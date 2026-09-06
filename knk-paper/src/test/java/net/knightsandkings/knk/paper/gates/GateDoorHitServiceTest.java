@@ -8,6 +8,7 @@ import net.knightsandkings.knk.paper.events.GateDoorDamageEvent;
 import net.knightsandkings.knk.paper.events.GateDoorIgniteEvent;
 import net.knightsandkings.knk.paper.events.GateDoorInteractEvent;
 import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Entity;
@@ -187,5 +188,60 @@ class GateDoorHitServiceTest {
 
         assertNull(event);
         verify(pluginManager, never()).callEvent(any());
+    }
+
+    @Test
+    void handleDamageDoesNothingWhenCausingPlayerIsNotInSurvival() {
+        Player player = mock(Player.class);
+        when(player.getGameMode()).thenReturn(GameMode.CREATIVE);
+
+        GateDoorDamageEvent event = hitService.handleDamage(gate, player, blockAt(100, 64, 100), GateDoorDamageEvent.Cause.LEFT_CLICK);
+
+        assertNull(event);
+        verify(pluginManager, never()).callEvent(any());
+    }
+
+    @Test
+    void handleDamageFiresEventWhenCausingPlayerIsInSurvival() {
+        Player player = mock(Player.class);
+        when(player.getGameMode()).thenReturn(GameMode.SURVIVAL);
+
+        GateDoorDamageEvent event = hitService.handleDamage(gate, player, blockAt(100, 64, 100), GateDoorDamageEvent.Cause.LEFT_CLICK);
+
+        assertNotNull(event);
+        verify(pluginManager).callEvent(event);
+    }
+
+    @Test
+    void handleDamageFiresEventWhenCausingEntityIsNotAPlayer() {
+        // Gamemode is a player-only concept - a mob-shot arrow always qualifies.
+        Entity mob = mock(Entity.class);
+
+        GateDoorDamageEvent event = hitService.handleDamage(gate, mob, blockAt(100, 64, 100), GateDoorDamageEvent.Cause.PROJECTILE);
+
+        assertNotNull(event);
+        verify(pluginManager).callEvent(event);
+    }
+
+    @Test
+    void handleIgniteDoesNothingWhenCausingPlayerIsNotInSurvival() {
+        Player player = mock(Player.class);
+        when(player.getGameMode()).thenReturn(GameMode.SPECTATOR);
+
+        GateDoorIgniteEvent event = hitService.handleIgnite(gate, player, blockAt(100, 64, 100), GateDoorIgniteEvent.Cause.FLINT_AND_STEEL);
+
+        assertNull(event);
+        verify(pluginManager, never()).callEvent(any());
+    }
+
+    @Test
+    void handleIgniteFiresEventWhenCausingPlayerIsInSurvival() {
+        Player player = mock(Player.class);
+        when(player.getGameMode()).thenReturn(GameMode.SURVIVAL);
+
+        GateDoorIgniteEvent event = hitService.handleIgnite(gate, player, blockAt(100, 64, 100), GateDoorIgniteEvent.Cause.FLINT_AND_STEEL);
+
+        assertNotNull(event);
+        verify(pluginManager).callEvent(event);
     }
 }

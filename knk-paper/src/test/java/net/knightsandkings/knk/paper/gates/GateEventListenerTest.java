@@ -9,6 +9,7 @@ import net.knightsandkings.knk.paper.events.GateDoorIgniteEvent;
 import net.knightsandkings.knk.paper.events.GateDoorInteractEvent;
 import net.knightsandkings.knk.paper.listeners.GateEventListener;
 import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
@@ -110,6 +111,7 @@ class GateEventListenerTest {
         Block block = doorBlock();
         Player player = mock(Player.class);
         when(player.hasPermission("knk.gate.admin")).thenReturn(false);
+        when(player.getGameMode()).thenReturn(GameMode.SURVIVAL);
 
         BlockBreakEvent event = mock(BlockBreakEvent.class);
         when(event.getBlock()).thenReturn(block);
@@ -285,6 +287,7 @@ class GateEventListenerTest {
         Block ignitedAirBlock = unrelatedBlock();
         when(ignitedAirBlock.getRelative(BlockFace.WEST)).thenReturn(doorBlock);
         Player player = mock(Player.class);
+        when(player.getGameMode()).thenReturn(GameMode.SURVIVAL);
 
         BlockIgniteEvent event = mock(BlockIgniteEvent.class);
         when(event.getBlock()).thenReturn(ignitedAirBlock);
@@ -415,6 +418,7 @@ class GateEventListenerTest {
     void leftClickOnDoorFiresDamageEvent() {
         Block block = doorBlock();
         Player player = mock(Player.class);
+        when(player.getGameMode()).thenReturn(GameMode.SURVIVAL);
 
         PlayerInteractEvent event = mock(PlayerInteractEvent.class);
         when(event.getClickedBlock()).thenReturn(block);
