@@ -282,8 +282,10 @@ public class GateDisplayManager {
         return new Location(world, position.getX(), position.getY(), position.getZ());
     }
 
-    /** FaceDirection as a world-space unit vector, falling back to the gate's precomputed normal axis. */
-    private Vector resolveFaceDirectionVector(CachedGate gate) {
+    /** FaceDirection as a world-space unit vector, falling back to the gate's precomputed normal axis.
+     *  Package-private (not private) and static so it's directly unit-testable without a live
+     *  Bukkit World, matching GatePassThroughService's pure-geometry-helper convention. */
+    static Vector resolveFaceDirectionVector(CachedGate gate) {
         Vector faceDirection = EntityPusher.vectorFromFaceDirection(gate.getFaceDirection());
         if (faceDirection != null && faceDirection.lengthSquared() > 0) {
             return faceDirection;

@@ -5,9 +5,11 @@ import net.knightsandkings.knk.api.dto.WorldTaskDto;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.util.Vector;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -135,6 +137,53 @@ class GateBlockScanTaskHandlerTest {
 
         verify(mockWorldTasksApi, timeout(1000)).fail(eq(3), anyString());
         assertTrue(finished.get());
+    }
+
+    @Test
+    void testComputeCellPosition_DiagonalWing_ProducesFourDistinctNonDuplicateCells() {
+        // Reproduces the reported bug directly: a GeometryWidth=4 diagonal (south-east) wing must
+        // scan 4 distinct, correctly-spaced world cells - (0,0,0),(1,0,1),(2,0,2),(3,0,3) - not
+        // collapse into fewer cells via duplicate roundings, which is what happened when the old
+        // code stepped by the unit axis (0.7071,0,0.7071) instead of the lattice step (1,0,1).
+        Vector anchor = new Vector(0, 0, 0);
+        Vector uStep = new Vector(1, 0, 1);
+        Vector vStep = new Vector(0, 1, 0);
+        Vector nStep = new Vector(-1, 0, 1);
+
+        Set<String> worldCells = new HashSet<>();
+        for (int i = 0; i < 4; i++) {
+            GateBlockScanTaskHandler.CellPosition pos =
+                GateBlockScanTaskHandler.computeCellPosition(anchor, uStep, vStep, nStep, i, 0, 0);
+
+            assertEquals(i, pos.relativeX());
+            assertEquals(0, pos.relativeY());
+            assertEquals(i, pos.relativeZ());
+            assertEquals(i, pos.worldX());
+            assertEquals(0, pos.worldY());
+            assertEquals(i, pos.worldZ());
+
+            worldCells.add(pos.worldX() + "," + pos.worldY() + "," + pos.worldZ());
+        }
+
+        assertEquals(4, worldCells.size(), "Expected 4 distinct world cells, found duplicates: " + worldCells);
+    }
+
+    @Test
+    void testComputeCellPosition_CardinalWing_UnaffectedByLatticeStepChange() {
+        Vector anchor = new Vector(10, 64, 10);
+        Vector uStep = new Vector(1, 0, 0);
+        Vector vStep = new Vector(0, 1, 0);
+        Vector nStep = new Vector(0, 0, 1);
+
+        GateBlockScanTaskHandler.CellPosition pos =
+            GateBlockScanTaskHandler.computeCellPosition(anchor, uStep, vStep, nStep, 2, 3, 1);
+
+        assertEquals(2, pos.relativeX());
+        assertEquals(3, pos.relativeY());
+        assertEquals(1, pos.relativeZ());
+        assertEquals(12, pos.worldX());
+        assertEquals(67, pos.worldY());
+        assertEquals(11, pos.worldZ());
     }
 
     private WorldTaskDto createTask(int id, String inputJson) {

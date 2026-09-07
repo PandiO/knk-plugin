@@ -68,19 +68,28 @@ public class GateFrameCalculator {
             return isWithinVerticalOpening(gate, anchor, worldPosition);
         }
 
-        Vector uAxis = gate.getUAxis();
-        Vector vAxis = gate.getVAxis();
-        Vector nAxis = gate.getNAxis();
+        Vector uStep = gate.getUStep();
+        Vector vStep = gate.getVStep();
+        Vector nStep = gate.getNStep();
 
-        if (anchor == null || uAxis == null || vAxis == null || nAxis == null) {
+        if (anchor == null || uStep == null || vStep == null || nStep == null
+            || uStep.lengthSquared() == 0 || vStep.lengthSquared() == 0 || nStep.lengthSquared() == 0) {
             return true;
         }
 
         Vector local = worldPosition.clone().subtract(anchor);
 
-        return withinAxis(local.dot(uAxis), gate.getGeometryWidth())
-            && withinAxis(local.dot(vAxis), gate.getGeometryHeight())
-            && withinAxis(local.dot(nAxis), gate.getGeometryDepth());
+        // Project onto the (possibly non-unit-length, e.g. diagonal) step vectors using the
+        // standard oblique-basis formula local.dot(step)/|step|^2, which recovers the integer
+        // width/height/depth index directly - unlike a unit-vector dot product, this stays exact
+        // for a diagonal step like (1,0,1) whose length is sqrt(2), not 1.
+        double uIndex = local.dot(uStep) / uStep.lengthSquared();
+        double vIndex = local.dot(vStep) / vStep.lengthSquared();
+        double nIndex = local.dot(nStep) / nStep.lengthSquared();
+
+        return withinAxis(uIndex, gate.getGeometryWidth())
+            && withinAxis(vIndex, gate.getGeometryHeight())
+            && withinAxis(nIndex, gate.getGeometryDepth());
     }
 
     private static boolean withinAxis(double projection, int extent) {

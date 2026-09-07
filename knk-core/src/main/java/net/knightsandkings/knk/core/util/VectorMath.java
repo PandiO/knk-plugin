@@ -118,7 +118,7 @@ public class VectorMath {
 
     /**
      * Calculate the angle between two vectors in degrees.
-     * 
+     *
      * @param v1 First vector
      * @param v2 Second vector
      * @return Angle in degrees (0 to 180)
@@ -140,5 +140,42 @@ public class VectorMath {
         cosAngle = Math.max(-1.0, Math.min(1.0, cosAngle));
 
         return Math.toDegrees(Math.acos(cosAngle));
+    }
+
+    /**
+     * Reduces an integer-valued delta (e.g. a reference-point offset) to the shortest integer
+     * vector pointing in the exact same direction, by dividing out the GCD of its components.
+     * Unlike normalize(), this preserves Minecraft's integer block lattice: a cardinal delta like
+     * (4,0,0) reduces to (1,0,0) (one block per step, same as normalize()), but a diagonal delta
+     * like (4,0,4) reduces to (1,0,1) - the true nearest diagonal neighbor - instead of a unit-length
+     * (0.7071,0,0.7071) that doesn't land on an adjacent lattice block when stepped by an integer index.
+     *
+     * @param delta Vector to reduce; components are rounded to the nearest integer first
+     * @return The shortest same-direction integer vector, or (0,0,0) if delta rounds to zero
+     */
+    public static Vector primitiveLatticeStep(Vector delta) {
+        if (delta == null) {
+            throw new IllegalArgumentException("Delta cannot be null");
+        }
+
+        long dx = Math.round(delta.getX());
+        long dy = Math.round(delta.getY());
+        long dz = Math.round(delta.getZ());
+
+        long g = gcd(gcd(Math.abs(dx), Math.abs(dy)), Math.abs(dz));
+        if (g == 0) {
+            return new Vector(0, 0, 0);
+        }
+
+        return new Vector(dx / g, dy / g, dz / g);
+    }
+
+    private static long gcd(long a, long b) {
+        while (b != 0) {
+            long t = b;
+            b = a % b;
+            a = t;
+        }
+        return a;
     }
 }

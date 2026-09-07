@@ -9,6 +9,7 @@ import net.knightsandkings.knk.api.dto.GateStructureDto;
 import net.knightsandkings.knk.api.dto.WorldTaskDto;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
 import net.knightsandkings.knk.core.util.CoordinateParser;
+import net.knightsandkings.knk.core.util.VectorMath;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -149,9 +150,13 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
             return wings;
         }
 
-        Vector uAxis = ref1.clone().subtract(anchor).normalize();
-        Vector vAxis = ref2.clone().subtract(anchor).normalize();
-        Vector nAxis = uAxis.clone().crossProduct(vAxis).normalize();
+        // Lattice step vectors (not unit-normalized): the shortest integer step along each
+        // reference direction, so integer width/height/depth indices always land on the true
+        // adjacent Minecraft block - including for diagonal gates, where a unit vector like
+        // (0.7071,0,0.7071) would under-shoot the real (1,0,1) neighbor. See VectorMath.primitiveLatticeStep.
+        Vector uStep = VectorMath.primitiveLatticeStep(ref1.clone().subtract(anchor));
+        Vector vStep = VectorMath.primitiveLatticeStep(ref2.clone().subtract(anchor));
+        Vector nStep = VectorMath.primitiveLatticeStep(uStep.clone().crossProduct(vStep));
 
         int width = Math.max(1, gate.getGeometryWidth() != null ? gate.getGeometryWidth() : 1);
         int height = Math.max(1, gate.getGeometryHeight() != null ? gate.getGeometryHeight() : 1);
@@ -163,10 +168,10 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
         Vector rightSeed = CoordinateParser.parseCoordinate(rightSeedJson);
 
         if ("DOUBLE_DOORS".equals(gate.getGateType()) && leftSeed != null && rightSeed != null) {
-            wings.add(new ScanWing(world, leftSeed, uAxis, vAxis, nAxis, width, height, depth));
-            wings.add(new ScanWing(world, rightSeed, uAxis, vAxis, nAxis, width, height, depth));
+            wings.add(new ScanWing(world, leftSeed, uStep, vStep, nStep, width, height, depth));
+            wings.add(new ScanWing(world, rightSeed, uStep, vStep, nStep, width, height, depth));
         } else {
-            wings.add(new ScanWing(world, anchor, uAxis, vAxis, nAxis, width, height, depth));
+            wings.add(new ScanWing(world, anchor, uStep, vStep, nStep, width, height, depth));
         }
 
         return wings;
@@ -311,8 +316,40 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
         return null;
     }
 
-    private record ScanWing(World world, Vector anchor, Vector uAxis, Vector vAxis, Vector nAxis,
+    private record ScanWing(World world, Vector anchor, Vector uStep, Vector vStep, Vector nStep,
                             int width, int height, int depth) {
+    }
+
+    /**
+     * Position of one scanned cell, both in the gate's relative coordinate system (persisted as
+     * BlockSnapshot.relativePosition) and in absolute world coordinates (where to actually read
+     * the block from). Pure function of the wing's lattice steps - no Bukkit World/Block/Location
+     * involved - so it's directly unit-testable without a live server.
+     */
+    record CellPosition(int relativeX, int relativeY, int relativeZ, int worldX, int worldY, int worldZ) {
+    }
+
+    /**
+     * Computes one PLANE_GRID cell's relative and world position from a wing's anchor and lattice
+     * step vectors. Because uStep/vStep/nStep are exact integer vectors (see
+     * VectorMath.primitiveLatticeStep), the offset is always integer-valued, so rounding the
+     * relative position and flooring the world position (via Vector.getBlockX/Y/Z) always agree -
+     * unlike the old unit-vector stepping, where a diagonal axis produced fractional offsets and
+     * the two roundings could disagree.
+     */
+    static CellPosition computeCellPosition(Vector anchor, Vector uStep, Vector vStep, Vector nStep,
+                                            int i, int j, int k) {
+        Vector offset = uStep.clone().multiply(i)
+            .add(vStep.clone().multiply(j))
+            .add(nStep.clone().multiply(k));
+
+        int relativeX = (int) Math.round(offset.getX());
+        int relativeY = (int) Math.round(offset.getY());
+        int relativeZ = (int) Math.round(offset.getZ());
+
+        Vector worldPos = anchor.clone().add(offset);
+        return new CellPosition(relativeX, relativeY, relativeZ,
+            worldPos.getBlockX(), worldPos.getBlockY(), worldPos.getBlockZ());
     }
 
     /**
@@ -367,18 +404,15 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
             int j = cell[2];
             int k = cell[3];
 
-            Vector offset = wing.uAxis.clone().multiply(i)
-                .add(wing.vAxis.clone().multiply(j))
-                .add(wing.nAxis.clone().multiply(k));
+            CellPosition pos = computeCellPosition(wing.anchor, wing.uStep, wing.vStep, wing.nStep, i, j, k);
 
-            int relativeX = (int) Math.round(offset.getX());
-            int relativeY = (int) Math.round(offset.getY());
-            int relativeZ = (int) Math.round(offset.getZ());
+            int relativeX = pos.relativeX();
+            int relativeY = pos.relativeY();
+            int relativeZ = pos.relativeZ();
 
-            Vector worldPos = wing.anchor.clone().add(offset);
-            int worldX = worldPos.getBlockX();
-            int worldY = worldPos.getBlockY();
-            int worldZ = worldPos.getBlockZ();
+            int worldX = pos.worldX();
+            int worldY = pos.worldY();
+            int worldZ = pos.worldZ();
 
             int chunkX = worldX >> 4;
             int chunkZ = worldZ >> 4;

@@ -124,6 +124,29 @@ class GatePassThroughServiceTest {
     }
 
     @Test
+    void blockInPassThroughPathHandlesDiagonalBasisVectors() {
+        // Regression guard: isBlockInPassThroughPath projects onto the unit uAxis/vAxis, never
+        // the new lattice uStep/vStep - deliberately left unset here to prove it isn't needed.
+        CachedGate diagonalGate = new CachedGate(
+            5, "DiagonalPathGate", "SLIDING", "VERTICAL", "PLANE_GRID",
+            60, 1, new Vector(0, 64, 0), 5, 5, 1,
+            500.0, 500.0, true, false, true, 90, "north"
+        );
+        double invSqrt2 = 1.0 / Math.sqrt(2.0);
+        diagonalGate.setUAxis(new Vector(invSqrt2, 0, invSqrt2));
+        diagonalGate.setVAxis(new Vector(0, 1, 0));
+
+        Vector playerPosition = new Vector(0, 64, 0);
+        // 1 block along the diagonal u-axis - within radius 1 (tolerance 1.5).
+        Vector nearBlock = new Vector(invSqrt2, 64, invSqrt2);
+        assertTrue(GatePassThroughService.isBlockInPassThroughPath(diagonalGate, nearBlock, playerPosition, 1));
+
+        // 3 blocks along the diagonal u-axis - beyond radius 1.
+        Vector farBlock = new Vector(3 * invSqrt2, 64, 3 * invSqrt2);
+        assertFalse(GatePassThroughService.isBlockInPassThroughPath(diagonalGate, farBlock, playerPosition, 1));
+    }
+
+    @Test
     void teleportDestinationCrossesToTheFarSideAlongNAxis() {
         // Player standing at the anchor (offsetN = 0, treated as the "positive" side) with depth 1
         // should land 2 blocks in the -n direction (depth 1 + 1 block clearance).

@@ -58,7 +58,9 @@ public final class EntityEvacuator {
         return true;
     }
 
-    private static Vector resolveFaceAxis(CachedGate gate) {
+    /** Package-private (not private) so it's directly unit-testable without a live Bukkit World,
+     *  matching GatePassThroughService's/GateDisplayManager's pure-geometry-helper convention. */
+    static Vector resolveFaceAxis(CachedGate gate) {
         Vector axis = EntityPusher.vectorFromFaceDirection(gate.getFaceDirection());
         if (axis == null || axis.lengthSquared() == 0) {
             axis = gate.getNAxis();

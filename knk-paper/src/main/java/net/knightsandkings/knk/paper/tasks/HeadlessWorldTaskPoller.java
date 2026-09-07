@@ -14,6 +14,13 @@ import java.util.logging.Logger;
  * Periodically polls the Web API for Pending WorldTasks that don't require a player
  * and dispatches each to the first registered handler that supports its TaskType.
  * Runs no scanning/game logic itself; each handler owns its own thread-safety.
+ *
+ * TODO: Replace this pull-based polling loop with a push notification from the API (e.g. a
+ * SignalR hub the plugin subscribes to) that fires the moment a headless WorldTask is created,
+ * instead of the plugin discovering it up to headless-poll-max-interval-seconds later. The
+ * idle back-off in {@link #onPollFinished} exists specifically to bound how often an otherwise-
+ * unnecessary "any pending tasks?" poll fires while idle - a server-initiated notification would
+ * remove the need for that trade-off entirely (no polling latency AND no idle API load).
  */
 public class HeadlessWorldTaskPoller {
     private static final Logger LOGGER = Logger.getLogger(HeadlessWorldTaskPoller.class.getName());

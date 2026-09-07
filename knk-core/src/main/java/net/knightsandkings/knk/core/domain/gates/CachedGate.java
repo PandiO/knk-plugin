@@ -42,6 +42,15 @@ public class CachedGate {
     private Vector vAxis;  // Height direction
     private Vector nAxis;  // Normal/motion direction
 
+    // === Precomputed Lattice Step Vectors ===
+    // Shortest integer vector pointing along uAxis/vAxis/nAxis (see VectorMath.primitiveLatticeStep).
+    // Identical to the unit axis for cardinal gates, but for a diagonal gate this is e.g. (1,0,1)
+    // instead of (0.7071,0,0.7071) - used wherever an integer index must land on an adjacent
+    // Minecraft block (scanning, LATERAL motion distance, geometry-bounds clipping).
+    private Vector uStep;
+    private Vector vStep;
+    private Vector nStep;
+
     // === Precomputed Motion ===
     private Vector motionVector;  // Direction and magnitude of motion
     private Vector hingeAxis;     // For rotation gates
@@ -214,6 +223,18 @@ public class CachedGate {
 
     public Vector getNAxis() {
         return nAxis;
+    }
+
+    public Vector getUStep() {
+        return uStep;
+    }
+
+    public Vector getVStep() {
+        return vStep;
+    }
+
+    public Vector getNStep() {
+        return nStep;
     }
 
     public Vector getMotionVector() {
@@ -422,6 +443,18 @@ public class CachedGate {
 
     public void setNAxis(Vector nAxis) {
         this.nAxis = nAxis;
+    }
+
+    public void setUStep(Vector uStep) {
+        this.uStep = uStep;
+    }
+
+    public void setVStep(Vector vStep) {
+        this.vStep = vStep;
+    }
+
+    public void setNStep(Vector nStep) {
+        this.nStep = nStep;
     }
 
     public void setMotionVector(Vector motionVector) {

@@ -59,6 +59,9 @@ world-tasks:
   # How often the plugin polls the API for headless (player-less) WorldTasks
   headless-poll-interval-seconds: 5
   # Idle back-off: the interval doubles up to this value while no headless task is found
+  # TODO: this pull-based polling (see HeadlessWorldTaskPoller) should eventually be replaced
+  # by the API pushing a notification (e.g. SignalR) the moment a headless task is created,
+  # removing the pickup-latency/idle-load trade-off these two settings exist to balance
   headless-poll-max-interval-seconds: 60
 
 # Gate structure state synchronization

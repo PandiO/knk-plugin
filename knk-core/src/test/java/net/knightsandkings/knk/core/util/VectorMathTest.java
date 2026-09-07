@@ -142,6 +142,58 @@ class VectorMathTest {
         });
     }
 
+    @Test
+    void shouldReduceDiagonalDeltaToPrimitiveStep() {
+        assertVectorEquals(new Vector(1, 0, 1), VectorMath.primitiveLatticeStep(new Vector(4, 0, 4)), EPSILON);
+    }
+
+    @Test
+    void shouldReduceNonUniformDeltaToPrimitiveStep() {
+        assertVectorEquals(new Vector(3, 0, 1), VectorMath.primitiveLatticeStep(new Vector(6, 0, 2)), EPSILON);
+    }
+
+    @Test
+    void shouldReduceCardinalDeltaToUnitStep() {
+        assertVectorEquals(new Vector(0, 1, 0), VectorMath.primitiveLatticeStep(new Vector(0, 5, 0)), EPSILON);
+        assertVectorEquals(new Vector(1, 0, 0), VectorMath.primitiveLatticeStep(new Vector(1, 0, 0)), EPSILON);
+    }
+
+    @Test
+    void shouldPreserveSignWhenReducingPrimitiveStep() {
+        assertVectorEquals(new Vector(-1, 0, 1), VectorMath.primitiveLatticeStep(new Vector(-4, 0, 4)), EPSILON);
+    }
+
+    @Test
+    void shouldReturnZeroVectorForDegenerateDelta() {
+        assertVectorEquals(new Vector(0, 0, 0), VectorMath.primitiveLatticeStep(new Vector(0, 0, 0)), EPSILON);
+    }
+
+    @Test
+    void shouldToleratePlacementNoiseWhenReducingPrimitiveStep() {
+        assertVectorEquals(new Vector(1, 0, -1), VectorMath.primitiveLatticeStep(new Vector(2.98, 0, -2.99)), EPSILON);
+    }
+
+    @Test
+    void shouldThrowExceptionForNullDeltaInPrimitiveLatticeStep() {
+        assertThrows(IllegalArgumentException.class, () -> VectorMath.primitiveLatticeStep(null));
+    }
+
+    @Test
+    void rotateAroundAxisShouldBeUnaffectedByAxisMagnitudeForDiagonalHingeAxis() {
+        // DRAWBRIDGE-style hinge rotation always passes the gate's unit nAxis as the rotation
+        // axis, never the new lattice nStep - this documents that rotateAroundAxis normalizes
+        // its axis internally, so it would produce the identical rotation either way. A diagonal
+        // hinge (e.g. a gate facing north-east) is therefore unaffected by introducing uStep/vStep/nStep.
+        Vector v = new Vector(1, 0, 0);
+        Vector unitDiagonalAxis = new Vector(1.0 / Math.sqrt(2), 0, 1.0 / Math.sqrt(2));
+        Vector nonUnitDiagonalAxis = new Vector(1, 0, 1); // same direction as unitDiagonalAxis, length sqrt(2)
+
+        Vector rotatedByUnitAxis = VectorMath.rotateAroundAxis(v, unitDiagonalAxis, 90);
+        Vector rotatedByNonUnitAxis = VectorMath.rotateAroundAxis(v, nonUnitDiagonalAxis, 90);
+
+        assertVectorEquals(rotatedByUnitAxis, rotatedByNonUnitAxis, EPSILON);
+    }
+
     /**
      * Helper method to assert vectors are equal within epsilon tolerance.
      */

@@ -166,6 +166,40 @@ class GateFrameCalculatorTest {
     }
 
     @Test
+    void diagonalClippingShouldUseLatticeStepNotUnitAxis() {
+        // A LATERAL gate whose u-axis is a 45-degree diagonal: uStep=(1,0,1) is the lattice step
+        // (not the unit uAxis=(0.7071,0,0.7071)). Before the fix, isWithinGeometryBounds projected
+        // onto the unit axis, so a lattice block's projection never landed on a clean integer index
+        // and edge blocks were misclipped. This asserts the last in-bounds column (index 3 of
+        // GeometryWidth=4) survives, and the first out-of-bounds column (index 4) is clipped.
+        CachedGate diagonalGate = new CachedGate(
+            4, "Diagonal Lateral Gate", "SLIDING", "LATERAL", "PLANE_GRID",
+            60, 1,
+            new Vector(0, 0, 0),
+            4, 1, 1,
+            500.0, 500.0, true, false, true, 90,
+            "south-east"
+        );
+
+        diagonalGate.setUStep(new Vector(1, 0, 1));
+        diagonalGate.setVStep(new Vector(0, 1, 0));
+        diagonalGate.setNStep(new Vector(-1, 0, 1));
+        diagonalGate.setMotionVector(new Vector(0, 0, 0));
+        diagonalGate.setClipToGeometryBounds(true);
+
+        assertNotNull(GateFrameCalculator.calculateBlockPosition(
+            diagonalGate,
+            new BlockSnapshot(1, new Vector(3, 0, 3), 1, "minecraft:iron_bars", 0),
+            0
+        ));
+        assertNull(GateFrameCalculator.calculateBlockPosition(
+            diagonalGate,
+            new BlockSnapshot(2, new Vector(4, 0, 4), 1, "minecraft:iron_bars", 0),
+            0
+        ));
+    }
+
+    @Test
     void shouldCalculateAngleStep() {
         double angleStep = GateFrameCalculator.calculateAngleStep(gate);
         
