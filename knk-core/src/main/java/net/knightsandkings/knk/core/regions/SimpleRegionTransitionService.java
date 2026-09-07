@@ -5,6 +5,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.logging.Logger;
 
 import net.knightsandkings.knk.core.ports.gates.GateControlPort;
@@ -26,13 +27,28 @@ public class SimpleRegionTransitionService implements RegionTransitionService {
     
     private final RegionDomainResolver regionResolver;
     private final GateControlPort gateControlPort;
+    private final Consumer<Set<DomainSnapshot>> onDomainsEntered;
+
+    /**
+     * Construct with resolver, optional gate control, and an optional callback invoked with the
+     * set of domains entered by this transition (e.g. used to trigger on-demand gate loading the
+     * first time a player is resolved into a District - see DistrictGateLoader/KnKPlugin).
+     */
+    public SimpleRegionTransitionService(
+        RegionDomainResolver regionResolver,
+        GateControlPort gateControlPort,
+        Consumer<Set<DomainSnapshot>> onDomainsEntered
+    ) {
+        this.regionResolver = Objects.requireNonNull(regionResolver, "regionResolver");
+        this.gateControlPort = gateControlPort;  // May be null if gates not implemented
+        this.onDomainsEntered = onDomainsEntered;  // May be null if no listener is needed
+    }
 
     /**
      * Construct with resolver and optional gate control.
      */
     public SimpleRegionTransitionService(RegionDomainResolver regionResolver, GateControlPort gateControlPort) {
-        this.regionResolver = Objects.requireNonNull(regionResolver, "regionResolver");
-        this.gateControlPort = gateControlPort;  // May be null if gates not implemented
+        this(regionResolver, gateControlPort, null);
     }
 
     /**
@@ -40,7 +56,7 @@ public class SimpleRegionTransitionService implements RegionTransitionService {
      * Useful for basic region entry/exit without gates.
      */
     public SimpleRegionTransitionService(RegionDomainResolver regionResolver) {
-        this(regionResolver, null);
+        this(regionResolver, null, null);
     }
 
     /**
@@ -49,7 +65,7 @@ public class SimpleRegionTransitionService implements RegionTransitionService {
      * Note: Resolver uses in-memory placeholders until API-backed lookup is implemented.
      */
     public SimpleRegionTransitionService() {
-        this(new RegionDomainResolver(), null);
+        this(new RegionDomainResolver(), null, null);
     }
 
     @Override
@@ -95,6 +111,10 @@ public class SimpleRegionTransitionService implements RegionTransitionService {
         // TODO 3: Trigger gate control for entered/left gates
         if (gateControlPort != null) {
             triggerGateControl(playerId, transition);
+        }
+
+        if (onDomainsEntered != null && !transition.enteredDomains().isEmpty()) {
+            onDomainsEntered.accept(transition.enteredDomains());
         }
 
         return decision;

@@ -33,6 +33,18 @@ public interface GateStructuresApi {
     CompletableFuture<GateStructureDto> getById(int id);
 
     /**
+     * Fetch every gate structure belonging to a District, for incremental (on-demand) loading
+     * as a player enters that district rather than loading the entire world's gates at startup.
+     * Calls GET /api/GateStructures?districtId={id}&amp;pageSize=500 (a real, indexed filter on
+     * Structure.DistrictId) with a large page size so a district with more than the endpoint's
+     * default page size (10) isn't silently truncated.
+     *
+     * @param districtId District ID
+     * @return CompletableFuture with the gate structures in that district
+     */
+    CompletableFuture<List<GateStructureDto>> getByDistrict(int districtId);
+
+    /**
      * Update the state (IsOpened, IsDestroyed, IsJammed) of a gate structure.
      * Calls PUT /api/GateStructures/{id}/state
      *

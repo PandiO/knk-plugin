@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import net.knightsandkings.knk.api.auth.AuthProvider;
 import net.knightsandkings.knk.api.dto.GateBlockSnapshotDto;
 import net.knightsandkings.knk.api.dto.GateStructureDto;
+import net.knightsandkings.knk.api.dto.PagedResultDto;
 import net.knightsandkings.knk.api.GateStructuresApi;
 import net.knightsandkings.knk.core.exception.ApiException;
 import okhttp3.MediaType;
@@ -95,6 +96,41 @@ public class GateStructuresApiImpl extends BaseApiImpl implements GateStructures
                     url,
                     0,
                     "Failed to parse gate structure response: " + e.getMessage(),
+                    e.getClass().getSimpleName()
+                );
+                apiEx.initCause(e);
+                throw apiEx;
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<List<GateStructureDto>> getByDistrict(int districtId) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + GATE_STRUCTURES_ENDPOINT + "?districtId=" + districtId
+                + "&pageNumber=1&pageSize=500";
+
+            try {
+                String responseBody = get(url);
+                PagedResultDto<GateStructureDto> page = objectMapper.readValue(
+                    responseBody, new TypeReference<PagedResultDto<GateStructureDto>>() {});
+                return page.items() != null ? page.items() : List.<GateStructureDto>of();
+            } catch (ApiException e) {
+                throw e;
+            } catch (IOException e) {
+                ApiException apiEx = new ApiException(
+                    url,
+                    0,
+                    "IO error fetching gate structures by district",
+                    e.getClass().getSimpleName() + ": " + e.getMessage()
+                );
+                apiEx.initCause(e);
+                throw apiEx;
+            } catch (Exception e) {
+                ApiException apiEx = new ApiException(
+                    url,
+                    0,
+                    "Failed to parse gate structures by district response: " + e.getMessage(),
                     e.getClass().getSimpleName()
                 );
                 apiEx.initCause(e);

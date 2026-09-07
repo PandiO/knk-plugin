@@ -6,6 +6,7 @@ import net.knightsandkings.knk.core.domain.gates.CachedGate;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
+import net.knightsandkings.knk.paper.gates.DistrictGateLoader;
 import net.knightsandkings.knk.paper.user.PlayerUserData;
 import net.knightsandkings.knk.paper.user.UserManager;
 import org.bukkit.command.Command;
@@ -29,13 +30,16 @@ public class GateCommand implements CommandExecutor {
     private final GateStructuresApi gateStructuresApi;
     private final UserManager userManager;
     private final UsersCommandApi usersCommandApi;
+    private final DistrictGateLoader districtGateLoader;
 
     public GateCommand(GateManager gateManager, GateStructuresApi gateStructuresApi,
-                        UserManager userManager, UsersCommandApi usersCommandApi) {
+                        UserManager userManager, UsersCommandApi usersCommandApi,
+                        DistrictGateLoader districtGateLoader) {
         this.gateManager = gateManager;
         this.gateStructuresApi = gateStructuresApi;
         this.userManager = userManager;
         this.usersCommandApi = usersCommandApi;
+        this.districtGateLoader = districtGateLoader;
     }
 
     @Override
@@ -154,6 +158,7 @@ public class GateCommand implements CommandExecutor {
     private void sendAdminHelp(CommandSender sender) {
         sender.sendMessage(ChatColor.GOLD + "━━━ Gate Admin Commands ━━━");
         sender.sendMessage(ChatColor.GRAY + "/knk gate admin reload");
+        sender.sendMessage(ChatColor.GRAY + "/knk gate admin reload district <id>");
         sender.sendMessage(ChatColor.GRAY + "/knk gate admin health <name|id> <amount>");
         sender.sendMessage(ChatColor.GRAY + "/knk gate admin repair <name|id>");
         sender.sendMessage(ChatColor.GRAY + "/knk gate admin tp <name|id>");
@@ -327,12 +332,21 @@ public class GateCommand implements CommandExecutor {
     }
 
     /**
-     * Handle /gate admin reload
+     * Handle /gate admin reload [district <id>]. Bare "reload" does a full world reload (as
+     * before); "reload district <id>" force-refreshes just one district's gates via
+     * DistrictGateLoader, without needing a full world reload - a district's gates already load
+     * automatically the first time a player enters it (see KnKPlugin's region-transition
+     * wiring), this is just for forcing a refresh after editing an already-loaded district's
+     * gates in the web app.
      */
     public boolean executeAdminReload(CommandSender sender, String[] args) {
         if (!sender.hasPermission("knk.gate.admin")) {
             sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
             return true;
+        }
+
+        if (args.length >= 2 && "district".equalsIgnoreCase(args[0])) {
+            return executeAdminReloadDistrict(sender, args[1]);
         }
 
         sender.sendMessage(ChatColor.YELLOW + "Reloading gates from API...");
@@ -341,6 +355,31 @@ public class GateCommand implements CommandExecutor {
             sender.sendMessage(ChatColor.GREEN + "Loaded " + gateCount + " gates from API.");
         }).exceptionally(ex -> {
             sender.sendMessage(ChatColor.RED + "Failed to reload gates: " + ex.getMessage());
+            return null;
+        });
+
+        return true;
+    }
+
+    private boolean executeAdminReloadDistrict(CommandSender sender, String districtIdArg) {
+        if (districtGateLoader == null) {
+            sender.sendMessage(ChatColor.RED + "District gate loading isn't configured on this server.");
+            return true;
+        }
+
+        int districtId;
+        try {
+            districtId = Integer.parseInt(districtIdArg);
+        } catch (NumberFormatException e) {
+            sender.sendMessage(ChatColor.RED + "Invalid district id: " + districtIdArg);
+            return true;
+        }
+
+        sender.sendMessage(ChatColor.YELLOW + "Reloading gates for district " + districtId + "...");
+        districtGateLoader.forceReload(districtId).thenRun(() ->
+            sender.sendMessage(ChatColor.GREEN + "Reloaded gates for district " + districtId + ".")
+        ).exceptionally(ex -> {
+            sender.sendMessage(ChatColor.RED + "Failed to reload district " + districtId + ": " + ex.getMessage());
             return null;
         });
 

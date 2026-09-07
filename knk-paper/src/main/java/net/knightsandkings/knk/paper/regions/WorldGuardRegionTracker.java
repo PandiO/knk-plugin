@@ -121,7 +121,7 @@ public class WorldGuardRegionTracker {
         // If data is missing or being fetched, start/wait for async lookup
         if (!cacheStatus.missing.isEmpty() || !cacheStatus.inFlight.isEmpty()) {
             if (!cacheStatus.missing.isEmpty()) {
-                startAsyncLookupWithRevalidation(player, cacheStatus.missing, oldRegions, newRegions);
+                startAsyncLookupWithRevalidation(player, cacheStatus.missing, oldRegions, newRegions, false);
             }
             
             // Update player regions and allow movement with stale/partial data
@@ -178,7 +178,16 @@ public class WorldGuardRegionTracker {
                 if (logger != null) {
                     logger.fine("[KnK Tracker] " + player.getName() + " JOIN: pre-warming cache for: " + cacheStatus.missing);
                 }
-                startAsyncLookupWithRevalidation(player, cacheStatus.missing, Collections.emptySet(), current);
+                // forceRevalidation=true: a player who joins already standing inside a district
+                // never gets a genuine "entering" transition otherwise. The synchronous call
+                // below resolves empty (cache is cold at this point), and if the player walks
+                // away before this async fetch completes - which most players do within a couple
+                // of seconds of spawning - the normal revalidatePlayerLocation would silently
+                // skip re-processing entirely (it only acts if the player is still in the exact
+                // same spot), permanently losing the one chance to notice they'd "entered"
+                // whatever they joined inside, along with anything that depends on that event
+                // (like on-demand district gate loading).
+                startAsyncLookupWithRevalidation(player, cacheStatus.missing, Collections.emptySet(), current, true);
             }
         }
 
@@ -247,8 +256,13 @@ public class WorldGuardRegionTracker {
     /**
      * Start async lookup for missing regions with queue-based re-validation.
      * After API fetch completes, re-validates player location on main thread.
+     *
+     * @param forceRevalidation if true, skips the "is the player still in the same spot" check
+     *     and processes newRegions as-is once the fetch completes - used for join-time pre-warm,
+     *     where we want the player's original regions treated as "entered" once resolved,
+     *     regardless of whether they've since walked elsewhere (see handleJoin).
      */
-    private void startAsyncLookupWithRevalidation(Player player, Set<String> missingIds, Set<String> oldRegions, Set<String> newRegions) {
+    private void startAsyncLookupWithRevalidation(Player player, Set<String> missingIds, Set<String> oldRegions, Set<String> newRegions, boolean forceRevalidation) {
         if (missingIds.isEmpty()) {
             return;
         }
@@ -285,7 +299,7 @@ public class WorldGuardRegionTracker {
                 // Schedule re-validation on main thread
                 if (plugin != null) {
                     Bukkit.getScheduler().runTask(plugin, () -> {
-                        revalidatePlayerLocation(player, oldRegions, newRegions);
+                        revalidatePlayerLocation(player, oldRegions, newRegions, forceRevalidation);
                     });
                 }
                 
@@ -319,8 +333,16 @@ public class WorldGuardRegionTracker {
      * Re-validate player location after async API fetch completes.
      * Checks if player is still in the regions and enforces entry/exit rules.
      * MUST be called on main thread.
+     *
+     * @param forceRevalidation if true (join-time pre-warm only), skips the "is the player still
+     *     in the same spot" check and processes expectedNewRegions unconditionally - this exists
+     *     purely to unblock one-time "entered" side effects (like district gate loading) for
+     *     wherever the player joined, so entry/exit enforcement is intentionally NOT re-run here:
+     *     retroactively teleporting a player away because a delayed pass resolved a deny-entry
+     *     policy for their join spot, seconds after they've already been playing from wherever
+     *     they walked to since, would be a surprising thing for the plugin to do on its own.
      */
-    private void revalidatePlayerLocation(Player player, Set<String> oldRegions, Set<String> expectedNewRegions) {
+    private void revalidatePlayerLocation(Player player, Set<String> oldRegions, Set<String> expectedNewRegions, boolean forceRevalidation) {
         if (player == null || !player.isOnline()) {
             if (logger != null) {
                 logger.fine("[KnK Tracker] " + player.getName() + " revalidation skipped (offline)");
@@ -329,8 +351,17 @@ public class WorldGuardRegionTracker {
         }
 
         UUID playerId = player.getUniqueId();
+
+        if (forceRevalidation) {
+            if (logger != null) {
+                logger.fine("[KnK Tracker] " + player.getName() + " forced join revalidation for: " + expectedNewRegions);
+            }
+            transitionService.handleRegionTransition(playerId, oldRegions, expectedNewRegions);
+            return;
+        }
+
         Set<String> currentRegions = getRegionNamesAt(player.getLocation());
-        
+
         if (logger != null) {
             logger.fine("[KnK Tracker] " + player.getName() + " revalidating: expected=" + expectedNewRegions + ", current=" + currentRegions);
         }
@@ -345,7 +376,7 @@ public class WorldGuardRegionTracker {
 
         // Re-run transition check with fresh data
         RegionTransitionDecision decision = transitionService.handleRegionTransition(playerId, oldRegions, currentRegions);
-        
+
         if (decision != null && !decision.isMovementAllowed()) {
             // Movement should have been denied - teleport player back
             if (logger != null) {

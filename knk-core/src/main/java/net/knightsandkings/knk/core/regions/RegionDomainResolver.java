@@ -85,15 +85,33 @@ public class RegionDomainResolver {
         DistrictCache districtCache,
         StructureCache structureCache
     ) {
+        this(townsQueryApi, districtsQueryApi, structuresQueryApi, domainsQueryApi,
+            townCache, districtCache, structureCache, DEFAULT_CACHE_TTL);
+    }
+
+    /**
+     * Full constructor allowing an explicit cache TTL, primarily so tests can simulate a stale
+     * cache entry without waiting on a real clock.
+     */
+    RegionDomainResolver(
+        TownsQueryApi townsQueryApi,
+        DistrictsQueryApi districtsQueryApi,
+        StructuresQueryApi structuresQueryApi,
+        DomainsQueryApi domainsQueryApi,
+        TownCache townCache,
+        DistrictCache districtCache,
+        StructureCache structureCache,
+        Duration cacheTtl
+    ) {
         this.townsQueryApi = townsQueryApi;
         this.districtsQueryApi = districtsQueryApi;
         this.structuresQueryApi = structuresQueryApi;
         this.domainsQueryApi = domainsQueryApi;
-        this.cacheTtl = DEFAULT_CACHE_TTL;
+        this.cacheTtl = cacheTtl;
         this.townCache = townCache;
         this.districtCache = districtCache;
         this.structureCache = structureCache;
-        
+
         if (townCache != null) {
             LOGGER.info("[KnK Resolver] Initialized with shared cache infrastructure");
         }
@@ -101,11 +119,22 @@ public class RegionDomainResolver {
 
     /**
      * Resolve from the current cache only (non-blocking, main-thread safe).
+     *
+     * Uses getDomainByRegionIdNoRefresh (age-tolerant), matching the freshness definition
+     * WorldGuardRegionTracker.checkCacheStatus already uses to decide whether to proceed
+     * synchronously instead of kicking off an async re-fetch. Using the TTL-strict
+     * getDomainByRegionId here instead was a real bug: once cacheTtl (1 minute) elapsed since a
+     * region was first cached, this discarded the data outright (returns empty for expired
+     * entries), while the tracker's own check doesn't look at age at all and so never noticed
+     * anything needed refreshing - the region stayed permanently "cached but silently empty"
+     * for the rest of the domain-resolution the tracker still thought was fresh, so
+     * enteredDomains/leftDomains came back empty on every subsequent transition through that
+     * region, forever, with no error and no retry.
      */
     public RegionSnapshot resolveRegions(Set<String> regionIds) {
         Set<DomainSnapshot> domains = new HashSet<>();
         for (String regionId : regionIds) {
-            getDomainByRegionId(regionId).ifPresent(domains::add);
+            getDomainByRegionIdNoRefresh(regionId).ifPresent(domains::add);
         }
         return new RegionSnapshot(domains);
     }

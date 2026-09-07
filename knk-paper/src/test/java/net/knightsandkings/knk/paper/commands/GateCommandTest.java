@@ -6,6 +6,7 @@ import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
 import net.knightsandkings.knk.core.domain.gates.CachedGate;
 import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
+import net.knightsandkings.knk.paper.gates.DistrictGateLoader;
 import net.knightsandkings.knk.paper.user.UserManager;
 import org.bukkit.ChatColor;
 import org.bukkit.command.CommandSender;
@@ -35,7 +36,7 @@ class GateCommandTest {
     void setUp() {
         mockGateManager = mock(GateManager.class);
         mockGateStructuresApi = mock(GateStructuresApi.class);
-        gateCommand = new GateCommand(mockGateManager, mockGateStructuresApi, mock(UserManager.class), mock(UsersCommandApi.class));
+        gateCommand = new GateCommand(mockGateManager, mockGateStructuresApi, mock(UserManager.class), mock(UsersCommandApi.class), mock(DistrictGateLoader.class));
         mockSender = mock(CommandSender.class);
         mockPlayer = mock(Player.class);
         sentMessages = new ArrayList<>();

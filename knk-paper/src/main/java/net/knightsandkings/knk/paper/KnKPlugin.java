@@ -38,6 +38,7 @@ import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.core.regions.RegionDomainResolver;
 import net.knightsandkings.knk.core.regions.RegionTransitionService;
 import net.knightsandkings.knk.core.regions.SimpleRegionTransitionService;
+import net.knightsandkings.knk.paper.gates.DistrictGateLoader;
 import net.knightsandkings.knk.paper.cache.CacheManager;
 import net.knightsandkings.knk.paper.chat.ChatCaptureManager;
 import net.knightsandkings.knk.paper.bootstrap.EnchantmentBootstrap;
@@ -108,6 +109,7 @@ public class KnKPlugin extends JavaPlugin {
     private GateManager gateManager;
     private GateStateSyncTask gateStateSyncTask;
     private GateDisplayManager gateDisplayManager;
+    private DistrictGateLoader districtGateLoader;
     private WorldTaskHandlerRegistry worldTaskHandlerRegistry;
     private HeadlessWorldTaskPoller headlessWorldTaskPoller;
     private UserManager userManager;
@@ -180,6 +182,7 @@ public class KnKPlugin extends JavaPlugin {
 
             GateLoaderAdapter gateLoader = new GateLoaderAdapter(gateManager);
             gateManager.setReloadAction(() -> gateLoader.loadAll(gateStructuresApi));
+            this.districtGateLoader = new DistrictGateLoader(gateLoader, gateStructuresApi);
 
             this.gateDisplayManager = new GateDisplayManager(this);
             getLogger().info("GateDisplayManager initialized");
@@ -341,8 +344,24 @@ public class KnKPlugin extends JavaPlugin {
             // Create gate control adapter for handling gate open/close
             GateControlPort gateControlPort = new PaperGateControlAdapter(this);
             
-            // Create region transition service with both resolver and gate control
-            RegionTransitionService regionTransitionService = new SimpleRegionTransitionService(regionDomainResolver, gateControlPort);
+            // Create region transition service with both resolver and gate control. The third
+            // argument loads a District's gates on demand the first time a player is resolved
+            // into it, so a gate created/edited after server start doesn't need a manual
+            // /knk gate admin reload - see DistrictGateLoader.
+            RegionTransitionService regionTransitionService = new SimpleRegionTransitionService(
+                regionDomainResolver, gateControlPort,
+                enteredDomains -> enteredDomains.stream()
+                    .filter(domain -> "District".equalsIgnoreCase(domain.domainType()))
+                    .forEach(domain -> {
+                        if (domain.id() == null) {
+                            getLogger().warning("Entered district '" + domain.name()
+                                + "' (wgRegionId=" + domain.wgRegionId()
+                                + ") resolved with a null domain id; cannot load its gates.");
+                            return;
+                        }
+                        districtGateLoader.loadIfNotAlreadyLoaded(domain.id());
+                    })
+            );
             
             // Wire tracker and listener
             WorldGuardRegionTracker regionTracker = new WorldGuardRegionTracker(
@@ -516,6 +535,7 @@ public class KnKPlugin extends JavaPlugin {
                 gateStructuresApi,
                 userManager,
                 usersCommandApi,
+                districtGateLoader,
                 serverId
             );
             knkCommand.setExecutor(knkAdminCommand);

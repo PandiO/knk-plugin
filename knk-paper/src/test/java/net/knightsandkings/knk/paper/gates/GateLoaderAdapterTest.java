@@ -59,6 +59,11 @@ class GateLoaderAdapterTest {
         assertEquals(1, nAxis.getZ(), EPSILON);
         // LATERAL slides sideways along the u-axis, not through the door plane.
         assertEquals(3, motion.getX(), EPSILON);
+
+        // Cardinal gate: the lattice step must equal the unit axis (GCD-reduction is a no-op).
+        assertEquals(1, gate.getUStep().getX(), EPSILON);
+        assertEquals(1, gate.getVStep().getY(), EPSILON);
+        assertEquals(1, gate.getNStep().getZ(), EPSILON);
     }
 
     @Test
@@ -113,6 +118,80 @@ class GateLoaderAdapterTest {
     }
 
     @Test
+    void loadForDistrict_FetchesOnlyThatDistrictsGatesAndCachesThem() {
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateStructuresApi api = mock(GateStructuresApi.class);
+
+        // getByDistrict (a query-filtered search) returns the backend's lightweight list DTO -
+        // only the id is reliable from it, no geometry fields.
+        GateStructureDto summary = new GateStructureDto();
+        summary.setId(5);
+        summary.setName("District Gate");
+
+        // getById returns the full DTO, including geometry - this is what loadForDistrict must
+        // actually use to build the CachedGate, not the summary above.
+        GateStructureDto fullDto = new GateStructureDto();
+        fullDto.setId(5);
+        fullDto.setName("District Gate");
+        fullDto.setGateType("SLIDING");
+        fullDto.setMotionType("VERTICAL");
+        fullDto.setGeometryDefinitionMode("PLANE_GRID");
+        fullDto.setAnimationDurationTicks(60);
+        fullDto.setAnimationTickRate(1);
+        fullDto.setGeometryDepth(1);
+        fullDto.setAnchorPoint("{\"x\":100,\"y\":64,\"z\":100}");
+
+        when(api.getByDistrict(7)).thenReturn(CompletableFuture.completedFuture(List.of(summary)));
+        when(api.getById(5)).thenReturn(CompletableFuture.completedFuture(fullDto));
+        when(api.getGateSnapshots(5)).thenReturn(CompletableFuture.completedFuture(List.of()));
+
+        adapter.loadForDistrict(api, 7).join();
+
+        CachedGate cached = gateManager.getGate(5);
+        assertNotNull(cached);
+        // Proves the full (getById) DTO's anchor was used, not a (0,0,0) fallback from the
+        // summary lacking an anchorPoint at all - the exact regression this test guards against.
+        assertEquals(new Vector(100, 64, 100), cached.getAnchorPoint());
+        verify(api, never()).getAll();
+        verify(api).getById(5);
+    }
+
+    @Test
+    void loadForDistrict_SkipsGatesMissingAnId() {
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateStructuresApi api = mock(GateStructuresApi.class);
+
+        GateStructureDto dtoWithoutId = new GateStructureDto();
+        dtoWithoutId.setName("Malformed Gate");
+
+        when(api.getByDistrict(9)).thenReturn(CompletableFuture.completedFuture(List.of(dtoWithoutId)));
+
+        assertDoesNotThrow(() -> adapter.loadForDistrict(api, 9).join());
+        verify(api, never()).getById(anyInt());
+        verify(api, never()).getGateSnapshots(anyInt());
+    }
+
+    @Test
+    void loadForDistrict_SkipsGateWhenFullLookupReturnsNothing() {
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateStructuresApi api = mock(GateStructuresApi.class);
+
+        GateStructureDto summary = new GateStructureDto();
+        summary.setId(6);
+        summary.setName("Vanished Gate");
+
+        when(api.getByDistrict(10)).thenReturn(CompletableFuture.completedFuture(List.of(summary)));
+        when(api.getById(6)).thenReturn(CompletableFuture.completedFuture(null));
+
+        assertDoesNotThrow(() -> adapter.loadForDistrict(api, 10).join());
+        assertNull(gateManager.getGate(6));
+        verify(api, never()).getGateSnapshots(anyInt());
+    }
+
+    @Test
     void loadAndCacheGate_ComputesBasisVectorsForDiagonalFaceDirection() {
         // High-risk case flagged in the roadmap (docs/features/gate-structure-animation/
         // IMPLEMENTATION_ROADMAP.md, Risk Management: "Diagonal Gate Geometry Calculation"):
@@ -157,6 +236,58 @@ class GateLoaderAdapterTest {
         assertEquals(-diag, nAxis.getX(), EPSILON);
         assertEquals(0, nAxis.getY(), EPSILON);
         assertEquals(diag, nAxis.getZ(), EPSILON);
+
+        // Lattice step vectors must be the shortest INTEGER step along the same directions -
+        // (1,0,1) not (diag,0,diag) - so an integer width/height index lands on the true adjacent
+        // block instead of under-shooting it (see VectorMath.primitiveLatticeStep and the bug this
+        // was written to catch: a diagonal GeometryWidth>1 door collapsing to fewer distinct blocks).
+        Vector uStep = gate.getUStep();
+        Vector vStep = gate.getVStep();
+        Vector nStep = gate.getNStep();
+
+        assertEquals(1, uStep.getX(), EPSILON);
+        assertEquals(0, uStep.getY(), EPSILON);
+        assertEquals(1, uStep.getZ(), EPSILON);
+
+        assertEquals(0, vStep.getX(), EPSILON);
+        assertEquals(1, vStep.getY(), EPSILON);
+        assertEquals(0, vStep.getZ(), EPSILON);
+
+        assertEquals(-1, nStep.getX(), EPSILON);
+        assertEquals(0, nStep.getY(), EPSILON);
+        assertEquals(1, nStep.getZ(), EPSILON);
+    }
+
+    @Test
+    void loadAndCacheGate_ScalesLateralMotionByLatticeStepForDiagonalGate() {
+        // Reproduces the reported bug: on a diagonal gate, LATERAL motion must slide by real
+        // integer blocks (distance * (1,0,1)) rather than by the unit axis (distance * (0.7071,0,0.7071)),
+        // which would only travel distance/sqrt(2) blocks along each world axis.
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+
+        GateStructureDto dto = new GateStructureDto();
+        dto.setId(20);
+        dto.setName("Diagonal Lateral Gate");
+        dto.setGateType("SLIDING");
+        dto.setMotionType("LATERAL");
+        dto.setGeometryDefinitionMode("PLANE_GRID");
+        dto.setAnimationDurationTicks(60);
+        dto.setAnimationTickRate(1);
+        dto.setMotionDistanceBlocks(4);
+        dto.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
+        dto.setReferencePoint1("{\"x\":1,\"y\":0,\"z\":1}");
+        dto.setReferencePoint2("{\"x\":0,\"y\":1,\"z\":0}");
+
+        adapter.loadAndCacheGate(dto, new ArrayList<>());
+
+        CachedGate gate = gateManager.getGate(20);
+        assertNotNull(gate);
+
+        Vector motion = gate.getMotionVector();
+        assertEquals(4, motion.getX(), EPSILON);
+        assertEquals(0, motion.getY(), EPSILON);
+        assertEquals(4, motion.getZ(), EPSILON);
     }
 
     @Test

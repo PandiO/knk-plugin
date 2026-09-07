@@ -7,6 +7,7 @@ import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
 import net.knightsandkings.knk.core.domain.gates.CachedGate;
 import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.core.util.CoordinateParser;
+import net.knightsandkings.knk.core.util.VectorMath;
 import org.bukkit.util.Vector;
 
 import java.util.Comparator;
@@ -44,19 +45,80 @@ public class GateLoaderAdapter {
             return CompletableFuture.failedFuture(new IllegalStateException("GateStructuresApi is not configured"));
         }
 
-        return gateStructuresApi.getAll().thenCompose(gates -> {
+        return gateStructuresApi.getAll().thenCompose(gates -> loadAndCacheAll(gateStructuresApi, gates));
+    }
+
+    /**
+     * Load and cache just the gate structures belonging to a single District - used to load a
+     * district's gates on demand as a player enters it, rather than requiring every gate in the
+     * world to already be loaded (and an admin to run /knk gate admin reload for anything added
+     * since server start). See DistrictGateLoader, which guards against re-fetching a district
+     * that's already loaded.
+     *
+     * getByDistrict hits GET /api/GateStructures?districtId={id} (a query-filtered search), which
+     * the backend serves from a lightweight list/search DTO with no geometry fields (anchorPoint,
+     * referencePoint1/2, geometryWidth/Height/Depth, etc.) - unlike the unfiltered GetAllAsync()
+     * that loadAll() uses, or GetById(). Caching those DTOs directly (as loadAll does with its
+     * already-full ones) silently produced gates with anchor (0,0,0) and default axes - which,
+     * for a gate already correctly loaded at startup, meant the first time a player entered its
+     * district mid-session, this OVERWROTE the good in-memory CachedGate with a broken one (all
+     * animated block positions would then compute relative to world (0,0,0) instead of the
+     * gate's real location). So each id is re-fetched individually via getById (the same full
+     * DTO getAll()/loadAll() already relies on) before building/caching it.
+     *
+     * @param gateStructuresApi API client used to retrieve gate data
+     * @param districtId District ID whose gates should be loaded
+     * @return future completed after every gate in that district has been cached
+     */
+    public CompletableFuture<Void> loadForDistrict(net.knightsandkings.knk.api.GateStructuresApi gateStructuresApi, int districtId) {
+        if (gateStructuresApi == null) {
+            return CompletableFuture.failedFuture(new IllegalStateException("GateStructuresApi is not configured"));
+        }
+
+        return gateStructuresApi.getByDistrict(districtId).thenCompose(summaries -> {
+            int count = summaries == null ? 0 : summaries.size();
+            LOGGER.info("District " + districtId + ": API returned " + count + " gate(s)");
+            if (summaries == null || summaries.isEmpty()) {
+                return CompletableFuture.completedFuture(null);
+            }
+
             List<CompletableFuture<Void>> loads = new ArrayList<>();
-            for (GateStructureDto gate : gates == null ? List.<GateStructureDto>of() : gates) {
-                if (gate == null || gate.getId() == null) {
+            for (GateStructureDto summary : summaries) {
+                if (summary == null || summary.getId() == null) {
                     continue;
                 }
+                int gateId = summary.getId();
 
-                loads.add(gateStructuresApi.getGateSnapshots(gate.getId())
-                    .thenAccept(snapshots -> loadAndCacheGate(gate, snapshots == null ? List.of() : snapshots)));
+                loads.add(gateStructuresApi.getById(gateId).thenCompose(fullDto -> {
+                    if (fullDto == null || fullDto.getId() == null) {
+                        LOGGER.warning("District " + districtId + ": full lookup for gate " + gateId + " returned nothing; skipping");
+                        return CompletableFuture.completedFuture(null);
+                    }
+                    return gateStructuresApi.getGateSnapshots(gateId)
+                        .thenAccept(snapshots -> loadAndCacheGate(fullDto, snapshots == null ? List.of() : snapshots));
+                }));
             }
 
             return CompletableFuture.allOf(loads.toArray(new CompletableFuture[0]));
         });
+    }
+
+    /**
+     * Shared per-gate loading loop: fetch each gate's block snapshots and cache it, used by both
+     * loadAll (every gate) and loadForDistrict (one district's gates).
+     */
+    private CompletableFuture<Void> loadAndCacheAll(net.knightsandkings.knk.api.GateStructuresApi gateStructuresApi, List<GateStructureDto> gates) {
+        List<CompletableFuture<Void>> loads = new ArrayList<>();
+        for (GateStructureDto gate : gates == null ? List.<GateStructureDto>of() : gates) {
+            if (gate == null || gate.getId() == null) {
+                continue;
+            }
+
+            loads.add(gateStructuresApi.getGateSnapshots(gate.getId())
+                .thenAccept(snapshots -> loadAndCacheGate(gate, snapshots == null ? List.of() : snapshots)));
+        }
+
+        return CompletableFuture.allOf(loads.toArray(new CompletableFuture[0]));
     }
 
     /**
@@ -166,24 +228,41 @@ public class GateLoaderAdapter {
         Vector anchor = gate.getAnchorPoint();
 
         if (ref1 != null && ref2 != null && anchor != null) {
+            Vector uDelta = ref1.clone().subtract(anchor);
+            Vector vDelta = ref2.clone().subtract(anchor);
+
             // u-axis: direction from anchor to ref1 (width direction)
-            Vector u = ref1.clone().subtract(anchor).normalize();
+            Vector u = uDelta.clone().normalize();
             gate.setUAxis(u);
 
             // v-axis: direction from anchor to ref2 (height direction)
-            Vector v = ref2.clone().subtract(anchor).normalize();
+            Vector v = vDelta.clone().normalize();
             gate.setVAxis(v);
 
             // n-axis: cross product (normal direction, motion axis)
             Vector n = u.clone().crossProduct(v).normalize();
             gate.setNAxis(n);
 
-            LOGGER.fine("Gate " + gate.getName() + " basis vectors: u=" + u + ", v=" + v + ", n=" + n);
+            // Lattice step vectors: shortest integer step along the same directions as u/v/n.
+            // Identical to u/v/n for cardinal gates, but correctly reaches the adjacent block
+            // for diagonal gates instead of under-shooting by stepping a unit vector.
+            Vector uStep = VectorMath.primitiveLatticeStep(uDelta);
+            Vector vStep = VectorMath.primitiveLatticeStep(vDelta);
+            Vector nStep = VectorMath.primitiveLatticeStep(uStep.clone().crossProduct(vStep));
+            gate.setUStep(uStep);
+            gate.setVStep(vStep);
+            gate.setNStep(nStep);
+
+            LOGGER.fine("Gate " + gate.getName() + " basis vectors: u=" + u + ", v=" + v + ", n=" + n
+                + "; steps: uStep=" + uStep + ", vStep=" + vStep + ", nStep=" + nStep);
         } else {
             // Fallback to standard axes
             gate.setUAxis(new Vector(1, 0, 0));
             gate.setVAxis(new Vector(0, 1, 0));
             gate.setNAxis(new Vector(0, 0, 1));
+            gate.setUStep(new Vector(1, 0, 0));
+            gate.setVStep(new Vector(0, 1, 0));
+            gate.setNStep(new Vector(0, 0, 1));
             LOGGER.warning("Gate " + gate.getName() + " missing reference points, using default axes");
         }
     }
@@ -207,10 +286,12 @@ public class GateLoaderAdapter {
                 gate.setMotionVector(new Vector(0, distance, 0));
                 break;
             case "LATERAL":
-                // Slides sideways along the door plane, not through it.
-                Vector uAxis = gate.getUAxis();
-                Vector lateralAxis = uAxis != null && uAxis.lengthSquared() > 0 ? uAxis.clone() : new Vector(1, 0, 0);
-                gate.setMotionVector(lateralAxis.multiply(distance));
+                // Slides sideways along the door plane, not through it. Uses the lattice step
+                // (not the unit uAxis) so "N blocks" of travel moves N real blocks even when
+                // the gate is diagonally oriented.
+                Vector uStep = gate.getUStep();
+                Vector lateralStep = uStep != null && uStep.lengthSquared() > 0 ? uStep.clone() : new Vector(1, 0, 0);
+                gate.setMotionVector(lateralStep.multiply(distance));
                 break;
             case "ROTATION":
                 // No linear motion vector, rotation handled separately
