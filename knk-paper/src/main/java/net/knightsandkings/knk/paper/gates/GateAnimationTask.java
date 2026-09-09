@@ -112,6 +112,16 @@ public class GateAnimationTask extends BukkitRunnable {
             boolean justStartedAnimating = state != previousState
                 && (state == AnimationState.OPENING || state == AnimationState.CLOSING);
 
+            if (justStartedAnimating && "ROTATION".equals(gate.getMotionType())) {
+                LOGGER.info("[GateAnimation] Gate '" + gate.getName() + "' (ID: " + gate.getId() + ") starting "
+                    + state + " rotation: hingeAxis=" + gate.getHingeAxis() + ", uAxis=" + gate.getUAxis()
+                    + ", vAxis=" + gate.getVAxis() + ", nAxis=" + gate.getNAxis()
+                    + ", rotationMaxAngleDegrees=" + gate.getRotationMaxAngleDegrees()
+                    + ", clipToGeometryBounds=" + gate.isClipToGeometryBounds()
+                    + " (W=" + gate.getGeometryWidth() + ", H=" + gate.getGeometryHeight()
+                    + ", D=" + gate.getGeometryDepth() + ")");
+            }
+
             // Only process gates that are animating
             if (state != AnimationState.OPENING && state != AnimationState.CLOSING) {
                 emptySnapshotWarnings.remove(gate.getId());
@@ -211,10 +221,24 @@ public class GateAnimationTask extends BukkitRunnable {
             ? Math.max(0, frame - Math.max(1, gate.getAnimationTickRate()))
             : Math.min(gate.getAnimationDurationTicks(), frame + Math.max(1, gate.getAnimationTickRate()));
 
+        // Keep each rotating block's own facing/axis blockstate in sync with how far the door
+        // has swung, not just its position - a no-op (returns the original angle 0) for
+        // non-ROTATION gates. Vacancies use the previous frame's angle so the removed blockdata
+        // still matches whatever was actually placed there last.
+        double currentAngle = GateFrameCalculator.calculateRotationAngle(gate, frame);
+        double previousAngle = GateFrameCalculator.calculateRotationAngle(gate, previousFrame);
+
         List<BlockPlacement> placements = new ArrayList<>();
         List<BlockPlacement> vacancies = new ArrayList<>();
         List<BlockMove> moves = new ArrayList<>();
         Set<Long> targetCells = new HashSet<>();
+
+        // Blocks whose calculated position fell outside the gate's geometry box this frame
+        // (calculateBlockPosition returned null because isWithinGeometryBounds rejected it) -
+        // these are otherwise dropped completely silently, with no other signal that they
+        // were ever supposed to be placed.
+        int clippedPlacementCount = 0;
+        int clippedVacancyCount = 0;
 
         for (BlockSnapshot block : gate.getBlocks()) {
             if (block == null) {
@@ -229,15 +253,29 @@ public class GateAnimationTask extends BukkitRunnable {
                     LOGGER.fine("Gate " + gate.getName() + " is in unloaded chunk, pausing animation");
                     return;
                 }
-                placements.add(new BlockPlacement(worldPos, block.getBlockData()));
+                String orientedBlockData = GateBlockOrientation.applyRotation(block.getBlockData(), gate, currentAngle);
+                placements.add(new BlockPlacement(worldPos, orientedBlockData));
                 targetCells.add(GateSpatialIndex.packCell(worldPos));
+            } else if (gate.isClipToGeometryBounds()) {
+                clippedPlacementCount++;
             }
 
             if (previousPosition != null) {
-                vacancies.add(new BlockPlacement(previousPosition, block.getBlockData()));
+                String orientedVacancyData = GateBlockOrientation.applyRotation(block.getBlockData(), gate, previousAngle);
+                vacancies.add(new BlockPlacement(previousPosition, orientedVacancyData));
+            } else if (gate.isClipToGeometryBounds()) {
+                clippedVacancyCount++;
             }
 
             moves.add(new BlockMove(previousPosition, worldPos));
+        }
+
+        boolean shouldLogThisFrame = frame == 0 || frame == gate.getAnimationDurationTicks() || frame % 20 == 0;
+        if (shouldLogThisFrame && (clippedPlacementCount > 0 || clippedVacancyCount > 0)) {
+            LOGGER.warning("[GateAnimation] Gate '" + gate.getName() + "' (ID: " + gate.getId() + ") frame " + frame
+                + ": " + clippedPlacementCount + "/" + gate.getBlocks().size()
+                + " target position(s) and " + clippedVacancyCount + "/" + gate.getBlocks().size()
+                + " vacancy position(s) fell outside GeometryWidth/Height/Depth bounds and were skipped.");
         }
 
         // Clear vacated cells first, but never a cell another block moves into this frame:
@@ -254,6 +292,12 @@ public class GateAnimationTask extends BukkitRunnable {
             if (!GateBlockPlacer.placeBlockIfVacant(world, placement.position(), placement.blockData(), fallbackMaterial)) {
                 blockedCount++;
             }
+        }
+
+        if (shouldLogThisFrame && blockedCount > 0) {
+            LOGGER.warning("[GateAnimation] Gate '" + gate.getName() + "' (ID: " + gate.getId() + ") frame " + frame
+                + ": " + blockedCount + "/" + placements.size()
+                + " placement(s) blocked by an existing, non-matching block this frame.");
         }
 
         // Keep the spatial index in lockstep with the block mutations above, so a hit-detection
@@ -386,6 +430,25 @@ public class GateAnimationTask extends BukkitRunnable {
     private void finishOpening(CachedGate gate) {
         gate.setCurrentState(AnimationState.OPEN);
         gate.setCurrentFrame(gate.getAnimationDurationTicks());
+
+        // Ensure all gate blocks are placed at the open position, mirroring finishClosing's
+        // force-placement at frame 0. Without this, a large wall-clock jump (e.g. a main-thread
+        // stall causing elapsed time to skip straight past most of the animation in one
+        // updateGateBlocks call) leaves blocks stranded wherever they last were computed -
+        // updateGateBlocks only ever vacates one tick behind the frame it's given, not every
+        // frame since the last call, so a skipped stretch is never cleaned up on its own.
+        double openAngle = GateFrameCalculator.calculateRotationAngle(gate, gate.getAnimationDurationTicks());
+        for (BlockSnapshot block : gate.getBlocks()) {
+            if (block == null) {
+                continue;
+            }
+
+            Vector worldPos = GateFrameCalculator.calculateBlockPosition(gate, block, gate.getAnimationDurationTicks());
+            if (worldPos != null) {
+                String orientedBlockData = GateBlockOrientation.applyRotation(block.getBlockData(), gate, openAngle);
+                GateBlockPlacer.placeBlock(world, worldPos, orientedBlockData, fallbackMaterial);
+            }
+        }
         resyncSpatialIndex(gate, gate.getCurrentFrame());
 
         LOGGER.info("Gate " + gate.getName() + " finished opening");

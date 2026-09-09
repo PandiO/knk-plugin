@@ -272,6 +272,41 @@ class GateFrameCalculatorTest {
     }
 
     @Test
+    void shouldCalculateRotationAngleAcrossFrameRange() {
+        CachedGate rotationGate = new CachedGate(
+            4, "Drawbridge", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
+            90, 1,
+            new Vector(100, 64, 100), 0, 0, 0,
+            500.0, 500.0, true, false, true, 90,
+            "east"
+        );
+
+        assertEquals(0.0, GateFrameCalculator.calculateRotationAngle(rotationGate, 0), EPSILON);
+        assertEquals(45.0, GateFrameCalculator.calculateRotationAngle(rotationGate, 45), EPSILON);
+        assertEquals(90.0, GateFrameCalculator.calculateRotationAngle(rotationGate, 90), EPSILON);
+
+        // Frames are clamped to [0, totalFrames] the same way calculateBlockPosition clamps.
+        assertEquals(90.0, GateFrameCalculator.calculateRotationAngle(rotationGate, 999), EPSILON);
+        assertEquals(0.0, GateFrameCalculator.calculateRotationAngle(rotationGate, -10), EPSILON);
+    }
+
+    @Test
+    void shouldReturnZeroRotationAngleForNonRotationGates() {
+        // A VERTICAL/LATERAL gate's blocks must never be reoriented - even if
+        // RotationMaxAngleDegrees happens to carry a nonzero leftover value in the DB.
+        CachedGate verticalGate = new CachedGate(
+            5, "Portcullis", "SLIDING", "VERTICAL", "PLANE_GRID",
+            60, 1,
+            new Vector(0, 64, 0), 0, 0, 0,
+            500.0, 500.0, true, false, true, 90,
+            "north"
+        );
+
+        assertEquals(0.0, GateFrameCalculator.calculateRotationAngle(verticalGate, 30), EPSILON);
+        assertEquals(0.0, GateFrameCalculator.calculateRotationAngle(null, 30), EPSILON);
+    }
+
+    @Test
     void shouldHandleNullGate() {
         Vector relativePos = new Vector(0, 0, 0);
         BlockSnapshot block = new BlockSnapshot(1, relativePos, 1, "stone", 0);

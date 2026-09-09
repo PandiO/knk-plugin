@@ -149,20 +149,41 @@ public class GateFrameCalculator {
     private static Vector calculateRotationPosition(CachedGate gate, Vector relativePos, double progress) {
         Vector anchorPoint = gate.getAnchorPoint();
         Vector hingeAxis = gate.getHingeAxis();
-        int maxAngle = gate.getRotationMaxAngleDegrees();
 
         if (anchorPoint == null || relativePos == null || hingeAxis == null) {
             return anchorPoint != null ? anchorPoint.clone().add(relativePos) : new Vector(0, 0, 0);
         }
 
-        // Calculate current rotation angle based on progress
-        double currentAngle = maxAngle * progress;
+        double currentAngle = gate.getRotationMaxAngleDegrees() * progress;
 
         // Rotate the relative position around the hinge axis
         Vector rotatedPos = VectorMath.rotateAroundAxis(relativePos, hingeAxis, currentAngle);
 
         // Add to anchor point to get world position
         return anchorPoint.clone().add(rotatedPos);
+    }
+
+    /**
+     * The rotation angle (degrees) a ROTATION-motion gate has swung through at a given frame -
+     * the same angle {@link #calculateRotationPosition} applies to each block's position. Exposed
+     * so a block's own facing/axis orientation can be kept in sync with how far the door has
+     * physically swung open, instead of staying frozen at its closed (scanned) orientation.
+     * Returns 0 for non-ROTATION gates, where no reorientation should ever be applied.
+     *
+     * @param gate The cached gate
+     * @param frame Animation frame to evaluate
+     * @return Rotation angle in degrees (0 at frame 0, RotationMaxAngleDegrees at the last frame)
+     */
+    public static double calculateRotationAngle(CachedGate gate, int frame) {
+        if (gate == null || !"ROTATION".equals(gate.getMotionType())) {
+            return 0.0;
+        }
+
+        int totalFrames = gate.getAnimationDurationTicks();
+        frame = Math.max(0, Math.min(frame, totalFrames));
+        double progress = totalFrames > 0 ? (double) frame / totalFrames : 0.0;
+
+        return gate.getRotationMaxAngleDegrees() * progress;
     }
 
     /**
