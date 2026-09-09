@@ -394,6 +394,61 @@ class GateLoaderAdapterTest {
     }
 
     @Test
+    void loadAndCacheGate_HingesDrawbridgeOnTheWidthAxis() {
+        // A drawbridge hinges along its bottom edge (uAxis) and swings height-offset blocks
+        // out into depth to lie flat as a bridge - rotating around nAxis (the old, wrong
+        // default) would instead spin blocks within their own plane and never form a bridge.
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+
+        GateStructureDto dto = new GateStructureDto();
+        dto.setId(30);
+        dto.setName("Drawbridge Gate");
+        dto.setGateType("DRAWBRIDGE");
+        dto.setMotionType("ROTATION");
+        dto.setGeometryDefinitionMode("PLANE_GRID");
+        dto.setAnimationDurationTicks(90);
+        dto.setAnimationTickRate(1);
+        dto.setRotationMaxAngleDegrees(90);
+        dto.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
+        dto.setReferencePoint1("{\"x\":1,\"y\":0,\"z\":0}");
+        dto.setReferencePoint2("{\"x\":0,\"y\":1,\"z\":0}");
+
+        adapter.loadAndCacheGate(dto, new ArrayList<>());
+
+        CachedGate gate = gateManager.getGate(30);
+        assertNotNull(gate);
+        assertEquals(gate.getUAxis(), gate.getHingeAxis());
+    }
+
+    @Test
+    void loadAndCacheGate_HingesDoubleDoorsOnTheHeightAxis() {
+        // Double doors hinge along a vertical edge (vAxis) and swing width-offset blocks out
+        // into depth as they open.
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+
+        GateStructureDto dto = new GateStructureDto();
+        dto.setId(31);
+        dto.setName("Double Doors Gate");
+        dto.setGateType("DOUBLE_DOORS");
+        dto.setMotionType("ROTATION");
+        dto.setGeometryDefinitionMode("PLANE_GRID");
+        dto.setAnimationDurationTicks(60);
+        dto.setAnimationTickRate(1);
+        dto.setRotationMaxAngleDegrees(90);
+        dto.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
+        dto.setReferencePoint1("{\"x\":1,\"y\":0,\"z\":0}");
+        dto.setReferencePoint2("{\"x\":0,\"y\":1,\"z\":0}");
+
+        adapter.loadAndCacheGate(dto, new ArrayList<>());
+
+        CachedGate gate = gateManager.getGate(31);
+        assertNotNull(gate);
+        assertEquals(gate.getVAxis(), gate.getHingeAxis());
+    }
+
+    @Test
     void loadAll_CachesEveryGateReturnedByTheApi() {
         GateManager gateManager = new GateManager();
         GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);

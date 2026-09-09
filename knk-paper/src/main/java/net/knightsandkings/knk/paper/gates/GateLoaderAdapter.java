@@ -296,14 +296,32 @@ public class GateLoaderAdapter {
             case "ROTATION":
                 // No linear motion vector, rotation handled separately
                 gate.setMotionVector(new Vector(0, 0, 0));
-                // Set hinge axis from DTO if available
-                gate.setHingeAxis(nAxis);
+                gate.setHingeAxis(resolveHingeAxis(gate));
                 break;
             default:
                 gate.setMotionVector(new Vector(0, 0, 0));
         }
 
         LOGGER.fine("Gate " + gate.getName() + " motion vector: " + gate.getMotionVector());
+    }
+
+    /**
+     * The line a rotating gate swings around. Rodrigues' rotation formula leaves the
+     * rotation axis's own component of a vector unchanged and mixes the other two - so the
+     * hinge must be the axis whose offset should NOT change as the gate opens:
+     * - DRAWBRIDGE hinges along its bottom edge (uAxis, the width direction) and sweeps
+     *   height-offset blocks (vAxis) out into depth (nAxis) to lie flat as a bridge.
+     * - DOUBLE_DOORS hinge along a vertical edge (vAxis, the height direction) and sweep
+     *   width-offset blocks (uAxis) out into depth (nAxis).
+     * nAxis itself is never a valid hinge for either: rotating around it just mixes uAxis
+     * and vAxis into each other, spinning the door flat within its own plane instead of
+     * swinging it open.
+     */
+    private Vector resolveHingeAxis(CachedGate gate) {
+        if ("DOUBLE_DOORS".equals(gate.getGateType())) {
+            return gate.getVAxis();
+        }
+        return gate.getUAxis();
     }
 
     /**
