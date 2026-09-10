@@ -7,6 +7,7 @@ import org.bukkit.util.Vector;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -308,6 +309,49 @@ public class GateFrameCalculator {
             byIndex.putIfAbsent(packIndex(Math.round(idx[0]), Math.round(idx[1])), block);
         }
 
+        // 3b. Guarantee every scanned source block contributes at least one placed cell, by
+        // rotating it forward directly (the same formula calculateRotationPosition uses for the
+        // non-rasterized path) and flooring to the block it lands in - exactly like every other
+        // block placement in this codebase (see GateBlockPlacer, which floors via getBlockX/Y/Z).
+        // Step 4 below only *tests candidate world cells against the closed frame*: for a
+        // diagonal hinge, a genuine source cell's true rotated position frequently doesn't
+        // reverse-project back to an exact integer (u,v) for *any* nearby integer cell (the
+        // rotation isn't lattice-preserving off cardinal axes), so step 4 alone silently drops
+        // whole rows/columns near the geometry's edges - this is what produced the reported
+        // "8-tall door only opens 6 blocks" bug: an entire column's blocks are, geometrically,
+        // spaced *less than one block apart* once projected onto world X/Z after a diagonal-axis
+        // rotation (e.g. 1/sqrt(2) per row for a 45-degree hinge), so several adjacent rows are
+        // mathematically guaranteed to floor to the very same integer cell - this is an intrinsic
+        // consequence of representing a continuously-rotated diagonal surface with unit blocks,
+        // not something any lookup strategy can avoid entirely. What *is* avoidable is which row
+        // wins that collision: processing farthest-from-hinge rows first (descending v-index) so
+        // the door's true, farthest reach always survives a collision, rather than being clobbered
+        // by whichever row processing happened to reach that cell first.
+        List<BlockSnapshot> byDistanceFromHinge = new ArrayList<>(gate.getBlocks());
+        byDistanceFromHinge.sort((a, b) -> {
+            double vA = Math.abs(projectOntoBasis(a.getRelativePosition(), uStep, vStep, nStep)[1]);
+            double vB = Math.abs(projectOntoBasis(b.getRelativePosition(), uStep, vStep, nStep)[1]);
+            return Double.compare(vB, vA);
+        });
+
+        Map<Long, RasterizedBlock> byPosition = new LinkedHashMap<>();
+        for (BlockSnapshot block : byDistanceFromHinge) {
+            Vector rotated = anchor.clone().add(
+                VectorMath.rotateAroundAxis(block.getRelativePosition(), hingeAxis, angleDegrees));
+            // Rodrigues' formula involves cos(angleDegrees), which for a "nice" angle like 90
+            // degrees is never bit-exact zero (Math.cos(Math.PI / 2) is ~6.12e-17, not 0) - so a
+            // coordinate that's algebraically supposed to land exactly on an integer (e.g. the
+            // hinge row, or any cardinal-axis rotation result) can come out a few ULPs *below* it
+            // instead (observed: 0.9999999999999998). Math.floor has no tolerance for that - it
+            // rounds such a value down a full block, silently colliding it with the block one cell
+            // over. Nudging by a tiny epsilon (far larger than FP noise, far smaller than any real
+            // fractional offset from a diagonal rotation) before flooring fixes that without
+            // affecting genuinely fractional positions.
+            Vector floored = new Vector(
+                Math.floor(rotated.getX() + 1e-6), Math.floor(rotated.getY() + 1e-6), Math.floor(rotated.getZ() + 1e-6));
+            byPosition.putIfAbsent(packPosition(floored), new RasterizedBlock(floored, block));
+        }
+
         // 4. Test every candidate cell: inverse-rotate back into the closed frame, project onto
         // the gate's own (unrotated) basis, and check it lands within [0,W-1]x[0,H-1] - and,
         // critically, that its n-index is ~0. u/v alone only constrain the cell to *some* point
@@ -330,17 +374,28 @@ public class GateFrameCalculator {
 
                     BlockSnapshot source = byIndex.get(packIndex(Math.round(idx[0]), Math.round(idx[1])));
                     if (source != null) {
-                        result.add(new RasterizedBlock(candidate, source));
+                        byPosition.putIfAbsent(packPosition(candidate), new RasterizedBlock(candidate, source));
                     }
                 }
             }
         }
 
+        result.addAll(byPosition.values());
         return result;
     }
 
     private static long packIndex(long i, long j) {
         return (i << 32) ^ (j & 0xFFFFFFFFL);
+    }
+
+    private static long packPosition(Vector position) {
+        return packPositionCoords((long) Math.round(position.getX()), (long) Math.round(position.getY()),
+            (long) Math.round(position.getZ()));
+    }
+
+    private static long packPositionCoords(long x, long y, long z) {
+        // World coordinates comfortably fit in 26 bits (+/- ~33M); y needs far fewer.
+        return (x & 0x3FFFFFFL) << 38 | (y & 0xFFFL) << 26 | (z & 0x3FFFFFFL);
     }
 
     /**

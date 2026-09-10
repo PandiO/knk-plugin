@@ -413,6 +413,54 @@ class GateFrameCalculatorTest {
         assertTrue(GateFrameCalculator.rasterizeRotationFrame(null, 45.0).isEmpty());
     }
 
+    @Test
+    void rasterizeRotationFrame_AtOpenAngle_TipRowAlwaysReachedAndNoColumnUniquelyDropped() {
+        // Regression test for a live-server bug report on gate #14 itself (width=4, height=8,
+        // south-east/45-degree hinge). Root cause: once a diagonal-hinge door swings to 90
+        // degrees, consecutive height-rows are only 1/sqrt(2) of a block apart in world X/Z, so
+        // several adjacent rows are mathematically guaranteed to floor to the very same integer
+        // cell - an intrinsic consequence of representing a continuously-rotated diagonal surface
+        // with unit blocks, not something any lookup strategy can eliminate. What *was* a genuine
+        // bug: the old code always let the row *nearer* the hinge win that collision (simple
+        // insertion-order iteration from row 0 upward), so the door's true, farthest reach (the
+        // tip row) was *always* the one silently dropped - live-observed as an 8-tall door only
+        // ever extending 6 blocks open. Processing farthest-from-hinge rows first fixes this: the
+        // tip row must now always survive any collision it's part of, for every column equally
+        // (no column should lose more rows than any other - that would reproduce the second part
+        // of the report, one whole column barely animating).
+        int width = 4;
+        int height = 8;
+        CachedGate gate = buildDiagonalDrawbridge(width, height);
+        Vector uStep = gate.getUStep();
+        Vector vStep = gate.getVStep();
+
+        List<GateFrameCalculator.RasterizedBlock> rasterized = GateFrameCalculator.rasterizeRotationFrame(gate, 90.0);
+
+        Map<Integer, Set<Integer>> presentRowsByColumn = new HashMap<>();
+        for (GateFrameCalculator.RasterizedBlock block : rasterized) {
+            Vector relPos = block.sourceBlock().getRelativePosition();
+            int u = (int) Math.round(relPos.dot(uStep) / uStep.lengthSquared());
+            int v = (int) Math.round(relPos.dot(vStep) / vStep.lengthSquared());
+            presentRowsByColumn.computeIfAbsent(u, k -> new HashSet<>()).add(v);
+        }
+
+        Integer expectedRowCount = null;
+        for (int u = 0; u < width; u++) {
+            Set<Integer> presentRows = presentRowsByColumn.getOrDefault(u, Set.of());
+            assertTrue(presentRows.contains(height - 1),
+                "Column " + u + " should reach its full extension (row " + (height - 1)
+                    + " present) but only has rows " + presentRows);
+            if (expectedRowCount == null) {
+                expectedRowCount = presentRows.size();
+            } else {
+                assertEquals(expectedRowCount, presentRows.size(),
+                    "Column " + u + " has " + presentRows.size() + " rows present (" + presentRows
+                        + ") but column 0 has " + expectedRowCount + " - no column should be "
+                        + "uniquely worse off than the others");
+            }
+        }
+    }
+
     // === Mechanism 2: openBlockPairing blend/lerp (ROTATION_GAP_FILL_DESIGN.md) ===
 
     @Test
