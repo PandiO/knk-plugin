@@ -180,25 +180,35 @@ public class KnKPlugin extends JavaPlugin {
             this.gateManager = new GateManager();
             getLogger().info("GateManager initialized");
 
-            GateLoaderAdapter gateLoader = new GateLoaderAdapter(gateManager);
-            gateManager.setReloadAction(() -> gateLoader.loadAll(gateStructuresApi));
-            this.districtGateLoader = new DistrictGateLoader(gateLoader, gateStructuresApi);
-
-            this.gateDisplayManager = new GateDisplayManager(this);
-            getLogger().info("GateDisplayManager initialized");
-
             // Mechanism 1 kill switch (Decision 5, ROTATION_GAP_FILL_DESIGN.md): default on, lets
             // an admin disable the automatic rasterized gap-fill server-wide without a code
             // deploy, since it runs unconditionally for every diagonal-hinge ROTATION gate.
-            // Read once here and reused for GateAnimationTask below.
+            // Read once here and reused for GateAnimationTask and GateStateSyncTask below.
             boolean rotationGapFillRasterizationEnabled =
                 getConfig().getBoolean("gates.rotationGapFill.rasterization-enabled", true);
 
+            // World/DB sync (docs/features/gate-structure-animation/GATE_WORLD_SYNC_DESIGN.md):
+            // the periodic health-check (Mechanism C) never forces a chunk load, so its cost
+            // tracks currently-active gates, not total gate count - safe to run fairly often.
             int gateStateSyncIntervalSeconds = getConfig().getInt("gates.state-sync-interval-seconds", 120);
+            long worldSyncHealthCheckIntervalSeconds =
+                getConfig().getLong("gates.world-sync.health-check-interval-seconds", 300L);
+            int worldSyncHealthCheckBatchSize =
+                getConfig().getInt("gates.world-sync.health-check-batch-size", 15);
             this.gateStateSyncTask = new GateStateSyncTask(
                 gateManager, gateStructuresApi, this, gateStateSyncIntervalSeconds, org.bukkit.Material.STONE,
-                rotationGapFillRasterizationEnabled
+                rotationGapFillRasterizationEnabled, worldSyncHealthCheckIntervalSeconds, worldSyncHealthCheckBatchSize
             );
+
+            // Constructed after gateStateSyncTask: DistrictGateLoader hands it every district's
+            // freshly-(re)loaded gates for a world/DB sync check-and-fix pass (Mechanism B) -
+            // the primary correction path, bounded to whatever district a player just entered.
+            GateLoaderAdapter gateLoader = new GateLoaderAdapter(gateManager);
+            gateManager.setReloadAction(() -> gateLoader.loadAll(gateStructuresApi));
+            this.districtGateLoader = new DistrictGateLoader(gateLoader, gateStructuresApi, gateStateSyncTask);
+
+            this.gateDisplayManager = new GateDisplayManager(this);
+            getLogger().info("GateDisplayManager initialized");
 
             gateManager.reloadGates().whenComplete((unused, error) -> {
                 if (error != null) {
@@ -207,7 +217,11 @@ public class KnKPlugin extends JavaPlugin {
                     getLogger().info("Loaded " + gateManager.getAllGates().size() + " gate(s) from API");
                     // Block edits and entity spawning must happen on the main thread; the reload future may complete off it.
                     getServer().getScheduler().runTask(this, () -> {
-                        gateStateSyncTask.reconcileWorldOnStartup();
+                        // Mechanism A: diagnose-only - logs mismatches for whatever's already
+                        // loaded (typically spawn-adjacent), never forces a chunk load or a
+                        // block write. Correction is left to Mechanism B (district-load) or
+                        // Mechanism C (periodic health-check, started below via gateStateSyncTask.start()).
+                        gateStateSyncTask.logStartupSyncDiagnostics();
                         for (org.bukkit.World world : getServer().getWorlds()) {
                             gateDisplayManager.cleanupOrphans(world, gateManager);
                         }

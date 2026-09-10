@@ -102,6 +102,16 @@ gates:
   # (Mechanism 2) is never affected either way - that always takes priority over this.
   rotationGapFill:
     rasterization-enabled: true
+  # World/DB sync (docs/features/gate-structure-animation/GATE_WORLD_SYNC_DESIGN.md): a gate's
+  # physical world blocks are kept converging on its DB-loaded state via three mechanisms - a
+  # startup diagnostic pass (logs mismatches only, never forces a chunk load or a block write),
+  # a check-and-fix pass the first time each district is entered (forces only that district's own
+  # gates' chunks - see DistrictGateLoader), and this periodic health-check, which re-verifies a
+  # small, round-robin batch of already-loaded gates every health-check-interval-seconds, never
+  # forcing a chunk load itself - its cost tracks currently-active gates, not total gate count.
+  world-sync:
+    health-check-interval-seconds: 300
+    health-check-batch-size: 15
 
 # Messages configuration
 messages:

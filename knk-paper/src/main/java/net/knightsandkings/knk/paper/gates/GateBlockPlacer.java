@@ -143,6 +143,33 @@ public class GateBlockPlacer {
         return removeBlock(world, position);
     }
 
+    /**
+     * Read-only, tri-state comparison used by gate world/DB sync verification (see
+     * GateWorldSyncChecker): {@code null} means "chunk not loaded, cannot determine" - the
+     * caller decides whether that counts as a mismatch or is simply skipped. Never mutates
+     * the world.
+     *
+     * @return null if the chunk isn't loaded or expectedBlockData can't be parsed; otherwise
+     *         whether the block at position matches expectedBlockData
+     */
+    public static Boolean blockMatches(World world, Vector position, String expectedBlockData, Material fallbackMaterial) {
+        if (world == null || position == null) {
+            return null;
+        }
+
+        Block block = getBlockIfLoaded(world, position);
+        if (block == null) {
+            return null;
+        }
+
+        BlockData expected = parseBlockData(expectedBlockData, fallbackMaterial);
+        if (expected == null) {
+            return null;
+        }
+
+        return isExpectedGateBlock(block, expected);
+    }
+
     private static Block getBlockIfLoaded(World world, Vector position) {
         if (!world.isChunkLoaded(position.getBlockX() >> 4, position.getBlockZ() >> 4)) {
             return null;

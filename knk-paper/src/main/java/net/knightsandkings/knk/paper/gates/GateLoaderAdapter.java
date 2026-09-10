@@ -13,6 +13,7 @@ import org.bukkit.util.Vector;
 
 import java.util.Comparator;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -71,9 +72,12 @@ public class GateLoaderAdapter {
      *
      * @param gateStructuresApi API client used to retrieve gate data
      * @param districtId District ID whose gates should be loaded
-     * @return future completed after every gate in that district has been cached
+     * @return future completed with the ids of every gate in that district successfully cached -
+     *         used by callers (see DistrictGateLoader) to run a world/DB sync check-and-fix pass
+     *         (Mechanism B, docs/features/gate-structure-animation/GATE_WORLD_SYNC_DESIGN.md)
+     *         against exactly the gates that were just (re)loaded, nothing more.
      */
-    public CompletableFuture<Void> loadForDistrict(net.knightsandkings.knk.api.GateStructuresApi gateStructuresApi, int districtId) {
+    public CompletableFuture<List<Integer>> loadForDistrict(net.knightsandkings.knk.api.GateStructuresApi gateStructuresApi, int districtId) {
         if (gateStructuresApi == null) {
             return CompletableFuture.failedFuture(new IllegalStateException("GateStructuresApi is not configured"));
         }
@@ -82,9 +86,10 @@ public class GateLoaderAdapter {
             int count = summaries == null ? 0 : summaries.size();
             LOGGER.info("District " + districtId + ": API returned " + count + " gate(s)");
             if (summaries == null || summaries.isEmpty()) {
-                return CompletableFuture.completedFuture(null);
+                return CompletableFuture.completedFuture(List.<Integer>of());
             }
 
+            List<Integer> loadedGateIds = Collections.synchronizedList(new ArrayList<>());
             List<CompletableFuture<Void>> loads = new ArrayList<>();
             for (GateStructureDto summary : summaries) {
                 if (summary == null || summary.getId() == null) {
@@ -99,13 +104,16 @@ public class GateLoaderAdapter {
                     }
                     CompletableFuture<List<GateBlockSnapshotDto>> snapshotsFuture = gateStructuresApi.getGateSnapshots(gateId);
                     CompletableFuture<List<GateBlockSnapshotDto>> openedSnapshotsFuture = gateStructuresApi.getGateOpenedSnapshots(gateId);
-                    return snapshotsFuture.thenAcceptBoth(openedSnapshotsFuture, (snapshots, openedSnapshots) ->
+                    return snapshotsFuture.thenAcceptBoth(openedSnapshotsFuture, (snapshots, openedSnapshots) -> {
                         loadAndCacheGate(fullDto, snapshots == null ? List.of() : snapshots,
-                            openedSnapshots == null ? List.of() : openedSnapshots));
+                            openedSnapshots == null ? List.of() : openedSnapshots);
+                        loadedGateIds.add(gateId);
+                    });
                 }));
             }
 
-            return CompletableFuture.allOf(loads.toArray(new CompletableFuture[0]));
+            return CompletableFuture.allOf(loads.toArray(new CompletableFuture[0]))
+                .thenApply(unused -> new ArrayList<>(loadedGateIds));
         });
     }
 

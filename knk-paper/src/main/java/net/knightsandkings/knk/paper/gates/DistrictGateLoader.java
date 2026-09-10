@@ -2,6 +2,7 @@ package net.knightsandkings.knk.paper.gates;
 
 import net.knightsandkings.knk.api.GateStructuresApi;
 
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -15,6 +16,13 @@ import java.util.logging.Logger;
  * KnKPlugin. This is what lets a gate created or edited after server start show up without an
  * admin needing to run /knk gate admin reload.
  *
+ * <p>Also the trigger point for Mechanism B in docs/features/gate-structure-animation/
+ * GATE_WORLD_SYNC_DESIGN.md: right after a district's gates are (re)loaded, its gates are handed
+ * to {@link GateStateSyncTask#checkAndFixGates} to force-load their own chunk(s) and correct any
+ * drift between their DB-loaded state and the physical world - the primary, bounded correction
+ * path for the world/DB sync problem (a district a player is entering is exactly the place where
+ * forcing a chunk load is justified, unlike an eager whole-server startup sweep).
+ *
  * No eviction: once a district is loaded it stays cached for the session. Total gate count for a
  * game world is realistic in the hundreds, and safely evicting a gate mid-animation/mid-siege is
  * a meaningfully harder problem than the "gates don't show up until a reload" pain point this
@@ -25,11 +33,14 @@ public class DistrictGateLoader {
 
     private final GateLoaderAdapter gateLoaderAdapter;
     private final GateStructuresApi gateStructuresApi;
+    private final GateStateSyncTask gateStateSyncTask;
     private final Set<Integer> loadedDistrictIds = ConcurrentHashMap.newKeySet();
 
-    public DistrictGateLoader(GateLoaderAdapter gateLoaderAdapter, GateStructuresApi gateStructuresApi) {
+    public DistrictGateLoader(GateLoaderAdapter gateLoaderAdapter, GateStructuresApi gateStructuresApi,
+                               GateStateSyncTask gateStateSyncTask) {
         this.gateLoaderAdapter = gateLoaderAdapter;
         this.gateStructuresApi = gateStructuresApi;
+        this.gateStateSyncTask = gateStateSyncTask;
     }
 
     /**
@@ -45,6 +56,7 @@ public class DistrictGateLoader {
 
         LOGGER.info("District " + districtId + " entered for the first time this session; loading its gates");
         gateLoaderAdapter.loadForDistrict(gateStructuresApi, districtId)
+            .thenAccept(this::checkAndFixLoadedGates)
             .exceptionally(error -> {
                 LOGGER.log(Level.WARNING, "Failed to load gates for district " + districtId, error);
                 loadedDistrictIds.remove(districtId);
@@ -54,11 +66,20 @@ public class DistrictGateLoader {
 
     /**
      * Force a re-load of a district's gates (e.g. an admin command after editing a gate's
-     * geometry in the web app) without needing a full /knk gate admin reload.
+     * geometry in the web app) without needing a full /knk gate admin reload. Also re-runs the
+     * world/DB sync check-and-fix, since an edited gate's geometry may have changed the set of
+     * world cells it now expects to occupy.
      */
     public CompletableFuture<Void> forceReload(int districtId) {
         loadedDistrictIds.add(districtId);
-        return gateLoaderAdapter.loadForDistrict(gateStructuresApi, districtId);
+        return gateLoaderAdapter.loadForDistrict(gateStructuresApi, districtId)
+            .thenAccept(this::checkAndFixLoadedGates);
+    }
+
+    private void checkAndFixLoadedGates(List<Integer> loadedGateIds) {
+        if (gateStateSyncTask != null) {
+            gateStateSyncTask.checkAndFixGates(loadedGateIds);
+        }
     }
 
     /**
