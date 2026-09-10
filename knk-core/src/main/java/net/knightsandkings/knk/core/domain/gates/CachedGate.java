@@ -51,12 +51,28 @@ public class CachedGate {
     private Vector vStep;
     private Vector nStep;
 
+    // Sublattice index (VectorMath.sublatticeIndex(uStep)) - 1 for a cardinal-hinge ROTATION gate
+    // (no gaps), >1 for a diagonal one. Drives Mechanism 1 (automatic rasterized gap-fill) in
+    // GateAnimationTask/GateFrameCalculator - see ROTATION_GAP_FILL_DESIGN.md.
+    private long sublatticeIndex = 1;
+
     // === Precomputed Motion ===
     private Vector motionVector;  // Direction and magnitude of motion
     private Vector hingeAxis;     // For rotation gates
 
     // === Block Data ===
     private final List<BlockSnapshot> blocks;
+
+    // === Mechanism 2: manually-scanned open state (ROTATION_GAP_FILL_DESIGN.md) ===
+    // Optional second physical anchor a scanned open shape was built/scanned relative to.
+    private Vector openAnchorPoint;
+    // Empty (never null) when no open-state scan exists for this gate - that emptiness is itself
+    // the trigger: Mechanism 2 only ever engages for a block with an entry in openBlockPairing.
+    private final List<BlockSnapshot> openBlocks = new ArrayList<>();
+    // Closed BlockSnapshot.getId() -> its nearest-neighbor-paired open BlockSnapshot, computed
+    // once at load time (GateLoaderAdapter) via GateBlockPairing. A block with no entry here has
+    // no open-scan counterpart and keeps today's exact procedural behavior.
+    private Map<Integer, BlockSnapshot> openBlockPairing = new HashMap<>();
 
     // === Health & State ===
     private double healthCurrent;
@@ -235,6 +251,18 @@ public class CachedGate {
 
     public Vector getNStep() {
         return nStep;
+    }
+
+    public long getSublatticeIndex() {
+        return sublatticeIndex;
+    }
+
+    public Vector getOpenAnchorPoint() {
+        return openAnchorPoint;
+    }
+
+    public List<BlockSnapshot> getOpenBlocks() {
+        return openBlocks;
     }
 
     public Vector getMotionVector() {
@@ -457,6 +485,23 @@ public class CachedGate {
         this.nStep = nStep;
     }
 
+    public void setSublatticeIndex(long sublatticeIndex) {
+        this.sublatticeIndex = sublatticeIndex;
+    }
+
+    public void setOpenAnchorPoint(Vector openAnchorPoint) {
+        this.openAnchorPoint = openAnchorPoint;
+    }
+
+    /**
+     * Closed BlockSnapshot.getId() -> paired open BlockSnapshot, per Decision 2/6 in
+     * ROTATION_GAP_FILL_DESIGN.md (nearest-neighbor for ROTATION, index-position for
+     * VERTICAL/LATERAL - computed by the caller, GateLoaderAdapter). Replaces any existing pairing.
+     */
+    public void setOpenBlockPairing(Map<Integer, BlockSnapshot> openBlockPairing) {
+        this.openBlockPairing = openBlockPairing != null ? openBlockPairing : new HashMap<>();
+    }
+
     public void setMotionVector(Vector motionVector) {
         this.motionVector = motionVector;
     }
@@ -469,6 +514,19 @@ public class CachedGate {
 
     public void addBlock(BlockSnapshot block) {
         this.blocks.add(block);
+    }
+
+    public void addOpenBlock(BlockSnapshot block) {
+        this.openBlocks.add(block);
+    }
+
+    /**
+     * The open-state block paired with the given closed-state block's id, or null when that
+     * block has no counterpart in a scanned open state (either the gate has none at all, or this
+     * particular block was left unpaired - see Decision 1 in ROTATION_GAP_FILL_DESIGN.md).
+     */
+    public BlockSnapshot getPairedOpenBlock(int closedBlockId) {
+        return openBlockPairing.get(closedBlockId);
     }
 
     public boolean isAnimating() {

@@ -187,9 +187,17 @@ public class KnKPlugin extends JavaPlugin {
             this.gateDisplayManager = new GateDisplayManager(this);
             getLogger().info("GateDisplayManager initialized");
 
+            // Mechanism 1 kill switch (Decision 5, ROTATION_GAP_FILL_DESIGN.md): default on, lets
+            // an admin disable the automatic rasterized gap-fill server-wide without a code
+            // deploy, since it runs unconditionally for every diagonal-hinge ROTATION gate.
+            // Read once here and reused for GateAnimationTask below.
+            boolean rotationGapFillRasterizationEnabled =
+                getConfig().getBoolean("gates.rotationGapFill.rasterization-enabled", true);
+
             int gateStateSyncIntervalSeconds = getConfig().getInt("gates.state-sync-interval-seconds", 120);
             this.gateStateSyncTask = new GateStateSyncTask(
-                gateManager, gateStructuresApi, this, gateStateSyncIntervalSeconds, org.bukkit.Material.STONE
+                gateManager, gateStructuresApi, this, gateStateSyncIntervalSeconds, org.bukkit.Material.STONE,
+                rotationGapFillRasterizationEnabled
             );
 
             gateManager.reloadGates().whenComplete((unused, error) -> {
@@ -399,7 +407,7 @@ public class KnKPlugin extends JavaPlugin {
             WorldGuardIntegration worldGuardIntegration = new WorldGuardIntegration(this);
             for (org.bukkit.World world : getServer().getWorlds()) {
                 new GateAnimationTask(gateManager, world, org.bukkit.Material.STONE, worldGuardIntegration,
-                    gateStructuresApi, this, gateDisplayManager)
+                    gateStructuresApi, this, gateDisplayManager, rotationGapFillRasterizationEnabled)
                     .runTaskTimer(this, 1L, 1L);
             }
             new GateDisplayUpdateTask(gateDisplayManager, gateManager).runTaskTimer(this, 20L, 20L);

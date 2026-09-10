@@ -230,9 +230,22 @@ public class GateStructuresApiImpl extends BaseApiImpl implements GateStructures
 
     @Override
     public CompletableFuture<List<GateBlockSnapshotDto>> getGateSnapshots(int gateId) {
+        return fetchSnapshots(gateId, "/snapshots", "gate snapshots");
+    }
+
+    @Override
+    public CompletableFuture<List<GateBlockSnapshotDto>> getGateOpenedSnapshots(int gateId) {
+        return fetchSnapshots(gateId, "/openedSnapshots", "gate opened-block snapshots");
+    }
+
+    /**
+     * Shared fetch/parse logic for /snapshots and /openedSnapshots - identical response shape,
+     * only the path segment and error-message label differ. See ROTATION_GAP_FILL_DESIGN.md.
+     */
+    private CompletableFuture<List<GateBlockSnapshotDto>> fetchSnapshots(int gateId, String pathSuffix, String description) {
         return CompletableFuture.supplyAsync(() -> {
-            String url = baseUrl + GATE_STRUCTURES_ENDPOINT + "/" + gateId + "/snapshots";
-            
+            String url = baseUrl + GATE_STRUCTURES_ENDPOINT + "/" + gateId + pathSuffix;
+
             try {
                 String responseBody = get(url);
                 JsonNode response = objectMapper.readTree(responseBody);
@@ -247,7 +260,7 @@ public class GateStructuresApiImpl extends BaseApiImpl implements GateStructures
                 ApiException apiEx = new ApiException(
                     url,
                     0,
-                    "IO error fetching gate snapshots",
+                    "IO error fetching " + description,
                     e.getClass().getSimpleName() + ": " + e.getMessage()
                 );
                 apiEx.initCause(e);
@@ -256,7 +269,7 @@ public class GateStructuresApiImpl extends BaseApiImpl implements GateStructures
                 ApiException apiEx = new ApiException(
                     url,
                     0,
-                    "Failed to parse gate snapshots response: " + e.getMessage(),
+                    "Failed to parse " + description + " response: " + e.getMessage(),
                     e.getClass().getSimpleName()
                 );
                 apiEx.initCause(e);

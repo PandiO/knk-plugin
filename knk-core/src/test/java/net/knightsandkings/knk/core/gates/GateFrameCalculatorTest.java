@@ -6,6 +6,12 @@ import org.bukkit.util.Vector;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -321,5 +327,177 @@ class GateFrameCalculatorTest {
         assertThrows(IllegalArgumentException.class, () -> {
             GateFrameCalculator.calculateBlockPosition(gate, null, 0);
         });
+    }
+
+    // === Mechanism 1: rasterizeRotationFrame (ROTATION_GAP_FILL_DESIGN.md) ===
+
+    private CachedGate buildDiagonalDrawbridge(int width, int height) {
+        CachedGate rotationGate = new CachedGate(
+            14, "Diagonal Drawbridge", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
+            90, 1,
+            new Vector(0, 0, 0), width, height, 1,
+            500.0, 500.0, true, false, true, 90,
+            "south-east"
+        );
+
+        // 45-degree diagonal width axis: uStep and nStep both diagonal (index=2), vStep cardinal.
+        Vector uStep = new Vector(1, 0, 1);
+        Vector vStep = new Vector(0, 1, 0);
+        Vector nStep = new Vector(-1, 0, 1);
+        rotationGate.setUStep(uStep);
+        rotationGate.setVStep(vStep);
+        rotationGate.setNStep(nStep);
+        rotationGate.setHingeAxis(uStep); // DRAWBRIDGE hinges on the width axis
+        rotationGate.setMotionVector(new Vector(0, 0, 0));
+
+        int sortOrder = 0;
+        for (int i = 0; i < width; i++) {
+            for (int j = 0; j < height; j++) {
+                Vector relPos = uStep.clone().multiply(i).add(vStep.clone().multiply(j));
+                rotationGate.addBlock(new BlockSnapshot(sortOrder, relPos, 1, "minecraft:oak_planks", sortOrder));
+                sortOrder++;
+            }
+        }
+
+        return rotationGate;
+    }
+
+    @Test
+    void rasterizeRotationFrame_AtClosedAngle_ReproducesExactlyTheScannedGridNoMoreNoFewer() {
+        CachedGate gate = buildDiagonalDrawbridge(8, 4);
+
+        List<GateFrameCalculator.RasterizedBlock> rasterized = GateFrameCalculator.rasterizeRotationFrame(gate, 0.0);
+
+        assertEquals(32, rasterized.size());
+        for (GateFrameCalculator.RasterizedBlock block : rasterized) {
+            assertTrue(gate.getBlocks().contains(block.sourceBlock()));
+        }
+    }
+
+    @Test
+    void rasterizeRotationFrame_AtOpenAngle_FillsMoreCellsThanTheNaiveRotatedSet() {
+        CachedGate gate = buildDiagonalDrawbridge(8, 4);
+
+        // The naive per-block approach (today's behavior without Mechanism 1) rotates each of the
+        // 32 scanned points individually and floors each to its containing block - this is
+        // exactly the reported bug: distinct scanned blocks can floor to the same cell (a
+        // collision), and the true open footprint is larger than 32 cells to begin with, so the
+        // naive approach's distinct cell count undercounts it. Rasterization must recover more of it.
+        Set<String> naiveCells = new HashSet<>();
+        for (BlockSnapshot block : gate.getBlocks()) {
+            Vector pos = GateFrameCalculator.calculateBlockPosition(gate, block, gate.getAnimationDurationTicks());
+            naiveCells.add(pos.getBlockX() + "," + pos.getBlockY() + "," + pos.getBlockZ());
+        }
+
+        List<GateFrameCalculator.RasterizedBlock> rasterized = GateFrameCalculator.rasterizeRotationFrame(gate, 90.0);
+
+        assertTrue(rasterized.size() > naiveCells.size(),
+            "Expected rasterization (" + rasterized.size() + ") to fill more cells than the naive "
+                + "rotated-and-floored set (" + naiveCells.size() + ")");
+        for (GateFrameCalculator.RasterizedBlock block : rasterized) {
+            assertTrue(gate.getBlocks().contains(block.sourceBlock()));
+        }
+    }
+
+    @Test
+    void rasterizeRotationFrame_SingleCellGate_IsTrivialAtAnyAngle() {
+        // Edge case from ROTATION_GAP_FILL_DESIGN.md: GeometryWidth/Height=1 has no gaps possible.
+        CachedGate gate = buildDiagonalDrawbridge(1, 1);
+
+        assertEquals(1, GateFrameCalculator.rasterizeRotationFrame(gate, 0.0).size());
+        assertEquals(1, GateFrameCalculator.rasterizeRotationFrame(gate, 90.0).size());
+    }
+
+    @Test
+    void rasterizeRotationFrame_NullGate_ReturnsEmptyList() {
+        assertTrue(GateFrameCalculator.rasterizeRotationFrame(null, 45.0).isEmpty());
+    }
+
+    // === Mechanism 2: openBlockPairing blend/lerp (ROTATION_GAP_FILL_DESIGN.md) ===
+
+    @Test
+    void calculateBlockPosition_RotationWithPairedOpenBlock_ConvergesExactlyOnOpenScanPosition() {
+        CachedGate rotationGate = new CachedGate(
+            40, "Drawbridge", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
+            90, 1,
+            new Vector(100, 64, 100), 0, 0, 0,
+            500.0, 500.0, true, false, true, 90,
+            "east"
+        );
+        rotationGate.setHingeAxis(new Vector(0, 0, 1));
+        rotationGate.setMotionVector(new Vector(0, 0, 0));
+        rotationGate.setOpenAnchorPoint(new Vector(200, 64, 300));
+
+        Vector relativePos = new Vector(5, 0, 0);
+        BlockSnapshot closedBlock = new BlockSnapshot(7, relativePos, 1, "minecraft:oak_log", 0);
+        // Deliberately far from where the pure arc would land, so the blend is actually exercised.
+        BlockSnapshot openBlock = new BlockSnapshot(99, new Vector(-3, 1, 9), 1, "minecraft:oak_log[axis=z]", 0);
+        rotationGate.setOpenBlockPairing(Map.of(7, openBlock));
+
+        Vector expectedOpenWorldPos = rotationGate.getOpenAnchorPoint().clone().add(openBlock.getRelativePosition());
+
+        // progress=0 -> unchanged from today's closed position.
+        Vector atClosed = GateFrameCalculator.calculateBlockPosition(rotationGate, closedBlock, 0);
+        assertEquals(105, atClosed.getX(), EPSILON);
+        assertEquals(64, atClosed.getY(), EPSILON);
+        assertEquals(100, atClosed.getZ(), EPSILON);
+
+        // progress=1 -> converges exactly on the scanned open position, not the arc's own endpoint.
+        Vector atOpen = GateFrameCalculator.calculateBlockPosition(rotationGate, closedBlock, 90);
+        assertEquals(expectedOpenWorldPos.getX(), atOpen.getX(), EPSILON);
+        assertEquals(expectedOpenWorldPos.getY(), atOpen.getY(), EPSILON);
+        assertEquals(expectedOpenWorldPos.getZ(), atOpen.getZ(), EPSILON);
+    }
+
+    @Test
+    void calculateBlockPosition_VerticalWithPairedOpenBlock_LerpsBetweenClosedAndOpenScanPositions() {
+        CachedGate verticalGate = new CachedGate(
+            41, "Portcullis", "SLIDING", "VERTICAL", "PLANE_GRID",
+            60, 1,
+            new Vector(0, 64, 0), 0, 0, 0,
+            500.0, 500.0, true, false, true, 90,
+            "north"
+        );
+        verticalGate.setMotionVector(new Vector(0, 5, 0));
+        verticalGate.setOpenAnchorPoint(new Vector(10, 64, 0));
+
+        BlockSnapshot closedBlock = new BlockSnapshot(1, new Vector(0, 0, 0), 1, "minecraft:iron_bars", 0);
+        BlockSnapshot openBlock = new BlockSnapshot(2, new Vector(0, 0, 0), 1, "minecraft:iron_bars", 0);
+        verticalGate.setOpenBlockPairing(Map.of(1, openBlock));
+
+        Vector atClosed = GateFrameCalculator.calculateBlockPosition(verticalGate, closedBlock, 0);
+        assertEquals(0, atClosed.getX(), EPSILON);
+        assertEquals(64, atClosed.getY(), EPSILON);
+
+        Vector atOpen = GateFrameCalculator.calculateBlockPosition(verticalGate, closedBlock, 60);
+        assertEquals(10, atOpen.getX(), EPSILON);
+        assertEquals(64, atOpen.getY(), EPSILON);
+
+        Vector atHalf = GateFrameCalculator.calculateBlockPosition(verticalGate, closedBlock, 30);
+        assertEquals(5, atHalf.getX(), EPSILON);
+        assertEquals(64, atHalf.getY(), EPSILON);
+    }
+
+    @Test
+    void calculateBlockPosition_UnpairedBlockOnGateWithOtherPairings_UsesOriginalProceduralPath() {
+        // Decision 1(a): a block with no counterpart keeps today's exact original behavior,
+        // unaffected by other blocks on the same gate having a pairing.
+        CachedGate verticalGate = new CachedGate(
+            42, "Portcullis", "SLIDING", "VERTICAL", "PLANE_GRID",
+            60, 1,
+            new Vector(0, 64, 0), 0, 0, 0,
+            500.0, 500.0, true, false, true, 90,
+            "north"
+        );
+        verticalGate.setMotionVector(new Vector(0, 5, 0));
+        verticalGate.setOpenAnchorPoint(new Vector(10, 64, 0));
+        verticalGate.setOpenBlockPairing(new HashMap<>(Map.of(1, new BlockSnapshot(2, new Vector(0, 0, 0), 1, "minecraft:iron_bars", 0))));
+
+        BlockSnapshot unpairedBlock = new BlockSnapshot(3, new Vector(0, 0, 0), 1, "minecraft:iron_bars", 0);
+        Vector atOpen = GateFrameCalculator.calculateBlockPosition(verticalGate, unpairedBlock, 60);
+
+        assertEquals(0, atOpen.getX(), EPSILON);
+        assertEquals(69, atOpen.getY(), EPSILON); // 64 + motionVector.y
+        assertEquals(0, atOpen.getZ(), EPSILON);
     }
 }

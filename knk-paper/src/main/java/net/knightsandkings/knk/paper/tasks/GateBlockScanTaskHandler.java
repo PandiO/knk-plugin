@@ -41,6 +41,12 @@ import java.util.logging.Logger;
 public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
     private static final Logger LOGGER = Logger.getLogger(GateBlockScanTaskHandler.class.getName());
     private static final String TASK_TYPE = "GateBlockScan";
+    // Sibling of GateBlockScan: identical scan geometry, anchored at the gate's OpenAnchorPoint
+    // instead of AnchorPoint - see docs/features/gate-structure-animation/
+    // ROTATION_GAP_FILL_DESIGN.md, Mechanism 2. The backend (WorldTaskService) routes this task
+    // type's completed output to the separate GateOpenedBlockSnapshot table on its own; this
+    // handler only needs to know which anchor to scan from.
+    private static final String OPENED_TASK_TYPE = "GateOpenedBlockScan";
     private static final int BLOCKS_PER_TICK = 200;
     private static final int BLOCKS_PER_TICK_WHEN_LAGGING = 50;
     private static final double LAG_TPS_THRESHOLD = 15.0;
@@ -60,7 +66,7 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
 
     @Override
     public boolean supports(String taskType) {
-        return TASK_TYPE.equals(taskType);
+        return TASK_TYPE.equals(taskType) || OPENED_TASK_TYPE.equals(taskType);
     }
 
     @Override
@@ -71,6 +77,8 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
             return;
         }
 
+        boolean useOpenAnchor = OPENED_TASK_TYPE.equals(task.taskType());
+
         gateStructuresApi.getById(gateStructureId).whenComplete((gate, error) -> {
             if (error != null || gate == null) {
                 String reason = error != null ? error.getMessage() : "gate not found";
@@ -79,25 +87,36 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
             }
 
             // Bukkit world/block access must happen on the main thread.
-            plugin.getServer().getScheduler().runTask(plugin, () -> startScan(task.id(), gate, onFinished));
+            plugin.getServer().getScheduler().runTask(plugin, () -> startScan(task.id(), gate, useOpenAnchor, onFinished));
         });
     }
 
-    private void startScan(int taskId, GateStructureDto gate, Runnable onFinished) {
+    // Package-private (not private) so tests can exercise the mode/anchor branching directly,
+    // without needing a live Bukkit scheduler - matching computeCellPosition/checkScanSizeLimit's
+    // existing visibility for the same reason.
+    void startScan(int taskId, GateStructureDto gate, boolean useOpenAnchor, Runnable onFinished) {
         String mode = gate.getGeometryDefinitionMode();
         if ("PLANE_GRID".equals(mode)) {
-            startPlaneGridScan(taskId, gate, onFinished);
+            startPlaneGridScan(taskId, gate, useOpenAnchor, onFinished);
         } else if ("FLOOD_FILL".equals(mode)) {
+            if (useOpenAnchor) {
+                // Out of scope for v1 - see ROTATION_GAP_FILL_DESIGN.md's non-goals (FLOOD_FILL
+                // has no OpenAnchorPoint-equivalent concept; only PLANE_GRID/DRAWBRIDGE is proven).
+                fail(taskId, "Gate '" + gate.getName() + "' uses FLOOD_FILL geometry, which does not "
+                    + "support a separately-scanned open state yet.", onFinished);
+                return;
+            }
             startFloodFillScan(taskId, gate, onFinished);
         } else {
             fail(taskId, "Gate '" + gate.getName() + "' has an unknown GeometryDefinitionMode: " + mode, onFinished);
         }
     }
 
-    private void startPlaneGridScan(int taskId, GateStructureDto gate, Runnable onFinished) {
-        List<ScanWing> wings = buildScanWings(gate);
+    private void startPlaneGridScan(int taskId, GateStructureDto gate, boolean useOpenAnchor, Runnable onFinished) {
+        List<ScanWing> wings = buildScanWings(gate, useOpenAnchor);
         if (wings.isEmpty()) {
-            fail(taskId, "Gate '" + gate.getName() + "' is missing anchor/reference points required for scanning.", onFinished);
+            String anchorLabel = useOpenAnchor ? "OpenAnchorPoint" : "anchor";
+            fail(taskId, "Gate '" + gate.getName() + "' is missing " + anchorLabel + "/reference points required for scanning.", onFinished);
             return;
         }
 
@@ -132,16 +151,38 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
     /**
      * One PLANE_GRID box per wing. Most gates have a single wing; DOUBLE_DOORS scans
      * both LeftDoorSeedBlock and RightDoorSeedBlock as independent boxes with the same footprint.
+     *
+     * @param useOpenAnchor When true (a GateOpenedBlockScan task), the wing(s) originate at the
+     *                      gate's OpenAnchorPoint instead of its AnchorPoint - Mechanism 2's
+     *                      separately-scanned open state (ROTATION_GAP_FILL_DESIGN.md). The
+     *                      lattice basis (uStep/vStep/nStep) is always derived from
+     *                      ReferencePoint1/2 relative to the closed AnchorPoint, per GateStructure's
+     *                      own contract ("uses the same ReferencePoint1/ReferencePoint2 basis as
+     *                      AnchorPoint, just a different physical origin for the scan") - only the
+     *                      wing's origin (where cell (0,0,0) actually is) changes.
      */
-    private List<ScanWing> buildScanWings(GateStructureDto gate) {
+    private List<ScanWing> buildScanWings(GateStructureDto gate, boolean useOpenAnchor) {
         List<ScanWing> wings = new ArrayList<>();
 
         Vector anchor = CoordinateParser.parseCoordinate(gate.getAnchorPoint());
         Vector ref1 = CoordinateParser.parseCoordinate(gate.getReferencePoint1());
         Vector ref2 = CoordinateParser.parseCoordinate(gate.getReferencePoint2());
-        String worldName = CoordinateParser.parseWorldName(gate.getAnchorPoint());
 
-        if (anchor == null || ref1 == null || ref2 == null || worldName.isBlank()) {
+        if (anchor == null || ref1 == null || ref2 == null) {
+            return wings;
+        }
+
+        Vector wingOrigin = anchor;
+        String worldName = CoordinateParser.parseWorldName(gate.getAnchorPoint());
+        if (useOpenAnchor) {
+            wingOrigin = CoordinateParser.parseCoordinate(gate.getOpenAnchorPoint());
+            if (wingOrigin == null) {
+                return wings;
+            }
+            worldName = CoordinateParser.parseWorldName(gate.getOpenAnchorPoint());
+        }
+
+        if (worldName.isBlank()) {
             return wings;
         }
 
@@ -167,11 +208,11 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
         Vector leftSeed = CoordinateParser.parseCoordinate(leftSeedJson);
         Vector rightSeed = CoordinateParser.parseCoordinate(rightSeedJson);
 
-        if ("DOUBLE_DOORS".equals(gate.getGateType()) && leftSeed != null && rightSeed != null) {
+        if (!useOpenAnchor && "DOUBLE_DOORS".equals(gate.getGateType()) && leftSeed != null && rightSeed != null) {
             wings.add(new ScanWing(world, leftSeed, uStep, vStep, nStep, width, height, depth));
             wings.add(new ScanWing(world, rightSeed, uStep, vStep, nStep, width, height, depth));
         } else {
-            wings.add(new ScanWing(world, anchor, uStep, vStep, nStep, width, height, depth));
+            wings.add(new ScanWing(world, wingOrigin, uStep, vStep, nStep, width, height, depth));
         }
 
         return wings;

@@ -194,6 +194,38 @@ class VectorMathTest {
         assertVectorEquals(rotatedByUnitAxis, rotatedByNonUnitAxis, EPSILON);
     }
 
+    // See docs/features/gate-structure-animation/ROTATION_GAP_FILL_DESIGN.md for the a^2+b^2
+    // formula and worked examples this documents (cardinal=1, 45-degree diagonal=2, (2,1)-type=5).
+    @Test
+    void sublatticeIndex_CardinalStep_IsOne() {
+        assertEquals(1, VectorMath.sublatticeIndex(new Vector(1, 0, 0)));
+        assertEquals(1, VectorMath.sublatticeIndex(new Vector(0, 0, 1)));
+    }
+
+    @Test
+    void sublatticeIndex_FortyFiveDegreeDiagonalStep_IsTwo() {
+        assertEquals(2, VectorMath.sublatticeIndex(new Vector(1, 0, 1)));
+        assertEquals(2, VectorMath.sublatticeIndex(new Vector(-1, 0, 1)));
+    }
+
+    @Test
+    void sublatticeIndex_TwoOverOneDiagonalStep_IsFive() {
+        assertEquals(5, VectorMath.sublatticeIndex(new Vector(2, 0, 1)));
+    }
+
+    @Test
+    void sublatticeIndex_IgnoresVerticalComponent() {
+        // The width axis is always horizontal by construction - a step's Y component (if any)
+        // must not affect the gap-density measurement.
+        assertEquals(1, VectorMath.sublatticeIndex(new Vector(1, 5, 0)));
+    }
+
+    @Test
+    void sublatticeIndex_NullOrZeroStep_TreatedAsOne() {
+        assertEquals(1, VectorMath.sublatticeIndex(null));
+        assertEquals(1, VectorMath.sublatticeIndex(new Vector(0, 0, 0)));
+    }
+
     /**
      * Helper method to assert vectors are equal within epsilon tolerance.
      */

@@ -16,4 +16,13 @@ class GateStructureDtoTest {
         assertEquals(10, gate.getId());
         assertEquals("{\"x\":1420,\"y\":85,\"z\":-522}", gate.getAnchorPoint());
     }
+
+    @Test
+    void deserializesOpenAnchorPointTheSameWayAsAnchorPoint() throws Exception {
+        String json = "{\"id\":14,\"name\":\"Drawbridge\",\"openAnchorPoint\":{\"x\":10,\"y\":64,\"z\":20}}";
+
+        GateStructureDto gate = new ObjectMapper().readValue(json, GateStructureDto.class);
+
+        assertEquals("{\"x\":10,\"y\":64,\"z\":20}", gate.getOpenAnchorPoint());
+    }
 }

@@ -86,6 +86,12 @@ public class GateStructureDto {
     @JsonDeserialize(using = CoordinateStringDeserializer.class)
     private String anchorPoint;
 
+    // Optional second physical anchor for a separately-scanned open state - see
+    // docs/features/gate-structure-animation/ROTATION_GAP_FILL_DESIGN.md.
+    @JsonProperty("openAnchorPoint")
+    @JsonDeserialize(using = CoordinateStringDeserializer.class)
+    private String openAnchorPoint;
+
     @JsonProperty("referencePoint1")
     @JsonDeserialize(using = CoordinateStringDeserializer.class)
     private String referencePoint1;
@@ -367,6 +373,14 @@ public class GateStructureDto {
 
     public void setAnchorPoint(String anchorPoint) {
         this.anchorPoint = anchorPoint;
+    }
+
+    public String getOpenAnchorPoint() {
+        return openAnchorPoint;
+    }
+
+    public void setOpenAnchorPoint(String openAnchorPoint) {
+        this.openAnchorPoint = openAnchorPoint;
     }
 
     public String getReferencePoint1() {

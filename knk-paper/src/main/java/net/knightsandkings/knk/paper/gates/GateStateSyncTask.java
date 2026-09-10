@@ -2,17 +2,18 @@ package net.knightsandkings.knk.paper.gates;
 
 import net.knightsandkings.knk.api.GateStructuresApi;
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
-import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
 import net.knightsandkings.knk.core.domain.gates.CachedGate;
-import net.knightsandkings.knk.core.gates.GateFrameCalculator;
 import net.knightsandkings.knk.core.gates.GateManager;
+import net.knightsandkings.knk.core.gates.GateSpatialIndex;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;
-import org.bukkit.util.Vector;
 
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.logging.Logger;
 
 /**
@@ -35,16 +36,27 @@ public class GateStateSyncTask {
     private final Plugin plugin;
     private final long intervalTicks;
     private final Material fallbackMaterial;
+    // Mechanism 1 kill switch, same flag GateAnimationTask uses - see ROTATION_GAP_FILL_DESIGN.md,
+    // Decision 5. Needed here too: reconcileWorldOnStartup force-places a gate's resting frame
+    // the same way an animation completion does, so a diagonal-hinge gate already OPEN when the
+    // server starts gets the correct rasterized/paired footprint too, not the old sparse one.
+    private final boolean rasterizationEnabled;
 
     private BukkitTask task;
 
     public GateStateSyncTask(GateManager gateManager, GateStructuresApi gateStructuresApi, Plugin plugin,
                               long intervalSeconds, Material fallbackMaterial) {
+        this(gateManager, gateStructuresApi, plugin, intervalSeconds, fallbackMaterial, true);
+    }
+
+    public GateStateSyncTask(GateManager gateManager, GateStructuresApi gateStructuresApi, Plugin plugin,
+                              long intervalSeconds, Material fallbackMaterial, boolean rasterizationEnabled) {
         this.gateManager = gateManager;
         this.gateStructuresApi = gateStructuresApi;
         this.plugin = plugin;
         this.intervalTicks = Math.max(1L, intervalSeconds) * 20L;
         this.fallbackMaterial = fallbackMaterial != null ? fallbackMaterial : Material.STONE;
+        this.rasterizationEnabled = rasterizationEnabled;
     }
 
     /**
@@ -136,20 +148,26 @@ public class GateStateSyncTask {
         int targetFrame = state == AnimationState.OPEN ? totalFrames : 0;
         int staleFrame = targetFrame == 0 ? totalFrames : 0;
 
-        for (BlockSnapshot block : gate.getBlocks()) {
-            if (block == null) {
+        // Clear whatever the stale (opposite) resting frame would have occupied first, the same
+        // way GateAnimationTask vacates before placing - using the exact stale footprint
+        // (rasterized/paired where applicable) rather than the plain per-block one, so a
+        // Mechanism-1-filled gap left over from a previous run is actually cleaned up too.
+        Set<Long> targetCells = new HashSet<>();
+        List<GateRestingFramePlacer.RestingCell> targetCellList =
+            GateRestingFramePlacer.restingFrameCells(gate, targetFrame, rasterizationEnabled);
+        for (GateRestingFramePlacer.RestingCell cell : targetCellList) {
+            targetCells.add(GateSpatialIndex.packCell(cell.position()));
+        }
+
+        for (GateRestingFramePlacer.RestingCell staleCell : GateRestingFramePlacer.restingFrameCells(gate, staleFrame, rasterizationEnabled)) {
+            if (targetCells.contains(GateSpatialIndex.packCell(staleCell.position()))) {
                 continue;
             }
+            GateBlockPlacer.removeBlockIfMatches(world, staleCell.position(), staleCell.blockData(), fallbackMaterial);
+        }
 
-            Vector targetPos = GateFrameCalculator.calculateBlockPosition(gate, block, targetFrame);
-            Vector stalePos = GateFrameCalculator.calculateBlockPosition(gate, block, staleFrame);
-
-            if (stalePos != null && !stalePos.equals(targetPos)) {
-                GateBlockPlacer.removeBlockIfMatches(world, stalePos, block.getBlockData(), fallbackMaterial);
-            }
-            if (targetPos != null) {
-                GateBlockPlacer.placeBlock(world, targetPos, block.getBlockData(), fallbackMaterial);
-            }
+        for (GateRestingFramePlacer.RestingCell targetCell : targetCellList) {
+            GateBlockPlacer.placeBlock(world, targetCell.position(), targetCell.blockData(), fallbackMaterial);
         }
     }
 }

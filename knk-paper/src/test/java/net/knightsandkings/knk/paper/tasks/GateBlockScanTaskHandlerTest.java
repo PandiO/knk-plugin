@@ -88,8 +88,11 @@ class GateBlockScanTaskHandlerTest {
     }
 
     @Test
-    void testSupports_OnlyGateBlockScan() {
+    void testSupports_GateBlockScanAndGateOpenedBlockScanOnly() {
+        // See ROTATION_GAP_FILL_DESIGN.md, Mechanism 2: one handler serves both task types,
+        // branching only on which anchor to scan from.
         assertTrue(handler.supports("GateBlockScan"));
+        assertTrue(handler.supports("GateOpenedBlockScan"));
         assertFalse(handler.supports("Location"));
         assertFalse(handler.supports(null));
     }
@@ -184,6 +187,22 @@ class GateBlockScanTaskHandlerTest {
         assertEquals(12, pos.worldX());
         assertEquals(67, pos.worldY());
         assertEquals(11, pos.worldZ());
+    }
+
+    @Test
+    void testStartScan_FloodFillGateopenAnchorRequested_FailsAsOutOfScope() {
+        // FLOOD_FILL has no OpenAnchorPoint-equivalent concept in v1 - see
+        // ROTATION_GAP_FILL_DESIGN.md's non-goals. Exercised directly (rather than via execute())
+        // since this branch fails before any Bukkit World/scheduler access is needed.
+        net.knightsandkings.knk.api.dto.GateStructureDto gate = new net.knightsandkings.knk.api.dto.GateStructureDto();
+        gate.setName("Flood Fill Gate");
+        gate.setGeometryDefinitionMode("FLOOD_FILL");
+        AtomicBoolean finished = new AtomicBoolean(false);
+
+        handler.startScan(5, gate, true, () -> finished.set(true));
+
+        verify(mockWorldTasksApi).fail(eq(5), contains("FLOOD_FILL"));
+        assertTrue(finished.get());
     }
 
     private WorldTaskDto createTask(int id, String inputJson) {

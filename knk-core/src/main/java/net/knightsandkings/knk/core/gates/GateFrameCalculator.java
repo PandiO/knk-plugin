@@ -5,6 +5,11 @@ import net.knightsandkings.knk.core.domain.gates.CachedGate;
 import net.knightsandkings.knk.core.util.VectorMath;
 import org.bukkit.util.Vector;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 /**
  * Calculator for gate animation frame positions.
  * Computes the world position of each gate block based on the current animation frame.
@@ -38,12 +43,36 @@ public class GateFrameCalculator {
 
         // Calculate world position based on motion type
         String motionType = gate.getMotionType();
-        
+
+        // Mechanism 2 (ROTATION_GAP_FILL_DESIGN.md): a block paired with a manually-scanned open
+        // state is steered toward that real position instead of (or, for ROTATION, blended with)
+        // the purely procedural one. Absent for the vast majority of gates (empty pairing), in
+        // which case every branch below reduces to today's exact original formulas.
+        BlockSnapshot pairedOpen = gate.getPairedOpenBlock(block.getId());
+        Vector openTarget = (pairedOpen != null && gate.getOpenAnchorPoint() != null)
+            ? gate.getOpenAnchorPoint().clone().add(pairedOpen.getRelativePosition())
+            : null;
+
         Vector position;
         if ("ROTATION".equals(motionType)) {
-            position = calculateRotationPosition(gate, relativePos, progress);
+            Vector arcPos = calculateRotationPosition(gate, relativePos, progress);
+            if (openTarget != null) {
+                // finalPos(frame) = arcPos(frame) + (openScanPos - arcPos(totalFrames)) * progress(frame)
+                // At progress=0 this is exactly arcPos(0) (today's closed position, no change); at
+                // progress=1 it converges exactly on openTarget - see Decision in Mechanism 2.
+                Vector arcPosFinal = calculateRotationPosition(gate, relativePos, 1.0);
+                Vector correction = openTarget.clone().subtract(arcPosFinal).multiply(progress);
+                position = arcPos.clone().add(correction);
+            } else {
+                position = arcPos;
+            }
+        } else if (openTarget != null) {
+            // VERTICAL/LATERAL: the real motion already is a straight line, so a plain lerp
+            // between the closed and open-scan positions is correct on its own (DUAL_SCAN_
+            // ANIMATION_DESIGN.md's original design for this case).
+            Vector closedPos = gate.getAnchorPoint().clone().add(relativePos);
+            position = VectorMath.lerp(closedPos, openTarget, progress);
         } else {
-            // VERTICAL or LATERAL - linear motion
             position = calculateLinearPosition(gate, relativePos, progress);
         }
 
@@ -78,18 +107,29 @@ public class GateFrameCalculator {
         }
 
         Vector local = worldPosition.clone().subtract(anchor);
+        double[] indices = projectOntoBasis(local, uStep, vStep, nStep);
 
-        // Project onto the (possibly non-unit-length, e.g. diagonal) step vectors using the
-        // standard oblique-basis formula local.dot(step)/|step|^2, which recovers the integer
-        // width/height/depth index directly - unlike a unit-vector dot product, this stays exact
-        // for a diagonal step like (1,0,1) whose length is sqrt(2), not 1.
-        double uIndex = local.dot(uStep) / uStep.lengthSquared();
-        double vIndex = local.dot(vStep) / vStep.lengthSquared();
-        double nIndex = local.dot(nStep) / nStep.lengthSquared();
+        return withinAxis(indices[0], gate.getGeometryWidth())
+            && withinAxis(indices[1], gate.getGeometryHeight())
+            && withinAxis(indices[2], gate.getGeometryDepth());
+    }
 
-        return withinAxis(uIndex, gate.getGeometryWidth())
-            && withinAxis(vIndex, gate.getGeometryHeight())
-            && withinAxis(nIndex, gate.getGeometryDepth());
+    /**
+     * Projects a local (anchor-relative) offset onto the (possibly non-unit-length, e.g.
+     * diagonal) uStep/vStep/nStep basis using the standard oblique-basis formula
+     * local.dot(step)/|step|^2, which recovers the true integer width/height/depth index -
+     * unlike a unit-vector dot product, this stays exact for a diagonal step like (1,0,1) whose
+     * length is sqrt(2), not 1. Shared by {@link #isWithinGeometryBounds} (bounds check against
+     * the gate's own, unrotated box) and {@link #rasterizeRotationFrame} (material lookup against
+     * the same box, after inverse-rotating a rasterized candidate back into it).
+     *
+     * @return {u, v, n} continuous (unrounded) indices
+     */
+    private static double[] projectOntoBasis(Vector local, Vector uStep, Vector vStep, Vector nStep) {
+        double uIndex = uStep.lengthSquared() > 0 ? local.dot(uStep) / uStep.lengthSquared() : 0;
+        double vIndex = vStep.lengthSquared() > 0 ? local.dot(vStep) / vStep.lengthSquared() : 0;
+        double nIndex = nStep.lengthSquared() > 0 ? local.dot(nStep) / nStep.lengthSquared() : 0;
+        return new double[]{uIndex, vIndex, nIndex};
     }
 
     private static boolean withinAxis(double projection, int extent) {
@@ -184,6 +224,123 @@ public class GateFrameCalculator {
         double progress = totalFrames > 0 ? (double) frame / totalFrames : 0.0;
 
         return gate.getRotationMaxAngleDegrees() * progress;
+    }
+
+    /**
+     * One rasterized (i.e. gap-filled, not individually scanned) block: a real-grid world
+     * position discovered by {@link #rasterizeRotationFrame}, together with the closed-state
+     * scanned block whose material/blockdata it should be placed with.
+     */
+    public record RasterizedBlock(Vector worldPosition, BlockSnapshot sourceBlock) {
+    }
+
+    /**
+     * Mechanism 1 (automatic rasterized gap-fill) from ROTATION_GAP_FILL_DESIGN.md: rotates the
+     * door's 4 local-space corners by angleDegrees around the gate's hinge axis, takes the
+     * axis-aligned bounding box of the result, and tests every integer world cell in that box by
+     * inverse-rotating it back into the closed (unrotated) frame and reusing {@link
+     * #projectOntoBasis}'s exact oblique-basis projection - the same check {@link
+     * #isWithinGeometryBounds} performs, just against a candidate that's been un-rotated first
+     * instead of a step basis that's been rotated forward (equivalent, and lets this reuse the
+     * gate's own stored, unrotated uStep/vStep/nStep unchanged). A cell that passes is assigned
+     * the material/blockdata of whichever originally-scanned block shares its (rounded) u/v index.
+     *
+     * <p>Pure function of the gate's own geometry - no Bukkit World/Block access - so it's
+     * directly unit-testable. Intended to run only at the two resting (closed/open) endpoint
+     * frames, never mid-swing (see Decision 3: matching every tick's cost of the current sparse
+     * sweep) - callers are responsible for that gating; this method itself is frame-count-agnostic
+     * and just rasterizes whatever single angle it's given.
+     *
+     * @param gate The cached gate (must be a ROTATION gate with a valid hinge axis and lattice steps)
+     * @param angleDegrees The rotation angle (degrees) to rasterize at - 0 for closed, RotationMaxAngleDegrees for open
+     * @return every real-grid cell inside the rotated footprint, with its sourced material; empty if the gate lacks the geometry to rasterize
+     */
+    public static List<RasterizedBlock> rasterizeRotationFrame(CachedGate gate, double angleDegrees) {
+        List<RasterizedBlock> result = new ArrayList<>();
+        if (gate == null) {
+            return result;
+        }
+
+        Vector anchor = gate.getAnchorPoint();
+        Vector hingeAxis = gate.getHingeAxis();
+        Vector uStep = gate.getUStep();
+        Vector vStep = gate.getVStep();
+        Vector nStep = gate.getNStep();
+        int width = Math.max(1, gate.getGeometryWidth());
+        int height = Math.max(1, gate.getGeometryHeight());
+
+        if (anchor == null || hingeAxis == null || uStep == null || vStep == null || nStep == null
+            || gate.getBlocks().isEmpty()) {
+            return result;
+        }
+
+        // 1. Rotate the 4 local corners (in u/v index space) by angleDegrees around the hinge.
+        int[][] cornerIndices = {{0, 0}, {width - 1, 0}, {0, height - 1}, {width - 1, height - 1}};
+        Vector[] rotatedCorners = new Vector[cornerIndices.length];
+        for (int c = 0; c < cornerIndices.length; c++) {
+            Vector localCorner = uStep.clone().multiply(cornerIndices[c][0])
+                .add(vStep.clone().multiply(cornerIndices[c][1]));
+            rotatedCorners[c] = anchor.clone().add(VectorMath.rotateAroundAxis(localCorner, hingeAxis, angleDegrees));
+        }
+
+        // 2. Axis-aligned bounding box of the rotated corners, rounded outward to integer cells.
+        // No epsilon slop here (unlike the projection check below): these are exact rotations of
+        // integer inputs by the exact configured angle, and padding the box would let stray
+        // integer cells outside the true footprint spuriously pass step 4's projection test,
+        // which only constrains u/v/n index *ratios* - not distance from the rotated rectangle -
+        // so it cannot by itself reject a cell the AABB should never have offered it in the first place.
+        int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
+        for (Vector corner : rotatedCorners) {
+            minX = Math.min(minX, (int) Math.floor(corner.getX()));
+            minY = Math.min(minY, (int) Math.floor(corner.getY()));
+            minZ = Math.min(minZ, (int) Math.floor(corner.getZ()));
+            maxX = Math.max(maxX, (int) Math.ceil(corner.getX()));
+            maxY = Math.max(maxY, (int) Math.ceil(corner.getY()));
+            maxZ = Math.max(maxZ, (int) Math.ceil(corner.getZ()));
+        }
+
+        // 3. Index every originally-scanned block by its own (rounded) u/v index, for step 4's
+        // material lookup.
+        Map<Long, BlockSnapshot> byIndex = new HashMap<>();
+        for (BlockSnapshot block : gate.getBlocks()) {
+            double[] idx = projectOntoBasis(block.getRelativePosition(), uStep, vStep, nStep);
+            byIndex.putIfAbsent(packIndex(Math.round(idx[0]), Math.round(idx[1])), block);
+        }
+
+        // 4. Test every candidate cell: inverse-rotate back into the closed frame, project onto
+        // the gate's own (unrotated) basis, and check it lands within [0,W-1]x[0,H-1] - and,
+        // critically, that its n-index is ~0. u/v alone only constrain the cell to *some* point
+        // on the infinite line through the footprint along nStep; every scanned block is a single
+        // layer (k=0 in i*uStep+j*vStep, with no k*nStep term at all - see
+        // GateBlockScanTaskHandler.computeCellPosition), so the true rotated sheet is the n=0
+        // slice specifically. (Multi-layer GeometryDepth>1 doors are a known, explicitly
+        // unverified edge case - see ROTATION_GAP_FILL_DESIGN.md - not handled by this n=0 check.)
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    Vector candidate = new Vector(x, y, z);
+                    Vector local = candidate.clone().subtract(anchor);
+                    Vector unrotated = VectorMath.rotateAroundAxis(local, hingeAxis, -angleDegrees);
+                    double[] idx = projectOntoBasis(unrotated, uStep, vStep, nStep);
+
+                    if (!withinAxis(idx[0], width) || !withinAxis(idx[1], height) || Math.abs(idx[2]) > BOUNDS_EPSILON) {
+                        continue;
+                    }
+
+                    BlockSnapshot source = byIndex.get(packIndex(Math.round(idx[0]), Math.round(idx[1])));
+                    if (source != null) {
+                        result.add(new RasterizedBlock(candidate, source));
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static long packIndex(long i, long j) {
+        return (i << 32) ^ (j & 0xFFFFFFFFL);
     }
 
     /**

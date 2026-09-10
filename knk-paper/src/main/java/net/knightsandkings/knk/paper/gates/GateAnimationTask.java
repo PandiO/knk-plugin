@@ -62,6 +62,11 @@ public class GateAnimationTask extends BukkitRunnable {
     private final GateStructuresApi gateStructuresApi;
     private final Plugin plugin;
     private final GateDisplayManager displayManager;
+    // Mechanism 1 kill switch (Decision 5, ROTATION_GAP_FILL_DESIGN.md): default on, but lets an
+    // admin fall back to today's exact sparse-lattice endpoint behavior server-wide in seconds,
+    // without a code deploy, if a defect is ever found (it runs automatically, with zero admin
+    // action, for every diagonal-hinge ROTATION gate).
+    private final boolean rasterizationEnabled;
 
     private long lastLagCheck = 0;
     private boolean isLagging = false;
@@ -70,7 +75,7 @@ public class GateAnimationTask extends BukkitRunnable {
     private final Map<Integer, Integer> jamTickCounters = new HashMap<>();
 
     /**
-     * Create a new gate animation task.
+     * Create a new gate animation task with Mechanism 1 rasterization enabled by default.
      *
      * @param gateManager The gate manager containing all cached gates
      * @param world The world to place blocks in
@@ -83,6 +88,15 @@ public class GateAnimationTask extends BukkitRunnable {
     public GateAnimationTask(GateManager gateManager, World world, Material fallbackMaterial,
                              WorldGuardIntegration worldGuardIntegration, GateStructuresApi gateStructuresApi,
                              Plugin plugin, GateDisplayManager displayManager) {
+        this(gateManager, world, fallbackMaterial, worldGuardIntegration, gateStructuresApi, plugin, displayManager, true);
+    }
+
+    /**
+     * @param rasterizationEnabled Mechanism 1 kill switch - see {@code gates.rotationGapFill.rasterization-enabled}
+     */
+    public GateAnimationTask(GateManager gateManager, World world, Material fallbackMaterial,
+                             WorldGuardIntegration worldGuardIntegration, GateStructuresApi gateStructuresApi,
+                             Plugin plugin, GateDisplayManager displayManager, boolean rasterizationEnabled) {
         this.gateManager = gateManager;
         this.world = world;
         this.fallbackMaterial = fallbackMaterial != null ? fallbackMaterial : Material.STONE;
@@ -90,6 +104,7 @@ public class GateAnimationTask extends BukkitRunnable {
         this.gateStructuresApi = gateStructuresApi;
         this.plugin = plugin;
         this.displayManager = displayManager;
+        this.rasterizationEnabled = rasterizationEnabled;
         LOGGER.info("[GateAnimation] Scheduled animation task for world '" + world.getName() + "'");
     }
 
@@ -245,6 +260,12 @@ public class GateAnimationTask extends BukkitRunnable {
                 continue;
             }
 
+            // Mechanism 2 (ROTATION_GAP_FILL_DESIGN.md): a block paired with a manually-scanned
+            // open state uses that scan's own orientation as-is, never the arc-angle rotation -
+            // an admin who built the open shape with e.g. logs lying flat already scanned the
+            // correct orientation directly. Absent for the vast majority of gates (no pairing).
+            BlockSnapshot pairedOpen = gate.getPairedOpenBlock(block.getId());
+
             Vector worldPos = GateFrameCalculator.calculateBlockPosition(gate, block, frame);
             Vector previousPosition = GateFrameCalculator.calculateBlockPosition(gate, block, previousFrame);
 
@@ -253,7 +274,9 @@ public class GateAnimationTask extends BukkitRunnable {
                     LOGGER.fine("Gate " + gate.getName() + " is in unloaded chunk, pausing animation");
                     return;
                 }
-                String orientedBlockData = GateBlockOrientation.applyRotation(block.getBlockData(), gate, currentAngle);
+                String orientedBlockData = pairedOpen != null
+                    ? pairedOpen.getBlockData()
+                    : GateBlockOrientation.applyRotation(block.getBlockData(), gate, currentAngle);
                 placements.add(new BlockPlacement(worldPos, orientedBlockData));
                 targetCells.add(GateSpatialIndex.packCell(worldPos));
             } else if (gate.isClipToGeometryBounds()) {
@@ -261,7 +284,9 @@ public class GateAnimationTask extends BukkitRunnable {
             }
 
             if (previousPosition != null) {
-                String orientedVacancyData = GateBlockOrientation.applyRotation(block.getBlockData(), gate, previousAngle);
+                String orientedVacancyData = pairedOpen != null
+                    ? pairedOpen.getBlockData()
+                    : GateBlockOrientation.applyRotation(block.getBlockData(), gate, previousAngle);
                 vacancies.add(new BlockPlacement(previousPosition, orientedVacancyData));
             } else if (gate.isClipToGeometryBounds()) {
                 clippedVacancyCount++;
@@ -372,16 +397,7 @@ public class GateAnimationTask extends BukkitRunnable {
      * skip, where the assumed single-step "previous frame" doesn't match the actual last frame).
      */
     private void resyncSpatialIndex(CachedGate gate, int frame) {
-        List<Vector> positions = new ArrayList<>();
-        for (BlockSnapshot block : gate.getBlocks()) {
-            if (block == null) {
-                continue;
-            }
-            Vector worldPos = GateFrameCalculator.calculateBlockPosition(gate, block, frame);
-            if (worldPos != null) {
-                positions.add(worldPos);
-            }
-        }
+        List<Vector> positions = GateRestingFramePlacer.restingFramePositions(gate, frame, rasterizationEnabled);
 
         GateSpatialIndex spatialIndex = gateManager.getSpatialIndex();
         spatialIndex.removeAllForGate(gate.getWorldName(), gate.getId());
@@ -437,18 +453,10 @@ public class GateAnimationTask extends BukkitRunnable {
         // updateGateBlocks call) leaves blocks stranded wherever they last were computed -
         // updateGateBlocks only ever vacates one tick behind the frame it's given, not every
         // frame since the last call, so a skipped stretch is never cleaned up on its own.
+        // Also where Mechanism 1 (rasterized gap-fill) and Mechanism 2 (open-scan pairing)
+        // actually converge to their final, fully-correct resting shape - see placeRestingFrame.
         double openAngle = GateFrameCalculator.calculateRotationAngle(gate, gate.getAnimationDurationTicks());
-        for (BlockSnapshot block : gate.getBlocks()) {
-            if (block == null) {
-                continue;
-            }
-
-            Vector worldPos = GateFrameCalculator.calculateBlockPosition(gate, block, gate.getAnimationDurationTicks());
-            if (worldPos != null) {
-                String orientedBlockData = GateBlockOrientation.applyRotation(block.getBlockData(), gate, openAngle);
-                GateBlockPlacer.placeBlock(world, worldPos, orientedBlockData, fallbackMaterial);
-            }
-        }
+        GateRestingFramePlacer.placeRestingFrame(world, gate, gate.getAnimationDurationTicks(), openAngle, fallbackMaterial, rasterizationEnabled);
         resyncSpatialIndex(gate, gate.getCurrentFrame());
 
         LOGGER.info("Gate " + gate.getName() + " finished opening");
@@ -477,14 +485,7 @@ public class GateAnimationTask extends BukkitRunnable {
         gate.setCurrentFrame(0);
 
         // Ensure all gate blocks are placed at closed position
-        for (BlockSnapshot block : gate.getBlocks()) {
-            if (block == null) {
-                continue;
-            }
-
-            Vector worldPos = GateFrameCalculator.calculateBlockPosition(gate, block, 0);
-            GateBlockPlacer.placeBlock(world, worldPos, block.getBlockData(), fallbackMaterial);
-        }
+        GateRestingFramePlacer.placeRestingFrame(world, gate, 0, 0.0, fallbackMaterial, rasterizationEnabled);
         resyncSpatialIndex(gate, 0);
 
         LOGGER.info("Gate " + gate.getName() + " finished closing");

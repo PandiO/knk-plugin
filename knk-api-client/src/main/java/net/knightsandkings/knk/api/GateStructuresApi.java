@@ -76,4 +76,15 @@ public interface GateStructuresApi {
      * @return CompletableFuture with list of block snapshots
      */
     CompletableFuture<List<GateBlockSnapshotDto>> getGateSnapshots(int gateId);
+
+    /**
+     * Get the separately-scanned, fully-open shape for a specific gate, if one exists - see
+     * docs/features/gate-structure-animation/ROTATION_GAP_FILL_DESIGN.md. Empty (not null)
+     * when the gate has no such scan; its mere presence/absence is what selects Mechanism 2.
+     * Calls GET /api/GateStructures/{id}/openedSnapshots
+     *
+     * @param gateId Gate structure ID
+     * @return CompletableFuture with the list of opened-block snapshots (empty if none)
+     */
+    CompletableFuture<List<GateBlockSnapshotDto>> getGateOpenedSnapshots(int gateId);
 }

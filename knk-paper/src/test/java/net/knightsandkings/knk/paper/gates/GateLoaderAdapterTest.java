@@ -145,6 +145,7 @@ class GateLoaderAdapterTest {
         when(api.getByDistrict(7)).thenReturn(CompletableFuture.completedFuture(List.of(summary)));
         when(api.getById(5)).thenReturn(CompletableFuture.completedFuture(fullDto));
         when(api.getGateSnapshots(5)).thenReturn(CompletableFuture.completedFuture(List.of()));
+        when(api.getGateOpenedSnapshots(5)).thenReturn(CompletableFuture.completedFuture(List.of()));
 
         adapter.loadForDistrict(api, 7).join();
 
@@ -459,6 +460,8 @@ class GateLoaderAdapterTest {
         when(api.getAll()).thenReturn(CompletableFuture.completedFuture(List.of(gateTen, gateEleven)));
         when(api.getGateSnapshots(10)).thenReturn(CompletableFuture.completedFuture(List.of()));
         when(api.getGateSnapshots(11)).thenReturn(CompletableFuture.completedFuture(List.of()));
+        when(api.getGateOpenedSnapshots(10)).thenReturn(CompletableFuture.completedFuture(List.of()));
+        when(api.getGateOpenedSnapshots(11)).thenReturn(CompletableFuture.completedFuture(List.of()));
 
         adapter.loadAll(api).join();
 
@@ -473,5 +476,130 @@ class GateLoaderAdapterTest {
         dto.setName(name);
         dto.setAnchorPoint("{\"x\":0,\"y\":64,\"z\":0}");
         return dto;
+    }
+
+    // === Mechanism 2: loading + pairing the optional open-state scan (ROTATION_GAP_FILL_DESIGN.md) ===
+
+    @Test
+    void loadAndCacheGate_NoOpenedSnapshots_LeavesOpenBlocksEmptyAndNothingPaired() {
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+
+        GateStructureDto dto = new GateStructureDto();
+        dto.setId(50);
+        dto.setName("No Open Scan Gate");
+        dto.setGateType("SLIDING");
+        dto.setMotionType("VERTICAL");
+        dto.setGeometryDefinitionMode("PLANE_GRID");
+        dto.setAnimationDurationTicks(60);
+        dto.setAnimationTickRate(1);
+        dto.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
+
+        GateBlockSnapshotDto closed = new GateBlockSnapshotDto(
+            1, 50, 0, 0, 0, 0, 0, 0, "minecraft:oak_planks", "minecraft:oak_planks", "{}", 0
+        );
+
+        adapter.loadAndCacheGate(dto, List.of(closed), List.of());
+
+        CachedGate gate = gateManager.getGate(50);
+        assertNotNull(gate);
+        assertTrue(gate.getOpenBlocks().isEmpty());
+        assertNull(gate.getPairedOpenBlock(1));
+    }
+
+    @Test
+    void loadAndCacheGate_VerticalGateWithOpenedSnapshots_PairsByIndexPosition() {
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+
+        GateStructureDto dto = new GateStructureDto();
+        dto.setId(51);
+        dto.setName("Vertical Dual-Scan Gate");
+        dto.setGateType("SLIDING");
+        dto.setMotionType("VERTICAL");
+        dto.setGeometryDefinitionMode("PLANE_GRID");
+        dto.setAnimationDurationTicks(60);
+        dto.setAnimationTickRate(1);
+        dto.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
+        dto.setOpenAnchorPoint("{\"x\":100,\"y\":0,\"z\":0}");
+
+        GateBlockSnapshotDto closed0 = new GateBlockSnapshotDto(
+            1, 51, 0, 0, 0, 0, 0, 0, "minecraft:iron_bars", "minecraft:iron_bars", "{}", 0
+        );
+        GateBlockSnapshotDto closed1 = new GateBlockSnapshotDto(
+            2, 51, 0, 1, 0, 0, 1, 0, "minecraft:iron_bars", "minecraft:iron_bars", "{}", 1
+        );
+        GateBlockSnapshotDto open0 = new GateBlockSnapshotDto(
+            10, 51, 0, 0, 0, 100, 0, 0, "minecraft:iron_bars", "minecraft:iron_bars", "{}", 0
+        );
+        GateBlockSnapshotDto open1 = new GateBlockSnapshotDto(
+            11, 51, 0, 1, 0, 100, 1, 0, "minecraft:iron_bars", "minecraft:iron_bars", "{}", 1
+        );
+
+        adapter.loadAndCacheGate(dto, List.of(closed0, closed1), List.of(open0, open1));
+
+        CachedGate gate = gateManager.getGate(51);
+        assertNotNull(gate);
+        assertEquals(2, gate.getOpenBlocks().size());
+
+        // Closed block id 1 (SortOrder 0) pairs with open block id 10 (SortOrder 0), etc.
+        BlockSnapshot paired0 = gate.getPairedOpenBlock(1);
+        BlockSnapshot paired1 = gate.getPairedOpenBlock(2);
+        assertNotNull(paired0);
+        assertNotNull(paired1);
+        assertEquals(10, paired0.getId());
+        assertEquals(11, paired1.getId());
+    }
+
+    @Test
+    void loadAndCacheGate_RotationGateWithOpenedSnapshots_PairsByNearestWorldDistance() {
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+
+        GateStructureDto dto = new GateStructureDto();
+        dto.setId(52);
+        dto.setName("Drawbridge Dual-Scan Gate");
+        dto.setGateType("DRAWBRIDGE");
+        dto.setMotionType("ROTATION");
+        dto.setGeometryDefinitionMode("PLANE_GRID");
+        dto.setAnimationDurationTicks(90);
+        dto.setAnimationTickRate(1);
+        dto.setRotationMaxAngleDegrees(90);
+        dto.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
+        dto.setReferencePoint1("{\"x\":1,\"y\":0,\"z\":0}");
+        dto.setReferencePoint2("{\"x\":0,\"y\":1,\"z\":0}");
+        // Deliberately far from the anchor, and with the two open blocks swapped relative to
+        // where a straight-line/SortOrder correspondence would put them - nearest-neighbor must
+        // still find the physically-closest match, not just index-align them.
+        dto.setOpenAnchorPoint("{\"x\":500,\"y\":0,\"z\":500}");
+
+        GateBlockSnapshotDto closedNear = new GateBlockSnapshotDto(
+            1, 52, 0, 0, 0, 0, 0, 0, "minecraft:oak_log", "minecraft:oak_log", "{}", 0
+        );
+        GateBlockSnapshotDto closedFar = new GateBlockSnapshotDto(
+            2, 52, 5, 0, 0, 5, 0, 0, "minecraft:oak_log", "minecraft:oak_log", "{}", 1
+        );
+        // openFar (SortOrder 0) sits near closedNear's anchor-relative position; openNear
+        // (SortOrder 1) sits near closedFar's - the reverse of SortOrder order.
+        GateBlockSnapshotDto openFar = new GateBlockSnapshotDto(
+            20, 52, 5, 0, 0, 505, 0, 500, "minecraft:oak_log", "minecraft:oak_log[axis=x]", "{}", 0
+        );
+        GateBlockSnapshotDto openNear = new GateBlockSnapshotDto(
+            21, 52, 0, 0, 0, 500, 0, 500, "minecraft:oak_log", "minecraft:oak_log[axis=x]", "{}", 1
+        );
+
+        adapter.loadAndCacheGate(dto, List.of(closedNear, closedFar), List.of(openFar, openNear));
+
+        CachedGate gate = gateManager.getGate(52);
+        assertNotNull(gate);
+
+        // closedNear=(0,0,0) is nearest to openNear=(500,0,500); closedFar=(5,0,5) (world
+        // (5,0,5)) is nearest to openFar=(505,0,1000... ) - by 3D distance, not SortOrder index.
+        BlockSnapshot pairedForNear = gate.getPairedOpenBlock(1);
+        BlockSnapshot pairedForFar = gate.getPairedOpenBlock(2);
+        assertNotNull(pairedForNear);
+        assertNotNull(pairedForFar);
+        assertEquals(21, pairedForNear.getId());
+        assertEquals(20, pairedForFar.getId());
     }
 }

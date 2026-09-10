@@ -170,6 +170,31 @@ public class VectorMath {
         return new Vector(dx / g, dy / g, dz / g);
     }
 
+    /**
+     * The number of parity classes a {@code ROTATION} gate's lattice splits into once rotated,
+     * per docs/features/gate-structure-animation/ROTATION_GAP_FILL_DESIGN.md: for a primitive
+     * horizontal step {@code uStep = (a, ., b)}, the perpendicular (nStep, the direction the
+     * rotation sweeps the other axis into) always has the same magnitude, so two diagonal steps
+     * as the two grid axes only reach 1-in-{@code a*a+b*b} of the true grid once rotated.
+     * Cardinal (a=1,b=0 or a=0,b=1) gives 1 (no gaps); a 45-degree diagonal gives 2 (checkerboard);
+     * a (2,1)-type diagonal gives 5. Only the step's horizontal (X/Z) components matter - a gate's
+     * width axis is always horizontal by construction (GateLoaderAdapter keeps the height axis as
+     * the sole carrier of any vertical component).
+     *
+     * @param step uStep (or nStep - they always share the same index) to measure
+     * @return the sublattice index, or 1 for a null/zero step (treated as "no gaps")
+     */
+    public static long sublatticeIndex(Vector step) {
+        if (step == null) {
+            return 1;
+        }
+
+        long a = Math.round(step.getX());
+        long b = Math.round(step.getZ());
+        long index = a * a + b * b;
+        return index == 0 ? 1 : index;
+    }
+
     private static long gcd(long a, long b) {
         while (b != 0) {
             long t = b;

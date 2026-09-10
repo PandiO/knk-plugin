@@ -5,6 +5,7 @@ import net.knightsandkings.knk.api.dto.GateStructureDto;
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
 import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.gates.GateBlockPairing;
 import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.core.util.CoordinateParser;
 import net.knightsandkings.knk.core.util.VectorMath;
@@ -12,7 +13,9 @@ import org.bukkit.util.Vector;
 
 import java.util.Comparator;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Logger;
 
@@ -94,8 +97,11 @@ public class GateLoaderAdapter {
                         LOGGER.warning("District " + districtId + ": full lookup for gate " + gateId + " returned nothing; skipping");
                         return CompletableFuture.completedFuture(null);
                     }
-                    return gateStructuresApi.getGateSnapshots(gateId)
-                        .thenAccept(snapshots -> loadAndCacheGate(fullDto, snapshots == null ? List.of() : snapshots));
+                    CompletableFuture<List<GateBlockSnapshotDto>> snapshotsFuture = gateStructuresApi.getGateSnapshots(gateId);
+                    CompletableFuture<List<GateBlockSnapshotDto>> openedSnapshotsFuture = gateStructuresApi.getGateOpenedSnapshots(gateId);
+                    return snapshotsFuture.thenAcceptBoth(openedSnapshotsFuture, (snapshots, openedSnapshots) ->
+                        loadAndCacheGate(fullDto, snapshots == null ? List.of() : snapshots,
+                            openedSnapshots == null ? List.of() : openedSnapshots));
                 }));
             }
 
@@ -114,8 +120,12 @@ public class GateLoaderAdapter {
                 continue;
             }
 
-            loads.add(gateStructuresApi.getGateSnapshots(gate.getId())
-                .thenAccept(snapshots -> loadAndCacheGate(gate, snapshots == null ? List.of() : snapshots)));
+            int gateId = gate.getId();
+            CompletableFuture<List<GateBlockSnapshotDto>> snapshotsFuture = gateStructuresApi.getGateSnapshots(gateId);
+            CompletableFuture<List<GateBlockSnapshotDto>> openedSnapshotsFuture = gateStructuresApi.getGateOpenedSnapshots(gateId);
+            loads.add(snapshotsFuture.thenAcceptBoth(openedSnapshotsFuture, (snapshots, openedSnapshots) ->
+                loadAndCacheGate(gate, snapshots == null ? List.of() : snapshots,
+                    openedSnapshots == null ? List.of() : openedSnapshots)));
         }
 
         return CompletableFuture.allOf(loads.toArray(new CompletableFuture[0]));
@@ -129,16 +139,32 @@ public class GateLoaderAdapter {
      * @param snapshotDtos List of block snapshot DTOs
      */
     public void loadAndCacheGate(GateStructureDto dto, List<GateBlockSnapshotDto> snapshotDtos) {
+        loadAndCacheGate(dto, snapshotDtos, List.of());
+    }
+
+    /**
+     * Load and cache a single gate from a DTO, including its optional Mechanism 2 open-state
+     * scan (see docs/features/gate-structure-animation/ROTATION_GAP_FILL_DESIGN.md). This method
+     * handles all DTO-to-domain conversion.
+     *
+     * @param dto Gate structure DTO from API
+     * @param snapshotDtos List of block snapshot DTOs
+     * @param openedSnapshotDtos List of opened-block snapshot DTOs - empty (not null) when the
+     *                           gate has no manually-scanned open state
+     */
+    public void loadAndCacheGate(GateStructureDto dto, List<GateBlockSnapshotDto> snapshotDtos,
+                                  List<GateBlockSnapshotDto> openedSnapshotDtos) {
         if (dto == null || dto.getId() == null) {
             LOGGER.warning("Cannot load gate: DTO or ID is null");
             return;
         }
 
-        CachedGate cachedGate = buildCachedGate(dto, snapshotDtos);
+        CachedGate cachedGate = buildCachedGate(dto, snapshotDtos, openedSnapshotDtos);
         gateManager.cacheGate(cachedGate);
-        
-        LOGGER.info("Cached gate: " + cachedGate.getName() + " (ID: " + cachedGate.getId() + 
-                   ") with " + cachedGate.getBlocks().size() + " blocks");
+
+        LOGGER.info("Cached gate: " + cachedGate.getName() + " (ID: " + cachedGate.getId() +
+                   ") with " + cachedGate.getBlocks().size() + " blocks"
+                   + (cachedGate.getOpenBlocks().isEmpty() ? "" : " and " + cachedGate.getOpenBlocks().size() + " open-scan blocks"));
     }
 
     /**
@@ -147,9 +173,11 @@ public class GateLoaderAdapter {
      *
      * @param dto Gate structure DTO
      * @param snapshotDtos List of block snapshot DTOs
+     * @param openedSnapshotDtos List of opened-block snapshot DTOs (empty when none)
      * @return CachedGate instance
      */
-    private CachedGate buildCachedGate(GateStructureDto dto, List<GateBlockSnapshotDto> snapshotDtos) {
+    private CachedGate buildCachedGate(GateStructureDto dto, List<GateBlockSnapshotDto> snapshotDtos,
+                                        List<GateBlockSnapshotDto> openedSnapshotDtos) {
         // Parse anchor point
         Vector anchorPoint = CoordinateParser.parseCoordinate(dto.getAnchorPoint());
         if (anchorPoint == null) {
@@ -196,6 +224,7 @@ public class GateLoaderAdapter {
         gate.setAllowPassThrough(Boolean.TRUE.equals(dto.getAllowPassThrough()));
         gate.setPassThroughDurationSeconds(
             dto.getPassThroughDurationSeconds() != null ? dto.getPassThroughDurationSeconds() : 2);
+        gate.setOpenAnchorPoint(CoordinateParser.parseCoordinate(dto.getOpenAnchorPoint()));
 
         // Precompute local basis vectors
         precomputeBasisVectors(gate, dto);
@@ -205,6 +234,12 @@ public class GateLoaderAdapter {
 
         // Load block snapshots
         loadBlockSnapshots(gate, snapshotDtos);
+
+        // Mechanism 2 (ROTATION_GAP_FILL_DESIGN.md): load the optional manually-scanned open
+        // state and pair it against the closed blocks just loaded above. A gate with none of
+        // these ends up with an empty openBlocks/openBlockPairing, which is itself the trigger
+        // GateFrameCalculator uses to fall through to today's exact procedural behavior.
+        loadOpenBlockSnapshots(gate, openedSnapshotDtos);
 
         // Set initial state based on IsOpened
         if (dto.getIsOpened() != null && dto.getIsOpened()) {
@@ -252,6 +287,11 @@ public class GateLoaderAdapter {
             gate.setUStep(uStep);
             gate.setVStep(vStep);
             gate.setNStep(nStep);
+            // Mechanism 1 (ROTATION_GAP_FILL_DESIGN.md): >1 for a diagonal-hinge ROTATION gate,
+            // whose open-state footprint would otherwise checkerboard. Computed for every gate
+            // (not just ROTATION ones) since it's a cheap, purely geometric property of uStep;
+            // GateAnimationTask is what actually gates its use on MotionType/GeometryDefinitionMode.
+            gate.setSublatticeIndex(VectorMath.sublatticeIndex(uStep));
 
             LOGGER.fine("Gate " + gate.getName() + " basis vectors: u=" + u + ", v=" + v + ", n=" + n
                 + "; steps: uStep=" + uStep + ", vStep=" + vStep + ", nStep=" + nStep);
@@ -263,6 +303,7 @@ public class GateLoaderAdapter {
             gate.setUStep(new Vector(1, 0, 0));
             gate.setVStep(new Vector(0, 1, 0));
             gate.setNStep(new Vector(0, 0, 1));
+            gate.setSublatticeIndex(1);
             LOGGER.warning("Gate " + gate.getName() + " missing reference points, using default axes");
         }
     }
@@ -350,33 +391,103 @@ public class GateLoaderAdapter {
             return;
         }
 
-        List<GateBlockSnapshotDto> sortedSnapshots = new ArrayList<>(snapshotDtos);
-        sortedSnapshots.sort(Comparator.comparingInt(GateBlockSnapshotDto::sortOrder));
-
-        for (GateBlockSnapshotDto dto : sortedSnapshots) {
-            String blockData = resolveBlockData(dto);
-            if (isAirBlock(blockData)) {
-                continue;
+        for (GateBlockSnapshotDto dto : sortedBySortOrder(snapshotDtos)) {
+            BlockSnapshot snapshot = toBlockSnapshot(dto);
+            if (snapshot != null) {
+                gate.addBlock(snapshot);
             }
-
-            Vector relativePos = new Vector(
-                dto.relativeX() != null ? dto.relativeX() : 0,
-                dto.relativeY() != null ? dto.relativeY() : 0,
-                dto.relativeZ() != null ? dto.relativeZ() : 0
-            );
-
-            BlockSnapshot snapshot = new BlockSnapshot(
-                dto.id(),
-                relativePos,
-                0, // no minecraftBlockRefId in the API contract; block identity travels via blockData/materialName
-                blockData,
-                dto.sortOrder() != null ? dto.sortOrder() : 0
-            );
-
-            gate.addBlock(snapshot);
         }
 
         LOGGER.fine("Loaded " + gate.getBlocks().size() + " blocks for gate " + gate.getName());
+    }
+
+    /**
+     * Mechanism 2 (ROTATION_GAP_FILL_DESIGN.md): load the gate's optional manually-scanned open
+     * state (empty/no-op when it has none) and pair each closed block to its open-state
+     * counterpart - by SortOrder position for VERTICAL/LATERAL (both scans walk the same
+     * deterministic loop from their own anchor), or by nearest 3D world-space distance for
+     * ROTATION (Decision 2: greedy, ship v1; see GateBlockPairing).
+     */
+    private void loadOpenBlockSnapshots(CachedGate gate, List<GateBlockSnapshotDto> openedSnapshotDtos) {
+        if (openedSnapshotDtos == null || openedSnapshotDtos.isEmpty()) {
+            return;
+        }
+
+        for (GateBlockSnapshotDto dto : sortedBySortOrder(openedSnapshotDtos)) {
+            BlockSnapshot snapshot = toBlockSnapshot(dto);
+            if (snapshot != null) {
+                gate.addOpenBlock(snapshot);
+            }
+        }
+
+        if (gate.getOpenBlocks().isEmpty() || gate.getOpenAnchorPoint() == null) {
+            return;
+        }
+
+        List<BlockSnapshot> closedBlocks = gate.getBlocks();
+        List<BlockSnapshot> openBlocks = gate.getOpenBlocks();
+
+        Map<Integer, BlockSnapshot> pairing = new HashMap<>();
+        if ("ROTATION".equals(gate.getMotionType())) {
+            List<Vector> closedWorldPositions = new ArrayList<>();
+            for (BlockSnapshot block : closedBlocks) {
+                closedWorldPositions.add(gate.getAnchorPoint().clone().add(block.getRelativePosition()));
+            }
+            List<Vector> openWorldPositions = new ArrayList<>();
+            for (BlockSnapshot block : openBlocks) {
+                openWorldPositions.add(gate.getOpenAnchorPoint().clone().add(block.getRelativePosition()));
+            }
+
+            Map<Integer, Integer> indexPairing = GateBlockPairing.pairNearestNeighbor(closedWorldPositions, openWorldPositions);
+            for (Map.Entry<Integer, Integer> entry : indexPairing.entrySet()) {
+                pairing.put(closedBlocks.get(entry.getKey()).getId(), openBlocks.get(entry.getValue()));
+            }
+        } else {
+            // VERTICAL/LATERAL: both scans walk the same deterministic (i,j,k) loop from their
+            // respective anchors, so index position IS the correspondence (DUAL_SCAN_ANIMATION_
+            // DESIGN.md's original design) - a block with no counterpart at the same index (the
+            // open scan has fewer/more blocks) is simply left unpaired.
+            int pairCount = Math.min(closedBlocks.size(), openBlocks.size());
+            for (int i = 0; i < pairCount; i++) {
+                pairing.put(closedBlocks.get(i).getId(), openBlocks.get(i));
+            }
+        }
+
+        gate.setOpenBlockPairing(pairing);
+        LOGGER.fine("Gate " + gate.getName() + " paired " + pairing.size() + "/" + closedBlocks.size()
+            + " closed block(s) to their scanned open-state counterpart");
+    }
+
+    private List<GateBlockSnapshotDto> sortedBySortOrder(List<GateBlockSnapshotDto> dtos) {
+        List<GateBlockSnapshotDto> sorted = new ArrayList<>(dtos);
+        sorted.sort(Comparator.comparingInt(GateBlockSnapshotDto::sortOrder));
+        return sorted;
+    }
+
+    /**
+     * Converts one scanned block DTO to a domain BlockSnapshot, or null for an air block (see
+     * {@link #isAirBlock}). Shared by the closed (BlockSnapshots) and Mechanism 2 open
+     * (OpenedBlockSnapshots) loading paths - identical conversion either way.
+     */
+    private BlockSnapshot toBlockSnapshot(GateBlockSnapshotDto dto) {
+        String blockData = resolveBlockData(dto);
+        if (isAirBlock(blockData)) {
+            return null;
+        }
+
+        Vector relativePos = new Vector(
+            dto.relativeX() != null ? dto.relativeX() : 0,
+            dto.relativeY() != null ? dto.relativeY() : 0,
+            dto.relativeZ() != null ? dto.relativeZ() : 0
+        );
+
+        return new BlockSnapshot(
+            dto.id(),
+            relativePos,
+            0, // no minecraftBlockRefId in the API contract; block identity travels via blockData/materialName
+            blockData,
+            dto.sortOrder() != null ? dto.sortOrder() : 0
+        );
     }
 
     /**

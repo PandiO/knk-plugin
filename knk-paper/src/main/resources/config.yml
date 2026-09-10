@@ -92,6 +92,16 @@ gates:
   # passthrough-instant-open-timeout-seconds elapses (safety net if they turn back or disconnect).
   passthrough-instant-open-radius-blocks: 1
   passthrough-instant-open-timeout-seconds: 5
+  # Rotation gap-fill (docs/features/gate-structure-animation/ROTATION_GAP_FILL_DESIGN.md):
+  # Mechanism 1 automatically fills the checkerboard-sparse open-state footprint of a
+  # diagonal-hinge ROTATION gate (e.g. a DRAWBRIDGE facing a diagonal direction) at its resting
+  # closed/open endpoints, with zero admin action. It's unconditional once enabled - a defect
+  # would affect every such gate on the server at once - so this is a kill switch (Decision 5):
+  # set to false to fall back to the exact original sparse-lattice behavior server-wide, no
+  # restart-affecting code deploy needed. A gate with its own manually-scanned open state
+  # (Mechanism 2) is never affected either way - that always takes priority over this.
+  rotationGapFill:
+    rasterization-enabled: true
 
 # Messages configuration
 messages:
