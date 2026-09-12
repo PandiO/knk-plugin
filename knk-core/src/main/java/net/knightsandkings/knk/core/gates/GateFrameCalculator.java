@@ -1,7 +1,7 @@
 package net.knightsandkings.knk.core.gates;
 
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.util.VectorMath;
 import org.bukkit.util.Vector;
 
@@ -27,7 +27,7 @@ public class GateFrameCalculator {
      * @param frame Current animation frame (0 = closed, animationDurationTicks = open)
      * @return World position for the block at this frame, or null when the block is clipped away
      */
-    public static Vector calculateBlockPosition(CachedGate gate, BlockSnapshot block, int frame) {
+    public static Vector calculateBlockPosition(CachedGateDoor gate, BlockSnapshot block, int frame) {
         if (gate == null || block == null) {
             throw new IllegalArgumentException("Gate and block cannot be null");
         }
@@ -88,7 +88,7 @@ public class GateFrameCalculator {
      * Projects a world position back onto the gate's u/v/n basis and checks it against the
      * Width/Height/Depth box. Lets a door retract into a housing instead of sticking out of it.
      */
-    public static boolean isWithinGeometryBounds(CachedGate gate, Vector worldPosition) {
+    public static boolean isWithinGeometryBounds(CachedGateDoor gate, Vector worldPosition) {
         if (gate == null || worldPosition == null) {
             return false;
         }
@@ -140,7 +140,7 @@ public class GateFrameCalculator {
         return projection >= -BOUNDS_EPSILON && projection <= extent - 1 + BOUNDS_EPSILON;
     }
 
-    private static boolean isWithinVerticalOpening(CachedGate gate, Vector anchor, Vector worldPosition) {
+    private static boolean isWithinVerticalOpening(CachedGateDoor gate, Vector anchor, Vector worldPosition) {
         if (anchor == null || gate.getGeometryHeight() <= 0) {
             return true;
         }
@@ -161,7 +161,7 @@ public class GateFrameCalculator {
      * @param progress Animation progress (0.0 to 1.0)
      * @return World position
      */
-    private static Vector calculateLinearPosition(CachedGate gate, Vector relativePos, double progress) {
+    private static Vector calculateLinearPosition(CachedGateDoor gate, Vector relativePos, double progress) {
         Vector anchorPoint = gate.getAnchorPoint();
         Vector motionVector = gate.getMotionVector();
 
@@ -187,7 +187,7 @@ public class GateFrameCalculator {
      * @param progress Animation progress (0.0 to 1.0)
      * @return World position
      */
-    private static Vector calculateRotationPosition(CachedGate gate, Vector relativePos, double progress) {
+    private static Vector calculateRotationPosition(CachedGateDoor gate, Vector relativePos, double progress) {
         Vector anchorPoint = gate.getAnchorPoint();
         Vector hingeAxis = gate.getHingeAxis();
 
@@ -215,7 +215,7 @@ public class GateFrameCalculator {
      * @param frame Animation frame to evaluate
      * @return Rotation angle in degrees (0 at frame 0, RotationMaxAngleDegrees at the last frame)
      */
-    public static double calculateRotationAngle(CachedGate gate, int frame) {
+    public static double calculateRotationAngle(CachedGateDoor gate, int frame) {
         if (gate == null || !"ROTATION".equals(gate.getMotionType())) {
             return 0.0;
         }
@@ -256,7 +256,7 @@ public class GateFrameCalculator {
      * @param angleDegrees The rotation angle (degrees) to rasterize at - 0 for closed, RotationMaxAngleDegrees for open
      * @return every real-grid cell inside the rotated footprint, with its sourced material; empty if the gate lacks the geometry to rasterize
      */
-    public static List<RasterizedBlock> rasterizeRotationFrame(CachedGate gate, double angleDegrees) {
+    public static List<RasterizedBlock> rasterizeRotationFrame(CachedGateDoor gate, double angleDegrees) {
         List<RasterizedBlock> result = new ArrayList<>();
         if (gate == null) {
             return result;
@@ -450,7 +450,7 @@ public class GateFrameCalculator {
      * @param gate The cached gate
      * @return Step vector (motionVector / totalFrames)
      */
-    public static Vector calculateStepVector(CachedGate gate) {
+    public static Vector calculateStepVector(CachedGateDoor gate) {
         if (gate == null) {
             return new Vector(0, 0, 0);
         }
@@ -471,7 +471,7 @@ public class GateFrameCalculator {
      * @param gate The cached gate
      * @return Angle increment in degrees
      */
-    public static double calculateAngleStep(CachedGate gate) {
+    public static double calculateAngleStep(CachedGateDoor gate) {
         if (gate == null) {
             return 0.0;
         }
@@ -494,7 +494,7 @@ public class GateFrameCalculator {
      * @param frame Current frame
      * @return True if block should be updated this frame
      */
-    public static boolean shouldUpdateFrame(CachedGate gate, int frame) {
+    public static boolean shouldUpdateFrame(CachedGateDoor gate, int frame) {
         if (gate == null) {
             return false;
         }

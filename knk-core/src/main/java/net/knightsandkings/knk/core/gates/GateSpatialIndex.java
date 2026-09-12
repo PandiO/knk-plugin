@@ -9,7 +9,7 @@ import java.util.Map;
 /**
  * O(1) lookup of which gate (if any) currently occupies a world block position.
  * Maps world name -> packed block coordinate -> gate id, covering only the animated
- * door blocks of each gate (CachedGate.getBlocks()), not the surrounding static structure.
+ * door blocks of each gate (CachedGateDoor.getBlocks()), not the surrounding static structure.
  *
  * Every mutator here must be called on the main server thread, in lockstep with whatever
  * code path actually places/removes the corresponding world block, so the index never drifts

@@ -1,7 +1,7 @@
 package net.knightsandkings.knk.paper.integration;
 
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import org.bukkit.util.Vector;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
@@ -43,7 +43,7 @@ public class WorldGuardIntegrationTest {
     @Test
     public void testSyncRegionsWithEmptyRegionIds() {
         // Create a test gate
-        CachedGate gate = createTestGate();
+        CachedGateDoor gate = createTestGate();
         gate.setRegionClosedId("");
         gate.setRegionOpenedId("");
 
@@ -56,7 +56,7 @@ public class WorldGuardIntegrationTest {
 
     @Test
     public void testSyncRegionsOpenState() {
-        CachedGate gate = createTestGate();
+        CachedGateDoor gate = createTestGate();
         gate.setRegionClosedId("gate_1_closed");
         gate.setRegionOpenedId("gate_1_open");
 
@@ -68,7 +68,7 @@ public class WorldGuardIntegrationTest {
 
     @Test
     public void testSyncRegionsClosedState() {
-        CachedGate gate = createTestGate();
+        CachedGateDoor gate = createTestGate();
         gate.setRegionClosedId("gate_1_closed");
         gate.setRegionOpenedId("gate_1_open");
 
@@ -91,9 +91,10 @@ public class WorldGuardIntegrationTest {
     /**
      * Create a test gate with minimal configuration.
      */
-    private CachedGate createTestGate() {
-        return new CachedGate(
+    private CachedGateDoor createTestGate() {
+        return new CachedGateDoor(
             1,                              // id
+            1,                              // gateStructureId
             "TestGate",                    // name
             "SLIDING",                     // gateType
             "VERTICAL",                    // motionType

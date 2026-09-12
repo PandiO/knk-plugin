@@ -1,6 +1,6 @@
 package net.knightsandkings.knk.paper.gates;
 
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import org.bukkit.entity.Entity;
 import org.bukkit.util.Vector;
 import org.junit.jupiter.api.Test;
@@ -15,7 +15,8 @@ class EntityPusherTest {
 
     @Test
     void shouldPushEntityInFaceDirection() {
-        CachedGate gate = new CachedGate(
+        CachedGateDoor gate = new CachedGateDoor(
+            1,
             1,
             "TestGate",
             "SLIDING",
@@ -52,11 +53,11 @@ class EntityPusherTest {
         // Regression guard: pushEntity resolves direction from FaceDirection (a unit vector),
         // never from the new lattice uStep/vStep/nStep - a diagonal push must stay a clean
         // 45-degree direction, unaffected by introducing those fields.
-        CachedGate gate = new CachedGate(
-            2, "DiagonalGate", "SLIDING", "VERTICAL", "PLANE_GRID",
+        CachedGateDoor gate = new CachedGateDoor(
+            2, 2, "DiagonalGate", "SLIDING", "VERTICAL", "PLANE_GRID",
             60, 1, new Vector(0, 0, 0), 1, 1, 1,
             500.0, 500.0, true, false, true, 90,
-            "south-east"
+            "SOUTH_EAST"
         );
 
         Entity entity = mock(Entity.class);
@@ -76,8 +77,8 @@ class EntityPusherTest {
     void shouldFallBackToDiagonalNAxisWhenFaceDirectionIsMissing() {
         // Regression guard: the nAxis fallback (used when FaceDirection is unset) must keep
         // working from the unit nAxis alone - it must not require the new nStep field.
-        CachedGate gate = new CachedGate(
-            3, "NoFaceDirectionGate", "SLIDING", "VERTICAL", "PLANE_GRID",
+        CachedGateDoor gate = new CachedGateDoor(
+            3, 3, "NoFaceDirectionGate", "SLIDING", "VERTICAL", "PLANE_GRID",
             60, 1, new Vector(0, 0, 0), 1, 1, 1,
             500.0, 500.0, true, false, true, 90,
             ""

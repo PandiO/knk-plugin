@@ -1,7 +1,7 @@
 package net.knightsandkings.knk.paper.gates;
 
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.paper.events.GateDoorDamageEvent;
 import net.knightsandkings.knk.paper.events.GateDoorIgniteEvent;
@@ -30,7 +30,7 @@ public class GateDoorHitService {
      * Resolve the gate whose door currently occupies the given world block, or null if the
      * block isn't part of any gate's door right now.
      */
-    public CachedGate resolveDoorGate(String worldName, Block block) {
+    public CachedGateDoor resolveDoorGate(String worldName, Block block) {
         if (block == null) {
             return null;
         }
@@ -43,7 +43,7 @@ public class GateDoorHitService {
      * and active. Returns the fired event so the caller can check isCancelled() and propagate
      * that back to the originating Bukkit event, or null if the gate doesn't qualify.
      */
-    public GateDoorInteractEvent handleInteract(CachedGate gate, Player player, Block clickedBlock) {
+    public GateDoorInteractEvent handleInteract(CachedGateDoor gate, Player player, Block clickedBlock) {
         if (!qualifiesForInteraction(gate)) {
             return null;
         }
@@ -61,8 +61,8 @@ public class GateDoorHitService {
      * handler already no-ops on that, so checking it twice would just duplicate the rule.
      * Returns the fired event, or null if the gate doesn't qualify.
      */
-    public GateDoorDamageEvent handleDamage(CachedGate gate, Entity causingEntity, Block hitBlock, GateDoorDamageEvent.Cause cause) {
-        if (gate == null || gate.getCurrentState() != AnimationState.CLOSED || !gate.isActive() || gate.isDestroyed()
+    public GateDoorDamageEvent handleDamage(CachedGateDoor gate, Entity causingEntity, Block hitBlock, GateDoorDamageEvent.Cause cause) {
+        if (gate == null || gate.getCurrentState() != AnimationState.CLOSED || !gate.isEffectivelyActive() || gate.isEffectivelyDestroyed()
             || !isSurvivalOrNonPlayer(causingEntity)) {
             return null;
         }
@@ -79,8 +79,8 @@ public class GateDoorHitService {
      * a door block only occupies a stable world position (the thing that actually "catches fire")
      * while CLOSED. Returns the fired event, or null if the gate doesn't qualify.
      */
-    public GateDoorIgniteEvent handleIgnite(CachedGate gate, Entity causingEntity, Block hitBlock, GateDoorIgniteEvent.Cause cause) {
-        if (gate == null || gate.getCurrentState() != AnimationState.CLOSED || !gate.isActive() || gate.isDestroyed()
+    public GateDoorIgniteEvent handleIgnite(CachedGateDoor gate, Entity causingEntity, Block hitBlock, GateDoorIgniteEvent.Cause cause) {
+        if (gate == null || gate.getCurrentState() != AnimationState.CLOSED || !gate.isEffectivelyActive() || gate.isEffectivelyDestroyed()
             || !isSurvivalOrNonPlayer(causingEntity)) {
             return null;
         }
@@ -90,8 +90,8 @@ public class GateDoorHitService {
         return event;
     }
 
-    private static boolean qualifiesForInteraction(CachedGate gate) {
-        return gate != null && gate.getCurrentState() == AnimationState.CLOSED && gate.isActive();
+    private static boolean qualifiesForInteraction(CachedGateDoor gate) {
+        return gate != null && gate.getCurrentState() == AnimationState.CLOSED && gate.isEffectivelyActive();
     }
 
     /**

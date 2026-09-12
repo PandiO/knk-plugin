@@ -1,7 +1,7 @@
 package net.knightsandkings.knk.core.gates;
 
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import org.bukkit.util.Vector;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,13 +20,14 @@ import static org.junit.jupiter.api.Assertions.*;
 class GateFrameCalculatorTest {
 
     private static final double EPSILON = 0.001;
-    private CachedGate gate;
+    private CachedGateDoor gate;
 
     @BeforeEach
     void setUp() {
         // Create a test gate with vertical motion
-        gate = new CachedGate(
+        gate = new CachedGateDoor(
             1,                                      // id
+            1,                                      // gateStructureId
             "TestGate",                             // name
             "SLIDING",                              // gateType
             "VERTICAL",                             // motionType
@@ -134,8 +135,8 @@ class GateFrameCalculatorTest {
 
     @Test
     void verticalClippingShouldKeepAllColumnsWhenReferencePointIsOffset() {
-        CachedGate clippedGate = new CachedGate(
-            12, "Offset Vertical Gate", "SLIDING", "VERTICAL", "PLANE_GRID",
+        CachedGateDoor clippedGate = new CachedGateDoor(
+            12, 12, "Offset Vertical Gate", "SLIDING", "VERTICAL", "PLANE_GRID",
             60, 1,
             new Vector(1416.699999988079, 65, -531.4505220512867),
             3, 8, 1,
@@ -178,8 +179,8 @@ class GateFrameCalculatorTest {
         // onto the unit axis, so a lattice block's projection never landed on a clean integer index
         // and edge blocks were misclipped. This asserts the last in-bounds column (index 3 of
         // GeometryWidth=4) survives, and the first out-of-bounds column (index 4) is clipped.
-        CachedGate diagonalGate = new CachedGate(
-            4, "Diagonal Lateral Gate", "SLIDING", "LATERAL", "PLANE_GRID",
+        CachedGateDoor diagonalGate = new CachedGateDoor(
+            4, 4, "Diagonal Lateral Gate", "SLIDING", "LATERAL", "PLANE_GRID",
             60, 1,
             new Vector(0, 0, 0),
             4, 1, 1,
@@ -227,8 +228,8 @@ class GateFrameCalculatorTest {
 
     @Test
     void shouldRespectTickRate() {
-        CachedGate gateTickRate2 = new CachedGate(
-            2, "TestGate2", "SLIDING", "VERTICAL", "PLANE_GRID",
+        CachedGateDoor gateTickRate2 = new CachedGateDoor(
+            2, 2, "TestGate2", "SLIDING", "VERTICAL", "PLANE_GRID",
             60, 2, // tickRate = 2
             new Vector(100, 64, 100), 5, 5, 3,
             500.0, 500.0, true, false, true, 90,
@@ -243,8 +244,8 @@ class GateFrameCalculatorTest {
 
     @Test
     void shouldCalculateRotationPosition() {
-        CachedGate rotationGate = new CachedGate(
-            3, "Drawbridge", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
+        CachedGateDoor rotationGate = new CachedGateDoor(
+            3, 3, "Drawbridge", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
             90, 1,
             new Vector(100, 64, 100), 0, 0, 0,
             500.0, 500.0, true, false, true, 90,
@@ -279,8 +280,8 @@ class GateFrameCalculatorTest {
 
     @Test
     void shouldCalculateRotationAngleAcrossFrameRange() {
-        CachedGate rotationGate = new CachedGate(
-            4, "Drawbridge", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
+        CachedGateDoor rotationGate = new CachedGateDoor(
+            4, 4, "Drawbridge", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
             90, 1,
             new Vector(100, 64, 100), 0, 0, 0,
             500.0, 500.0, true, false, true, 90,
@@ -300,8 +301,8 @@ class GateFrameCalculatorTest {
     void shouldReturnZeroRotationAngleForNonRotationGates() {
         // A VERTICAL/LATERAL gate's blocks must never be reoriented - even if
         // RotationMaxAngleDegrees happens to carry a nonzero leftover value in the DB.
-        CachedGate verticalGate = new CachedGate(
-            5, "Portcullis", "SLIDING", "VERTICAL", "PLANE_GRID",
+        CachedGateDoor verticalGate = new CachedGateDoor(
+            5, 5, "Portcullis", "SLIDING", "VERTICAL", "PLANE_GRID",
             60, 1,
             new Vector(0, 64, 0), 0, 0, 0,
             500.0, 500.0, true, false, true, 90,
@@ -331,9 +332,9 @@ class GateFrameCalculatorTest {
 
     // === Mechanism 1: rasterizeRotationFrame (ROTATION_GAP_FILL_DESIGN.md) ===
 
-    private CachedGate buildDiagonalDrawbridge(int width, int height) {
-        CachedGate rotationGate = new CachedGate(
-            14, "Diagonal Drawbridge", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
+    private CachedGateDoor buildDiagonalDrawbridge(int width, int height) {
+        CachedGateDoor rotationGate = new CachedGateDoor(
+            14, 14, "Diagonal Drawbridge", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
             90, 1,
             new Vector(0, 0, 0), width, height, 1,
             500.0, 500.0, true, false, true, 90,
@@ -362,12 +363,12 @@ class GateFrameCalculatorTest {
         return rotationGate;
     }
 
-    private CachedGate buildRealGate14(int width, int height) {
+    private CachedGateDoor buildRealGate14(int width, int height) {
         // Exact basis vectors from the live server's own log line for gate #14 (north-west
         // facing, not the south-east fixture used elsewhere in this file) - a sign-mirrored
         // variant of buildDiagonalDrawbridge, used to rule out a directionality-dependent bug.
-        CachedGate rotationGate = new CachedGate(
-            14, "Northern Gate", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
+        CachedGateDoor rotationGate = new CachedGateDoor(
+            14, 14, "Northern Gate", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
             90, 1,
             new Vector(0, 0, 0), width, height, 0,
             2000.0, 2000.0, true, false, false, 90,
@@ -406,7 +407,7 @@ class GateFrameCalculatorTest {
         // through. See claimNearestAvailableCell in the fix itself.
         int width = 4;
         int height = 8;
-        CachedGate gate = buildRealGate14(width, height);
+        CachedGateDoor gate = buildRealGate14(width, height);
         Vector uStep = gate.getUStep();
         Vector vStep = gate.getVStep();
 
@@ -431,7 +432,7 @@ class GateFrameCalculatorTest {
 
     @Test
     void rasterizeRotationFrame_AtClosedAngle_ReproducesExactlyTheScannedGridNoMoreNoFewer() {
-        CachedGate gate = buildDiagonalDrawbridge(8, 4);
+        CachedGateDoor gate = buildDiagonalDrawbridge(8, 4);
 
         List<GateFrameCalculator.RasterizedBlock> rasterized = GateFrameCalculator.rasterizeRotationFrame(gate, 0.0);
 
@@ -443,7 +444,7 @@ class GateFrameCalculatorTest {
 
     @Test
     void rasterizeRotationFrame_AtOpenAngle_FillsMoreCellsThanTheNaiveRotatedSet() {
-        CachedGate gate = buildDiagonalDrawbridge(8, 4);
+        CachedGateDoor gate = buildDiagonalDrawbridge(8, 4);
 
         // The naive per-block approach (today's behavior without Mechanism 1) rotates each of the
         // 32 scanned points individually and floors each to its containing block - this is
@@ -469,7 +470,7 @@ class GateFrameCalculatorTest {
     @Test
     void rasterizeRotationFrame_SingleCellGate_IsTrivialAtAnyAngle() {
         // Edge case from ROTATION_GAP_FILL_DESIGN.md: GeometryWidth/Height=1 has no gaps possible.
-        CachedGate gate = buildDiagonalDrawbridge(1, 1);
+        CachedGateDoor gate = buildDiagonalDrawbridge(1, 1);
 
         assertEquals(1, GateFrameCalculator.rasterizeRotationFrame(gate, 0.0).size());
         assertEquals(1, GateFrameCalculator.rasterizeRotationFrame(gate, 90.0).size());
@@ -498,7 +499,7 @@ class GateFrameCalculatorTest {
         // gets its own distinct cell.
         int width = 4;
         int height = 8;
-        CachedGate gate = buildDiagonalDrawbridge(width, height);
+        CachedGateDoor gate = buildDiagonalDrawbridge(width, height);
         Vector uStep = gate.getUStep();
         Vector vStep = gate.getVStep();
 
@@ -525,8 +526,8 @@ class GateFrameCalculatorTest {
 
     @Test
     void calculateBlockPosition_RotationWithPairedOpenBlock_ConvergesExactlyOnOpenScanPosition() {
-        CachedGate rotationGate = new CachedGate(
-            40, "Drawbridge", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
+        CachedGateDoor rotationGate = new CachedGateDoor(
+            40, 40, "Drawbridge", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
             90, 1,
             new Vector(100, 64, 100), 0, 0, 0,
             500.0, 500.0, true, false, true, 90,
@@ -559,8 +560,8 @@ class GateFrameCalculatorTest {
 
     @Test
     void calculateBlockPosition_VerticalWithPairedOpenBlock_LerpsBetweenClosedAndOpenScanPositions() {
-        CachedGate verticalGate = new CachedGate(
-            41, "Portcullis", "SLIDING", "VERTICAL", "PLANE_GRID",
+        CachedGateDoor verticalGate = new CachedGateDoor(
+            41, 41, "Portcullis", "SLIDING", "VERTICAL", "PLANE_GRID",
             60, 1,
             new Vector(0, 64, 0), 0, 0, 0,
             500.0, 500.0, true, false, true, 90,
@@ -590,8 +591,8 @@ class GateFrameCalculatorTest {
     void calculateBlockPosition_UnpairedBlockOnGateWithOtherPairings_UsesOriginalProceduralPath() {
         // Decision 1(a): a block with no counterpart keeps today's exact original behavior,
         // unaffected by other blocks on the same gate having a pairing.
-        CachedGate verticalGate = new CachedGate(
-            42, "Portcullis", "SLIDING", "VERTICAL", "PLANE_GRID",
+        CachedGateDoor verticalGate = new CachedGateDoor(
+            42, 42, "Portcullis", "SLIDING", "VERTICAL", "PLANE_GRID",
             60, 1,
             new Vector(0, 64, 0), 0, 0, 0,
             500.0, 500.0, true, false, true, 90,

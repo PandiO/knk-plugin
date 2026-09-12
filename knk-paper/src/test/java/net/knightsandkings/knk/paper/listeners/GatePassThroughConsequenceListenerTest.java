@@ -1,6 +1,6 @@
 package net.knightsandkings.knk.paper.listeners;
 
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.paper.events.GateDoorInteractEvent;
 import net.knightsandkings.knk.paper.gates.GatePassThroughService;
@@ -24,7 +24,7 @@ class GatePassThroughConsequenceListenerTest {
     private GatePassThroughService passThroughService;
     private UserManager userManager;
     private GatePassThroughConsequenceListener listener;
-    private CachedGate gate;
+    private CachedGateDoor gate;
     private Player player;
     private UUID playerUuid;
 
@@ -34,8 +34,8 @@ class GatePassThroughConsequenceListenerTest {
         userManager = mock(UserManager.class);
         listener = new GatePassThroughConsequenceListener(passThroughService, userManager);
 
-        gate = new CachedGate(
-            1, "TestGate", "SLIDING", "VERTICAL", "PLANE_GRID",
+        gate = new CachedGateDoor(
+            1, 1, "TestGate", "SLIDING", "VERTICAL", "PLANE_GRID",
             60, 1, new Vector(100, 64, 100), 5, 5, 3,
             500.0, 500.0, true, false, false, 90, "north"
         );

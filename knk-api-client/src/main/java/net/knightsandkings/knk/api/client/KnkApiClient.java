@@ -21,6 +21,7 @@ import net.knightsandkings.knk.api.impl.UsersCommandApiImpl;
 import net.knightsandkings.knk.api.impl.UserAccountApiImpl;
 import net.knightsandkings.knk.api.impl.WorldTasksApiImpl;
 import net.knightsandkings.knk.api.impl.GateStructuresApiImpl;
+import net.knightsandkings.knk.api.impl.GateDoorsApiImpl;
 import net.knightsandkings.knk.core.ports.api.HealthApi;
 import net.knightsandkings.knk.core.ports.api.TownsQueryApi;
 import net.knightsandkings.knk.core.ports.api.LocationsQueryApi;
@@ -36,6 +37,7 @@ import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.core.ports.api.UserAccountApi;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
 import net.knightsandkings.knk.api.GateStructuresApi;
+import net.knightsandkings.knk.api.GateDoorsApi;
 import net.knightsandkings.knk.core.ports.api.RegionsCommandApi;
 import okhttp3.OkHttpClient;
 
@@ -73,7 +75,8 @@ public class KnkApiClient {
     private final UserAccountApi userAccountApi;
     private final WorldTasksApi worldTasksApi;
     private final GateStructuresApi gateStructuresApi;
-    
+    private final GateDoorsApi gateDoorsApi;
+
     private KnkApiClient(
         String baseUrl,
         OkHttpClient httpClient,
@@ -104,6 +107,7 @@ public class KnkApiClient {
         this.userAccountApi = new UserAccountApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.worldTasksApi = new WorldTasksApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.gateStructuresApi = new GateStructuresApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.gateDoorsApi = new GateDoorsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
     }
     
     public HealthApi getHealthApi() {
@@ -165,7 +169,11 @@ public class KnkApiClient {
     public GateStructuresApi getGateStructuresApi() {
         return gateStructuresApi;
     }
-    
+
+    public GateDoorsApi getGateDoorsApi() {
+        return gateDoorsApi;
+    }
+
     /**
      * Shutdown the client and release resources.
      */

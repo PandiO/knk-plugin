@@ -1,7 +1,7 @@
 package net.knightsandkings.knk.paper.gates;
 
-import net.knightsandkings.knk.api.GateStructuresApi;
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.api.GateDoorsApi;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.gates.GateManager;
 import org.bukkit.util.Vector;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.*;
 public class HealthSystemTest {
 
     @Mock
-    private GateStructuresApi mockGateStructuresApi;
+    private GateDoorsApi mockGateDoorsApi;
 
     @Mock
     private org.bukkit.plugin.java.JavaPlugin mockPlugin;
@@ -31,13 +31,13 @@ public class HealthSystemTest {
     @BeforeEach
     public void setUp() throws Exception {
         MockitoAnnotations.openMocks(this);
-        healthSystem = new HealthSystem(mockGateStructuresApi, mockPlugin, null, new GateManager());
+        healthSystem = new HealthSystem(mockGateDoorsApi, mockPlugin, null, new GateManager());
     }
 
     @Test
     @Disabled("Requires Bukkit runtime for BukkitRunnable")
     public void testApplyDamageToVulnerableGate() {
-        CachedGate gate = createTestGate();
+        CachedGateDoor gate = createTestGate();
         gate.setIsInvincible(false);
         gate.setHealthCurrent(100.0);
 
@@ -49,7 +49,7 @@ public class HealthSystemTest {
     @Test
     @Disabled("Requires Bukkit runtime for BukkitRunnable")
     public void testApplyDamageToInvincibleGate() {
-        CachedGate gate = createTestGate();
+        CachedGateDoor gate = createTestGate();
         gate.setIsInvincible(true);
         gate.setHealthCurrent(100.0);
 
@@ -62,7 +62,7 @@ public class HealthSystemTest {
     @Test
     @Disabled("Requires Bukkit runtime for BukkitRunnable")
     public void testApplyDamageMinimumZeroHealth() {
-        CachedGate gate = createTestGate();
+        CachedGateDoor gate = createTestGate();
         gate.setIsInvincible(false);
         gate.setHealthCurrent(10.0);
 
@@ -74,7 +74,7 @@ public class HealthSystemTest {
 
     @Test
     public void testApplyNegativeDamageIsIgnored() {
-        CachedGate gate = createTestGate();
+        CachedGateDoor gate = createTestGate();
         gate.setHealthCurrent(50.0);
 
         healthSystem.applyDamage(gate, -10.0);
@@ -84,7 +84,7 @@ public class HealthSystemTest {
 
     @Test
     public void testApplyZeroDamageIsIgnored() {
-        CachedGate gate = createTestGate();
+        CachedGateDoor gate = createTestGate();
         gate.setHealthCurrent(50.0);
 
         healthSystem.applyDamage(gate, 0.0);
@@ -96,7 +96,7 @@ public class HealthSystemTest {
     public void testApplyContinuousDamageReducesHealth() {
         // Unlike applyDamage, the non-lethal path never touches BukkitRunnable (no per-tick
         // persistence - see HealthSystem.applyContinuousDamage), so this can run un-Disabled.
-        CachedGate gate = createTestGate();
+        CachedGateDoor gate = createTestGate();
         gate.setIsInvincible(false);
         gate.setHealthCurrent(100.0);
 
@@ -107,7 +107,7 @@ public class HealthSystemTest {
 
     @Test
     public void testApplyContinuousDamageIgnoredWhenInvincible() {
-        CachedGate gate = createTestGate();
+        CachedGateDoor gate = createTestGate();
         gate.setIsInvincible(true);
         gate.setHealthCurrent(100.0);
 
@@ -118,7 +118,7 @@ public class HealthSystemTest {
 
     @Test
     public void testApplyContinuousDamageIgnoredWhenAlreadyDestroyed() {
-        CachedGate gate = createTestGate();
+        CachedGateDoor gate = createTestGate();
         gate.setIsDestroyed(true);
         gate.setHealthCurrent(0.0);
 
@@ -129,7 +129,7 @@ public class HealthSystemTest {
 
     @Test
     public void testApplyContinuousDamageIgnoresNonPositiveAmount() {
-        CachedGate gate = createTestGate();
+        CachedGateDoor gate = createTestGate();
         gate.setHealthCurrent(50.0);
 
         healthSystem.applyContinuousDamage(gate, 0.0);
@@ -141,7 +141,7 @@ public class HealthSystemTest {
     @Test
     @Disabled("Requires Bukkit runtime for BukkitRunnable (destroyGate path)")
     public void testApplyContinuousDamageDestroysGateAtZeroHealth() {
-        CachedGate gate = createTestGate();
+        CachedGateDoor gate = createTestGate();
         gate.setIsInvincible(false);
         gate.setHealthCurrent(5.0);
 
@@ -154,7 +154,7 @@ public class HealthSystemTest {
     @Test
     @Disabled("Requires Bukkit runtime for BukkitRunnable")
     public void testDestroyGateUpdatesState() {
-        CachedGate gate = createTestGate();
+        CachedGateDoor gate = createTestGate();
         gate.setHealthCurrent(100.0);
         gate.setIsActive(true);
         gate.setIsDestroyed(false);
@@ -170,7 +170,7 @@ public class HealthSystemTest {
 
     @Test
     public void testDestroyGateDoesNotDoubleDestroy() {
-        CachedGate gate = createTestGate();
+        CachedGateDoor gate = createTestGate();
         gate.setIsDestroyed(true);
 
         // Should not throw exception or change state
@@ -182,7 +182,7 @@ public class HealthSystemTest {
     @Test
     @Disabled("Requires Bukkit runtime for Bukkit.broadcast")
     public void testRespawnGateRestoresHealth() {
-        CachedGate gate = createTestGate();
+        CachedGateDoor gate = createTestGate();
         gate.setIsDestroyed(true);
         gate.setHealthCurrent(0.0);
         gate.setHealthMax(100.0);
@@ -197,7 +197,7 @@ public class HealthSystemTest {
 
     @Test
     public void testRespawnGateOnlyWorksForDestroyedGates() {
-        CachedGate gate = createTestGate();
+        CachedGateDoor gate = createTestGate();
         gate.setIsDestroyed(false);
         gate.setHealthCurrent(50.0);
 
@@ -210,9 +210,10 @@ public class HealthSystemTest {
     /**
      * Create a test gate with minimal configuration.
      */
-    private CachedGate createTestGate() {
-        return new CachedGate(
+    private CachedGateDoor createTestGate() {
+        return new CachedGateDoor(
             1,                              // id
+            1,                              // gateStructureId
             "TestGate",                    // name
             "SLIDING",                     // gateType
             "VERTICAL",                    // motionType

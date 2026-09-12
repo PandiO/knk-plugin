@@ -1,9 +1,9 @@
 package net.knightsandkings.knk.paper.gates;
 
-import net.knightsandkings.knk.api.GateStructuresApi;
+import net.knightsandkings.knk.api.GateDoorsApi;
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.gates.GateFrameCalculator;
 import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.core.gates.GateSpatialIndex;
@@ -59,7 +59,7 @@ public class GateAnimationTask extends BukkitRunnable {
     private final World world;
     private final Material fallbackMaterial;
     private final WorldGuardIntegration worldGuardIntegration;
-    private final GateStructuresApi gateStructuresApi;
+    private final GateDoorsApi gateDoorsApi;
     private final Plugin plugin;
     private final GateDisplayManager displayManager;
     // Mechanism 1 kill switch (Decision 5, ROTATION_GAP_FILL_DESIGN.md): default on, but lets an
@@ -81,27 +81,27 @@ public class GateAnimationTask extends BukkitRunnable {
      * @param world The world to place blocks in
      * @param fallbackMaterial Fallback material if block data is corrupted
      * @param worldGuardIntegration WorldGuard integration for region sync
-     * @param gateStructuresApi API client used to persist state once an animation completes
+     * @param gateDoorsApi API client used to persist state once an animation completes
      * @param plugin Plugin instance for scheduling the async persistence call
      * @param displayManager Manager used to refresh the gate's info display when its status changes
      */
     public GateAnimationTask(GateManager gateManager, World world, Material fallbackMaterial,
-                             WorldGuardIntegration worldGuardIntegration, GateStructuresApi gateStructuresApi,
+                             WorldGuardIntegration worldGuardIntegration, GateDoorsApi gateDoorsApi,
                              Plugin plugin, GateDisplayManager displayManager) {
-        this(gateManager, world, fallbackMaterial, worldGuardIntegration, gateStructuresApi, plugin, displayManager, true);
+        this(gateManager, world, fallbackMaterial, worldGuardIntegration, gateDoorsApi, plugin, displayManager, true);
     }
 
     /**
      * @param rasterizationEnabled Mechanism 1 kill switch - see {@code gates.rotationGapFill.rasterization-enabled}
      */
     public GateAnimationTask(GateManager gateManager, World world, Material fallbackMaterial,
-                             WorldGuardIntegration worldGuardIntegration, GateStructuresApi gateStructuresApi,
+                             WorldGuardIntegration worldGuardIntegration, GateDoorsApi gateDoorsApi,
                              Plugin plugin, GateDisplayManager displayManager, boolean rasterizationEnabled) {
         this.gateManager = gateManager;
         this.world = world;
         this.fallbackMaterial = fallbackMaterial != null ? fallbackMaterial : Material.STONE;
         this.worldGuardIntegration = worldGuardIntegration;
-        this.gateStructuresApi = gateStructuresApi;
+        this.gateDoorsApi = gateDoorsApi;
         this.plugin = plugin;
         this.displayManager = displayManager;
         this.rasterizationEnabled = rasterizationEnabled;
@@ -114,9 +114,9 @@ public class GateAnimationTask extends BukkitRunnable {
         checkServerLag();
 
         // Get all gates
-        Map<Integer, CachedGate> gates = gateManager.getAllGates();
+        Map<Integer, CachedGateDoor> gates = gateManager.getAllGates();
 
-        for (CachedGate gate : gates.values()) {
+        for (CachedGateDoor gate : gates.values()) {
             if (!gate.getWorldName().isBlank() && !gate.getWorldName().equals(world.getName())) {
                 continue;
             }
@@ -151,10 +151,11 @@ public class GateAnimationTask extends BukkitRunnable {
                 gate.setAnimationStartTime(gate.getAnimationStartTime() + MS_PER_TICK);
             }
 
-            // Skip if gate is inactive or destroyed
-            if (!gate.isActive() || gate.isDestroyed()) {
+            // Skip if gate is inactive or destroyed (decision 5.0-B: a structure-level override
+            // takes effect immediately, so this checks the effective value, not the door's own).
+            if (!gate.isEffectivelyActive() || gate.isEffectivelyDestroyed()) {
                 LOGGER.warning("[GateAnimation] Skipping gate '" + gate.getName() + "' (ID: " + gate.getId()
-                    + ") because it is " + (!gate.isActive() ? "inactive" : "destroyed") + ".");
+                    + ") because it is " + (!gate.isEffectivelyActive() ? "inactive" : "destroyed") + ".");
                 continue;
             }
 
@@ -227,7 +228,7 @@ public class GateAnimationTask extends BukkitRunnable {
      * @param gate The gate to update
      * @param frame The current animation frame
      */
-    private void updateGateBlocks(CachedGate gate, int frame) {
+    private void updateGateBlocks(CachedGateDoor gate, int frame) {
         if (gate == null || gate.getBlocks() == null) {
             return;
         }
@@ -341,7 +342,7 @@ public class GateAnimationTask extends BukkitRunnable {
      * Persists the transition immediately so admins/players see it without waiting for the
      * periodic GateStateSyncTask sweep.
      */
-    private void handleJamTracking(CachedGate gate, int blockedCount) {
+    private void handleJamTracking(CachedGateDoor gate, int blockedCount) {
         if (blockedCount > 0) {
             int consecutiveTicks = jamTickCounters.merge(gate.getId(), 1, Integer::sum);
             if (consecutiveTicks >= JAM_THRESHOLD_TICKS && !gate.isJammed()) {
@@ -364,7 +365,7 @@ public class GateAnimationTask extends BukkitRunnable {
     /**
      * Play the gate's open/close sound once, the tick it starts animating.
      */
-    private void playGateSoundIfDue(CachedGate gate, AnimationState state, boolean justStarted) {
+    private void playGateSoundIfDue(CachedGateDoor gate, AnimationState state, boolean justStarted) {
         if (!justStarted) {
             return;
         }
@@ -376,7 +377,7 @@ public class GateAnimationTask extends BukkitRunnable {
     /**
      * Play a gate open/close sound effect at the gate's anchor point.
      */
-    private void playGateSound(CachedGate gate, Sound sound) {
+    private void playGateSound(CachedGateDoor gate, Sound sound) {
         Vector anchor = gate.getAnchorPoint();
         if (anchor == null) {
             return;
@@ -396,7 +397,7 @@ public class GateAnimationTask extends BukkitRunnable {
      * drift the per-tick move() calls might have accumulated (e.g. under a lag-induced frame
      * skip, where the assumed single-step "previous frame" doesn't match the actual last frame).
      */
-    private void resyncSpatialIndex(CachedGate gate, int frame) {
+    private void resyncSpatialIndex(CachedGateDoor gate, int frame) {
         List<Vector> positions = GateRestingFramePlacer.restingFramePositions(gate, frame, rasterizationEnabled);
 
         GateSpatialIndex spatialIndex = gateManager.getSpatialIndex();
@@ -404,7 +405,7 @@ public class GateAnimationTask extends BukkitRunnable {
         spatialIndex.putAll(gate.getWorldName(), positions, gate.getId());
     }
 
-    private void handleEntityPush(CachedGate gate, int currentFrame) {
+    private void handleEntityPush(CachedGateDoor gate, int currentFrame) {
         Vector anchor = gate.getAnchorPoint();
         if (anchor == null) {
             return;
@@ -430,7 +431,7 @@ public class GateAnimationTask extends BukkitRunnable {
         }
     }
 
-    private double entitySearchRadius(CachedGate gate) {
+    private double entitySearchRadius(CachedGateDoor gate) {
         int span = Math.max(gate.getGeometryWidth(), Math.max(gate.getGeometryHeight(), gate.getGeometryDepth()));
         Vector motion = gate.getMotionVector();
         double travel = motion != null ? motion.length() : 0.0;
@@ -443,7 +444,7 @@ public class GateAnimationTask extends BukkitRunnable {
      * 
      * @param gate The gate that finished opening
      */
-    private void finishOpening(CachedGate gate) {
+    private void finishOpening(CachedGateDoor gate) {
         gate.setCurrentState(AnimationState.OPEN);
         gate.setCurrentFrame(gate.getAnimationDurationTicks());
 
@@ -482,7 +483,7 @@ public class GateAnimationTask extends BukkitRunnable {
      * 
      * @param gate The gate that finished closing
      */
-    private void finishClosing(CachedGate gate) {
+    private void finishClosing(CachedGateDoor gate) {
         gate.setCurrentState(AnimationState.CLOSED);
         gate.setCurrentFrame(0);
 
@@ -511,22 +512,21 @@ public class GateAnimationTask extends BukkitRunnable {
      * Persist the gate's terminal state (opened/destroyed) to the API asynchronously,
      * so the DB stays in sync as soon as an open/close animation completes.
      */
-    private void persistGateState(CachedGate gate) {
-        if (gateStructuresApi == null) {
+    private void persistGateState(CachedGateDoor gate) {
+        if (gateDoorsApi == null) {
             return;
         }
 
-        boolean isOpened = gate.getCurrentState() == AnimationState.OPEN;
         boolean isDestroyed = gate.isDestroyed();
-        boolean isJammed = gate.isJammed();
+        String openedState = GateDoorOpenStateMapper.toWireValue(gate.getCurrentState(), gate.isJammed());
 
         new BukkitRunnable() {
             @Override
             public void run() {
                 try {
-                    gateStructuresApi.updateGateState(gate.getId(), isOpened, isDestroyed, isJammed).join();
+                    gateDoorsApi.updateState(gate.getId(), openedState, isDestroyed).join();
                     LOGGER.fine("Gate state persisted to API: " + gate.getName() +
-                        " (opened=" + isOpened + ", destroyed=" + isDestroyed + ", jammed=" + isJammed + ")");
+                        " (openedState=" + openedState + ", destroyed=" + isDestroyed + ")");
                 } catch (Exception e) {
                     LOGGER.warning("Failed to persist gate state for '" + gate.getName() + "': " + e.getMessage());
                 }

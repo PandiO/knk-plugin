@@ -1,6 +1,6 @@
 package net.knightsandkings.knk.paper.gates;
 
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.block.Block;
@@ -25,7 +25,7 @@ public final class EntityEvacuator {
     /**
      * @return True if the entity was teleported to a safe spot outside the gate plane
      */
-    public static boolean evacuate(Entity entity, CachedGate gate) {
+    public static boolean evacuate(Entity entity, CachedGateDoor gate) {
         if (entity == null || gate == null || entity.isDead()) {
             return false;
         }
@@ -60,7 +60,7 @@ public final class EntityEvacuator {
 
     /** Package-private (not private) so it's directly unit-testable without a live Bukkit World,
      *  matching GatePassThroughService's/GateDisplayManager's pure-geometry-helper convention. */
-    static Vector resolveFaceAxis(CachedGate gate) {
+    static Vector resolveFaceAxis(CachedGateDoor gate) {
         Vector axis = EntityPusher.vectorFromFaceDirection(gate.getFaceDirection());
         if (axis == null || axis.lengthSquared() == 0) {
             axis = gate.getNAxis();

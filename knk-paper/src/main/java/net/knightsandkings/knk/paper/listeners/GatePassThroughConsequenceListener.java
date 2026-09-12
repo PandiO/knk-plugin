@@ -1,6 +1,6 @@
 package net.knightsandkings.knk.paper.listeners;
 
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.paper.events.GateDoorInteractEvent;
 import net.knightsandkings.knk.paper.gates.GatePassThroughService;
@@ -34,11 +34,11 @@ public class GatePassThroughConsequenceListener implements Listener {
             return;
         }
 
-        CachedGate gate = event.getGate();
+        CachedGateDoor gate = event.getGate();
         Player player = event.getPlayer();
         boolean isAdmin = player.hasPermission("knk.gate.admin");
 
-        if (!gate.isAllowPassThrough() && !isAdmin) {
+        if (!gate.isEffectivelyAllowPassThrough() && !isAdmin) {
             return;
         }
         if (!isAdmin && !player.hasPermission("knk.gate.passthrough.use")) {

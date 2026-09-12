@@ -8,7 +8,7 @@ import com.sk89q.worldguard.protection.managers.RegionManager;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import com.sk89q.worldguard.protection.regions.RegionContainer;
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import org.bukkit.World;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -39,7 +39,7 @@ public class WorldGuardIntegration {
      * @param gate The gate being animated
      * @param newState The new animation state (OPEN or CLOSED)
      */
-    public void syncRegions(CachedGate gate, AnimationState newState, World world) {
+    public void syncRegions(CachedGateDoor gate, AnimationState newState, World world) {
         if (regionContainer == null || world == null) {
             LOGGER.fine("Region container not initialized, skipping sync");
             return;

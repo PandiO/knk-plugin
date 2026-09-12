@@ -1,6 +1,6 @@
 package net.knightsandkings.knk.paper.gates;
 
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import org.bukkit.util.Vector;
 import org.junit.jupiter.api.Test;
 
@@ -18,11 +18,11 @@ class GateDisplayManagerTest {
 
     @Test
     void resolveFaceDirectionVectorUsesDiagonalFaceDirectionDirectly() {
-        CachedGate gate = new CachedGate(
-            1, "DiagonalGate", "SLIDING", "VERTICAL", "PLANE_GRID",
+        CachedGateDoor gate = new CachedGateDoor(
+            1, 1, "DiagonalGate", "SLIDING", "VERTICAL", "PLANE_GRID",
             60, 1, new Vector(0, 0, 0), 4, 5, 1,
             500.0, 500.0, true, false, true, 90,
-            "south-east"
+            "SOUTH_EAST"
         );
 
         Vector direction = GateDisplayManager.resolveFaceDirectionVector(gate);
@@ -35,8 +35,8 @@ class GateDisplayManagerTest {
 
     @Test
     void resolveFaceDirectionVectorFallsBackToDiagonalNAxisWhenFaceDirectionMissing() {
-        CachedGate gate = new CachedGate(
-            2, "NoFaceDirectionGate", "SLIDING", "VERTICAL", "PLANE_GRID",
+        CachedGateDoor gate = new CachedGateDoor(
+            2, 2, "NoFaceDirectionGate", "SLIDING", "VERTICAL", "PLANE_GRID",
             60, 1, new Vector(0, 0, 0), 4, 5, 1,
             500.0, 500.0, true, false, true, 90,
             ""
@@ -54,8 +54,8 @@ class GateDisplayManagerTest {
 
     @Test
     void resolveFaceDirectionVectorReturnsZeroVectorWhenNothingResolvable() {
-        CachedGate gate = new CachedGate(
-            3, "NoDirectionGate", "SLIDING", "VERTICAL", "PLANE_GRID",
+        CachedGateDoor gate = new CachedGateDoor(
+            3, 3, "NoDirectionGate", "SLIDING", "VERTICAL", "PLANE_GRID",
             60, 1, new Vector(0, 0, 0), 4, 5, 1,
             500.0, 500.0, true, false, true, 90,
             ""

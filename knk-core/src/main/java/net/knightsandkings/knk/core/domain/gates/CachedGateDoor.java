@@ -8,18 +8,33 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Cached representation of a gate structure with precomputed animation data.
- * This model is optimized for runtime animation calculations.
+ * Cached representation of one gate door with precomputed animation data. This model is
+ * optimized for runtime animation calculations.
+ *
+ * <p>Introduced by item 5 (docs/features/gate-structure-animation/
+ * GATESTRUCTURE_QOL_IMPLEMENTATION_PLAN.md) as the per-door split of what used to be a single
+ * "one movable door per gate structure" model (formerly named {@code CachedGate} - a "gate" in
+ * this plugin's commands/UX has always meant one animated door, so that terminology carries over
+ * unchanged; only the class name and its new structure back-pointer are new). A handful of fields
+ * can be cascade-overridden from the parent {@link CachedGateStructure} - see the
+ * {@code isEffectivelyXxx()}/{@code getEffectiveXxx()} accessors below (decision 5.0-B).
  */
-public class CachedGate {
+public class CachedGateDoor {
     // === Core Identity ===
     private final int id;
+    private final int gateStructureId;
     private final String name;
     private final String gateType;
     private final String motionType;
     private final String geometryDefinitionMode;
     private final String faceDirection;
     private String worldName;
+
+    // Back-pointer to this door's parent structure, for override resolution. Set once by
+    // GateLoaderAdapter after building both objects; null only in tests that don't care about
+    // structure-level overrides, in which case every isEffectivelyXxx()/getEffectiveXxx()
+    // accessor below simply falls back to this door's own value - i.e. "no override" behavior.
+    private CachedGateStructure structure;
 
     // === Animation State (mutable) ===
     private AnimationState currentState;
@@ -87,7 +102,7 @@ public class CachedGate {
     // === Rotation (for DRAWBRIDGE/DOUBLE_DOORS) ===
     private final int rotationMaxAngleDegrees;
 
-    // === WorldGuard Integration ===
+    // === WorldGuard-named-but-repurposed (currently unused; see item 6) ===
     private String regionClosedId;
     private String regionOpenedId;
 
@@ -105,27 +120,30 @@ public class CachedGate {
     private Vector infoDisplayLocation;
     private String gateNameDisplayMode = "ALWAYS";
     private String statusDisplayMode = "ALWAYS";
-
-    // === Siege Integration ===
-    private Integer currentSiegeId;
+    // Decision 5.0-D: per-door only, no structure-level override - gates this door's own name
+    // line in the combined structure+door hover (GateDisplayManager).
+    private String doorNameDisplayMode = "ALWAYS";
 
     // === Pass-Through ===
     private boolean allowPassThrough;
     private int passThroughDurationSeconds = 2;
 
     // === Continuous Damage (Fire) ===
+    private boolean allowContinuousDamage = true;
+    private double continuousDamageMultiplier = 1.0;
     // World-block position (integer-valued Vector) -> epoch millis when the fire on that block
     // expires. Populated by GateFireSystem.igniteBlock, drained by GateFireSystem.tick. Only
     // meaningful while CLOSED - that's the only state where a door block's world position is
     // stable enough for a burn to track a specific cell.
     private final Map<Vector, Long> burningBlocks = new HashMap<>();
 
-    public CachedGate(int id, String name, String gateType, String motionType, String geometryDefinitionMode,
-                      int animationDurationTicks, int animationTickRate,
+    public CachedGateDoor(int id, int gateStructureId, String name, String gateType, String motionType,
+                      String geometryDefinitionMode, int animationDurationTicks, int animationTickRate,
                       Vector anchorPoint, int geometryWidth, int geometryHeight, int geometryDepth,
-                      double healthCurrent, double healthMax, boolean isActive, boolean isDestroyed, 
+                      double healthCurrent, double healthMax, boolean isActive, boolean isDestroyed,
                       boolean isInvincible, int rotationMaxAngleDegrees, String faceDirection) {
         this.id = id;
+        this.gateStructureId = gateStructureId;
         this.name = name;
         this.gateType = gateType;
         this.motionType = motionType;
@@ -161,6 +179,10 @@ public class CachedGate {
         return id;
     }
 
+    public int getGateStructureId() {
+        return gateStructureId;
+    }
+
     public String getName() {
         return name;
     }
@@ -183,6 +205,24 @@ public class CachedGate {
 
     public String getWorldName() {
         return worldName;
+    }
+
+    public CachedGateStructure getStructure() {
+        return structure;
+    }
+
+    public void setStructure(CachedGateStructure structure) {
+        this.structure = structure;
+    }
+
+    /** The parent structure's own name, or "" if this door has no structure attached (tests). */
+    public String getStructureName() {
+        return structure != null ? structure.getName() : "";
+    }
+
+    /** Delegates to the parent structure - Siege capture is a whole-structure event (decision 5.0-A). */
+    public Integer getCurrentSiegeId() {
+        return structure != null ? structure.getCurrentSiegeId() : null;
     }
 
     public AnimationState getCurrentState() {
@@ -301,6 +341,77 @@ public class CachedGate {
         return isJammed;
     }
 
+    /**
+     * Effective active state (decision 5.0-B): the structure-level IsActiveOverride wins when
+     * set, otherwise this door's own value. Use this (not {@link #isActive()}) everywhere the
+     * check gates a behavior - animation, damage, display - so a structure-wide override takes
+     * effect immediately for every door without a per-door write.
+     */
+    public boolean isEffectivelyActive() {
+        Boolean override = structure != null ? structure.getIsActiveOverride() : null;
+        return override != null ? override : isActive;
+    }
+
+    public boolean isEffectivelyDestroyed() {
+        Boolean override = structure != null ? structure.getIsDestroyedOverride() : null;
+        return override != null ? override : isDestroyed;
+    }
+
+    public boolean isEffectivelyInvincible() {
+        Boolean override = structure != null ? structure.getIsInvincibleOverride() : null;
+        return override != null ? override : isInvincible;
+    }
+
+    public boolean isEffectivelyCanRespawn() {
+        Boolean override = structure != null ? structure.getCanRespawnOverride() : null;
+        return override != null ? override : canRespawn;
+    }
+
+    public boolean isEffectivelyAllowPassThrough() {
+        Boolean override = structure != null ? structure.getAllowPassThroughOverride() : null;
+        return override != null ? override : allowPassThrough;
+    }
+
+    public int getEffectivePassThroughDurationSeconds() {
+        Integer override = structure != null ? structure.getPassThroughDurationSecondsOverride() : null;
+        return override != null ? override : passThroughDurationSeconds;
+    }
+
+    public boolean isEffectivelyShowHealthDisplay() {
+        Boolean override = structure != null ? structure.getShowHealthDisplayOverride() : null;
+        return override != null ? override : showHealthDisplay;
+    }
+
+    public String getEffectiveHealthDisplayMode() {
+        String override = structure != null ? structure.getHealthDisplayModeOverride() : null;
+        return override != null ? override : healthDisplayMode;
+    }
+
+    public int getEffectiveHealthDisplayYOffset() {
+        Integer override = structure != null ? structure.getHealthDisplayYOffsetOverride() : null;
+        return override != null ? override : healthDisplayYOffset;
+    }
+
+    public String getEffectiveGateNameDisplayMode() {
+        String override = structure != null ? structure.getGateNameDisplayModeOverride() : null;
+        return override != null ? override : gateNameDisplayMode;
+    }
+
+    public String getEffectiveStatusDisplayMode() {
+        String override = structure != null ? structure.getStatusDisplayModeOverride() : null;
+        return override != null ? override : statusDisplayMode;
+    }
+
+    public boolean isEffectivelyAllowContinuousDamage() {
+        Boolean override = structure != null ? structure.getAllowContinuousDamageOverride() : null;
+        return override != null ? override : allowContinuousDamage;
+    }
+
+    public double getEffectiveContinuousDamageMultiplier() {
+        Double override = structure != null ? structure.getContinuousDamageMultiplierOverride() : null;
+        return override != null ? override : continuousDamageMultiplier;
+    }
+
     public int getRotationMaxAngleDegrees() {
         return rotationMaxAngleDegrees;
     }
@@ -349,8 +460,8 @@ public class CachedGate {
         return statusDisplayMode;
     }
 
-    public Integer getCurrentSiegeId() {
-        return currentSiegeId;
+    public String getDoorNameDisplayMode() {
+        return doorNameDisplayMode;
     }
 
     public boolean isAllowPassThrough() {
@@ -359,6 +470,14 @@ public class CachedGate {
 
     public int getPassThroughDurationSeconds() {
         return passThroughDurationSeconds;
+    }
+
+    public boolean isAllowContinuousDamage() {
+        return allowContinuousDamage;
+    }
+
+    public double getContinuousDamageMultiplier() {
+        return continuousDamageMultiplier;
     }
 
     // === Setters for Mutable State ===
@@ -447,8 +566,8 @@ public class CachedGate {
         this.statusDisplayMode = statusDisplayMode != null ? statusDisplayMode : "ALWAYS";
     }
 
-    public void setCurrentSiegeId(Integer currentSiegeId) {
-        this.currentSiegeId = currentSiegeId;
+    public void setDoorNameDisplayMode(String doorNameDisplayMode) {
+        this.doorNameDisplayMode = doorNameDisplayMode != null ? doorNameDisplayMode : "ALWAYS";
     }
 
     public void setAllowPassThrough(boolean allowPassThrough) {
@@ -457,6 +576,14 @@ public class CachedGate {
 
     public void setPassThroughDurationSeconds(int passThroughDurationSeconds) {
         this.passThroughDurationSeconds = passThroughDurationSeconds;
+    }
+
+    public void setAllowContinuousDamage(boolean allowContinuousDamage) {
+        this.allowContinuousDamage = allowContinuousDamage;
+    }
+
+    public void setContinuousDamageMultiplier(double continuousDamageMultiplier) {
+        this.continuousDamageMultiplier = continuousDamageMultiplier;
     }
 
     // === Setters for Precomputed Data ===

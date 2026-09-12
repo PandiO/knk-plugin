@@ -1,7 +1,7 @@
 package net.knightsandkings.knk.paper.gates;
 
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.gates.GateFrameCalculator;
 import org.bukkit.entity.Entity;
 import org.bukkit.util.BoundingBox;
@@ -13,11 +13,11 @@ import org.bukkit.util.Vector;
 public class CollisionPredictor {
     private static final int DEFAULT_LOOKAHEAD_FRAMES = 5;
 
-    public static int predictCollision(CachedGate gate, Entity entity, int currentFrame) {
+    public static int predictCollision(CachedGateDoor gate, Entity entity, int currentFrame) {
         return predictCollision(gate, entity, currentFrame, DEFAULT_LOOKAHEAD_FRAMES);
     }
 
-    public static int predictCollision(CachedGate gate, Entity entity, int currentFrame, int lookaheadFrames) {
+    public static int predictCollision(CachedGateDoor gate, Entity entity, int currentFrame, int lookaheadFrames) {
         if (gate == null || entity == null || lookaheadFrames <= 0) {
             return Integer.MAX_VALUE;
         }

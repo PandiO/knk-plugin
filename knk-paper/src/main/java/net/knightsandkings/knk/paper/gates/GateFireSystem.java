@@ -1,7 +1,7 @@
 package net.knightsandkings.knk.paper.gates;
 
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.gates.GateManager;
 import org.bukkit.Bukkit;
 import org.bukkit.Particle;
@@ -51,7 +51,7 @@ public class GateFireSystem {
      * Set a gate's door block on fire (or refresh its burn if already alight), and play an
      * immediate ignite effect at the block. No-ops for a null gate/block.
      */
-    public void igniteBlock(CachedGate gate, Block block) {
+    public void igniteBlock(CachedGateDoor gate, Block block) {
         if (gate == null || block == null) {
             return;
         }
@@ -75,7 +75,7 @@ public class GateFireSystem {
      */
     public void tick() {
         long now = System.currentTimeMillis();
-        for (CachedGate gate : gateManager.getAllGates().values()) {
+        for (CachedGateDoor gate : gateManager.getAllGates().values()) {
             if (gate.getBurningBlocks().isEmpty()) {
                 continue;
             }
@@ -83,10 +83,10 @@ public class GateFireSystem {
         }
     }
 
-    private void processGateFire(CachedGate gate, long now) {
+    private void processGateFire(CachedGateDoor gate, long now) {
         var burning = gate.getBurningBlocks();
 
-        if (gate.isDestroyed() || !gate.isActive() || gate.getCurrentState() != AnimationState.CLOSED) {
+        if (gate.isEffectivelyDestroyed() || !gate.isEffectivelyActive() || gate.getCurrentState() != AnimationState.CLOSED) {
             burning.clear();
             return;
         }
@@ -107,7 +107,7 @@ public class GateFireSystem {
         }
     }
 
-    private void spawnBurnParticles(CachedGate gate, Iterable<Vector> positions) {
+    private void spawnBurnParticles(CachedGateDoor gate, Iterable<Vector> positions) {
         World world = Bukkit.getWorld(gate.getWorldName());
         if (world == null) {
             return;

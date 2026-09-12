@@ -1,9 +1,10 @@
 package net.knightsandkings.knk.paper.commands;
 
 import net.knightsandkings.knk.api.GateStructuresApi;
+import net.knightsandkings.knk.api.GateDoorsApi;
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.paper.gates.DistrictGateLoader;
@@ -28,6 +29,7 @@ class GateCommandTest {
     private GateCommand gateCommand;
     private GateManager mockGateManager;
     private GateStructuresApi mockGateStructuresApi;
+    private GateDoorsApi mockGateDoorsApi;
     private CommandSender mockSender;
     private Player mockPlayer;
     private List<String> sentMessages;
@@ -36,7 +38,8 @@ class GateCommandTest {
     void setUp() {
         mockGateManager = mock(GateManager.class);
         mockGateStructuresApi = mock(GateStructuresApi.class);
-        gateCommand = new GateCommand(mockGateManager, mockGateStructuresApi, mock(UserManager.class), mock(UsersCommandApi.class), mock(DistrictGateLoader.class));
+        mockGateDoorsApi = mock(GateDoorsApi.class);
+        gateCommand = new GateCommand(mockGateManager, mockGateStructuresApi, mockGateDoorsApi, mock(UserManager.class), mock(UsersCommandApi.class), mock(DistrictGateLoader.class));
         mockSender = mock(CommandSender.class);
         mockPlayer = mock(Player.class);
         sentMessages = new ArrayList<>();
@@ -55,11 +58,11 @@ class GateCommandTest {
         // Default permissions
         when(mockSender.hasPermission(anyString())).thenReturn(true);
         when(mockPlayer.hasPermission(anyString())).thenReturn(true);
-        when(mockGateStructuresApi.updateOperationalSettings(anyInt(), anyBoolean(), anyBoolean()))
+        when(mockGateDoorsApi.updateOperationalSettings(anyInt(), anyBoolean(), anyBoolean()))
             .thenReturn(java.util.concurrent.CompletableFuture.completedFuture(null));
-        when(mockGateStructuresApi.updateGateHealth(anyInt(), anyDouble()))
+        when(mockGateDoorsApi.updateHealth(anyInt(), anyDouble()))
             .thenReturn(java.util.concurrent.CompletableFuture.completedFuture(null));
-        when(mockGateStructuresApi.updateGateState(anyInt(), anyBoolean(), anyBoolean(), anyBoolean()))
+        when(mockGateDoorsApi.updateState(anyInt(), anyString(), anyBoolean()))
             .thenReturn(java.util.concurrent.CompletableFuture.completedFuture(null));
     }
 
@@ -67,7 +70,7 @@ class GateCommandTest {
 
     @Test
     void testExecuteOpen_Success() {
-        CachedGate gate = createTestGate(1, "TestGate", true, false);
+        CachedGateDoor gate = createTestGate(1, "TestGate", true, false);
         when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
         when(mockGateManager.openGate(1)).thenReturn(true);
 
@@ -82,7 +85,7 @@ class GateCommandTest {
 
     @Test
     void testExecuteOpen_ResolvesGateById() {
-        CachedGate gate = createTestGate(10, "Keep Gate", true, false);
+        CachedGateDoor gate = createTestGate(10, "Keep Gate", true, false);
         when(mockGateManager.getGate(10)).thenReturn(gate);
         when(mockGateManager.openGate(10)).thenReturn(true);
 
@@ -95,7 +98,7 @@ class GateCommandTest {
 
     @Test
     void testExecuteOpen_ResolvesMultiWordGateName() {
-        CachedGate gate = createTestGate(10, "Keep Gate Test", true, false);
+        CachedGateDoor gate = createTestGate(10, "Keep Gate Test", true, false);
         when(mockGateManager.getGateByName("Keep Gate Test")).thenReturn(gate);
         when(mockGateManager.openGate(10)).thenReturn(true);
 
@@ -108,7 +111,7 @@ class GateCommandTest {
 
     @Test
     void testOnCommand_DelegatesOpen() {
-        CachedGate gate = createTestGate(1, "TestGate", true, false);
+        CachedGateDoor gate = createTestGate(1, "TestGate", true, false);
         when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
         when(mockGateManager.openGate(1)).thenReturn(true);
 
@@ -131,7 +134,7 @@ class GateCommandTest {
 
     @Test
     void testExecuteOpen_GateNotActive() {
-        CachedGate gate = createTestGate(1, "TestGate", false, false);
+        CachedGateDoor gate = createTestGate(1, "TestGate", false, false);
         when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
 
         boolean result = gateCommand.executeOpen(mockSender, new String[]{"TestGate"});
@@ -142,7 +145,7 @@ class GateCommandTest {
 
     @Test
     void testExecuteOpen_GateDestroyed() {
-        CachedGate gate = createTestGate(1, "TestGate", true, true);
+        CachedGateDoor gate = createTestGate(1, "TestGate", true, true);
         when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
 
         boolean result = gateCommand.executeOpen(mockSender, new String[]{"TestGate"});
@@ -153,7 +156,7 @@ class GateCommandTest {
 
     @Test
     void testExecuteOpen_AlreadyOpen() {
-        CachedGate gate = createTestGate(1, "TestGate", true, false);
+        CachedGateDoor gate = createTestGate(1, "TestGate", true, false);
         when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
         when(mockGateManager.openGate(1)).thenReturn(false);
 
@@ -165,7 +168,7 @@ class GateCommandTest {
 
     @Test
     void testExecuteClose_Success() {
-        CachedGate gate = createTestGate(1, "TestGate", true, false);
+        CachedGateDoor gate = createTestGate(1, "TestGate", true, false);
         when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
         when(mockGateManager.closeGate(1)).thenReturn(true);
 
@@ -179,7 +182,7 @@ class GateCommandTest {
 
     @Test
     void testExecuteInfo_Success() {
-        CachedGate gate = createTestGate(1, "TestGate", true, false);
+        CachedGateDoor gate = createTestGate(1, "TestGate", true, false);
         when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
 
         boolean result = gateCommand.executeInfo(mockSender, new String[]{"TestGate"});
@@ -205,7 +208,7 @@ class GateCommandTest {
 
     @Test
     void testExecuteAdminHealth_Success() {
-        CachedGate gate = createTestGate(1, "TestGate", true, false);
+        CachedGateDoor gate = createTestGate(1, "TestGate", true, false);
         when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
 
         boolean result = gateCommand.executeAdminHealth(mockSender, new String[]{"TestGate", "250"});
@@ -217,7 +220,7 @@ class GateCommandTest {
 
     @Test
     void testExecuteAdminHealth_ResolvesMultiWordGateName() {
-        CachedGate gate = createTestGate(10, "Keep Gate Test", true, false);
+        CachedGateDoor gate = createTestGate(10, "Keep Gate Test", true, false);
         when(mockGateManager.getGateByName("Keep Gate Test")).thenReturn(gate);
 
         boolean result = gateCommand.executeAdminHealth(mockSender, new String[]{"Keep", "Gate", "Test", "250"});
@@ -229,31 +232,31 @@ class GateCommandTest {
 
     @Test
     void testExecuteAdminToggleActive_PersistsChangeById() {
-        CachedGate gate = createTestGate(11, "Keep Gate Test", false, false);
+        CachedGateDoor gate = createTestGate(11, "Keep Gate Test", false, false);
         when(mockGateManager.getGate(11)).thenReturn(gate);
 
         boolean result = gateCommand.executeAdminToggleActive(mockSender, new String[]{"11"});
 
         assertTrue(result);
         assertTrue(gate.isActive());
-        verify(mockGateStructuresApi).updateOperationalSettings(11, true, true);
+        verify(mockGateDoorsApi).updateOperationalSettings(11, true, true);
     }
 
     @Test
     void testExecuteAdminToggleInvincible_ResolvesMultiWordName() {
-        CachedGate gate = createTestGate(11, "Keep Gate Test", true, false);
+        CachedGateDoor gate = createTestGate(11, "Keep Gate Test", true, false);
         when(mockGateManager.getGateByName("Keep Gate Test")).thenReturn(gate);
 
         boolean result = gateCommand.executeAdminToggleInvincible(mockSender, new String[]{"Keep", "Gate", "Test"});
 
         assertTrue(result);
         assertFalse(gate.isInvincible());
-        verify(mockGateStructuresApi).updateOperationalSettings(11, true, false);
+        verify(mockGateDoorsApi).updateOperationalSettings(11, true, false);
     }
 
     @Test
     void testExecuteAdminHealth_InvalidValue() {
-        CachedGate gate = createTestGate(1, "TestGate", true, false);
+        CachedGateDoor gate = createTestGate(1, "TestGate", true, false);
         when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
 
         boolean result = gateCommand.executeAdminHealth(mockSender, new String[]{"TestGate", "invalid"});
@@ -264,7 +267,7 @@ class GateCommandTest {
 
     @Test
     void testExecuteAdminRepair_Success() {
-        CachedGate gate = createTestGate(1, "TestGate", true, true);
+        CachedGateDoor gate = createTestGate(1, "TestGate", true, true);
         gate.setHealthCurrent(100.0);
         when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
 
@@ -292,7 +295,7 @@ class GateCommandTest {
 
     @Test
     void testExecuteAdminTeleport_Success() {
-        CachedGate gate = createTestGate(1, "TestGate", true, false);
+        CachedGateDoor gate = createTestGate(1, "TestGate", true, false);
         when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
         when(mockPlayer.getWorld()).thenReturn(mock(org.bukkit.World.class));
 
@@ -305,7 +308,7 @@ class GateCommandTest {
 
     @Test
     void testExecuteAdminTeleport_NotPlayer() {
-        CachedGate gate = createTestGate(1, "TestGate", true, false);
+        CachedGateDoor gate = createTestGate(1, "TestGate", true, false);
         when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
 
         boolean result = gateCommand.executeAdminTeleport(mockSender, new String[]{"TestGate"});
@@ -319,8 +322,9 @@ class GateCommandTest {
     /**
      * Create a test gate with sensible defaults.
      */
-    private CachedGate createTestGate(int id, String name, boolean isActive, boolean isDestroyed) {
-        CachedGate gate = new CachedGate(
+    private CachedGateDoor createTestGate(int id, String name, boolean isActive, boolean isDestroyed) {
+        CachedGateDoor gate = new CachedGateDoor(
+            id,
             id,
             name,
             "SLIDING",

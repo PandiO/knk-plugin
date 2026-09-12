@@ -1,8 +1,8 @@
 package net.knightsandkings.knk.paper.gates;
 
-import net.knightsandkings.knk.api.GateStructuresApi;
+import net.knightsandkings.knk.api.GateDoorsApi;
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.gates.GateManager;
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
@@ -49,7 +49,7 @@ public class GateStateSyncTask {
     private static final int DEFAULT_HEALTH_CHECK_BATCH_SIZE = 15;
 
     private final GateManager gateManager;
-    private final GateStructuresApi gateStructuresApi;
+    private final GateDoorsApi gateDoorsApi;
     private final Plugin plugin;
     private final long intervalTicks;
     private final Material fallbackMaterial;
@@ -69,22 +69,22 @@ public class GateStateSyncTask {
     // full list in one run.
     private int healthCheckCursor = 0;
 
-    public GateStateSyncTask(GateManager gateManager, GateStructuresApi gateStructuresApi, Plugin plugin,
+    public GateStateSyncTask(GateManager gateManager, GateDoorsApi gateDoorsApi, Plugin plugin,
                               long intervalSeconds, Material fallbackMaterial) {
-        this(gateManager, gateStructuresApi, plugin, intervalSeconds, fallbackMaterial, true);
+        this(gateManager, gateDoorsApi, plugin, intervalSeconds, fallbackMaterial, true);
     }
 
-    public GateStateSyncTask(GateManager gateManager, GateStructuresApi gateStructuresApi, Plugin plugin,
+    public GateStateSyncTask(GateManager gateManager, GateDoorsApi gateDoorsApi, Plugin plugin,
                               long intervalSeconds, Material fallbackMaterial, boolean rasterizationEnabled) {
-        this(gateManager, gateStructuresApi, plugin, intervalSeconds, fallbackMaterial, rasterizationEnabled,
+        this(gateManager, gateDoorsApi, plugin, intervalSeconds, fallbackMaterial, rasterizationEnabled,
             DEFAULT_HEALTH_CHECK_INTERVAL_SECONDS, DEFAULT_HEALTH_CHECK_BATCH_SIZE);
     }
 
-    public GateStateSyncTask(GateManager gateManager, GateStructuresApi gateStructuresApi, Plugin plugin,
+    public GateStateSyncTask(GateManager gateManager, GateDoorsApi gateDoorsApi, Plugin plugin,
                               long intervalSeconds, Material fallbackMaterial, boolean rasterizationEnabled,
                               long healthCheckIntervalSeconds, int healthCheckBatchSize) {
         this.gateManager = gateManager;
-        this.gateStructuresApi = gateStructuresApi;
+        this.gateDoorsApi = gateDoorsApi;
         this.plugin = plugin;
         this.intervalTicks = Math.max(1L, intervalSeconds) * 20L;
         this.fallbackMaterial = fallbackMaterial != null ? fallbackMaterial : Material.STONE;
@@ -130,30 +130,31 @@ public class GateStateSyncTask {
      * Safe to call from any thread; blocks on each API call to guarantee completion (used on shutdown).
      */
     public void persistAllGateStates() {
-        for (CachedGate gate : gateManager.getAllGates().values()) {
+        for (CachedGateDoor gate : gateManager.getAllGates().values()) {
             persistGateState(gate);
         }
     }
 
-    private void persistGateState(CachedGate gate) {
-        if (gateStructuresApi == null || gate == null) {
+    private void persistGateState(CachedGateDoor gate) {
+        if (gateDoorsApi == null || gate == null) {
             return;
         }
 
         // OPENING/CLOSING is transient; persist the state the animation is heading towards.
-        boolean isOpened = gate.getCurrentState() == AnimationState.OPEN
-            || gate.getCurrentState() == AnimationState.OPENING;
+        AnimationState persistedState = gate.getCurrentState() == AnimationState.OPENING
+            ? AnimationState.OPEN : gate.getCurrentState();
+        String openedState = GateDoorOpenStateMapper.toWireValue(persistedState, gate.isJammed());
 
         try {
-            gateStructuresApi.updateGateState(gate.getId(), isOpened, gate.isDestroyed(), gate.isJammed()).join();
+            gateDoorsApi.updateState(gate.getId(), openedState, gate.isDestroyed()).join();
             LOGGER.fine("Gate state synced to API: " + gate.getName() +
-                " (opened=" + isOpened + ", destroyed=" + gate.isDestroyed() + ", jammed=" + gate.isJammed() + ")");
+                " (openedState=" + openedState + ", destroyed=" + gate.isDestroyed() + ")");
         } catch (Exception e) {
             LOGGER.warning("Failed to sync gate state for '" + gate.getName() + "': " + e.getMessage());
         }
 
         try {
-            gateStructuresApi.updateGateHealth(gate.getId(), gate.getHealthCurrent()).join();
+            gateDoorsApi.updateHealth(gate.getId(), gate.getHealthCurrent()).join();
             LOGGER.fine("Gate health synced to API: " + gate.getName() + " (health=" + gate.getHealthCurrent() + ")");
         } catch (Exception e) {
             LOGGER.warning("Failed to sync gate health for '" + gate.getName() + "': " + e.getMessage());
@@ -174,7 +175,7 @@ public class GateStateSyncTask {
         int mismatched = 0;
         int skipped = 0;
 
-        for (CachedGate gate : gateManager.getAllGates().values()) {
+        for (CachedGateDoor gate : gateManager.getAllGates().values()) {
             if (!isEligibleForSync(gate)) {
                 continue;
             }
@@ -230,7 +231,7 @@ public class GateStateSyncTask {
 
     /** Must run on the main server thread (starts an async chunk load, then hops back). */
     private void checkAndFixGate(int gateId) {
-        CachedGate gate = gateManager.getGate(gateId);
+        CachedGateDoor gate = gateManager.getGate(gateId);
         if (!isEligibleForSync(gate)) {
             return;
         }
@@ -269,7 +270,7 @@ public class GateStateSyncTask {
         });
     }
 
-    private void checkAndFixLoadedGate(CachedGate gate, World world) {
+    private void checkAndFixLoadedGate(CachedGateDoor gate, World world) {
         GateWorldSyncChecker.SyncResult result = GateWorldSyncChecker.check(world, gate, fallbackMaterial, rasterizationEnabled);
         if (result.inSync()) {
             LOGGER.fine("[GateWorldSync] Gate '" + gate.getName() + "' (ID: " + gate.getId() + ") already in sync.");
@@ -331,7 +332,7 @@ public class GateStateSyncTask {
     }
 
     private void checkAndFixGateIfAlreadyLoaded(int gateId) {
-        CachedGate gate = gateManager.getGate(gateId);
+        CachedGateDoor gate = gateManager.getGate(gateId);
         if (!isEligibleForSync(gate)) {
             return;
         }
@@ -354,7 +355,7 @@ public class GateStateSyncTask {
 
     // === Shared helpers ===
 
-    private static boolean isEligibleForSync(CachedGate gate) {
+    private static boolean isEligibleForSync(CachedGateDoor gate) {
         if (gate == null || gate.isDestroyed() || gate.getBlocks().isEmpty()) {
             return false;
         }
@@ -362,7 +363,7 @@ public class GateStateSyncTask {
         return state == AnimationState.OPEN || state == AnimationState.CLOSED;
     }
 
-    private static World resolveWorld(CachedGate gate) {
+    private static World resolveWorld(CachedGateDoor gate) {
         if (gate.getWorldName() == null || gate.getWorldName().isBlank()) {
             return null;
         }

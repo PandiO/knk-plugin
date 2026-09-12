@@ -1,11 +1,10 @@
 package net.knightsandkings.knk.api.impl;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import net.knightsandkings.knk.api.auth.AuthProvider;
-import net.knightsandkings.knk.api.dto.GateBlockSnapshotDto;
 import net.knightsandkings.knk.api.dto.GateStructureDto;
+import net.knightsandkings.knk.api.dto.GateStructureOverridesUpdateDto;
 import net.knightsandkings.knk.api.dto.PagedResultDto;
 import net.knightsandkings.knk.api.GateStructuresApi;
 import net.knightsandkings.knk.core.exception.ApiException;
@@ -15,9 +14,7 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
@@ -44,7 +41,7 @@ public class GateStructuresApiImpl extends BaseApiImpl implements GateStructures
     public CompletableFuture<List<GateStructureDto>> getAll() {
         return CompletableFuture.supplyAsync(() -> {
             String url = baseUrl + GATE_STRUCTURES_ENDPOINT;
-            
+
             try {
                 String responseBody = get(url);
                 return objectMapper.readValue(responseBody, new TypeReference<List<GateStructureDto>>() {});
@@ -74,9 +71,19 @@ public class GateStructuresApiImpl extends BaseApiImpl implements GateStructures
 
     @Override
     public CompletableFuture<GateStructureDto> getById(int id) {
+        return fetchById(id, false);
+    }
+
+    @Override
+    public CompletableFuture<GateStructureDto> getByIdWithSnapshots(int id) {
+        return fetchById(id, true);
+    }
+
+    private CompletableFuture<GateStructureDto> fetchById(int id, boolean includeSnapshots) {
         return CompletableFuture.supplyAsync(() -> {
-            String url = baseUrl + GATE_STRUCTURES_ENDPOINT + "/" + id;
-            
+            String url = baseUrl + GATE_STRUCTURES_ENDPOINT + "/" + id
+                + (includeSnapshots ? "?includeSnapshots=true" : "");
+
             try {
                 String responseBody = get(url);
                 return objectMapper.readValue(responseBody, GateStructureDto.class);
@@ -140,138 +147,24 @@ public class GateStructuresApiImpl extends BaseApiImpl implements GateStructures
     }
 
     @Override
-    public CompletableFuture<Void> updateGateState(int id, boolean isOpened, boolean isDestroyed, boolean isJammed) {
+    public CompletableFuture<Void> updateOverrides(int id, GateStructureOverridesUpdateDto request) {
         return CompletableFuture.supplyAsync(() -> {
-            String url = baseUrl + GATE_STRUCTURES_ENDPOINT + "/" + id + "/state";
+            String url = baseUrl + GATE_STRUCTURES_ENDPOINT + "/" + id + "/overrides";
 
             try {
-                Map<String, Boolean> payload = new HashMap<>();
-                payload.put("isOpened", isOpened);
-                payload.put("isDestroyed", isDestroyed);
-                payload.put("isJammed", isJammed);
-                String json = objectMapper.writeValueAsString(payload);
-                
-                Request request = newRequest(url)
+                String json = objectMapper.writeValueAsString(request);
+                Request httpRequest = newRequest(url)
                     .addHeader("Content-Type", "application/json")
-                    .put(RequestBody.create(json, MediaType.get("application/json")))
+                    .patch(RequestBody.create(json, MediaType.get("application/json")))
                     .build();
-                
-                if (debugLogging) LOGGER.info("API Request: PUT " + url);
-                execute(request, url);
-                
+                if (debugLogging) LOGGER.info("API Request: PATCH " + url);
+                execute(httpRequest, url);
                 return null;
             } catch (ApiException e) {
                 throw e;
             } catch (IOException e) {
-                ApiException apiEx = new ApiException(
-                    url,
-                    0,
-                    "IO error updating gate state",
-                    e.getClass().getSimpleName() + ": " + e.getMessage()
-                );
-                apiEx.initCause(e);
-                throw apiEx;
-            }
-        }, executor);
-    }
-
-    @Override
-    public CompletableFuture<Void> updateOperationalSettings(int id, boolean isActive, boolean isInvincible) {
-        return CompletableFuture.supplyAsync(() -> {
-            String url = baseUrl + GATE_STRUCTURES_ENDPOINT + "/" + id + "/operational-settings";
-
-            try {
-                Map<String, Boolean> payload = new HashMap<>();
-                payload.put("isActive", isActive);
-                payload.put("isInvincible", isInvincible);
-                String json = objectMapper.writeValueAsString(payload);
-                Request request = newRequest(url)
-                    .addHeader("Content-Type", "application/json")
-                    .put(RequestBody.create(json, MediaType.get("application/json")))
-                    .build();
-                execute(request, url);
-                return null;
-            } catch (ApiException e) {
-                throw e;
-            } catch (IOException e) {
-                ApiException apiEx = new ApiException(url, 0, "IO error updating gate operational settings",
+                ApiException apiEx = new ApiException(url, 0, "IO error updating gate structure overrides",
                     e.getClass().getSimpleName() + ": " + e.getMessage());
-                apiEx.initCause(e);
-                throw apiEx;
-            }
-        }, executor);
-    }
-
-    @Override
-    public CompletableFuture<Void> updateGateHealth(int id, double healthCurrent) {
-        return CompletableFuture.supplyAsync(() -> {
-            String url = baseUrl + GATE_STRUCTURES_ENDPOINT + "/" + id + "/health";
-
-            try {
-                Map<String, Double> payload = new HashMap<>();
-                payload.put("healthCurrent", healthCurrent);
-                String json = objectMapper.writeValueAsString(payload);
-                Request request = newRequest(url)
-                    .addHeader("Content-Type", "application/json")
-                    .put(RequestBody.create(json, MediaType.get("application/json")))
-                    .build();
-                execute(request, url);
-                return null;
-            } catch (ApiException e) {
-                throw e;
-            } catch (IOException e) {
-                ApiException apiEx = new ApiException(url, 0, "IO error updating gate health",
-                    e.getClass().getSimpleName() + ": " + e.getMessage());
-                apiEx.initCause(e);
-                throw apiEx;
-            }
-        }, executor);
-    }
-
-    @Override
-    public CompletableFuture<List<GateBlockSnapshotDto>> getGateSnapshots(int gateId) {
-        return fetchSnapshots(gateId, "/snapshots", "gate snapshots");
-    }
-
-    @Override
-    public CompletableFuture<List<GateBlockSnapshotDto>> getGateOpenedSnapshots(int gateId) {
-        return fetchSnapshots(gateId, "/openedSnapshots", "gate opened-block snapshots");
-    }
-
-    /**
-     * Shared fetch/parse logic for /snapshots and /openedSnapshots - identical response shape,
-     * only the path segment and error-message label differ. See ROTATION_GAP_FILL_DESIGN.md.
-     */
-    private CompletableFuture<List<GateBlockSnapshotDto>> fetchSnapshots(int gateId, String pathSuffix, String description) {
-        return CompletableFuture.supplyAsync(() -> {
-            String url = baseUrl + GATE_STRUCTURES_ENDPOINT + "/" + gateId + pathSuffix;
-
-            try {
-                String responseBody = get(url);
-                JsonNode response = objectMapper.readTree(responseBody);
-                JsonNode snapshots = response.isArray() ? response : response.path("value");
-                if (!snapshots.isArray()) {
-                    throw new IOException("Expected an array or an object containing a value array");
-                }
-                return objectMapper.convertValue(snapshots, new TypeReference<List<GateBlockSnapshotDto>>() {});
-            } catch (ApiException e) {
-                throw e;
-            } catch (IOException e) {
-                ApiException apiEx = new ApiException(
-                    url,
-                    0,
-                    "IO error fetching " + description,
-                    e.getClass().getSimpleName() + ": " + e.getMessage()
-                );
-                apiEx.initCause(e);
-                throw apiEx;
-            } catch (Exception e) {
-                ApiException apiEx = new ApiException(
-                    url,
-                    0,
-                    "Failed to parse " + description + " response: " + e.getMessage(),
-                    e.getClass().getSimpleName()
-                );
                 apiEx.initCause(e);
                 throw apiEx;
             }

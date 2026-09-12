@@ -1,6 +1,6 @@
 package net.knightsandkings.knk.paper.listeners;
 
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.paper.events.GateDoorDamageEvent;
 import net.knightsandkings.knk.paper.events.GateDoorIgniteEvent;
 import net.knightsandkings.knk.paper.events.GateDoorInteractEvent;
@@ -59,7 +59,7 @@ public class GateEventListener implements Listener {
         Block block = event.getBlock();
         Player player = event.getPlayer();
 
-        CachedGate gate = hitService.resolveDoorGate(block.getWorld().getName(), block);
+        CachedGateDoor gate = hitService.resolveDoorGate(block.getWorld().getName(), block);
         if (gate == null) {
             return;
         }
@@ -90,7 +90,7 @@ public class GateEventListener implements Listener {
         Set<Block> blocksToRemove = new HashSet<>();
 
         for (Block block : event.blockList()) {
-            CachedGate gate = hitService.resolveDoorGate(block.getWorld().getName(), block);
+            CachedGateDoor gate = hitService.resolveDoorGate(block.getWorld().getName(), block);
             if (gate == null) {
                 continue;
             }
@@ -110,7 +110,7 @@ public class GateEventListener implements Listener {
         Set<Block> blocksToRemove = new HashSet<>();
 
         for (Block block : event.blockList()) {
-            CachedGate gate = hitService.resolveDoorGate(block.getWorld().getName(), block);
+            CachedGateDoor gate = hitService.resolveDoorGate(block.getWorld().getName(), block);
             if (gate == null) {
                 continue;
             }
@@ -136,7 +136,7 @@ public class GateEventListener implements Listener {
             return;
         }
 
-        CachedGate gate = hitService.resolveDoorGate(hitBlock.getWorld().getName(), hitBlock);
+        CachedGateDoor gate = hitService.resolveDoorGate(hitBlock.getWorld().getName(), hitBlock);
         if (gate == null) {
             return;
         }
@@ -190,7 +190,7 @@ public class GateEventListener implements Listener {
         Block ignitedBlock = event.getBlock();
         String worldName = ignitedBlock.getWorld().getName();
 
-        CachedGate directGate = hitService.resolveDoorGate(worldName, ignitedBlock);
+        CachedGateDoor directGate = hitService.resolveDoorGate(worldName, ignitedBlock);
         if (directGate != null) {
             event.setCancelled(true);
             hitService.handleIgnite(directGate, event.getPlayer(), ignitedBlock, cause);
@@ -199,7 +199,7 @@ public class GateEventListener implements Listener {
 
         for (BlockFace face : ADJACENT_FACES) {
             Block neighbor = ignitedBlock.getRelative(face);
-            CachedGate gate = hitService.resolveDoorGate(worldName, neighbor);
+            CachedGateDoor gate = hitService.resolveDoorGate(worldName, neighbor);
             if (gate == null) {
                 continue;
             }
@@ -237,7 +237,7 @@ public class GateEventListener implements Listener {
             return;
         }
 
-        CachedGate gate = hitService.resolveDoorGate(clickedBlock.getWorld().getName(), clickedBlock);
+        CachedGateDoor gate = hitService.resolveDoorGate(clickedBlock.getWorld().getName(), clickedBlock);
         if (gate == null) {
             return;
         }

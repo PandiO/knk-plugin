@@ -1,9 +1,9 @@
 package net.knightsandkings.knk.paper.gates;
 
-import net.knightsandkings.knk.api.GateStructuresApi;
+import net.knightsandkings.knk.api.GateDoorsApi;
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.gates.GateFrameCalculator;
 import net.knightsandkings.knk.core.gates.GateManager;
 import org.bukkit.Bukkit;
@@ -31,7 +31,7 @@ import java.util.logging.Logger;
 public class HealthSystem {
     private static final Logger LOGGER = Logger.getLogger(HealthSystem.class.getName());
 
-    private final GateStructuresApi gateStructuresApi;
+    private final GateDoorsApi gateDoorsApi;
     private final Plugin plugin;
     private final GateDisplayManager displayManager;
     private final GateManager gateManager;
@@ -39,13 +39,13 @@ public class HealthSystem {
     /**
      * Create a new health system.
      *
-     * @param gateStructuresApi The API client for persisting state
+     * @param gateDoorsApi The API client for persisting state
      * @param plugin The plugin instance for scheduler access
      * @param displayManager Manager used to refresh the gate's info display on health/state changes
      * @param gateManager Owner of the door-block spatial index, kept in sync on destroy/respawn
      */
-    public HealthSystem(GateStructuresApi gateStructuresApi, Plugin plugin, GateDisplayManager displayManager, GateManager gateManager) {
-        this.gateStructuresApi = gateStructuresApi;
+    public HealthSystem(GateDoorsApi gateDoorsApi, Plugin plugin, GateDisplayManager displayManager, GateManager gateManager) {
+        this.gateDoorsApi = gateDoorsApi;
         this.plugin = plugin;
         this.displayManager = displayManager;
         this.gateManager = gateManager;
@@ -58,18 +58,18 @@ public class HealthSystem {
      * @param gate The gate to damage
      * @param damageAmount The amount of damage to apply
      */
-    public void applyDamage(CachedGate gate, double damageAmount) {
+    public void applyDamage(CachedGateDoor gate, double damageAmount) {
         if (gate == null || damageAmount <= 0) {
             return;
         }
 
-        if (gate.isDestroyed()) {
+        if (gate.isEffectivelyDestroyed()) {
             LOGGER.fine("Gate '" + gate.getName() + "' is already destroyed, ignoring damage.");
             return;
         }
 
-        // Skip if invincible
-        if (gate.isInvincible()) {
+        // Skip if invincible (decision 5.0-B: a structure-level override applies immediately)
+        if (gate.isEffectivelyInvincible()) {
             LOGGER.info("Gate '" + gate.getName() + "' is invincible, ignoring damage");
             return;
         }
@@ -106,12 +106,12 @@ public class HealthSystem {
      * @param gate The gate to damage
      * @param damageAmount The amount of damage to apply
      */
-    public void applyContinuousDamage(CachedGate gate, double damageAmount) {
+    public void applyContinuousDamage(CachedGateDoor gate, double damageAmount) {
         if (gate == null || damageAmount <= 0) {
             return;
         }
 
-        if (gate.isDestroyed() || gate.isInvincible()) {
+        if (gate.isEffectivelyDestroyed() || gate.isEffectivelyInvincible()) {
             return;
         }
 
@@ -128,7 +128,7 @@ public class HealthSystem {
      * 
      * @param gate The gate to destroy
      */
-    public void destroyGate(CachedGate gate) {
+    public void destroyGate(CachedGateDoor gate) {
         if (gate == null || gate.isDestroyed()) {
             return;
         }
@@ -168,8 +168,9 @@ public class HealthSystem {
         persistGateState(gate);
         persistHealthChange(gate);
 
-        // Schedule respawn if enabled
-        if (gate.isCanRespawn()) {
+        // Schedule respawn if enabled (decision 5.0-B: a structure-level CanRespawnOverride can
+        // suppress auto-respawn for every door at once, e.g. while a Siege is in progress)
+        if (gate.isEffectivelyCanRespawn()) {
             scheduleRespawn(gate);
         }
     }
@@ -178,7 +179,7 @@ public class HealthSystem {
      * Play a cosmetic-only explosion effect (particle + sound) at the gate's anchor point.
      * Deliberately does not call World.createExplosion - no terrain damage or entity knockback.
      */
-    private void playDestructionEffect(CachedGate gate) {
+    private void playDestructionEffect(CachedGateDoor gate) {
         Vector anchor = gate.getAnchorPoint();
         if (anchor == null) {
             return;
@@ -202,7 +203,7 @@ public class HealthSystem {
      * @param gate The gate whose blocks to remove
      * @param frame The animation frame the blocks currently occupy
      */
-    private void removeGateBlocks(CachedGate gate, int frame) {
+    private void removeGateBlocks(CachedGateDoor gate, int frame) {
         try {
             World world = Bukkit.getWorld(gate.getWorldName());
             if (world == null) {
@@ -266,7 +267,7 @@ public class HealthSystem {
      * 
      * @param gate The gate to respawn
      */
-    private void scheduleRespawn(CachedGate gate) {
+    private void scheduleRespawn(CachedGateDoor gate) {
         if (gate == null) {
             return;
         }
@@ -298,7 +299,7 @@ public class HealthSystem {
      * 
      * @param gate The gate to respawn
      */
-    public void respawnGate(CachedGate gate) {
+    public void respawnGate(CachedGateDoor gate) {
         if (gate == null || !gate.isDestroyed()) {
             return;
         }
@@ -335,7 +336,7 @@ public class HealthSystem {
     /**
      * Restore gate blocks to the closed (frame 0) position.
      */
-    private void restoreGateBlocks(CachedGate gate) {
+    private void restoreGateBlocks(CachedGateDoor gate) {
         try {
             World world = Bukkit.getWorld(gate.getWorldName());
             if (world == null) {
@@ -367,8 +368,8 @@ public class HealthSystem {
      * 
      * @param gate The gate to persist
      */
-    private void persistHealthChange(CachedGate gate) {
-        if (gateStructuresApi == null) {
+    private void persistHealthChange(CachedGateDoor gate) {
+        if (gateDoorsApi == null) {
             LOGGER.warning("Gate API not available, cannot persist health change");
             return;
         }
@@ -379,7 +380,7 @@ public class HealthSystem {
             @Override
             public void run() {
                 try {
-                    gateStructuresApi.updateGateHealth(gate.getId(), healthCurrent).join();
+                    gateDoorsApi.updateHealth(gate.getId(), healthCurrent).join();
                     LOGGER.fine("Health change persisted to API for gate: " + gate.getName() + " (health=" + healthCurrent + ")");
                 } catch (Exception e) {
                     LOGGER.warning("Failed to persist health change: " + e.getMessage());
@@ -393,8 +394,8 @@ public class HealthSystem {
      * 
      * @param gate The gate to persist
      */
-    private void persistGateState(CachedGate gate) {
-        if (gateStructuresApi == null) {
+    private void persistGateState(CachedGateDoor gate) {
+        if (gateDoorsApi == null) {
             LOGGER.warning("Gate API not available, cannot persist gate state");
             return;
         }
@@ -404,10 +405,12 @@ public class HealthSystem {
             @Override
             public void run() {
                 try {
-                    boolean isOpened = gate.getCurrentState() == AnimationState.OPEN && !gate.isDestroyed();
-                    gateStructuresApi.updateGateState(gate.getId(), isOpened, gate.isDestroyed(), gate.isJammed()).join();
+                    AnimationState persistedState = gate.getCurrentState() == AnimationState.OPEN && !gate.isDestroyed()
+                        ? AnimationState.OPEN : AnimationState.CLOSED;
+                    String openedState = GateDoorOpenStateMapper.toWireValue(persistedState, gate.isJammed());
+                    gateDoorsApi.updateState(gate.getId(), openedState, gate.isDestroyed()).join();
                     LOGGER.fine("Gate state persisted to API: " + gate.getName() +
-                               " (destroyed=" + gate.isDestroyed() + ", opened=" + isOpened + ", jammed=" + gate.isJammed() + ")");
+                               " (destroyed=" + gate.isDestroyed() + ", openedState=" + openedState + ")");
                 } catch (Exception e) {
                     LOGGER.warning("Failed to persist gate state: " + e.getMessage());
                 }

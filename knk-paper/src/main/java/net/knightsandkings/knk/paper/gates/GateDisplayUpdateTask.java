@@ -1,6 +1,6 @@
 package net.knightsandkings.knk.paper.gates;
 
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.gates.GateManager;
 import org.bukkit.scheduler.BukkitRunnable;
 
@@ -20,7 +20,7 @@ public class GateDisplayUpdateTask extends BukkitRunnable {
 
     @Override
     public void run() {
-        for (CachedGate gate : gateManager.getAllGates().values()) {
+        for (CachedGateDoor gate : gateManager.getAllGates().values()) {
             if (!gate.isAnimating()) {
                 displayManager.syncDisplay(gate);
             }

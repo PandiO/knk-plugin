@@ -1,6 +1,6 @@
 package net.knightsandkings.knk.paper.gates;
 
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import org.bukkit.entity.Entity;
 import org.bukkit.util.Vector;
 
@@ -11,7 +11,7 @@ public class EntityPusher {
     private static final double DEFAULT_PUSH_FORCE = 0.6;
     private static final double DIAGONAL_FACTOR = 0.70710678118;
 
-    public static void pushEntity(Entity entity, CachedGate gate) {
+    public static void pushEntity(Entity entity, CachedGateDoor gate) {
         if (entity == null || gate == null) {
             return;
         }
@@ -30,7 +30,7 @@ public class EntityPusher {
         entity.setVelocity(pushForce);
     }
 
-    private static Vector resolvePushDirection(CachedGate gate) {
+    private static Vector resolvePushDirection(CachedGateDoor gate) {
         Vector faceDirection = vectorFromFaceDirection(gate.getFaceDirection());
         if (faceDirection != null && faceDirection.lengthSquared() > 0) {
             return faceDirection.clone();
@@ -54,22 +54,24 @@ public class EntityPusher {
             return null;
         }
 
-        switch (faceDirection.trim().toLowerCase()) {
-            case "north":
+        // Backend's GateFaceDirection enum serializes as uppercase-underscore (e.g. "NORTH_EAST") -
+        // see GATESTRUCTURE_QOL_IMPLEMENTATION_PLAN.md item 5's FaceDirection type-safety note.
+        switch (faceDirection.trim().toUpperCase()) {
+            case "NORTH":
                 return new Vector(0, 0, -1);
-            case "north-east":
+            case "NORTH_EAST":
                 return new Vector(DIAGONAL_FACTOR, 0, -DIAGONAL_FACTOR);
-            case "east":
+            case "EAST":
                 return new Vector(1, 0, 0);
-            case "south-east":
+            case "SOUTH_EAST":
                 return new Vector(DIAGONAL_FACTOR, 0, DIAGONAL_FACTOR);
-            case "south":
+            case "SOUTH":
                 return new Vector(0, 0, 1);
-            case "south-west":
+            case "SOUTH_WEST":
                 return new Vector(-DIAGONAL_FACTOR, 0, DIAGONAL_FACTOR);
-            case "west":
+            case "WEST":
                 return new Vector(-1, 0, 0);
-            case "north-west":
+            case "NORTH_WEST":
                 return new Vector(-DIAGONAL_FACTOR, 0, -DIAGONAL_FACTOR);
             default:
                 return null;

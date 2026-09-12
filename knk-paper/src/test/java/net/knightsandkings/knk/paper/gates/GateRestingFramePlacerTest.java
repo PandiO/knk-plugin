@@ -1,7 +1,7 @@
 package net.knightsandkings.knk.paper.gates;
 
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import org.bukkit.util.Vector;
 import org.junit.jupiter.api.Test;
 
@@ -17,9 +17,9 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class GateRestingFramePlacerTest {
 
-    private CachedGate buildDiagonalDrawbridge(int width, int height) {
-        CachedGate gate = new CachedGate(
-            14, "Diagonal Drawbridge", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
+    private CachedGateDoor buildDiagonalDrawbridge(int width, int height) {
+        CachedGateDoor gate = new CachedGateDoor(
+            14, 14, "Diagonal Drawbridge", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
             90, 1,
             new Vector(0, 0, 0), width, height, 1,
             500.0, 500.0, true, false, true, 90,
@@ -50,7 +50,7 @@ class GateRestingFramePlacerTest {
 
     @Test
     void useRasterization_DiagonalRotationGateAtEndpointWithNoOpenScan_IsEligible() {
-        CachedGate gate = buildDiagonalDrawbridge(8, 4);
+        CachedGateDoor gate = buildDiagonalDrawbridge(8, 4);
 
         assertTrue(GateRestingFramePlacer.useRasterization(gate, 0, true));
         assertTrue(GateRestingFramePlacer.useRasterization(gate, gate.getAnimationDurationTicks(), true));
@@ -58,19 +58,19 @@ class GateRestingFramePlacerTest {
 
     @Test
     void useRasterization_KillSwitchDisabled_NeverEligible() {
-        CachedGate gate = buildDiagonalDrawbridge(8, 4);
+        CachedGateDoor gate = buildDiagonalDrawbridge(8, 4);
         assertFalse(GateRestingFramePlacer.useRasterization(gate, gate.getAnimationDurationTicks(), false));
     }
 
     @Test
     void useRasterization_MidSwingFrame_NeverEligible() {
-        CachedGate gate = buildDiagonalDrawbridge(8, 4);
+        CachedGateDoor gate = buildDiagonalDrawbridge(8, 4);
         assertFalse(GateRestingFramePlacer.useRasterization(gate, 45, true));
     }
 
     @Test
     void useRasterization_OpenScanPresent_MechanismTwoWinsOutright() {
-        CachedGate gate = buildDiagonalDrawbridge(8, 4);
+        CachedGateDoor gate = buildDiagonalDrawbridge(8, 4);
         gate.addOpenBlock(new BlockSnapshot(999, new Vector(0, 0, 0), 1, "minecraft:oak_planks", 0));
 
         assertFalse(GateRestingFramePlacer.useRasterization(gate, gate.getAnimationDurationTicks(), true));
@@ -78,8 +78,8 @@ class GateRestingFramePlacerTest {
 
     @Test
     void useRasterization_CardinalGate_NeverEligible() {
-        CachedGate gate = new CachedGate(
-            15, "Cardinal Drawbridge", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
+        CachedGateDoor gate = new CachedGateDoor(
+            15, 15, "Cardinal Drawbridge", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
             90, 1, new Vector(0, 0, 0), 4, 4, 1,
             500.0, 500.0, true, false, true, 90, "north"
         );
@@ -102,7 +102,7 @@ class GateRestingFramePlacerTest {
 
     @Test
     void restingFrameCells_RasterizationDisabledAtClosedFrame_MatchesRawBlockCount() {
-        CachedGate gate = buildDiagonalDrawbridge(8, 4);
+        CachedGateDoor gate = buildDiagonalDrawbridge(8, 4);
 
         List<GateRestingFramePlacer.RestingCell> cells = GateRestingFramePlacer.restingFrameCells(gate, 0, false);
 
@@ -111,8 +111,8 @@ class GateRestingFramePlacerTest {
 
     @Test
     void restingFrameCells_PairedOpenBlock_UsesOpenBlockdataAsIs() {
-        CachedGate gate = new CachedGate(
-            16, "Dual-Scan Drawbridge", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
+        CachedGateDoor gate = new CachedGateDoor(
+            16, 16, "Dual-Scan Drawbridge", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
             90, 1, new Vector(0, 0, 0), 1, 1, 1,
             500.0, 500.0, true, false, true, 90, "north"
         );
@@ -146,7 +146,7 @@ class GateRestingFramePlacerTest {
         // Built directly from GateFrameCalculator.rasterizeRotationFrame (pure, Bukkit-free)
         // rather than restingFrameCells, since the latter's blockdata orientation step needs a
         // live Bukkit server for a nonzero angle (see this class's other tests' notes).
-        CachedGate gate = buildDiagonalDrawbridge(4, 8);
+        CachedGateDoor gate = buildDiagonalDrawbridge(4, 8);
 
         List<GateRestingFramePlacer.RestingCell> openCells = toRestingCells(
             net.knightsandkings.knk.core.gates.GateFrameCalculator.rasterizeRotationFrame(gate, 90.0));

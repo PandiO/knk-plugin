@@ -1,7 +1,7 @@
 package net.knightsandkings.knk.paper.gates;
 
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.gates.GateFrameCalculator;
 import net.knightsandkings.knk.core.gates.GateSpatialIndex;
 import org.bukkit.Material;
@@ -41,7 +41,7 @@ final class GateRestingFramePlacer {
      * diagonal-hinge ROTATION gate, only when no manual open-state scan exists (Mechanism 2
      * always wins outright over Mechanism 1), and only when the admin hasn't disabled the kill switch.
      */
-    static boolean useRasterization(CachedGate gate, int frame, boolean rasterizationEnabled) {
+    static boolean useRasterization(CachedGateDoor gate, int frame, boolean rasterizationEnabled) {
         return rasterizationEnabled
             && (frame == 0 || frame == gate.getAnimationDurationTicks())
             && "ROTATION".equals(gate.getMotionType())
@@ -54,7 +54,7 @@ final class GateRestingFramePlacer {
      * Mechanism 1's rasterized gap-fill when eligible, otherwise today's exact per-block set -
      * using a paired open-scan block's own blockdata as-is (Mechanism 2) where one exists.
      */
-    static List<RestingCell> restingFrameCells(CachedGate gate, int frame, boolean rasterizationEnabled) {
+    static List<RestingCell> restingFrameCells(CachedGateDoor gate, int frame, boolean rasterizationEnabled) {
         List<RestingCell> cells = new ArrayList<>();
 
         if (useRasterization(gate, frame, rasterizationEnabled)) {
@@ -95,7 +95,7 @@ final class GateRestingFramePlacer {
     }
 
     /** Force-places every cell of {@link #restingFrameCells}. */
-    static void placeRestingFrame(World world, CachedGate gate, int frame, double angle,
+    static void placeRestingFrame(World world, CachedGateDoor gate, int frame, double angle,
                                    Material fallbackMaterial, boolean rasterizationEnabled) {
         for (RestingCell cell : restingFrameCells(gate, frame, rasterizationEnabled)) {
             GateBlockPlacer.placeBlock(world, cell.position(), cell.blockData(), fallbackMaterial);
@@ -114,7 +114,7 @@ final class GateRestingFramePlacer {
      * an open gate's rasterized filler blocks would sit there forever after it closes again,
      * wherever they don't happen to be overwritten by the closed frame's own cells.
      */
-    static void transitionRestingFrame(World world, CachedGate gate, int fromFrame, int toFrame,
+    static void transitionRestingFrame(World world, CachedGateDoor gate, int fromFrame, int toFrame,
                                         Material fallbackMaterial, boolean rasterizationEnabled) {
         List<RestingCell> fromCells = restingFrameCells(gate, fromFrame, rasterizationEnabled);
         List<RestingCell> toCells = restingFrameCells(gate, toFrame, rasterizationEnabled);
@@ -167,7 +167,7 @@ final class GateRestingFramePlacer {
     }
 
     /** Just the positions from {@link #restingFrameCells}, for keeping GateSpatialIndex in sync. */
-    static List<Vector> restingFramePositions(CachedGate gate, int frame, boolean rasterizationEnabled) {
+    static List<Vector> restingFramePositions(CachedGateDoor gate, int frame, boolean rasterizationEnabled) {
         List<Vector> positions = new ArrayList<>();
         for (RestingCell cell : restingFrameCells(gate, frame, rasterizationEnabled)) {
             positions.add(cell.position());

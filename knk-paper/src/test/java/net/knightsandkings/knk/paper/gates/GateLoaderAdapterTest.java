@@ -1,10 +1,11 @@
 package net.knightsandkings.knk.paper.gates;
 
 import net.knightsandkings.knk.api.dto.GateBlockSnapshotDto;
+import net.knightsandkings.knk.api.dto.GateDoorDto;
 import net.knightsandkings.knk.api.dto.GateStructureDto;
 import net.knightsandkings.knk.api.GateStructuresApi;
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.gates.GateManager;
 import org.bukkit.util.Vector;
 import org.junit.jupiter.api.Test;
@@ -16,32 +17,52 @@ import java.util.concurrent.CompletableFuture;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+/**
+ * Item 5 (docs/features/gate-structure-animation/GATESTRUCTURE_QOL_IMPLEMENTATION_PLAN.md) moved
+ * per-door geometry/animation/block-snapshot fields off GateStructureDto onto the new
+ * GateDoorDto, embedded as GateStructureDto.gateDoors. Every test below builds a structure DTO
+ * wrapping a single door DTO and asserts against the resulting cached door (keyed by the door's
+ * own id, not the structure's) - mirroring how GateLoaderAdapter now actually loads gates.
+ */
 class GateLoaderAdapterTest {
     private static final double EPSILON = 0.001;
 
+    private static GateStructureDto structureOf(int structureId, String name, GateDoorDto... doors) {
+        GateStructureDto dto = new GateStructureDto();
+        dto.setId(structureId);
+        dto.setName(name);
+        dto.setGateDoors(List.of(doors));
+        return dto;
+    }
+
+    private static GateDoorDto doorOf(int doorId, int structureId, String name) {
+        GateDoorDto dto = new GateDoorDto();
+        dto.setId(doorId);
+        dto.setGateStructureId(structureId);
+        dto.setName(name);
+        return dto;
+    }
+
     @Test
-    void loadAndCacheGate_ComputesBasisVectorsAndMotion() {
+    void loadAndCacheStructure_ComputesBasisVectorsAndMotion() {
         GateManager gateManager = new GateManager();
         GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
 
-        GateStructureDto dto = new GateStructureDto();
-        dto.setId(1);
-        dto.setName("Basis Gate");
-        dto.setGateType("SLIDING");
-        dto.setMotionType("LATERAL");
-        dto.setGeometryDefinitionMode("PLANE_GRID");
-        dto.setAnimationDurationTicks(60);
-        dto.setAnimationTickRate(1);
-        dto.setGeometryDepth(1);
-        dto.setMotionDistanceBlocks(3);
-        dto.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
-        dto.setReferencePoint1("{\"x\":1,\"y\":0,\"z\":0}");
-        dto.setReferencePoint2("{\"x\":0,\"y\":1,\"z\":0}");
+        GateDoorDto door = doorOf(1, 1, "Basis Door");
+        door.setGateType("SLIDING");
+        door.setMotionType("LATERAL");
+        door.setGeometryDefinitionMode("PLANE_GRID");
+        door.setAnimationDurationTicks(60);
+        door.setAnimationTickRate(1);
+        door.setGeometryDepth(1);
+        door.setMotionDistanceBlocks(3);
+        door.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
+        door.setReferencePoint1("{\"x\":1,\"y\":0,\"z\":0}");
+        door.setReferencePoint2("{\"x\":0,\"y\":1,\"z\":0}");
 
-        List<GateBlockSnapshotDto> snapshots = new ArrayList<>();
-        adapter.loadAndCacheGate(dto, snapshots);
+        adapter.loadAndCacheStructure(structureOf(1, "Basis Gate", door));
 
-        CachedGate gate = gateManager.getGate(1);
+        CachedGateDoor gate = gateManager.getGate(1);
         assertNotNull(gate);
 
         Vector uAxis = gate.getUAxis();
@@ -67,51 +88,47 @@ class GateLoaderAdapterTest {
     }
 
     @Test
-    void loadAndCacheGate_MapsPassThroughFields() {
+    void loadAndCacheStructure_MapsPassThroughFields() {
         GateManager gateManager = new GateManager();
         GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
 
-        GateStructureDto dto = new GateStructureDto();
-        dto.setId(2);
-        dto.setName("PassThrough Gate");
-        dto.setGateType("SLIDING");
-        dto.setMotionType("VERTICAL");
-        dto.setGeometryDefinitionMode("PLANE_GRID");
-        dto.setAnimationDurationTicks(60);
-        dto.setAnimationTickRate(1);
-        dto.setGeometryDepth(1);
-        dto.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
-        dto.setAllowPassThrough(true);
-        dto.setPassThroughDurationSeconds(6);
+        GateDoorDto door = doorOf(2, 2, "PassThrough Door");
+        door.setGateType("SLIDING");
+        door.setMotionType("VERTICAL");
+        door.setGeometryDefinitionMode("PLANE_GRID");
+        door.setAnimationDurationTicks(60);
+        door.setAnimationTickRate(1);
+        door.setGeometryDepth(1);
+        door.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
+        door.setAllowPassThrough(true);
+        door.setPassThroughDurationSeconds(6);
 
-        adapter.loadAndCacheGate(dto, new ArrayList<>());
+        adapter.loadAndCacheStructure(structureOf(2, "PassThrough Gate", door));
 
-        CachedGate gate = gateManager.getGate(2);
+        CachedGateDoor gate = gateManager.getGate(2);
         assertNotNull(gate);
         assertTrue(gate.isAllowPassThrough());
         assertEquals(6, gate.getPassThroughDurationSeconds());
     }
 
     @Test
-    void loadAndCacheGate_DefaultsPassThroughFieldsWhenAbsentFromDto() {
+    void loadAndCacheStructure_DefaultsPassThroughFieldsWhenAbsentFromDto() {
         GateManager gateManager = new GateManager();
         GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
 
-        GateStructureDto dto = new GateStructureDto();
-        dto.setId(3);
-        dto.setName("Legacy Gate");
-        dto.setGateType("SLIDING");
-        dto.setMotionType("VERTICAL");
-        dto.setGeometryDefinitionMode("PLANE_GRID");
-        dto.setAnimationDurationTicks(60);
-        dto.setAnimationTickRate(1);
-        dto.setGeometryDepth(1);
-        dto.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
+        GateDoorDto door = doorOf(3, 3, "Legacy Door");
+        door.setGateType("SLIDING");
+        door.setMotionType("VERTICAL");
+        door.setGeometryDefinitionMode("PLANE_GRID");
+        door.setAnimationDurationTicks(60);
+        door.setAnimationTickRate(1);
+        door.setGeometryDepth(1);
+        door.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
         // allowPassThrough/passThroughDurationSeconds intentionally left unset
 
-        adapter.loadAndCacheGate(dto, new ArrayList<>());
+        adapter.loadAndCacheStructure(structureOf(3, "Legacy Gate", door));
 
-        CachedGate gate = gateManager.getGate(3);
+        CachedGateDoor gate = gateManager.getGate(3);
         assertNotNull(gate);
         assertFalse(gate.isAllowPassThrough());
         assertEquals(2, gate.getPassThroughDurationSeconds());
@@ -124,38 +141,35 @@ class GateLoaderAdapterTest {
         GateStructuresApi api = mock(GateStructuresApi.class);
 
         // getByDistrict (a query-filtered search) returns the backend's lightweight list DTO -
-        // only the id is reliable from it, no geometry fields.
+        // only the id is reliable from it, no door geometry.
         GateStructureDto summary = new GateStructureDto();
         summary.setId(5);
         summary.setName("District Gate");
 
-        // getById returns the full DTO, including geometry - this is what loadForDistrict must
-        // actually use to build the CachedGate, not the summary above.
-        GateStructureDto fullDto = new GateStructureDto();
-        fullDto.setId(5);
-        fullDto.setName("District Gate");
-        fullDto.setGateType("SLIDING");
-        fullDto.setMotionType("VERTICAL");
-        fullDto.setGeometryDefinitionMode("PLANE_GRID");
-        fullDto.setAnimationDurationTicks(60);
-        fullDto.setAnimationTickRate(1);
-        fullDto.setGeometryDepth(1);
-        fullDto.setAnchorPoint("{\"x\":100,\"y\":64,\"z\":100}");
+        // getByIdWithSnapshots returns the full DTO, including door geometry - this is what
+        // loadForDistrict must actually use to build the CachedGateDoor, not the summary above.
+        GateDoorDto door = doorOf(50, 5, "District Door");
+        door.setGateType("SLIDING");
+        door.setMotionType("VERTICAL");
+        door.setGeometryDefinitionMode("PLANE_GRID");
+        door.setAnimationDurationTicks(60);
+        door.setAnimationTickRate(1);
+        door.setGeometryDepth(1);
+        door.setAnchorPoint("{\"x\":100,\"y\":64,\"z\":100}");
+        GateStructureDto fullDto = structureOf(5, "District Gate", door);
 
         when(api.getByDistrict(7)).thenReturn(CompletableFuture.completedFuture(List.of(summary)));
-        when(api.getById(5)).thenReturn(CompletableFuture.completedFuture(fullDto));
-        when(api.getGateSnapshots(5)).thenReturn(CompletableFuture.completedFuture(List.of()));
-        when(api.getGateOpenedSnapshots(5)).thenReturn(CompletableFuture.completedFuture(List.of()));
+        when(api.getByIdWithSnapshots(5)).thenReturn(CompletableFuture.completedFuture(fullDto));
 
         adapter.loadForDistrict(api, 7).join();
 
-        CachedGate cached = gateManager.getGate(5);
+        CachedGateDoor cached = gateManager.getGate(50);
         assertNotNull(cached);
-        // Proves the full (getById) DTO's anchor was used, not a (0,0,0) fallback from the
-        // summary lacking an anchorPoint at all - the exact regression this test guards against.
+        // Proves the full (getByIdWithSnapshots) DTO's anchor was used, not a (0,0,0) fallback
+        // from the summary lacking any door at all - the exact regression this test guards against.
         assertEquals(new Vector(100, 64, 100), cached.getAnchorPoint());
         verify(api, never()).getAll();
-        verify(api).getById(5);
+        verify(api).getByIdWithSnapshots(5);
     }
 
     @Test
@@ -170,8 +184,7 @@ class GateLoaderAdapterTest {
         when(api.getByDistrict(9)).thenReturn(CompletableFuture.completedFuture(List.of(dtoWithoutId)));
 
         assertDoesNotThrow(() -> adapter.loadForDistrict(api, 9).join());
-        verify(api, never()).getById(anyInt());
-        verify(api, never()).getGateSnapshots(anyInt());
+        verify(api, never()).getByIdWithSnapshots(anyInt());
     }
 
     @Test
@@ -185,15 +198,14 @@ class GateLoaderAdapterTest {
         summary.setName("Vanished Gate");
 
         when(api.getByDistrict(10)).thenReturn(CompletableFuture.completedFuture(List.of(summary)));
-        when(api.getById(6)).thenReturn(CompletableFuture.completedFuture(null));
+        when(api.getByIdWithSnapshots(6)).thenReturn(CompletableFuture.completedFuture(null));
 
         assertDoesNotThrow(() -> adapter.loadForDistrict(api, 10).join());
-        assertNull(gateManager.getGate(6));
-        verify(api, never()).getGateSnapshots(anyInt());
+        assertTrue(gateManager.getAllGates().isEmpty());
     }
 
     @Test
-    void loadAndCacheGate_ComputesBasisVectorsForDiagonalFaceDirection() {
+    void loadAndCacheStructure_ComputesBasisVectorsForDiagonalFaceDirection() {
         // High-risk case flagged in the roadmap (docs/features/gate-structure-animation/
         // IMPLEMENTATION_ROADMAP.md, Risk Management: "Diagonal Gate Geometry Calculation"):
         // a diagonal reference point must produce a correctly signed, correctly ordered
@@ -201,22 +213,20 @@ class GateLoaderAdapterTest {
         GateManager gateManager = new GateManager();
         GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
 
-        GateStructureDto dto = new GateStructureDto();
-        dto.setId(2);
-        dto.setName("Diagonal Gate");
-        dto.setGateType("SLIDING");
-        dto.setMotionType("VERTICAL");
-        dto.setGeometryDefinitionMode("PLANE_GRID");
-        dto.setAnimationDurationTicks(60);
-        dto.setAnimationTickRate(1);
-        dto.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
+        GateDoorDto door = doorOf(2, 2, "Diagonal Door");
+        door.setGateType("SLIDING");
+        door.setMotionType("VERTICAL");
+        door.setGeometryDefinitionMode("PLANE_GRID");
+        door.setAnimationDurationTicks(60);
+        door.setAnimationTickRate(1);
+        door.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
         // Diagonal (northeast-style) width axis instead of a straight cardinal direction.
-        dto.setReferencePoint1("{\"x\":1,\"y\":0,\"z\":1}");
-        dto.setReferencePoint2("{\"x\":0,\"y\":1,\"z\":0}");
+        door.setReferencePoint1("{\"x\":1,\"y\":0,\"z\":1}");
+        door.setReferencePoint2("{\"x\":0,\"y\":1,\"z\":0}");
 
-        adapter.loadAndCacheGate(dto, new ArrayList<>());
+        adapter.loadAndCacheStructure(structureOf(2, "Diagonal Gate", door));
 
-        CachedGate gate = gateManager.getGate(2);
+        CachedGateDoor gate = gateManager.getGate(2);
         assertNotNull(gate);
 
         double diag = 1 / Math.sqrt(2);
@@ -260,29 +270,27 @@ class GateLoaderAdapterTest {
     }
 
     @Test
-    void loadAndCacheGate_ScalesLateralMotionByLatticeStepForDiagonalGate() {
+    void loadAndCacheStructure_ScalesLateralMotionByLatticeStepForDiagonalGate() {
         // Reproduces the reported bug: on a diagonal gate, LATERAL motion must slide by real
         // integer blocks (distance * (1,0,1)) rather than by the unit axis (distance * (0.7071,0,0.7071)),
         // which would only travel distance/sqrt(2) blocks along each world axis.
         GateManager gateManager = new GateManager();
         GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
 
-        GateStructureDto dto = new GateStructureDto();
-        dto.setId(20);
-        dto.setName("Diagonal Lateral Gate");
-        dto.setGateType("SLIDING");
-        dto.setMotionType("LATERAL");
-        dto.setGeometryDefinitionMode("PLANE_GRID");
-        dto.setAnimationDurationTicks(60);
-        dto.setAnimationTickRate(1);
-        dto.setMotionDistanceBlocks(4);
-        dto.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
-        dto.setReferencePoint1("{\"x\":1,\"y\":0,\"z\":1}");
-        dto.setReferencePoint2("{\"x\":0,\"y\":1,\"z\":0}");
+        GateDoorDto door = doorOf(20, 20, "Diagonal Lateral Door");
+        door.setGateType("SLIDING");
+        door.setMotionType("LATERAL");
+        door.setGeometryDefinitionMode("PLANE_GRID");
+        door.setAnimationDurationTicks(60);
+        door.setAnimationTickRate(1);
+        door.setMotionDistanceBlocks(4);
+        door.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
+        door.setReferencePoint1("{\"x\":1,\"y\":0,\"z\":1}");
+        door.setReferencePoint2("{\"x\":0,\"y\":1,\"z\":0}");
 
-        adapter.loadAndCacheGate(dto, new ArrayList<>());
+        adapter.loadAndCacheStructure(structureOf(20, "Diagonal Lateral Gate", door));
 
-        CachedGate gate = gateManager.getGate(20);
+        CachedGateDoor gate = gateManager.getGate(20);
         assertNotNull(gate);
 
         Vector motion = gate.getMotionVector();
@@ -292,29 +300,27 @@ class GateLoaderAdapterTest {
     }
 
     @Test
-    void loadAndCacheGate_KeepsVerticalMotionOnWorldYWhenReferencePointIsOffset() {
+    void loadAndCacheStructure_KeepsVerticalMotionOnWorldYWhenReferencePointIsOffset() {
         GateManager gateManager = new GateManager();
         GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
 
-        GateStructureDto dto = new GateStructureDto();
-        dto.setId(12);
-        dto.setName("Offset Vertical Gate");
-        dto.setGateType("SLIDING");
-        dto.setMotionType("VERTICAL");
-        dto.setGeometryDefinitionMode("PLANE_GRID");
-        dto.setAnimationDurationTicks(60);
-        dto.setAnimationTickRate(1);
-        dto.setGeometryWidth(3);
-        dto.setGeometryHeight(8);
-        dto.setGeometryDepth(1);
-        dto.setMotionDistanceBlocks(3);
-        dto.setAnchorPoint("{\"x\":1416.699999988079,\"y\":65,\"z\":-531.4505220512867}");
-        dto.setReferencePoint1("{\"x\":1414.300000011921,\"y\":65,\"z\":-531.4283039056044}");
-        dto.setReferencePoint2("{\"x\":1416,\"y\":72,\"z\":-532}");
+        GateDoorDto door = doorOf(12, 12, "Offset Vertical Door");
+        door.setGateType("SLIDING");
+        door.setMotionType("VERTICAL");
+        door.setGeometryDefinitionMode("PLANE_GRID");
+        door.setAnimationDurationTicks(60);
+        door.setAnimationTickRate(1);
+        door.setGeometryWidth(3);
+        door.setGeometryHeight(8);
+        door.setGeometryDepth(1);
+        door.setMotionDistanceBlocks(3);
+        door.setAnchorPoint("{\"x\":1416.699999988079,\"y\":65,\"z\":-531.4505220512867}");
+        door.setReferencePoint1("{\"x\":1414.300000011921,\"y\":65,\"z\":-531.4283039056044}");
+        door.setReferencePoint2("{\"x\":1416,\"y\":72,\"z\":-532}");
 
-        adapter.loadAndCacheGate(dto, new ArrayList<>());
+        adapter.loadAndCacheStructure(structureOf(12, "Offset Vertical Gate", door));
 
-        CachedGate gate = gateManager.getGate(12);
+        CachedGateDoor gate = gateManager.getGate(12);
         assertNotNull(gate);
 
         Vector motion = gate.getMotionVector();
@@ -324,24 +330,22 @@ class GateLoaderAdapterTest {
     }
 
     @Test
-    void loadAndCacheGate_FallsBackToDefaultAxesWhenReferencePointsMissing() {
+    void loadAndCacheStructure_FallsBackToDefaultAxesWhenReferencePointsMissing() {
         GateManager gateManager = new GateManager();
         GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
 
-        GateStructureDto dto = new GateStructureDto();
-        dto.setId(3);
-        dto.setName("No Reference Points Gate");
-        dto.setGateType("SLIDING");
-        dto.setMotionType("VERTICAL");
-        dto.setGeometryDefinitionMode("PLANE_GRID");
-        dto.setAnimationDurationTicks(60);
-        dto.setAnimationTickRate(1);
-        dto.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
+        GateDoorDto door = doorOf(3, 3, "No Reference Points Door");
+        door.setGateType("SLIDING");
+        door.setMotionType("VERTICAL");
+        door.setGeometryDefinitionMode("PLANE_GRID");
+        door.setAnimationDurationTicks(60);
+        door.setAnimationTickRate(1);
+        door.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
         // referencePoint1/2 left null - adapter must fall back to standard axes.
 
-        adapter.loadAndCacheGate(dto, new ArrayList<>());
+        adapter.loadAndCacheStructure(structureOf(3, "No Reference Points Gate", door));
 
-        CachedGate gate = gateManager.getGate(3);
+        CachedGateDoor gate = gateManager.getGate(3);
         assertNotNull(gate);
 
         Vector uAxis = gate.getUAxis();
@@ -362,19 +366,17 @@ class GateLoaderAdapterTest {
     }
 
     @Test
-    void loadAndCacheGate_UsesBlockDataJsonFromRealApiContract() {
+    void loadAndCacheStructure_UsesBlockDataJsonFromRealApiContract() {
         GateManager gateManager = new GateManager();
         GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
 
-        GateStructureDto dto = new GateStructureDto();
-        dto.setId(11);
-        dto.setName("Keep Gate test");
-        dto.setGateType("SLIDING");
-        dto.setMotionType("VERTICAL");
-        dto.setGeometryDefinitionMode("PLANE_GRID");
-        dto.setAnimationDurationTicks(60);
-        dto.setAnimationTickRate(1);
-        dto.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
+        GateDoorDto door = doorOf(11, 11, "Keep Door test");
+        door.setGateType("SLIDING");
+        door.setMotionType("VERTICAL");
+        door.setGeometryDefinitionMode("PLANE_GRID");
+        door.setAnimationDurationTicks(60);
+        door.setAnimationTickRate(1);
+        door.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
 
         GateBlockSnapshotDto snapshotWithBlockData = new GateBlockSnapshotDto(
             1, 11, 0, 0, 0, 0, 0, 0, "minecraft:oak_planks", "minecraft:oak_planks", "{}", 0
@@ -385,8 +387,9 @@ class GateLoaderAdapterTest {
         GateBlockSnapshotDto airSnapshot = new GateBlockSnapshotDto(
             3, 11, 2, 0, 0, 2, 0, 0, "minecraft:air", "minecraft:air", "{}", 2
         );
+        door.setBlockSnapshots(List.of(snapshotWithBlockData, snapshotWithoutBlockData, airSnapshot));
 
-        adapter.loadAndCacheGate(dto, List.of(snapshotWithBlockData, snapshotWithoutBlockData, airSnapshot));
+        adapter.loadAndCacheStructure(structureOf(11, "Keep Gate test", door));
 
         List<BlockSnapshot> blocks = gateManager.getGate(11).getBlocks();
         assertEquals(2, blocks.size());
@@ -395,85 +398,87 @@ class GateLoaderAdapterTest {
     }
 
     @Test
-    void loadAndCacheGate_HingesDrawbridgeOnTheWidthAxis() {
+    void loadAndCacheStructure_HingesDrawbridgeOnTheWidthAxis() {
         // A drawbridge hinges along its bottom edge (uAxis) and swings height-offset blocks
         // out into depth to lie flat as a bridge - rotating around nAxis (the old, wrong
         // default) would instead spin blocks within their own plane and never form a bridge.
         GateManager gateManager = new GateManager();
         GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
 
-        GateStructureDto dto = new GateStructureDto();
-        dto.setId(30);
-        dto.setName("Drawbridge Gate");
-        dto.setGateType("DRAWBRIDGE");
-        dto.setMotionType("ROTATION");
-        dto.setGeometryDefinitionMode("PLANE_GRID");
-        dto.setAnimationDurationTicks(90);
-        dto.setAnimationTickRate(1);
-        dto.setRotationMaxAngleDegrees(90);
-        dto.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
-        dto.setReferencePoint1("{\"x\":1,\"y\":0,\"z\":0}");
-        dto.setReferencePoint2("{\"x\":0,\"y\":1,\"z\":0}");
+        GateDoorDto door = doorOf(30, 30, "Drawbridge Door");
+        door.setGateType("DRAWBRIDGE");
+        door.setMotionType("ROTATION");
+        door.setGeometryDefinitionMode("PLANE_GRID");
+        door.setAnimationDurationTicks(90);
+        door.setAnimationTickRate(1);
+        door.setRotationMaxAngleDegrees(90);
+        door.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
+        door.setReferencePoint1("{\"x\":1,\"y\":0,\"z\":0}");
+        door.setReferencePoint2("{\"x\":0,\"y\":1,\"z\":0}");
 
-        adapter.loadAndCacheGate(dto, new ArrayList<>());
+        adapter.loadAndCacheStructure(structureOf(30, "Drawbridge Gate", door));
 
-        CachedGate gate = gateManager.getGate(30);
+        CachedGateDoor gate = gateManager.getGate(30);
         assertNotNull(gate);
         assertEquals(gate.getUAxis(), gate.getHingeAxis());
     }
 
     @Test
-    void loadAndCacheGate_HingesDoubleDoorsOnTheHeightAxis() {
+    void loadAndCacheStructure_HingesDoubleDoorsOnTheHeightAxis() {
         // Double doors hinge along a vertical edge (vAxis) and swing width-offset blocks out
         // into depth as they open.
         GateManager gateManager = new GateManager();
         GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
 
-        GateStructureDto dto = new GateStructureDto();
-        dto.setId(31);
-        dto.setName("Double Doors Gate");
-        dto.setGateType("DOUBLE_DOORS");
-        dto.setMotionType("ROTATION");
-        dto.setGeometryDefinitionMode("PLANE_GRID");
-        dto.setAnimationDurationTicks(60);
-        dto.setAnimationTickRate(1);
-        dto.setRotationMaxAngleDegrees(90);
-        dto.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
-        dto.setReferencePoint1("{\"x\":1,\"y\":0,\"z\":0}");
-        dto.setReferencePoint2("{\"x\":0,\"y\":1,\"z\":0}");
+        GateDoorDto door = doorOf(31, 31, "Double Doors Door");
+        door.setGateType("DOUBLE_DOORS");
+        door.setMotionType("ROTATION");
+        door.setGeometryDefinitionMode("PLANE_GRID");
+        door.setAnimationDurationTicks(60);
+        door.setAnimationTickRate(1);
+        door.setRotationMaxAngleDegrees(90);
+        door.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
+        door.setReferencePoint1("{\"x\":1,\"y\":0,\"z\":0}");
+        door.setReferencePoint2("{\"x\":0,\"y\":1,\"z\":0}");
 
-        adapter.loadAndCacheGate(dto, new ArrayList<>());
+        adapter.loadAndCacheStructure(structureOf(31, "Double Doors Gate", door));
 
-        CachedGate gate = gateManager.getGate(31);
+        CachedGateDoor gate = gateManager.getGate(31);
         assertNotNull(gate);
         assertEquals(gate.getVAxis(), gate.getHingeAxis());
     }
 
     @Test
-    void loadAll_CachesEveryGateReturnedByTheApi() {
+    void loadAll_CachesEveryDoorOfEveryStructureReturnedByTheApi() {
         GateManager gateManager = new GateManager();
         GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
         GateStructuresApi api = mock(GateStructuresApi.class);
 
-        GateStructureDto gateTen = createGate(10, "East Gate");
-        GateStructureDto gateEleven = createGate(11, "West Gate");
-        when(api.getAll()).thenReturn(CompletableFuture.completedFuture(List.of(gateTen, gateEleven)));
-        when(api.getGateSnapshots(10)).thenReturn(CompletableFuture.completedFuture(List.of()));
-        when(api.getGateSnapshots(11)).thenReturn(CompletableFuture.completedFuture(List.of()));
-        when(api.getGateOpenedSnapshots(10)).thenReturn(CompletableFuture.completedFuture(List.of()));
-        when(api.getGateOpenedSnapshots(11)).thenReturn(CompletableFuture.completedFuture(List.of()));
+        GateStructureDto summaryTen = new GateStructureDto();
+        summaryTen.setId(10);
+        summaryTen.setName("East Gate");
+        GateStructureDto summaryEleven = new GateStructureDto();
+        summaryEleven.setId(11);
+        summaryEleven.setName("West Gate");
+
+        GateStructureDto fullTen = structureOf(10, "East Gate", createDoor(100, 10, "East Door"));
+        GateStructureDto fullEleven = structureOf(11, "West Gate", createDoor(110, 11, "West Door"));
+
+        when(api.getAll()).thenReturn(CompletableFuture.completedFuture(List.of(summaryTen, summaryEleven)));
+        when(api.getByIdWithSnapshots(10)).thenReturn(CompletableFuture.completedFuture(fullTen));
+        when(api.getByIdWithSnapshots(11)).thenReturn(CompletableFuture.completedFuture(fullEleven));
 
         adapter.loadAll(api).join();
 
         assertEquals(2, gateManager.getAllGates().size());
-        assertEquals("East Gate", gateManager.getGate(10).getName());
-        assertEquals("West Gate", gateManager.getGate(11).getName());
+        assertEquals("East Door", gateManager.getGate(100).getName());
+        assertEquals("West Door", gateManager.getGate(110).getName());
+        assertNotNull(gateManager.getStructure(10));
+        assertNotNull(gateManager.getStructure(11));
     }
 
-    private GateStructureDto createGate(int id, String name) {
-        GateStructureDto dto = new GateStructureDto();
-        dto.setId(id);
-        dto.setName(name);
+    private GateDoorDto createDoor(int doorId, int structureId, String name) {
+        GateDoorDto dto = doorOf(doorId, structureId, name);
         dto.setAnchorPoint("{\"x\":0,\"y\":64,\"z\":0}");
         return dto;
     }
@@ -481,47 +486,44 @@ class GateLoaderAdapterTest {
     // === Mechanism 2: loading + pairing the optional open-state scan (ROTATION_GAP_FILL_DESIGN.md) ===
 
     @Test
-    void loadAndCacheGate_NoOpenedSnapshots_LeavesOpenBlocksEmptyAndNothingPaired() {
+    void loadAndCacheStructure_NoOpenedSnapshots_LeavesOpenBlocksEmptyAndNothingPaired() {
         GateManager gateManager = new GateManager();
         GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
 
-        GateStructureDto dto = new GateStructureDto();
-        dto.setId(50);
-        dto.setName("No Open Scan Gate");
-        dto.setGateType("SLIDING");
-        dto.setMotionType("VERTICAL");
-        dto.setGeometryDefinitionMode("PLANE_GRID");
-        dto.setAnimationDurationTicks(60);
-        dto.setAnimationTickRate(1);
-        dto.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
+        GateDoorDto door = doorOf(50, 50, "No Open Scan Door");
+        door.setGateType("SLIDING");
+        door.setMotionType("VERTICAL");
+        door.setGeometryDefinitionMode("PLANE_GRID");
+        door.setAnimationDurationTicks(60);
+        door.setAnimationTickRate(1);
+        door.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
 
         GateBlockSnapshotDto closed = new GateBlockSnapshotDto(
             1, 50, 0, 0, 0, 0, 0, 0, "minecraft:oak_planks", "minecraft:oak_planks", "{}", 0
         );
+        door.setBlockSnapshots(List.of(closed));
 
-        adapter.loadAndCacheGate(dto, List.of(closed), List.of());
+        adapter.loadAndCacheStructure(structureOf(50, "No Open Scan Gate", door));
 
-        CachedGate gate = gateManager.getGate(50);
+        CachedGateDoor gate = gateManager.getGate(50);
         assertNotNull(gate);
         assertTrue(gate.getOpenBlocks().isEmpty());
         assertNull(gate.getPairedOpenBlock(1));
     }
 
     @Test
-    void loadAndCacheGate_VerticalGateWithOpenedSnapshots_PairsByIndexPosition() {
+    void loadAndCacheStructure_VerticalGateWithOpenedSnapshots_PairsByIndexPosition() {
         GateManager gateManager = new GateManager();
         GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
 
-        GateStructureDto dto = new GateStructureDto();
-        dto.setId(51);
-        dto.setName("Vertical Dual-Scan Gate");
-        dto.setGateType("SLIDING");
-        dto.setMotionType("VERTICAL");
-        dto.setGeometryDefinitionMode("PLANE_GRID");
-        dto.setAnimationDurationTicks(60);
-        dto.setAnimationTickRate(1);
-        dto.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
-        dto.setOpenAnchorPoint("{\"x\":100,\"y\":0,\"z\":0}");
+        GateDoorDto door = doorOf(51, 51, "Vertical Dual-Scan Door");
+        door.setGateType("SLIDING");
+        door.setMotionType("VERTICAL");
+        door.setGeometryDefinitionMode("PLANE_GRID");
+        door.setAnimationDurationTicks(60);
+        door.setAnimationTickRate(1);
+        door.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
+        door.setOpenAnchorPoint("{\"x\":100,\"y\":0,\"z\":0}");
 
         GateBlockSnapshotDto closed0 = new GateBlockSnapshotDto(
             1, 51, 0, 0, 0, 0, 0, 0, "minecraft:iron_bars", "minecraft:iron_bars", "{}", 0
@@ -535,10 +537,12 @@ class GateLoaderAdapterTest {
         GateBlockSnapshotDto open1 = new GateBlockSnapshotDto(
             11, 51, 0, 1, 0, 100, 1, 0, "minecraft:iron_bars", "minecraft:iron_bars", "{}", 1
         );
+        door.setBlockSnapshots(List.of(closed0, closed1));
+        door.setOpenedBlockSnapshots(List.of(open0, open1));
 
-        adapter.loadAndCacheGate(dto, List.of(closed0, closed1), List.of(open0, open1));
+        adapter.loadAndCacheStructure(structureOf(51, "Vertical Dual-Scan Gate", door));
 
-        CachedGate gate = gateManager.getGate(51);
+        CachedGateDoor gate = gateManager.getGate(51);
         assertNotNull(gate);
         assertEquals(2, gate.getOpenBlocks().size());
 
@@ -552,26 +556,24 @@ class GateLoaderAdapterTest {
     }
 
     @Test
-    void loadAndCacheGate_RotationGateWithOpenedSnapshots_PairsByNearestWorldDistance() {
+    void loadAndCacheStructure_RotationGateWithOpenedSnapshots_PairsByNearestWorldDistance() {
         GateManager gateManager = new GateManager();
         GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
 
-        GateStructureDto dto = new GateStructureDto();
-        dto.setId(52);
-        dto.setName("Drawbridge Dual-Scan Gate");
-        dto.setGateType("DRAWBRIDGE");
-        dto.setMotionType("ROTATION");
-        dto.setGeometryDefinitionMode("PLANE_GRID");
-        dto.setAnimationDurationTicks(90);
-        dto.setAnimationTickRate(1);
-        dto.setRotationMaxAngleDegrees(90);
-        dto.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
-        dto.setReferencePoint1("{\"x\":1,\"y\":0,\"z\":0}");
-        dto.setReferencePoint2("{\"x\":0,\"y\":1,\"z\":0}");
+        GateDoorDto door = doorOf(52, 52, "Drawbridge Dual-Scan Door");
+        door.setGateType("DRAWBRIDGE");
+        door.setMotionType("ROTATION");
+        door.setGeometryDefinitionMode("PLANE_GRID");
+        door.setAnimationDurationTicks(90);
+        door.setAnimationTickRate(1);
+        door.setRotationMaxAngleDegrees(90);
+        door.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
+        door.setReferencePoint1("{\"x\":1,\"y\":0,\"z\":0}");
+        door.setReferencePoint2("{\"x\":0,\"y\":1,\"z\":0}");
         // Deliberately far from the anchor, and with the two open blocks swapped relative to
         // where a straight-line/SortOrder correspondence would put them - nearest-neighbor must
         // still find the physically-closest match, not just index-align them.
-        dto.setOpenAnchorPoint("{\"x\":500,\"y\":0,\"z\":500}");
+        door.setOpenAnchorPoint("{\"x\":500,\"y\":0,\"z\":500}");
 
         GateBlockSnapshotDto closedNear = new GateBlockSnapshotDto(
             1, 52, 0, 0, 0, 0, 0, 0, "minecraft:oak_log", "minecraft:oak_log", "{}", 0
@@ -587,10 +589,12 @@ class GateLoaderAdapterTest {
         GateBlockSnapshotDto openNear = new GateBlockSnapshotDto(
             21, 52, 0, 0, 0, 500, 0, 500, "minecraft:oak_log", "minecraft:oak_log[axis=x]", "{}", 1
         );
+        door.setBlockSnapshots(List.of(closedNear, closedFar));
+        door.setOpenedBlockSnapshots(List.of(openFar, openNear));
 
-        adapter.loadAndCacheGate(dto, List.of(closedNear, closedFar), List.of(openFar, openNear));
+        adapter.loadAndCacheStructure(structureOf(52, "Drawbridge Dual-Scan Gate", door));
 
-        CachedGate gate = gateManager.getGate(52);
+        CachedGateDoor gate = gateManager.getGate(52);
         assertNotNull(gate);
 
         // closedNear=(0,0,0) is nearest to openNear=(500,0,500); closedFar=(5,0,5) (world

@@ -1,6 +1,6 @@
 package net.knightsandkings.knk.paper.gates;
 
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -30,12 +30,12 @@ import static org.mockito.Mockito.when;
  * matching GateFrameCalculatorTest's approach for the same kind of basis-vector math.
  */
 class GatePassThroughServiceTest {
-    private CachedGate axisAlignedGate;
+    private CachedGateDoor axisAlignedGate;
 
     @BeforeEach
     void setUp() {
-        axisAlignedGate = new CachedGate(
-            1, "TestGate", "SLIDING", "VERTICAL", "PLANE_GRID",
+        axisAlignedGate = new CachedGateDoor(
+            1, 1, "TestGate", "SLIDING", "VERTICAL", "PLANE_GRID",
             60, 1,
             new Vector(100, 64, 100),
             5, 5, 1,
@@ -113,8 +113,8 @@ class GatePassThroughServiceTest {
 
     @Test
     void isBlockInPassThroughPathReturnsFalseWhenBasisVectorsMissing() {
-        CachedGate noBasisGate = new CachedGate(
-            2, "NoBasisGate", "SLIDING", "VERTICAL", "PLANE_GRID",
+        CachedGateDoor noBasisGate = new CachedGateDoor(
+            2, 2, "NoBasisGate", "SLIDING", "VERTICAL", "PLANE_GRID",
             60, 1, new Vector(0, 64, 0), 5, 5, 1,
             500.0, 500.0, true, false, true, 90, "north"
         );
@@ -127,8 +127,8 @@ class GatePassThroughServiceTest {
     void blockInPassThroughPathHandlesDiagonalBasisVectors() {
         // Regression guard: isBlockInPassThroughPath projects onto the unit uAxis/vAxis, never
         // the new lattice uStep/vStep - deliberately left unset here to prove it isn't needed.
-        CachedGate diagonalGate = new CachedGate(
-            5, "DiagonalPathGate", "SLIDING", "VERTICAL", "PLANE_GRID",
+        CachedGateDoor diagonalGate = new CachedGateDoor(
+            5, 5, "DiagonalPathGate", "SLIDING", "VERTICAL", "PLANE_GRID",
             60, 1, new Vector(0, 64, 0), 5, 5, 1,
             500.0, 500.0, true, false, true, 90, "north"
         );
@@ -170,8 +170,8 @@ class GatePassThroughServiceTest {
 
     @Test
     void teleportDestinationReturnsNullWhenBasisVectorsMissing() {
-        CachedGate noBasisGate = new CachedGate(
-            3, "NoBasisGate", "SLIDING", "VERTICAL", "PLANE_GRID",
+        CachedGateDoor noBasisGate = new CachedGateDoor(
+            3, 3, "NoBasisGate", "SLIDING", "VERTICAL", "PLANE_GRID",
             60, 1, new Vector(0, 64, 0), 5, 5, 1,
             500.0, 500.0, true, false, true, 90, "north"
         );
@@ -181,8 +181,8 @@ class GatePassThroughServiceTest {
 
     @Test
     void teleportDestinationHandlesDiagonalBasisVectors() {
-        CachedGate diagonalGate = new CachedGate(
-            4, "DiagonalGate", "SLIDING", "VERTICAL", "PLANE_GRID",
+        CachedGateDoor diagonalGate = new CachedGateDoor(
+            4, 4, "DiagonalGate", "SLIDING", "VERTICAL", "PLANE_GRID",
             60, 1, new Vector(0, 64, 0), 5, 5, 2,
             500.0, 500.0, true, false, true, 90, "north"
         );

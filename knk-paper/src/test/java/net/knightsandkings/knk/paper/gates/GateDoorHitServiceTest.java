@@ -2,7 +2,7 @@ package net.knightsandkings.knk.paper.gates;
 
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.paper.events.GateDoorDamageEvent;
 import net.knightsandkings.knk.paper.events.GateDoorIgniteEvent;
@@ -31,7 +31,7 @@ class GateDoorHitServiceTest {
 
     private GateManager gateManager;
     private GateDoorHitService hitService;
-    private CachedGate gate;
+    private CachedGateDoor gate;
     private MockedStatic<Bukkit> bukkitMock;
     private PluginManager pluginManager;
 
@@ -40,8 +40,8 @@ class GateDoorHitServiceTest {
         gateManager = new GateManager();
         hitService = new GateDoorHitService(gateManager);
 
-        gate = new CachedGate(
-            1, "TestGate", "SLIDING", "VERTICAL", "PLANE_GRID",
+        gate = new CachedGateDoor(
+            1, 1, "TestGate", "SLIDING", "VERTICAL", "PLANE_GRID",
             60, 1, new Vector(100, 64, 100), 5, 5, 3,
             500.0, 500.0, true, false, false, 90, "north"
         );

@@ -2,7 +2,7 @@ package net.knightsandkings.knk.core.gates;
 
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import org.bukkit.util.Vector;
 import org.junit.jupiter.api.Test;
 
@@ -17,7 +17,7 @@ class GateManagerTest {
     void cacheGateIndexesDoorBlocksAtTheGatesCurrentFrame() {
         GateManager manager = new GateManager();
 
-        CachedGate gate = closedGateWithOneBlock(1);
+        CachedGateDoor gate = closedGateWithOneBlock(1);
         manager.cacheGate(gate);
 
         // Block's relative position (0,0,0) at frame 0 world position equals the anchor point.
@@ -29,7 +29,7 @@ class GateManagerTest {
     void cacheGateIndexesAtTheOpenFrameWhenLoadedAlreadyOpen() {
         GateManager manager = new GateManager();
 
-        CachedGate gate = closedGateWithOneBlock(1);
+        CachedGateDoor gate = closedGateWithOneBlock(1);
         gate.setCurrentState(AnimationState.OPEN);
         gate.setCurrentFrame(gate.getAnimationDurationTicks());
         manager.cacheGate(gate);
@@ -43,25 +43,26 @@ class GateManagerTest {
     void reCachingAGateClearsItsOldCellsBeforeAddingTheNewOnes() {
         GateManager manager = new GateManager();
 
-        CachedGate original = closedGateWithOneBlock(1);
+        CachedGateDoor original = closedGateWithOneBlock(1);
         manager.cacheGate(original);
         assertEquals(1, manager.getSpatialIndex().lookup(original.getWorldName(), 100, 64, 100));
 
         // Simulate a reload where the gate's anchor point moved.
-        CachedGate reloaded = closedGateWithOneBlockAt(1, new Vector(200, 64, 200));
+        CachedGateDoor reloaded = closedGateWithOneBlockAt(1, new Vector(200, 64, 200));
         manager.cacheGate(reloaded);
 
         assertNull(manager.getSpatialIndex().lookup(original.getWorldName(), 100, 64, 100));
         assertEquals(1, manager.getSpatialIndex().lookup(reloaded.getWorldName(), 200, 64, 200));
     }
 
-    private static CachedGate closedGateWithOneBlock(int id) {
+    private static CachedGateDoor closedGateWithOneBlock(int id) {
         return closedGateWithOneBlockAt(id, new Vector(100, 64, 100));
     }
 
-    private static CachedGate closedGateWithOneBlockAt(int id, Vector anchorPoint) {
-        CachedGate gate = new CachedGate(
+    private static CachedGateDoor closedGateWithOneBlockAt(int id, Vector anchorPoint) {
+        CachedGateDoor gate = new CachedGateDoor(
             id,
+            1,
             "TestGate",
             "SLIDING",
             "VERTICAL",

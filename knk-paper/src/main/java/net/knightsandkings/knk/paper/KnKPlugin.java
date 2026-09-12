@@ -15,6 +15,7 @@ import net.knightsandkings.knk.api.client.KnkApiClient;
 import net.knightsandkings.knk.core.dataaccess.TownsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
 import net.knightsandkings.knk.api.GateStructuresApi;
+import net.knightsandkings.knk.api.GateDoorsApi;
 import net.knightsandkings.knk.core.ports.api.DistrictsQueryApi;
 import net.knightsandkings.knk.core.ports.api.DomainsQueryApi;
 import net.knightsandkings.knk.core.ports.api.LocationsQueryApi;
@@ -106,6 +107,7 @@ public class KnKPlugin extends JavaPlugin {
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private WorldTasksApi worldTasksApi;
     private GateStructuresApi gateStructuresApi;
+    private GateDoorsApi gateDoorsApi;
     private GateManager gateManager;
     private GateStateSyncTask gateStateSyncTask;
     private GateDisplayManager gateDisplayManager;
@@ -162,6 +164,7 @@ public class KnKPlugin extends JavaPlugin {
             this.userAccountApi = apiClient.getUserAccountApi();
             this.worldTasksApi = apiClient.getWorldTasksApi();
             this.gateStructuresApi = apiClient.getGateStructuresApi();
+            this.gateDoorsApi = apiClient.getGateDoorsApi();
             getLogger().info("TownsQueryApi wired from API client");
             getLogger().info("LocationsQueryApi wired from API client");
             getLogger().info("EnchantmentDefinitionsQueryApi wired from API client");
@@ -196,7 +199,7 @@ public class KnKPlugin extends JavaPlugin {
             int worldSyncHealthCheckBatchSize =
                 getConfig().getInt("gates.world-sync.health-check-batch-size", 15);
             this.gateStateSyncTask = new GateStateSyncTask(
-                gateManager, gateStructuresApi, this, gateStateSyncIntervalSeconds, org.bukkit.Material.STONE,
+                gateManager, gateDoorsApi, this, gateStateSyncIntervalSeconds, org.bukkit.Material.STONE,
                 rotationGapFillRasterizationEnabled, worldSyncHealthCheckIntervalSeconds, worldSyncHealthCheckBatchSize
             );
 
@@ -300,7 +303,7 @@ public class KnKPlugin extends JavaPlugin {
 
             // Start headless WorldTask poller (webapp-initiated tasks that need no player)
             headlessWorldTaskPoller = new HeadlessWorldTaskPoller(worldTasksApi, this);
-            headlessWorldTaskPoller.registerHandler(new GateBlockScanTaskHandler(gateStructuresApi, worldTasksApi, this));
+            headlessWorldTaskPoller.registerHandler(new GateBlockScanTaskHandler(gateDoorsApi, worldTasksApi, this));
             headlessWorldTaskPoller.start();
             
             getLogger().info("WorldTaskHandlerRegistry initialized with handlers");
@@ -396,7 +399,7 @@ public class KnKPlugin extends JavaPlugin {
             );
             registerEvents(regionTracker);
 
-            HealthSystem healthSystem = new HealthSystem(gateStructuresApi, this, gateDisplayManager, gateManager);
+            HealthSystem healthSystem = new HealthSystem(gateDoorsApi, this, gateDisplayManager, gateManager);
             GateDoorHitService gateDoorHitService = new GateDoorHitService(gateManager);
 
             long fireDurationMillis = getConfig().getLong("gates.fire-duration-seconds", 8) * 1000L;
@@ -421,7 +424,7 @@ public class KnKPlugin extends JavaPlugin {
             WorldGuardIntegration worldGuardIntegration = new WorldGuardIntegration(this);
             for (org.bukkit.World world : getServer().getWorlds()) {
                 new GateAnimationTask(gateManager, world, org.bukkit.Material.STONE, worldGuardIntegration,
-                    gateStructuresApi, this, gateDisplayManager, rotationGapFillRasterizationEnabled)
+                    gateDoorsApi, this, gateDisplayManager, rotationGapFillRasterizationEnabled)
                     .runTaskTimer(this, 1L, 1L);
             }
             new GateDisplayUpdateTask(gateDisplayManager, gateManager).runTaskTimer(this, 20L, 20L);
@@ -555,6 +558,7 @@ public class KnKPlugin extends JavaPlugin {
                 worldTaskHandlerRegistry,
                 gateManager,
                 gateStructuresApi,
+                gateDoorsApi,
                 userManager,
                 usersCommandApi,
                 districtGateLoader,

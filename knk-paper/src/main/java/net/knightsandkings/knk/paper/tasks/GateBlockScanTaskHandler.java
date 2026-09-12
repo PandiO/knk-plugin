@@ -3,9 +3,9 @@ package net.knightsandkings.knk.paper.tasks;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import net.knightsandkings.knk.api.GateStructuresApi;
+import net.knightsandkings.knk.api.GateDoorsApi;
 import net.knightsandkings.knk.api.dto.GateBlockSnapshotScanDto;
-import net.knightsandkings.knk.api.dto.GateStructureDto;
+import net.knightsandkings.knk.api.dto.GateDoorDto;
 import net.knightsandkings.knk.api.dto.WorldTaskDto;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
 import net.knightsandkings.knk.core.util.CoordinateParser;
@@ -54,12 +54,12 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
     private static final int DEFAULT_SCAN_MAX_RADIUS = 20; // matches GateStructure.ScanMaxRadius default
     private static final int ABSOLUTE_MAX_CELLS = 20000; // hard ceiling regardless of gate configuration
 
-    private final GateStructuresApi gateStructuresApi;
+    private final GateDoorsApi gateDoorsApi;
     private final WorldTasksApi worldTasksApi;
     private final Plugin plugin;
 
-    public GateBlockScanTaskHandler(GateStructuresApi gateStructuresApi, WorldTasksApi worldTasksApi, Plugin plugin) {
-        this.gateStructuresApi = gateStructuresApi;
+    public GateBlockScanTaskHandler(GateDoorsApi gateDoorsApi, WorldTasksApi worldTasksApi, Plugin plugin) {
+        this.gateDoorsApi = gateDoorsApi;
         this.worldTasksApi = worldTasksApi;
         this.plugin = plugin;
     }
@@ -71,18 +71,18 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
 
     @Override
     public void execute(WorldTaskDto task, Runnable onFinished) {
-        Integer gateStructureId = parseGateStructureId(task.inputJson());
-        if (gateStructureId == null) {
-            fail(task.id(), "InputJson did not contain a valid gateStructureId.", onFinished);
+        Integer gateDoorId = parseGateDoorId(task.inputJson());
+        if (gateDoorId == null) {
+            fail(task.id(), "InputJson did not contain a valid gateDoorId.", onFinished);
             return;
         }
 
         boolean useOpenAnchor = OPENED_TASK_TYPE.equals(task.taskType());
 
-        gateStructuresApi.getById(gateStructureId).whenComplete((gate, error) -> {
+        gateDoorsApi.getById(gateDoorId).whenComplete((gate, error) -> {
             if (error != null || gate == null) {
-                String reason = error != null ? error.getMessage() : "gate not found";
-                fail(task.id(), "Could not load gate " + gateStructureId + ": " + reason, onFinished);
+                String reason = error != null ? error.getMessage() : "gate door not found";
+                fail(task.id(), "Could not load gate door " + gateDoorId + ": " + reason, onFinished);
                 return;
             }
 
@@ -94,7 +94,7 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
     // Package-private (not private) so tests can exercise the mode/anchor branching directly,
     // without needing a live Bukkit scheduler - matching computeCellPosition/checkScanSizeLimit's
     // existing visibility for the same reason.
-    void startScan(int taskId, GateStructureDto gate, boolean useOpenAnchor, Runnable onFinished) {
+    void startScan(int taskId, GateDoorDto gate, boolean useOpenAnchor, Runnable onFinished) {
         String mode = gate.getGeometryDefinitionMode();
         if ("PLANE_GRID".equals(mode)) {
             startPlaneGridScan(taskId, gate, useOpenAnchor, onFinished);
@@ -112,7 +112,7 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
         }
     }
 
-    private void startPlaneGridScan(int taskId, GateStructureDto gate, boolean useOpenAnchor, Runnable onFinished) {
+    private void startPlaneGridScan(int taskId, GateDoorDto gate, boolean useOpenAnchor, Runnable onFinished) {
         List<ScanWing> wings = buildScanWings(gate, useOpenAnchor);
         if (wings.isEmpty()) {
             String anchorLabel = useOpenAnchor ? "OpenAnchorPoint" : "anchor";
@@ -161,7 +161,7 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
      *                      AnchorPoint, just a different physical origin for the scan") - only the
      *                      wing's origin (where cell (0,0,0) actually is) changes.
      */
-    private List<ScanWing> buildScanWings(GateStructureDto gate, boolean useOpenAnchor) {
+    private List<ScanWing> buildScanWings(GateDoorDto gate, boolean useOpenAnchor) {
         List<ScanWing> wings = new ArrayList<>();
 
         Vector anchor = CoordinateParser.parseCoordinate(gate.getAnchorPoint());
@@ -218,7 +218,7 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
         return wings;
     }
 
-    private void startFloodFillScan(int taskId, GateStructureDto gate, Runnable onFinished) {
+    private void startFloodFillScan(int taskId, GateDoorDto gate, Runnable onFinished) {
         String worldName = CoordinateParser.parseWorldName(gate.getAnchorPoint());
         List<Vector> seeds = CoordinateParser.parseCoordinates(gate.getSeedBlocks());
         if (seeds.isEmpty()) {
@@ -326,14 +326,14 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
         }
     }
 
-    private Integer parseGateStructureId(String inputJson) {
+    private Integer parseGateDoorId(String inputJson) {
         if (inputJson == null || inputJson.isBlank()) {
             return null;
         }
         try {
             JsonObject obj = JsonParser.parseString(inputJson).getAsJsonObject();
-            if (obj.has("gateStructureId") && !obj.get("gateStructureId").isJsonNull()) {
-                return obj.get("gateStructureId").getAsInt();
+            if (obj.has("gateDoorId") && !obj.get("gateDoorId").isJsonNull()) {
+                return obj.get("gateDoorId").getAsInt();
             }
         } catch (Exception e) {
             LOGGER.warning("[GateBlockScan] Could not parse InputJson: " + e.getMessage());
@@ -399,7 +399,7 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
      */
     private class ChunkedScanRunnable extends BukkitRunnable {
         private final int taskId;
-        private final GateStructureDto gate;
+        private final GateDoorDto gate;
         private final List<ScanWing> wings;
         private final List<int[]> cells;
         private final boolean captureTileEntities;
@@ -412,7 +412,7 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
         private int skippedUnloadedChunks = 0;
         private boolean tileEntityWarningAdded = false;
 
-        ChunkedScanRunnable(int taskId, GateStructureDto gate, List<ScanWing> wings, List<int[]> cells,
+        ChunkedScanRunnable(int taskId, GateDoorDto gate, List<ScanWing> wings, List<int[]> cells,
                             boolean captureTileEntities, Runnable onFinished) {
             this.taskId = taskId;
             this.gate = gate;
@@ -517,7 +517,7 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
      */
     private class FloodFillScanRunnable extends BukkitRunnable {
         private final int taskId;
-        private final GateStructureDto gate;
+        private final GateDoorDto gate;
         private final World world;
         private final Vector origin;
         private final Set<String> whitelist;
@@ -537,7 +537,7 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
         private boolean tileEntityWarningAdded = false;
         private boolean cappedByMaxBlocks = false;
 
-        FloodFillScanRunnable(int taskId, GateStructureDto gate, World world, Vector origin, List<Vector> seeds,
+        FloodFillScanRunnable(int taskId, GateDoorDto gate, World world, Vector origin, List<Vector> seeds,
                               Set<String> whitelist, Set<String> blacklist, int scanMaxBlocks, int scanMaxRadius,
                               boolean planeConstraint, boolean captureTileEntities, Runnable onFinished) {
             this.taskId = taskId;

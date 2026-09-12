@@ -1,36 +1,49 @@
 package net.knightsandkings.knk.api;
 
-import net.knightsandkings.knk.api.dto.GateBlockSnapshotDto;
 import net.knightsandkings.knk.api.dto.GateStructureDto;
+import net.knightsandkings.knk.api.dto.GateStructureOverridesUpdateDto;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 /**
  * API interface for gate structure operations.
- * Provides methods to fetch gate structures and their block snapshots from the Web API.
- * 
+ * Provides methods to fetch gate structures (and their embedded doors) from the Web API.
+ *
  * This interface is in knk-api-client (not knk-core) because it returns DTOs.
  * Framework adapters (in knk-paper) implement this and use it to load gates into knk-core.
+ *
+ * Item 5 (docs/features/gate-structure-animation/GATESTRUCTURE_QOL_IMPLEMENTATION_PLAN.md) moved
+ * per-door operations (state/health/operational-settings/snapshots) to {@link GateDoorsApi} -
+ * this interface now covers only structure-level reads and the cascading override endpoint.
  */
 public interface GateStructuresApi {
 
     /**
-     * Fetch all active gate structures from the Web API.
-     * Calls GET /api/GateStructures or similar endpoint.
+     * Fetch all active gate structures (with their doors' geometry, but not block snapshots)
+     * from the Web API. Calls GET /api/GateStructures.
      *
      * @return CompletableFuture with list of all gate structures
      */
     CompletableFuture<List<GateStructureDto>> getAll();
 
     /**
-     * Get a single gate structure by ID.
+     * Get a single gate structure by ID, without its doors' block snapshots.
      * Calls GET /api/GateStructures/{id}
      *
      * @param id Gate structure ID
      * @return CompletableFuture with gate structure details
      */
     CompletableFuture<GateStructureDto> getById(int id);
+
+    /**
+     * Get a single gate structure by ID, including every door's block snapshots and
+     * opened-block snapshots. Calls GET /api/GateStructures/{id}?includeSnapshots=true
+     *
+     * @param id Gate structure ID
+     * @return CompletableFuture with gate structure details, doors, and their snapshots
+     */
+    CompletableFuture<GateStructureDto> getByIdWithSnapshots(int id);
 
     /**
      * Fetch every gate structure belonging to a District, for incremental (on-demand) loading
@@ -45,46 +58,13 @@ public interface GateStructuresApi {
     CompletableFuture<List<GateStructureDto>> getByDistrict(int districtId);
 
     /**
-     * Update the state (IsOpened, IsDestroyed, IsJammed) of a gate structure.
-     * Calls PUT /api/GateStructures/{id}/state
+     * Set/clear the structure-level cascading overrides (decision 5.0-B) - every overridable
+     * door field that's non-null here wins over each child GateDoor's own value at read time,
+     * with no per-door write needed. Calls PATCH /api/GateStructures/{id}/overrides
      *
      * @param id Gate structure ID
-     * @param isOpened New opened state
-     * @param isDestroyed New destroyed state
-     * @param isJammed New jammed state
-     * @return CompletableFuture that completes when update is done
+     * @param request Override fields to set/clear
+     * @return CompletableFuture that completes when the update is done
      */
-    CompletableFuture<Void> updateGateState(int id, boolean isOpened, boolean isDestroyed, boolean isJammed);
-
-    CompletableFuture<Void> updateOperationalSettings(int id, boolean isActive, boolean isInvincible);
-
-    /**
-     * Update the current health of a gate structure.
-     * Calls PUT /api/GateStructures/{id}/health
-     *
-     * @param id Gate structure ID
-     * @param healthCurrent New current health value
-     * @return CompletableFuture that completes when update is done
-     */
-    CompletableFuture<Void> updateGateHealth(int id, double healthCurrent);
-
-    /**
-     * Get all block snapshots for a specific gate.
-     * Calls GET /api/GateStructures/{id}/snapshots
-     *
-     * @param gateId Gate structure ID
-     * @return CompletableFuture with list of block snapshots
-     */
-    CompletableFuture<List<GateBlockSnapshotDto>> getGateSnapshots(int gateId);
-
-    /**
-     * Get the separately-scanned, fully-open shape for a specific gate, if one exists - see
-     * docs/features/gate-structure-animation/ROTATION_GAP_FILL_DESIGN.md. Empty (not null)
-     * when the gate has no such scan; its mere presence/absence is what selects Mechanism 2.
-     * Calls GET /api/GateStructures/{id}/openedSnapshots
-     *
-     * @param gateId Gate structure ID
-     * @return CompletableFuture with the list of opened-block snapshots (empty if none)
-     */
-    CompletableFuture<List<GateBlockSnapshotDto>> getGateOpenedSnapshots(int gateId);
+    CompletableFuture<Void> updateOverrides(int id, GateStructureOverridesUpdateDto request);
 }

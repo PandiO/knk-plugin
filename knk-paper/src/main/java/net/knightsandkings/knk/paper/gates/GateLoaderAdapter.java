@@ -1,10 +1,11 @@
 package net.knightsandkings.knk.paper.gates;
 
 import net.knightsandkings.knk.api.dto.GateBlockSnapshotDto;
+import net.knightsandkings.knk.api.dto.GateDoorDto;
 import net.knightsandkings.knk.api.dto.GateStructureDto;
-import net.knightsandkings.knk.core.domain.gates.AnimationState;
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
+import net.knightsandkings.knk.core.domain.gates.CachedGateStructure;
 import net.knightsandkings.knk.core.gates.GateBlockPairing;
 import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.core.util.CoordinateParser;
@@ -21,13 +22,17 @@ import java.util.concurrent.CompletableFuture;
 import java.util.logging.Logger;
 
 /**
- * Adapter for loading gates from API DTOs into the GateManager cache.
+ * Adapter for loading gate structures (and their doors) from API DTOs into the GateManager cache.
  * This class handles the conversion from API DTOs to domain objects.
- * 
+ *
  * Exists in knk-paper (not knk-core) to avoid circular dependency between
  * knk-core and knk-api-client. This follows hexagonal architecture:
  * - Core business logic lives in knk-core (GateManager state machine, etc.)
  * - Framework adapters (DTO conversions) live in knk-paper
+ *
+ * Item 5 (docs/features/gate-structure-animation/GATESTRUCTURE_QOL_IMPLEMENTATION_PLAN.md) moved
+ * per-door data (geometry, animation, health, block snapshots) onto GateDoorDto/CachedGateDoor -
+ * this adapter now builds one CachedGateStructure plus one CachedGateDoor per embedded door.
  */
 public class GateLoaderAdapter {
     private static final Logger LOGGER = Logger.getLogger(GateLoaderAdapter.class.getName());
@@ -39,17 +44,17 @@ public class GateLoaderAdapter {
     }
 
     /**
-     * Load every gate structure and its block snapshots into the runtime cache.
+     * Load every gate structure and its doors' block snapshots into the runtime cache.
      *
      * @param gateStructuresApi API client used to retrieve gate data
-     * @return future completed after every gate has been cached
+     * @return future completed after every gate structure has been cached
      */
     public CompletableFuture<Void> loadAll(net.knightsandkings.knk.api.GateStructuresApi gateStructuresApi) {
         if (gateStructuresApi == null) {
             return CompletableFuture.failedFuture(new IllegalStateException("GateStructuresApi is not configured"));
         }
 
-        return gateStructuresApi.getAll().thenCompose(gates -> loadAndCacheAll(gateStructuresApi, gates));
+        return gateStructuresApi.getAll().thenCompose(structures -> loadAndCacheAll(gateStructuresApi, structures));
     }
 
     /**
@@ -60,22 +65,18 @@ public class GateLoaderAdapter {
      * that's already loaded.
      *
      * getByDistrict hits GET /api/GateStructures?districtId={id} (a query-filtered search), which
-     * the backend serves from a lightweight list/search DTO with no geometry fields (anchorPoint,
-     * referencePoint1/2, geometryWidth/Height/Depth, etc.) - unlike the unfiltered GetAllAsync()
-     * that loadAll() uses, or GetById(). Caching those DTOs directly (as loadAll does with its
-     * already-full ones) silently produced gates with anchor (0,0,0) and default axes - which,
-     * for a gate already correctly loaded at startup, meant the first time a player entered its
-     * district mid-session, this OVERWROTE the good in-memory CachedGate with a broken one (all
-     * animated block positions would then compute relative to world (0,0,0) instead of the
-     * gate's real location). So each id is re-fetched individually via getById (the same full
-     * DTO getAll()/loadAll() already relies on) before building/caching it.
+     * the backend serves from a lightweight list/search DTO with no door geometry - unlike the
+     * unfiltered getAll()/getByIdWithSnapshots() this method falls back to per id. So each id is
+     * re-fetched individually via getByIdWithSnapshots before building/caching it, the same full
+     * fetch loadAll()/loadAndCacheAll() use.
      *
      * @param gateStructuresApi API client used to retrieve gate data
      * @param districtId District ID whose gates should be loaded
-     * @return future completed with the ids of every gate in that district successfully cached -
-     *         used by callers (see DistrictGateLoader) to run a world/DB sync check-and-fix pass
-     *         (Mechanism B, docs/features/gate-structure-animation/GATE_WORLD_SYNC_DESIGN.md)
-     *         against exactly the gates that were just (re)loaded, nothing more.
+     * @return future completed with the ids of every gate door in that district successfully
+     *         cached - used by callers (see DistrictGateLoader) to run a world/DB sync
+     *         check-and-fix pass (Mechanism B,
+     *         docs/features/gate-structure-animation/GATE_WORLD_SYNC_DESIGN.md) against exactly
+     *         the gates that were just (re)loaded, nothing more.
      */
     public CompletableFuture<List<Integer>> loadForDistrict(net.knightsandkings.knk.api.GateStructuresApi gateStructuresApi, int districtId) {
         if (gateStructuresApi == null) {
@@ -84,118 +85,133 @@ public class GateLoaderAdapter {
 
         return gateStructuresApi.getByDistrict(districtId).thenCompose(summaries -> {
             int count = summaries == null ? 0 : summaries.size();
-            LOGGER.info("District " + districtId + ": API returned " + count + " gate(s)");
+            LOGGER.info("District " + districtId + ": API returned " + count + " gate structure(s)");
             if (summaries == null || summaries.isEmpty()) {
                 return CompletableFuture.completedFuture(List.<Integer>of());
             }
 
-            List<Integer> loadedGateIds = Collections.synchronizedList(new ArrayList<>());
+            List<Integer> loadedDoorIds = Collections.synchronizedList(new ArrayList<>());
             List<CompletableFuture<Void>> loads = new ArrayList<>();
             for (GateStructureDto summary : summaries) {
                 if (summary == null || summary.getId() == null) {
                     continue;
                 }
-                int gateId = summary.getId();
+                int structureId = summary.getId();
 
-                loads.add(gateStructuresApi.getById(gateId).thenCompose(fullDto -> {
+                loads.add(gateStructuresApi.getByIdWithSnapshots(structureId).thenAccept(fullDto -> {
                     if (fullDto == null || fullDto.getId() == null) {
-                        LOGGER.warning("District " + districtId + ": full lookup for gate " + gateId + " returned nothing; skipping");
-                        return CompletableFuture.completedFuture(null);
+                        LOGGER.warning("District " + districtId + ": full lookup for gate structure " + structureId + " returned nothing; skipping");
+                        return;
                     }
-                    CompletableFuture<List<GateBlockSnapshotDto>> snapshotsFuture = gateStructuresApi.getGateSnapshots(gateId);
-                    CompletableFuture<List<GateBlockSnapshotDto>> openedSnapshotsFuture = gateStructuresApi.getGateOpenedSnapshots(gateId);
-                    return snapshotsFuture.thenAcceptBoth(openedSnapshotsFuture, (snapshots, openedSnapshots) -> {
-                        loadAndCacheGate(fullDto, snapshots == null ? List.of() : snapshots,
-                            openedSnapshots == null ? List.of() : openedSnapshots);
-                        loadedGateIds.add(gateId);
-                    });
+                    loadedDoorIds.addAll(loadAndCacheStructure(fullDto));
                 }));
             }
 
             return CompletableFuture.allOf(loads.toArray(new CompletableFuture[0]))
-                .thenApply(unused -> new ArrayList<>(loadedGateIds));
+                .thenApply(unused -> new ArrayList<>(loadedDoorIds));
         });
     }
 
     /**
-     * Shared per-gate loading loop: fetch each gate's block snapshots and cache it, used by both
-     * loadAll (every gate) and loadForDistrict (one district's gates).
+     * Shared per-structure loading loop: re-fetch each structure with its doors' snapshots
+     * included and cache it, used by loadAll (every gate structure).
      */
-    private CompletableFuture<Void> loadAndCacheAll(net.knightsandkings.knk.api.GateStructuresApi gateStructuresApi, List<GateStructureDto> gates) {
+    private CompletableFuture<Void> loadAndCacheAll(net.knightsandkings.knk.api.GateStructuresApi gateStructuresApi, List<GateStructureDto> structures) {
         List<CompletableFuture<Void>> loads = new ArrayList<>();
-        for (GateStructureDto gate : gates == null ? List.<GateStructureDto>of() : gates) {
-            if (gate == null || gate.getId() == null) {
+        for (GateStructureDto structure : structures == null ? List.<GateStructureDto>of() : structures) {
+            if (structure == null || structure.getId() == null) {
                 continue;
             }
 
-            int gateId = gate.getId();
-            CompletableFuture<List<GateBlockSnapshotDto>> snapshotsFuture = gateStructuresApi.getGateSnapshots(gateId);
-            CompletableFuture<List<GateBlockSnapshotDto>> openedSnapshotsFuture = gateStructuresApi.getGateOpenedSnapshots(gateId);
-            loads.add(snapshotsFuture.thenAcceptBoth(openedSnapshotsFuture, (snapshots, openedSnapshots) ->
-                loadAndCacheGate(gate, snapshots == null ? List.of() : snapshots,
-                    openedSnapshots == null ? List.of() : openedSnapshots)));
+            int structureId = structure.getId();
+            loads.add(gateStructuresApi.getByIdWithSnapshots(structureId).thenAccept(this::loadAndCacheStructure));
         }
 
         return CompletableFuture.allOf(loads.toArray(new CompletableFuture[0]));
     }
 
     /**
-     * Load and cache a single gate from a DTO.
-     * This method handles all DTO-to-domain conversion.
+     * Build and cache one CachedGateStructure plus one CachedGateDoor per embedded door from a
+     * full (snapshots-included) GateStructureDto.
      *
-     * @param dto Gate structure DTO from API
-     * @param snapshotDtos List of block snapshot DTOs
+     * @param dto Gate structure DTO from API, with GateDoors (each including BlockSnapshots/
+     *            OpenedBlockSnapshots) populated
+     * @return the ids of every door successfully cached
      */
-    public void loadAndCacheGate(GateStructureDto dto, List<GateBlockSnapshotDto> snapshotDtos) {
-        loadAndCacheGate(dto, snapshotDtos, List.of());
-    }
-
-    /**
-     * Load and cache a single gate from a DTO, including its optional Mechanism 2 open-state
-     * scan (see docs/features/gate-structure-animation/ROTATION_GAP_FILL_DESIGN.md). This method
-     * handles all DTO-to-domain conversion.
-     *
-     * @param dto Gate structure DTO from API
-     * @param snapshotDtos List of block snapshot DTOs
-     * @param openedSnapshotDtos List of opened-block snapshot DTOs - empty (not null) when the
-     *                           gate has no manually-scanned open state
-     */
-    public void loadAndCacheGate(GateStructureDto dto, List<GateBlockSnapshotDto> snapshotDtos,
-                                  List<GateBlockSnapshotDto> openedSnapshotDtos) {
+    public List<Integer> loadAndCacheStructure(GateStructureDto dto) {
         if (dto == null || dto.getId() == null) {
-            LOGGER.warning("Cannot load gate: DTO or ID is null");
-            return;
+            LOGGER.warning("Cannot load gate structure: DTO or ID is null");
+            return List.of();
         }
 
-        CachedGate cachedGate = buildCachedGate(dto, snapshotDtos, openedSnapshotDtos);
-        gateManager.cacheGate(cachedGate);
+        CachedGateStructure structure = buildCachedGateStructure(dto);
+        gateManager.cacheStructure(structure);
 
-        LOGGER.info("Cached gate: " + cachedGate.getName() + " (ID: " + cachedGate.getId() +
-                   ") with " + cachedGate.getBlocks().size() + " blocks"
-                   + (cachedGate.getOpenBlocks().isEmpty() ? "" : " and " + cachedGate.getOpenBlocks().size() + " open-scan blocks"));
+        List<Integer> doorIds = new ArrayList<>();
+        List<GateDoorDto> doorDtos = dto.getGateDoors();
+        if (doorDtos == null || doorDtos.isEmpty()) {
+            LOGGER.warning("Gate structure '" + dto.getName() + "' (ID: " + dto.getId() + ") has no doors.");
+            return doorIds;
+        }
+
+        for (GateDoorDto doorDto : doorDtos) {
+            if (doorDto == null || doorDto.getId() == null) {
+                continue;
+            }
+            CachedGateDoor door = buildCachedGateDoor(doorDto, structure);
+            gateManager.cacheGate(door);
+            doorIds.add(door.getId());
+
+            LOGGER.info("Cached gate door: " + door.getName() + " (ID: " + door.getId() + ", structure: "
+                + structure.getName() + ") with " + door.getBlocks().size() + " blocks"
+                + (door.getOpenBlocks().isEmpty() ? "" : " and " + door.getOpenBlocks().size() + " open-scan blocks"));
+        }
+
+        return doorIds;
+    }
+
+    /** Structure-level fields only (decision 5.0-A "stays on GateStructure" list). */
+    private CachedGateStructure buildCachedGateStructure(GateStructureDto dto) {
+        CachedGateStructure structure = new CachedGateStructure(dto.getId(), dto.getName());
+
+        structure.setCurrentSiegeId(dto.getCurrentSiegeId());
+        structure.setOverridable(dto.getIsOverridable() == null || dto.getIsOverridable());
+        structure.setAnimateDuringSiege(dto.getAnimateDuringSiege() == null || dto.getAnimateDuringSiege());
+        structure.setSiegeObjective(Boolean.TRUE.equals(dto.getIsSiegeObjective()));
+
+        structure.setIsActiveOverride(dto.getIsActiveOverride());
+        structure.setCanRespawnOverride(dto.getCanRespawnOverride());
+        structure.setIsDestroyedOverride(dto.getIsDestroyedOverride());
+        structure.setIsInvincibleOverride(dto.getIsInvincibleOverride());
+        structure.setOpenedStateOverride(dto.getOpenedStateOverride());
+        structure.setAllowPassThroughOverride(dto.getAllowPassThroughOverride());
+        structure.setPassThroughDurationSecondsOverride(dto.getPassThroughDurationSecondsOverride());
+        structure.setShowHealthDisplayOverride(dto.getShowHealthDisplayOverride());
+        structure.setHealthDisplayModeOverride(dto.getHealthDisplayModeOverride());
+        structure.setHealthDisplayYOffsetOverride(dto.getHealthDisplayYOffsetOverride());
+        structure.setGateNameDisplayModeOverride(dto.getGateNameDisplayModeOverride());
+        structure.setStatusDisplayModeOverride(dto.getStatusDisplayModeOverride());
+        structure.setAllowContinuousDamageOverride(dto.getAllowContinuousDamageOverride());
+        structure.setContinuousDamageMultiplierOverride(dto.getContinuousDamageMultiplierOverride());
+
+        return structure;
     }
 
     /**
-     * Build a CachedGate from DTO data.
-     * Precomputes local basis vectors and motion vectors.
-     *
-     * @param dto Gate structure DTO
-     * @param snapshotDtos List of block snapshot DTOs
-     * @param openedSnapshotDtos List of opened-block snapshot DTOs (empty when none)
-     * @return CachedGate instance
+     * Build a CachedGateDoor from a door DTO. Precomputes local basis vectors and motion vectors,
+     * mirroring the pre-item-5 buildCachedGate logic exactly, just reading from GateDoorDto.
      */
-    private CachedGate buildCachedGate(GateStructureDto dto, List<GateBlockSnapshotDto> snapshotDtos,
-                                        List<GateBlockSnapshotDto> openedSnapshotDtos) {
+    private CachedGateDoor buildCachedGateDoor(GateDoorDto dto, CachedGateStructure structure) {
         // Parse anchor point
         Vector anchorPoint = CoordinateParser.parseCoordinate(dto.getAnchorPoint());
         if (anchorPoint == null) {
-            LOGGER.warning("Gate " + dto.getName() + " has invalid anchor point, using (0,0,0)");
+            LOGGER.warning("Gate door " + dto.getName() + " has invalid anchor point, using (0,0,0)");
             anchorPoint = new Vector(0, 0, 0);
         }
 
-        // Create CachedGate
-        CachedGate gate = new CachedGate(
+        CachedGateDoor door = new CachedGateDoor(
             dto.getId(),
+            structure.getId(),
             dto.getName(),
             dto.getGateType() != null ? dto.getGateType() : "SLIDING",
             dto.getMotionType() != null ? dto.getMotionType() : "VERTICAL",
@@ -212,60 +228,68 @@ public class GateLoaderAdapter {
             dto.getIsDestroyed() != null ? dto.getIsDestroyed() : false,
             dto.getIsInvincible() != null ? dto.getIsInvincible() : true,
             dto.getRotationMaxAngleDegrees() != null ? dto.getRotationMaxAngleDegrees() : 90,
-            dto.getFaceDirection() != null ? dto.getFaceDirection() : "north"
+            dto.getFaceDirection() != null ? dto.getFaceDirection() : "NORTH"
         );
 
-        gate.setRegionClosedId(dto.getRegionClosedId());
-        gate.setRegionOpenedId(dto.getRegionOpenedId());
-        gate.setWorldName(CoordinateParser.parseWorldName(dto.getAnchorPoint()));
-        gate.setCanRespawn(dto.getCanRespawn() != null ? dto.getCanRespawn() : true);
-        gate.setRespawnRateSeconds(dto.getRespawnRateSeconds() != null ? dto.getRespawnRateSeconds() : 300);
-        gate.setClipToGeometryBounds(Boolean.TRUE.equals(dto.getClipToGeometryBounds()));
+        door.setStructure(structure);
 
-        gate.setShowHealthDisplay(dto.getShowHealthDisplay() == null || dto.getShowHealthDisplay());
-        gate.setHealthDisplayMode(dto.getHealthDisplayMode());
-        gate.setHealthDisplayYOffset(dto.getHealthDisplayYOffset() != null ? dto.getHealthDisplayYOffset() : 2);
-        gate.setInfoDisplayLocation(CoordinateParser.parseCoordinate(dto.getInfoDisplayLocation()));
-        gate.setGateNameDisplayMode(dto.getGateNameDisplayMode());
-        gate.setStatusDisplayMode(dto.getStatusDisplayMode());
-        gate.setCurrentSiegeId(dto.getCurrentSiegeId());
-        gate.setAllowPassThrough(Boolean.TRUE.equals(dto.getAllowPassThrough()));
-        gate.setPassThroughDurationSeconds(
+        door.setRegionClosedId(dto.getRegionClosedId());
+        door.setRegionOpenedId(dto.getRegionOpenedId());
+        door.setWorldName(CoordinateParser.parseWorldName(dto.getAnchorPoint()));
+        door.setCanRespawn(dto.getCanRespawn() != null ? dto.getCanRespawn() : true);
+        door.setRespawnRateSeconds(dto.getRespawnRateSeconds() != null ? dto.getRespawnRateSeconds() : 300);
+        door.setClipToGeometryBounds(Boolean.TRUE.equals(dto.getClipToGeometryBounds()));
+
+        door.setShowHealthDisplay(dto.getShowHealthDisplay() == null || dto.getShowHealthDisplay());
+        door.setHealthDisplayMode(dto.getHealthDisplayMode());
+        door.setHealthDisplayYOffset(dto.getHealthDisplayYOffset() != null ? dto.getHealthDisplayYOffset() : 2);
+        door.setInfoDisplayLocation(CoordinateParser.parseCoordinate(dto.getInfoDisplayLocation()));
+        door.setGateNameDisplayMode(dto.getGateNameDisplayMode());
+        door.setStatusDisplayMode(dto.getStatusDisplayMode());
+        door.setDoorNameDisplayMode(dto.getDoorNameDisplayMode());
+        door.setAllowPassThrough(Boolean.TRUE.equals(dto.getAllowPassThrough()));
+        door.setPassThroughDurationSeconds(
             dto.getPassThroughDurationSeconds() != null ? dto.getPassThroughDurationSeconds() : 2);
-        gate.setOpenAnchorPoint(CoordinateParser.parseCoordinate(dto.getOpenAnchorPoint()));
+        door.setAllowContinuousDamage(dto.getAllowContinuousDamage() == null || dto.getAllowContinuousDamage());
+        door.setContinuousDamageMultiplier(
+            dto.getContinuousDamageMultiplier() != null ? dto.getContinuousDamageMultiplier() : 1.0);
+        door.setOpenAnchorPoint(CoordinateParser.parseCoordinate(dto.getOpenAnchorPoint()));
 
         // Precompute local basis vectors
-        precomputeBasisVectors(gate, dto);
+        precomputeBasisVectors(door, dto);
 
         // Precompute motion vector
-        precomputeMotionVector(gate, dto);
+        precomputeMotionVector(door, dto);
 
         // Load block snapshots
-        loadBlockSnapshots(gate, snapshotDtos);
+        loadBlockSnapshots(door, dto.getBlockSnapshots());
 
         // Mechanism 2 (ROTATION_GAP_FILL_DESIGN.md): load the optional manually-scanned open
-        // state and pair it against the closed blocks just loaded above. A gate with none of
+        // state and pair it against the closed blocks just loaded above. A door with none of
         // these ends up with an empty openBlocks/openBlockPairing, which is itself the trigger
         // GateFrameCalculator uses to fall through to today's exact procedural behavior.
-        loadOpenBlockSnapshots(gate, openedSnapshotDtos);
+        loadOpenBlockSnapshots(door, dto.getOpenedBlockSnapshots());
 
-        // Set initial state based on IsOpened
-        if (dto.getIsOpened() != null && dto.getIsOpened()) {
-            gate.setCurrentState(AnimationState.OPEN);
-            gate.setCurrentFrame(gate.getAnimationDurationTicks());
+        // Set initial state from OpenedState (CLOSED/OPENING/OPEN/CLOSING/JAMMED - decision 5.0-C).
+        String openedState = dto.getOpenedState();
+        door.setIsJammed(GateDoorOpenStateMapper.isJammedFromWireValue(openedState));
+        if (GateDoorOpenStateMapper.animationStateFromWireValue(openedState)
+            == net.knightsandkings.knk.core.domain.gates.AnimationState.OPEN) {
+            door.setCurrentState(net.knightsandkings.knk.core.domain.gates.AnimationState.OPEN);
+            door.setCurrentFrame(door.getAnimationDurationTicks());
         } else {
-            gate.setCurrentState(AnimationState.CLOSED);
-            gate.setCurrentFrame(0);
+            door.setCurrentState(net.knightsandkings.knk.core.domain.gates.AnimationState.CLOSED);
+            door.setCurrentFrame(0);
         }
 
-        return gate;
+        return door;
     }
 
     /**
      * Precompute local basis vectors (u, v, n) from reference points.
      * For PLANE_GRID geometry mode.
      */
-    private void precomputeBasisVectors(CachedGate gate, GateStructureDto dto) {
+    private void precomputeBasisVectors(CachedGateDoor gate, GateDoorDto dto) {
         Vector ref1 = CoordinateParser.parseCoordinate(dto.getReferencePoint1());
         Vector ref2 = CoordinateParser.parseCoordinate(dto.getReferencePoint2());
         Vector anchor = gate.getAnchorPoint();
@@ -319,7 +343,7 @@ public class GateLoaderAdapter {
     /**
      * Precompute motion vector based on motion type and geometry.
      */
-    private void precomputeMotionVector(CachedGate gate, GateStructureDto dto) {
+    private void precomputeMotionVector(CachedGateDoor gate, GateDoorDto dto) {
         String motionType = gate.getMotionType();
         Vector nAxis = gate.getNAxis();
 
@@ -366,7 +390,7 @@ public class GateLoaderAdapter {
      * and vAxis into each other, spinning the door flat within its own plane instead of
      * swinging it open.
      */
-    private Vector resolveHingeAxis(CachedGate gate) {
+    private Vector resolveHingeAxis(CachedGateDoor gate) {
         if ("DOUBLE_DOORS".equals(gate.getGateType())) {
             return gate.getVAxis();
         }
@@ -376,7 +400,7 @@ public class GateLoaderAdapter {
     /**
      * MotionDistanceBlocks wins; legacy gates fall back to the geometry axis matching the motion type.
      */
-    private int resolveMotionDistance(CachedGate gate, GateStructureDto dto, String motionType) {
+    private int resolveMotionDistance(CachedGateDoor gate, GateDoorDto dto, String motionType) {
         Integer configured = dto.getMotionDistanceBlocks();
         if (configured != null && configured != 0) {
             return configured;
@@ -390,12 +414,12 @@ public class GateLoaderAdapter {
     }
 
     /**
-     * Load block snapshots into the gate.
+     * Load block snapshots into the gate door.
      * Sorts by SortOrder to ensure stable block placement order.
      */
-    private void loadBlockSnapshots(CachedGate gate, List<GateBlockSnapshotDto> snapshotDtos) {
+    private void loadBlockSnapshots(CachedGateDoor gate, List<GateBlockSnapshotDto> snapshotDtos) {
         if (snapshotDtos == null || snapshotDtos.isEmpty()) {
-            LOGGER.warning("Gate " + gate.getName() + " (ID: " + gate.getId() + ") has no block snapshots; it cannot be animated.");
+            LOGGER.warning("Gate door " + gate.getName() + " (ID: " + gate.getId() + ") has no block snapshots; it cannot be animated.");
             return;
         }
 
@@ -406,17 +430,17 @@ public class GateLoaderAdapter {
             }
         }
 
-        LOGGER.fine("Loaded " + gate.getBlocks().size() + " blocks for gate " + gate.getName());
+        LOGGER.fine("Loaded " + gate.getBlocks().size() + " blocks for gate door " + gate.getName());
     }
 
     /**
-     * Mechanism 2 (ROTATION_GAP_FILL_DESIGN.md): load the gate's optional manually-scanned open
+     * Mechanism 2 (ROTATION_GAP_FILL_DESIGN.md): load the door's optional manually-scanned open
      * state (empty/no-op when it has none) and pair each closed block to its open-state
      * counterpart - by SortOrder position for VERTICAL/LATERAL (both scans walk the same
      * deterministic loop from their own anchor), or by nearest 3D world-space distance for
      * ROTATION (Decision 2: greedy, ship v1; see GateBlockPairing).
      */
-    private void loadOpenBlockSnapshots(CachedGate gate, List<GateBlockSnapshotDto> openedSnapshotDtos) {
+    private void loadOpenBlockSnapshots(CachedGateDoor gate, List<GateBlockSnapshotDto> openedSnapshotDtos) {
         if (openedSnapshotDtos == null || openedSnapshotDtos.isEmpty()) {
             return;
         }

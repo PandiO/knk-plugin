@@ -1,6 +1,6 @@
 package net.knightsandkings.knk.paper.gates;
 
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.util.VectorMath;
 import org.bukkit.Axis;
 import org.bukkit.Bukkit;
@@ -56,7 +56,7 @@ public final class GateBlockOrientation {
      * hinge axis, or unchanged if the block has neither, the gate has no hinge axis (non-rotation
      * gates), the angle is ~0, or the string fails to parse.
      */
-    public static String applyRotation(String blockDataString, CachedGate gate, double angleDegrees) {
+    public static String applyRotation(String blockDataString, CachedGateDoor gate, double angleDegrees) {
         if (blockDataString == null || blockDataString.isEmpty()) {
             return blockDataString;
         }

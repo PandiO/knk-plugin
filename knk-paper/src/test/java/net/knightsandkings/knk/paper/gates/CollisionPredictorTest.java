@@ -1,7 +1,7 @@
 package net.knightsandkings.knk.paper.gates;
 
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import org.bukkit.entity.Entity;
 import org.bukkit.util.BoundingBox;
 import org.bukkit.util.Vector;
@@ -15,7 +15,7 @@ class CollisionPredictorTest {
 
     @Test
     void shouldDetectImmediateCollision() {
-        CachedGate gate = buildStaticGate("north");
+        CachedGateDoor gate = buildStaticGate("north");
         gate.addBlock(new BlockSnapshot(1, new Vector(0, 0, 0), 1, "stone", 0));
 
         Entity entity = mock(Entity.class);
@@ -27,7 +27,7 @@ class CollisionPredictorTest {
 
     @Test
     void shouldReturnMaxValueWhenNoCollision() {
-        CachedGate gate = buildStaticGate("north");
+        CachedGateDoor gate = buildStaticGate("north");
         gate.addBlock(new BlockSnapshot(1, new Vector(0, 0, 0), 1, "stone", 0));
 
         Entity entity = mock(Entity.class);
@@ -37,8 +37,9 @@ class CollisionPredictorTest {
         assertEquals(Integer.MAX_VALUE, framesToCollision);
     }
 
-    private CachedGate buildStaticGate(String faceDirection) {
-        CachedGate gate = new CachedGate(
+    private CachedGateDoor buildStaticGate(String faceDirection) {
+        CachedGateDoor gate = new CachedGateDoor(
+            1,
             1,
             "TestGate",
             "SLIDING",

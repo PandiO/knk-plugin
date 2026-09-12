@@ -1,7 +1,7 @@
 package net.knightsandkings.knk.paper.gates;
 
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.gates.GateFrameCalculator;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -42,7 +42,7 @@ final class GateWorldSyncChecker {
      * forces a chunk load; callers decide whether to do that first (Mechanism B) or accept a
      * partial/empty check (Mechanisms A and C, which never force a load).
      */
-    static SyncResult check(World world, CachedGate gate, Material fallbackMaterial, boolean rasterizationEnabled) {
+    static SyncResult check(World world, CachedGateDoor gate, Material fallbackMaterial, boolean rasterizationEnabled) {
         List<GateRestingFramePlacer.RestingCell> cells =
             GateRestingFramePlacer.restingFrameCells(gate, restingFrame(gate), rasterizationEnabled);
 
@@ -61,14 +61,14 @@ final class GateWorldSyncChecker {
     }
 
     /** Force the gate's resting frame to match its DB-loaded state - see {@link GateRestingFramePlacer}. */
-    static void fix(World world, CachedGate gate, Material fallbackMaterial, boolean rasterizationEnabled) {
+    static void fix(World world, CachedGateDoor gate, Material fallbackMaterial, boolean rasterizationEnabled) {
         int frame = restingFrame(gate);
         double angle = GateFrameCalculator.calculateRotationAngle(gate, frame);
         GateRestingFramePlacer.placeRestingFrame(world, gate, frame, angle, fallbackMaterial, rasterizationEnabled);
     }
 
     /** The resting animation frame (0 or totalFrames) matching the gate's current CLOSED/OPEN state. */
-    static int restingFrame(CachedGate gate) {
+    static int restingFrame(CachedGateDoor gate) {
         return gate.getCurrentState() == AnimationState.OPEN ? gate.getAnimationDurationTicks() : 0;
     }
 }

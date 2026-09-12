@@ -1,6 +1,6 @@
 package net.knightsandkings.knk.paper.tasks;
 
-import net.knightsandkings.knk.api.GateStructuresApi;
+import net.knightsandkings.knk.api.GateDoorsApi;
 import net.knightsandkings.knk.api.dto.WorldTaskDto;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
@@ -27,17 +27,17 @@ import static org.mockito.Mockito.*;
  * a live Bukkit World (see repo testing notes: full scans need Bukkit runtime).
  */
 class GateBlockScanTaskHandlerTest {
-    private GateStructuresApi mockGateStructuresApi;
+    private GateDoorsApi mockGateDoorsApi;
     private WorldTasksApi mockWorldTasksApi;
     private Plugin mockPlugin;
     private GateBlockScanTaskHandler handler;
 
     @BeforeEach
     void setUp() {
-        mockGateStructuresApi = mock(GateStructuresApi.class);
+        mockGateDoorsApi = mock(GateDoorsApi.class);
         mockWorldTasksApi = mock(WorldTasksApi.class);
         mockPlugin = mock(Plugin.class);
-        handler = new GateBlockScanTaskHandler(mockGateStructuresApi, mockWorldTasksApi, mockPlugin);
+        handler = new GateBlockScanTaskHandler(mockGateDoorsApi, mockWorldTasksApi, mockPlugin);
 
         when(mockWorldTasksApi.fail(anyInt(), anyString()))
             .thenReturn(CompletableFuture.completedFuture(null));
@@ -98,21 +98,21 @@ class GateBlockScanTaskHandlerTest {
     }
 
     @Test
-    void testExecute_MissingGateStructureId_FailsTaskWithoutTouchingGateApi() {
+    void testExecute_MissingGateDoorId_FailsTaskWithoutTouchingGateApi() {
         WorldTaskDto task = createTask(1, "{}");
         AtomicBoolean finished = new AtomicBoolean(false);
 
         handler.execute(task, () -> finished.set(true));
 
-        verify(mockWorldTasksApi).fail(eq(1), contains("gateStructureId"));
-        verify(mockGateStructuresApi, never()).getById(anyInt());
+        verify(mockWorldTasksApi).fail(eq(1), contains("gateDoorId"));
+        verify(mockGateDoorsApi, never()).getById(anyInt());
         assertTrue(finished.get());
     }
 
     @Test
     void testExecute_GateApiLookupFails_FailsTaskWithReason() {
-        WorldTaskDto task = createTask(2, "{\"gateStructureId\":11}");
-        when(mockGateStructuresApi.getById(11)).thenReturn(
+        WorldTaskDto task = createTask(2, "{\"gateDoorId\":11}");
+        when(mockGateDoorsApi.getById(11)).thenReturn(
             CompletableFuture.failedFuture(new ApiException("url", 500, "boom", "detail"))
         );
         AtomicBoolean finished = new AtomicBoolean(false);
@@ -132,8 +132,8 @@ class GateBlockScanTaskHandlerTest {
 
     @Test
     void testExecute_GateNotFound_FailsTask() {
-        WorldTaskDto task = createTask(3, "{\"gateStructureId\":99}");
-        when(mockGateStructuresApi.getById(99)).thenReturn(CompletableFuture.completedFuture(null));
+        WorldTaskDto task = createTask(3, "{\"gateDoorId\":99}");
+        when(mockGateDoorsApi.getById(99)).thenReturn(CompletableFuture.completedFuture(null));
         AtomicBoolean finished = new AtomicBoolean(false);
 
         handler.execute(task, () -> finished.set(true));
@@ -194,8 +194,8 @@ class GateBlockScanTaskHandlerTest {
         // FLOOD_FILL has no OpenAnchorPoint-equivalent concept in v1 - see
         // ROTATION_GAP_FILL_DESIGN.md's non-goals. Exercised directly (rather than via execute())
         // since this branch fails before any Bukkit World/scheduler access is needed.
-        net.knightsandkings.knk.api.dto.GateStructureDto gate = new net.knightsandkings.knk.api.dto.GateStructureDto();
-        gate.setName("Flood Fill Gate");
+        net.knightsandkings.knk.api.dto.GateDoorDto gate = new net.knightsandkings.knk.api.dto.GateDoorDto();
+        gate.setName("Flood Fill Door");
         gate.setGeometryDefinitionMode("FLOOD_FILL");
         AtomicBoolean finished = new AtomicBoolean(false);
 

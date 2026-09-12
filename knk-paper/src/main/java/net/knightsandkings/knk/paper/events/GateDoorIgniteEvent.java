@@ -1,6 +1,6 @@
 package net.knightsandkings.knk.paper.events;
 
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Entity;
 import org.bukkit.event.Cancellable;
@@ -23,20 +23,20 @@ public class GateDoorIgniteEvent extends Event implements Cancellable {
         FLINT_AND_STEEL
     }
 
-    private final CachedGate gate;
+    private final CachedGateDoor gate;
     private final Cause cause;
     private final Entity causingEntity;
     private final Block hitBlock;
     private boolean cancelled;
 
-    public GateDoorIgniteEvent(CachedGate gate, Cause cause, Entity causingEntity, Block hitBlock) {
+    public GateDoorIgniteEvent(CachedGateDoor gate, Cause cause, Entity causingEntity, Block hitBlock) {
         this.gate = gate;
         this.cause = cause;
         this.causingEntity = causingEntity;
         this.hitBlock = hitBlock;
     }
 
-    public CachedGate getGate() {
+    public CachedGateDoor getGate() {
         return gate;
     }
 

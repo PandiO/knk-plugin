@@ -2,7 +2,8 @@ package net.knightsandkings.knk.core.gates;
 
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
+import net.knightsandkings.knk.core.domain.gates.CachedGateStructure;
 import org.bukkit.util.Vector;
 
 import java.util.ArrayList;
@@ -17,19 +18,28 @@ import java.util.logging.Logger;
 
 /**
  * Manager for gate structures in the plugin.
- * Caches gates in memory and provides access to gate data and state management.
- * DTO loading and conversion is handled by adapters in the framework layer (knk-paper).
+ * Caches gate doors (and their parent structures) in memory and provides access to gate data and
+ * state management. DTO loading and conversion is handled by adapters in the framework layer
+ * (knk-paper).
+ *
+ * <p>A "gate" in this plugin's commands/animation/interaction has always meant one animated door
+ * (today's {@link CachedGateDoor}) - item 5's multi-door support
+ * (docs/features/gate-structure-animation/GATESTRUCTURE_QOL_IMPLEMENTATION_PLAN.md) adds a
+ * separate, thinner {@link CachedGateStructure} cache for the structure-level identity and
+ * cascading-override data every door on that structure shares.
  */
 public class GateManager {
     private static final Logger LOGGER = Logger.getLogger(GateManager.class.getName());
 
-    private final Map<Integer, CachedGate> gateCache;
+    private final Map<Integer, CachedGateDoor> gateCache;
+    private final Map<Integer, CachedGateStructure> structureCache;
     private final Map<Integer, Consumer<AnimationState>> animationCompletionCallbacks;
     private final GateSpatialIndex spatialIndex;
     private Supplier<CompletableFuture<Void>> reloadAction;
 
     public GateManager() {
         this.gateCache = new HashMap<>();
+        this.structureCache = new HashMap<>();
         this.animationCompletionCallbacks = new ConcurrentHashMap<>();
         this.spatialIndex = new GateSpatialIndex();
     }
@@ -70,7 +80,7 @@ public class GateManager {
     /**
      * Register the one-shot callback that receives the terminal animation state.
      *
-     * @param gateId gate being animated
+     * @param gateId gate (door) being animated
      * @param callback invoked with OPEN or CLOSED when animation finishes
      */
     public void setAnimationCompletionCallback(int gateId, Consumer<AnimationState> callback) {
@@ -82,7 +92,7 @@ public class GateManager {
     /**
      * Notify and remove the callback associated with a completed gate animation.
      *
-     * @param gateId completed gate ID
+     * @param gateId completed gate (door) ID
      * @param state terminal animation state
      */
     public void notifyAnimationCompleted(int gateId, AnimationState state) {
@@ -93,19 +103,19 @@ public class GateManager {
     }
 
     /**
-     * Cache a gate that has been loaded and converted by a framework adapter.
-     * This is the primary entry point for gates created outside of this class.
+     * Cache a gate door that has been loaded and converted by a framework adapter.
+     * This is the primary entry point for gate doors created outside of this class.
      * Called by adapters in knk-paper after DTO conversion.
      *
-     * @param gate The CachedGate instance to cache
+     * @param gate The CachedGateDoor instance to cache
      */
-    public void cacheGate(CachedGate gate) {
+    public void cacheGate(CachedGateDoor gate) {
         if (gate == null) {
             LOGGER.warning("Attempted to cache null gate");
             return;
         }
 
-        CachedGate previous = gateCache.get(gate.getId());
+        CachedGateDoor previous = gateCache.get(gate.getId());
         if (previous != null) {
             spatialIndex.removeAll(previous.getWorldName(), doorBlockPositions(previous, previous.getCurrentFrame()));
         }
@@ -118,10 +128,24 @@ public class GateManager {
     }
 
     /**
+     * Cache a gate structure's structure-level data (identity, siege fields, cascading
+     * overrides). Called by GateLoaderAdapter alongside {@link #cacheGate}.
+     *
+     * @param structure The CachedGateStructure instance to cache
+     */
+    public void cacheStructure(CachedGateStructure structure) {
+        if (structure == null) {
+            LOGGER.warning("Attempted to cache null gate structure");
+            return;
+        }
+        structureCache.put(structure.getId(), structure);
+    }
+
+    /**
      * World positions of a gate's door blocks at the given animation frame, skipping any
      * block clipped away by ClipToGeometryBounds (see GateFrameCalculator).
      */
-    private static List<Vector> doorBlockPositions(CachedGate gate, int frame) {
+    private static List<Vector> doorBlockPositions(CachedGateDoor gate, int frame) {
         List<Vector> positions = new ArrayList<>();
         for (BlockSnapshot block : gate.getBlocks()) {
             if (block == null) {
@@ -138,22 +162,23 @@ public class GateManager {
     // === Public API for accessing gates ===
 
     /**
-     * Get a cached gate by ID.
+     * Get a cached gate door by ID.
      *
-     * @param id Gate ID
-     * @return CachedGate or null if not found
+     * @param id Gate door ID
+     * @return CachedGateDoor or null if not found
      */
-    public CachedGate getGate(int id) {
+    public CachedGateDoor getGate(int id) {
         return gateCache.get(id);
     }
 
     /**
-     * Get a cached gate by name.
+     * Get a cached gate door by name. Door names are only guaranteed unique within their parent
+     * structure (decision 5.0-D), not globally - this returns the first match.
      *
-     * @param name Gate name
-     * @return CachedGate or null if not found
+     * @param name Gate door name
+     * @return CachedGateDoor or null if not found
      */
-    public CachedGate getGateByName(String name) {
+    public CachedGateDoor getGateByName(String name) {
         return gateCache.values().stream()
             .filter(gate -> gate.getName().equalsIgnoreCase(name))
             .findFirst()
@@ -161,12 +186,52 @@ public class GateManager {
     }
 
     /**
-     * Get all cached gates.
+     * Get all cached gate doors.
      *
-     * @return Map of gate ID to CachedGate
+     * @return Map of gate door ID to CachedGateDoor
      */
-    public Map<Integer, CachedGate> getAllGates() {
+    public Map<Integer, CachedGateDoor> getAllGates() {
         return new HashMap<>(gateCache);
+    }
+
+    /**
+     * Get a cached gate structure by ID.
+     *
+     * @param id Gate structure ID
+     * @return CachedGateStructure or null if not found
+     */
+    public CachedGateStructure getStructure(int id) {
+        return structureCache.get(id);
+    }
+
+    /**
+     * Get a cached gate structure by name (case-insensitive, first match - structure names are
+     * unique in the backend, so this is unambiguous in practice).
+     *
+     * @param name Gate structure name
+     * @return CachedGateStructure or null if not found
+     */
+    public CachedGateStructure getStructureByName(String name) {
+        return structureCache.values().stream()
+            .filter(structure -> structure.getName().equalsIgnoreCase(name))
+            .findFirst()
+            .orElse(null);
+    }
+
+    /**
+     * Get every cached door belonging to a gate structure.
+     *
+     * @param gateStructureId Parent gate structure ID
+     * @return Doors belonging to that structure, in no particular order
+     */
+    public List<CachedGateDoor> getDoorsForStructure(int gateStructureId) {
+        List<CachedGateDoor> doors = new ArrayList<>();
+        for (CachedGateDoor door : gateCache.values()) {
+            if (door.getGateStructureId() == gateStructureId) {
+                doors.add(door);
+            }
+        }
+        return doors;
     }
 
     /**
@@ -184,13 +249,13 @@ public class GateManager {
 
     /**
      * Open a gate, starting the opening animation.
-     * 
+     *
      * @param gateId Gate ID
      * @return True if gate started opening, false if already open or animating
      */
     public boolean openGate(int gateId) {
-        CachedGate gate = gateCache.get(gateId);
-        
+        CachedGateDoor gate = gateCache.get(gateId);
+
         if (gate == null) {
             LOGGER.warning("Cannot open gate: Gate ID " + gateId + " not found");
             return false;
@@ -204,7 +269,7 @@ public class GateManager {
         }
 
         // Check if gate is active and not destroyed
-        if (!gate.isActive() || gate.isDestroyed()) {
+        if (!gate.isEffectivelyActive() || gate.isEffectivelyDestroyed()) {
             LOGGER.warning("Cannot open gate " + gate.getName() + ": Gate is inactive or destroyed");
             return false;
         }
@@ -220,13 +285,13 @@ public class GateManager {
 
     /**
      * Close a gate, starting the closing animation.
-     * 
+     *
      * @param gateId Gate ID
      * @return True if gate started closing, false if already closed or animating
      */
     public boolean closeGate(int gateId) {
-        CachedGate gate = gateCache.get(gateId);
-        
+        CachedGateDoor gate = gateCache.get(gateId);
+
         if (gate == null) {
             LOGGER.warning("Cannot close gate: Gate ID " + gateId + " not found");
             return false;
@@ -240,7 +305,7 @@ public class GateManager {
         }
 
         // Check if gate is active
-        if (!gate.isActive()) {
+        if (!gate.isEffectivelyActive()) {
             LOGGER.warning("Cannot close gate " + gate.getName() + ": Gate is inactive");
             return false;
         }
@@ -256,19 +321,19 @@ public class GateManager {
 
     /**
      * Toggle a gate between open and closed states.
-     * 
+     *
      * @param gateId Gate ID
      * @return True if gate state was toggled
      */
     public boolean toggleGate(int gateId) {
-        CachedGate gate = gateCache.get(gateId);
-        
+        CachedGateDoor gate = gateCache.get(gateId);
+
         if (gate == null) {
             return false;
         }
 
         AnimationState currentState = gate.getCurrentState();
-        
+
         if (currentState == AnimationState.CLOSED) {
             return openGate(gateId);
         } else if (currentState == AnimationState.OPEN) {
@@ -282,13 +347,13 @@ public class GateManager {
     /**
      * Force a gate to a specific state immediately (skip animation).
      * Use with caution - mainly for admin commands or error recovery.
-     * 
+     *
      * @param gateId Gate ID
      * @param isOpened Target state (true = open, false = closed)
      */
     public void forceGateState(int gateId, boolean isOpened) {
-        CachedGate gate = gateCache.get(gateId);
-        
+        CachedGateDoor gate = gateCache.get(gateId);
+
         if (gate == null) {
             LOGGER.warning("Cannot force gate state: Gate ID " + gateId + " not found");
             return;
@@ -307,24 +372,24 @@ public class GateManager {
 
     /**
      * Check if a gate is currently animating.
-     * 
+     *
      * @param gateId Gate ID
      * @return True if gate is opening or closing
      */
     public boolean isGateAnimating(int gateId) {
-        CachedGate gate = gateCache.get(gateId);
+        CachedGateDoor gate = gateCache.get(gateId);
         return gate != null && gate.isAnimating();
     }
 
     /**
      * Get the current animation progress of a gate.
-     * 
+     *
      * @param gateId Gate ID
      * @return Progress from 0.0 (closed) to 1.0 (open), or -1.0 if gate not found
      */
     public double getGateProgress(int gateId) {
-        CachedGate gate = gateCache.get(gateId);
-        
+        CachedGateDoor gate = gateCache.get(gateId);
+
         if (gate == null) {
             return -1.0;
         }

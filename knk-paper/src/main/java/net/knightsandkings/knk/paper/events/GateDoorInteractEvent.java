@@ -1,6 +1,6 @@
 package net.knightsandkings.knk.paper.events;
 
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Cancellable;
@@ -16,18 +16,18 @@ import org.bukkit.event.HandlerList;
 public class GateDoorInteractEvent extends Event implements Cancellable {
     private static final HandlerList HANDLERS = new HandlerList();
 
-    private final CachedGate gate;
+    private final CachedGateDoor gate;
     private final Player player;
     private final Block clickedBlock;
     private boolean cancelled;
 
-    public GateDoorInteractEvent(CachedGate gate, Player player, Block clickedBlock) {
+    public GateDoorInteractEvent(CachedGateDoor gate, Player player, Block clickedBlock) {
         this.gate = gate;
         this.player = player;
         this.clickedBlock = clickedBlock;
     }
 
-    public CachedGate getGate() {
+    public CachedGateDoor getGate() {
         return gate;
     }
 

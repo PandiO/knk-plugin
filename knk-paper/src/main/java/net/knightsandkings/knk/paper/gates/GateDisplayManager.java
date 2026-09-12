@@ -1,7 +1,7 @@
 package net.knightsandkings.knk.paper.gates;
 
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.gates.GateManager;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -40,7 +40,7 @@ public class GateDisplayManager {
      * is currently loaded.
      */
     public void syncAll(GateManager gateManager) {
-        for (CachedGate gate : gateManager.getAllGates().values()) {
+        for (CachedGateDoor gate : gateManager.getAllGates().values()) {
             syncDisplay(gate);
         }
     }
@@ -49,7 +49,7 @@ public class GateDisplayManager {
      * Recompute the display for a single gate: spawns/moves/updates its TextDisplay, or removes
      * it if nothing is currently visible.
      */
-    public void syncDisplay(CachedGate gate) {
+    public void syncDisplay(CachedGateDoor gate) {
         if (gate == null) {
             return;
         }
@@ -59,7 +59,7 @@ public class GateDisplayManager {
         // destroyed gate should still show its info hover (DESTROYED status, buildStatusLine
         // below already handles this) rather than vanish - only a merely-deactivated,
         // not-destroyed gate hides its display entirely.
-        if (world == null || (!gate.isActive() && !gate.isDestroyed())) {
+        if (world == null || (!gate.isEffectivelyActive() && !gate.isEffectivelyDestroyed())) {
             removeDisplay(gate.getId());
             return;
         }
@@ -213,7 +213,7 @@ public class GateDisplayManager {
         }
     }
 
-    private World resolveWorld(CachedGate gate) {
+    private World resolveWorld(CachedGateDoor gate) {
         String worldName = gate.getWorldName();
         if (worldName == null || worldName.isBlank()) {
             return null;
@@ -247,7 +247,7 @@ public class GateDisplayManager {
      * (1-2 block deep) gate, cancelling past the anchor entirely - landing the display back inside
      * the door/wall blocks and making it fully invisible, exactly what this method used to do.
      */
-    private Location calculateDisplayLocation(CachedGate gate, World world) {
+    private Location calculateDisplayLocation(CachedGateDoor gate, World world) {
         Vector manualOverride = gate.getInfoDisplayLocation();
         if (manualOverride != null) {
             return new Location(world, manualOverride.getX(), manualOverride.getY(), manualOverride.getZ());
@@ -285,7 +285,7 @@ public class GateDisplayManager {
     /** FaceDirection as a world-space unit vector, falling back to the gate's precomputed normal axis.
      *  Package-private (not private) and static so it's directly unit-testable without a live
      *  Bukkit World, matching GatePassThroughService's pure-geometry-helper convention. */
-    static Vector resolveFaceDirectionVector(CachedGate gate) {
+    static Vector resolveFaceDirectionVector(CachedGateDoor gate) {
         Vector faceDirection = EntityPusher.vectorFromFaceDirection(gate.getFaceDirection());
         if (faceDirection != null && faceDirection.lengthSquared() > 0) {
             return faceDirection;
@@ -299,18 +299,28 @@ public class GateDisplayManager {
         return new Vector(0, 0, 0);
     }
 
-    private Component buildDisplayText(CachedGate gate) {
+    /**
+     * Combines structure + door info (decision 5.0-D): the structure's own name (gated by
+     * GateNameDisplayMode, unchanged from before item 5 - it always meant "the top-level gate's
+     * name"), this door's own name (gated by the new DoorNameDisplayMode), then health and
+     * status - each line independently gated by its own (possibly structure-overridden) mode.
+     */
+    private Component buildDisplayText(CachedGateDoor gate) {
         Component text = null;
 
-        if (isTopicVisible(gate.getGateNameDisplayMode(), gate)) {
-            text = appendLine(text, Component.text(gate.getName(), NamedTextColor.WHITE));
+        if (isTopicVisible(gate.getEffectiveGateNameDisplayMode(), gate)) {
+            text = appendLine(text, Component.text(gate.getStructureName(), NamedTextColor.WHITE));
+        }
+
+        if (isTopicVisible(gate.getDoorNameDisplayMode(), gate)) {
+            text = appendLine(text, Component.text(gate.getName(), NamedTextColor.GRAY));
         }
 
         if (isHealthVisible(gate)) {
             text = appendLine(text, buildHealthLine(gate));
         }
 
-        if (isTopicVisible(gate.getStatusDisplayMode(), gate)) {
+        if (isTopicVisible(gate.getEffectiveStatusDisplayMode(), gate)) {
             text = appendLine(text, buildStatusLine(gate));
         }
 
@@ -321,8 +331,8 @@ public class GateDisplayManager {
         return existing == null ? line : existing.append(Component.newline()).append(line);
     }
 
-    /** Shared visibility rule for the Gate Name / Status topics (ALWAYS / NEVER / SIEGE_ONLY). */
-    private boolean isTopicVisible(String mode, CachedGate gate) {
+    /** Shared visibility rule for the Gate Name / Door Name / Status topics (ALWAYS / NEVER / SIEGE_ONLY). */
+    private boolean isTopicVisible(String mode, CachedGateDoor gate) {
         String resolved = mode != null ? mode : "ALWAYS";
         return switch (resolved) {
             case "NEVER" -> false;
@@ -332,12 +342,12 @@ public class GateDisplayManager {
     }
 
     /** Health has its own rule since it has the extra DAMAGED_ONLY mode and a master toggle. */
-    private boolean isHealthVisible(CachedGate gate) {
-        if (!gate.isShowHealthDisplay()) {
+    private boolean isHealthVisible(CachedGateDoor gate) {
+        if (!gate.isEffectivelyShowHealthDisplay()) {
             return false;
         }
 
-        String mode = gate.getHealthDisplayMode() != null ? gate.getHealthDisplayMode() : "ALWAYS";
+        String mode = gate.getEffectiveHealthDisplayMode() != null ? gate.getEffectiveHealthDisplayMode() : "ALWAYS";
         return switch (mode) {
             case "NEVER" -> false;
             case "DAMAGED_ONLY" -> gate.getHealthCurrent() < gate.getHealthMax();
@@ -346,12 +356,12 @@ public class GateDisplayManager {
         };
     }
 
-    private Component buildHealthLine(CachedGate gate) {
+    private Component buildHealthLine(CachedGateDoor gate) {
         double max = Math.max(1.0, gate.getHealthMax());
         double ratio = gate.getHealthCurrent() / max;
 
         NamedTextColor color;
-        if (gate.isDestroyed()) {
+        if (gate.isEffectivelyDestroyed()) {
             color = NamedTextColor.DARK_RED;
         } else if (ratio >= 0.75) {
             color = NamedTextColor.GREEN;
@@ -367,11 +377,11 @@ public class GateDisplayManager {
         return Component.text(healthText, color);
     }
 
-    private Component buildStatusLine(CachedGate gate) {
-        if (gate.isDestroyed()) {
+    private Component buildStatusLine(CachedGateDoor gate) {
+        if (gate.isEffectivelyDestroyed()) {
             return Component.text("DESTROYED", NamedTextColor.DARK_RED);
         }
-        if (gate.isInvincible()) {
+        if (gate.isEffectivelyInvincible()) {
             return Component.text("INVINCIBLE", NamedTextColor.AQUA);
         }
 

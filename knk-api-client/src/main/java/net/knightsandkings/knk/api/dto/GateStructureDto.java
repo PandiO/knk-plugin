@@ -5,14 +5,18 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 
 import java.io.IOException;
 import java.util.List;
 
 /**
  * DTO for gate structure details from Web API.
- * Maps to GateStructureReadDto from knk-web-api-v2.
+ * Maps to GateStructureDto from knk-web-api-v2.
+ *
+ * Item 5 (docs/features/gate-structure-animation/GATESTRUCTURE_QOL_IMPLEMENTATION_PLAN.md) moved
+ * every per-door field (geometry, animation, health, block snapshots, etc.) onto the new
+ * GateDoorDto, embedded here as {@link #gateDoors}. What's left here is structure-level identity,
+ * the guard/siege systems, and the structure-level cascading override fields (decision 5.0-B).
  */
 public class GateStructureDto {
 
@@ -23,187 +27,81 @@ public class GateStructureDto {
     @JsonProperty("name")
     private String name;
 
-    @JsonProperty("domainId")
-    private Integer domainId;
-
     @JsonProperty("districtId")
     private Integer districtId;
 
     @JsonProperty("streetId")
     private Integer streetId;
 
-    // === State ===
-    @JsonProperty("isActive")
-    private Boolean isActive;
+    // === Guard & Defense System (Future Feature) ===
+    @JsonProperty("guardCount")
+    private Integer guardCount;
 
-    @JsonProperty("isOpened")
-    private Boolean isOpened;
-
-    @JsonProperty("isJammed")
-    private Boolean isJammed;
-
-    @JsonProperty("isDestroyed")
-    private Boolean isDestroyed;
-
-    @JsonProperty("isInvincible")
-    private Boolean isInvincible;
-
-    @JsonProperty("canRespawn")
-    private Boolean canRespawn;
-
-    @JsonProperty("healthCurrent")
-    private Double healthCurrent;
-
-    @JsonProperty("healthMax")
-    private Double healthMax;
-
-    @JsonProperty("respawnRateSeconds")
-    private Integer respawnRateSeconds;
-
-    // === Orientation ===
-    @JsonProperty("faceDirection")
-    private String faceDirection;
-
-    // === Gate Type Configuration ===
-    @JsonProperty("gateType")
-    private String gateType;
-
-    @JsonProperty("motionType")
-    private String motionType;
-
-    @JsonProperty("geometryDefinitionMode")
-    private String geometryDefinitionMode;
-
-    // === Animation Timing ===
-    @JsonProperty("animationDurationTicks")
-    private Integer animationDurationTicks;
-
-    @JsonProperty("animationTickRate")
-    private Integer animationTickRate;
-
-    // === PLANE_GRID Geometry ===
-    @JsonProperty("anchorPoint")
-    @JsonDeserialize(using = CoordinateStringDeserializer.class)
-    private String anchorPoint;
-
-    // Optional second physical anchor for a separately-scanned open state - see
-    // docs/features/gate-structure-animation/ROTATION_GAP_FILL_DESIGN.md.
-    @JsonProperty("openAnchorPoint")
-    @JsonDeserialize(using = CoordinateStringDeserializer.class)
-    private String openAnchorPoint;
-
-    @JsonProperty("referencePoint1")
-    @JsonDeserialize(using = CoordinateStringDeserializer.class)
-    private String referencePoint1;
-
-    @JsonProperty("referencePoint2")
-    @JsonDeserialize(using = CoordinateStringDeserializer.class)
-    private String referencePoint2;
-
-    @JsonProperty("geometryWidth")
-    private Integer geometryWidth;
-
-    @JsonProperty("geometryHeight")
-    private Integer geometryHeight;
-
-    @JsonProperty("geometryDepth")
-    private Integer geometryDepth;
-
-    @JsonProperty("motionDistanceBlocks")
-    private Integer motionDistanceBlocks;
-
-    @JsonProperty("clipToGeometryBounds")
-    private Boolean clipToGeometryBounds;
-
-    // === FLOOD_FILL Geometry ===
-    @JsonProperty("seedBlocks")
-    private String seedBlocks;
-
-    @JsonProperty("scanMaxBlocks")
-    private Integer scanMaxBlocks;
-
-    @JsonProperty("scanMaxRadius")
-    private Integer scanMaxRadius;
-
-    @JsonProperty("scanMaterialWhitelist")
-    private String scanMaterialWhitelist;
-
-    @JsonProperty("scanMaterialBlacklist")
-    private String scanMaterialBlacklist;
-
-    @JsonProperty("scanPlaneConstraint")
-    private Boolean scanPlaneConstraint;
-
-    // === Block Rendering ===
-    @JsonProperty("fallbackMaterialRefId")
-    private Integer fallbackMaterialRefId;
-
-    @JsonProperty("tileEntityPolicy")
-    private String tileEntityPolicy;
-
-    // === Rotation ===
-    @JsonProperty("rotationMaxAngleDegrees")
-    private Integer rotationMaxAngleDegrees;
-
-    @JsonProperty("hingeAxis")
-    @JsonDeserialize(using = CoordinateStringDeserializer.class)
-    private String hingeAxis;
-
-    // === Double Doors ===
-    @JsonProperty("leftDoorSeedBlock")
-    @JsonDeserialize(using = CoordinateStringDeserializer.class)
-    private String leftDoorSeedBlock;
-
-    @JsonProperty("rightDoorSeedBlock")
-    @JsonDeserialize(using = CoordinateStringDeserializer.class)
-    private String rightDoorSeedBlock;
-
-    @JsonProperty("mirrorRotation")
-    private Boolean mirrorRotation;
-
-    // === WorldGuard Integration ===
-    @JsonProperty("regionClosedId")
-    private String regionClosedId;
-
-    @JsonProperty("regionOpenedId")
-    private String regionOpenedId;
-
-    // === Health Display ===
-    @JsonProperty("showHealthDisplay")
-    private Boolean showHealthDisplay;
-
-    @JsonProperty("healthDisplayMode")
-    private String healthDisplayMode;
-
-    @JsonProperty("healthDisplayYOffset")
-    private Integer healthDisplayYOffset;
-
-    // Optional manual override for where the info hover renders; falls back to the computed
-    // FaceDirection-based position (see GateDisplayManager) when absent.
-    @JsonProperty("infoDisplayLocation")
-    @JsonDeserialize(using = CoordinateStringDeserializer.class)
-    private String infoDisplayLocation;
-
-    @JsonProperty("gateNameDisplayMode")
-    private String gateNameDisplayMode;
-
-    @JsonProperty("statusDisplayMode")
-    private String statusDisplayMode;
+    @JsonProperty("guardNpcTemplateId")
+    private Integer guardNpcTemplateId;
 
     // === Siege Integration ===
+    @JsonProperty("isOverridable")
+    private Boolean isOverridable;
+
+    @JsonProperty("animateDuringSiege")
+    private Boolean animateDuringSiege;
+
     @JsonProperty("currentSiegeId")
     private Integer currentSiegeId;
 
-    // === Pass-Through ===
-    @JsonProperty("allowPassThrough")
-    private Boolean allowPassThrough;
+    @JsonProperty("isSiegeObjective")
+    private Boolean isSiegeObjective;
 
-    @JsonProperty("passThroughDurationSeconds")
-    private Integer passThroughDurationSeconds;
+    // === Structure-level cascading overrides (decision 5.0-B) ===
+    // Null means "no override, each door uses its own value". Set/cleared via
+    // PATCH /api/GateStructures/{id}/overrides (see GateDoorsApi/updateOverrides), not via this
+    // general read DTO.
+    @JsonProperty("isActiveOverride")
+    private Boolean isActiveOverride;
 
-    // === Block Snapshots ===
-    @JsonProperty("blockSnapshots")
-    private List<GateBlockSnapshotDto> blockSnapshots;
+    @JsonProperty("canRespawnOverride")
+    private Boolean canRespawnOverride;
+
+    @JsonProperty("isDestroyedOverride")
+    private Boolean isDestroyedOverride;
+
+    @JsonProperty("isInvincibleOverride")
+    private Boolean isInvincibleOverride;
+
+    @JsonProperty("openedStateOverride")
+    private String openedStateOverride;
+
+    @JsonProperty("allowPassThroughOverride")
+    private Boolean allowPassThroughOverride;
+
+    @JsonProperty("passThroughDurationSecondsOverride")
+    private Integer passThroughDurationSecondsOverride;
+
+    @JsonProperty("showHealthDisplayOverride")
+    private Boolean showHealthDisplayOverride;
+
+    @JsonProperty("healthDisplayModeOverride")
+    private String healthDisplayModeOverride;
+
+    @JsonProperty("healthDisplayYOffsetOverride")
+    private Integer healthDisplayYOffsetOverride;
+
+    @JsonProperty("gateNameDisplayModeOverride")
+    private String gateNameDisplayModeOverride;
+
+    @JsonProperty("statusDisplayModeOverride")
+    private String statusDisplayModeOverride;
+
+    @JsonProperty("allowContinuousDamageOverride")
+    private Boolean allowContinuousDamageOverride;
+
+    @JsonProperty("continuousDamageMultiplierOverride")
+    private Double continuousDamageMultiplierOverride;
+
+    // === Navigation: this structure's doors (item 5) ===
+    @JsonProperty("gateDoors")
+    private List<GateDoorDto> gateDoors;
 
     // === Getters and Setters ===
 
@@ -223,14 +121,6 @@ public class GateStructureDto {
         this.name = name;
     }
 
-    public Integer getDomainId() {
-        return domainId;
-    }
-
-    public void setDomainId(Integer domainId) {
-        this.domainId = domainId;
-    }
-
     public Integer getDistrictId() {
         return districtId;
     }
@@ -247,364 +137,36 @@ public class GateStructureDto {
         this.streetId = streetId;
     }
 
-    public Boolean getIsActive() {
-        return isActive;
+    public Integer getGuardCount() {
+        return guardCount;
     }
 
-    public void setIsActive(Boolean isActive) {
-        this.isActive = isActive;
+    public void setGuardCount(Integer guardCount) {
+        this.guardCount = guardCount;
     }
 
-    public Boolean getIsOpened() {
-        return isOpened;
+    public Integer getGuardNpcTemplateId() {
+        return guardNpcTemplateId;
     }
 
-    public void setIsOpened(Boolean isOpened) {
-        this.isOpened = isOpened;
+    public void setGuardNpcTemplateId(Integer guardNpcTemplateId) {
+        this.guardNpcTemplateId = guardNpcTemplateId;
     }
 
-    public Boolean getIsJammed() {
-        return isJammed;
+    public Boolean getIsOverridable() {
+        return isOverridable;
     }
 
-    public void setIsJammed(Boolean isJammed) {
-        this.isJammed = isJammed;
+    public void setIsOverridable(Boolean isOverridable) {
+        this.isOverridable = isOverridable;
     }
 
-    public Boolean getIsDestroyed() {
-        return isDestroyed;
+    public Boolean getAnimateDuringSiege() {
+        return animateDuringSiege;
     }
 
-    public void setIsDestroyed(Boolean isDestroyed) {
-        this.isDestroyed = isDestroyed;
-    }
-
-    public Boolean getIsInvincible() {
-        return isInvincible;
-    }
-
-    public void setIsInvincible(Boolean isInvincible) {
-        this.isInvincible = isInvincible;
-    }
-
-    public Boolean getCanRespawn() {
-        return canRespawn;
-    }
-
-    public void setCanRespawn(Boolean canRespawn) {
-        this.canRespawn = canRespawn;
-    }
-
-    public Double getHealthCurrent() {
-        return healthCurrent;
-    }
-
-    public void setHealthCurrent(Double healthCurrent) {
-        this.healthCurrent = healthCurrent;
-    }
-
-    public Double getHealthMax() {
-        return healthMax;
-    }
-
-    public void setHealthMax(Double healthMax) {
-        this.healthMax = healthMax;
-    }
-
-    public Integer getRespawnRateSeconds() {
-        return respawnRateSeconds;
-    }
-
-    public void setRespawnRateSeconds(Integer respawnRateSeconds) {
-        this.respawnRateSeconds = respawnRateSeconds;
-    }
-
-    public String getFaceDirection() {
-        return faceDirection;
-    }
-
-    public void setFaceDirection(String faceDirection) {
-        this.faceDirection = faceDirection;
-    }
-
-    public String getGateType() {
-        return gateType;
-    }
-
-    public void setGateType(String gateType) {
-        this.gateType = gateType;
-    }
-
-    public String getMotionType() {
-        return motionType;
-    }
-
-    public void setMotionType(String motionType) {
-        this.motionType = motionType;
-    }
-
-    public String getGeometryDefinitionMode() {
-        return geometryDefinitionMode;
-    }
-
-    public void setGeometryDefinitionMode(String geometryDefinitionMode) {
-        this.geometryDefinitionMode = geometryDefinitionMode;
-    }
-
-    public Integer getAnimationDurationTicks() {
-        return animationDurationTicks;
-    }
-
-    public void setAnimationDurationTicks(Integer animationDurationTicks) {
-        this.animationDurationTicks = animationDurationTicks;
-    }
-
-    public Integer getAnimationTickRate() {
-        return animationTickRate;
-    }
-
-    public void setAnimationTickRate(Integer animationTickRate) {
-        this.animationTickRate = animationTickRate;
-    }
-
-    public String getAnchorPoint() {
-        return anchorPoint;
-    }
-
-    public void setAnchorPoint(String anchorPoint) {
-        this.anchorPoint = anchorPoint;
-    }
-
-    public String getOpenAnchorPoint() {
-        return openAnchorPoint;
-    }
-
-    public void setOpenAnchorPoint(String openAnchorPoint) {
-        this.openAnchorPoint = openAnchorPoint;
-    }
-
-    public String getReferencePoint1() {
-        return referencePoint1;
-    }
-
-    public void setReferencePoint1(String referencePoint1) {
-        this.referencePoint1 = referencePoint1;
-    }
-
-    public String getReferencePoint2() {
-        return referencePoint2;
-    }
-
-    public void setReferencePoint2(String referencePoint2) {
-        this.referencePoint2 = referencePoint2;
-    }
-
-    public Integer getGeometryWidth() {
-        return geometryWidth;
-    }
-
-    public void setGeometryWidth(Integer geometryWidth) {
-        this.geometryWidth = geometryWidth;
-    }
-
-    public Integer getGeometryHeight() {
-        return geometryHeight;
-    }
-
-    public void setGeometryHeight(Integer geometryHeight) {
-        this.geometryHeight = geometryHeight;
-    }
-
-    public Integer getGeometryDepth() {
-        return geometryDepth;
-    }
-
-    public void setGeometryDepth(Integer geometryDepth) {
-        this.geometryDepth = geometryDepth;
-    }
-
-    public Integer getMotionDistanceBlocks() {
-        return motionDistanceBlocks;
-    }
-
-    public void setMotionDistanceBlocks(Integer motionDistanceBlocks) {
-        this.motionDistanceBlocks = motionDistanceBlocks;
-    }
-
-    public Boolean getClipToGeometryBounds() {
-        return clipToGeometryBounds;
-    }
-
-    public void setClipToGeometryBounds(Boolean clipToGeometryBounds) {
-        this.clipToGeometryBounds = clipToGeometryBounds;
-    }
-
-    public String getSeedBlocks() {
-        return seedBlocks;
-    }
-
-    public void setSeedBlocks(String seedBlocks) {
-        this.seedBlocks = seedBlocks;
-    }
-
-    public Integer getScanMaxBlocks() {
-        return scanMaxBlocks;
-    }
-
-    public void setScanMaxBlocks(Integer scanMaxBlocks) {
-        this.scanMaxBlocks = scanMaxBlocks;
-    }
-
-    public Integer getScanMaxRadius() {
-        return scanMaxRadius;
-    }
-
-    public void setScanMaxRadius(Integer scanMaxRadius) {
-        this.scanMaxRadius = scanMaxRadius;
-    }
-
-    public String getScanMaterialWhitelist() {
-        return scanMaterialWhitelist;
-    }
-
-    public void setScanMaterialWhitelist(String scanMaterialWhitelist) {
-        this.scanMaterialWhitelist = scanMaterialWhitelist;
-    }
-
-    public String getScanMaterialBlacklist() {
-        return scanMaterialBlacklist;
-    }
-
-    public void setScanMaterialBlacklist(String scanMaterialBlacklist) {
-        this.scanMaterialBlacklist = scanMaterialBlacklist;
-    }
-
-    public Boolean getScanPlaneConstraint() {
-        return scanPlaneConstraint;
-    }
-
-    public void setScanPlaneConstraint(Boolean scanPlaneConstraint) {
-        this.scanPlaneConstraint = scanPlaneConstraint;
-    }
-
-    public Integer getFallbackMaterialRefId() {
-        return fallbackMaterialRefId;
-    }
-
-    public void setFallbackMaterialRefId(Integer fallbackMaterialRefId) {
-        this.fallbackMaterialRefId = fallbackMaterialRefId;
-    }
-
-    public String getTileEntityPolicy() {
-        return tileEntityPolicy;
-    }
-
-    public void setTileEntityPolicy(String tileEntityPolicy) {
-        this.tileEntityPolicy = tileEntityPolicy;
-    }
-
-    public Integer getRotationMaxAngleDegrees() {
-        return rotationMaxAngleDegrees;
-    }
-
-    public void setRotationMaxAngleDegrees(Integer rotationMaxAngleDegrees) {
-        this.rotationMaxAngleDegrees = rotationMaxAngleDegrees;
-    }
-
-    public String getHingeAxis() {
-        return hingeAxis;
-    }
-
-    public void setHingeAxis(String hingeAxis) {
-        this.hingeAxis = hingeAxis;
-    }
-
-    public String getLeftDoorSeedBlock() {
-        return leftDoorSeedBlock;
-    }
-
-    public void setLeftDoorSeedBlock(String leftDoorSeedBlock) {
-        this.leftDoorSeedBlock = leftDoorSeedBlock;
-    }
-
-    public String getRightDoorSeedBlock() {
-        return rightDoorSeedBlock;
-    }
-
-    public void setRightDoorSeedBlock(String rightDoorSeedBlock) {
-        this.rightDoorSeedBlock = rightDoorSeedBlock;
-    }
-
-    public Boolean getMirrorRotation() {
-        return mirrorRotation;
-    }
-
-    public void setMirrorRotation(Boolean mirrorRotation) {
-        this.mirrorRotation = mirrorRotation;
-    }
-
-    public String getRegionClosedId() {
-        return regionClosedId;
-    }
-
-    public void setRegionClosedId(String regionClosedId) {
-        this.regionClosedId = regionClosedId;
-    }
-
-    public String getRegionOpenedId() {
-        return regionOpenedId;
-    }
-
-    public void setRegionOpenedId(String regionOpenedId) {
-        this.regionOpenedId = regionOpenedId;
-    }
-
-    public Boolean getShowHealthDisplay() {
-        return showHealthDisplay;
-    }
-
-    public void setShowHealthDisplay(Boolean showHealthDisplay) {
-        this.showHealthDisplay = showHealthDisplay;
-    }
-
-    public String getHealthDisplayMode() {
-        return healthDisplayMode;
-    }
-
-    public void setHealthDisplayMode(String healthDisplayMode) {
-        this.healthDisplayMode = healthDisplayMode;
-    }
-
-    public Integer getHealthDisplayYOffset() {
-        return healthDisplayYOffset;
-    }
-
-    public void setHealthDisplayYOffset(Integer healthDisplayYOffset) {
-        this.healthDisplayYOffset = healthDisplayYOffset;
-    }
-
-    public String getInfoDisplayLocation() {
-        return infoDisplayLocation;
-    }
-
-    public void setInfoDisplayLocation(String infoDisplayLocation) {
-        this.infoDisplayLocation = infoDisplayLocation;
-    }
-
-    public String getGateNameDisplayMode() {
-        return gateNameDisplayMode;
-    }
-
-    public void setGateNameDisplayMode(String gateNameDisplayMode) {
-        this.gateNameDisplayMode = gateNameDisplayMode;
-    }
-
-    public String getStatusDisplayMode() {
-        return statusDisplayMode;
-    }
-
-    public void setStatusDisplayMode(String statusDisplayMode) {
-        this.statusDisplayMode = statusDisplayMode;
+    public void setAnimateDuringSiege(Boolean animateDuringSiege) {
+        this.animateDuringSiege = animateDuringSiege;
     }
 
     public Integer getCurrentSiegeId() {
@@ -615,30 +177,136 @@ public class GateStructureDto {
         this.currentSiegeId = currentSiegeId;
     }
 
-    public Boolean getAllowPassThrough() {
-        return allowPassThrough;
+    public Boolean getIsSiegeObjective() {
+        return isSiegeObjective;
     }
 
-    public void setAllowPassThrough(Boolean allowPassThrough) {
-        this.allowPassThrough = allowPassThrough;
+    public void setIsSiegeObjective(Boolean isSiegeObjective) {
+        this.isSiegeObjective = isSiegeObjective;
     }
 
-    public Integer getPassThroughDurationSeconds() {
-        return passThroughDurationSeconds;
+    public Boolean getIsActiveOverride() {
+        return isActiveOverride;
     }
 
-    public void setPassThroughDurationSeconds(Integer passThroughDurationSeconds) {
-        this.passThroughDurationSeconds = passThroughDurationSeconds;
+    public void setIsActiveOverride(Boolean isActiveOverride) {
+        this.isActiveOverride = isActiveOverride;
     }
 
-    public List<GateBlockSnapshotDto> getBlockSnapshots() {
-        return blockSnapshots;
+    public Boolean getCanRespawnOverride() {
+        return canRespawnOverride;
     }
 
-    public void setBlockSnapshots(List<GateBlockSnapshotDto> blockSnapshots) {
-        this.blockSnapshots = blockSnapshots;
+    public void setCanRespawnOverride(Boolean canRespawnOverride) {
+        this.canRespawnOverride = canRespawnOverride;
     }
 
+    public Boolean getIsDestroyedOverride() {
+        return isDestroyedOverride;
+    }
+
+    public void setIsDestroyedOverride(Boolean isDestroyedOverride) {
+        this.isDestroyedOverride = isDestroyedOverride;
+    }
+
+    public Boolean getIsInvincibleOverride() {
+        return isInvincibleOverride;
+    }
+
+    public void setIsInvincibleOverride(Boolean isInvincibleOverride) {
+        this.isInvincibleOverride = isInvincibleOverride;
+    }
+
+    public String getOpenedStateOverride() {
+        return openedStateOverride;
+    }
+
+    public void setOpenedStateOverride(String openedStateOverride) {
+        this.openedStateOverride = openedStateOverride;
+    }
+
+    public Boolean getAllowPassThroughOverride() {
+        return allowPassThroughOverride;
+    }
+
+    public void setAllowPassThroughOverride(Boolean allowPassThroughOverride) {
+        this.allowPassThroughOverride = allowPassThroughOverride;
+    }
+
+    public Integer getPassThroughDurationSecondsOverride() {
+        return passThroughDurationSecondsOverride;
+    }
+
+    public void setPassThroughDurationSecondsOverride(Integer passThroughDurationSecondsOverride) {
+        this.passThroughDurationSecondsOverride = passThroughDurationSecondsOverride;
+    }
+
+    public Boolean getShowHealthDisplayOverride() {
+        return showHealthDisplayOverride;
+    }
+
+    public void setShowHealthDisplayOverride(Boolean showHealthDisplayOverride) {
+        this.showHealthDisplayOverride = showHealthDisplayOverride;
+    }
+
+    public String getHealthDisplayModeOverride() {
+        return healthDisplayModeOverride;
+    }
+
+    public void setHealthDisplayModeOverride(String healthDisplayModeOverride) {
+        this.healthDisplayModeOverride = healthDisplayModeOverride;
+    }
+
+    public Integer getHealthDisplayYOffsetOverride() {
+        return healthDisplayYOffsetOverride;
+    }
+
+    public void setHealthDisplayYOffsetOverride(Integer healthDisplayYOffsetOverride) {
+        this.healthDisplayYOffsetOverride = healthDisplayYOffsetOverride;
+    }
+
+    public String getGateNameDisplayModeOverride() {
+        return gateNameDisplayModeOverride;
+    }
+
+    public void setGateNameDisplayModeOverride(String gateNameDisplayModeOverride) {
+        this.gateNameDisplayModeOverride = gateNameDisplayModeOverride;
+    }
+
+    public String getStatusDisplayModeOverride() {
+        return statusDisplayModeOverride;
+    }
+
+    public void setStatusDisplayModeOverride(String statusDisplayModeOverride) {
+        this.statusDisplayModeOverride = statusDisplayModeOverride;
+    }
+
+    public Boolean getAllowContinuousDamageOverride() {
+        return allowContinuousDamageOverride;
+    }
+
+    public void setAllowContinuousDamageOverride(Boolean allowContinuousDamageOverride) {
+        this.allowContinuousDamageOverride = allowContinuousDamageOverride;
+    }
+
+    public Double getContinuousDamageMultiplierOverride() {
+        return continuousDamageMultiplierOverride;
+    }
+
+    public void setContinuousDamageMultiplierOverride(Double continuousDamageMultiplierOverride) {
+        this.continuousDamageMultiplierOverride = continuousDamageMultiplierOverride;
+    }
+
+    public List<GateDoorDto> getGateDoors() {
+        return gateDoors;
+    }
+
+    public void setGateDoors(List<GateDoorDto> gateDoors) {
+        this.gateDoors = gateDoors;
+    }
+
+    /** Shared by GateDoorDto's own point fields - deserializes either a plain coordinate string
+     *  or (today's wire shape) a LocationDto object, verbatim as its raw JSON text either way. */
     public static class CoordinateStringDeserializer extends JsonDeserializer<String> {
         @Override
         public String deserialize(JsonParser parser, DeserializationContext context) throws IOException {

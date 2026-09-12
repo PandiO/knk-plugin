@@ -1,7 +1,7 @@
 package net.knightsandkings.knk.paper.gates;
 
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.gates.GateManager;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -30,7 +30,7 @@ class GateFireSystemTest {
     private HealthSystem healthSystem;
     private GateManager gateManager;
     private GateFireSystem fireSystem;
-    private CachedGate gate;
+    private CachedGateDoor gate;
     private World world;
     private MockedStatic<Bukkit> bukkitMock;
 
@@ -40,8 +40,8 @@ class GateFireSystemTest {
         gateManager = new GateManager();
         fireSystem = new GateFireSystem(healthSystem, gateManager, FIRE_DURATION_MILLIS, DAMAGE_PER_BLOCK_PER_TICK);
 
-        gate = new CachedGate(
-            1, "TestGate", "SLIDING", "VERTICAL", "PLANE_GRID",
+        gate = new CachedGateDoor(
+            1, 1, "TestGate", "SLIDING", "VERTICAL", "PLANE_GRID",
             60, 1, new Vector(100, 64, 100), 5, 5, 3,
             500.0, 500.0, true, false, false, 90, "north"
         );
@@ -174,7 +174,7 @@ class GateFireSystemTest {
     void tickClearsBurningBlocksWhenDamageDestroysTheGate() {
         gate.getBurningBlocks().put(new Vector(100, 64, 100), System.currentTimeMillis() + 5000L);
         doAnswer(invocation -> {
-            CachedGate target = invocation.getArgument(0);
+            CachedGateDoor target = invocation.getArgument(0);
             target.setIsDestroyed(true);
             return null;
         }).when(healthSystem).applyContinuousDamage(eq(gate), anyDouble());

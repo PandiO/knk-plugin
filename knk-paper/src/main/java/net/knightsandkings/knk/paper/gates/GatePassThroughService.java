@@ -2,7 +2,7 @@ package net.knightsandkings.knk.paper.gates;
 
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.gates.GateFrameCalculator;
 import net.knightsandkings.knk.core.gates.GateManager;
@@ -64,7 +64,7 @@ public class GatePassThroughService {
     /**
      * Dispatch to the handler for the given (already permission-checked) mode.
      */
-    public void dispatch(CachedGate gate, Player player, GatePassThroughMethod mode) {
+    public void dispatch(CachedGateDoor gate, Player player, GatePassThroughMethod mode) {
         switch (mode) {
             case INSTANT_OPEN -> handleInstantOpen(gate, player);
             case TELEPORT -> handleTeleport(gate, player);
@@ -77,7 +77,7 @@ public class GatePassThroughService {
      * configured PassThroughDurationSeconds. Re-triggering while already open/opening just resets
      * the close timer, which is the "stays open while players keep passing through" behavior.
      */
-    private void handleDefault(CachedGate gate) {
+    private void handleDefault(CachedGateDoor gate) {
         int gateId = gate.getId();
         AnimationState state = gate.getCurrentState();
 
@@ -94,14 +94,14 @@ public class GatePassThroughService {
         }
     }
 
-    private void scheduleAutoClose(CachedGate gate) {
+    private void scheduleAutoClose(CachedGateDoor gate) {
         int gateId = gate.getId();
         BukkitTask existing = pendingAutoClose.remove(gateId);
         if (existing != null) {
             existing.cancel();
         }
 
-        long delayTicks = Math.max(1, gate.getPassThroughDurationSeconds()) * 20L;
+        long delayTicks = Math.max(1, gate.getEffectivePassThroughDurationSeconds()) * 20L;
         BukkitTask task = new GatePassThroughAutoCloseTask(gateManager, gateId).runTaskLater(plugin, delayTicks);
         pendingAutoClose.put(gateId, task);
     }
@@ -120,7 +120,7 @@ public class GatePassThroughService {
      * a block that's still really solid, regardless of what their client was shown, so packets
      * alone cannot make a genuinely solid block passable for just one player.
      */
-    private void handleInstantOpen(CachedGate gate, Player player) {
+    private void handleInstantOpen(CachedGateDoor gate, Player player) {
         Vector anchor = gate.getAnchorPoint();
         Vector uAxis = gate.getUAxis();
         Vector vAxis = gate.getVAxis();
@@ -202,7 +202,7 @@ public class GatePassThroughService {
      * gate can otherwise land the player inside solid ground on the other side), so the raw
      * destination's Y is adjusted to the nearest non-suffocating, standable spot before teleporting.
      */
-    private void handleTeleport(CachedGate gate, Player player) {
+    private void handleTeleport(CachedGateDoor gate, Player player) {
         Location playerLoc = player.getLocation();
         Vector destination = computeTeleportDestination(gate, playerLoc.toVector());
         if (destination == null) {
@@ -282,7 +282,7 @@ public class GatePassThroughService {
      * for InstantOpen. Package-private and static: pure geometry, independently testable without
      * a live Bukkit world/player.
      */
-    static boolean isBlockInPassThroughPath(CachedGate gate, Vector blockClosedWorldPos, Vector playerPosition, int radiusBlocks) {
+    static boolean isBlockInPassThroughPath(CachedGateDoor gate, Vector blockClosedWorldPos, Vector playerPosition, int radiusBlocks) {
         Vector anchor = gate.getAnchorPoint();
         Vector uAxis = gate.getUAxis();
         Vector vAxis = gate.getVAxis();
@@ -308,7 +308,7 @@ public class GatePassThroughService {
      * Returns null if the gate is missing basis vectors. Package-private and static: pure
      * geometry, independently testable without a live Bukkit world/player.
      */
-    static Vector computeTeleportDestination(CachedGate gate, Vector playerPosition) {
+    static Vector computeTeleportDestination(CachedGateDoor gate, Vector playerPosition) {
         Vector anchor = gate.getAnchorPoint();
         Vector uAxis = gate.getUAxis();
         Vector vAxis = gate.getVAxis();

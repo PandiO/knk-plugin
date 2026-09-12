@@ -1,6 +1,6 @@
 package net.knightsandkings.knk.paper.listeners;
 
-import net.knightsandkings.knk.core.domain.gates.CachedGate;
+import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.paper.events.GateDoorDamageEvent;
 import net.knightsandkings.knk.paper.events.GateDoorIgniteEvent;
 import net.knightsandkings.knk.paper.gates.GateFireSystem;
@@ -20,7 +20,7 @@ class GateDamageConsequenceListenerTest {
     private HealthSystem healthSystem;
     private GateFireSystem fireSystem;
     private GateDamageConsequenceListener listener;
-    private CachedGate gate;
+    private CachedGateDoor gate;
 
     @BeforeEach
     void setUp() {
@@ -28,8 +28,8 @@ class GateDamageConsequenceListenerTest {
         fireSystem = mock(GateFireSystem.class);
         listener = new GateDamageConsequenceListener(healthSystem, fireSystem);
 
-        gate = new CachedGate(
-            1, "TestGate", "SLIDING", "VERTICAL", "PLANE_GRID",
+        gate = new CachedGateDoor(
+            1, 1, "TestGate", "SLIDING", "VERTICAL", "PLANE_GRID",
             60, 1, new Vector(100, 64, 100), 5, 5, 3,
             500.0, 500.0, true, false, false, 90, "north"
         );
