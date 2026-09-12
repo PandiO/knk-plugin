@@ -362,6 +362,73 @@ class GateFrameCalculatorTest {
         return rotationGate;
     }
 
+    private CachedGate buildRealGate14(int width, int height) {
+        // Exact basis vectors from the live server's own log line for gate #14 (north-west
+        // facing, not the south-east fixture used elsewhere in this file) - a sign-mirrored
+        // variant of buildDiagonalDrawbridge, used to rule out a directionality-dependent bug.
+        CachedGate rotationGate = new CachedGate(
+            14, "Northern Gate", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
+            90, 1,
+            new Vector(0, 0, 0), width, height, 0,
+            2000.0, 2000.0, true, false, false, 90,
+            "north-west"
+        );
+
+        Vector uStep = new Vector(-1, 0, 1);
+        Vector vStep = new Vector(0, 1, 0);
+        Vector nStep = new Vector(-1, 0, -1);
+        rotationGate.setUStep(uStep);
+        rotationGate.setVStep(vStep);
+        rotationGate.setNStep(nStep);
+        rotationGate.setHingeAxis(uStep);
+        rotationGate.setMotionVector(new Vector(0, 0, 0));
+        rotationGate.setSublatticeIndex(net.knightsandkings.knk.core.util.VectorMath.sublatticeIndex(uStep));
+
+        int sortOrder = 0;
+        for (int i = 0; i < width; i++) {
+            for (int j = 0; j < height; j++) {
+                Vector relPos = uStep.clone().multiply(i).add(vStep.clone().multiply(j));
+                rotationGate.addBlock(new BlockSnapshot(sortOrder, relPos, 1, "minecraft:oak_planks", sortOrder));
+                sortOrder++;
+            }
+        }
+
+        return rotationGate;
+    }
+
+    @Test
+    void rasterizeRotationFrame_RealGate14AxesAtOpenAngle_EveryRowOfEveryColumnIsPresent() {
+        // Regression test using gate #14's EXACT logged basis vectors (see GateAnimationTask's
+        // "starting OPENING rotation" log line), not just a generic south-east fixture - an
+        // earlier version of this fix passed the generic fixture but still left gate #14's own
+        // edge column (u=width-1) short by one row live, because that column has fewer
+        // neighboring cells for step 4's independent box-scan to recover a collision loser
+        // through. See claimNearestAvailableCell in the fix itself.
+        int width = 4;
+        int height = 8;
+        CachedGate gate = buildRealGate14(width, height);
+        Vector uStep = gate.getUStep();
+        Vector vStep = gate.getVStep();
+
+        List<GateFrameCalculator.RasterizedBlock> rasterized = GateFrameCalculator.rasterizeRotationFrame(gate, 90.0);
+
+        Map<Integer, Set<Integer>> presentRowsByColumn = new HashMap<>();
+        for (GateFrameCalculator.RasterizedBlock block : rasterized) {
+            Vector relPos = block.sourceBlock().getRelativePosition();
+            int u = (int) Math.round(relPos.dot(uStep) / uStep.lengthSquared());
+            int v = (int) Math.round(relPos.dot(vStep) / vStep.lengthSquared());
+            presentRowsByColumn.computeIfAbsent(u, k -> new HashSet<>()).add(v);
+        }
+
+        for (int u = 0; u < width; u++) {
+            Set<Integer> presentRows = presentRowsByColumn.getOrDefault(u, Set.of());
+            for (int v = 0; v < height; v++) {
+                assertTrue(presentRows.contains(v),
+                    "Column " + u + " is missing row " + v + " - present rows: " + presentRows);
+            }
+        }
+    }
+
     @Test
     void rasterizeRotationFrame_AtClosedAngle_ReproducesExactlyTheScannedGridNoMoreNoFewer() {
         CachedGate gate = buildDiagonalDrawbridge(8, 4);
@@ -414,20 +481,21 @@ class GateFrameCalculatorTest {
     }
 
     @Test
-    void rasterizeRotationFrame_AtOpenAngle_TipRowAlwaysReachedAndNoColumnUniquelyDropped() {
+    void rasterizeRotationFrame_AtOpenAngle_EveryRowOfEveryColumnIsPresent() {
         // Regression test for a live-server bug report on gate #14 itself (width=4, height=8,
         // south-east/45-degree hinge). Root cause: once a diagonal-hinge door swings to 90
         // degrees, consecutive height-rows are only 1/sqrt(2) of a block apart in world X/Z, so
-        // several adjacent rows are mathematically guaranteed to floor to the very same integer
+        // several adjacent rows are mathematically guaranteed to round to the very same integer
         // cell - an intrinsic consequence of representing a continuously-rotated diagonal surface
-        // with unit blocks, not something any lookup strategy can eliminate. What *was* a genuine
-        // bug: the old code always let the row *nearer* the hinge win that collision (simple
-        // insertion-order iteration from row 0 upward), so the door's true, farthest reach (the
-        // tip row) was *always* the one silently dropped - live-observed as an 8-tall door only
-        // ever extending 6 blocks open. Processing farthest-from-hinge rows first fixes this: the
-        // tip row must now always survive any collision it's part of, for every column equally
-        // (no column should lose more rows than any other - that would reproduce the second part
-        // of the report, one whole column barely animating).
+        // with unit blocks. What *was* a genuine bug: the old code either let the row nearer the
+        // hinge win that collision unconditionally (dropping the door's true, farthest reach -
+        // live-observed as an 8-tall door only ever extending 6 blocks open), or, in a later
+        // attempt, simply dropped whichever row lost a collision outright (worse at the
+        // geometry's edge columns, which have fewer neighboring cells for step 4's independent
+        // box-scan to patch the loss through - reproducing a milder "one column worse than the
+        // rest" bug). Claiming the nearest still-free of the 8 floor/ceil corners around a row's
+        // true position (see claimNearestAvailableCell) means every single row of every column
+        // gets its own distinct cell.
         int width = 4;
         int height = 8;
         CachedGate gate = buildDiagonalDrawbridge(width, height);
@@ -444,19 +512,11 @@ class GateFrameCalculatorTest {
             presentRowsByColumn.computeIfAbsent(u, k -> new HashSet<>()).add(v);
         }
 
-        Integer expectedRowCount = null;
         for (int u = 0; u < width; u++) {
             Set<Integer> presentRows = presentRowsByColumn.getOrDefault(u, Set.of());
-            assertTrue(presentRows.contains(height - 1),
-                "Column " + u + " should reach its full extension (row " + (height - 1)
-                    + " present) but only has rows " + presentRows);
-            if (expectedRowCount == null) {
-                expectedRowCount = presentRows.size();
-            } else {
-                assertEquals(expectedRowCount, presentRows.size(),
-                    "Column " + u + " has " + presentRows.size() + " rows present (" + presentRows
-                        + ") but column 0 has " + expectedRowCount + " - no column should be "
-                        + "uniquely worse off than the others");
+            for (int v = 0; v < height; v++) {
+                assertTrue(presentRows.contains(v),
+                    "Column " + u + " is missing row " + v + " - present rows: " + presentRows);
             }
         }
     }

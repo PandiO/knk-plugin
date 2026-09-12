@@ -311,22 +311,35 @@ public class GateFrameCalculator {
 
         // 3b. Guarantee every scanned source block contributes at least one placed cell, by
         // rotating it forward directly (the same formula calculateRotationPosition uses for the
-        // non-rasterized path) and flooring to the block it lands in - exactly like every other
-        // block placement in this codebase (see GateBlockPlacer, which floors via getBlockX/Y/Z).
-        // Step 4 below only *tests candidate world cells against the closed frame*: for a
-        // diagonal hinge, a genuine source cell's true rotated position frequently doesn't
+        // non-rasterized path) and claiming the nearest still-free integer cell to that continuous
+        // position. Step 4 below only *tests candidate world cells against the closed frame*: for
+        // a diagonal hinge, a genuine source cell's true rotated position frequently doesn't
         // reverse-project back to an exact integer (u,v) for *any* nearby integer cell (the
         // rotation isn't lattice-preserving off cardinal axes), so step 4 alone silently drops
         // whole rows/columns near the geometry's edges - this is what produced the reported
         // "8-tall door only opens 6 blocks" bug: an entire column's blocks are, geometrically,
         // spaced *less than one block apart* once projected onto world X/Z after a diagonal-axis
         // rotation (e.g. 1/sqrt(2) per row for a 45-degree hinge), so several adjacent rows are
-        // mathematically guaranteed to floor to the very same integer cell - this is an intrinsic
+        // mathematically guaranteed to round to the very same integer cell - this is an intrinsic
         // consequence of representing a continuously-rotated diagonal surface with unit blocks,
-        // not something any lookup strategy can avoid entirely. What *is* avoidable is which row
-        // wins that collision: processing farthest-from-hinge rows first (descending v-index) so
-        // the door's true, farthest reach always survives a collision, rather than being clobbered
-        // by whichever row processing happened to reach that cell first.
+        // not something any lookup strategy can avoid entirely.
+        //
+        // What *is* avoidable is which row wins that collision, and what happens to the loser:
+        // - Processing farthest-from-hinge rows first (descending v-index) means the door's true,
+        //   farthest reach always survives a collision, rather than being clobbered by whichever
+        //   row happened to be processed first.
+        // - The loser of a collision isn't simply dropped: claimNearestAvailableCell tries all 8
+        //   floor/ceil corners around its true continuous position (not just floor), so it can
+        //   still claim a distinct, merely-adjacent cell instead of vanishing outright. This also
+        //   subsumes the floating-point case where a coordinate that's algebraically supposed to
+        //   land exactly on an integer (e.g. the hinge row) comes out a few ULPs to either side of
+        //   it instead (Math.cos(Math.PI / 2) is ~6.12e-17, not bit-exact 0) - the correct corner
+        //   is simply whichever of the 8 is nearest, no separate epsilon needed.
+        // - Relying only on step 4's independent box-scan to patch up collision losers (as an
+        //   earlier version of this fix did) left a systematic gap at the geometry's edge columns,
+        //   which have fewer neighboring candidate cells for step 4 to find a match through than
+        //   interior columns do - reproducing a milder version of the same "one column worse than
+        //   the rest" bug. Recovering within 3b itself removes that dependency entirely.
         List<BlockSnapshot> byDistanceFromHinge = new ArrayList<>(gate.getBlocks());
         byDistanceFromHinge.sort((a, b) -> {
             double vA = Math.abs(projectOntoBasis(a.getRelativePosition(), uStep, vStep, nStep)[1]);
@@ -338,18 +351,10 @@ public class GateFrameCalculator {
         for (BlockSnapshot block : byDistanceFromHinge) {
             Vector rotated = anchor.clone().add(
                 VectorMath.rotateAroundAxis(block.getRelativePosition(), hingeAxis, angleDegrees));
-            // Rodrigues' formula involves cos(angleDegrees), which for a "nice" angle like 90
-            // degrees is never bit-exact zero (Math.cos(Math.PI / 2) is ~6.12e-17, not 0) - so a
-            // coordinate that's algebraically supposed to land exactly on an integer (e.g. the
-            // hinge row, or any cardinal-axis rotation result) can come out a few ULPs *below* it
-            // instead (observed: 0.9999999999999998). Math.floor has no tolerance for that - it
-            // rounds such a value down a full block, silently colliding it with the block one cell
-            // over. Nudging by a tiny epsilon (far larger than FP noise, far smaller than any real
-            // fractional offset from a diagonal rotation) before flooring fixes that without
-            // affecting genuinely fractional positions.
-            Vector floored = new Vector(
-                Math.floor(rotated.getX() + 1e-6), Math.floor(rotated.getY() + 1e-6), Math.floor(rotated.getZ() + 1e-6));
-            byPosition.putIfAbsent(packPosition(floored), new RasterizedBlock(floored, block));
+            Vector claimed = claimNearestAvailableCell(byPosition, rotated);
+            if (claimed != null) {
+                byPosition.put(packPosition(claimed), new RasterizedBlock(claimed, block));
+            }
         }
 
         // 4. Test every candidate cell: inverse-rotate back into the closed frame, project onto
@@ -396,6 +401,46 @@ public class GateFrameCalculator {
     private static long packPositionCoords(long x, long y, long z) {
         // World coordinates comfortably fit in 26 bits (+/- ~33M); y needs far fewer.
         return (x & 0x3FFFFFFL) << 38 | (y & 0xFFFL) << 26 | (z & 0x3FFFFFFL);
+    }
+
+    /**
+     * The true continuous position always lies within the unit cube spanned by floor/ceil of each
+     * coordinate - one of those (up to) 8 corners is the exact integer cell a naive round would
+     * pick, and the rest are its immediate neighbors. Returns whichever of the 8 is nearest to
+     * {@code continuous} and not already claimed in {@code byPosition}, or null if every corner is
+     * already taken (only possible under an extreme, multi-way collision).
+     */
+    private static Vector claimNearestAvailableCell(Map<Long, RasterizedBlock> byPosition, Vector continuous) {
+        double[] xs = corners(continuous.getX());
+        double[] ys = corners(continuous.getY());
+        double[] zs = corners(continuous.getZ());
+
+        Vector best = null;
+        double bestDistanceSquared = Double.MAX_VALUE;
+        for (double x : xs) {
+            for (double y : ys) {
+                for (double z : zs) {
+                    if (byPosition.containsKey(packPositionCoords((long) x, (long) y, (long) z))) {
+                        continue;
+                    }
+                    double dx = continuous.getX() - x;
+                    double dy = continuous.getY() - y;
+                    double dz = continuous.getZ() - z;
+                    double distanceSquared = dx * dx + dy * dy + dz * dz;
+                    if (distanceSquared < bestDistanceSquared) {
+                        bestDistanceSquared = distanceSquared;
+                        best = new Vector(x, y, z);
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    private static double[] corners(double value) {
+        double floor = Math.floor(value);
+        double ceil = Math.ceil(value);
+        return floor == ceil ? new double[]{floor} : new double[]{floor, ceil};
     }
 
     /**

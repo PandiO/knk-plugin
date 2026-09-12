@@ -454,9 +454,11 @@ public class GateAnimationTask extends BukkitRunnable {
         // updateGateBlocks only ever vacates one tick behind the frame it's given, not every
         // frame since the last call, so a skipped stretch is never cleaned up on its own.
         // Also where Mechanism 1 (rasterized gap-fill) and Mechanism 2 (open-scan pairing)
-        // actually converge to their final, fully-correct resting shape - see placeRestingFrame.
-        double openAngle = GateFrameCalculator.calculateRotationAngle(gate, gate.getAnimationDurationTicks());
-        GateRestingFramePlacer.placeRestingFrame(world, gate, gate.getAnimationDurationTicks(), openAngle, fallbackMaterial, rasterizationEnabled);
+        // actually converge to their final, fully-correct resting shape - see
+        // transitionRestingFrame, which also clears any closed-frame rasterized filler blocks
+        // that aren't part of the open frame (the per-tick swing above only vacates each
+        // BlockSnapshot's own previous position, never Mechanism 1's extra filler cells).
+        GateRestingFramePlacer.transitionRestingFrame(world, gate, 0, gate.getAnimationDurationTicks(), fallbackMaterial, rasterizationEnabled);
         resyncSpatialIndex(gate, gate.getCurrentFrame());
 
         LOGGER.info("Gate " + gate.getName() + " finished opening");
@@ -484,8 +486,10 @@ public class GateAnimationTask extends BukkitRunnable {
         gate.setCurrentState(AnimationState.CLOSED);
         gate.setCurrentFrame(0);
 
-        // Ensure all gate blocks are placed at closed position
-        GateRestingFramePlacer.placeRestingFrame(world, gate, 0, 0.0, fallbackMaterial, rasterizationEnabled);
+        // Ensure all gate blocks are placed at closed position, and clear any open-frame
+        // rasterized filler blocks that aren't also part of the closed frame (see
+        // transitionRestingFrame).
+        GateRestingFramePlacer.transitionRestingFrame(world, gate, gate.getAnimationDurationTicks(), 0, fallbackMaterial, rasterizationEnabled);
         resyncSpatialIndex(gate, 0);
 
         LOGGER.info("Gate " + gate.getName() + " finished closing");

@@ -135,4 +135,55 @@ class GateRestingFramePlacerTest {
         assertEquals(1, cells.size());
         assertEquals("minecraft:oak_log[axis=z]", cells.get(0).blockData());
     }
+
+    @Test
+    void cellsToClear_RasterizedExtraCellsNotInTargetFrame_AreReturned() {
+        // Live-server bug: Mechanism 1's rasterized gap-fill places cells beyond the gate's own
+        // scanned BlockSnapshots, but those extra cells aren't tied to any single BlockSnapshot,
+        // so nothing ever cleared them when the gate closed again - they were left behind forever.
+        // cellsToClear must surface exactly those "extra, not reused by the target frame" cells.
+        //
+        // Built directly from GateFrameCalculator.rasterizeRotationFrame (pure, Bukkit-free)
+        // rather than restingFrameCells, since the latter's blockdata orientation step needs a
+        // live Bukkit server for a nonzero angle (see this class's other tests' notes).
+        CachedGate gate = buildDiagonalDrawbridge(4, 8);
+
+        List<GateRestingFramePlacer.RestingCell> openCells = toRestingCells(
+            net.knightsandkings.knk.core.gates.GateFrameCalculator.rasterizeRotationFrame(gate, 90.0));
+        List<GateRestingFramePlacer.RestingCell> closedCells = toRestingCells(
+            net.knightsandkings.knk.core.gates.GateFrameCalculator.rasterizeRotationFrame(gate, 0.0));
+
+        // The open frame's rasterized set is strictly larger than the raw scanned block count,
+        // and essentially disjoint from the closed frame's footprint (a 90-degree swing away).
+        assertTrue(openCells.size() > gate.getBlocks().size());
+
+        List<GateRestingFramePlacer.RestingCell> toClear =
+            GateRestingFramePlacer.cellsToClear(openCells, closedCells);
+
+        assertFalse(toClear.isEmpty(), "Expected open-frame cells not reused by the closed frame to need clearing");
+        assertTrue(toClear.size() >= gate.getBlocks().size(),
+            "Expected at least as many cells to clear as there are scanned blocks, since the open "
+                + "and closed footprints are essentially disjoint for a 90-degree swing");
+    }
+
+    private List<GateRestingFramePlacer.RestingCell> toRestingCells(
+            List<net.knightsandkings.knk.core.gates.GateFrameCalculator.RasterizedBlock> rasterized) {
+        return rasterized.stream()
+            .map(block -> new GateRestingFramePlacer.RestingCell(block.worldPosition(), block.sourceBlock().getBlockData()))
+            .toList();
+    }
+
+    @Test
+    void cellsToClear_TargetFrameReusesSamePosition_IsNotReturned() {
+        List<GateRestingFramePlacer.RestingCell> fromCells = List.of(
+            new GateRestingFramePlacer.RestingCell(new Vector(0, 0, 0), "minecraft:oak_planks"),
+            new GateRestingFramePlacer.RestingCell(new Vector(1, 0, 0), "minecraft:oak_planks"));
+        List<GateRestingFramePlacer.RestingCell> toCells = List.of(
+            new GateRestingFramePlacer.RestingCell(new Vector(0, 0, 0), "minecraft:stone"));
+
+        List<GateRestingFramePlacer.RestingCell> toClear = GateRestingFramePlacer.cellsToClear(fromCells, toCells);
+
+        assertEquals(1, toClear.size());
+        assertEquals(new Vector(1, 0, 0), toClear.get(0).position());
+    }
 }

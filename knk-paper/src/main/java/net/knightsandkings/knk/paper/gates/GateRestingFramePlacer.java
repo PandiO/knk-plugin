@@ -3,12 +3,16 @@ package net.knightsandkings.knk.paper.gates;
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
 import net.knightsandkings.knk.core.domain.gates.CachedGate;
 import net.knightsandkings.knk.core.gates.GateFrameCalculator;
+import net.knightsandkings.knk.core.gates.GateSpatialIndex;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.util.Vector;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.logging.Logger;
 
 /**
  * Shared logic for what a gate's blocks actually look like at one of its two resting
@@ -22,6 +26,8 @@ import java.util.List;
  * actually look like" answer, not just the sparse per-block one.
  */
 final class GateRestingFramePlacer {
+
+    private static final Logger LOGGER = Logger.getLogger(GateRestingFramePlacer.class.getName());
 
     private GateRestingFramePlacer() {
     }
@@ -57,8 +63,16 @@ final class GateRestingFramePlacer {
                 String orientedBlockData = GateBlockOrientation.applyRotation(rasterized.sourceBlock().getBlockData(), gate, angle);
                 cells.add(new RestingCell(rasterized.worldPosition(), orientedBlockData));
             }
+            LOGGER.info("[GateRestingFrame] Gate '" + gate.getName() + "' (ID: " + gate.getId() + ") frame " + frame
+                + " (angle=" + angle + "): rasterized " + cells.size() + " cell(s) from " + gate.getBlocks().size()
+                + " scanned block(s) (sublatticeIndex=" + gate.getSublatticeIndex() + ").");
             return cells;
         }
+
+        LOGGER.info("[GateRestingFrame] Gate '" + gate.getName() + "' (ID: " + gate.getId() + ") frame " + frame
+            + ": rasterization NOT used (rasterizationEnabled=" + rasterizationEnabled + ", motionType="
+            + gate.getMotionType() + ", openBlocks=" + gate.getOpenBlocks().size() + ", sublatticeIndex="
+            + gate.getSublatticeIndex() + ") - using plain per-block placement.");
 
         double angle = GateFrameCalculator.calculateRotationAngle(gate, frame);
         for (BlockSnapshot block : gate.getBlocks()) {
@@ -86,6 +100,70 @@ final class GateRestingFramePlacer {
         for (RestingCell cell : restingFrameCells(gate, frame, rasterizationEnabled)) {
             GateBlockPlacer.placeBlock(world, cell.position(), cell.blockData(), fallbackMaterial);
         }
+    }
+
+    /**
+     * Moves a gate from one resting frame to the other: clears whatever cells belonged only to
+     * {@code fromFrame} (not also part of {@code toFrame}), then places {@code toFrame}.
+     *
+     * <p>Mechanism 1's rasterized gap-fill can place cells beyond the gate's own scanned
+     * BlockSnapshots - extra filler blocks that exist only to make the diagonal surface look
+     * solid. Those extra cells aren't tied to any single BlockSnapshot, so the ordinary per-tick
+     * swing (which vacates each block's own previous position, one for one) never touches them,
+     * and {@link #placeRestingFrame} only ever adds cells, never removes any - so without this,
+     * an open gate's rasterized filler blocks would sit there forever after it closes again,
+     * wherever they don't happen to be overwritten by the closed frame's own cells.
+     */
+    static void transitionRestingFrame(World world, CachedGate gate, int fromFrame, int toFrame,
+                                        Material fallbackMaterial, boolean rasterizationEnabled) {
+        List<RestingCell> fromCells = restingFrameCells(gate, fromFrame, rasterizationEnabled);
+        List<RestingCell> toCells = restingFrameCells(gate, toFrame, rasterizationEnabled);
+        List<RestingCell> toClear = cellsToClear(fromCells, toCells);
+
+        LOGGER.info("[GateRestingFrame] Gate '" + gate.getName() + "' (ID: " + gate.getId() + ") transitioning frame "
+            + fromFrame + " -> " + toFrame + ": clearing " + toClear.size() + " cell(s), placing " + toCells.size()
+            + " cell(s).");
+
+        int clearedCount = 0;
+        for (RestingCell cell : toClear) {
+            if (GateBlockPlacer.removeBlockIfMatches(world, cell.position(), cell.blockData(), fallbackMaterial)) {
+                clearedCount++;
+            }
+        }
+
+        int placedCount = 0;
+        for (RestingCell cell : toCells) {
+            if (GateBlockPlacer.placeBlock(world, cell.position(), cell.blockData(), fallbackMaterial)) {
+                placedCount++;
+            }
+        }
+
+        if (clearedCount != toClear.size() || placedCount != toCells.size()) {
+            LOGGER.warning("[GateRestingFrame] Gate '" + gate.getName() + "' (ID: " + gate.getId() + ") transition "
+                + fromFrame + " -> " + toFrame + ": only cleared " + clearedCount + "/" + toClear.size()
+                + " and placed " + placedCount + "/" + toCells.size() + " (chunk not loaded, or a mismatched "
+                + "block already occupied the cell).");
+        }
+    }
+
+    /**
+     * Pure (World-free) half of {@link #transitionRestingFrame}: every {@code fromCells} cell
+     * whose position isn't also occupied by {@code toCells} - i.e. the ones that need clearing,
+     * not just overwriting, when moving from one resting frame to the other.
+     */
+    static List<RestingCell> cellsToClear(List<RestingCell> fromCells, List<RestingCell> toCells) {
+        Set<Long> toPositions = new HashSet<>();
+        for (RestingCell cell : toCells) {
+            toPositions.add(GateSpatialIndex.packCell(cell.position()));
+        }
+
+        List<RestingCell> toClear = new ArrayList<>();
+        for (RestingCell cell : fromCells) {
+            if (!toPositions.contains(GateSpatialIndex.packCell(cell.position()))) {
+                toClear.add(cell);
+            }
+        }
+        return toClear;
     }
 
     /** Just the positions from {@link #restingFrameCells}, for keeping GateSpatialIndex in sync. */
