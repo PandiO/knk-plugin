@@ -1,20 +1,11 @@
 package net.knightsandkings.knk.paper.tasks;
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import com.sk89q.worldedit.IncompleteRegionException;
 import com.sk89q.worldedit.LocalSession;
 import com.sk89q.worldedit.WorldEdit;
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
-import com.sk89q.worldedit.math.BlockVector2;
-import com.sk89q.worldedit.math.BlockVector3;
-import com.sk89q.worldedit.regions.Polygonal2DRegion;
 import com.sk89q.worldedit.regions.Region;
 import com.sk89q.worldedit.regions.RegionSelector;
-import com.sk89q.worldedit.regions.selector.CuboidRegionSelector;
-import com.sk89q.worldedit.regions.selector.Polygonal2DRegionSelector;
 import net.knightsandkings.knk.api.GateDoorsApi;
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import org.bukkit.ChatColor;
@@ -22,9 +13,7 @@ import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.logging.Logger;
 
@@ -96,7 +85,7 @@ public class GateDoorRegionCaptureHandler {
         World world = player.getWorld();
         RegionSelector selector;
         try {
-            selector = buildRegionSelector(BukkitAdapter.adapt(world), existingRegionData);
+            selector = GateRegionDataFormat.parseAsRegionSelector(BukkitAdapter.adapt(world), existingRegionData);
         } catch (Exception e) {
             player.sendMessage(ChatColor.RED + "[Gate Region] Failed to parse the door's stored region data: " + e.getMessage());
             LOGGER.warning("Failed to parse region data for door " + door.getId() + ": " + e.getMessage());
@@ -168,7 +157,7 @@ public class GateDoorRegionCaptureHandler {
 
             String regionDataJson;
             try {
-                regionDataJson = serializeRegion(selection, world);
+                regionDataJson = GateRegionDataFormat.serialize(selection, world.getName());
             } catch (Exception e) {
                 player.sendMessage(ChatColor.RED + "[Gate Region] Error serializing selection: " + e.getMessage());
                 LOGGER.warning("Error serializing WorldEdit selection for player " + player.getName() + ": " + e.getMessage());
@@ -196,75 +185,4 @@ public class GateDoorRegionCaptureHandler {
         });
     }
 
-    /**
-     * Serializes a WorldEdit selection into the vertex JSON shape documented in
-     * {@code WORLDGUARD_REGION_FEASIBILITY.md} §9.1 - a polygon (points + Y range) or, for any
-     * other selection type (in practice, a cuboid), its two corner points.
-     */
-    private String serializeRegion(Region selection, World world) {
-        JsonObject json = new JsonObject();
-        json.addProperty("worldName", world.getName());
-
-        if (selection instanceof Polygonal2DRegion poly) {
-            json.addProperty("type", "POLYGON2D");
-            JsonArray points = new JsonArray();
-            for (BlockVector2 point : poly.getPoints()) {
-                JsonObject p = new JsonObject();
-                p.addProperty("x", point.x());
-                p.addProperty("z", point.z());
-                points.add(p);
-            }
-            json.add("points", points);
-            json.addProperty("minY", poly.getMinimumY());
-            json.addProperty("maxY", poly.getMaximumY());
-        } else {
-            json.addProperty("type", "CUBOID");
-            BlockVector3 min = selection.getMinimumPoint();
-            BlockVector3 max = selection.getMaximumPoint();
-            json.add("pos1", blockVector3ToJson(min));
-            json.add("pos2", blockVector3ToJson(max));
-        }
-
-        return json.toString();
-    }
-
-    private JsonObject blockVector3ToJson(BlockVector3 vector) {
-        JsonObject json = new JsonObject();
-        json.addProperty("x", vector.x());
-        json.addProperty("y", vector.y());
-        json.addProperty("z", vector.z());
-        return json;
-    }
-
-    /**
-     * Reconstructs a {@link RegionSelector} from stored region data JSON (§9.1 shape), for
-     * re-hydrating into an active {@link LocalSession} on redefine (6.4) - see
-     * {@code WgRegionIdTaskHandler}'s constructors of the equivalent WorldGuard-region types for
-     * the precedent this mirrors.
-     */
-    private RegionSelector buildRegionSelector(com.sk89q.worldedit.world.World weWorld, String regionDataJson) {
-        JsonObject json = JsonParser.parseString(regionDataJson).getAsJsonObject();
-        String type = json.has("type") ? json.get("type").getAsString() : null;
-
-        if ("POLYGON2D".equals(type)) {
-            List<BlockVector2> points = new ArrayList<>();
-            for (JsonElement element : json.getAsJsonArray("points")) {
-                JsonObject p = element.getAsJsonObject();
-                points.add(BlockVector2.at(p.get("x").getAsInt(), p.get("z").getAsInt()));
-            }
-            int minY = json.get("minY").getAsInt();
-            int maxY = json.get("maxY").getAsInt();
-            return new Polygonal2DRegionSelector(weWorld, points, minY, maxY);
-        } else if ("CUBOID".equals(type)) {
-            BlockVector3 pos1 = jsonToBlockVector3(json.getAsJsonObject("pos1"));
-            BlockVector3 pos2 = jsonToBlockVector3(json.getAsJsonObject("pos2"));
-            return new CuboidRegionSelector(weWorld, pos1, pos2);
-        }
-
-        throw new IllegalArgumentException("Unknown or missing region type: " + type);
-    }
-
-    private BlockVector3 jsonToBlockVector3(JsonObject json) {
-        return BlockVector3.at(json.get("x").getAsInt(), json.get("y").getAsInt(), json.get("z").getAsInt());
-    }
 }

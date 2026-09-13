@@ -3,6 +3,9 @@ package net.knightsandkings.knk.paper.tasks;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.sk89q.worldedit.bukkit.BukkitAdapter;
+import com.sk89q.worldedit.math.BlockVector3;
+import com.sk89q.worldedit.regions.Region;
 import net.knightsandkings.knk.api.GateDoorsApi;
 import net.knightsandkings.knk.api.dto.GateBlockSnapshotScanDto;
 import net.knightsandkings.knk.api.dto.GateDoorDto;
@@ -107,6 +110,8 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
                 return;
             }
             startFloodFillScan(taskId, gate, onFinished);
+        } else if ("REGION".equals(mode)) {
+            startRegionScan(taskId, gate, useOpenAnchor, onFinished);
         } else {
             fail(taskId, "Gate '" + gate.getName() + "' has an unknown GeometryDefinitionMode: " + mode, onFinished);
         }
@@ -252,6 +257,64 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
 
         new FloodFillScanRunnable(taskId, gate, world, seeds.get(0), seeds, whitelist, blacklist,
             scanMaxBlocks, scanMaxRadius, planeConstraint, captureTileEntities, onFinished)
+            .runTaskTimer(plugin, 1L, 1L);
+    }
+
+    /**
+     * REGION mode (item 6.5): iterates every block position contained in the door's captured
+     * WorldEdit region (§9.1 vertex JSON, reconstructed via {@link GateRegionDataFormat}) instead
+     * of PLANE_GRID's anchor/ref1/ref2 lattice math. The anchor/basis fields (AnchorPointId etc.)
+     * are still required in REGION mode - see WORLDGUARD_REGION_FEASIBILITY.md §9.3's "basis
+     * retention" decision - the captured region supplies a precise in-plane footprint, not a
+     * replacement for the plane-defining anchor {@link #computeCellPosition} and the animation
+     * engine's rotation math both still rely on.
+     */
+    private void startRegionScan(int taskId, GateDoorDto gate, boolean useOpenAnchor, Runnable onFinished) {
+        String regionDataJson = useOpenAnchor ? gate.getOpenedRegionData() : gate.getClosedRegionData();
+        if (regionDataJson == null || regionDataJson.isBlank()) {
+            fail(taskId, "Gate '" + gate.getName() + "' has no " + (useOpenAnchor ? "opened" : "closed")
+                + " region captured yet - use '/knk gate door capture' first.", onFinished);
+            return;
+        }
+
+        Vector anchor = useOpenAnchor
+            ? CoordinateParser.parseCoordinate(gate.getOpenAnchorPoint())
+            : CoordinateParser.parseCoordinate(gate.getAnchorPoint());
+        String worldName = useOpenAnchor
+            ? CoordinateParser.parseWorldName(gate.getOpenAnchorPoint())
+            : CoordinateParser.parseWorldName(gate.getAnchorPoint());
+
+        if (anchor == null || worldName.isBlank()) {
+            String anchorLabel = useOpenAnchor ? "OpenAnchorPoint" : "AnchorPoint";
+            fail(taskId, "Gate '" + gate.getName() + "' is missing " + anchorLabel + " required for scanning.", onFinished);
+            return;
+        }
+
+        World world = Bukkit.getWorld(worldName);
+        if (world == null) {
+            fail(taskId, "World '" + worldName + "' for gate '" + gate.getName() + "' is not loaded.", onFinished);
+            return;
+        }
+
+        Region region;
+        try {
+            region = GateRegionDataFormat.parseAsRegion(BukkitAdapter.adapt(world), regionDataJson);
+        } catch (Exception e) {
+            fail(taskId, "Gate '" + gate.getName() + "' has invalid stored region data: " + e.getMessage(), onFinished);
+            return;
+        }
+
+        String sizeError = checkScanSizeLimit(region.getVolume(), gate.getScanMaxBlocks());
+        if (sizeError != null) {
+            fail(taskId, "Scan area for gate '" + gate.getName() + "' " + sizeError, onFinished);
+            return;
+        }
+
+        Set<String> whitelist = parseMaterialSet(gate.getScanMaterialWhitelist());
+        Set<String> blacklist = parseMaterialSet(gate.getScanMaterialBlacklist());
+        boolean captureTileEntities = !"NONE".equals(gate.getTileEntityPolicy());
+
+        new RegionScanRunnable(taskId, gate, world, region, anchor, whitelist, blacklist, captureTileEntities, onFinished)
             .runTaskTimer(plugin, 1L, 1L);
     }
 
@@ -667,6 +730,135 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
             if (snapshots.isEmpty()) {
                 status = "Failed";
                 warnings.add("No blocks were captured for gate '" + gate.getName() + "'.");
+            }
+
+            String outputJson = buildOutputJson(status, snapshots, warnings, null);
+
+            if ("Failed".equals(status)) {
+                fail(taskId, String.join(" ", warnings), onFinished);
+            } else {
+                complete(taskId, outputJson, onFinished);
+            }
+        }
+    }
+
+    /**
+     * REGION mode's scan runnable: iterates the captured {@link Region}'s contained block
+     * positions (via its own {@link Region#iterator()}, not a hand-rolled bounding-box scan) at
+     * the same per-tick budget as {@link FloodFillScanRunnable}, applying the same whitelist/
+     * blacklist filtering and skipping air by default - an admin drew this boundary deliberately,
+     * but a captured "block" that's actually empty space isn't meaningful to place during
+     * animation. relativePosition is worldPos - anchor, the same raw-offset convention
+     * FLOOD_FILL already established (confirmed in WORLDGUARD_REGION_FEASIBILITY.md §9.3 to be
+     * the correct one to reuse here, not PLANE_GRID's lattice-index convention).
+     */
+    private class RegionScanRunnable extends BukkitRunnable {
+        private final int taskId;
+        private final GateDoorDto gate;
+        private final World world;
+        private final java.util.Iterator<BlockVector3> positions;
+        private final Vector anchor;
+        private final Set<String> whitelist;
+        private final Set<String> blacklist;
+        private final boolean captureTileEntities;
+        private final Runnable onFinished;
+
+        private final List<GateBlockSnapshotScanDto> snapshots = new ArrayList<>();
+        private final List<String> warnings = new ArrayList<>();
+        private int sortOrder = 0;
+        private int skippedUnloadedChunks = 0;
+        private boolean tileEntityWarningAdded = false;
+
+        RegionScanRunnable(int taskId, GateDoorDto gate, World world, Region region, Vector anchor,
+                            Set<String> whitelist, Set<String> blacklist, boolean captureTileEntities,
+                            Runnable onFinished) {
+            this.taskId = taskId;
+            this.gate = gate;
+            this.world = world;
+            this.positions = region.iterator();
+            this.anchor = anchor;
+            this.whitelist = whitelist;
+            this.blacklist = blacklist;
+            this.captureTileEntities = captureTileEntities;
+            this.onFinished = onFinished;
+        }
+
+        @Override
+        public void run() {
+            int budget = isServerLagging() ? BLOCKS_PER_TICK_WHEN_LAGGING : BLOCKS_PER_TICK;
+            int processed = 0;
+
+            while (positions.hasNext() && processed < budget) {
+                processCell(positions.next());
+                processed++;
+            }
+
+            if (!positions.hasNext()) {
+                finish();
+                cancel();
+            }
+        }
+
+        private void processCell(BlockVector3 pos) {
+            int worldX = pos.x();
+            int worldY = pos.y();
+            int worldZ = pos.z();
+
+            if (!ensureChunkLoaded(world, worldX >> 4, worldZ >> 4)) {
+                skippedUnloadedChunks++;
+                return;
+            }
+
+            Block block = world.getBlockAt(worldX, worldY, worldZ);
+            if (block.getType() == Material.AIR) {
+                return; // an admin-drawn boundary still shouldn't capture empty space as a "block"
+            }
+
+            String materialKey = block.getType().getKey().toString();
+            if (!blacklist.isEmpty() && blacklist.contains(materialKey)) {
+                return;
+            }
+            if (!whitelist.isEmpty() && !whitelist.contains(materialKey)) {
+                return;
+            }
+
+            int relativeX = worldX - anchor.getBlockX();
+            int relativeY = worldY - anchor.getBlockY();
+            int relativeZ = worldZ - anchor.getBlockZ();
+
+            String tileEntityJson = "{}";
+            if (captureTileEntities && block.getState() instanceof TileState && !tileEntityWarningAdded) {
+                warnings.add("Tile entity contents (inventory/text/etc.) are not captured yet; only the block type was recorded.");
+                tileEntityWarningAdded = true;
+            }
+
+            snapshots.add(new GateBlockSnapshotScanDto(
+                relativeX, relativeY, relativeZ,
+                worldX, worldY, worldZ,
+                materialKey,
+                block.getBlockData().getAsString(),
+                tileEntityJson,
+                sortOrder++
+            ));
+        }
+
+        private boolean isServerLagging() {
+            try {
+                return Bukkit.getTPS()[0] < LAG_TPS_THRESHOLD;
+            } catch (Exception e) {
+                return false;
+            }
+        }
+
+        private void finish() {
+            if (skippedUnloadedChunks > 0) {
+                warnings.add(skippedUnloadedChunks + " cell(s) were skipped because their chunk was not loaded.");
+            }
+
+            String status = warnings.isEmpty() ? "Success" : "Warning";
+            if (snapshots.isEmpty()) {
+                status = "Failed";
+                warnings.add("No blocks were captured for gate '" + gate.getName() + "' - the region may be entirely air, or entirely filtered out by ScanMaterialWhitelist/Blacklist.");
             }
 
             String outputJson = buildOutputJson(status, snapshots, warnings, null);

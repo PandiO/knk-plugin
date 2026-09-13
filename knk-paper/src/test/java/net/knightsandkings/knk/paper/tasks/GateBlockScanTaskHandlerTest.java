@@ -205,6 +205,36 @@ class GateBlockScanTaskHandlerTest {
         assertTrue(finished.get());
     }
 
+    @Test
+    void testStartScan_RegionModeMissingRegionData_FailsFast() {
+        // Item 6.5: REGION mode fails before touching Bukkit.getWorld() when the targeted region
+        // slot has never been captured - exercised directly, same rationale as the FLOOD_FILL
+        // open-anchor test above (fails before any Bukkit World/scheduler access is needed).
+        net.knightsandkings.knk.api.dto.GateDoorDto gate = new net.knightsandkings.knk.api.dto.GateDoorDto();
+        gate.setName("Region Door");
+        gate.setGeometryDefinitionMode("REGION");
+        gate.setClosedRegionData("");
+        AtomicBoolean finished = new AtomicBoolean(false);
+
+        handler.startScan(6, gate, false, () -> finished.set(true));
+
+        verify(mockWorldTasksApi).fail(eq(6), contains("closed"));
+        assertTrue(finished.get());
+    }
+
+    @Test
+    void testStartScan_UnknownGeometryDefinitionMode_FailsTask() {
+        net.knightsandkings.knk.api.dto.GateDoorDto gate = new net.knightsandkings.knk.api.dto.GateDoorDto();
+        gate.setName("Mystery Door");
+        gate.setGeometryDefinitionMode("SOMETHING_ELSE");
+        AtomicBoolean finished = new AtomicBoolean(false);
+
+        handler.startScan(7, gate, false, () -> finished.set(true));
+
+        verify(mockWorldTasksApi).fail(eq(7), contains("unknown GeometryDefinitionMode"));
+        assertTrue(finished.get());
+    }
+
     private WorldTaskDto createTask(int id, String inputJson) {
         return new WorldTaskDto(
             id, 1, "GateStructure", 1, "BlockSnapshots", "GateBlockScan", "Pending",
