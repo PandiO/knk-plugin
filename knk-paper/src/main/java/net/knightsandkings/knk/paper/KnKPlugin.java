@@ -79,6 +79,7 @@ import net.knightsandkings.knk.paper.tasks.LocationTaskHandler;
 import net.knightsandkings.knk.paper.tasks.WorldTaskHandlerRegistry;
 import net.knightsandkings.knk.paper.tasks.HeadlessWorldTaskPoller;
 import net.knightsandkings.knk.paper.tasks.GateBlockScanTaskHandler;
+import net.knightsandkings.knk.paper.tasks.GateDoorRegionCaptureHandler;
 import net.knightsandkings.knk.paper.user.UserManager;
 import net.knightsandkings.knk.paper.utils.CommandCooldownManager;
 
@@ -108,6 +109,7 @@ public class KnKPlugin extends JavaPlugin {
     private WorldTasksApi worldTasksApi;
     private GateStructuresApi gateStructuresApi;
     private GateDoorsApi gateDoorsApi;
+    private GateDoorRegionCaptureHandler gateDoorRegionCaptureHandler;
     private GateManager gateManager;
     private GateStateSyncTask gateStateSyncTask;
     private GateDisplayManager gateDisplayManager;
@@ -165,6 +167,7 @@ public class KnKPlugin extends JavaPlugin {
             this.worldTasksApi = apiClient.getWorldTasksApi();
             this.gateStructuresApi = apiClient.getGateStructuresApi();
             this.gateDoorsApi = apiClient.getGateDoorsApi();
+            this.gateDoorRegionCaptureHandler = new GateDoorRegionCaptureHandler(this, this.gateDoorsApi);
             getLogger().info("TownsQueryApi wired from API client");
             getLogger().info("LocationsQueryApi wired from API client");
             getLogger().info("EnchantmentDefinitionsQueryApi wired from API client");
@@ -451,7 +454,7 @@ public class KnKPlugin extends JavaPlugin {
             
             // Register world task chat listener for handling chat input during tasks
             getServer().getPluginManager().registerEvents(
-                new WorldTaskChatListener(this, worldTaskHandlerRegistry),
+                new WorldTaskChatListener(this, worldTaskHandlerRegistry, gateDoorRegionCaptureHandler),
                 this
             );
             getLogger().info("Registered WorldTaskChatListener for task chat input handling");
@@ -562,6 +565,7 @@ public class KnKPlugin extends JavaPlugin {
                 userManager,
                 usersCommandApi,
                 districtGateLoader,
+                gateDoorRegionCaptureHandler,
                 serverId
             );
             knkCommand.setExecutor(knkAdminCommand);

@@ -39,7 +39,11 @@ class GateCommandTest {
         mockGateManager = mock(GateManager.class);
         mockGateStructuresApi = mock(GateStructuresApi.class);
         mockGateDoorsApi = mock(GateDoorsApi.class);
-        gateCommand = new GateCommand(mockGateManager, mockGateStructuresApi, mockGateDoorsApi, mock(UserManager.class), mock(UsersCommandApi.class), mock(DistrictGateLoader.class));
+        // GateDoorRegionCaptureHandler references WorldEdit types (compileOnly, unavailable on
+        // the test classpath - see WorldGuardIntegrationTest's identical constraint), so it can't
+        // be Mockito-mocked here; null is safe since no existing test exercises the door
+        // capture/redefine subcommand this handler backs.
+        gateCommand = new GateCommand(mockGateManager, mockGateStructuresApi, mockGateDoorsApi, mock(UserManager.class), mock(UsersCommandApi.class), mock(DistrictGateLoader.class), null);
         mockSender = mock(CommandSender.class);
         mockPlayer = mock(Player.class);
         sentMessages = new ArrayList<>();

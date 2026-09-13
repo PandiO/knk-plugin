@@ -61,4 +61,15 @@ public interface GateDoorsApi {
      * @return CompletableFuture that completes when update is done
      */
     CompletableFuture<Void> updateHealth(int id, double healthCurrent);
+
+    /**
+     * Persist a captured region (item 6) against one of a door's two region slots.
+     * Calls PUT /api/GateDoors/{id}/region
+     *
+     * @param id Gate door ID
+     * @param isOpenedRegion true to write OpenedRegionData, false to write ClosedRegionData
+     * @param regionData Raw region vertex JSON (WORLDGUARD_REGION_FEASIBILITY.md §9.1 shape)
+     * @return CompletableFuture that completes when the update is done
+     */
+    CompletableFuture<Void> updateRegionData(int id, boolean isOpenedRegion, String regionData);
 }

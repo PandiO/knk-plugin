@@ -11,6 +11,7 @@ import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.paper.gates.DistrictGateLoader;
 import net.knightsandkings.knk.paper.gates.GateDoorOpenStateMapper;
+import net.knightsandkings.knk.paper.tasks.GateDoorRegionCaptureHandler;
 import net.knightsandkings.knk.paper.user.PlayerUserData;
 import net.knightsandkings.knk.paper.user.UserManager;
 import org.bukkit.command.Command;
@@ -43,16 +44,19 @@ public class GateCommand implements CommandExecutor {
     private final UserManager userManager;
     private final UsersCommandApi usersCommandApi;
     private final DistrictGateLoader districtGateLoader;
+    private final GateDoorRegionCaptureHandler gateDoorRegionCaptureHandler;
 
     public GateCommand(GateManager gateManager, GateStructuresApi gateStructuresApi, GateDoorsApi gateDoorsApi,
                         UserManager userManager, UsersCommandApi usersCommandApi,
-                        DistrictGateLoader districtGateLoader) {
+                        DistrictGateLoader districtGateLoader,
+                        GateDoorRegionCaptureHandler gateDoorRegionCaptureHandler) {
         this.gateManager = gateManager;
         this.gateStructuresApi = gateStructuresApi;
         this.gateDoorsApi = gateDoorsApi;
         this.userManager = userManager;
         this.usersCommandApi = usersCommandApi;
         this.districtGateLoader = districtGateLoader;
+        this.gateDoorRegionCaptureHandler = gateDoorRegionCaptureHandler;
     }
 
     @Override
@@ -72,6 +76,7 @@ public class GateCommand implements CommandExecutor {
             case "list" -> executeList(sender, subArgs);
             case "passthrough" -> executePassThrough(sender, subArgs);
             case "admin" -> executeAdmin(sender, subArgs);
+            case "door" -> executeDoor(sender, subArgs);
             case "help", "?" -> {
                 sendHelp(sender);
                 yield true;
@@ -90,10 +95,100 @@ public class GateCommand implements CommandExecutor {
         sender.sendMessage(ChatColor.GRAY + "/knk gate close <door name|id> | <structure> <door>");
         sender.sendMessage(ChatColor.GRAY + "/knk gate info <door name|id> | <structure> <door>");
         sender.sendMessage(ChatColor.GRAY + "/knk gate list");
+        sender.sendMessage(ChatColor.GRAY + "/knk gate door capture|redefine <door name|id> | <structure> <door> [closed|opened]");
         sender.sendMessage(ChatColor.GRAY + "/knk gate passthrough <default|instant|teleport>");
         sender.sendMessage(ChatColor.GRAY + "/knk gate admin health <door name|id> <amount>");
         sender.sendMessage(ChatColor.GRAY + "/knk gate admin repair <door name|id>");
         sender.sendMessage(ChatColor.GRAY + "/knk gate admin tp <door name|id>");
+        sender.sendMessage(ChatColor.GRAY + "/knk gate door capture <door name|id> | <structure> <door> [closed|opened]");
+        sender.sendMessage(ChatColor.GRAY + "/knk gate door redefine <door name|id> | <structure> <door> [closed|opened]");
+    }
+
+    /**
+     * Handle /gate door capture|redefine <door> | <structure> <door> [closed|opened] (items
+     * 6.3/6.4): draws or re-edits a WorldEdit-based region for one of a door's two region slots.
+     */
+    private boolean executeDoor(CommandSender sender, String[] args) {
+        if (args.length == 0) {
+            sendDoorHelp(sender);
+            return true;
+        }
+
+        String action = args[0].toLowerCase();
+        String[] subArgs = Arrays.copyOfRange(args, 1, args.length);
+
+        return switch (action) {
+            case "capture" -> executeDoorRegion(sender, subArgs, false);
+            case "redefine" -> executeDoorRegion(sender, subArgs, true);
+            default -> {
+                sender.sendMessage(ChatColor.RED + "Unknown gate door action: " + args[0]);
+                sendDoorHelp(sender);
+                yield true;
+            }
+        };
+    }
+
+    private void sendDoorHelp(CommandSender sender) {
+        sender.sendMessage(ChatColor.GOLD + "━━━ Gate Door Region Commands ━━━");
+        sender.sendMessage(ChatColor.GRAY + "/knk gate door capture <door name|id> | <structure> <door> [closed|opened]");
+        sender.sendMessage(ChatColor.GRAY + "/knk gate door redefine <door name|id> | <structure> <door> [closed|opened]");
+        sender.sendMessage(ChatColor.GRAY + "Draw a selection with '//sel poly' or '//sel cuboid', then type 'save' or 'cancel' in chat.");
+    }
+
+    /**
+     * Shared implementation for capture (fresh selection) and redefine (pre-loaded selection) -
+     * both just start {@link GateDoorRegionCaptureHandler}'s identical save/cancel loop, differing
+     * only in which of its two entry points is called.
+     */
+    private boolean executeDoorRegion(CommandSender sender, String[] args, boolean isRedefine) {
+        if (!sender.hasPermission("knk.gate.admin")) {
+            sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
+            return true;
+        }
+
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage(ChatColor.RED + "Only players can " + (isRedefine ? "redefine" : "capture") + " a gate door region.");
+            return true;
+        }
+
+        String usage = "Usage: /knk gate door " + (isRedefine ? "redefine" : "capture")
+            + " <door name|id> | <structure> <door> [closed|opened]";
+
+        if (args.length == 0) {
+            sender.sendMessage(ChatColor.YELLOW + usage);
+            return true;
+        }
+
+        boolean isOpenedRegion = false;
+        String[] doorArgs = args;
+        String last = args[args.length - 1].toLowerCase();
+        if (last.equals("closed") || last.equals("opened")) {
+            isOpenedRegion = last.equals("opened");
+            doorArgs = Arrays.copyOf(args, args.length - 1);
+        }
+
+        if (doorArgs.length == 0) {
+            sender.sendMessage(ChatColor.YELLOW + usage);
+            return true;
+        }
+
+        CachedGateDoor gate = resolveDoor(doorArgs);
+        if (gate == null) {
+            sender.sendMessage(ChatColor.RED + "Gate door '" + String.join(" ", doorArgs) + "' not found.");
+            return true;
+        }
+
+        if (gateDoorRegionCaptureHandler == null) {
+            sender.sendMessage(ChatColor.RED + "Region capture is not available.");
+            return true;
+        }
+
+        if (isRedefine) {
+            gateDoorRegionCaptureHandler.startRedefine(player, gate, isOpenedRegion);
+        } else {
+            gateDoorRegionCaptureHandler.startCapture(player, gate, isOpenedRegion);
+        }
+        return true;
     }
 
     /**

@@ -169,4 +169,31 @@ public class GateDoorsApiImpl extends BaseApiImpl implements GateDoorsApi {
             }
         }, executor);
     }
+
+    @Override
+    public CompletableFuture<Void> updateRegionData(int id, boolean isOpenedRegion, String regionData) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + GATE_DOORS_ENDPOINT + "/" + id + "/region";
+
+            try {
+                Map<String, Object> payload = new HashMap<>();
+                payload.put("isOpenedRegion", isOpenedRegion);
+                payload.put("regionData", regionData);
+                String json = objectMapper.writeValueAsString(payload);
+                Request request = newRequest(url)
+                    .addHeader("Content-Type", "application/json")
+                    .put(RequestBody.create(json, MediaType.get("application/json")))
+                    .build();
+                execute(request, url);
+                return null;
+            } catch (ApiException e) {
+                throw e;
+            } catch (IOException e) {
+                ApiException apiEx = new ApiException(url, 0, "IO error updating gate door region data",
+                    e.getClass().getSimpleName() + ": " + e.getMessage());
+                apiEx.initCause(e);
+                throw apiEx;
+            }
+        }, executor);
+    }
 }

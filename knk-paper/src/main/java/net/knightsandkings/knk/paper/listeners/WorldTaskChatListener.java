@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.listeners;
 
+import net.knightsandkings.knk.paper.tasks.GateDoorRegionCaptureHandler;
 import net.knightsandkings.knk.paper.tasks.WorldTaskHandlerRegistry;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -15,13 +16,20 @@ import java.util.logging.Logger;
  */
 public class WorldTaskChatListener implements Listener {
     private static final Logger LOGGER = Logger.getLogger(WorldTaskChatListener.class.getName());
-    
+
     private final Plugin plugin;
     private final WorldTaskHandlerRegistry handlerRegistry;
+    // Not part of WorldTaskHandlerRegistry - item 6.3/6.4's region capture/redefine is a direct
+    // admin command, not a FormConfig-driven WorldTask (see GateDoorRegionCaptureHandler's
+    // class Javadoc) - so it's routed here directly, matching the existing per-handler-type
+    // dispatch style already used for WgRegionId/Location below rather than through the registry.
+    private final GateDoorRegionCaptureHandler gateDoorRegionCaptureHandler;
 
-    public WorldTaskChatListener(Plugin plugin, WorldTaskHandlerRegistry handlerRegistry) {
+    public WorldTaskChatListener(Plugin plugin, WorldTaskHandlerRegistry handlerRegistry,
+                                  GateDoorRegionCaptureHandler gateDoorRegionCaptureHandler) {
         this.plugin = plugin;
         this.handlerRegistry = handlerRegistry;
+        this.gateDoorRegionCaptureHandler = gateDoorRegionCaptureHandler;
     }
 
     /**
@@ -46,6 +54,10 @@ public class WorldTaskChatListener implements Listener {
         if (locationHandler != null && locationHandler.onPlayerChat(player, message)) {
             event.setCancelled(true);
             return;
+        }
+
+        if (gateDoorRegionCaptureHandler != null && gateDoorRegionCaptureHandler.onPlayerChat(player, message)) {
+            event.setCancelled(true);
         }
     }
 }
