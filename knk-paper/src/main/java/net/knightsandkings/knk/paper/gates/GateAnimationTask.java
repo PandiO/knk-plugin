@@ -58,6 +58,10 @@ public class GateAnimationTask extends BukkitRunnable {
     private final GateManager gateManager;
     private final World world;
     private final Material fallbackMaterial;
+    // Currently unused (item 6.2 removed this class's only calls - see finishOpening/
+    // finishClosing) but kept wired rather than removed, since WorldGuardIntegration itself still
+    // exists as a general-purpose collaborator; not deleted from the constructor to avoid churn
+    // on a dependency this class may reasonably want again.
     private final WorldGuardIntegration worldGuardIntegration;
     private final GateDoorsApi gateDoorsApi;
     private final Plugin plugin;
@@ -440,8 +444,7 @@ public class GateAnimationTask extends BukkitRunnable {
 
     /**
      * Finish opening animation for a gate.
-     * Syncs WorldGuard regions based on new state.
-     * 
+     *
      * @param gate The gate that finished opening
      */
     private void finishOpening(CachedGateDoor gate) {
@@ -465,10 +468,14 @@ public class GateAnimationTask extends BukkitRunnable {
         LOGGER.info("Gate " + gate.getName() + " finished opening");
         gateManager.notifyAnimationCompleted(gate.getId(), AnimationState.OPEN);
 
-        // Sync WorldGuard regions
-        if (worldGuardIntegration != null) {
-            worldGuardIntegration.syncRegions(gate, AnimationState.OPEN, world);
-        }
+        // No WorldGuard region sync here (item 6.2): GateDoor.ClosedRegionData/OpenedRegionData
+        // used to be WorldGuard region names (RegionClosedId/RegionOpenedId) that this method
+        // toggled via worldGuardIntegration.syncRegions on every open/close; they now hold
+        // captured region vertex JSON instead, so that call was removed - passing JSON to
+        // RegionManager.getRegion would just silently no-op. worldGuardIntegration itself (and the
+        // WorldGuard integration used elsewhere by Town/District/GateStructure) is untouched by
+        // this change - only this class's own use of it went away. See
+        // WORLDGUARD_REGION_FEASIBILITY.md §9 for the decision.
 
         if (displayManager != null) {
             displayManager.syncDisplay(gate);
@@ -479,8 +486,7 @@ public class GateAnimationTask extends BukkitRunnable {
 
     /**
      * Finish closing animation for a gate.
-     * Syncs WorldGuard regions based on new state.
-     * 
+     *
      * @param gate The gate that finished closing
      */
     private void finishClosing(CachedGateDoor gate) {
@@ -496,10 +502,7 @@ public class GateAnimationTask extends BukkitRunnable {
         LOGGER.info("Gate " + gate.getName() + " finished closing");
         gateManager.notifyAnimationCompleted(gate.getId(), AnimationState.CLOSED);
 
-        // Sync WorldGuard regions
-        if (worldGuardIntegration != null) {
-            worldGuardIntegration.syncRegions(gate, AnimationState.CLOSED, world);
-        }
+        // No WorldGuard region sync here - see the matching comment in finishOpening above.
 
         if (displayManager != null) {
             displayManager.syncDisplay(gate);

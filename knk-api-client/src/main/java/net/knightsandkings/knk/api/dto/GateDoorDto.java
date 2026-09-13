@@ -147,12 +147,12 @@ public class GateDoorDto {
     @JsonDeserialize(using = GateStructureDto.CoordinateStringDeserializer.class)
     private String rightDoorSeedBlock;
 
-    // === WorldGuard-named-but-repurposed (currently unused; see item 6) ===
-    @JsonProperty("regionClosedId")
-    private String regionClosedId;
+    // === Region-based geometry (GeometryDefinitionMode.REGION; item 6) ===
+    @JsonProperty("closedRegionData")
+    private String closedRegionData;
 
-    @JsonProperty("regionOpenedId")
-    private String regionOpenedId;
+    @JsonProperty("openedRegionData")
+    private String openedRegionData;
 
     // === Pass-Through System (cascade-overridable) ===
     @JsonProperty("allowPassThrough")
@@ -517,20 +517,20 @@ public class GateDoorDto {
         this.mirrorRotation = mirrorRotation;
     }
 
-    public String getRegionClosedId() {
-        return regionClosedId;
+    public String getClosedRegionData() {
+        return closedRegionData;
     }
 
-    public void setRegionClosedId(String regionClosedId) {
-        this.regionClosedId = regionClosedId;
+    public void setClosedRegionData(String closedRegionData) {
+        this.closedRegionData = closedRegionData;
     }
 
-    public String getRegionOpenedId() {
-        return regionOpenedId;
+    public String getOpenedRegionData() {
+        return openedRegionData;
     }
 
-    public void setRegionOpenedId(String regionOpenedId) {
-        this.regionOpenedId = regionOpenedId;
+    public void setOpenedRegionData(String openedRegionData) {
+        this.openedRegionData = openedRegionData;
     }
 
     public Boolean getAllowPassThrough() {

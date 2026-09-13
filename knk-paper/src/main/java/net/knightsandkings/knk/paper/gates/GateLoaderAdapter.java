@@ -233,8 +233,8 @@ public class GateLoaderAdapter {
 
         door.setStructure(structure);
 
-        door.setRegionClosedId(dto.getRegionClosedId());
-        door.setRegionOpenedId(dto.getRegionOpenedId());
+        door.setClosedRegionData(dto.getClosedRegionData());
+        door.setOpenedRegionData(dto.getOpenedRegionData());
         door.setWorldName(CoordinateParser.parseWorldName(dto.getAnchorPoint()));
         door.setCanRespawn(dto.getCanRespawn() != null ? dto.getCanRespawn() : true);
         door.setRespawnRateSeconds(dto.getRespawnRateSeconds() != null ? dto.getRespawnRateSeconds() : 300);

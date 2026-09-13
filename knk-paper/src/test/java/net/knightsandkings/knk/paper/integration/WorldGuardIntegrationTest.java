@@ -1,8 +1,5 @@
 package net.knightsandkings.knk.paper.integration;
 
-import net.knightsandkings.knk.core.domain.gates.AnimationState;
-import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
-import org.bukkit.util.Vector;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
@@ -12,9 +9,12 @@ import org.mockito.MockitoAnnotations;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Unit tests for WorldGuardIntegration.
- * Tests region synchronization with gate state changes.
- * 
+ * Unit tests for WorldGuardIntegration's {@link WorldGuardIntegration#regionExists} lookup helper.
+ * The gate-door region sync this class used to also provide ({@code syncRegions}) was removed in
+ * item 6.2 - see the class-level Javadoc on {@link WorldGuardIntegration} - so tests for that
+ * behavior were removed along with it, rather than updated to cover a method that no longer
+ * exists.
+ *
  * NOTE: These tests are disabled because WorldGuard is a compileOnly dependency
  * and is not available in the test classpath. The functionality will work at runtime.
  */
@@ -29,7 +29,7 @@ public class WorldGuardIntegrationTest {
     @BeforeEach
     public void setUp() throws Exception {
         MockitoAnnotations.openMocks(this);
-        
+
         // Create integration with mock plugin
         integration = new WorldGuardIntegration(mockPlugin);
     }
@@ -41,44 +41,6 @@ public class WorldGuardIntegrationTest {
     }
 
     @Test
-    public void testSyncRegionsWithEmptyRegionIds() {
-        // Create a test gate
-        CachedGateDoor gate = createTestGate();
-        gate.setRegionClosedId("");
-        gate.setRegionOpenedId("");
-
-        // Should not throw exception
-        assertDoesNotThrow(() -> {
-            integration.syncRegions(gate, AnimationState.OPEN, null);
-            integration.syncRegions(gate, AnimationState.CLOSED, null);
-        });
-    }
-
-    @Test
-    public void testSyncRegionsOpenState() {
-        CachedGateDoor gate = createTestGate();
-        gate.setRegionClosedId("gate_1_closed");
-        gate.setRegionOpenedId("gate_1_open");
-
-        // Should not throw exception
-        assertDoesNotThrow(() -> {
-            integration.syncRegions(gate, AnimationState.OPEN, null);
-        });
-    }
-
-    @Test
-    public void testSyncRegionsClosedState() {
-        CachedGateDoor gate = createTestGate();
-        gate.setRegionClosedId("gate_1_closed");
-        gate.setRegionOpenedId("gate_1_open");
-
-        // Should not throw exception
-        assertDoesNotThrow(() -> {
-            integration.syncRegions(gate, AnimationState.CLOSED, null);
-        });
-    }
-
-    @Test
     public void testRegionExistsReturnsTrueForNonEmptyId() {
         // Since we can't properly initialize WorldGuard in tests,
         // we just verify the method doesn't throw exceptions
@@ -86,32 +48,5 @@ public class WorldGuardIntegrationTest {
             boolean exists = integration.regionExists("some_region", null);
             assertFalse(exists);
         });
-    }
-
-    /**
-     * Create a test gate with minimal configuration.
-     */
-    private CachedGateDoor createTestGate() {
-        return new CachedGateDoor(
-            1,                              // id
-            1,                              // gateStructureId
-            "TestGate",                    // name
-            "SLIDING",                     // gateType
-            "VERTICAL",                    // motionType
-            "PLANE_GRID",                  // geometryDefinitionMode
-            60,                            // animationDurationTicks
-            1,                             // animationTickRate
-            new Vector(0, 0, 0),          // anchorPoint
-            5,                             // geometryWidth
-            5,                             // geometryHeight
-            3,                             // geometryDepth
-            100.0,                         // healthCurrent
-            100.0,                         // healthMax
-            true,                          // isActive
-            false,                         // isDestroyed
-            true,                          // isInvincible
-            90,                            // rotationMaxAngleDegrees
-            "north"                        // faceDirection
-        );
     }
 }

@@ -102,9 +102,9 @@ public class CachedGateDoor {
     // === Rotation (for DRAWBRIDGE/DOUBLE_DOORS) ===
     private final int rotationMaxAngleDegrees;
 
-    // === WorldGuard-named-but-repurposed (currently unused; see item 6) ===
-    private String regionClosedId;
-    private String regionOpenedId;
+    // === Region-based geometry (GeometryDefinitionMode.REGION; item 6) ===
+    private String closedRegionData;
+    private String openedRegionData;
 
     // === Respawn System ===
     private boolean canRespawn;
@@ -166,8 +166,8 @@ public class CachedGateDoor {
         this.currentState = AnimationState.CLOSED;
         this.currentFrame = 0;
         this.animationStartTime = 0;
-        this.regionClosedId = "";
-        this.regionOpenedId = "";
+        this.closedRegionData = "";
+        this.openedRegionData = "";
         this.canRespawn = true;
         this.respawnRateSeconds = 300;
         this.respawnScheduledTime = 0;
@@ -416,12 +416,12 @@ public class CachedGateDoor {
         return rotationMaxAngleDegrees;
     }
 
-    public String getRegionClosedId() {
-        return regionClosedId;
+    public String getClosedRegionData() {
+        return closedRegionData;
     }
 
-    public String getRegionOpenedId() {
-        return regionOpenedId;
+    public String getOpenedRegionData() {
+        return openedRegionData;
     }
 
     public boolean isCanRespawn() {
@@ -518,12 +518,12 @@ public class CachedGateDoor {
         this.isJammed = isJammed;
     }
 
-    public void setRegionClosedId(String regionClosedId) {
-        this.regionClosedId = regionClosedId != null ? regionClosedId : "";
+    public void setClosedRegionData(String closedRegionData) {
+        this.closedRegionData = closedRegionData != null ? closedRegionData : "";
     }
 
-    public void setRegionOpenedId(String regionOpenedId) {
-        this.regionOpenedId = regionOpenedId != null ? regionOpenedId : "";
+    public void setOpenedRegionData(String openedRegionData) {
+        this.openedRegionData = openedRegionData != null ? openedRegionData : "";
     }
 
     public void setCanRespawn(boolean canRespawn) {
