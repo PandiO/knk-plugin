@@ -357,23 +357,24 @@ public class GateLoaderAdapter {
      * treat a null/empty footprint as "fail open", matching how those same methods already treat
      * a missing PLANE_GRID basis.
      *
-     * <p><strong>Known limitation, found during implementation, not resolved here</strong>: a
-     * {@code POLYGON2D} capture ({@link GateRegionDataFormat}'s §9.1 shape) is fundamentally a
-     * WorldEdit X/Z-plane outline extruded through a Y range - it cannot precisely represent a
-     * shape whose real variation is in Y (e.g., a vertically-standing closed door, where the
-     * door's own v-axis is world-vertical). Every captured vertex collapses to the region's own
-     * {@code minY}, so if the door's {@code vStep} is (close to) vertical, the projected
-     * footprint degenerates toward a line rather than a real 2D outline - the same limitation
-     * WorldEdit's own {@code //sel poly} has (it cannot trace a vertical or diagonal-plane
-     * shape either). {@code CUBOID} capture has an analogous gap: its extracted "bottom face" is
-     * always world-axis-aligned, so it can't precisely bound a diagonally-oriented rectangular
-     * door (e.g., entity 14's diagonal hinge) in a plane other than horizontal. REGION mode's
-     * polygon/cuboid capture is solid for gates whose footprint is genuinely horizontal-ish (a
-     * rotating deck, viewed from above) - which covers the documented primary motivating case -
-     * but not yet for an arbitrarily-oriented 3D shape in general; that would need WorldEdit's
-     * {@code ConvexPolyhedralRegion} (see {@code WgRegionIdTaskHandler.isPolyhedralInsideRegionReflective}
-     * for existing precedent reading that type) or a different capture strategy, out of scope for
-     * what was asked/designed here.
+     * <p><strong>Orientation limitation, found during 6.6, resolved via {@code CONVEX_POLYHEDRON}
+     * support</strong>: a {@code POLYGON2D} capture ({@link GateRegionDataFormat}'s §9.1 shape) is
+     * fundamentally a WorldEdit X/Z-plane outline extruded through a Y range - it cannot precisely
+     * represent a shape whose real variation is in Y (e.g., a vertically-standing closed door,
+     * where the door's own v-axis is world-vertical); every captured vertex collapses to the
+     * region's own {@code minY}. {@code CUBOID} capture has an analogous gap: its extracted
+     * "bottom face" is always world-axis-aligned, so it can't precisely bound a diagonally-oriented
+     * rectangular door (e.g., entity 14's diagonal hinge) in a plane other than horizontal. Both
+     * remain limited to a genuinely horizontal-ish/axis-aligned footprint - that's an inherent
+     * property of those two WorldEdit selection types themselves (the same limitation {@code
+     * //sel poly}/{@code //sel cuboid} have), not something fixable here. For anything else
+     * (vertical, diagonal, or both), capture with {@code //sel convex} instead: {@code
+     * CONVEX_POLYHEDRON} vertices each carry a real, independent {@code (x, y, z)} - nothing
+     * collapses - so once projected into u/v space they correctly span whatever orientation the
+     * door actually has. The one extra step that type needs: WorldEdit exposes its vertices as an
+     * unordered {@code Set}, so after projection they're re-ordered via {@link
+     * GateFrameCalculator#convexHull2D} (safe specifically because a convex 3D shape's projection
+     * onto any plane is itself convex) before being handed to {@code pointInPolygon}.
      */
     private void precomputeFootprintPolygons(CachedGateDoor gate, GateDoorDto dto) {
         if (!"REGION".equals(dto.getGeometryDefinitionMode())) {
@@ -403,6 +404,15 @@ public class GateLoaderAdapter {
                 double[] indices = GateFrameCalculator.projectOntoBasis(local, uStep, vStep, nStep);
                 footprintUV.add(new double[]{indices[0], indices[1]});
             }
+
+            // CONVEX_POLYHEDRON's vertices come from WorldEdit as an unordered Set - re-derive a
+            // valid boundary trace via 2D convex hull now that they're projected. Never applied to
+            // POLYGON2D/CUBOID, whose vertices are already in a valid (possibly concave, for
+            // POLYGON2D) order - hulling those would silently "fill in" a real concave notch.
+            if (GateRegionDataFormat.isConvexPolyhedron(regionDataJson)) {
+                footprintUV = GateFrameCalculator.convexHull2D(footprintUV);
+            }
+
             return footprintUV;
         } catch (Exception e) {
             LOGGER.warning("Gate " + gate.getName() + " has invalid stored region data, footprint clipping disabled: " + e.getMessage());

@@ -655,6 +655,53 @@ class GateLoaderAdapterTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Disabled("WorldEdit is compileOnly dependency, not available in test classpath - "
+        + "this path invokes GateRegionDataFormat, whose methods reference WorldEdit types, same "
+        + "constraint as WorldGuardIntegrationTest/GateDoorRegionCaptureHandlerTest")
+    void loadAndCacheStructure_ConvexPolyhedronRegionDoor_ProjectsVerticalShapeWithoutDegenerating() {
+        // The case POLYGON2D can't handle: a vertically-standing door (vAxis = world Y), whose
+        // captured shape needs real per-vertex Y to avoid collapsing to a line - see the design
+        // note on GateLoaderAdapter.precomputeFootprintPolygons. Vertices given out of order,
+        // mimicking WorldEdit's own unordered Set<BlockVector3> - proves the convex-hull
+        // re-ordering step (GateFrameCalculator.convexHull2D) runs and produces a correct result,
+        // not just that projection alone would (which the shuffled order would fail without it).
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+
+        GateDoorDto door = doorOf(62, 62, "Vertical Convex Door");
+        door.setGateType("SLIDING");
+        door.setMotionType("LATERAL");
+        door.setGeometryDefinitionMode("REGION");
+        door.setAnimationDurationTicks(60);
+        door.setAnimationTickRate(1);
+        door.setGeometryDepth(1);
+        door.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
+        door.setReferencePoint1("{\"x\":1,\"y\":0,\"z\":0}");
+        door.setReferencePoint2("{\"x\":0,\"y\":1,\"z\":0}");
+        door.setClosedRegionData(
+            "{\"type\":\"CONVEX_POLYHEDRON\",\"worldName\":\"world\",\"points\":"
+                + "[{\"x\":4,\"y\":3,\"z\":0},{\"x\":0,\"y\":0,\"z\":0},"
+                + "{\"x\":4,\"y\":0,\"z\":0},{\"x\":0,\"y\":3,\"z\":0}]}");
+
+        adapter.loadAndCacheStructure(structureOf(62, "Vertical Convex Gate", door));
+
+        CachedGateDoor gate = gateManager.getGate(62);
+        assertNotNull(gate);
+
+        List<double[]> closedFootprint = gate.getClosedFootprintUV();
+        assertNotNull(closedFootprint);
+        assertEquals(4, closedFootprint.size());
+        // A real 4x3 rectangle in u/v space - v (height) carries genuine variation (0..3), which
+        // a POLYGON2D capture of this same vertical shape could never have produced. Checked via
+        // the actual production entry point (isWithinGeometryBounds), not the package-private
+        // pointInPolygon directly (net.knightsandkings.knk.core.gates, a different package here).
+        assertTrue(net.knightsandkings.knk.core.gates.GateFrameCalculator.isWithinGeometryBounds(
+            gate, gate.getAnchorPoint().clone().add(new Vector(2, 1.5, 0))), "center of the standing door");
+        assertFalse(net.knightsandkings.knk.core.gates.GateFrameCalculator.isWithinGeometryBounds(
+            gate, gate.getAnchorPoint().clone().add(new Vector(2, 5, 0))), "above the door's real height");
+    }
+
+    @Test
     void loadAndCacheStructure_PlaneGridDoor_LeavesFootprintUVNull() {
         // Non-REGION gates must not run the footprint precompute at all - confirms it's correctly
         // gated on GeometryDefinitionMode, not run unconditionally for every door.

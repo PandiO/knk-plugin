@@ -55,8 +55,12 @@ public class GateDoorRegionCaptureHandler {
     }
 
     /**
-     * Item 6.3: begin a fresh capture. The player draws a new selection with {@code //sel poly}
-     * or {@code //sel cuboid} and types 'save' when done, or 'cancel' to abort.
+     * Item 6.3: begin a fresh capture. The player draws a new selection with {@code //sel poly},
+     * {@code //sel cuboid}, or {@code //sel convex} and types 'save' when done, or 'cancel' to
+     * abort. Prefer {@code //sel convex} for anything that isn't a genuinely horizontal/
+     * axis-aligned footprint (a vertically-standing or diagonally-oriented door) - see the design
+     * note on {@code GateLoaderAdapter.precomputeFootprintPolygons} for why the other two shapes
+     * can't precisely represent those orientations.
      */
     public void startCapture(Player player, CachedGateDoor door, boolean isOpenedRegion) {
         activeCaptures.put(player, new CaptureContext(door.getId(), door.getName(), isOpenedRegion));
@@ -66,7 +70,8 @@ public class GateDoorRegionCaptureHandler {
 
         String slot = isOpenedRegion ? "opened" : "closed";
         player.sendMessage(ChatColor.GOLD + "[Gate Region] Capturing the " + slot + " region for door '" + door.getName() + "'.");
-        player.sendMessage(ChatColor.YELLOW + "Draw a selection with '//sel poly' or '//sel cuboid', then type 'save'.");
+        player.sendMessage(ChatColor.YELLOW + "Draw a selection with '//sel poly', '//sel cuboid', or '//sel convex', then type 'save'.");
+        player.sendMessage(ChatColor.GRAY + "Not a flat/axis-aligned shape (e.g. a vertical or diagonal door)? Use '//sel convex'.");
         player.sendMessage(ChatColor.GRAY + "Or type 'cancel' to abort.");
     }
 

@@ -212,6 +212,73 @@ public class GateFrameCalculator {
         return dotProduct <= squaredLength + BOUNDS_EPSILON;
     }
 
+    /**
+     * 2D convex hull (Andrew's monotone chain), returned counterclockwise. Needed specifically
+     * for a captured {@code CONVEX_POLYHEDRON} footprint (WORLDGUARD_REGION_FEASIBILITY.md §9's
+     * follow-up on non-horizontal shapes): WorldEdit stores that region's vertices as an
+     * unordered {@code Set}, but {@link #pointInPolygon}'s ray-casting requires points traced
+     * around the boundary in order. A convex 3D shape's projection onto any 2D plane is itself
+     * convex, so re-deriving the hull after projecting into u/v space recovers a valid boundary
+     * trace regardless of what order the vertices arrived in.
+     *
+     * <p>Callers must only apply this to a footprint that's known to originate from a genuinely
+     * convex source (see {@code GateRegionDataFormat#isConvexPolyhedron}) - running it on a
+     * {@code POLYGON2D} capture would silently "fill in" any legitimately concave notch (e.g. an
+     * L-shaped outline) into its convex bounding shape instead.
+     *
+     * <p>Public (not just package-private) so {@code GateLoaderAdapter} (a different module,
+     * {@code knk-paper}) can call it - the same reason {@link #projectOntoBasis} is public.
+     *
+     * @return the hull's vertices in order; a degenerate input (fewer than 3 distinct points, or
+     *         all collinear) returns as many of the (deduplicated, sorted) input points as remain
+     */
+    public static List<double[]> convexHull2D(List<double[]> pointsUV) {
+        if (pointsUV == null || pointsUV.size() < 2) {
+            return pointsUV == null ? List.of() : new ArrayList<>(pointsUV);
+        }
+
+        List<double[]> sorted = new ArrayList<>(pointsUV);
+        sorted.sort((a, b) -> a[0] != b[0] ? Double.compare(a[0], b[0]) : Double.compare(a[1], b[1]));
+
+        // Deduplicate consecutive equal points (harmless for the hull, avoids degenerate
+        // zero-length segments confusing the cross-product turn test below).
+        List<double[]> unique = new ArrayList<>();
+        for (double[] p : sorted) {
+            if (unique.isEmpty() || p[0] != unique.get(unique.size() - 1)[0] || p[1] != unique.get(unique.size() - 1)[1]) {
+                unique.add(p);
+            }
+        }
+        if (unique.size() < 3) {
+            return unique;
+        }
+
+        List<double[]> lower = new ArrayList<>();
+        for (double[] p : unique) {
+            while (lower.size() >= 2 && cross(lower.get(lower.size() - 2), lower.get(lower.size() - 1), p) <= 0) {
+                lower.remove(lower.size() - 1);
+            }
+            lower.add(p);
+        }
+
+        List<double[]> upper = new ArrayList<>();
+        for (int i = unique.size() - 1; i >= 0; i--) {
+            double[] p = unique.get(i);
+            while (upper.size() >= 2 && cross(upper.get(upper.size() - 2), upper.get(upper.size() - 1), p) <= 0) {
+                upper.remove(upper.size() - 1);
+            }
+            upper.add(p);
+        }
+
+        lower.remove(lower.size() - 1);
+        upper.remove(upper.size() - 1);
+        lower.addAll(upper);
+        return lower;
+    }
+
+    private static double cross(double[] o, double[] a, double[] b) {
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    }
+
     private static boolean isWithinVerticalOpening(CachedGateDoor gate, Vector anchor, Vector worldPosition) {
         if (anchor == null || gate.getGeometryHeight() <= 0) {
             return true;

@@ -66,6 +66,62 @@ class GateFrameCalculatorRegionModeTest {
         assertFalse(GateFrameCalculator.pointInPolygon(0, 0, null));
     }
 
+    // === convexHull2D (needed for CONVEX_POLYHEDRON captures, whose WorldEdit vertices arrive
+    // as an unordered Set - see GateLoaderAdapter.precomputeFootprintPolygons) ===
+
+    @Test
+    void convexHull2D_SquareGivenOutOfOrder_RecoversAllFourCornersInBoundaryOrder() {
+        // Deliberately shuffled input, mimicking a Set's undefined iteration order.
+        List<double[]> shuffled = List.of(
+            new double[]{4, 4}, new double[]{0, 0}, new double[]{4, 0}, new double[]{0, 4}
+        );
+
+        List<double[]> hull = GateFrameCalculator.convexHull2D(shuffled);
+
+        assertEquals(4, hull.size());
+        // A valid boundary trace: every consecutive pair (wrapping) must be an actual edge of the
+        // square (i.e. adjacent corners, not a diagonal) - confirmed by pointInPolygon still
+        // correctly containing/excluding points against the hull's own output.
+        assertTrue(GateFrameCalculator.pointInPolygon(2, 2, hull), "center of the square");
+        assertFalse(GateFrameCalculator.pointInPolygon(5, 5, hull), "outside the square");
+        assertTrue(GateFrameCalculator.pointInPolygon(0, 0, hull), "on a corner");
+    }
+
+    @Test
+    void convexHull2D_InteriorPointExcludedFromHull() {
+        List<double[]> withInteriorPoint = List.of(
+            new double[]{0, 0}, new double[]{4, 0}, new double[]{4, 4}, new double[]{0, 4},
+            new double[]{2, 2} // strictly inside - must not appear on the hull boundary
+        );
+
+        List<double[]> hull = GateFrameCalculator.convexHull2D(withInteriorPoint);
+
+        assertEquals(4, hull.size(), "the interior point must not become a hull vertex");
+    }
+
+    @Test
+    void convexHull2D_TriangleGivenOutOfOrder_ProducesCorrectContainment() {
+        List<double[]> shuffled = List.of(
+            new double[]{7, 0}, new double[]{0, 0}, new double[]{0, 7}
+        );
+
+        List<double[]> hull = GateFrameCalculator.convexHull2D(shuffled);
+
+        assertEquals(3, hull.size());
+        assertTrue(GateFrameCalculator.pointInPolygon(1, 1, hull), "inside the triangle");
+        assertFalse(GateFrameCalculator.pointInPolygon(5, 5, hull), "outside the triangle (past the hypotenuse)");
+    }
+
+    @Test
+    void convexHull2D_DegenerateInputs_DoNotThrow() {
+        assertEquals(List.of(), GateFrameCalculator.convexHull2D(null));
+        assertTrue(GateFrameCalculator.convexHull2D(List.of()).isEmpty());
+        assertEquals(1, GateFrameCalculator.convexHull2D(List.of(new double[]{1, 1})).size());
+        // Three collinear points: not a real polygon, but must not throw.
+        assertDoesNotThrow(() -> GateFrameCalculator.convexHull2D(
+            List.of(new double[]{0, 0}, new double[]{1, 1}, new double[]{2, 2})));
+    }
+
     // === isWithinGeometryBounds, REGION mode ===
 
     @Test
