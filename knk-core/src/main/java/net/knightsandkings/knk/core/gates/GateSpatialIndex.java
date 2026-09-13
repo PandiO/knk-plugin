@@ -2,22 +2,25 @@ package net.knightsandkings.knk.core.gates;
 
 import org.bukkit.util.Vector;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * O(1) lookup of which gate (if any) currently occupies a world block position.
  * Maps world name -> packed block coordinate -> gate id, covering only the animated
  * door blocks of each gate (CachedGateDoor.getBlocks()), not the surrounding static structure.
  *
- * Every mutator here must be called on the main server thread, in lockstep with whatever
- * code path actually places/removes the corresponding world block, so the index never drifts
- * from reality. Never call these from the async persistence callbacks (API state sync) -
- * those only touch database state, not block positions.
+ * Every mutator driven by an actual world-block change (animation frames, placement/removal)
+ * must be called on the main server thread, in lockstep with the block edit itself, so the
+ * index never drifts from reality. Never call those from the async persistence callbacks (API
+ * state sync) - those only touch database state, not block positions. The one exception is
+ * initial population from GateManager.cacheGate/GateLoaderAdapter, which runs off the main
+ * thread (one call per gate structure, fanned out over parallel API responses) before any
+ * physical block exists yet - backed by ConcurrentHashMap so those concurrent calls are safe.
  */
 public class GateSpatialIndex {
-    private final Map<String, Map<Long, Integer>> cellsByWorld = new HashMap<>();
+    private final Map<String, Map<Long, Integer>> cellsByWorld = new ConcurrentHashMap<>();
 
     public static long packCell(int x, int y, int z) {
         return (((long) x & 0x3FFFFFFL) << 38)
@@ -33,7 +36,7 @@ public class GateSpatialIndex {
         if (worldName == null || position == null) {
             return;
         }
-        cellsByWorld.computeIfAbsent(worldName, w -> new HashMap<>()).put(packCell(position), gateId);
+        cellsByWorld.computeIfAbsent(worldName, w -> new ConcurrentHashMap<>()).put(packCell(position), gateId);
     }
 
     public void remove(String worldName, Vector position) {

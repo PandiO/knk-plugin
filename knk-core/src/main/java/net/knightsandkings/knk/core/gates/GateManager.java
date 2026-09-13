@@ -38,8 +38,11 @@ public class GateManager {
     private Supplier<CompletableFuture<Void>> reloadAction;
 
     public GateManager() {
-        this.gateCache = new HashMap<>();
-        this.structureCache = new HashMap<>();
+        // ConcurrentHashMap: GateLoaderAdapter populates these from N parallel async HTTP
+        // completion callbacks (one per gate structure, via CompletableFuture.allOf), so
+        // concurrent cacheGate/cacheStructure calls from different threads are expected.
+        this.gateCache = new ConcurrentHashMap<>();
+        this.structureCache = new ConcurrentHashMap<>();
         this.animationCompletionCallbacks = new ConcurrentHashMap<>();
         this.spatialIndex = new GateSpatialIndex();
     }
