@@ -7,9 +7,11 @@ import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.domain.gates.CachedGateStructure;
 import net.knightsandkings.knk.core.gates.GateBlockPairing;
+import net.knightsandkings.knk.core.gates.GateFrameCalculator;
 import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.core.util.CoordinateParser;
 import net.knightsandkings.knk.core.util.VectorMath;
+import net.knightsandkings.knk.paper.tasks.GateRegionDataFormat;
 import org.bukkit.util.Vector;
 
 import java.util.Comparator;
@@ -258,6 +260,11 @@ public class GateLoaderAdapter {
         // Precompute local basis vectors
         precomputeBasisVectors(door, dto);
 
+        // REGION mode (item 6.6): project the captured world-space footprint(s) into the u/v
+        // index space precomputeBasisVectors just established. Must run after it - the basis
+        // (anchor/uStep/vStep/nStep) is exactly what the projection needs.
+        precomputeFootprintPolygons(door, dto);
+
         // Precompute motion vector
         precomputeMotionVector(door, dto);
 
@@ -337,6 +344,69 @@ public class GateLoaderAdapter {
             gate.setNStep(new Vector(0, 0, 1));
             gate.setSublatticeIndex(1);
             LOGGER.warning("Gate " + gate.getName() + " missing reference points, using default axes");
+        }
+    }
+
+    /**
+     * REGION mode (item 6.6): projects the door's captured world-space footprint(s) into u/v
+     * index space, once at load time rather than per-frame. Must run after {@link
+     * #precomputeBasisVectors} - it needs the anchor/uStep/vStep/nStep that method just set.
+     * No-op for PLANE_GRID/FLOOD_FILL gates, and leaves the corresponding footprint null (not an
+     * empty list) when a REGION door's region hasn't been captured yet or fails to parse -
+     * {@code GateFrameCalculator.isWithinGeometryBounds}/{@code rasterizeRotationFrame} both
+     * treat a null/empty footprint as "fail open", matching how those same methods already treat
+     * a missing PLANE_GRID basis.
+     *
+     * <p><strong>Known limitation, found during implementation, not resolved here</strong>: a
+     * {@code POLYGON2D} capture ({@link GateRegionDataFormat}'s §9.1 shape) is fundamentally a
+     * WorldEdit X/Z-plane outline extruded through a Y range - it cannot precisely represent a
+     * shape whose real variation is in Y (e.g., a vertically-standing closed door, where the
+     * door's own v-axis is world-vertical). Every captured vertex collapses to the region's own
+     * {@code minY}, so if the door's {@code vStep} is (close to) vertical, the projected
+     * footprint degenerates toward a line rather than a real 2D outline - the same limitation
+     * WorldEdit's own {@code //sel poly} has (it cannot trace a vertical or diagonal-plane
+     * shape either). {@code CUBOID} capture has an analogous gap: its extracted "bottom face" is
+     * always world-axis-aligned, so it can't precisely bound a diagonally-oriented rectangular
+     * door (e.g., entity 14's diagonal hinge) in a plane other than horizontal. REGION mode's
+     * polygon/cuboid capture is solid for gates whose footprint is genuinely horizontal-ish (a
+     * rotating deck, viewed from above) - which covers the documented primary motivating case -
+     * but not yet for an arbitrarily-oriented 3D shape in general; that would need WorldEdit's
+     * {@code ConvexPolyhedralRegion} (see {@code WgRegionIdTaskHandler.isPolyhedralInsideRegionReflective}
+     * for existing precedent reading that type) or a different capture strategy, out of scope for
+     * what was asked/designed here.
+     */
+    private void precomputeFootprintPolygons(CachedGateDoor gate, GateDoorDto dto) {
+        if (!"REGION".equals(dto.getGeometryDefinitionMode())) {
+            return;
+        }
+
+        gate.setClosedFootprintUV(projectFootprintToUV(gate, dto.getClosedRegionData()));
+        gate.setOpenFootprintUV(projectFootprintToUV(gate, dto.getOpenedRegionData()));
+    }
+
+    private List<double[]> projectFootprintToUV(CachedGateDoor gate, String regionDataJson) {
+        Vector anchor = gate.getAnchorPoint();
+        Vector uStep = gate.getUStep();
+        Vector vStep = gate.getVStep();
+        Vector nStep = gate.getNStep();
+
+        if (regionDataJson == null || regionDataJson.isBlank() || anchor == null
+            || uStep == null || vStep == null || nStep == null) {
+            return null;
+        }
+
+        try {
+            List<double[]> worldVertices = GateRegionDataFormat.extractFootprintVerticesXYZ(regionDataJson);
+            List<double[]> footprintUV = new ArrayList<>(worldVertices.size());
+            for (double[] vertex : worldVertices) {
+                Vector local = new Vector(vertex[0], vertex[1], vertex[2]).subtract(anchor);
+                double[] indices = GateFrameCalculator.projectOntoBasis(local, uStep, vStep, nStep);
+                footprintUV.add(new double[]{indices[0], indices[1]});
+            }
+            return footprintUV;
+        } catch (Exception e) {
+            LOGGER.warning("Gate " + gate.getName() + " has invalid stored region data, footprint clipping disabled: " + e.getMessage());
+            return null;
         }
     }
 

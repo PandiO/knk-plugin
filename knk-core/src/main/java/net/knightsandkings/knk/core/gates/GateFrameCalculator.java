@@ -110,6 +110,15 @@ public class GateFrameCalculator {
         Vector local = worldPosition.clone().subtract(anchor);
         double[] indices = projectOntoBasis(local, uStep, vStep, nStep);
 
+        if ("REGION".equals(gate.getGeometryDefinitionMode())) {
+            List<double[]> footprint = gate.getClosedFootprintUV();
+            // No captured footprint yet (not scanned, or a parse failure at load) - fail open,
+            // matching the box case's own "missing basis" fail-open two lines above, rather than
+            // clipping every block away.
+            return footprint == null || footprint.isEmpty()
+                || (withinAxis(indices[2], gate.getGeometryDepth()) && pointInPolygon(indices[0], indices[1], footprint));
+        }
+
         return withinAxis(indices[0], gate.getGeometryWidth())
             && withinAxis(indices[1], gate.getGeometryHeight())
             && withinAxis(indices[2], gate.getGeometryDepth());
@@ -124,9 +133,14 @@ public class GateFrameCalculator {
      * the gate's own, unrotated box) and {@link #rasterizeRotationFrame} (material lookup against
      * the same box, after inverse-rotating a rasterized candidate back into it).
      *
+     * <p>Public (not just package-private) so {@code GateLoaderAdapter} (a different module,
+     * {@code knk-paper}) can reuse it to project a REGION-mode door's captured world-space
+     * footprint vertices into the same u/v index space at load time - see
+     * WORLDGUARD_REGION_FEASIBILITY.md §9.3.
+     *
      * @return {u, v, n} continuous (unrounded) indices
      */
-    private static double[] projectOntoBasis(Vector local, Vector uStep, Vector vStep, Vector nStep) {
+    public static double[] projectOntoBasis(Vector local, Vector uStep, Vector vStep, Vector nStep) {
         double uIndex = uStep.lengthSquared() > 0 ? local.dot(uStep) / uStep.lengthSquared() : 0;
         double vIndex = vStep.lengthSquared() > 0 ? local.dot(vStep) / vStep.lengthSquared() : 0;
         double nIndex = nStep.lengthSquared() > 0 ? local.dot(nStep) / nStep.lengthSquared() : 0;
@@ -138,6 +152,64 @@ public class GateFrameCalculator {
             return true;
         }
         return projection >= -BOUNDS_EPSILON && projection <= extent - 1 + BOUNDS_EPSILON;
+    }
+
+    /**
+     * REGION mode's containment predicate (WORLDGUARD_REGION_FEASIBILITY.md §9.3): the polygon
+     * analogue of {@link #withinAxis}'s rectangle box test, used by {@link
+     * #isWithinGeometryBounds} and {@link #rasterizeRotationFrame} in place of the width/height
+     * bounds check. Standard even-odd ray-casting in u/v index space - a boundary edge counts as
+     * inside (via {@link #BOUNDS_EPSILON}) so a point that lands exactly on a captured region's
+     * edge (common for the closed/starting frame, since that's exactly what got scanned) isn't
+     * spuriously excluded by floating-point noise.
+     *
+     * <p>No Bukkit dependency, pure function of already-projected u/v coordinates - directly
+     * unit-testable like every other method in this file.
+     *
+     * @param polygonUV the footprint's vertices in u/v index space, in order (not necessarily
+     *                  closed - the last point connects back to the first)
+     */
+    static boolean pointInPolygon(double u, double v, List<double[]> polygonUV) {
+        if (polygonUV == null || polygonUV.size() < 3) {
+            return false;
+        }
+
+        boolean inside = false;
+        int n = polygonUV.size();
+        for (int i = 0, j = n - 1; i < n; j = i++) {
+            double ui = polygonUV.get(i)[0];
+            double vi = polygonUV.get(i)[1];
+            double uj = polygonUV.get(j)[0];
+            double vj = polygonUV.get(j)[1];
+
+            // On-edge check first (inclusive boundary, within epsilon) - a plain ray-cast alone
+            // would leave this to floating-point luck.
+            if (isOnSegment(u, v, ui, vi, uj, vj)) {
+                return true;
+            }
+
+            boolean straddles = (vi > v) != (vj > v);
+            if (straddles) {
+                double uCrossing = ui + (v - vi) / (vj - vi) * (uj - ui);
+                if (u < uCrossing) {
+                    inside = !inside;
+                }
+            }
+        }
+        return inside;
+    }
+
+    private static boolean isOnSegment(double u, double v, double ui, double vi, double uj, double vj) {
+        double crossProduct = (v - vi) * (uj - ui) - (u - ui) * (vj - vi);
+        if (Math.abs(crossProduct) > BOUNDS_EPSILON * Math.max(1.0, Math.hypot(uj - ui, vj - vi))) {
+            return false;
+        }
+        double dotProduct = (u - ui) * (uj - ui) + (v - vi) * (vj - vi);
+        if (dotProduct < -BOUNDS_EPSILON) {
+            return false;
+        }
+        double squaredLength = (uj - ui) * (uj - ui) + (vj - vi) * (vj - vi);
+        return dotProduct <= squaredLength + BOUNDS_EPSILON;
     }
 
     private static boolean isWithinVerticalOpening(CachedGateDoor gate, Vector anchor, Vector worldPosition) {
@@ -275,12 +347,22 @@ public class GateFrameCalculator {
             return result;
         }
 
-        // 1. Rotate the 4 local corners (in u/v index space) by angleDegrees around the hinge.
-        int[][] cornerIndices = {{0, 0}, {width - 1, 0}, {0, height - 1}, {width - 1, height - 1}};
-        Vector[] rotatedCorners = new Vector[cornerIndices.length];
-        for (int c = 0; c < cornerIndices.length; c++) {
-            Vector localCorner = uStep.clone().multiply(cornerIndices[c][0])
-                .add(vStep.clone().multiply(cornerIndices[c][1]));
+        // 1. Rotate the footprint's local corners (in u/v index space) by angleDegrees around the
+        // hinge - the door's own captured polygon for REGION mode (§9.3), or the 4 rectangle
+        // corners for PLANE_GRID/FLOOD_FILL (unchanged from before REGION mode existed).
+        boolean isRegionMode = "REGION".equals(gate.getGeometryDefinitionMode());
+        List<double[]> footprintUV = isRegionMode ? gate.getClosedFootprintUV() : null;
+        if (isRegionMode && (footprintUV == null || footprintUV.isEmpty())) {
+            return result; // no captured footprint yet - nothing to rasterize
+        }
+
+        List<double[]> cornerIndices = isRegionMode ? footprintUV
+            : List.of(new double[]{0, 0}, new double[]{width - 1, 0}, new double[]{0, height - 1}, new double[]{width - 1, height - 1});
+        Vector[] rotatedCorners = new Vector[cornerIndices.size()];
+        for (int c = 0; c < cornerIndices.size(); c++) {
+            double[] corner = cornerIndices.get(c);
+            Vector localCorner = uStep.clone().multiply(corner[0])
+                .add(vStep.clone().multiply(corner[1]));
             rotatedCorners[c] = anchor.clone().add(VectorMath.rotateAroundAxis(localCorner, hingeAxis, angleDegrees));
         }
 
@@ -373,7 +455,10 @@ public class GateFrameCalculator {
                     Vector unrotated = VectorMath.rotateAroundAxis(local, hingeAxis, -angleDegrees);
                     double[] idx = projectOntoBasis(unrotated, uStep, vStep, nStep);
 
-                    if (!withinAxis(idx[0], width) || !withinAxis(idx[1], height) || Math.abs(idx[2]) > BOUNDS_EPSILON) {
+                    boolean withinFootprint = isRegionMode
+                        ? pointInPolygon(idx[0], idx[1], footprintUV)
+                        : withinAxis(idx[0], width) && withinAxis(idx[1], height);
+                    if (!withinFootprint || Math.abs(idx[2]) > BOUNDS_EPSILON) {
                         continue;
                     }
 

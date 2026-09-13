@@ -606,4 +606,77 @@ class GateLoaderAdapterTest {
         assertEquals(21, pairedForNear.getId());
         assertEquals(20, pairedForFar.getId());
     }
+
+    @Test
+    @org.junit.jupiter.api.Disabled("WorldEdit is compileOnly dependency, not available in test classpath - "
+        + "this path invokes GateRegionDataFormat, whose methods reference WorldEdit types, same "
+        + "constraint as WorldGuardIntegrationTest/GateDoorRegionCaptureHandlerTest")
+    void loadAndCacheStructure_RegionModeDoor_ProjectsCapturedFootprintIntoUVSpace() {
+        // Item 6.6 (WORLDGUARD_REGION_FEASIBILITY.md §9.3): a REGION-mode door's captured
+        // ClosedRegionData is projected into u/v index space once at load time. Uses a
+        // horizontal-plane basis (ref2 along Z, not the more common vertical Y) since a
+        // POLYGON2D capture is fundamentally an X/Z outline - see the design note on
+        // GateLoaderAdapter.precomputeFootprintPolygons for why a vertical vAxis degenerates.
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+
+        GateDoorDto door = doorOf(60, 60, "Region Door");
+        door.setGateType("SLIDING");
+        door.setMotionType("LATERAL");
+        door.setGeometryDefinitionMode("REGION");
+        door.setAnimationDurationTicks(60);
+        door.setAnimationTickRate(1);
+        door.setGeometryDepth(1);
+        door.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
+        door.setReferencePoint1("{\"x\":1,\"y\":0,\"z\":0}");
+        door.setReferencePoint2("{\"x\":0,\"y\":0,\"z\":1}");
+        door.setClosedRegionData(
+            "{\"type\":\"POLYGON2D\",\"worldName\":\"world\",\"points\":"
+                + "[{\"x\":0,\"z\":0},{\"x\":4,\"z\":0},{\"x\":4,\"z\":4},{\"x\":0,\"z\":4}],"
+                + "\"minY\":0,\"maxY\":1}");
+        // Deliberately left blank - proves the "no capture yet" path leaves it null rather than
+        // throwing or producing an empty-but-non-null list.
+        door.setOpenedRegionData("");
+
+        adapter.loadAndCacheStructure(structureOf(60, "Region Gate", door));
+
+        CachedGateDoor gate = gateManager.getGate(60);
+        assertNotNull(gate);
+
+        List<double[]> closedFootprint = gate.getClosedFootprintUV();
+        assertNotNull(closedFootprint);
+        assertEquals(4, closedFootprint.size());
+        assertArrayEquals(new double[]{0, 0}, closedFootprint.get(0), EPSILON);
+        assertArrayEquals(new double[]{4, 0}, closedFootprint.get(1), EPSILON);
+        assertArrayEquals(new double[]{4, 4}, closedFootprint.get(2), EPSILON);
+        assertArrayEquals(new double[]{0, 4}, closedFootprint.get(3), EPSILON);
+
+        assertNull(gate.getOpenFootprintUV());
+    }
+
+    @Test
+    void loadAndCacheStructure_PlaneGridDoor_LeavesFootprintUVNull() {
+        // Non-REGION gates must not run the footprint precompute at all - confirms it's correctly
+        // gated on GeometryDefinitionMode, not run unconditionally for every door.
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+
+        GateDoorDto door = doorOf(61, 61, "Plane Grid Door");
+        door.setGateType("SLIDING");
+        door.setMotionType("LATERAL");
+        door.setGeometryDefinitionMode("PLANE_GRID");
+        door.setAnimationDurationTicks(60);
+        door.setAnimationTickRate(1);
+        door.setGeometryDepth(1);
+        door.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
+        door.setReferencePoint1("{\"x\":1,\"y\":0,\"z\":0}");
+        door.setReferencePoint2("{\"x\":0,\"y\":1,\"z\":0}");
+
+        adapter.loadAndCacheStructure(structureOf(61, "Plane Grid Gate", door));
+
+        CachedGateDoor gate = gateManager.getGate(61);
+        assertNotNull(gate);
+        assertNull(gate.getClosedFootprintUV());
+        assertNull(gate.getOpenFootprintUV());
+    }
 }

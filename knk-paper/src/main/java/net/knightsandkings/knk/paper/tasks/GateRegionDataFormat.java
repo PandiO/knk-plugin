@@ -23,9 +23,10 @@ import java.util.List;
  * by {@link GateDoorRegionCaptureHandler} (items 6.3/6.4 - writes it on save, reads it back on
  * redefine) and {@link GateBlockScanTaskHandler} (item 6.5 - reads it for REGION-mode scanning),
  * so the shape has exactly one read implementation and one write implementation, not three
- * independently-drifting copies.
+ * independently-drifting copies. Also used by {@code GateLoaderAdapter} (a different package,
+ * {@code knk-paper.gates}) via {@link #extractFootprintVerticesXYZ}, so this class is public.
  */
-final class GateRegionDataFormat {
+public final class GateRegionDataFormat {
     private GateRegionDataFormat() {
     }
 
@@ -70,6 +71,44 @@ final class GateRegionDataFormat {
         return parsed.isPolygon()
             ? new Polygonal2DRegionSelector(weWorld, parsed.points(), parsed.minY(), parsed.maxY())
             : new CuboidRegionSelector(weWorld, parsed.pos1(), parsed.pos2());
+    }
+
+    /**
+     * Extracts the footprint's world-space outline vertices, each {@code {x, y, z}} at the
+     * region's minimum Y - used to project a REGION-mode door's captured shape into u/v index
+     * space at load time (item 6.6, {@code WORLDGUARD_REGION_FEASIBILITY.md} §9.3). For
+     * {@code POLYGON2D} this is exactly the stored (x, z) points (all at {@code minY}); for
+     * {@code CUBOID}, the 4 corners of its bottom face. A single representative Y is enough since
+     * {@code GateFrameCalculator}'s footprint containment check is 2D (u, v) with depth handled
+     * separately via the n-axis check - matching how {@code PLANE_GRID}'s own width/height indices
+     * are likewise a flat 2D rectangle in u/v space, not a 3D box directly.
+     *
+     * <p>No {@link World}/live selection needed - this is pure JSON parsing, usable from a
+     * different module ({@code knk-paper}'s {@code gates} package) without a WorldEdit session.
+     */
+    public static List<double[]> extractFootprintVerticesXYZ(String regionDataJson) {
+        Parsed parsed = parse(regionDataJson);
+        List<double[]> vertices = new ArrayList<>();
+
+        if (parsed.isPolygon()) {
+            for (BlockVector2 point : parsed.points()) {
+                vertices.add(new double[]{point.x(), parsed.minY(), point.z()});
+            }
+        } else {
+            BlockVector3 pos1 = parsed.pos1();
+            BlockVector3 pos2 = parsed.pos2();
+            int minX = Math.min(pos1.x(), pos2.x());
+            int maxX = Math.max(pos1.x(), pos2.x());
+            int minY = Math.min(pos1.y(), pos2.y());
+            int minZ = Math.min(pos1.z(), pos2.z());
+            int maxZ = Math.max(pos1.z(), pos2.z());
+            vertices.add(new double[]{minX, minY, minZ});
+            vertices.add(new double[]{maxX, minY, minZ});
+            vertices.add(new double[]{maxX, minY, maxZ});
+            vertices.add(new double[]{minX, minY, maxZ});
+        }
+
+        return vertices;
     }
 
     private static Parsed parse(String regionDataJson) {

@@ -71,6 +71,14 @@ public class CachedGateDoor {
     // GateAnimationTask/GateFrameCalculator - see ROTATION_GAP_FILL_DESIGN.md.
     private long sublatticeIndex = 1;
 
+    // === REGION mode footprint (item 6.6, WORLDGUARD_REGION_FEASIBILITY.md §9.3) ===
+    // The door's captured closed/open-state region, precomputed once at load time by projecting
+    // each stored world-space vertex through the same uStep/vStep/nStep basis above (via
+    // GateFrameCalculator.projectOntoBasis) - a list of {u, v} pairs. Null for PLANE_GRID/
+    // FLOOD_FILL gates, and for a REGION gate whose region hasn't been captured yet.
+    private List<double[]> closedFootprintUV;
+    private List<double[]> openFootprintUV;
+
     // === Precomputed Motion ===
     private Vector motionVector;  // Direction and magnitude of motion
     private Vector hingeAxis;     // For rotation gates
@@ -291,6 +299,14 @@ public class CachedGateDoor {
 
     public Vector getNStep() {
         return nStep;
+    }
+
+    public List<double[]> getClosedFootprintUV() {
+        return closedFootprintUV;
+    }
+
+    public List<double[]> getOpenFootprintUV() {
+        return openFootprintUV;
     }
 
     public long getSublatticeIndex() {
@@ -610,6 +626,14 @@ public class CachedGateDoor {
 
     public void setNStep(Vector nStep) {
         this.nStep = nStep;
+    }
+
+    public void setClosedFootprintUV(List<double[]> closedFootprintUV) {
+        this.closedFootprintUV = closedFootprintUV;
+    }
+
+    public void setOpenFootprintUV(List<double[]> openFootprintUV) {
+        this.openFootprintUV = openFootprintUV;
     }
 
     public void setSublatticeIndex(long sublatticeIndex) {
