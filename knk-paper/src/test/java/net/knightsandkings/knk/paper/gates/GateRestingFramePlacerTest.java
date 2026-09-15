@@ -137,6 +137,38 @@ class GateRestingFramePlacerTest {
     }
 
     @Test
+    void restingFrameCells_PairedOpenBlock_AtClosedRestingFrame_UsesOwnOrientationNotOpenBlockdata() {
+        // Regression test for a bug found during item 6.7's live testing: this used to hand back
+        // pairedOpen's blockdata (the OPEN state's real scanned orientation) at frame 0 too, so a
+        // fully-closed door's paired blocks showed their open-state look even while at rest,
+        // closed. Fixed 2026-09-15 alongside the matching per-tick swing fix in
+        // GateAnimationTask - the paired block's own scanned orientation is only authoritative at
+        // the door's true OPEN resting frame (see this class's atOpenRestingFrame flag).
+        CachedGateDoor gate = new CachedGateDoor(
+            17, 17, "Dual-Scan Drawbridge Closed Check", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
+            90, 1, new Vector(0, 0, 0), 1, 1, 1,
+            500.0, 500.0, true, false, true, 90, "north"
+        );
+        Vector uStep = new Vector(1, 0, 0);
+        gate.setUStep(uStep);
+        gate.setVStep(new Vector(0, 1, 0));
+        gate.setNStep(new Vector(0, 0, 1));
+        gate.setHingeAxis(uStep);
+        gate.setSublatticeIndex(1);
+        gate.setOpenAnchorPoint(new Vector(50, 0, 50));
+
+        BlockSnapshot closed = new BlockSnapshot(1, new Vector(0, 0, 0), 1, "minecraft:oak_log[axis=z]", 0);
+        BlockSnapshot pairedOpen = new BlockSnapshot(2, new Vector(0, 0, 0), 1, "minecraft:oak_log[axis=x]", 0);
+        gate.addBlock(closed);
+        gate.setOpenBlockPairing(Map.of(1, pairedOpen));
+
+        List<GateRestingFramePlacer.RestingCell> cells = GateRestingFramePlacer.restingFrameCells(gate, 0, true);
+
+        assertEquals(1, cells.size());
+        assertEquals("minecraft:oak_log[axis=z]", cells.get(0).blockData());
+    }
+
+    @Test
     void cellsToClear_RasterizedExtraCellsNotInTargetFrame_AreReturned() {
         // Live-server bug: Mechanism 1's rasterized gap-fill places cells beyond the gate's own
         // scanned BlockSnapshots, but those extra cells aren't tied to any single BlockSnapshot,

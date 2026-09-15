@@ -265,23 +265,30 @@ public class GateAnimationTask extends BukkitRunnable {
                 continue;
             }
 
-            // Mechanism 2 (ROTATION_GAP_FILL_DESIGN.md): a block paired with a manually-scanned
-            // open state uses that scan's own orientation as-is, never the arc-angle rotation -
-            // an admin who built the open shape with e.g. logs lying flat already scanned the
-            // correct orientation directly. Absent for the vast majority of gates (no pairing).
-            BlockSnapshot pairedOpen = gate.getPairedOpenBlock(block.getId());
-
+            // Mechanism 2 (ROTATION_GAP_FILL_DESIGN.md) position blending: a block paired with a
+            // manually-scanned open state converges toward that scan's real position as the door
+            // swings (looked up internally by calculateBlockPosition) - unaffected by the fix
+            // below, which is about ORIENTATION only.
             Vector worldPos = GateFrameCalculator.calculateBlockPosition(gate, block, frame);
             Vector previousPosition = GateFrameCalculator.calculateBlockPosition(gate, block, previousFrame);
 
+            // Orientation during the swing always uses the same angle-based procedural rotation
+            // as an unpaired block, regardless of pairing (fixed 2026-09-15, live-tested with a
+            // dense REGION-mode open scan): there's no real scanned orientation for the
+            // in-between angles a paired block passes through mid-swing anyway, so hard-cutting
+            // to the paired open block's orientation at every frame - including frame 0, before
+            // any rotation has happened - showed the door's true CLOSED-state blocks in their
+            // OPEN-state orientation the instant the animation started. The paired block's real
+            // scanned orientation is still used, correctly, once the door reaches its true open
+            // resting frame - see GateRestingFramePlacer.restingFrameCells, which the completed
+            // animation's finishOpening/finishClosing resync onto regardless of what this
+            // per-tick swing placed.
             if (worldPos != null) {
                 if (!GateBlockPlacer.isChunkLoaded(world, worldPos)) {
                     LOGGER.fine("Gate " + gate.getName() + " is in unloaded chunk, pausing animation");
                     return;
                 }
-                String orientedBlockData = pairedOpen != null
-                    ? pairedOpen.getBlockData()
-                    : GateBlockOrientation.applyRotation(block.getBlockData(), gate, currentAngle);
+                String orientedBlockData = GateBlockOrientation.applyRotation(block.getBlockData(), gate, currentAngle);
                 placements.add(new BlockPlacement(worldPos, orientedBlockData));
                 targetCells.add(GateSpatialIndex.packCell(worldPos));
             } else if (gate.isClipToGeometryBounds()) {
@@ -289,9 +296,7 @@ public class GateAnimationTask extends BukkitRunnable {
             }
 
             if (previousPosition != null) {
-                String orientedVacancyData = pairedOpen != null
-                    ? pairedOpen.getBlockData()
-                    : GateBlockOrientation.applyRotation(block.getBlockData(), gate, previousAngle);
+                String orientedVacancyData = GateBlockOrientation.applyRotation(block.getBlockData(), gate, previousAngle);
                 vacancies.add(new BlockPlacement(previousPosition, orientedVacancyData));
             } else if (gate.isClipToGeometryBounds()) {
                 clippedVacancyCount++;

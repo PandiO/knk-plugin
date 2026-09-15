@@ -75,6 +75,13 @@ final class GateRestingFramePlacer {
             + gate.getSublatticeIndex() + ") - using plain per-block placement.");
 
         double angle = GateFrameCalculator.calculateRotationAngle(gate, frame);
+        // A paired block's own scanned open-state orientation is only authoritative at the door's
+        // true OPEN resting frame - at the CLOSED resting frame (frame 0), the block's own scanned
+        // closed-state orientation is correct instead, same as an unpaired block (fixed
+        // 2026-09-15, alongside the matching per-tick swing fix in GateAnimationTask -
+        // previously this used the paired open orientation at frame 0 too, showing a door's
+        // closed-state blocks in their open-state look even while fully closed).
+        boolean atOpenRestingFrame = frame == gate.getAnimationDurationTicks();
         for (BlockSnapshot block : gate.getBlocks()) {
             if (block == null) {
                 continue;
@@ -86,7 +93,7 @@ final class GateRestingFramePlacer {
             }
 
             BlockSnapshot pairedOpen = gate.getPairedOpenBlock(block.getId());
-            String blockData = pairedOpen != null
+            String blockData = (pairedOpen != null && atOpenRestingFrame)
                 ? pairedOpen.getBlockData()
                 : GateBlockOrientation.applyRotation(block.getBlockData(), gate, angle);
             cells.add(new RestingCell(worldPos, blockData));
