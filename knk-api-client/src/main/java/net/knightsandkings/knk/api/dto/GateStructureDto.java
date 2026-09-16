@@ -11,7 +11,7 @@ import java.util.List;
 
 /**
  * DTO for gate structure details from Web API.
- * Maps to GateStructureDto from knk-web-api-v2.
+ * Maps to GateStructureDto from knk-web-api.
  *
  * Item 5 (docs/features/gate-structure-animation/GATESTRUCTURE_QOL_IMPLEMENTATION_PLAN.md) moved
  * every per-door field (geometry, animation, health, block snapshots, etc.) onto the new

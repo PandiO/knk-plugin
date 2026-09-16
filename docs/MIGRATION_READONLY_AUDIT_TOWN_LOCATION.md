@@ -20,4 +20,4 @@ Scope: confirm Town and Location flows remain read-only (no create/update/delete
 ## Not Found / Verified Absent
 - No Town/Location Create or Update DTOs or ports were found.
 - No write-side ports or commands (create/update/delete) for Towns or Locations.
-- No world-binding/workflow code such as PendingWorldBinding, WorldTask, WorldGuard region create/update, or location creation in knk-plugin-v2.
+- No world-binding/workflow code such as PendingWorldBinding, WorldTask, WorldGuard region create/update, or location creation in knk-plugin.

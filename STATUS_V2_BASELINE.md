@@ -1,4 +1,4 @@
-# V2 Baseline Status — knk-plugin-v2
+# V2 Baseline Status — knk-plugin
 
 **Date**: 2025-12-14  
 **Build**: ✅ SUCCESS  
@@ -9,7 +9,7 @@
 ## ✅ What is Present
 
 ### Project Structure
-- ✅ Root project: `knk-plugin-v2` (Gradle 8.10, Java 21)
+- ✅ Root project: `knk-plugin` (Gradle 8.10, Java 21)
 - ✅ Module: `knk-core` (domain + services + ports)
 - ✅ Module: `knk-api-client` (HTTP client + DTOs + mappers)
 - ✅ Module: `knk-paper` (Paper plugin adapter)

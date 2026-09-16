@@ -185,8 +185,8 @@ After @ExtendWith + mockito-junit-jupiter:
 ## Related Documentation
 
 - `docs/ai/plugin-auth/PLUGIN_USER_ACCOUNT_IMPLEMENTATION_ROADMAP.md` (Phase 7 ✅ Complete)
-- `Repository/knk-plugin-v2/docs/PLAYER_GUIDE_ACCOUNT_MANAGEMENT.md` (✅ Created)
-- `Repository/knk-plugin-v2/docs/DEVELOPER_GUIDE_ACCOUNT_INTEGRATION.md` (✅ Created)
+- `Repository/knk-plugin/docs/PLAYER_GUIDE_ACCOUNT_MANAGEMENT.md` (✅ Created)
+- `Repository/knk-plugin/docs/DEVELOPER_GUIDE_ACCOUNT_INTEGRATION.md` (✅ Created)
 
 ---
 

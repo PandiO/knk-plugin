@@ -165,7 +165,7 @@ This allows the resolver to leverage shared cache infrastructure across the enti
 
 ## Differences from Legacy System
 
-| Aspect | Legacy (knk-legacy-plugin) | New (knk-plugin-v2) |
+| Aspect | Legacy (knk-v2-archive) | New (knk-plugin) |
 |--------|---------------------------|---------------------|
 | **Blocking I/O** | ❌ Synchronous DB calls on main thread | ✅ Async API calls; read-only cache |
 | **Scope** | Full Hibernate ORM cache | ✅ API responses only (READ-ONLY) |

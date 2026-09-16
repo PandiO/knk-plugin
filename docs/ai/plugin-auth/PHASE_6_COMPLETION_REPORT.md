@@ -1,7 +1,7 @@
 # Phase 6 Implementation: Testing - Completion Report
 
 **Feature**: User Account Management (plugin-auth)  
-**Repository**: knk-plugin-v2  
+**Repository**: knk-plugin  
 **Phase**: 6 - Testing  
 **Status**: ✅ **COMPLETE**  
 **Date Completed**: January 30, 2026
@@ -18,7 +18,7 @@ Phase 6 (Testing) has been successfully implemented for the plugin-auth feature.
 
 ### 1. Unit Tests for ChatCaptureManager ✅
 
-**File**: [knk-paper/src/test/java/net/knightsandkings/knk/paper/chat/ChatCaptureManagerTest.java](../../../Repository/knk-plugin-v2/knk-paper/src/test/java/net/knightsandkings/knk/paper/chat/ChatCaptureManagerTest.java)
+**File**: [knk-paper/src/test/java/net/knightsandkings/knk/paper/chat/ChatCaptureManagerTest.java](../../../Repository/knk-plugin/knk-paper/src/test/java/net/knightsandkings/knk/paper/chat/ChatCaptureManagerTest.java)
 
 **Coverage**: 485 lines of test code
 
@@ -60,7 +60,7 @@ Phase 6 (Testing) has been successfully implemented for the plugin-auth feature.
 
 ### 2. Unit Tests for UserManager ✅
 
-**File**: [knk-paper/src/test/java/net/knightsandkings/knk/paper/user/UserManagerTest.java](../../../Repository/knk-plugin-v2/knk-paper/src/test/java/net/knightsandkings/knk/paper/user/UserManagerTest.java)
+**File**: [knk-paper/src/test/java/net/knightsandkings/knk/paper/user/UserManagerTest.java](../../../Repository/knk-plugin/knk-paper/src/test/java/net/knightsandkings/knk/paper/user/UserManagerTest.java)
 
 **Coverage**: 469 lines of test code
 
@@ -94,7 +94,7 @@ Phase 6 (Testing) has been successfully implemented for the plugin-auth feature.
 
 ### 3. Integration Tests for Command Flows ✅
 
-**File**: [knk-paper/src/test/java/net/knightsandkings/knk/paper/integration/AccountCommandIntegrationTest.java](../../../Repository/knk-plugin-v2/knk-paper/src/test/java/net/knightsandkings/knk/paper/integration/AccountCommandIntegrationTest.java)
+**File**: [knk-paper/src/test/java/net/knightsandkings/knk/paper/integration/AccountCommandIntegrationTest.java](../../../Repository/knk-plugin/knk-paper/src/test/java/net/knightsandkings/knk/paper/integration/AccountCommandIntegrationTest.java)
 
 **Coverage**: 437 lines of test code
 

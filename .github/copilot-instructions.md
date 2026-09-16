@@ -1,4 +1,4 @@
-# Knights & Kings (knk-plugin-v2) – Copilot Instructions
+# Knights & Kings (knk-plugin) – Copilot Instructions
 
 This repository is a multi-module Gradle project targeting Paper (Minecraft 1.21.x, Java 21).
 

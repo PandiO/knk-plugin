@@ -2,7 +2,7 @@ package net.knightsandkings.knk.core.domain.users;
 
 /**
  * A player's preferred method for passing through a closed, pass-through-enabled gate.
- * Mirrors the backend's GatePassThroughMethod enum (knk-web-api-v2 Models/User.cs).
+ * Mirrors the backend's GatePassThroughMethod enum (knk-web-api Models/User.cs).
  */
 public enum GatePassThroughMethod {
     /**

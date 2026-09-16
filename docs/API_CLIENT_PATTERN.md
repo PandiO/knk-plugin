@@ -1,4 +1,4 @@
-# API Client Pattern (knk-plugin-v2)
+# API Client Pattern (knk-plugin)
 
 Guideline for adding a new HTTP endpoint across modules.
 

@@ -1,5 +1,5 @@
 /**
- * Unified data access layer for knk-plugin-v2.
+ * Unified data access layer for knk-plugin.
  * <p>
  * Provides a consistent, cache-aware data access strategy that:
  * <ul>

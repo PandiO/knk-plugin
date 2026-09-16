@@ -29,7 +29,7 @@ Do **not** invent fields or endpoints. If Swagger doesn't define it, don't imple
 
 ## Legacy Usage
 
-Use `knk-legacy-plugin` **only** for:
+Use `knk-v2-archive` **only** for:
 - Understanding business rules (e.g., validation logic, permissions, workflow sequences)
 - Identifying missing behavior that should be documented as TODOs
 - Clarifying domain concepts

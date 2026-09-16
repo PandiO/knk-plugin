@@ -1,7 +1,7 @@
 # Manual Testing Checklist - Plugin Auth (Phase 6)
 
 **Feature**: User Account Management  
-**Repository**: knk-plugin-v2  
+**Repository**: knk-plugin  
 **Date**: January 30, 2026  
 **Tester**: _________________
 
@@ -10,7 +10,7 @@
 ## Pre-Test Setup
 
 ### Environment Verification
-- [ ] Backend API (knk-web-api-v2) is running and accessible
+- [ ] Backend API (knk-web-api) is running and accessible
 - [ ] Test database is properly seeded
 - [ ] Minecraft dev server (1.21.10) is running
 - [ ] Plugin JAR deployed to server plugins folder

@@ -1,2 +1,2 @@
-rootProject.name = "knk-plugin-v2"
+rootProject.name = "knk-plugin"
 include("knk-core", "knk-api-client", "knk-paper")

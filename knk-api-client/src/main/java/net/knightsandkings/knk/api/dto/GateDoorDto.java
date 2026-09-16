@@ -6,7 +6,7 @@ import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import java.util.List;
 
 /**
- * DTO for a single gate door from the Web API. Maps to GateDoorDto from knk-web-api-v2 - see
+ * DTO for a single gate door from the Web API. Maps to GateDoorDto from knk-web-api - see
  * docs/features/gate-structure-animation/GATESTRUCTURE_QOL_IMPLEMENTATION_PLAN.md item 5. Holds
  * every field that used to live directly on GateStructureDto and is meaningful per-door
  * (geometry, animation, health, block snapshots).
