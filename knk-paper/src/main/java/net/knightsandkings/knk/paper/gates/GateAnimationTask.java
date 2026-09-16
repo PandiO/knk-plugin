@@ -7,6 +7,7 @@ import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.gates.GateFrameCalculator;
 import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.core.gates.GateSpatialIndex;
+import net.knightsandkings.knk.paper.gates.GateRestingFramePlacer.RestingCell;
 import net.knightsandkings.knk.paper.integration.WorldGuardIntegration;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -77,6 +78,10 @@ public class GateAnimationTask extends BukkitRunnable {
     private final Set<Integer> emptySnapshotWarnings = new HashSet<>();
     private final Map<Integer, AnimationState> lastObservedState = new HashMap<>();
     private final Map<Integer, Integer> jamTickCounters = new HashMap<>();
+    // Item 6.8: the cells (position + blockdata) this gate's blocks actually occupied after the
+    // last successful updateGateBlocks call - see resolveVacateCells for why this replaced a
+    // frame-arithmetic guess.
+    private final Map<Integer, List<RestingCell>> lastPlacedCellsByGate = new HashMap<>();
 
     /**
      * Create a new gate animation task with Mechanism 1 rasterization enabled by default.
@@ -145,6 +150,10 @@ public class GateAnimationTask extends BukkitRunnable {
             if (state != AnimationState.OPENING && state != AnimationState.CLOSING) {
                 emptySnapshotWarnings.remove(gate.getId());
                 jamTickCounters.remove(gate.getId());
+                // finishOpening/finishClosing's transitionRestingFrame already fully reconciled
+                // the world; nothing needs to survive to the next animation, which correctly
+                // re-seeds via resolveVacateCells' fallback.
+                lastPlacedCellsByGate.remove(gate.getId());
                 continue;
             }
 
@@ -248,10 +257,11 @@ public class GateAnimationTask extends BukkitRunnable {
         double currentAngle = GateFrameCalculator.calculateRotationAngle(gate, frame);
         double previousAngle = GateFrameCalculator.calculateRotationAngle(gate, previousFrame);
 
-        List<BlockPlacement> placements = new ArrayList<>();
-        List<BlockPlacement> vacancies = new ArrayList<>();
-        List<BlockMove> moves = new ArrayList<>();
-        Set<Long> targetCells = new HashSet<>();
+        List<RestingCell> targetCells = new ArrayList<>();
+        // Only used as a fallback seed when no remembered previous-tick state exists yet (see
+        // resolveVacateCells) - a one-frame-back guess, exactly what this method used to vacate
+        // unconditionally before item 6.8.
+        List<RestingCell> fallbackPreviousCells = new ArrayList<>();
 
         // Blocks whose calculated position fell outside the gate's geometry box this frame
         // (calculateBlockPosition returned null because isWithinGeometryBounds rejected it) -
@@ -289,20 +299,17 @@ public class GateAnimationTask extends BukkitRunnable {
                     return;
                 }
                 String orientedBlockData = GateBlockOrientation.applyRotation(block.getBlockData(), gate, currentAngle);
-                placements.add(new BlockPlacement(worldPos, orientedBlockData));
-                targetCells.add(GateSpatialIndex.packCell(worldPos));
+                targetCells.add(new RestingCell(worldPos, orientedBlockData));
             } else if (gate.isClipToGeometryBounds()) {
                 clippedPlacementCount++;
             }
 
             if (previousPosition != null) {
                 String orientedVacancyData = GateBlockOrientation.applyRotation(block.getBlockData(), gate, previousAngle);
-                vacancies.add(new BlockPlacement(previousPosition, orientedVacancyData));
+                fallbackPreviousCells.add(new RestingCell(previousPosition, orientedVacancyData));
             } else if (gate.isClipToGeometryBounds()) {
                 clippedVacancyCount++;
             }
-
-            moves.add(new BlockMove(previousPosition, worldPos));
         }
 
         boolean shouldLogThisFrame = frame == 0 || frame == gate.getAnimationDurationTicks() || frame % 20 == 0;
@@ -313,17 +320,21 @@ public class GateAnimationTask extends BukkitRunnable {
                 + " vacancy position(s) fell outside GeometryWidth/Height/Depth bounds and were skipped.");
         }
 
-        // Clear vacated cells first, but never a cell another block moves into this frame:
-        // otherwise a later snapshot erases what an earlier one just placed.
-        for (BlockPlacement vacancy : vacancies) {
-            if (targetCells.contains(GateSpatialIndex.packCell(vacancy.position()))) {
-                continue;
-            }
+        // Item 6.8 fix: vacate whatever this gate's blocks ACTUALLY occupied after the last
+        // successful call, not a frame-arithmetic guess - a main-thread stall spanning multiple
+        // real frames between two run() invocations used to leave every skipped frame's blocks
+        // permanently orphaned, since only one tickRate step back was ever targeted for removal.
+        // cellsToClear (shared with GateRestingFramePlacer) also implicitly protects a cell
+        // another block moves into this same frame, exactly like the old targetCells check did.
+        List<RestingCell> toVacate = resolveVacateCells(
+            lastPlacedCellsByGate.get(gate.getId()), fallbackPreviousCells, targetCells);
+
+        for (RestingCell vacancy : toVacate) {
             GateBlockPlacer.removeBlockIfMatches(world, vacancy.position(), vacancy.blockData(), fallbackMaterial);
         }
 
         int blockedCount = 0;
-        for (BlockPlacement placement : placements) {
+        for (RestingCell placement : targetCells) {
             if (!GateBlockPlacer.placeBlockIfVacant(world, placement.position(), placement.blockData(), fallbackMaterial)) {
                 blockedCount++;
             }
@@ -331,18 +342,53 @@ public class GateAnimationTask extends BukkitRunnable {
 
         if (shouldLogThisFrame && blockedCount > 0) {
             LOGGER.warning("[GateAnimation] Gate '" + gate.getName() + "' (ID: " + gate.getId() + ") frame " + frame
-                + ": " + blockedCount + "/" + placements.size()
+                + ": " + blockedCount + "/" + targetCells.size()
                 + " placement(s) blocked by an existing, non-matching block this frame.");
         }
 
         // Keep the spatial index in lockstep with the block mutations above, so a hit-detection
-        // lookup can never observe a cell that disagrees with the real world block.
+        // lookup can never observe a cell that disagrees with the real world block. A full
+        // remove/add-by-position (mirroring resyncSpatialIndex's bulk approach) is correct
+        // regardless of how the previous and next cell sets relate, unlike the per-block move()
+        // pairing this replaced, which assumed an exact 1:1 correspondence that a multi-frame
+        // skip breaks.
         GateSpatialIndex spatialIndex = gateManager.getSpatialIndex();
-        for (BlockMove move : moves) {
-            spatialIndex.move(gate.getWorldName(), move.previousPosition(), move.worldPos(), gate.getId());
-        }
+        spatialIndex.removeAll(gate.getWorldName(), positionsOf(toVacate));
+        spatialIndex.putAll(gate.getWorldName(), positionsOf(targetCells), gate.getId());
+
+        lastPlacedCellsByGate.put(gate.getId(), targetCells);
 
         handleJamTracking(gate, blockedCount);
+    }
+
+    /**
+     * Resolves exactly which cells need vacating this tick: the diff between what this gate's
+     * blocks actually occupied last time and what they occupy now. "Actually occupied last time"
+     * prefers the real remembered set from the previous successful updateGateBlocks call, falling
+     * back to a one-time frame-arithmetic guess only when no memory exists yet (this animation's
+     * first call - e.g. just started, or after a server restart). That fallback is safe exactly
+     * because a fresh animation's first "previous" position genuinely is the resting position, so
+     * there is nothing to have skipped yet; every call after that uses the remembered set
+     * instead, so correctness no longer depends on assuming calls happen on a regular cadence -
+     * see item 6.8 in GATESTRUCTURE_QOL_IMPLEMENTATION_PLAN.md for the bug this replaced (a
+     * main-thread stall spanning multiple real frames used to leave every skipped frame's blocks
+     * permanently orphaned, since only one tickRate step back was ever targeted for removal).
+     * Delegates the actual diff to {@link GateRestingFramePlacer#cellsToClear}, already used (and
+     * tested) for the same "positions in fromCells absent from toCells" computation elsewhere.
+     * Package-private and static (Bukkit-free) so it's unit-testable without a live World.
+     */
+    static List<RestingCell> resolveVacateCells(List<RestingCell> remembered, List<RestingCell> fallback,
+                                                 List<RestingCell> targetCells) {
+        List<RestingCell> previousCells = remembered != null ? remembered : fallback;
+        return GateRestingFramePlacer.cellsToClear(previousCells, targetCells);
+    }
+
+    private static List<Vector> positionsOf(List<RestingCell> cells) {
+        List<Vector> positions = new ArrayList<>(cells.size());
+        for (RestingCell cell : cells) {
+            positions.add(cell.position());
+        }
+        return positions;
     }
 
     /**
@@ -393,12 +439,6 @@ public class GateAnimationTask extends BukkitRunnable {
         }
         Location location = new Location(world, anchor.getX(), anchor.getY(), anchor.getZ());
         world.playSound(location, sound, SoundCategory.BLOCKS, 1.0f, GATE_SOUND_PITCH);
-    }
-
-    private record BlockPlacement(Vector position, String blockData) {
-    }
-
-    private record BlockMove(Vector previousPosition, Vector worldPos) {
     }
 
     /**
