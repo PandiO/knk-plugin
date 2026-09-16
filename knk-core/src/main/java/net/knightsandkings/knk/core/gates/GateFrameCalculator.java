@@ -21,13 +21,47 @@ public class GateFrameCalculator {
 
     /**
      * Calculate the world position of a block at a specific animation frame.
-     * 
+     *
      * @param gate The cached gate containing animation configuration
      * @param block The block snapshot to calculate position for
      * @param frame Current animation frame (0 = closed, animationDurationTicks = open)
      * @return World position for the block at this frame, or null when the block is clipped away
      */
     public static Vector calculateBlockPosition(CachedGateDoor gate, BlockSnapshot block, int frame) {
+        return calculateBlockPositionBreakdown(gate, block, frame).finalPosition();
+    }
+
+    /**
+     * Full breakdown of how {@link #calculateBlockPosition} arrives at a block's position - added
+     * during item 6.7's live-testing diagnostic session (2026-09-16) to compare the old, purely
+     * procedural rotation against the new Mechanism 2 pairing-blended motion, frame by frame,
+     * after the user reported the new motion still "looks weird" despite 6.8/6.9 fixing the
+     * orphaned-block and render-cap bugs. Not on the hot per-tick path itself -
+     * {@link #calculateBlockPosition} delegates here and returns only {@code finalPosition()},
+     * behaviorally unchanged - this exists purely so a caller that wants to log/inspect the
+     * intermediate values (see {@code GateAnimationTask}'s per-frame trace logging) doesn't have
+     * to duplicate this method's math to get them.
+     *
+     * @param baselinePosition What this block's position would be with zero Mechanism 2 influence
+     *     - the pure rotation arc (ROTATION motion) or the plain procedural position (other motion
+     *     types with no pairing) - i.e. "what the old system, before item 6, would have placed
+     *     this block at." For a VERTICAL/LATERAL block that IS paired, this is its closed-anchor
+     *     position (the lerp's start point), for consistency with the ROTATION case.
+     * @param pairedOpenBlockId The paired open-scan {@code BlockSnapshot}'s id, or null if this
+     *     block has no Mechanism 2 pairing.
+     * @param openTarget The paired open-scan block's real world position, or null if unpaired.
+     * @param correction {@code finalPosition - baselinePosition} (pre-clip) - the actual Mechanism
+     *     2 blend term, or null if unpaired. Its magnitude at progress=1 is exactly how far this
+     *     block's true open-scan position sits from where pure procedural motion would have put
+     *     it - the number to watch to find which blocks are driving non-rigid-looking motion.
+     * @param finalPosition The same value {@link #calculateBlockPosition} returns - null if
+     *     clipped outside the gate's geometry bounds.
+     */
+    public record BlockPositionBreakdown(Vector baselinePosition, Integer pairedOpenBlockId, Vector openTarget,
+                                          Vector correction, Vector finalPosition) {
+    }
+
+    public static BlockPositionBreakdown calculateBlockPositionBreakdown(CachedGateDoor gate, BlockSnapshot block, int frame) {
         if (gate == null || block == null) {
             throw new IllegalArgumentException("Gate and block cannot be null");
         }
@@ -54,15 +88,18 @@ public class GateFrameCalculator {
             ? gate.getOpenAnchorPoint().clone().add(pairedOpen.getRelativePosition())
             : null;
 
+        Vector baselinePosition;
+        Vector correction = null;
         Vector position;
         if ("ROTATION".equals(motionType)) {
             Vector arcPos = calculateRotationPosition(gate, relativePos, progress);
+            baselinePosition = arcPos;
             if (openTarget != null) {
                 // finalPos(frame) = arcPos(frame) + (openScanPos - arcPos(totalFrames)) * progress(frame)
                 // At progress=0 this is exactly arcPos(0) (today's closed position, no change); at
                 // progress=1 it converges exactly on openTarget - see Decision in Mechanism 2.
                 Vector arcPosFinal = calculateRotationPosition(gate, relativePos, 1.0);
-                Vector correction = openTarget.clone().subtract(arcPosFinal).multiply(progress);
+                correction = openTarget.clone().subtract(arcPosFinal).multiply(progress);
                 position = arcPos.clone().add(correction);
             } else {
                 position = arcPos;
@@ -72,16 +109,18 @@ public class GateFrameCalculator {
             // between the closed and open-scan positions is correct on its own (DUAL_SCAN_
             // ANIMATION_DESIGN.md's original design for this case).
             Vector closedPos = gate.getAnchorPoint().clone().add(relativePos);
+            baselinePosition = closedPos;
             position = VectorMath.lerp(closedPos, openTarget, progress);
+            correction = position.clone().subtract(baselinePosition);
         } else {
             position = calculateLinearPosition(gate, relativePos, progress);
+            baselinePosition = position;
         }
 
-        if (gate.isClipToGeometryBounds() && !isWithinGeometryBounds(gate, position)) {
-            return null;
-        }
+        Vector finalPosition = (gate.isClipToGeometryBounds() && !isWithinGeometryBounds(gate, position)) ? null : position;
 
-        return position;
+        return new BlockPositionBreakdown(baselinePosition, pairedOpen != null ? pairedOpen.getId() : null,
+            openTarget, correction, finalPosition);
     }
 
     /**

@@ -56,6 +56,17 @@ public class GateAnimationTask extends BukkitRunnable {
     // slowest/deepest the clip can play. Played once, on the tick the gate starts animating.
     private static final float GATE_SOUND_PITCH = 0.5f;
 
+    // TEMPORARY diagnostic instrumentation (item 6.7 live-testing, 2026-09-16): the user reported
+    // the new Mechanism 2 pairing-blended motion still "looks weird" compared to the old, purely
+    // procedural rotation, even after 6.8/6.9 fixed the orphaned-block and render-cap bugs. Logs
+    // every frame's per-block placement breakdown (and every vacated cell) at INFO so a run in the
+    // old PLANE_GRID mode (no pairing at all) and a run in the new REGION mode can be diffed side
+    // by side, block-by-block, frame-by-frame - see GateFrameCalculator.BlockPositionBreakdown for
+    // what each field means. Volume is roughly (blockCount * frameCount) lines per animation -
+    // flip to false (or delete this flag, logTrace, and its call sites) once the investigation
+    // concludes; not meant to stay enabled long-term.
+    private static final boolean TRACE_LOGGING_ENABLED = true;
+
     private final GateManager gateManager;
     private final World world;
     private final Material fallbackMaterial;
@@ -279,8 +290,14 @@ public class GateAnimationTask extends BukkitRunnable {
             // manually-scanned open state converges toward that scan's real position as the door
             // swings (looked up internally by calculateBlockPosition) - unaffected by the fix
             // below, which is about ORIENTATION only.
-            Vector worldPos = GateFrameCalculator.calculateBlockPosition(gate, block, frame);
+            GateFrameCalculator.BlockPositionBreakdown breakdown =
+                GateFrameCalculator.calculateBlockPositionBreakdown(gate, block, frame);
+            Vector worldPos = breakdown.finalPosition();
             Vector previousPosition = GateFrameCalculator.calculateBlockPosition(gate, block, previousFrame);
+
+            if (TRACE_LOGGING_ENABLED) {
+                logTrace(gate, frame, block, breakdown);
+            }
 
             // Orientation during the swing always uses the same angle-based procedural rotation
             // as an unpaired block, regardless of pairing (fixed 2026-09-15, live-tested with a
@@ -330,6 +347,10 @@ public class GateAnimationTask extends BukkitRunnable {
             lastPlacedCellsByGate.get(gate.getId()), fallbackPreviousCells, targetCells);
 
         for (RestingCell vacancy : toVacate) {
+            if (TRACE_LOGGING_ENABLED) {
+                LOGGER.info("[GateAnimationTrace] gate=" + gate.getId() + " frame=" + frame
+                    + " VACATE pos=" + formatVector(vacancy.position()) + " blockData=" + vacancy.blockData());
+            }
             GateBlockPlacer.removeBlockIfMatches(world, vacancy.position(), vacancy.blockData(), fallbackMaterial);
         }
 
@@ -389,6 +410,32 @@ public class GateAnimationTask extends BukkitRunnable {
             positions.add(cell.position());
         }
         return positions;
+    }
+
+    /** See {@link #TRACE_LOGGING_ENABLED}. */
+    private static void logTrace(CachedGateDoor gate, int frame, BlockSnapshot block,
+                                  GateFrameCalculator.BlockPositionBreakdown breakdown) {
+        StringBuilder sb = new StringBuilder("[GateAnimationTrace] gate=").append(gate.getId())
+            .append(" frame=").append(frame).append('/').append(gate.getAnimationDurationTicks())
+            .append(" block=").append(block.getId())
+            .append(" baseline=").append(formatVector(breakdown.baselinePosition()));
+
+        if (breakdown.pairedOpenBlockId() != null) {
+            Vector correction = breakdown.correction();
+            sb.append(" pairedOpen=").append(breakdown.pairedOpenBlockId())
+                .append(" openTarget=").append(formatVector(breakdown.openTarget()))
+                .append(" correction=").append(formatVector(correction))
+                .append(" correctionMag=").append(String.format("%.3f", correction != null ? correction.length() : 0.0));
+        } else {
+            sb.append(" pairedOpen=none");
+        }
+
+        sb.append(" final=").append(breakdown.finalPosition() != null ? formatVector(breakdown.finalPosition()) : "CLIPPED");
+        LOGGER.info(sb.toString());
+    }
+
+    private static String formatVector(Vector v) {
+        return v == null ? "null" : String.format("(%.2f,%.2f,%.2f)", v.getX(), v.getY(), v.getZ());
     }
 
     /**
