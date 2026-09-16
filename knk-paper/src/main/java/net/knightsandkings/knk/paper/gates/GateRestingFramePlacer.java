@@ -57,6 +57,44 @@ final class GateRestingFramePlacer {
     static List<RestingCell> restingFrameCells(CachedGateDoor gate, int frame, boolean rasterizationEnabled) {
         List<RestingCell> cells = new ArrayList<>();
 
+        // Item 6.9: at the true OPEN resting frame, render every real open-scan block directly
+        // rather than only the ones GateBlockPairing managed to pair to a closed block.
+        // GateBlockPairing is inherently keyed 1:1 off the closed block list, so it can never
+        // produce more than min(closedCount, openCount) pairs - for a door whose open-scan
+        // genuinely has more points than its closed state (the diagonal-rotation case this whole
+        // region-capture mechanism exists for), that silently capped rendering below the real
+        // open-scan count even after a correct capture. gate.getOpenBlocks() is authoritative for
+        // what "open" actually looks like, so it's used verbatim here - not gated on
+        // GeometryDefinitionMode, since the underlying cap is identical for any door with a
+        // manually-scanned open state larger than its closed one, regardless of capture shape
+        // (mirroring useRasterization's own precedent: gated on getOpenBlocks().isEmpty(), never
+        // on geometry mode, since Mechanism 2 already always wins outright over Mechanism 1).
+        //
+        // Accepted trade-off, not a bug: since GateAnimationTask's per-tick swing only ever
+        // iterates gate.getBlocks() (the closed list), these open-only blocks never appear until
+        // this method places the full open resting frame - so on OPENING they pop in all at once
+        // exactly when the door finishes, but on CLOSING there's no symmetric "vacate on swing
+        // start" step, so they stay frozen in their open position for the entire closing swing,
+        // only disappearing on the final tick when transitionRestingFrame reconciles down to the
+        // closed frame. This matches how Mechanism 1's rasterized filler cells already behave
+        // (also only reconciled at the far end of a swing, per Decision 3 - "never mid-swing"),
+        // so it isn't a new inconsistency, just the same one-sided trade-off in a second place.
+        boolean atOpenRestingFrame = frame == gate.getAnimationDurationTicks();
+        if (atOpenRestingFrame && !gate.getOpenBlocks().isEmpty() && gate.getOpenAnchorPoint() != null) {
+            Vector openAnchor = gate.getOpenAnchorPoint();
+            for (BlockSnapshot openBlock : gate.getOpenBlocks()) {
+                if (openBlock == null) {
+                    continue;
+                }
+                Vector worldPos = openAnchor.clone().add(openBlock.getRelativePosition());
+                cells.add(new RestingCell(worldPos, openBlock.getBlockData()));
+            }
+            LOGGER.info("[GateRestingFrame] Gate '" + gate.getName() + "' (ID: " + gate.getId() + ") frame " + frame
+                + ": rendered " + cells.size() + " cell(s) directly from the open-scan block list "
+                + "(bypassing GateBlockPairing's closed-block-keyed cap).");
+            return cells;
+        }
+
         if (useRasterization(gate, frame, rasterizationEnabled)) {
             double angle = GateFrameCalculator.calculateRotationAngle(gate, frame);
             for (GateFrameCalculator.RasterizedBlock rasterized : GateFrameCalculator.rasterizeRotationFrame(gate, angle)) {
@@ -80,8 +118,8 @@ final class GateRestingFramePlacer {
         // closed-state orientation is correct instead, same as an unpaired block (fixed
         // 2026-09-15, alongside the matching per-tick swing fix in GateAnimationTask -
         // previously this used the paired open orientation at frame 0 too, showing a door's
-        // closed-state blocks in their open-state look even while fully closed).
-        boolean atOpenRestingFrame = frame == gate.getAnimationDurationTicks();
+        // closed-state blocks in their open-state look even while fully closed). atOpenRestingFrame
+        // is computed once, above, and shared with the item 6.9 branch.
         for (BlockSnapshot block : gate.getBlocks()) {
             if (block == null) {
                 continue;

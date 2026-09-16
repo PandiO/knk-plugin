@@ -169,6 +169,106 @@ class GateRestingFramePlacerTest {
     }
 
     @Test
+    void restingFrameCells_OpenRestingFrameWithOpenScan_RendersAllOpenScanBlocksDirectly_NotJustPairedOnes() {
+        // Item 6.9 regression test: GateBlockPairing is capped at min(closedCount, openCount)
+        // pairs, so a door whose real open-scan is larger than its closed state (the diagonal-
+        // rotation case this whole region-capture mechanism exists for) used to only ever render
+        // the paired subset. restingFrameCells must now render every gate.getOpenBlocks() entry
+        // directly at the open resting frame, not just the ones with a closed-block pairing.
+        CachedGateDoor gate = new CachedGateDoor(
+            18, 18, "Wide-Open-Scan Drawbridge", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
+            90, 1, new Vector(0, 0, 0), 1, 1, 1,
+            500.0, 500.0, true, false, true, 90, "north"
+        );
+        Vector uStep = new Vector(1, 0, 0);
+        gate.setUStep(uStep);
+        gate.setVStep(new Vector(0, 1, 0));
+        gate.setNStep(new Vector(0, 0, 1));
+        gate.setHingeAxis(uStep);
+        gate.setSublatticeIndex(1);
+        gate.setOpenAnchorPoint(new Vector(50, 0, 50));
+
+        gate.addBlock(new BlockSnapshot(1, new Vector(0, 0, 0), 1, "minecraft:oak_log", 0));
+        gate.addBlock(new BlockSnapshot(2, new Vector(1, 0, 0), 1, "minecraft:oak_log", 1));
+
+        BlockSnapshot open1 = new BlockSnapshot(10, new Vector(0, 0, 0), 1, "minecraft:oak_log[axis=x]", 0);
+        BlockSnapshot open2 = new BlockSnapshot(11, new Vector(1, 0, 0), 1, "minecraft:oak_log[axis=x]", 1);
+        BlockSnapshot open3 = new BlockSnapshot(12, new Vector(2, 0, 0), 1, "minecraft:oak_log[axis=x]", 2);
+        gate.addOpenBlock(open1);
+        gate.addOpenBlock(open2);
+        gate.addOpenBlock(open3);
+        // Only ONE of the three open blocks has a pairing configured, to prove the new branch
+        // isn't going through GateBlockPairing at all - if it were, this would cap the result at 1.
+        gate.setOpenBlockPairing(Map.of(1, open1));
+
+        List<GateRestingFramePlacer.RestingCell> cells =
+            GateRestingFramePlacer.restingFrameCells(gate, gate.getAnimationDurationTicks(), true);
+
+        assertEquals(3, cells.size());
+        assertTrue(cells.stream().anyMatch(c -> c.position().equals(new Vector(50, 0, 50))
+            && c.blockData().equals("minecraft:oak_log[axis=x]")));
+        assertTrue(cells.stream().anyMatch(c -> c.position().equals(new Vector(51, 0, 50))));
+        assertTrue(cells.stream().anyMatch(c -> c.position().equals(new Vector(52, 0, 50))));
+    }
+
+    @Test
+    void restingFrameCells_OpenScanPresent_AtClosedRestingFrame_UnaffectedByOpenScanBranch() {
+        // The item 6.9 branch must only fire at the OPEN resting frame - the closed resting frame
+        // (frame 0) must still be exactly the gate's own closed BlockSnapshot positions,
+        // regardless of how large the open scan is.
+        CachedGateDoor gate = new CachedGateDoor(
+            19, 19, "Wide-Open-Scan Drawbridge Closed Check", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
+            90, 1, new Vector(0, 0, 0), 1, 1, 1,
+            500.0, 500.0, true, false, true, 90, "north"
+        );
+        Vector uStep = new Vector(1, 0, 0);
+        gate.setUStep(uStep);
+        gate.setVStep(new Vector(0, 1, 0));
+        gate.setNStep(new Vector(0, 0, 1));
+        gate.setHingeAxis(uStep);
+        gate.setSublatticeIndex(1);
+        gate.setOpenAnchorPoint(new Vector(50, 0, 50));
+
+        gate.addBlock(new BlockSnapshot(1, new Vector(0, 0, 0), 1, "minecraft:oak_log", 0));
+        gate.addOpenBlock(new BlockSnapshot(10, new Vector(0, 0, 0), 1, "minecraft:oak_log[axis=x]", 0));
+        gate.addOpenBlock(new BlockSnapshot(11, new Vector(1, 0, 0), 1, "minecraft:oak_log[axis=x]", 1));
+        gate.addOpenBlock(new BlockSnapshot(12, new Vector(2, 0, 0), 1, "minecraft:oak_log[axis=x]", 2));
+
+        List<GateRestingFramePlacer.RestingCell> cells = GateRestingFramePlacer.restingFrameCells(gate, 0, true);
+
+        assertEquals(1, cells.size());
+        assertEquals(new Vector(0, 0, 0), cells.get(0).position());
+        assertEquals("minecraft:oak_log", cells.get(0).blockData());
+    }
+
+    @Test
+    void restingFrameCells_EmptyOpenScan_AtOpenRestingFrame_FallsThroughToPlainPerBlockBehavior() {
+        // Regression guard for the majority (no-open-scan) case: the new item 6.9 branch is gated
+        // on getOpenBlocks() being non-empty, so a gate with no open scan at all must still render
+        // exactly its own closed BlockSnapshot positions at the open resting frame, unaffected.
+        // Uses a non-ROTATION motion type so calculateRotationAngle is always 0 and
+        // GateBlockOrientation.applyRotation short-circuits before touching Bukkit (see this
+        // class's note above restingFrameCells_RasterizationDisabledAtClosedFrame_MatchesRawBlockCount).
+        CachedGateDoor gate = new CachedGateDoor(
+            20, 20, "Vertical Portcullis, No Open Scan", "PORTCULLIS", "VERTICAL", "PLANE_GRID",
+            90, 1, new Vector(0, 0, 0), 1, 2, 1,
+            500.0, 500.0, true, false, true, 0, "north"
+        );
+        gate.setUStep(new Vector(1, 0, 0));
+        gate.setVStep(new Vector(0, 1, 0));
+        gate.setNStep(new Vector(0, 0, 1));
+        gate.setMotionVector(new Vector(0, 5, 0));
+        gate.setOpenAnchorPoint(new Vector(50, 0, 50));
+        gate.addBlock(new BlockSnapshot(1, new Vector(0, 0, 0), 1, "minecraft:oak_planks", 0));
+        gate.addBlock(new BlockSnapshot(2, new Vector(0, 1, 0), 1, "minecraft:oak_planks", 1));
+
+        List<GateRestingFramePlacer.RestingCell> cells =
+            GateRestingFramePlacer.restingFrameCells(gate, gate.getAnimationDurationTicks(), true);
+
+        assertEquals(gate.getBlocks().size(), cells.size());
+    }
+
+    @Test
     void cellsToClear_RasterizedExtraCellsNotInTargetFrame_AreReturned() {
         // Live-server bug: Mechanism 1's rasterized gap-fill places cells beyond the gate's own
         // scanned BlockSnapshots, but those extra cells aren't tied to any single BlockSnapshot,
