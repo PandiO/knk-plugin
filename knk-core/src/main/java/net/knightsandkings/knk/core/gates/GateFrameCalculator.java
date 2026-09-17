@@ -50,15 +50,24 @@ public class GateFrameCalculator {
      * @param pairedOpenBlockId The paired open-scan {@code BlockSnapshot}'s id, or null if this
      *     block has no Mechanism 2 pairing.
      * @param openTarget The paired open-scan block's real world position, or null if unpaired.
-     * @param correction {@code finalPosition - baselinePosition} (pre-clip) - the actual Mechanism
-     *     2 blend term, or null if unpaired. Its magnitude at progress=1 is exactly how far this
-     *     block's true open-scan position sits from where pure procedural motion would have put
-     *     it - the number to watch to find which blocks are driving non-rigid-looking motion.
+     * @param correction {@code finalPosition - baselinePosition} (pre-clip) - the total blend term
+     *     (uniform transform correction plus, for a {@code ROTATION} block with a pairing, item
+     *     6.11's residual - see {@code residual} below), or null if unpaired. Its magnitude at
+     *     progress=1 is exactly how far this block's true open-scan position sits from where pure
+     *     procedural motion would have put it - the number to watch to find which blocks are
+     *     driving non-rigid-looking motion.
      * @param finalPosition The same value {@link #calculateBlockPosition} returns - null if
      *     clipped outside the gate's geometry bounds.
+     * @param residual Item 6.11 (Decision 8, ROTATION_GAP_FILL_DESIGN.md): for a {@code ROTATION}
+     *     block with both a fitted transform and a pairing, the tapered per-block correction on
+     *     top of the shared/uniform one - this block's own gap between its real scanned position
+     *     and the shared transform's prediction for it, closing exactly at progress=1. Null when
+     *     not applicable (no fit, no pairing, or a non-{@code ROTATION} motion type). Always
+     *     (numerically) zero for an open-only block, by construction - included anyway so the
+     *     trace log can show it's behaving as expected rather than omitting it.
      */
     public record BlockPositionBreakdown(Vector baselinePosition, Integer pairedOpenBlockId, Vector openTarget,
-                                          Vector correction, Vector finalPosition) {
+                                          Vector correction, Vector finalPosition, Vector residual) {
     }
 
     public static BlockPositionBreakdown calculateBlockPositionBreakdown(CachedGateDoor gate, BlockSnapshot block, int frame) {
@@ -90,20 +99,15 @@ public class GateFrameCalculator {
 
         Vector baselinePosition;
         Vector correction = null;
+        Vector residual = null;
         Vector position;
         if ("ROTATION".equals(motionType)) {
-            Vector arcPos = calculateRotationPosition(gate, relativePos, progress);
-            baselinePosition = arcPos;
-            if (openTarget != null) {
-                // finalPos(frame) = arcPos(frame) + (openScanPos - arcPos(totalFrames)) * progress(frame)
-                // At progress=0 this is exactly arcPos(0) (today's closed position, no change); at
-                // progress=1 it converges exactly on openTarget - see Decision in Mechanism 2.
-                Vector arcPosFinal = calculateRotationPosition(gate, relativePos, 1.0);
-                correction = openTarget.clone().subtract(arcPosFinal).multiply(progress);
-                position = arcPos.clone().add(correction);
-            } else {
-                position = arcPos;
-            }
+            RigidTransform transform = gate.getFittedOpenTransform();
+            RotationBlend blend = blendRotationPosition(gate, relativePos, progress, transform, openTarget);
+            baselinePosition = blend.arcPos();
+            correction = blend.correction();
+            residual = blend.residual();
+            position = blend.position();
         } else if (openTarget != null) {
             // VERTICAL/LATERAL: the real motion already is a straight line, so a plain lerp
             // between the closed and open-scan positions is correct on its own (DUAL_SCAN_
@@ -120,7 +124,146 @@ public class GateFrameCalculator {
         Vector finalPosition = (gate.isClipToGeometryBounds() && !isWithinGeometryBounds(gate, position)) ? null : position;
 
         return new BlockPositionBreakdown(baselinePosition, pairedOpen != null ? pairedOpen.getId() : null,
-            openTarget, correction, finalPosition);
+            openTarget, correction, finalPosition, residual);
+    }
+
+    /**
+     * The result of blending a {@code ROTATION} block's rigid rotation arc with the fitted
+     * transform's uniform correction and (item 6.11) a per-block residual - shared by {@link
+     * #calculateBlockPositionBreakdown} (a real paired/unpaired closed block) and {@link
+     * #calculateOpenOnlyBlockPositionBreakdown} (an open-only block's synthesized start point), so
+     * both go through the exact same formula rather than two copies that could drift apart.
+     */
+    private record RotationBlend(Vector arcPos, Vector correction, Vector residual, Vector position) {
+    }
+
+    /**
+     * Item 6.10 (Decision 7) + item 6.11 (Decision 8), both in ROTATION_GAP_FILL_DESIGN.md:
+     * blends a {@code ROTATION} block's pure rigid rotation arc with the fitted transform's shared,
+     * uniform correction, plus - when {@code openTarget} is non-null (a real pairing) - a small
+     * per-block residual that closes this specific block's own gap between the shared transform's
+     * prediction and its true scanned position, tapered in non-linearly so it only becomes
+     * significant near the end of the swing.
+     *
+     * <p><strong>Why the residual's taper must not be plain {@code progress}</strong> (Decision 8):
+     * the uniform correction is already {@code (transformPos - arcPosFinal) * progress}. If the
+     * residual - {@code (openTarget - transformPos)} - were ALSO tapered by plain {@code progress},
+     * the two {@code transformPos} terms cancel algebraically:
+     * {@code (transformPos - arcPosFinal)*progress + (openTarget - transformPos)*progress =
+     * (openTarget - arcPosFinal) * progress} - exactly the old, pre-6.10 per-block blend this whole
+     * item exists to move away from. The residual's taper must be a genuinely different curve (see
+     * {@link #residualTaper}) so the two corrections don't silently recombine into one.
+     *
+     * <p>Endpoints stay exact regardless of the taper's exact shape: at {@code progress=0} both
+     * corrections are zero (the taper and the uniform factor both vanish), giving exactly the
+     * closed position; at {@code progress=1} the uniform correction reaches {@code transformPos -
+     * arcPosFinal} and the residual reaches its full {@code openTarget - transformPos} (any taper
+     * with {@code f(1)=1} gives this), so the two combine to {@code openTarget - arcPosFinal}
+     * exactly - {@code position(1) = arcPosFinal + (openTarget - arcPosFinal) = openTarget}, for
+     * every block with a pairing, paired-closed or open-only alike.
+     *
+     * <p>For an open-only block (called from {@link #calculateOpenOnlyBlockPositionBreakdown} with
+     * {@code openTarget} = that block's own real open-scan position and {@code relativePos} = its
+     * synthesized closed-frame start), the residual is always numerically zero: {@code
+     * transformPos} there is {@code transform.apply(anchor + synthesizedRelativePos)}, and
+     * {@code synthesizedRelativePos} is defined as the transform's own inverse applied to {@code
+     * openTarget} - so {@code transformPos} reduces to {@code openTarget} exactly, making {@code
+     * openTarget - transformPos} the zero vector regardless of the taper. No special-casing needed.
+     *
+     * @param transform The gate's fitted rigid transform, or null (Decision 7's degenerate
+     *     fallback) - the whole blend then degrades to the pure rotation arc.
+     * @param openTarget The real scanned position this block should converge onto by
+     *     {@code progress=1} - a paired closed block's own paired open-scan position, an open-only
+     *     block's own real position, or null (no pairing - no residual, uniform correction only).
+     */
+    private static RotationBlend blendRotationPosition(CachedGateDoor gate, Vector relativePos, double progress,
+                                                         RigidTransform transform, Vector openTarget) {
+        Vector arcPos = calculateRotationPosition(gate, relativePos, progress);
+        if (transform == null) {
+            return new RotationBlend(arcPos, null, null, arcPos);
+        }
+
+        Vector arcPosFinal = calculateRotationPosition(gate, relativePos, 1.0);
+        Vector closedWorldPos = gate.getAnchorPoint().clone().add(relativePos);
+        Vector transformPos = transform.apply(closedWorldPos);
+        Vector uniformCorrection = transformPos.clone().subtract(arcPosFinal).multiply(progress);
+
+        Vector residual = null;
+        Vector totalCorrection = uniformCorrection;
+        if (openTarget != null) {
+            double taper = residualTaper(progress);
+            residual = openTarget.clone().subtract(transformPos).multiply(taper);
+            totalCorrection = uniformCorrection.clone().add(residual);
+        }
+
+        Vector position = arcPos.clone().add(totalCorrection);
+        return new RotationBlend(arcPos, totalCorrection, residual, position);
+    }
+
+    /**
+     * Item 6.11's per-block residual taper (Decision 8, ROTATION_GAP_FILL_DESIGN.md) - deliberately
+     * NOT plain {@code progress} (see {@link #blendRotationPosition}'s javadoc for the algebraic
+     * cancellation that would cause). A cubic ease-in: {@code f(0)=0, f(1)=1} (so endpoints stay
+     * exact regardless of the exponent - a correctness-independent tuning choice, not a
+     * correctness requirement), while keeping a residual's visible contribution under ~13% through
+     * the first half of the swing (a well-fit block stays visually rigid alongside its neighbors
+     * for most of the animation) and reaching ~97% by {@code progress=0.989} (frame 89 of a
+     * 90-frame swing - the exact frame where entity 14's real geometry was observed to jam under
+     * the pure uniform-transform formula, per Decision 8's live-test evidence) - by the time a
+     * collision risk would materialize, the residual has already all but fully closed the gap that
+     * was causing it. Revisit this constant (not the shape of the formula) if a future door's live
+     * testing shows the catch-up motion happening too late (visible last-second snapping) or too
+     * early (loses rigidity too soon).
+     */
+    private static double residualTaper(double progress) {
+        return progress * progress * progress;
+    }
+
+    /** @see #calculateOpenOnlyBlockPositionBreakdown */
+    public static Vector calculateOpenOnlyBlockPosition(CachedGateDoor gate, BlockSnapshot openBlock, int frame) {
+        return calculateOpenOnlyBlockPositionBreakdown(gate, openBlock, frame).finalPosition();
+    }
+
+    /**
+     * Mid-swing position for a block that exists only in the open scan (no closed-state
+     * counterpart) - item 6.10's fix for the "open-only blocks pop in at the last tick" trade-off
+     * item 6.9 explicitly accepted. Only possible when the gate has a fitted rigid transform (see
+     * {@link CachedGateDoor#getFittedOpenTransform()}): {@code openBlock}'s real open-scan world
+     * position is inverse-transformed back through that same shared transform (once, at load time
+     * - see {@code GateLoaderAdapter}) to synthesize a closed-side start point, then run through
+     * the exact same arc-plus-correction blend {@link #calculateBlockPositionBreakdown}'s
+     * {@code ROTATION} branch uses for a real paired block. Because the synthesized start point is
+     * defined as the transform's own inverse, {@code transform.apply(closedWorldPos)} reduces
+     * exactly to this block's real open-scan position by construction - so this still converges
+     * exactly onto the real scanned position at {@code progress=1}, same guarantee as a paired
+     * block gets.
+     *
+     * @return a breakdown with a null {@code finalPosition} (nothing to place this frame) when no
+     *     fit is available, or {@code openBlock} isn't a recognized open-only block for this gate
+     *     (e.g. it's actually paired, or this isn't a ROTATION gate) - callers should simply skip
+     *     placing it, exactly like today's unpaired-block behavior.
+     */
+    public static BlockPositionBreakdown calculateOpenOnlyBlockPositionBreakdown(CachedGateDoor gate, BlockSnapshot openBlock, int frame) {
+        if (gate == null || openBlock == null) {
+            throw new IllegalArgumentException("Gate and block cannot be null");
+        }
+
+        RigidTransform transform = gate.getFittedOpenTransform();
+        Vector synthesizedRelativePos = gate.getOpenOnlyBlockSynthesizedRelativePosition(openBlock.getId());
+        if (transform == null || synthesizedRelativePos == null || !"ROTATION".equals(gate.getMotionType())) {
+            return new BlockPositionBreakdown(null, openBlock.getId(), null, null, null, null);
+        }
+
+        int totalFrames = gate.getAnimationDurationTicks();
+        frame = Math.max(0, Math.min(frame, totalFrames));
+        double progress = totalFrames > 0 ? (double) frame / totalFrames : 0.0;
+
+        Vector openWorldPos = gate.getOpenAnchorPoint().clone().add(openBlock.getRelativePosition());
+        RotationBlend blend = blendRotationPosition(gate, synthesizedRelativePos, progress, transform, openWorldPos);
+
+        Vector finalPosition = (gate.isClipToGeometryBounds() && !isWithinGeometryBounds(gate, blend.position())) ? null : blend.position();
+
+        return new BlockPositionBreakdown(blend.arcPos(), openBlock.getId(), openWorldPos, blend.correction(), finalPosition, blend.residual());
     }
 
     /**

@@ -280,19 +280,24 @@ public class GateAnimationTask extends BukkitRunnable {
         // were ever supposed to be placed.
         int clippedPlacementCount = 0;
         int clippedVacancyCount = 0;
+        // Denominator for the clip-ratio warning below - starts at the closed-block count and
+        // grows by 1 for each open-only block actually considered this frame (item 6.10), so the
+        // logged ratio stays accurate instead of silently under-counting once open-only blocks
+        // can contribute to the numerator too.
+        int consideredBlockCount = gate.getBlocks().size();
 
         for (BlockSnapshot block : gate.getBlocks()) {
             if (block == null) {
                 continue;
             }
 
-            // Mechanism 2 (ROTATION_GAP_FILL_DESIGN.md) position blending: a block paired with a
-            // manually-scanned open state converges toward that scan's real position as the door
-            // swings (looked up internally by calculateBlockPosition) - unaffected by the fix
-            // below, which is about ORIENTATION only.
+            // Mechanism 2 (ROTATION_GAP_FILL_DESIGN.md) / item 6.10's uniform rigid-transform
+            // position blending: a block paired with a manually-scanned open state converges
+            // toward the shared transform's prediction as the door swings (looked up internally by
+            // calculateBlockPositionBreakdown) - unaffected by the fix below, which is about
+            // ORIENTATION only.
             GateFrameCalculator.BlockPositionBreakdown breakdown =
                 GateFrameCalculator.calculateBlockPositionBreakdown(gate, block, frame);
-            Vector worldPos = breakdown.finalPosition();
             Vector previousPosition = GateFrameCalculator.calculateBlockPosition(gate, block, previousFrame);
 
             if (TRACE_LOGGING_ENABLED) {
@@ -310,30 +315,48 @@ public class GateAnimationTask extends BukkitRunnable {
             // resting frame - see GateRestingFramePlacer.restingFrameCells, which the completed
             // animation's finishOpening/finishClosing resync onto regardless of what this
             // per-tick swing placed.
-            if (worldPos != null) {
-                if (!GateBlockPlacer.isChunkLoaded(world, worldPos)) {
-                    LOGGER.fine("Gate " + gate.getName() + " is in unloaded chunk, pausing animation");
-                    return;
-                }
-                String orientedBlockData = GateBlockOrientation.applyRotation(block.getBlockData(), gate, currentAngle);
-                targetCells.add(new RestingCell(worldPos, orientedBlockData));
-            } else if (gate.isClipToGeometryBounds()) {
-                clippedPlacementCount++;
+            AppendOutcome outcome = appendAnimatedCells(gate, block.getBlockData(), breakdown.finalPosition(),
+                previousPosition, currentAngle, previousAngle, targetCells, fallbackPreviousCells);
+            if (outcome.pause()) {
+                return;
+            }
+            clippedPlacementCount += outcome.clippedPlacement() ? 1 : 0;
+            clippedVacancyCount += outcome.clippedVacancy() ? 1 : 0;
+        }
+
+        // Item 6.10 (Decision 7, ROTATION_GAP_FILL_DESIGN.md): an open-only block (no closed-side
+        // pairing) with a synthesized start point now animates across the swing too, instead of
+        // only popping into existence at the open resting frame (item 6.9's accepted trade-off) -
+        // a no-op loop (nothing has a synthesized position) for any gate without a fitted rigid
+        // transform, i.e. every gate as before this item.
+        for (BlockSnapshot openBlock : gate.getOpenBlocks()) {
+            if (openBlock == null || gate.getOpenOnlyBlockSynthesizedRelativePosition(openBlock.getId()) == null) {
+                continue;
+            }
+            consideredBlockCount++;
+
+            GateFrameCalculator.BlockPositionBreakdown breakdown =
+                GateFrameCalculator.calculateOpenOnlyBlockPositionBreakdown(gate, openBlock, frame);
+            Vector previousPosition = GateFrameCalculator.calculateOpenOnlyBlockPosition(gate, openBlock, previousFrame);
+
+            if (TRACE_LOGGING_ENABLED) {
+                logTrace(gate, frame, openBlock, breakdown);
             }
 
-            if (previousPosition != null) {
-                String orientedVacancyData = GateBlockOrientation.applyRotation(block.getBlockData(), gate, previousAngle);
-                fallbackPreviousCells.add(new RestingCell(previousPosition, orientedVacancyData));
-            } else if (gate.isClipToGeometryBounds()) {
-                clippedVacancyCount++;
+            AppendOutcome outcome = appendAnimatedCells(gate, openBlock.getBlockData(), breakdown.finalPosition(),
+                previousPosition, currentAngle, previousAngle, targetCells, fallbackPreviousCells);
+            if (outcome.pause()) {
+                return;
             }
+            clippedPlacementCount += outcome.clippedPlacement() ? 1 : 0;
+            clippedVacancyCount += outcome.clippedVacancy() ? 1 : 0;
         }
 
         boolean shouldLogThisFrame = frame == 0 || frame == gate.getAnimationDurationTicks() || frame % 20 == 0;
         if (shouldLogThisFrame && (clippedPlacementCount > 0 || clippedVacancyCount > 0)) {
             LOGGER.warning("[GateAnimation] Gate '" + gate.getName() + "' (ID: " + gate.getId() + ") frame " + frame
-                + ": " + clippedPlacementCount + "/" + gate.getBlocks().size()
-                + " target position(s) and " + clippedVacancyCount + "/" + gate.getBlocks().size()
+                + ": " + clippedPlacementCount + "/" + consideredBlockCount
+                + " target position(s) and " + clippedVacancyCount + "/" + consideredBlockCount
                 + " vacancy position(s) fell outside GeometryWidth/Height/Depth bounds and were skipped.");
         }
 
@@ -383,6 +406,48 @@ public class GateAnimationTask extends BukkitRunnable {
     }
 
     /**
+     * Whether appending one block's cells for this frame requires pausing the whole gate's
+     * animation this tick ({@code pause}, mirroring the original inline "unloaded chunk" early
+     * return), and whether its placement/vacancy position was clipped outside the gate's geometry
+     * bounds - counted by the caller into its own running totals for the periodic warning log.
+     */
+    private record AppendOutcome(boolean pause, boolean clippedPlacement, boolean clippedVacancy) {
+    }
+
+    /**
+     * Appends one block's target/vacancy cell for this frame into the shared {@code targetCells}/
+     * {@code fallbackPreviousCells} lists {@code updateGateBlocks} vacates/places from - shared by
+     * the closed-block loop and (item 6.10) the open-only-block loop, so both use identical
+     * chunk-loaded/orientation/clip-counting handling instead of two copies that could drift.
+     */
+    private AppendOutcome appendAnimatedCells(CachedGateDoor gate, String blockData, Vector worldPos, Vector previousPosition,
+                                               double currentAngle, double previousAngle,
+                                               List<RestingCell> targetCells, List<RestingCell> fallbackPreviousCells) {
+        boolean clippedPlacement = false;
+        boolean clippedVacancy = false;
+
+        if (worldPos != null) {
+            if (!GateBlockPlacer.isChunkLoaded(world, worldPos)) {
+                LOGGER.fine("Gate " + gate.getName() + " is in unloaded chunk, pausing animation");
+                return new AppendOutcome(true, false, false);
+            }
+            String orientedBlockData = GateBlockOrientation.applyRotation(blockData, gate, currentAngle);
+            targetCells.add(new RestingCell(worldPos, orientedBlockData));
+        } else if (gate.isClipToGeometryBounds()) {
+            clippedPlacement = true;
+        }
+
+        if (previousPosition != null) {
+            String orientedVacancyData = GateBlockOrientation.applyRotation(blockData, gate, previousAngle);
+            fallbackPreviousCells.add(new RestingCell(previousPosition, orientedVacancyData));
+        } else if (gate.isClipToGeometryBounds()) {
+            clippedVacancy = true;
+        }
+
+        return new AppendOutcome(false, clippedPlacement, clippedVacancy);
+    }
+
+    /**
      * Resolves exactly which cells need vacating this tick: the diff between what this gate's
      * blocks actually occupied last time and what they occupy now. "Actually occupied last time"
      * prefers the real remembered set from the previous successful updateGateBlocks call, falling
@@ -422,10 +487,15 @@ public class GateAnimationTask extends BukkitRunnable {
 
         if (breakdown.pairedOpenBlockId() != null) {
             Vector correction = breakdown.correction();
+            Vector residual = breakdown.residual();
             sb.append(" pairedOpen=").append(breakdown.pairedOpenBlockId())
                 .append(" openTarget=").append(formatVector(breakdown.openTarget()))
                 .append(" correction=").append(formatVector(correction))
-                .append(" correctionMag=").append(String.format("%.3f", correction != null ? correction.length() : 0.0));
+                .append(" correctionMag=").append(String.format("%.3f", correction != null ? correction.length() : 0.0))
+                // Item 6.11 (Decision 8): the per-block residual on top of the shared/uniform
+                // transform correction - near-zero for a well-fit block, larger for an outlier
+                // (e.g. an open-only block's residual is always numerically ~0, by construction).
+                .append(" residualMag=").append(String.format("%.3f", residual != null ? residual.length() : 0.0));
         } else {
             sb.append(" pairedOpen=none");
         }

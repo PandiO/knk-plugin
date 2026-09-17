@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.core.domain.gates;
 
+import net.knightsandkings.knk.core.gates.RigidTransform;
 import org.bukkit.util.Vector;
 
 import java.util.ArrayList;
@@ -96,6 +97,22 @@ public class CachedGateDoor {
     // once at load time (GateLoaderAdapter) via GateBlockPairing. A block with no entry here has
     // no open-scan counterpart and keeps today's exact procedural behavior.
     private Map<Integer, BlockSnapshot> openBlockPairing = new HashMap<>();
+
+    // === Item 6.10: uniform rigid-transform mid-swing motion (Decision 7, ROTATION_GAP_FILL_
+    // DESIGN.md) ===
+    // Single best-fit rotation+translation (Kabsch), fit once at load time from the closed/open
+    // pairing's world-position correspondences, applied identically to every ROTATION block's
+    // mid-swing position (GateFrameCalculator) instead of Mechanism 2's old per-block correction -
+    // uniform by construction, so no two blocks can disagree on how far they've drifted. Null when
+    // the gate has fewer than 3 non-collinear correspondence pairs to fit from (nothing to fit) -
+    // callers fall back to today's pure procedural rotation in that case.
+    private RigidTransform fittedOpenTransform;
+    // Open-scan blocks with no closed-side counterpart (id -> synthesized closed-frame
+    // relativePosition, derived by inverse-transforming the block's real open world position
+    // through fittedOpenTransform). Lets an "open-only" block animate across the swing instead of
+    // only popping into existence at the open resting frame (item 6.9's accepted trade-off, now
+    // lifted where a fit is available). Empty when fittedOpenTransform is null.
+    private final Map<Integer, Vector> openOnlyBlockSynthesizedRelativePositions = new HashMap<>();
 
     // === Health & State ===
     private double healthCurrent;
@@ -651,6 +668,35 @@ public class CachedGateDoor {
      */
     public void setOpenBlockPairing(Map<Integer, BlockSnapshot> openBlockPairing) {
         this.openBlockPairing = openBlockPairing != null ? openBlockPairing : new HashMap<>();
+    }
+
+    public RigidTransform getFittedOpenTransform() {
+        return fittedOpenTransform;
+    }
+
+    public void setFittedOpenTransform(RigidTransform fittedOpenTransform) {
+        this.fittedOpenTransform = fittedOpenTransform;
+    }
+
+    /**
+     * Replaces the full set of open-only blocks' synthesized closed-frame relative positions (see
+     * {@link #openOnlyBlockSynthesizedRelativePositions}'s field doc).
+     */
+    public void setOpenOnlyBlockSynthesizedRelativePositions(Map<Integer, Vector> positions) {
+        this.openOnlyBlockSynthesizedRelativePositions.clear();
+        if (positions != null) {
+            this.openOnlyBlockSynthesizedRelativePositions.putAll(positions);
+        }
+    }
+
+    /**
+     * The synthesized closed-frame relative position for an open-scan block with no closed-side
+     * pairing (keyed by that open {@code BlockSnapshot}'s own id), or null when this block is
+     * paired (handled via {@link #getPairedOpenBlock} instead) or no rigid fit is available for
+     * this gate.
+     */
+    public Vector getOpenOnlyBlockSynthesizedRelativePosition(int openBlockId) {
+        return openOnlyBlockSynthesizedRelativePositions.get(openBlockId);
     }
 
     public void setMotionVector(Vector motionVector) {

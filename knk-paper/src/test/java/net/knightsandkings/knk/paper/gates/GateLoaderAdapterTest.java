@@ -605,6 +605,141 @@ class GateLoaderAdapterTest {
         assertNotNull(pairedForFar);
         assertEquals(21, pairedForNear.getId());
         assertEquals(20, pairedForFar.getId());
+
+        // Item 6.10 (Decision 7): only 2 correspondence pairs is a degenerate input for the
+        // Kabsch fit (fewer than 3 non-collinear pairs, "nothing to fit") - the gate must fall
+        // back to no fitted transform at all, not a partial/unreliable one.
+        assertNull(gate.getFittedOpenTransform());
+    }
+
+    // === Item 6.10: uniform rigid-transform fit + open-only block synthesis (ROTATION_GAP_FILL_DESIGN.md, Decision 7) ===
+
+    @Test
+    void loadAndCacheStructure_RotationGateWithThreeOrMorePairings_FitsARigidTransform() {
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+
+        GateDoorDto door = doorOf(53, 53, "Drawbridge Dense Dual-Scan Door");
+        door.setGateType("DRAWBRIDGE");
+        door.setMotionType("ROTATION");
+        door.setGeometryDefinitionMode("PLANE_GRID");
+        door.setAnimationDurationTicks(90);
+        door.setAnimationTickRate(1);
+        door.setRotationMaxAngleDegrees(90);
+        door.setAnchorPoint("{\"x\":0,\"y\":64,\"z\":0}");
+        door.setReferencePoint1("{\"x\":1,\"y\":64,\"z\":0}");
+        door.setReferencePoint2("{\"x\":0,\"y\":65,\"z\":0}");
+        door.setOpenAnchorPoint("{\"x\":0,\"y\":64,\"z\":0}");
+
+        // 3 non-collinear closed points (all at world Y=64, i.e. zero Y-component of their own),
+        // mapped through a KNOWN, consistent rigid transform - pure translation along Y, chosen
+        // specifically so it's ORTHOGONAL to every pairwise difference among the 3 points (which
+        // all vary only in X/Z). That guarantees the true diagonal correspondence is the STRICT,
+        // unambiguous minimum-total-distance assignment (any swap adds a strictly positive
+        // |diff_XZ|^2 term on top of the same shared |translation|^2 baseline) - avoiding a subtler
+        // failure mode where GateBlockPairing's Hungarian matcher, minimizing pure total distance
+        // with no knowledge of "rotation", can legitimately prefer a globally-cheaper but
+        // geometrically "twisted" assignment over the one this test was actually built from,
+        // especially once a rotation is involved. Plus a 4th, open-only point with no closed
+        // counterpart, placed far enough away that it's unambiguously the one left unmatched.
+        Vector translation = new Vector(0, 500, 0);
+
+        Vector closedRel1 = new Vector(5, 0, 0);
+        Vector closedRel2 = new Vector(0, 0, 0);
+        Vector closedRel3 = new Vector(3, 0, 4);
+
+        GateBlockSnapshotDto closed1 = snapshotDto(1, 53, closedRel1, 0);
+        GateBlockSnapshotDto closed2 = snapshotDto(2, 53, closedRel2, 1);
+        GateBlockSnapshotDto closed3 = snapshotDto(3, 53, closedRel3, 2);
+        door.setBlockSnapshots(List.of(closed1, closed2, closed3));
+
+        Vector open1Rel = closedRel1.clone().add(translation);
+        Vector open2Rel = closedRel2.clone().add(translation);
+        Vector open3Rel = closedRel3.clone().add(translation);
+        // Open-only: no closed counterpart. Distance-squared to any closed point (~4,000,000+) is
+        // far larger than even an off-diagonal cost among the 3 true pairs (~250,000-250,050), so
+        // the Hungarian matcher never prefers it over any true correspondence - it must be left as
+        // the one unmatched column.
+        Vector openOnlyRel = new Vector(2000, 0, 0);
+
+        GateBlockSnapshotDto open1 = snapshotDto(20, 53, open1Rel, 0);
+        GateBlockSnapshotDto open2 = snapshotDto(21, 53, open2Rel, 1);
+        GateBlockSnapshotDto open3 = snapshotDto(22, 53, open3Rel, 2);
+        GateBlockSnapshotDto openOnly = snapshotDto(23, 53, openOnlyRel, 3);
+        door.setOpenedBlockSnapshots(List.of(open1, open2, open3, openOnly));
+
+        adapter.loadAndCacheStructure(structureOf(53, "Drawbridge Dense Dual-Scan Gate", door));
+
+        CachedGateDoor gate = gateManager.getGate(53);
+        assertNotNull(gate);
+        assertNotNull(gate.getFittedOpenTransform(), "3 non-collinear pairs must produce a fit");
+
+        // Every real closed block is still paired to its true nearest-neighbor open counterpart.
+        assertEquals(20, gate.getPairedOpenBlock(1).getId());
+        assertEquals(21, gate.getPairedOpenBlock(2).getId());
+        assertEquals(22, gate.getPairedOpenBlock(3).getId());
+
+        // The open-only block has no closed-side pairing, but DOES get a synthesized closed-frame
+        // start point once a fit exists.
+        Vector synthesized = gate.getOpenOnlyBlockSynthesizedRelativePosition(23);
+        assertNotNull(synthesized);
+
+        // Round-trip sanity: applying the fitted transform to the synthesized closed-frame world
+        // position must land back exactly on the open-only block's own real open-scan position.
+        Vector synthesizedClosedWorldPos = gate.getAnchorPoint().clone().add(synthesized);
+        Vector recoveredOpenWorldPos = gate.getFittedOpenTransform().apply(synthesizedClosedWorldPos);
+        Vector realOpenWorldPos = gate.getOpenAnchorPoint().clone().add(openOnlyRel);
+        assertEquals(realOpenWorldPos.getX(), recoveredOpenWorldPos.getX(), EPSILON);
+        assertEquals(realOpenWorldPos.getY(), recoveredOpenWorldPos.getY(), EPSILON);
+        assertEquals(realOpenWorldPos.getZ(), recoveredOpenWorldPos.getZ(), EPSILON);
+
+        // No synthesized start point for a block that IS paired - it's handled via the closed-side
+        // pairing instead, not this map.
+        assertNull(gate.getOpenOnlyBlockSynthesizedRelativePosition(20));
+    }
+
+    @Test
+    void loadAndCacheStructure_VerticalGateWithThreeOrMorePairings_NeverFitsATransform() {
+        // Decision 7 is ROTATION-specific - VERTICAL/LATERAL's plain lerp was never the source of
+        // the reported non-rigid motion, so no fit should ever be computed for them, regardless of
+        // how many pairings exist.
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+
+        GateDoorDto door = doorOf(54, 54, "Vertical Dense Dual-Scan Door");
+        door.setGateType("SLIDING");
+        door.setMotionType("VERTICAL");
+        door.setGeometryDefinitionMode("PLANE_GRID");
+        door.setAnimationDurationTicks(60);
+        door.setAnimationTickRate(1);
+        door.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
+        door.setOpenAnchorPoint("{\"x\":100,\"y\":0,\"z\":0}");
+
+        door.setBlockSnapshots(List.of(
+            snapshotDto(1, 54, new Vector(0, 0, 0), 0),
+            snapshotDto(2, 54, new Vector(1, 0, 0), 1),
+            snapshotDto(3, 54, new Vector(0, 1, 0), 2)
+        ));
+        door.setOpenedBlockSnapshots(List.of(
+            snapshotDto(10, 54, new Vector(0, 0, 0), 0),
+            snapshotDto(11, 54, new Vector(1, 0, 0), 1),
+            snapshotDto(12, 54, new Vector(0, 1, 0), 2)
+        ));
+
+        adapter.loadAndCacheStructure(structureOf(54, "Vertical Dense Dual-Scan Gate", door));
+
+        CachedGateDoor gate = gateManager.getGate(54);
+        assertNotNull(gate);
+        assertNull(gate.getFittedOpenTransform());
+    }
+
+    private static GateBlockSnapshotDto snapshotDto(int id, int doorId, Vector relativePos, int sortOrder) {
+        return new GateBlockSnapshotDto(
+            id, doorId,
+            (int) Math.round(relativePos.getX()), (int) Math.round(relativePos.getY()), (int) Math.round(relativePos.getZ()),
+            0, 0, 0,
+            "minecraft:oak_log", "minecraft:oak_log", "{}", sortOrder
+        );
     }
 
     @Test

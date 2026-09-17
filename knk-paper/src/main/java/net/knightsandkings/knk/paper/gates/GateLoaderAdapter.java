@@ -9,6 +9,7 @@ import net.knightsandkings.knk.core.domain.gates.CachedGateStructure;
 import net.knightsandkings.knk.core.gates.GateBlockPairing;
 import net.knightsandkings.knk.core.gates.GateFrameCalculator;
 import net.knightsandkings.knk.core.gates.GateManager;
+import net.knightsandkings.knk.core.gates.RigidTransform;
 import net.knightsandkings.knk.core.util.CoordinateParser;
 import net.knightsandkings.knk.core.util.VectorMath;
 import net.knightsandkings.knk.paper.tasks.GateRegionDataFormat;
@@ -18,8 +19,10 @@ import java.util.Comparator;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Logger;
 
@@ -554,11 +557,16 @@ public class GateLoaderAdapter {
             for (Map.Entry<Integer, Integer> entry : indexPairing.entrySet()) {
                 pairing.put(closedBlocks.get(entry.getKey()).getId(), openBlocks.get(entry.getValue()));
             }
+
+            fitRigidTransform(gate, closedBlocks, openBlocks, indexPairing, closedWorldPositions, openWorldPositions);
         } else {
             // VERTICAL/LATERAL: both scans walk the same deterministic (i,j,k) loop from their
             // respective anchors, so index position IS the correspondence (DUAL_SCAN_ANIMATION_
             // DESIGN.md's original design) - a block with no counterpart at the same index (the
-            // open scan has fewer/more blocks) is simply left unpaired.
+            // open scan has fewer/more blocks) is simply left unpaired. Item 6.10's uniform
+            // rigid-transform fix is ROTATION-specific (Decision 7) - VERTICAL/LATERAL's plain
+            // lerp is already a straight line and was never the source of the reported non-rigid
+            // motion, so no transform is fit here.
             int pairCount = Math.min(closedBlocks.size(), openBlocks.size());
             for (int i = 0; i < pairCount; i++) {
                 pairing.put(closedBlocks.get(i).getId(), openBlocks.get(i));
@@ -568,6 +576,60 @@ public class GateLoaderAdapter {
         gate.setOpenBlockPairing(pairing);
         LOGGER.fine("Gate " + gate.getName() + " paired " + pairing.size() + "/" + closedBlocks.size()
             + " closed block(s) to their scanned open-state counterpart");
+    }
+
+    /**
+     * Item 6.10 (Decision 7, ROTATION_GAP_FILL_DESIGN.md): fits one shared best-fit rigid
+     * rotation+translation from the closed/open pairing's world-position correspondences, once at
+     * door-load time, and stores it on the gate for {@code GateFrameCalculator} to use as the
+     * uniform mid-swing correction target - replacing the old per-block nearest-neighbor
+     * correction that let neighboring blocks disagree on how far they'd drifted. Also synthesizes
+     * a closed-side start point for every open-only block (one with no closed-side pairing at all)
+     * by inverse-transforming its real open-scan position back through that same fitted transform,
+     * so it can animate across the swing instead of only popping in at the open resting frame
+     * (item 6.9's accepted trade-off).
+     *
+     * <p>Leaves the gate's {@code fittedOpenTransform} null (today's pure procedural rotation,
+     * unchanged) when there are fewer than 3 non-collinear correspondence pairs to fit from - see
+     * {@link RigidTransform#fit}'s own degenerate-input contract.
+     */
+    private void fitRigidTransform(CachedGateDoor gate, List<BlockSnapshot> closedBlocks, List<BlockSnapshot> openBlocks,
+                                    Map<Integer, Integer> indexPairing, List<Vector> closedWorldPositions,
+                                    List<Vector> openWorldPositions) {
+        List<Vector> pairedClosed = new ArrayList<>();
+        List<Vector> pairedOpen = new ArrayList<>();
+        Set<Integer> pairedOpenIndices = new HashSet<>();
+        for (Map.Entry<Integer, Integer> entry : indexPairing.entrySet()) {
+            pairedClosed.add(closedWorldPositions.get(entry.getKey()));
+            pairedOpen.add(openWorldPositions.get(entry.getValue()));
+            pairedOpenIndices.add(entry.getValue());
+        }
+
+        RigidTransform transform = RigidTransform.fit(pairedClosed, pairedOpen);
+        gate.setFittedOpenTransform(transform);
+
+        if (transform == null) {
+            LOGGER.fine("Gate " + gate.getName() + " has too few/collinear open-scan pairing(s) ("
+                + pairedClosed.size() + ") to fit a rigid transform; ROTATION mid-swing motion falls "
+                + "back to pure procedural rotation.");
+            return;
+        }
+
+        Map<Integer, Vector> openOnlySynthesized = new HashMap<>();
+        for (int i = 0; i < openBlocks.size(); i++) {
+            if (pairedOpenIndices.contains(i)) {
+                continue;
+            }
+            BlockSnapshot openOnlyBlock = openBlocks.get(i);
+            Vector synthesizedClosedWorldPos = transform.applyInverse(openWorldPositions.get(i));
+            Vector synthesizedRelativePos = synthesizedClosedWorldPos.clone().subtract(gate.getAnchorPoint());
+            openOnlySynthesized.put(openOnlyBlock.getId(), synthesizedRelativePos);
+        }
+        gate.setOpenOnlyBlockSynthesizedRelativePositions(openOnlySynthesized);
+
+        LOGGER.fine("Gate " + gate.getName() + " fitted a rigid open-scan transform from "
+            + pairedClosed.size() + " pairing(s); synthesized closed-side start points for "
+            + openOnlySynthesized.size() + " open-only block(s)");
     }
 
     private List<GateBlockSnapshotDto> sortedBySortOrder(List<GateBlockSnapshotDto> dtos) {
