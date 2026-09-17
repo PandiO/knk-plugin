@@ -69,9 +69,13 @@ confirmed no `pom.xml` anywhere in the repo. Targets Paper API
   Locations, EnchantmentDefinitions, ItemBlueprints,
   MinecraftMaterialRefs, Domains, Health) — this confirms the V2→V3
   storage migration is complete for those entities.
-- WorldGuard/WorldEdit are still declared as `compileOnly` dependencies in
-  `knk-paper` (carried over from V1/V2). <<ASK HUMAN: are these still
-  actively used, or a leftover? Confirming would need a call-site search
-  across the codebase, which is out of scope for this doc pass — the
-  upcoming codebase scan should settle it.>>
+- WorldGuard/WorldEdit are actively used, not V1/V2 leftovers — confirmed
+  by the developer and by call sites: `WorldGuardIntegration.java`
+  (`integration/`) wraps WorldGuard's `RegionManager`/`RegionContainer` and
+  WorldEdit's `BukkitAdapter` for region-feasibility checks, and
+  `WorldGuardRegionTracker.java` (`regions/`) plus several `tasks/` handlers
+  (`GateDoorRegionCaptureHandler`, `GateBlockScanTaskHandler`,
+  `WgRegionIdTaskHandler`, `LocationTaskHandler`, `TempRegionRetentionTask`,
+  `GateRegionDataFormat`) build on it for gate-structure and world-task
+  region tracking.
 - Target Minecraft version: 1.21.10 (Paper).
