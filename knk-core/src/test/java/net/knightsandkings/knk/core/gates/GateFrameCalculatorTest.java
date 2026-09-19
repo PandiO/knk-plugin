@@ -831,4 +831,87 @@ class GateFrameCalculatorTest {
             "Residual at progress=0.5 should be a small fraction of its full magnitude (cubic taper: "
                 + "0.5^3=0.125), got " + residualAtHalf + " vs full " + fullResidualMagnitude);
     }
+
+    @Test
+    void calculateBlockPosition_RotationBlockConvergingToTarget_SnapsExactlyOnceWithinSnapDistance() {
+        // Item 6.11.2 (Decision 8, second follow-up): item 6.11.1's first attempt (a fixed
+        // progress threshold) turned out not to work - live testing showed the frame at which a
+        // collision risk actually materializes isn't a fixed fraction of the swing (frame 89 for
+        // one colliding pair, frame 84 for a different pair, on the very same door). The real fix
+        // is distance-based: once a block's blend has naturally converged to within SNAP_DISTANCE
+        // of its own real, by-definition-distinct target, it must snap to that target EXACTLY
+        // (never just "close") - close enough that Math.floor() cannot mistake it for a different
+        // real block's cell. Verified here empirically (walking every frame, not hand-predicting a
+        // boundary - the whole point is that the boundary isn't reliably predictable by a simple
+        // formula) rather than assuming a specific frame.
+        // Deliberately NOT buildRotationGateForBlend()'s usual fixture: its anchor is far from the
+        // world origin, and VectorMath.rotateAroundAxis rotates around the origin - combined with
+        // that fixture's large (50,0,150) fit translation, the resulting uniform-correction term
+        // ends up over 100 blocks for any test point, which swamps the small, realistic residual
+        // this test needs to isolate. An anchor near the origin keeps all the blend's terms at a
+        // believable, real-geometry scale instead.
+        CachedGateDoor rotationGate = new CachedGateDoor(
+            41, 41, "Drawbridge", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
+            90, 1,
+            new Vector(0, 64, 0), 0, 0, 0,
+            500.0, 500.0, true, false, true, 90,
+            "east"
+        );
+        rotationGate.setHingeAxis(new Vector(0, 0, 1));
+        rotationGate.setMotionVector(new Vector(0, 0, 0));
+        rotationGate.setOpenAnchorPoint(new Vector(0, 64, 0));
+
+        Vector axis = new Vector(0, 1, 0);
+        double angleDegrees = 30.0;
+        Vector translation = new Vector(5, 0, 3);
+        RigidTransform transform = fitExactRotationTransform(rotationGate, axis, angleDegrees, translation);
+        assertNotNull(transform);
+        rotationGate.setFittedOpenTransform(transform);
+
+        Vector outlierRelativePos = new Vector(2, 0, 1);
+        BlockSnapshot outlierClosedBlock = new BlockSnapshot(50, outlierRelativePos, 1, "minecraft:oak_log", 0);
+        // A moderate, realistic-scale mismatch (a couple of blocks, matching the live-observed
+        // correctionMag range) rather than the astronomical one used elsewhere in this file to
+        // isolate pure endpoint algebra - this one needs to actually cross the snap threshold
+        // partway through a normal swing, the way it does in practice. Offset from the shared
+        // transform's OWN prediction for this block (not from the anchor).
+        Vector transformPosForOutlier = transform.apply(rotationGate.getAnchorPoint().clone().add(outlierRelativePos));
+        Vector mismatchedOpenWorldPos = transformPosForOutlier.clone().add(new Vector(2, 0, 1));
+        BlockSnapshot outlierOpenBlock = new BlockSnapshot(51,
+            mismatchedOpenWorldPos.clone().subtract(rotationGate.getOpenAnchorPoint()), 1, "minecraft:oak_log", 0);
+        rotationGate.setOpenBlockPairing(Map.of(50, outlierOpenBlock));
+
+        int totalFrames = rotationGate.getAnimationDurationTicks();
+        int firstSnappedFrame = -1;
+        for (int frame = 0; frame <= totalFrames; frame++) {
+            Vector position = GateFrameCalculator.calculateBlockPosition(rotationGate, outlierClosedBlock, frame);
+            double distance = position.clone().subtract(mismatchedOpenWorldPos).length();
+            if (distance < EPSILON) {
+                firstSnappedFrame = frame;
+                break;
+            }
+        }
+
+        assertTrue(firstSnappedFrame >= 0 && firstSnappedFrame < totalFrames,
+            "block should snap to its exact target strictly before the true final frame (frame "
+                + totalFrames + "), found: " + firstSnappedFrame);
+
+        // Once snapped, it must stay exactly there for every subsequent frame - no un-snapping,
+        // no drift, matching the "holding, motionless" property the fix is meant to provide.
+        for (int frame = firstSnappedFrame; frame <= totalFrames; frame++) {
+            Vector position = GateFrameCalculator.calculateBlockPosition(rotationGate, outlierClosedBlock, frame);
+            double distance = position.clone().subtract(mismatchedOpenWorldPos).length();
+            assertEquals(0.0, distance, EPSILON, "frame " + frame);
+        }
+
+        // The frame immediately before the snap must NOT already be exactly at the target -
+        // proving this is a genuine distance-triggered transition, not the formula trivially being
+        // exact everywhere.
+        if (firstSnappedFrame > 0) {
+            Vector beforeSnap = GateFrameCalculator.calculateBlockPosition(rotationGate, outlierClosedBlock, firstSnappedFrame - 1);
+            double distanceBeforeSnap = beforeSnap.clone().subtract(mismatchedOpenWorldPos).length();
+            assertTrue(distanceBeforeSnap > EPSILON,
+                "frame " + (firstSnappedFrame - 1) + " (right before the snap) should not yet be exactly at target");
+        }
+    }
 }

@@ -190,15 +190,51 @@ public class GateFrameCalculator {
 
         Vector residual = null;
         Vector totalCorrection = uniformCorrection;
+        Vector position;
         if (openTarget != null) {
             double taper = residualTaper(progress);
             residual = openTarget.clone().subtract(transformPos).multiply(taper);
             totalCorrection = uniformCorrection.clone().add(residual);
+            Vector blended = arcPos.clone().add(totalCorrection);
+
+            // Item 6.11.2 (Decision 8, second follow-up, ROTATION_GAP_FILL_DESIGN.md): a FIXED
+            // progress threshold (item 6.11.1's first attempt) doesn't work, because the frame at
+            // which a block gets dangerously close to its real target isn't a fixed fraction of the
+            // swing - it depends on that specific block's own residual size and the neighboring
+            // blocks it might collide with, which live testing showed varies (frame 89 for one
+            // pair, frame 84 for a different pair, on the SAME door). Distance-based snapping
+            // instead: once the blend has naturally converged to within SNAP_DISTANCE of the real,
+            // by-definition-distinct target - close enough that Math.floor() (what actually decides
+            // a block's placed world cell) cannot possibly mistake it for any OTHER real target
+            // (every scanned block is at least 1 full block from its nearest neighbor on the
+            // integer lattice) - snap to it exactly, whichever frame that happens to occur on. This
+            // is what actually adapts to each block's own convergence rate instead of guessing a
+            // global timing constant that only fit the last failure observed.
+            if (blended.distanceSquared(openTarget) < SNAP_DISTANCE * SNAP_DISTANCE) {
+                position = openTarget.clone();
+            } else {
+                position = blended;
+            }
+        } else {
+            position = arcPos.clone().add(totalCorrection);
         }
 
-        Vector position = arcPos.clone().add(totalCorrection);
         return new RotationBlend(arcPos, totalCorrection, residual, position);
     }
+
+    /**
+     * Item 6.11.2's snap radius (Decision 8, second follow-up) - once a block with a real target
+     * has naturally converged (via {@link #blendRotationPosition}'s arc+uniform+residual blend) to
+     * within this many blocks of it, the position snaps to the target exactly instead of continuing
+     * to approach asymptotically. 0.5 is the largest radius that's still unconditionally safe: two
+     * distinct real scanned blocks are never less than 1 full block apart (they're on the integer
+     * lattice), so being within 0.5 of one target rules out ever being simultaneously within 0.5 of
+     * a different one - {@code Math.floor()} (what actually decides a block's placed world cell)
+     * can no longer be ambiguous about which real block this is. A smaller radius would still be
+     * correct but would shrink the window in which this protection applies for no benefit; a larger
+     * one would start risking exactly the ambiguity this exists to prevent.
+     */
+    private static final double SNAP_DISTANCE = 0.5;
 
     /**
      * Item 6.11's per-block residual taper (Decision 8, ROTATION_GAP_FILL_DESIGN.md) - deliberately
