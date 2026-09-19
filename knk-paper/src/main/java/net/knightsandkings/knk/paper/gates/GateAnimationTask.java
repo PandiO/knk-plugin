@@ -605,6 +605,36 @@ public class GateAnimationTask extends BukkitRunnable {
     }
 
     /**
+     * Vacates any cell this gate's blocks actually occupy (per {@link #lastPlacedCellsByGate},
+     * the same real-placement tracking item 6.8 introduced for the per-tick vacate step) that
+     * isn't part of the resting frame the animation is about to converge onto.
+     *
+     * <p>Needed because {@link GateRestingFramePlacer#transitionRestingFrame} only diffs the two
+     * *idealized* endpoint frames (the real closed `BlockSnapshot`s vs. the real open-scan list) -
+     * it has no visibility into anything the per-tick swing actually placed that isn't part of
+     * either idealized set. An open-only block's mid-swing position (item 6.10/6.11) is exactly
+     * such a case: it's driven by a *synthesized* closed-frame start point (an inverse-transform
+     * extrapolation, not a real scanned position), so a leftover placement there is invisible to
+     * both the real open resting frame (it's not that block's real position) and the real closed
+     * resting frame (open-only blocks were never part of the closed scan at all) - live testing
+     * confirmed exactly this: a stray block left behind after closing, at a position adjacent to
+     * but not part of the real closed structure. Vacating against the *actual* last-known cells
+     * first closes that gap generally, for any future case of this shape, not just this one.
+     */
+    private void vacateStrayCells(CachedGateDoor gate, int targetFrame) {
+        List<RestingCell> lastKnownCells = lastPlacedCellsByGate.get(gate.getId());
+        if (lastKnownCells == null || lastKnownCells.isEmpty()) {
+            return;
+        }
+
+        List<RestingCell> targetCells = GateRestingFramePlacer.restingFrameCells(gate, targetFrame, rasterizationEnabled);
+        List<RestingCell> stray = GateRestingFramePlacer.cellsToClear(lastKnownCells, targetCells);
+        for (RestingCell cell : stray) {
+            GateBlockPlacer.removeBlockIfMatches(world, cell.position(), cell.blockData(), fallbackMaterial);
+        }
+    }
+
+    /**
      * Finish opening animation for a gate.
      *
      * @param gate The gate that finished opening
@@ -624,6 +654,7 @@ public class GateAnimationTask extends BukkitRunnable {
         // transitionRestingFrame, which also clears any closed-frame rasterized filler blocks
         // that aren't part of the open frame (the per-tick swing above only vacates each
         // BlockSnapshot's own previous position, never Mechanism 1's extra filler cells).
+        vacateStrayCells(gate, gate.getAnimationDurationTicks());
         GateRestingFramePlacer.transitionRestingFrame(world, gate, 0, gate.getAnimationDurationTicks(), fallbackMaterial, rasterizationEnabled);
         resyncSpatialIndex(gate, gate.getCurrentFrame());
 
@@ -658,6 +689,7 @@ public class GateAnimationTask extends BukkitRunnable {
         // Ensure all gate blocks are placed at closed position, and clear any open-frame
         // rasterized filler blocks that aren't also part of the closed frame (see
         // transitionRestingFrame).
+        vacateStrayCells(gate, 0);
         GateRestingFramePlacer.transitionRestingFrame(world, gate, gate.getAnimationDurationTicks(), 0, fallbackMaterial, rasterizationEnabled);
         resyncSpatialIndex(gate, 0);
 

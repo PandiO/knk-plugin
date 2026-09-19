@@ -239,20 +239,22 @@ public class GateFrameCalculator {
     /**
      * Item 6.11's per-block residual taper (Decision 8, ROTATION_GAP_FILL_DESIGN.md) - deliberately
      * NOT plain {@code progress} (see {@link #blendRotationPosition}'s javadoc for the algebraic
-     * cancellation that would cause). A cubic ease-in: {@code f(0)=0, f(1)=1} (so endpoints stay
+     * cancellation that would cause). An ease-in curve: {@code f(0)=0, f(1)=1} (so endpoints stay
      * exact regardless of the exponent - a correctness-independent tuning choice, not a
-     * correctness requirement), while keeping a residual's visible contribution under ~13% through
-     * the first half of the swing (a well-fit block stays visually rigid alongside its neighbors
-     * for most of the animation) and reaching ~97% by {@code progress=0.989} (frame 89 of a
-     * 90-frame swing - the exact frame where entity 14's real geometry was observed to jam under
-     * the pure uniform-transform formula, per Decision 8's live-test evidence) - by the time a
-     * collision risk would materialize, the residual has already all but fully closed the gap that
-     * was causing it. Revisit this constant (not the shape of the formula) if a future door's live
-     * testing shows the catch-up motion happening too late (visible last-second snapping) or too
-     * early (loses rigidity too soon).
+     * correctness requirement, since {@link #SNAP_DISTANCE}'s snap is what actually guarantees no
+     * collision, not this taper). Raised from cubic to quintic (2026-09-19, live-testing feedback
+     * that the swing still wasn't rigid-looking enough): a well-fit block's residual contribution
+     * now stays under ~3% through the first half of the swing (was ~13% at cubic) and under ~10%
+     * through 70% of the swing (was ~34%) - a genuinely non-rigid outlier's individual catch-up
+     * motion is pushed even later and becomes more concentrated, while {@link #SNAP_DISTANCE}
+     * still independently guarantees exact, collision-free convergence regardless of how late that
+     * catch-up starts. Revisit this constant (not the shape of the formula, and not the snap
+     * mechanism, which is a separate and already-proven-safe guarantee) if live testing shows the
+     * catch-up motion is now too abrupt (a visible last-instant snap) rather than too early.
      */
     private static double residualTaper(double progress) {
-        return progress * progress * progress;
+        double squared = progress * progress;
+        return squared * squared * progress;
     }
 
     /** @see #calculateOpenOnlyBlockPositionBreakdown */
