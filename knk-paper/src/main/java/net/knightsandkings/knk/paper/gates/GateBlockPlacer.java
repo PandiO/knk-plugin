@@ -101,6 +101,7 @@ public class GateBlockPlacer {
         }
 
         if (isExpectedGateBlock(block, desired)) {
+            clearSnowLayerAbove(world, position);
             return placeBlock(world, position, blockData, fallbackMaterial);
         }
 
@@ -110,6 +111,7 @@ public class GateBlockPlacer {
             return false;
         }
 
+        clearSnowLayerAbove(world, position);
         return placeBlock(world, position, blockData, fallbackMaterial);
     }
 
@@ -140,7 +142,24 @@ public class GateBlockPlacer {
             return false;
         }
 
+        clearSnowLayerAbove(world, position);
         return removeBlock(world, position);
+    }
+
+    /**
+     * Silently clears a snow layer (not a solid snow block) directly above a gate block
+     * position, if one is present. Snow physics are disabled everywhere gate blocks are
+     * placed/removed ({@code setBlockData}/{@code setType} called with {@code applyPhysics=
+     * false}), so a snow layer resting on a gate block never gets its usual "break when
+     * unsupported" check when that gate block moves away - left unhandled, it hovers in
+     * mid-air. Presence/absence only, no item drop or layer-height tracking - see
+     * QOL_BUGFIX_BACKLOG.md #7.
+     */
+    private static void clearSnowLayerAbove(World world, Vector position) {
+        Block above = getBlockIfLoaded(world, position.clone().add(new Vector(0, 1, 0)));
+        if (above != null && above.getType() == Material.SNOW) {
+            above.setType(Material.AIR, false);
+        }
     }
 
     /**
