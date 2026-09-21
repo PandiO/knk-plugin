@@ -10,6 +10,7 @@ import net.knightsandkings.knk.core.menu.RuntimeMenuSection;
 import net.knightsandkings.knk.core.menu.SectionSlotAssignment;
 import net.knightsandkings.knk.paper.mapper.MaterialNamespaceResolver;
 import org.bukkit.Material;
+import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
@@ -47,9 +48,17 @@ public final class MenuRenderer {
      * Blocks (on already-off-main-thread async data-access calls) while
      * resolving material refs and building the desired slot contents. Do not
      * call this from the main thread.
+     * <p>
+     * {@code session.clearDirty()} is called once, after every item in this
+     * pass has had a chance to observe {@code ON_DIRTY} variables as stale
+     * (IMPLEMENTATION_PLAN.md Phase 3, DESIGN_REVIEW.md §1) - a single dirty
+     * flag must stay true for every binding in the pass that triggered it,
+     * not be consumed by whichever binding happens to resolve first.
      */
-    public MenuRenderResult computeState(RuntimeMenu menu, MenuSession session) {
+    public MenuRenderResult computeState(RuntimeMenu menu, MenuSession session, Player player) {
         Map<Integer, String> namespaceKeysByMaterialRefId = resolveMaterialNamespaceKeys(menu);
+        Map<String, Object> variableContext = MenuVariableContext.liveValues(player);
+        long currentTick = currentTick();
 
         Map<Integer, ItemStack> itemStacksBySlot = new HashMap<>();
         Map<Integer, RuntimeMenuItem> itemsBySlot = new HashMap<>();
@@ -66,7 +75,8 @@ public final class MenuRenderer {
                         ? namespaceKeysByMaterialRefId.get(item.materialRefId())
                         : null;
 
-                ItemStack itemStack = MenuItemBukkitMapper.toItemStack(item, namespaceKey);
+                ItemStack itemStack = MenuItemBukkitMapper.toItemStack(
+                        item, namespaceKey, session, variableContext, currentTick);
                 if (itemStack != null) {
                     itemStacksBySlot.put(entry.getKey(), itemStack);
                     itemsBySlot.put(entry.getKey(), item);
@@ -75,8 +85,19 @@ public final class MenuRenderer {
         }
 
         fillBackground(menu, namespaceKeysByMaterialRefId, itemStacksBySlot);
+        session.clearDirty();
 
         return new MenuRenderResult(Map.copyOf(itemStacksBySlot), Map.copyOf(itemsBySlot));
+    }
+
+    /**
+     * Approximate game ticks (1 tick = 50ms), used only as a monotonic clock
+     * for TTL-policy variables - {@code System.currentTimeMillis()}-based
+     * rather than {@code Bukkit.getCurrentTick()} so this doesn't depend on a
+     * specific Paper API version being present.
+     */
+    private static long currentTick() {
+        return System.currentTimeMillis() / 50L;
     }
 
     /** Must only be called from the main thread. */

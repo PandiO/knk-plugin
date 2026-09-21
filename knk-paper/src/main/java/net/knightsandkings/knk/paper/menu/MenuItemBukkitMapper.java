@@ -1,8 +1,9 @@
 package net.knightsandkings.knk.paper.menu;
 
 import net.knightsandkings.knk.core.menu.MenuDisplayMode;
-import net.knightsandkings.knk.core.menu.MenuVariablePlaceholderText;
+import net.knightsandkings.knk.core.menu.MenuSession;
 import net.knightsandkings.knk.core.menu.RuntimeMenuItem;
+import net.knightsandkings.knk.core.menu.VariableResolver;
 import net.knightsandkings.knk.paper.mapper.MaterialNamespaceResolver;
 import net.knightsandkings.knk.paper.utils.DisplayTextFormatter;
 import org.bukkit.ChatColor;
@@ -17,13 +18,15 @@ import org.bukkit.inventory.meta.ItemMeta;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.logging.Logger;
 
 /**
  * Converts an assembled {@link RuntimeMenuItem} into a Bukkit {@link ItemStack}
- * ready to place in an Inventory. Name/lore text is Phase 2's literal
- * placeholder (see {@link MenuVariablePlaceholderText}) - the binding's raw
- * Expression, not real variable resolution (Phase 3).
+ * ready to place in an Inventory. Name/lore text is resolved for real
+ * (IMPLEMENTATION_PLAN.md Phase 3) via {@link VariableResolver} - Phase 2's
+ * literal-placeholder stand-in ({@code MenuVariablePlaceholderText}) has been
+ * retired.
  * <p>
  * Kept in knk-paper (not knk-core) because it's the one place this phase
  * needs {@code Material}/{@code ItemStack} - DESIGN_REVIEW.md's "keep
@@ -44,8 +47,16 @@ public final class MenuItemBukkitMapper {
      *                              no material ref set / it couldn't be resolved - falls back
      *                              to {@link #FALLBACK_MATERIAL} rather than failing the whole
      *                              render (NFR-3.2.3's "safe fallback for missing data").
+     * @param session               the clicking player's session - {@link VariableResolver}
+     *                              caches resolved variables here, keyed by binding id.
+     * @param contextValues         live root variables (e.g. {@code "player" -> Player}) that
+     *                              {@code $x.y$} getter chains resolve against - see
+     *                              {@link MenuVariableContext#liveValues}.
+     * @param currentTick           the render pass's "now", for TTL-policy bindings - one value
+     *                              shared across every item in the same pass.
      */
-    public static ItemStack toItemStack(RuntimeMenuItem item, String materialNamespaceKey) {
+    public static ItemStack toItemStack(RuntimeMenuItem item, String materialNamespaceKey, MenuSession session,
+                                         Map<String, Object> contextValues, long currentTick) {
         if (item.displayMode() == MenuDisplayMode.HIDDEN) {
             return null;
         }
@@ -64,8 +75,8 @@ public final class MenuItemBukkitMapper {
 
         ItemMeta meta = itemStack.getItemMeta();
         if (meta != null) {
-            applyName(item, meta);
-            applyLore(item, meta);
+            applyName(item, meta, session, contextValues, currentTick);
+            applyLore(item, meta, session, contextValues, currentTick);
             applyDisplayModeStyling(item, meta);
             itemStack.setItemMeta(meta);
         }
@@ -73,8 +84,9 @@ public final class MenuItemBukkitMapper {
         return itemStack;
     }
 
-    private static void applyName(RuntimeMenuItem item, ItemMeta meta) {
-        String name = MenuVariablePlaceholderText.resolveName(item.variableBindings());
+    private static void applyName(RuntimeMenuItem item, ItemMeta meta, MenuSession session,
+                                   Map<String, Object> contextValues, long currentTick) {
+        String name = VariableResolver.resolveName(item.variableBindings(), session, contextValues, currentTick);
         if (name == null) {
             return;
         }
@@ -83,8 +95,9 @@ public final class MenuItemBukkitMapper {
         meta.setDisplayName(DisplayTextFormatter.translateToLegacy(colored));
     }
 
-    private static void applyLore(RuntimeMenuItem item, ItemMeta meta) {
-        List<String> loreLines = MenuVariablePlaceholderText.resolveLore(item.variableBindings());
+    private static void applyLore(RuntimeMenuItem item, ItemMeta meta, MenuSession session,
+                                   Map<String, Object> contextValues, long currentTick) {
+        List<String> loreLines = VariableResolver.resolveLore(item.variableBindings(), session, contextValues, currentTick);
         List<String> lore = new ArrayList<>(loreLines.size() + 1);
         for (String line : loreLines) {
             String colored = item.chatColorDescription() != null ? prefixColor(item.chatColorDescription(), line) : line;

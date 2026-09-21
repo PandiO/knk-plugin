@@ -28,6 +28,7 @@ public final class MenuSession {
     private final Instant createdAt;
     private final Deque<String> menuKeyHistory = new ArrayDeque<>();
     private final Map<Integer, Integer> sectionPages = new ConcurrentHashMap<>();
+    private final Map<Integer, CachedVariable> variableCache = new ConcurrentHashMap<>();
     private volatile String currentMenuKey;
     private volatile boolean dirty;
 
@@ -108,11 +109,37 @@ public final class MenuSession {
         dirty = true;
     }
 
+    /**
+     * Called once per render pass (by {@code MenuRenderer}, after every
+     * item's variables have had a chance to observe {@link #isDirty()} as
+     * true) - not by {@link VariableResolver} itself, since a single dirty
+     * flag must stay true for every binding in the pass that triggered it,
+     * not be consumed by whichever binding happens to check it first.
+     */
     public void clearDirty() {
         dirty = false;
     }
 
     public boolean isDirty() {
         return dirty;
+    }
+
+    /**
+     * A resolved {@link VariableResolver} result, cached here (not on the
+     * {@code KnkVariableBinding}/{@code RuntimeMenuItem} instance that
+     * produced it) because those are rebuilt fresh from the database on
+     * every menu open/page turn - an instance-held cache would never survive
+     * past a single render. Keyed by the binding's stable persisted id, which
+     * does survive reassembly.
+     */
+    public record CachedVariable(String value, long resolvedAtTick) {
+    }
+
+    public Optional<CachedVariable> getCachedVariable(int bindingId) {
+        return Optional.ofNullable(variableCache.get(bindingId));
+    }
+
+    public void cacheVariable(int bindingId, CachedVariable value) {
+        variableCache.put(bindingId, value);
     }
 }

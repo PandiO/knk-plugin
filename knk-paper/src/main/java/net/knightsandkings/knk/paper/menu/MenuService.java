@@ -15,8 +15,10 @@ import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.plugin.Plugin;
 
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -42,6 +44,7 @@ public final class MenuService {
     private final MenuSessionRegistry sessionRegistry;
     private final OpenMenuContextRegistry openMenuContextRegistry;
     private final MenuRenderer renderer;
+    private final Map<String, String> blockedMenus = new ConcurrentHashMap<>();
 
     public MenuService(
             Plugin plugin,
@@ -133,7 +136,7 @@ public final class MenuService {
 
     /** Must be called off the main thread - blocks on {@link MenuRenderer#computeState}. */
     private void renderAndOpen(Player player, RuntimeMenu menu, MenuSession session) {
-        MenuRenderResult result = renderer.computeState(menu, session);
+        MenuRenderResult result = renderer.computeState(menu, session, player);
 
         Bukkit.getScheduler().runTask(plugin, () -> {
             Optional<OpenMenuContext> existing = openMenuContextRegistry.get(player.getUniqueId());
@@ -155,6 +158,12 @@ public final class MenuService {
 
     /** Must be called off the main thread. Returns null (having already messaged the player) on failure. */
     private RuntimeMenu loadAndAssemble(Player player, String templateKey) {
+        String blockedReason = blockedMenus.get(templateKey);
+        if (blockedReason != null) {
+            failToOpen(player, templateKey, "blocked at startup validation: " + blockedReason, null);
+            return null;
+        }
+
         try {
             KnkMenuTemplate template = menuTemplatesDataAccess.getByKeyAsync(templateKey).join().value()
                     .orElseThrow(() -> new MenuAssemblyException("Menu template '" + templateKey + "' was not found"));
@@ -182,5 +191,22 @@ public final class MenuService {
     public void closeSession(UUID playerId) {
         openMenuContextRegistry.close(playerId);
         sessionRegistry.close(playerId);
+    }
+
+    /**
+     * Marks a menu key as broken (IMPLEMENTATION_PLAN.md Phase 3,
+     * {@link MenuDefinitionValidationRunner}, run once at plugin enable) so
+     * every subsequent open attempt refuses immediately with a clear reason,
+     * rather than re-discovering (and re-paying the reflection cost of) the
+     * same failure on every player's click - DESIGN_REVIEW.md §1's "a menu
+     * with unresolved bindings refuses to register" per-menu failure policy.
+     */
+    public void blockMenu(String templateKey, String reason) {
+        blockedMenus.put(templateKey, reason != null ? reason : "failed startup validation");
+    }
+
+    /** Currently-blocked menu keys and why, for admin visibility (e.g. {@code /knk menu broken}). */
+    public Map<String, String> blockedMenus() {
+        return Map.copyOf(blockedMenus);
     }
 }

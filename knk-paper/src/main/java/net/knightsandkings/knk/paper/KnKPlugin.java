@@ -32,6 +32,7 @@ import net.knightsandkings.knk.core.dataaccess.MenuTemplatesDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
 import net.knightsandkings.knk.core.menu.MenuSessionRegistry;
 import net.knightsandkings.knk.paper.menu.MenuClickListener;
+import net.knightsandkings.knk.paper.menu.MenuDefinitionValidationRunner;
 import net.knightsandkings.knk.paper.menu.MenuLifecycleListener;
 import net.knightsandkings.knk.paper.menu.MenuRenderer;
 import net.knightsandkings.knk.paper.menu.MenuService;
@@ -370,6 +371,14 @@ public class KnKPlugin extends JavaPlugin {
                 new MenuLifecycleListener(menuService, openMenuContextRegistry), this
             );
             getLogger().info("InventoryMenu rendering engine initialized (Phase 2)");
+
+            // InventoryMenu Phase 3 (docs/specs/inventory-menu/IMPLEMENTATION_PLAN.md,
+            // DESIGN_REVIEW.md §1): validate every registered menu's variable bindings now,
+            // at enable, not lazily on first render - a broken menu is blocked in menuService
+            // and refuses to open for any player, rather than surfacing as a silent blank/
+            // literal-text tooltip the first time someone happens to open it.
+            MenuDefinitionValidationRunner.runAtStartup(menuTemplatesDataAccess, menuService, getLogger());
+            getLogger().info("InventoryMenu variable resolution + load-time validation initialized (Phase 3)");
 
             initializeEnchantmentRuntime();
             getLogger().info("Registered custom enchantment runtime listeners and /ce command");
