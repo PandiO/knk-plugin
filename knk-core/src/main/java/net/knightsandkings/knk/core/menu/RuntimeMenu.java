@@ -23,7 +23,14 @@ public record RuntimeMenu(
         return height * MenuSlotCalculator.MENU_WIDTH;
     }
 
+    /**
+     * Case-insensitive on purpose: the only current caller is a human typing a
+     * section name into a chat command ({@code MenuDebugCommand}'s
+     * {@code /knk menu page next|prev <sectionName>}), not code matching
+     * against a stored identifier - a section's persisted {@code Name} is
+     * still an exact, case-preserving value everywhere else.
+     */
     public Optional<RuntimeMenuSection> findSection(String name) {
-        return sections.stream().filter(section -> section.name().equals(name)).findFirst();
+        return sections.stream().filter(section -> section.name().equalsIgnoreCase(name)).findFirst();
     }
 }
