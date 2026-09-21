@@ -8,7 +8,6 @@ import org.bukkit.inventory.meta.ItemMeta;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 public final class ItemBlueprintBukkitMapper {
 
@@ -20,7 +19,7 @@ public final class ItemBlueprintBukkitMapper {
             throw new IllegalArgumentException("blueprint must not be null");
         }
 
-        Material material = resolveMaterial(materialNamespaceKey);
+        Material material = MaterialNamespaceResolver.resolve(materialNamespaceKey);
         if (material == null) {
             throw new IllegalArgumentException("Unknown material namespace key: " + materialNamespaceKey);
         }
@@ -61,28 +60,5 @@ public final class ItemBlueprintBukkitMapper {
         }
 
         return lore;
-    }
-
-    private static Material resolveMaterial(String namespaceKey) {
-        if (namespaceKey == null || namespaceKey.isBlank()) {
-            return null;
-        }
-
-        Material direct = Material.matchMaterial(namespaceKey);
-        if (direct != null) {
-            return direct;
-        }
-
-        String keyPart = namespaceKey.contains(":")
-                ? namespaceKey.substring(namespaceKey.indexOf(':') + 1)
-                : namespaceKey;
-
-        Material byKeyPart = Material.matchMaterial(keyPart);
-        if (byKeyPart != null) {
-            return byKeyPart;
-        }
-
-        String enumToken = keyPart.toUpperCase(Locale.ROOT).replace('-', '_');
-        return Material.matchMaterial(enumToken);
     }
 }

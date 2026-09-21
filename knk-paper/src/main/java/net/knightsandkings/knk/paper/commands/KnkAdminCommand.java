@@ -17,6 +17,7 @@ import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.api.GateStructuresApi;
 import net.knightsandkings.knk.api.GateDoorsApi;
 import net.knightsandkings.knk.paper.gates.DistrictGateLoader;
+import net.knightsandkings.knk.paper.menu.MenuService;
 import net.knightsandkings.knk.paper.tasks.GateDoorRegionCaptureHandler;
 import net.knightsandkings.knk.paper.tasks.WorldTaskHandlerRegistry;
 import net.knightsandkings.knk.paper.cache.CacheManager;
@@ -85,7 +86,8 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
             UsersCommandApi usersCommandApi,
             DistrictGateLoader districtGateLoader,
             GateDoorRegionCaptureHandler gateDoorRegionCaptureHandler,
-            String serverId
+            String serverId,
+            MenuService menuService
     ) {
                 this.plugin = plugin;
                 this.enchantmentDefinitionsDataAccess = enchantmentDefinitionsDataAccess;
@@ -221,7 +223,28 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                 (sender, args) -> itemBlueprintsCommand.onCommand(sender, null, "knk", args),
                 "itemblueprint"
         );
-        
+
+        // InventoryMenu Phase 2 dev harness (docs/specs/inventory-menu/IMPLEMENTATION_PLAN.md) -
+        // no real menu content exists yet to trigger this from, so this is the only way to open
+        // a menu and verify assembly/layout/pagination/async-rendering on a live server.
+        if (menuService != null) {
+            MenuDebugCommand menuCommand = new MenuDebugCommand(menuService);
+            registry.register(
+                    new CommandMetadata(
+                            "menu",
+                            "Open a menu template / page through its sections (Phase 2 dev harness)",
+                            "/knk menu open <key> | /knk menu page next|prev <sectionName>",
+                            "knk.admin",
+                            List.of(
+                                    "/knk menu open example.placeholder",
+                                    "/knk menu page next content",
+                                    "/knk menu page prev content"
+                            )
+                    ),
+                    (sender, args) -> menuCommand.onCommand(sender, null, "knk", args)
+            );
+        }
+
         // Register streets
         StreetsDebugCommand streetsCommand = new StreetsDebugCommand(plugin, streetsApi);
         registry.register(

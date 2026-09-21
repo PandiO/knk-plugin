@@ -30,6 +30,12 @@ import net.knightsandkings.knk.core.dataaccess.EnchantmentDefinitionsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.ItemBlueprintsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MenuTemplatesDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
+import net.knightsandkings.knk.core.menu.MenuSessionRegistry;
+import net.knightsandkings.knk.paper.menu.MenuClickListener;
+import net.knightsandkings.knk.paper.menu.MenuLifecycleListener;
+import net.knightsandkings.knk.paper.menu.MenuRenderer;
+import net.knightsandkings.knk.paper.menu.MenuService;
+import net.knightsandkings.knk.paper.menu.OpenMenuContextRegistry;
 import net.knightsandkings.knk.core.ports.api.StructuresQueryApi;
 import net.knightsandkings.knk.core.ports.api.TownsQueryApi;
 import net.knightsandkings.knk.core.ports.api.UserAccountApi;
@@ -110,6 +116,9 @@ public class KnKPlugin extends JavaPlugin {
     private ItemBlueprintsDataAccess itemBlueprintsDataAccess;
     private MenuTemplatesDataAccess menuTemplatesDataAccess;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
+    private MenuSessionRegistry menuSessionRegistry;
+    private OpenMenuContextRegistry openMenuContextRegistry;
+    private MenuService menuService;
     private WorldTasksApi worldTasksApi;
     private GateStructuresApi gateStructuresApi;
     private GateDoorsApi gateDoorsApi;
@@ -348,6 +357,20 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().info("Cache manager initialized with TTL: " + config.cache().ttl());
             getLogger().info("Data access factory initialized with entity-specific settings");
 
+            // InventoryMenu Phase 2 (docs/specs/inventory-menu/IMPLEMENTATION_PLAN.md):
+            // rendering engine wiring, built on Phase 1's menuTemplatesDataAccess above.
+            this.menuSessionRegistry = new MenuSessionRegistry();
+            this.openMenuContextRegistry = new OpenMenuContextRegistry();
+            MenuRenderer menuRenderer = new MenuRenderer(minecraftMaterialRefsDataAccess);
+            this.menuService = new MenuService(
+                this, menuTemplatesDataAccess, menuSessionRegistry, openMenuContextRegistry, menuRenderer
+            );
+            getServer().getPluginManager().registerEvents(new MenuClickListener(openMenuContextRegistry), this);
+            getServer().getPluginManager().registerEvents(
+                new MenuLifecycleListener(menuService, openMenuContextRegistry), this
+            );
+            getLogger().info("InventoryMenu rendering engine initialized (Phase 2)");
+
             initializeEnchantmentRuntime();
             getLogger().info("Registered custom enchantment runtime listeners and /ce command");
 
@@ -539,6 +562,14 @@ public class KnKPlugin extends JavaPlugin {
     public CacheManager getCacheManager() {
         return cacheManager;
     }
+
+    /**
+     * InventoryMenu Phase 2 (docs/specs/inventory-menu/IMPLEMENTATION_PLAN.md)
+     * rendering-engine entry point.
+     */
+    public MenuService getMenuService() {
+        return menuService;
+    }
     
     /**
      * Returns the WorldTask handler registry for accessing registered handlers.
@@ -576,7 +607,8 @@ public class KnKPlugin extends JavaPlugin {
                 usersCommandApi,
                 districtGateLoader,
                 gateDoorRegionCaptureHandler,
-                serverId
+                serverId,
+                menuService
             );
             knkCommand.setExecutor(knkAdminCommand);
             knkCommand.setTabCompleter(knkAdminCommand);
