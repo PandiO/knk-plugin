@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Predicate;
 import java.util.logging.Logger;
 
 /**
@@ -54,10 +55,21 @@ public final class MenuItemBukkitMapper {
      *                              {@link MenuVariableContext#liveValues}.
      * @param currentTick           the render pass's "now", for TTL-policy bindings - one value
      *                              shared across every item in the same pass.
+     * @param permissionChecker     resolves a permission node against the clicking player, via
+     *                              Bukkit's own {@code Permissible.hasPermission(String)}
+     *                              (IMPLEMENTATION_PLAN.md Phase 4) - no hard dependency on a
+     *                              specific permission plugin, per DESIGN_REVIEW.md's
+     *                              PermissionsEx-independence rationale.
      */
     public static ItemStack toItemStack(RuntimeMenuItem item, String materialNamespaceKey, MenuSession session,
-                                         Map<String, Object> contextValues, long currentTick) {
+                                         Map<String, Object> contextValues, long currentTick,
+                                         Predicate<String> permissionChecker) {
         if (item.displayMode() == MenuDisplayMode.HIDDEN) {
+            return null;
+        }
+        // visibilityPermission gets the same treatment as HIDDEN: excluded from
+        // rendering entirely, not just visually marked (DESIGN_REVIEW.md §2.4).
+        if (!item.isVisibleTo(permissionChecker)) {
             return null;
         }
 
@@ -73,10 +85,12 @@ public final class MenuItemBukkitMapper {
         ItemStack itemStack = new ItemStack(material);
         itemStack.setAmount(Math.max(1, Math.min(item.amount(), itemStack.getMaxStackSize())));
 
+        boolean actionDenied = !item.isActionAllowedFor(permissionChecker);
+
         ItemMeta meta = itemStack.getItemMeta();
         if (meta != null) {
             applyName(item, meta, session, contextValues, currentTick);
-            applyLore(item, meta, session, contextValues, currentTick);
+            applyLore(item, meta, session, contextValues, currentTick, actionDenied);
             applyDisplayModeStyling(item, meta);
             itemStack.setItemMeta(meta);
         }
@@ -96,7 +110,7 @@ public final class MenuItemBukkitMapper {
     }
 
     private static void applyLore(RuntimeMenuItem item, ItemMeta meta, MenuSession session,
-                                   Map<String, Object> contextValues, long currentTick) {
+                                   Map<String, Object> contextValues, long currentTick, boolean actionDenied) {
         List<String> loreLines = VariableResolver.resolveLore(item.variableBindings(), session, contextValues, currentTick);
         List<String> lore = new ArrayList<>(loreLines.size() + 1);
         for (String line : loreLines) {
@@ -104,7 +118,12 @@ public final class MenuItemBukkitMapper {
             lore.add(DisplayTextFormatter.translateToLegacy(colored));
         }
 
-        if (item.displayMode() == MenuDisplayMode.DISABLED) {
+        // actionPermission reuses the same "(Unavailable)" DISABLED styling as an
+        // explicit DISABLED displayMode (IMPLEMENTATION_PLAN.md Phase 4) - this is
+        // the render-time half of DESIGN_REVIEW.md §2.4's "visible to everyone,
+        // actionable only by some" case: independent of visibilityPermission,
+        // which is enforced earlier by excluding the item from rendering entirely.
+        if (item.displayMode() == MenuDisplayMode.DISABLED || actionDenied) {
             lore.add(DISABLED_LORE_LINE);
         }
 

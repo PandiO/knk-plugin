@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 
 /**
  * The rendered-instance side of {@code KnkMenuSectionTemplate} (FR-2.1.2).
@@ -113,5 +114,19 @@ public record RuntimeMenuSection(
         boolean hasPrev = totalPages > 0 && page > 0;
 
         return new SectionSlotAssignment(Map.copyOf(slotAssignments), page, totalPages, hasNext, hasPrev);
+    }
+
+    /**
+     * IMPLEMENTATION_PLAN.md Phase 4 / DESIGN_REVIEW.md §2.4: whether this
+     * whole section should render for a player. A null/blank
+     * {@link #visibilityPermission} means "no restriction". Sections have no
+     * {@code actionPermission} - they aren't clickable themselves, only their
+     * items are. Denying here means hiding every item in the section, not
+     * gating each item individually - the caller (knk-paper's
+     * {@code MenuRenderer}) skips the whole section rather than calling
+     * {@link #resolveSlots} at all when this returns false.
+     */
+    public boolean isVisibleTo(Predicate<String> permissionChecker) {
+        return visibilityPermission == null || visibilityPermission.isBlank() || permissionChecker.test(visibilityPermission);
     }
 }

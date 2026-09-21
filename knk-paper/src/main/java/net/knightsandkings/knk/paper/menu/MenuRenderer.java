@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Predicate;
 
 /**
  * Computes and applies a {@link RuntimeMenu}'s Inventory contents for one
@@ -58,6 +59,7 @@ public final class MenuRenderer {
     public MenuRenderResult computeState(RuntimeMenu menu, MenuSession session, Player player) {
         Map<Integer, String> namespaceKeysByMaterialRefId = resolveMaterialNamespaceKeys(menu);
         Map<String, Object> variableContext = MenuVariableContext.liveValues(player);
+        Predicate<String> permissionChecker = player::hasPermission;
         long currentTick = currentTick();
 
         Map<Integer, ItemStack> itemStacksBySlot = new HashMap<>();
@@ -68,6 +70,13 @@ public final class MenuRenderer {
                 .toList();
 
         for (RuntimeMenuSection section : sectionsByRenderOrder) {
+            // IMPLEMENTATION_PLAN.md Phase 4 - a section the player lacks
+            // visibilityPermission for is skipped entirely, hiding every item in
+            // it rather than gating each item individually (DESIGN_REVIEW.md §2.4).
+            if (!section.isVisibleTo(permissionChecker)) {
+                continue;
+            }
+
             SectionSlotAssignment assignment = section.resolveSlots(menu.totalSlots(), session.getPage(section.id()));
             for (Map.Entry<Integer, RuntimeMenuItem> entry : assignment.itemsBySlot().entrySet()) {
                 RuntimeMenuItem item = entry.getValue();
@@ -76,7 +85,7 @@ public final class MenuRenderer {
                         : null;
 
                 ItemStack itemStack = MenuItemBukkitMapper.toItemStack(
-                        item, namespaceKey, session, variableContext, currentTick);
+                        item, namespaceKey, session, variableContext, currentTick, permissionChecker);
                 if (itemStack != null) {
                     itemStacksBySlot.put(entry.getKey(), itemStack);
                     itemsBySlot.put(entry.getKey(), item);

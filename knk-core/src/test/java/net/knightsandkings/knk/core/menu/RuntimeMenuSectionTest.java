@@ -131,4 +131,28 @@ class RuntimeMenuSectionTest {
         assertFalse(assignment.hasNextPage());
         assertFalse(assignment.hasPreviousPage());
     }
+
+    /**
+     * IMPLEMENTATION_PLAN.md Phase 4 / DESIGN_REVIEW.md §2.4: a section's
+     * visibilityPermission is a whole-section gate, closing reconciliation
+     * gap #10 (v2's debug-only Caches button had no permission gate at all).
+     */
+    @Test
+    void nullVisibilityPermissionIsAlwaysVisible() {
+        RuntimeMenuSection section = section(MenuOverflowMode.HIDE, List.of());
+
+        assertTrue(section.isVisibleTo(node -> false));
+    }
+
+    @Test
+    void nonNullVisibilityPermissionDelegatesToChecker() {
+        RuntimeMenuSection base = section(MenuOverflowMode.HIDE, List.of());
+        RuntimeMenuSection gated = new RuntimeMenuSection(base.id(), base.name(), base.kind(), base.sortOrder(),
+                base.displaySlot(), base.width(), base.height(), base.positionMode(), base.alignVertical(),
+                base.alignHorizontal(), base.overflow(), base.listMode(), base.priority(),
+                "knk.menu.example.debug", base.items(), base.variableBindings());
+
+        assertFalse(gated.isVisibleTo(node -> false));
+        assertTrue(gated.isVisibleTo(node -> node.equals("knk.menu.example.debug")));
+    }
 }

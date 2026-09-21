@@ -20,8 +20,14 @@ import java.util.logging.Logger;
  * Deliberately does not execute {@code item.actions()} - wiring
  * {@code ActionRegistry} is Phase 6's job (IMPLEMENTATION_PLAN.md). This
  * phase's click pipeline exists so the routing itself (identify which item
- * was clicked, respect DISABLED/HIDDEN) is in place and testable end-to-end
- * against a live menu, without pulling action execution forward.
+ * was clicked, respect DISABLED/HIDDEN, and reject a click actionPermission
+ * denies) is in place and testable end-to-end against a live menu, without
+ * pulling action execution forward.
+ * <p>
+ * The {@code actionPermission} check here is IMPLEMENTATION_PLAN.md Phase 4's
+ * click-time defense-in-depth half of DESIGN_REVIEW.md §2.4: render-time
+ * hiding/disabling (see {@code MenuItemBukkitMapper}) is never trusted alone,
+ * in case of a stale client view or any other client/timing edge case.
  */
 public final class MenuClickListener implements Listener {
 
@@ -62,6 +68,19 @@ public final class MenuClickListener implements Listener {
 
         RuntimeMenuItem item = context.get().itemsBySlot().get(event.getSlot());
         if (item == null || item.displayMode() == MenuDisplayMode.DISABLED || item.displayMode() == MenuDisplayMode.HIDDEN) {
+            return;
+        }
+
+        if (!item.isVisibleTo(player::hasPermission)) {
+            // Defense in depth (DESIGN_REVIEW.md §2.4) - render-time exclusion
+            // should already make this unreachable (the item wouldn't be in
+            // itemsBySlot at all), but never trust that alone.
+            return;
+        }
+
+        if (!item.isActionAllowedFor(player::hasPermission)) {
+            LOGGER.fine(() -> "Player " + player.getName() + " lacks actionPermission '" + item.actionPermission()
+                    + "' for menu item (id " + item.id() + "); click rejected");
             return;
         }
 

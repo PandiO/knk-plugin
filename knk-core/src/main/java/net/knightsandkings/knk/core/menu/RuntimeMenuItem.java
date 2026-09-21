@@ -5,6 +5,7 @@ import net.knightsandkings.knk.core.domain.menu.KnkConditionBinding;
 import net.knightsandkings.knk.core.domain.menu.KnkVariableBinding;
 
 import java.util.List;
+import java.util.function.Predicate;
 
 /**
  * The rendered-instance side of {@code KnkMenuItemTemplate} (FR-2.1.3):
@@ -35,4 +36,32 @@ public record RuntimeMenuItem(
         List<KnkActionBinding> actions,
         List<KnkConditionBinding> conditions
 ) {
+
+    /**
+     * IMPLEMENTATION_PLAN.md Phase 4 / DESIGN_REVIEW.md §2.4: whether this item
+     * should render at all for a player. A null/blank {@link #visibilityPermission}
+     * means "no restriction" - independent of {@link #isActionAllowedFor}, since
+     * a node can be visible to everyone but actionable only by some (or vice
+     * versa). The {@code permissionChecker} is a {@code String -> boolean}
+     * function rather than a live Bukkit type so this stays testable without
+     * Bukkit on the classpath; knk-paper supplies {@code player::hasPermission}.
+     */
+    public boolean isVisibleTo(Predicate<String> permissionChecker) {
+        return isAllowed(visibilityPermission, permissionChecker);
+    }
+
+    /**
+     * Whether a click on this item should be allowed to proceed for a player -
+     * checked independently of {@link #isVisibleTo}, and re-checked at click
+     * time (not just render time) per DESIGN_REVIEW.md §2.4's defense-in-depth
+     * requirement: never trust that render-time hiding/disabling alone was
+     * sufficient.
+     */
+    public boolean isActionAllowedFor(Predicate<String> permissionChecker) {
+        return isAllowed(actionPermission, permissionChecker);
+    }
+
+    private static boolean isAllowed(String permissionNode, Predicate<String> permissionChecker) {
+        return permissionNode == null || permissionNode.isBlank() || permissionChecker.test(permissionNode);
+    }
 }
