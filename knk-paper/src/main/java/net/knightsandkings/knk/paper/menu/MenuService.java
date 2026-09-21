@@ -19,6 +19,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 /**
  * Paper-side orchestrator tying together the Phase 1 data access, the Phase 2
@@ -59,37 +60,30 @@ public final class MenuService {
 
     public void openMenu(Player player, String templateKey) {
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            RuntimeMenu menu;
-            try {
-                KnkMenuTemplate template = menuTemplatesDataAccess.getByKeyAsync(templateKey).join().value()
-                        .orElseThrow(() -> new MenuAssemblyException("Menu template '" + templateKey + "' was not found"));
-                menu = MenuTemplateAssembler.assemble(template);
-            } catch (MenuAssemblyException e) {
-                failToOpen(player, templateKey, e.getMessage(), null);
-                return;
-            } catch (Exception e) {
-                failToOpen(player, templateKey, e.getMessage(), e);
+            RuntimeMenu menu = loadAndAssemble(player, templateKey);
+            if (menu == null) {
                 return;
             }
 
             MenuSession session = sessionRegistry.open(player.getUniqueId());
             session.navigateTo(menu.key());
 
-            RuntimeMenu finalMenu = menu;
-            MenuRenderResult result = renderer.computeState(finalMenu, session);
-
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                Inventory inventory = Bukkit.createInventory(null, finalMenu.totalSlots(),
-                        DisplayTextFormatter.toComponent(finalMenu.title()));
-                renderer.applyToInventory(inventory, result);
-                player.openInventory(inventory);
-                openMenuContextRegistry.register(player.getUniqueId(),
-                        new OpenMenuContext(player, inventory, finalMenu, result.itemsBySlot()));
-            });
+            renderAndOpen(player, menu, session);
         });
     }
 
-    /** Advances {@code sectionName}'s page and re-renders into the already-open Inventory. */
+    /**
+     * Advances {@code sectionName}'s page. Re-renders into the already-open
+     * Inventory when the player still has the menu open; otherwise re-fetches
+     * and reopens it fresh with the new page. The fallback isn't an edge case
+     * - it's the common case for this command specifically: vanilla Minecraft
+     * doesn't let a player type a chat command while a custom Inventory
+     * screen has focus, so by the time {@code /knk menu page next <section>}
+     * actually runs, {@link MenuLifecycleListener}'s {@code InventoryCloseEvent}
+     * handler has already cleared the {@link OpenMenuContext}. The
+     * {@code MenuSession} (current menu key, per-section page) survives that
+     * close regardless, which is exactly what makes the fallback possible.
+     */
     public void nextPage(Player player, String sectionName) {
         changePage(player, sectionName, true);
     }
@@ -99,40 +93,79 @@ public final class MenuService {
     }
 
     private void changePage(Player player, String sectionName, boolean forward) {
-        Optional<OpenMenuContext> context = openMenuContextRegistry.get(player.getUniqueId());
-        Optional<MenuSession> session = sessionRegistry.get(player.getUniqueId());
-        if (context.isEmpty() || session.isEmpty()) {
+        Optional<MenuSession> sessionOpt = sessionRegistry.get(player.getUniqueId());
+        Optional<String> currentMenuKey = sessionOpt.flatMap(MenuSession::currentMenuKey);
+        if (sessionOpt.isEmpty() || currentMenuKey.isEmpty()) {
+            player.sendMessage(ChatColor.YELLOW + "You don't have a menu open.");
             return;
         }
+        MenuSession session = sessionOpt.get();
 
-        RuntimeMenu menu = context.get().menu();
-        Optional<RuntimeMenuSection> section = menu.findSection(sectionName);
-        if (section.isEmpty()) {
-            return;
-        }
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            RuntimeMenu menu = loadAndAssemble(player, currentMenuKey.get());
+            if (menu == null) {
+                return;
+            }
 
-        int sectionId = section.get().id();
-        int currentTotalPages = section.get()
-                .resolveSlots(menu.totalSlots(), session.get().getPage(sectionId))
-                .totalPages();
+            Optional<RuntimeMenuSection> section = menu.findSection(sectionName);
+            if (section.isEmpty()) {
+                String available = menu.sections().stream().map(RuntimeMenuSection::name)
+                        .collect(Collectors.joining(", "));
+                Bukkit.getScheduler().runTask(plugin, () -> player.sendMessage(
+                        ChatColor.YELLOW + "No section named '" + sectionName + "' in this menu. Available: " + available));
+                return;
+            }
 
-        if (forward) {
-            session.get().nextPage(sectionId, currentTotalPages);
-        } else {
-            session.get().previousPage(sectionId);
-        }
+            int sectionId = section.get().id();
+            int currentTotalPages = section.get()
+                    .resolveSlots(menu.totalSlots(), session.getPage(sectionId))
+                    .totalPages();
 
-        refresh(player, menu, session.get(), context.get());
+            if (forward) {
+                session.nextPage(sectionId, currentTotalPages);
+            } else {
+                session.previousPage(sectionId);
+            }
+
+            renderAndOpen(player, menu, session);
+        });
     }
 
-    private void refresh(Player player, RuntimeMenu menu, MenuSession session, OpenMenuContext context) {
-        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            MenuRenderResult result = renderer.computeState(menu, session);
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                renderer.applyToInventory(context.inventory(), result);
-                context.update(menu, result.itemsBySlot());
-            });
+    /** Must be called off the main thread - blocks on {@link MenuRenderer#computeState}. */
+    private void renderAndOpen(Player player, RuntimeMenu menu, MenuSession session) {
+        MenuRenderResult result = renderer.computeState(menu, session);
+
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            Optional<OpenMenuContext> existing = openMenuContextRegistry.get(player.getUniqueId());
+            if (existing.isPresent() && player.getOpenInventory().getTopInventory().equals(existing.get().inventory())) {
+                // Still looking at it (e.g. a future click-driven page turn) - refresh in place.
+                renderer.applyToInventory(existing.get().inventory(), result);
+                existing.get().update(menu, result.itemsBySlot());
+                return;
+            }
+
+            Inventory inventory = Bukkit.createInventory(null, menu.totalSlots(),
+                    DisplayTextFormatter.toComponent(menu.title()));
+            renderer.applyToInventory(inventory, result);
+            player.openInventory(inventory);
+            openMenuContextRegistry.register(player.getUniqueId(),
+                    new OpenMenuContext(player, inventory, menu, result.itemsBySlot()));
         });
+    }
+
+    /** Must be called off the main thread. Returns null (having already messaged the player) on failure. */
+    private RuntimeMenu loadAndAssemble(Player player, String templateKey) {
+        try {
+            KnkMenuTemplate template = menuTemplatesDataAccess.getByKeyAsync(templateKey).join().value()
+                    .orElseThrow(() -> new MenuAssemblyException("Menu template '" + templateKey + "' was not found"));
+            return MenuTemplateAssembler.assemble(template);
+        } catch (MenuAssemblyException e) {
+            failToOpen(player, templateKey, e.getMessage(), null);
+            return null;
+        } catch (Exception e) {
+            failToOpen(player, templateKey, e.getMessage(), e);
+            return null;
+        }
     }
 
     private void failToOpen(Player player, String templateKey, String reason, Exception cause) {
