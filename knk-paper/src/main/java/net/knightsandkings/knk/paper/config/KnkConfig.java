@@ -127,7 +127,8 @@ public record KnkConfig(
         EntitySettings itemBlueprints,
         EntitySettings minecraftMaterials,
         EntitySettings domains,
-        EntitySettings health
+        EntitySettings health,
+        EntitySettings menus
     ) {
         public static EntityCacheSettings defaults() {
             return new EntityCacheSettings(
@@ -141,7 +142,8 @@ public record KnkConfig(
                 EntitySettings.defaults(), // itemBlueprints
                 EntitySettings.defaults(), // minecraftMaterials
                 EntitySettings.defaults(), // domains
-                EntitySettings.defaults()  // health
+                EntitySettings.defaults(), // health
+                EntitySettings.defaults()  // menus
             );
         }
     }

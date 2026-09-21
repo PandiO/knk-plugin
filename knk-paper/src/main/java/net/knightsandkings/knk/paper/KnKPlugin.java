@@ -21,12 +21,14 @@ import net.knightsandkings.knk.core.ports.api.DomainsQueryApi;
 import net.knightsandkings.knk.core.ports.api.LocationsQueryApi;
 import net.knightsandkings.knk.core.ports.api.EnchantmentDefinitionsQueryApi;
 import net.knightsandkings.knk.core.ports.api.ItemBlueprintsQueryApi;
+import net.knightsandkings.knk.core.ports.api.MenuTemplatesQueryApi;
 import net.knightsandkings.knk.core.ports.api.MinecraftMaterialRefsQueryApi;
 import net.knightsandkings.knk.core.ports.api.StreetsQueryApi;
 import net.knightsandkings.knk.core.dataaccess.TownsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
 import net.knightsandkings.knk.core.dataaccess.EnchantmentDefinitionsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.ItemBlueprintsDataAccess;
+import net.knightsandkings.knk.core.dataaccess.MenuTemplatesDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
 import net.knightsandkings.knk.core.ports.api.StructuresQueryApi;
 import net.knightsandkings.knk.core.ports.api.TownsQueryApi;
@@ -93,6 +95,7 @@ public class KnKPlugin extends JavaPlugin {
     private LocationsQueryApi locationsQueryApi;
     private EnchantmentDefinitionsQueryApi enchantmentDefinitionsQueryApi;
     private ItemBlueprintsQueryApi itemBlueprintsQueryApi;
+    private MenuTemplatesQueryApi menuTemplatesQueryApi;
     private MinecraftMaterialRefsQueryApi minecraftMaterialRefsQueryApi;
     private DistrictsQueryApi districtsQueryApi;
     private StreetsQueryApi streetsQueryApi;
@@ -105,6 +108,7 @@ public class KnKPlugin extends JavaPlugin {
     private TownsDataAccess townsDataAccess;
     private EnchantmentDefinitionsDataAccess enchantmentDefinitionsDataAccess;
     private ItemBlueprintsDataAccess itemBlueprintsDataAccess;
+    private MenuTemplatesDataAccess menuTemplatesDataAccess;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private WorldTasksApi worldTasksApi;
     private GateStructuresApi gateStructuresApi;
@@ -156,6 +160,7 @@ public class KnKPlugin extends JavaPlugin {
             this.locationsQueryApi = apiClient.getLocationsQueryApi();
             this.enchantmentDefinitionsQueryApi = apiClient.getEnchantmentDefinitionsQueryApi();
             this.itemBlueprintsQueryApi = apiClient.getItemBlueprintsQueryApi();
+            this.menuTemplatesQueryApi = apiClient.getMenuTemplatesQueryApi();
             this.minecraftMaterialRefsQueryApi = apiClient.getMinecraftMaterialRefsQueryApi();
             this.districtsQueryApi = apiClient.getDistrictsQueryApi();
             this.streetsQueryApi = apiClient.getStreetsQueryApi();
@@ -172,6 +177,7 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().info("LocationsQueryApi wired from API client");
             getLogger().info("EnchantmentDefinitionsQueryApi wired from API client");
             getLogger().info("ItemBlueprintsQueryApi wired from API client");
+            getLogger().info("MenuTemplatesQueryApi wired from API client");
             getLogger().info("MinecraftMaterialRefsQueryApi wired from API client");
             getLogger().info("DistrictsQueryApi wired from API client");
             getLogger().info("StreetsQueryApi wired from API client");
@@ -330,6 +336,10 @@ public class KnKPlugin extends JavaPlugin {
             this.itemBlueprintsDataAccess = dataAccessFactory.createItemBlueprintsDataAccess(
                 config.cache().ttl(),
                 itemBlueprintsQueryApi
+            );
+            this.menuTemplatesDataAccess = dataAccessFactory.createMenuTemplatesDataAccess(
+                config.cache().ttl(),
+                menuTemplatesQueryApi
             );
             this.minecraftMaterialRefsDataAccess = dataAccessFactory.createMinecraftMaterialRefsDataAccess(
                 config.cache().ttl(),
