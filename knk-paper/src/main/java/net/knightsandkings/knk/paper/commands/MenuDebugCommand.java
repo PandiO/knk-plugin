@@ -18,12 +18,16 @@ import org.bukkit.entity.Player;
  * IMPLEMENTATION_PLAN.md's "explicitly out of scope" section), so this is
  * the only way to actually open a menu and verify assembly/layout/
  * pagination/variable-resolution/search-filter/async-rendering on a live dev
- * server rather than stopping at unit tests. {@code search}/{@code filter}
- * (IMPLEMENTATION_PLAN.md Phase 5) are the trigger for
- * {@link MenuService#promptSearch}/{@link MenuService#promptFilter}'s chat-
- * capture flow, standing in for the actual clickable SearchBar/FilterBar
- * button Phase 7's preset renderer will eventually provide - same relationship
- * this dev harness already has to real pagination-button UI.
+ * server rather than stopping at unit tests.
+ * <p>
+ * IMPLEMENTATION_PLAN.md Phase 7 / QOL_BUGFIX_BACKLOG.md item 8: {@code page}/
+ * {@code search}/{@code filter} are no longer the only way to drive these -
+ * {@code example.presets}' real clickable Next/Previous, Search, and Filter-
+ * cycle items now exist and go through the exact same {@link MenuService}
+ * methods these subcommands call. This command stays registered as the
+ * DESIGN_REVIEW.md §2.5-decided optional command fallback (never the primary
+ * path), and remains useful for scripting/macros and for exercising a section
+ * that hasn't been given real buttons yet.
  */
 public class MenuDebugCommand implements CommandExecutor {
 

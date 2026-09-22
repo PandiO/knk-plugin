@@ -32,6 +32,7 @@ public final class MenuSession {
     private final Map<Integer, MenuContentQuery> contentQueries = new ConcurrentHashMap<>();
     private volatile String currentMenuKey;
     private volatile boolean dirty;
+    private volatile PendingConfirmation pendingConfirmation;
 
     MenuSession(UUID playerId) {
         this.playerId = playerId;
@@ -173,5 +174,37 @@ public final class MenuSession {
 
     public void cacheVariable(int bindingId, CachedVariable value) {
         variableCache.put(bindingId, value);
+    }
+
+    /**
+     * IMPLEMENTATION_PLAN.md Phase 7 / DESIGN_REVIEW.md §2.5 (Confirmations):
+     * an action awaiting confirmation before it actually runs - set by
+     * {@code menu.confirm.request}, consumed (re-executed via
+     * {@code ActionRegistry}) by {@code menu.confirm.accept}, or discarded by
+     * {@code menu.confirm.cancel}. Deliberately not persisted and holds only
+     * the same plain-String {@code actionTypeId}/params shape every other
+     * ActionBinding already carries - a confirm dialog re-triggers whatever
+     * action prompted it, it doesn't invent a second action mechanism.
+     * <p>
+     * One pending confirmation per session (not per-section/per-item): a
+     * player can only be looking at one confirm prompt at a time, since
+     * requesting a new one simply overwrites whatever was pending before.
+     */
+    public record PendingConfirmation(String actionTypeId, Map<String, String> actionParams, String promptMessage) {
+        public PendingConfirmation {
+            actionParams = actionParams == null ? Map.of() : Map.copyOf(actionParams);
+        }
+    }
+
+    public Optional<PendingConfirmation> getPendingConfirmation() {
+        return Optional.ofNullable(pendingConfirmation);
+    }
+
+    public void setPendingConfirmation(PendingConfirmation pending) {
+        this.pendingConfirmation = pending;
+    }
+
+    public void clearPendingConfirmation() {
+        this.pendingConfirmation = null;
     }
 }

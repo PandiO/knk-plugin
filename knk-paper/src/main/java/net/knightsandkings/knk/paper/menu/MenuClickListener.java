@@ -11,6 +11,7 @@ import net.knightsandkings.knk.core.menu.MenuParams;
 import net.knightsandkings.knk.core.menu.MenuSession;
 import net.knightsandkings.knk.core.menu.MenuSessionRegistry;
 import net.knightsandkings.knk.core.menu.RuntimeMenuItem;
+import net.knightsandkings.knk.core.menu.RuntimeMenuSection;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -116,12 +117,19 @@ public final class MenuClickListener implements Listener {
             return;
         }
 
+        // IMPLEMENTATION_PLAN.md Phase 7: which section the clicked item lives
+        // in - section-scoped actions (pagination, search/filter) need this;
+        // see MenuActionContext's javadoc for why it comes from context here
+        // rather than a paramsJson-carried section name.
+        RuntimeMenuSection section = context.get().sectionsBySlot().get(event.getSlot());
+
         // IMPLEMENTATION_PLAN.md Phase 6 / DESIGN_REVIEW.md §2.2: built fresh,
         // right now - never reused from whatever render pass produced the
         // Inventory the player is looking at, which is the entire point of a
         // click-time (re-)check instead of trusting render-time state alone.
         MenuActionContext actionContext = new MenuActionContext(
-                player, session.get(), MenuVariableContext.liveValues(player), menuService);
+                player, session.get(), MenuVariableContext.liveValues(player), menuService,
+                context.get().menu(), section);
 
         try {
             executeClick(item, actionContext, player);

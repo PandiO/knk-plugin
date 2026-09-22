@@ -71,6 +71,7 @@ public final class MenuRenderer {
 
         Map<Integer, ItemStack> itemStacksBySlot = new HashMap<>();
         Map<Integer, RuntimeMenuItem> itemsBySlot = new HashMap<>();
+        Map<Integer, RuntimeMenuSection> sectionsBySlot = new HashMap<>();
 
         List<RuntimeMenuSection> sectionsByRenderOrder = menu.sections().stream()
                 .sorted(Comparator.comparingInt(section -> priorityRank(section.priority())))
@@ -109,6 +110,7 @@ public final class MenuRenderer {
                 if (itemStack != null) {
                     itemStacksBySlot.put(entry.getKey(), itemStack);
                     itemsBySlot.put(entry.getKey(), item);
+                    sectionsBySlot.put(entry.getKey(), section);
                 }
             }
 
@@ -120,7 +122,7 @@ public final class MenuRenderer {
         fillBackground(menu, namespaceKeysByMaterialRefId, itemStacksBySlot);
         session.clearDirty();
 
-        return new MenuRenderResult(Map.copyOf(itemStacksBySlot), Map.copyOf(itemsBySlot));
+        return new MenuRenderResult(Map.copyOf(itemStacksBySlot), Map.copyOf(itemsBySlot), Map.copyOf(sectionsBySlot));
     }
 
     /**

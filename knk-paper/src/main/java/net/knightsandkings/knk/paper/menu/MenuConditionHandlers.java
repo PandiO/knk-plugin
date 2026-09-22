@@ -24,6 +24,7 @@ public final class MenuConditionHandlers {
 
     public static final String ALWAYS = "always";
     public static final String PERMISSION_NODE = "permission-node";
+    public static final String HAS_PENDING_CONFIRMATION = "has-pending-confirmation";
 
     private MenuConditionHandlers() {
     }
@@ -31,6 +32,7 @@ public final class MenuConditionHandlers {
     public static void registerDefaults(ConditionRegistry<MenuActionContext> registry) {
         registry.register(ALWAYS, (context, params) -> ConditionOutcome.allow());
         registry.register(PERMISSION_NODE, MenuConditionHandlers::permissionNode);
+        registry.register(HAS_PENDING_CONFIRMATION, MenuConditionHandlers::hasPendingConfirmation);
     }
 
     /**
@@ -53,5 +55,19 @@ public final class MenuConditionHandlers {
         return context.player().hasPermission(node)
                 ? ConditionOutcome.allow()
                 : ConditionOutcome.deny("You don't have permission to do that.");
+    }
+
+    /**
+     * IMPLEMENTATION_PLAN.md Phase 7 (Confirmations): gates a ConfirmDialog's
+     * Confirm/Cancel items so clicking either one with no
+     * {@code menu.confirm.request} pending is a clean, player-visible no-op
+     * via the normal condition-denial path, rather than reaching
+     * {@code menu.confirm.accept}/{@code menu.confirm.cancel}'s own
+     * MenuActionException-on-misuse fallback.
+     */
+    private static ConditionOutcome hasPendingConfirmation(MenuActionContext context, Map<String, String> params) {
+        return context.session().getPendingConfirmation().isPresent()
+                ? ConditionOutcome.allow()
+                : ConditionOutcome.deny("Nothing to confirm.");
     }
 }

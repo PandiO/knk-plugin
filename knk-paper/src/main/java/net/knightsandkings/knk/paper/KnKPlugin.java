@@ -33,6 +33,7 @@ import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
 import net.knightsandkings.knk.core.menu.ActionRegistry;
 import net.knightsandkings.knk.core.menu.ConditionRegistry;
 import net.knightsandkings.knk.core.menu.MenuSessionRegistry;
+import net.knightsandkings.knk.paper.menu.AnvilCaptureManager;
 import net.knightsandkings.knk.paper.menu.MenuActionContext;
 import net.knightsandkings.knk.paper.menu.MenuActionHandlers;
 import net.knightsandkings.knk.paper.menu.MenuClickListener;
@@ -139,6 +140,7 @@ public class KnKPlugin extends JavaPlugin {
     private HeadlessWorldTaskPoller headlessWorldTaskPoller;
     private UserManager userManager;
     private ChatCaptureManager chatCaptureManager;
+    private AnvilCaptureManager anvilCaptureManager;
     private CommandCooldownManager cooldownManager;
     private EnchantmentBootstrap.EnchantmentRuntime enchantmentRuntime;
     private ExecutorService regionLookupExecutor;
@@ -365,6 +367,15 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().info("Cache manager initialized with TTL: " + config.cache().ttl());
             getLogger().info("Data access factory initialized with entity-specific settings");
 
+            // InventoryMenu Phase 7 (docs/specs/inventory-menu/IMPLEMENTATION_PLAN.md,
+            // DESIGN_REVIEW.md §2.1 (updated)/§2.5): the in-house anvil-capture
+            // component replacing ChatCaptureManager for InventoryMenu's search/
+            // filter text input specifically - built before MenuService since
+            // MenuService now depends on it directly.
+            this.anvilCaptureManager = new AnvilCaptureManager(this);
+            getServer().getPluginManager().registerEvents(anvilCaptureManager, this);
+            getLogger().info("InventoryMenu anvil-capture component initialized (Phase 7)");
+
             // InventoryMenu Phase 2 (docs/specs/inventory-menu/IMPLEMENTATION_PLAN.md):
             // rendering engine wiring, built on Phase 1's menuTemplatesDataAccess above.
             this.menuSessionRegistry = new MenuSessionRegistry();
@@ -372,14 +383,18 @@ public class KnKPlugin extends JavaPlugin {
             MenuRenderer menuRenderer = new MenuRenderer(minecraftMaterialRefsDataAccess);
             this.menuService = new MenuService(
                 this, menuTemplatesDataAccess, menuSessionRegistry, openMenuContextRegistry, menuRenderer,
-                chatCaptureManager
+                anvilCaptureManager
             );
             getLogger().info("InventoryMenu rendering engine initialized (Phase 2)");
 
             // InventoryMenu Phase 6 (docs/specs/inventory-menu/IMPLEMENTATION_PLAN.md,
             // DESIGN_REVIEW.md §2.2): wire ActionRegistry/ConditionRegistry with their
             // real, currently-supportable handler library before the click listener
-            // and startup validator need them.
+            // and startup validator need them. Phase 7 extends the same two
+            // registries in place with the pagination/search/filter/confirm preset
+            // library (MenuActionHandlers/MenuConditionHandlers.registerDefaults) -
+            // no separate Phase 7 registry, per that phase's own decision not to
+            // build a SectionTypeRegistry (see ACTIVE_SESSIONS.md's Phase 7 entry).
             this.menuActionRegistry = new ActionRegistry<>();
             this.menuConditionRegistry = new ConditionRegistry<>();
             MenuActionHandlers.registerDefaults(menuActionRegistry);
@@ -392,7 +407,7 @@ public class KnKPlugin extends JavaPlugin {
             getServer().getPluginManager().registerEvents(
                 new MenuLifecycleListener(menuService, openMenuContextRegistry), this
             );
-            getLogger().info("InventoryMenu conditional actions initialized (Phase 6)");
+            getLogger().info("InventoryMenu conditional actions + preset library initialized (Phase 6 + 7)");
 
             // InventoryMenu Phase 3 (docs/specs/inventory-menu/IMPLEMENTATION_PLAN.md,
             // DESIGN_REVIEW.md §1) + Phase 6: validate every registered menu's variable

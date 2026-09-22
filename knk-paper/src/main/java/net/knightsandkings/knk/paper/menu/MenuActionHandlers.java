@@ -2,24 +2,43 @@ package net.knightsandkings.knk.paper.menu;
 
 import net.knightsandkings.knk.core.menu.ActionRegistry;
 import net.knightsandkings.knk.core.menu.MenuActionException;
+import net.knightsandkings.knk.core.menu.MenuParams;
+import net.knightsandkings.knk.core.menu.MenuSession;
+import net.knightsandkings.knk.core.menu.RuntimeMenuSection;
+import org.bukkit.ChatColor;
 
+import java.util.List;
 import java.util.Map;
 
 /**
- * Concrete {@code ActionRegistry} handlers (IMPLEMENTATION_PLAN.md Phase 6,
- * open question 1): the small, real starting library this phase actually
- * needs - {@code menu.close} and {@code menu.open} for basic navigation,
- * enough to make the existing {@code example.placeholder} seed's button
- * work and to support simple menu-to-menu navigation - not a speculative
- * library built ahead of real content. Registered once at plugin enable
- * (see {@code KnKPlugin.onEnable}), mirroring how {@link MenuVariableContext}
- * separates declared shape (knk-core-visible) from live values
- * (knk-paper-only).
+ * Concrete {@code ActionRegistry} handlers. Phase 6 shipped the small
+ * starting library ({@code menu.close}/{@code menu.open}); IMPLEMENTATION_PLAN.md
+ * Phase 7 (folding in QOL_BUGFIX_BACKLOG.md item 8) adds the real preset
+ * library for click-driven pagination, search, filter, and confirmation -
+ * DESIGN_REVIEW.md §2.5's UI-first interaction model actually wired up.
+ * <p>
+ * Every section-scoped handler here ({@code menu.page.*}, {@code menu.search.*},
+ * {@code menu.filter.*}) delegates to the same {@link MenuService} methods
+ * {@code /knk menu ...} already calls (QOL_BUGFIX_BACKLOG.md item 8, open
+ * question 6) - a click and a command drive the exact same pagination/search/
+ * filter code path, never a second parallel implementation. They resolve
+ * their target section from {@link MenuActionContext#section()} rather than a
+ * paramsJson-carried section name - see that record's javadoc for why.
  */
 public final class MenuActionHandlers {
 
     public static final String CLOSE = "menu.close";
     public static final String OPEN = "menu.open";
+    public static final String PAGE_NEXT = "menu.page.next";
+    public static final String PAGE_PREV = "menu.page.prev";
+    public static final String SEARCH_PROMPT = "menu.search.prompt";
+    public static final String SEARCH_CLEAR = "menu.search.clear";
+    public static final String FILTER_PROMPT = "menu.filter.prompt";
+    public static final String FILTER_CYCLE = "menu.filter.cycle";
+    public static final String FILTER_CLEAR = "menu.filter.clear";
+    public static final String CONFIRM_REQUEST = "menu.confirm.request";
+    public static final String CONFIRM_ACCEPT = "menu.confirm.accept";
+    public static final String CONFIRM_CANCEL = "menu.confirm.cancel";
 
     private MenuActionHandlers() {
     }
@@ -27,6 +46,22 @@ public final class MenuActionHandlers {
     public static void registerDefaults(ActionRegistry<MenuActionContext> registry) {
         registry.register(CLOSE, MenuActionHandlers::close);
         registry.register(OPEN, MenuActionHandlers::open);
+        registry.register(PAGE_NEXT, (context, params) ->
+                context.menuService().nextPage(context.player(), requireSection(context, PAGE_NEXT).name()));
+        registry.register(PAGE_PREV, (context, params) ->
+                context.menuService().previousPage(context.player(), requireSection(context, PAGE_PREV).name()));
+        registry.register(SEARCH_PROMPT, (context, params) ->
+                context.menuService().promptSearch(context.player(), requireSection(context, SEARCH_PROMPT).name()));
+        registry.register(SEARCH_CLEAR, (context, params) ->
+                context.menuService().clearSearch(context.player(), requireSection(context, SEARCH_CLEAR).name()));
+        registry.register(FILTER_PROMPT, MenuActionHandlers::filterPrompt);
+        registry.register(FILTER_CYCLE, MenuActionHandlers::filterCycle);
+        registry.register(FILTER_CLEAR, MenuActionHandlers::filterClear);
+        registry.register(CONFIRM_REQUEST, MenuActionHandlers::confirmRequest);
+        // Captures `registry` itself so accepting a pending confirmation can
+        // re-invoke whatever action it names - see #confirmAccept.
+        registry.register(CONFIRM_ACCEPT, (context, params) -> confirmAccept(context, registry));
+        registry.register(CONFIRM_CANCEL, MenuActionHandlers::confirmCancel);
     }
 
     private static void close(MenuActionContext context, Map<String, String> params) {
@@ -35,10 +70,109 @@ public final class MenuActionHandlers {
 
     /** Requires a {@code key} param naming the {@code MenuTemplate.Key} to navigate to. */
     private static void open(MenuActionContext context, Map<String, String> params) {
-        String key = params.get("key");
-        if (key == null || key.isBlank()) {
-            throw new MenuActionException("menu.open action is missing its required 'key' param");
-        }
+        String key = requireParam(params, "key", OPEN);
         context.menuService().openMenu(context.player(), key);
+    }
+
+    private static void filterPrompt(MenuActionContext context, Map<String, String> params) {
+        RuntimeMenuSection section = requireSection(context, FILTER_PROMPT);
+        String facetKey = requireParam(params, "facetKey", FILTER_PROMPT);
+        context.menuService().promptFilter(context.player(), section.name(), facetKey);
+    }
+
+    private static void filterClear(MenuActionContext context, Map<String, String> params) {
+        RuntimeMenuSection section = requireSection(context, FILTER_CLEAR);
+        String facetKey = requireParam(params, "facetKey", FILTER_CLEAR);
+        context.menuService().clearFilter(context.player(), section.name(), facetKey);
+    }
+
+    /**
+     * Cycles a FilterBar facet through an author-supplied, comma-separated
+     * value list ({@code facetKey}, {@code values} params) - not a schema-
+     * derived enumeration, since no such thing exists yet for any real
+     * content field (ACTIVE_SESSIONS.md's Phase 5 entry, open question 4).
+     * Reads the section's current {@code MenuContentQuery} for
+     * {@code facetKey} to find where in the list the player currently is,
+     * and advances to the next entry, wrapping back to "no filter" after the
+     * last value - so repeated clicks visit every author-supplied value plus
+     * an explicit "off" state, with no extra session state needed beyond
+     * what Phase 5 already tracks.
+     */
+    private static void filterCycle(MenuActionContext context, Map<String, String> params) {
+        RuntimeMenuSection section = requireSection(context, FILTER_CYCLE);
+        String facetKey = requireParam(params, "facetKey", FILTER_CYCLE);
+        String valuesParam = requireParam(params, "values", FILTER_CYCLE);
+        List<String> values = List.of(valuesParam.split(","));
+
+        String current = context.session().getContentQuery(section.id()).filterValues().get(facetKey);
+        int currentIndex = current == null ? -1 : values.indexOf(current);
+        int nextIndex = currentIndex + 1;
+
+        if (nextIndex >= values.size()) {
+            context.menuService().clearFilter(context.player(), section.name(), facetKey);
+        } else {
+            context.menuService().filter(context.player(), section.name(), facetKey, values.get(nextIndex));
+        }
+    }
+
+    /**
+     * IMPLEMENTATION_PLAN.md Phase 7 / DESIGN_REVIEW.md §2.5 (Confirmations),
+     * open question 4: doesn't run anything itself - stores what to run
+     * ({@code actionTypeId} + its own {@code actionParamsJson}, defaulting to
+     * "{}") as the session's one {@link MenuSession.PendingConfirmation}, and
+     * tells the player. The originating action (e.g. a "close the menu"
+     * button gated by a confirm step) is never invoked here; only
+     * {@code menu.confirm.accept} actually re-triggers it.
+     */
+    private static void confirmRequest(MenuActionContext context, Map<String, String> params) {
+        String actionTypeId = requireParam(params, "actionTypeId", CONFIRM_REQUEST);
+        String actionParamsJson = params.getOrDefault("actionParamsJson", "{}");
+        String prompt = params.getOrDefault("prompt", "Are you sure? Click Confirm or Cancel.");
+
+        context.session().setPendingConfirmation(
+                new MenuSession.PendingConfirmation(actionTypeId, MenuParams.parse(actionParamsJson), prompt));
+        context.player().sendMessage(ChatColor.YELLOW + prompt);
+    }
+
+    /**
+     * Re-invokes whatever action {@code menu.confirm.request} stored, via the
+     * very same {@code registry} instance this handler is registered on -
+     * simpler than threading the registry through {@link MenuActionContext}
+     * for the one action that needs it. Throwing when nothing is pending is
+     * the same "fail loudly, don't silently no-op" policy every handler in
+     * this class follows; in practice this is unreachable through the normal
+     * UI path since a Confirm button is expected to also carry a
+     * {@code has-pending-confirmation} condition (see {@code example.presets}'
+     * seed), so reaching this with nothing pending means that condition was
+     * left off, not a legitimate empty click.
+     */
+    private static void confirmAccept(MenuActionContext context, ActionRegistry<MenuActionContext> registry) {
+        MenuSession.PendingConfirmation pending = context.session().getPendingConfirmation()
+                .orElseThrow(() -> new MenuActionException(CONFIRM_ACCEPT + " action has no pending confirmation to accept"));
+        context.session().clearPendingConfirmation();
+        registry.execute(pending.actionTypeId(), context, pending.actionParams());
+    }
+
+    private static void confirmCancel(MenuActionContext context, Map<String, String> params) {
+        MenuSession.PendingConfirmation pending = context.session().getPendingConfirmation()
+                .orElseThrow(() -> new MenuActionException(CONFIRM_CANCEL + " action has no pending confirmation to cancel"));
+        context.session().clearPendingConfirmation();
+        context.player().sendMessage(ChatColor.YELLOW + "Cancelled.");
+    }
+
+    private static RuntimeMenuSection requireSection(MenuActionContext context, String actionTypeId) {
+        RuntimeMenuSection section = context.section();
+        if (section == null) {
+            throw new MenuActionException(actionTypeId + " action requires a section context, but the clicked item has none");
+        }
+        return section;
+    }
+
+    private static String requireParam(Map<String, String> params, String key, String actionTypeId) {
+        String value = params.get(key);
+        if (value == null || value.isBlank()) {
+            throw new MenuActionException(actionTypeId + " action is missing its required '" + key + "' param");
+        }
+        return value;
     }
 }

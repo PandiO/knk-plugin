@@ -9,7 +9,6 @@ import net.knightsandkings.knk.core.menu.MenuSessionRegistry;
 import net.knightsandkings.knk.core.menu.MenuTemplateAssembler;
 import net.knightsandkings.knk.core.menu.RuntimeMenu;
 import net.knightsandkings.knk.core.menu.RuntimeMenuSection;
-import net.knightsandkings.knk.paper.chat.ChatCaptureManager;
 import net.knightsandkings.knk.paper.utils.DisplayTextFormatter;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
@@ -47,7 +46,7 @@ public final class MenuService {
     private final MenuSessionRegistry sessionRegistry;
     private final OpenMenuContextRegistry openMenuContextRegistry;
     private final MenuRenderer renderer;
-    private final ChatCaptureManager chatCaptureManager;
+    private final AnvilCaptureManager anvilCaptureManager;
     private final Map<String, String> blockedMenus = new ConcurrentHashMap<>();
 
     public MenuService(
@@ -56,7 +55,7 @@ public final class MenuService {
             MenuSessionRegistry sessionRegistry,
             OpenMenuContextRegistry openMenuContextRegistry,
             MenuRenderer renderer,
-            ChatCaptureManager chatCaptureManager
+            AnvilCaptureManager anvilCaptureManager
     ) {
         this.plugin = plugin;
         this.logger = plugin.getLogger();
@@ -64,7 +63,7 @@ public final class MenuService {
         this.sessionRegistry = sessionRegistry;
         this.openMenuContextRegistry = openMenuContextRegistry;
         this.renderer = renderer;
-        this.chatCaptureManager = chatCaptureManager;
+        this.anvilCaptureManager = anvilCaptureManager;
     }
 
     public void openMenu(Player player, String templateKey) {
@@ -141,30 +140,32 @@ public final class MenuService {
     }
 
     /**
-     * IMPLEMENTATION_PLAN.md Phase 5: prompts (via the reused
-     * {@link ChatCaptureManager} text-input flow, not a one-off anvil GUI -
-     * see ACTIVE_SESSIONS.md's Phase 5 entry, open question 3) for a search
-     * query and applies it to {@code sectionName}. Vanilla Minecraft closes
-     * any open custom Inventory the instant a player opens chat (the same
-     * behavior {@link #nextPage}/{@link #previousPage}'s fallback already
-     * works around), so - exactly like those - this re-fetches and reopens
-     * the menu fresh once the query is captured rather than assuming the
-     * Inventory the player had open is still there.
+     * IMPLEMENTATION_PLAN.md Phase 7 / DESIGN_REVIEW.md §2.1 §2.5: prompts via
+     * the in-house {@link AnvilCaptureManager} - superseding Phase 5's
+     * {@code ChatCaptureManager}-based capture for this specific call site
+     * (see DESIGN_REVIEW.md §2.1's updated text and ACTIVE_SESSIONS.md's
+     * Phase 5 entry for why that original choice is now superseded, not kept
+     * as an option). Vanilla Minecraft closes any open custom Inventory the
+     * instant another one opens (the same behavior {@link #nextPage}/
+     * {@link #previousPage}'s fallback already works around, now true of the
+     * anvil capture too), so - exactly like those - this re-fetches and
+     * reopens the menu fresh once the query is captured rather than assuming
+     * the Inventory the player had open is still there.
      */
     public void promptSearch(Player player, String sectionName) {
-        chatCaptureManager.startTextCapture(
+        anvilCaptureManager.startTextCapture(
                 player,
-                ChatColor.YELLOW + "Type a search query for '" + sectionName + "' (or 'cancel'):",
+                ChatColor.YELLOW + "Type a search query for '" + sectionName + "':",
                 query -> search(player, sectionName, query),
                 () -> player.sendMessage(ChatColor.YELLOW + "Search cancelled.")
         );
     }
 
-    /** IMPLEMENTATION_PLAN.md Phase 5: same as {@link #promptSearch}, for one FilterBar facet. */
+    /** IMPLEMENTATION_PLAN.md Phase 7: same as {@link #promptSearch}, for one FilterBar facet. */
     public void promptFilter(Player player, String sectionName, String facetKey) {
-        chatCaptureManager.startTextCapture(
+        anvilCaptureManager.startTextCapture(
                 player,
-                ChatColor.YELLOW + "Type a value for filter '" + facetKey + "' on '" + sectionName + "' (or 'cancel'):",
+                ChatColor.YELLOW + "Type a value for filter '" + facetKey + "' on '" + sectionName + "':",
                 value -> filter(player, sectionName, facetKey, value),
                 () -> player.sendMessage(ChatColor.YELLOW + "Filter cancelled.")
         );
@@ -241,9 +242,9 @@ public final class MenuService {
         Bukkit.getScheduler().runTask(plugin, () -> {
             Optional<OpenMenuContext> existing = openMenuContextRegistry.get(player.getUniqueId());
             if (existing.isPresent() && player.getOpenInventory().getTopInventory().equals(existing.get().inventory())) {
-                // Still looking at it (e.g. a future click-driven page turn) - refresh in place.
+                // Still looking at it (e.g. a click-driven page turn) - refresh in place.
                 renderer.applyToInventory(existing.get().inventory(), result);
-                existing.get().update(menu, result.itemsBySlot());
+                existing.get().update(menu, result.itemsBySlot(), result.sectionsBySlot());
                 return;
             }
 
@@ -252,7 +253,7 @@ public final class MenuService {
             renderer.applyToInventory(inventory, result);
             player.openInventory(inventory);
             openMenuContextRegistry.register(player.getUniqueId(),
-                    new OpenMenuContext(player, inventory, menu, result.itemsBySlot()));
+                    new OpenMenuContext(player, inventory, menu, result.itemsBySlot(), result.sectionsBySlot()));
         });
     }
 
