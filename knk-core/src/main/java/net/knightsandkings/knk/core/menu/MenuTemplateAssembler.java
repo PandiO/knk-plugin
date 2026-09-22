@@ -7,6 +7,7 @@ import net.knightsandkings.knk.core.domain.menu.KnkMenuTemplate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -84,11 +85,19 @@ public final class MenuTemplateAssembler {
         }
         items.sort(Comparator.comparingInt(RuntimeMenuItem::sortOrder));
 
+        // IMPLEMENTATION_PLAN.md Phase 8: contentSourceParamsJson is parsed here
+        // (not left as a raw string on RuntimeMenuSection), the same
+        // ActionBinding/ConditionBinding-mirroring paramsJson convention
+        // MenuParams already implements - malformed JSON degrades to empty
+        // params rather than failing assembly.
+        Map<String, String> contentSourceParams = MenuParams.parse(sectionTemplate.contentSourceParamsJson());
+
         return new RuntimeMenuSection(
                 sectionTemplate.id(), sectionTemplate.name(), kind, sortOrder, displaySlot, width, height,
                 positionMode, alignVertical, alignHorizontal, overflow, listMode, priority,
                 sectionTemplate.visibilityPermission(), searchable, List.copyOf(items),
-                sectionTemplate.variableBindings() != null ? sectionTemplate.variableBindings() : List.of()
+                sectionTemplate.variableBindings() != null ? sectionTemplate.variableBindings() : List.of(),
+                sectionTemplate.contentSourceId(), contentSourceParams
         );
     }
 

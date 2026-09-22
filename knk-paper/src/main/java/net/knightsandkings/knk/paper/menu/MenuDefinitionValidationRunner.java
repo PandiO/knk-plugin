@@ -36,7 +36,8 @@ public final class MenuDefinitionValidationRunner {
     }
 
     public static void runAtStartup(MenuTemplatesDataAccess menuTemplatesDataAccess, MenuService menuService, Logger logger,
-                                     Set<String> registeredActionTypeIds, Set<String> registeredConditionTypeIds) {
+                                     Set<String> registeredActionTypeIds, Set<String> registeredConditionTypeIds,
+                                     Set<String> registeredContentSourceIds) {
         List<KnkMenuTemplateSummary> summaries;
         try {
             summaries = menuTemplatesDataAccess.listAllAsync().join();
@@ -54,7 +55,7 @@ public final class MenuDefinitionValidationRunner {
             }
             checked++;
             if (!validateOne(summary.key(), menuTemplatesDataAccess, menuService, logger,
-                    registeredActionTypeIds, registeredConditionTypeIds)) {
+                    registeredActionTypeIds, registeredConditionTypeIds, registeredContentSourceIds)) {
                 blocked++;
             }
         }
@@ -64,7 +65,8 @@ public final class MenuDefinitionValidationRunner {
     /** @return true if the menu registered cleanly (or couldn't be re-fetched - not this validator's job to flag that). */
     private static boolean validateOne(String key, MenuTemplatesDataAccess menuTemplatesDataAccess,
                                         MenuService menuService, Logger logger,
-                                        Set<String> registeredActionTypeIds, Set<String> registeredConditionTypeIds) {
+                                        Set<String> registeredActionTypeIds, Set<String> registeredConditionTypeIds,
+                                        Set<String> registeredContentSourceIds) {
         try {
             KnkMenuTemplate template = menuTemplatesDataAccess.getByKeyAsync(key).join().value().orElse(null);
             if (template == null) {
@@ -80,6 +82,9 @@ public final class MenuDefinitionValidationRunner {
             // references a registered ID" - unbuilt until now since the
             // registries themselves didn't exist before this phase.
             MenuDefinitionValidator.validateActionsAndConditions(menu, registeredActionTypeIds, registeredConditionTypeIds);
+            // IMPLEMENTATION_PLAN.md Phase 8: same load-time-not-click-time
+            // policy for contentSourceId references.
+            MenuDefinitionValidator.validateContentSources(menu, registeredContentSourceIds);
             return true;
         } catch (MenuAssemblyException e) {
             logger.severe("InventoryMenu startup validation: menu '" + key + "' is broken and will refuse to open: "

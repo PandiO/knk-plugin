@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -37,7 +38,7 @@ class RuntimeMenuSectionTest {
         // A 2x2 (capacity 4) content section starting at slot 0.
         return new RuntimeMenuSection(1, "content", MenuSectionKind.CONTENT_GRID, 0, 0, 2, 2,
                 MenuPositionMode.STATIC, MenuAlignVertical.TOP, MenuAlignHorizontal.LEFT,
-                overflow, MenuListMode.DEFAULT, MenuRenderPriority.MEDIUM, null, searchable, items, List.of());
+                overflow, MenuListMode.DEFAULT, MenuRenderPriority.MEDIUM, null, searchable, items, List.of(), null, null);
     }
 
     @Test
@@ -154,7 +155,8 @@ class RuntimeMenuSectionTest {
         RuntimeMenuSection gated = new RuntimeMenuSection(base.id(), base.name(), base.kind(), base.sortOrder(),
                 base.displaySlot(), base.width(), base.height(), base.positionMode(), base.alignVertical(),
                 base.alignHorizontal(), base.overflow(), base.listMode(), base.priority(),
-                "knk.menu.example.debug", base.searchable(), base.items(), base.variableBindings());
+                "knk.menu.example.debug", base.searchable(), base.items(), base.variableBindings(),
+                base.contentSourceId(), base.contentSourceParams());
 
         assertFalse(gated.isVisibleTo(node -> false));
         assertTrue(gated.isVisibleTo(node -> node.equals("knk.menu.example.debug")));
@@ -228,5 +230,106 @@ class RuntimeMenuSectionTest {
 
         assertEquals(section.resolveSlots(MENU_TOTAL_SLOTS, 0).itemsBySlot(),
                 section.resolveSlots(MENU_TOTAL_SLOTS, 0, candidate -> true).itemsBySlot());
+    }
+
+    /**
+     * IMPLEMENTATION_PLAN.md Phase 8: a section with no {@code contentSourceId}
+     * (the default for every pre-Phase-8 section) reports
+     * {@link RuntimeMenuSection#hasContentSource()} false, and {@code null}
+     * {@code contentSourceParams} normalizes to an empty map rather than null.
+     */
+    @Test
+    void sectionWithNoContentSourceIdReportsHasContentSourceFalse() {
+        RuntimeMenuSection section = section(MenuOverflowMode.HIDE, List.of());
+
+        assertFalse(section.hasContentSource());
+        assertEquals(Map.of(), section.contentSourceParams());
+    }
+
+    @Test
+    void blankContentSourceIdAlsoReportsHasContentSourceFalse() {
+        RuntimeMenuSection base = section(MenuOverflowMode.HIDE, List.of());
+        RuntimeMenuSection blank = new RuntimeMenuSection(base.id(), base.name(), base.kind(), base.sortOrder(),
+                base.displaySlot(), base.width(), base.height(), base.positionMode(), base.alignVertical(),
+                base.alignHorizontal(), base.overflow(), base.listMode(), base.priority(),
+                base.visibilityPermission(), base.searchable(), base.items(), base.variableBindings(),
+                "  ", base.contentSourceParams());
+
+        assertFalse(blank.hasContentSource());
+    }
+
+    @Test
+    void contentSourceIdMakesHasContentSourceTrue() {
+        RuntimeMenuSection base = section(MenuOverflowMode.HIDE, List.of());
+        RuntimeMenuSection backed = new RuntimeMenuSection(base.id(), base.name(), base.kind(), base.sortOrder(),
+                base.displaySlot(), base.width(), base.height(), base.positionMode(), base.alignVertical(),
+                base.alignHorizontal(), base.overflow(), base.listMode(), base.priority(),
+                base.visibilityPermission(), base.searchable(), base.items(), base.variableBindings(),
+                "catalog.itemblueprints", Map.of("kind", "example"));
+
+        assertTrue(backed.hasContentSource());
+        assertEquals("example", backed.contentSourceParams().get("kind"));
+    }
+
+    /**
+     * IMPLEMENTATION_PLAN.md Phase 8: {@link RuntimeMenuSection#computeSlotPool}
+     * is the shared pinned/pool split both the legacy in-memory {@link
+     * RuntimeMenuSection#resolveSlots} path and knk-paper's new
+     * content-source-backed render path use - a pinned control button (e.g. a
+     * Next-page/Search button) must be excluded from the pool the content
+     * source pages into, exactly like it's excluded from the auto/paginated
+     * pool today.
+     */
+    @Test
+    void computeSlotPoolExcludesPinnedSlotsFromThePool() {
+        // The 2x2 section helper below is anchored at slot 0, so its footprint
+        // is {0, 1, 9, 10} (row-major, 9-wide) - slots 0 and 9 pin the first
+        // cell of each row.
+        List<RuntimeMenuItem> items = List.of(item(0, 0), item(1, 9));
+        RuntimeMenuSection section = section(MenuOverflowMode.SCROLL, items);
+
+        RuntimeMenuSection.SlotPool pool = section.computeSlotPool(MENU_TOTAL_SLOTS);
+
+        assertEquals(2, pool.pinnedBySlot().size());
+        assertEquals(item(0, 0), pool.pinnedBySlot().get(0));
+        assertEquals(item(1, 9), pool.pinnedBySlot().get(9));
+        assertFalse(pool.availablePool().contains(0));
+        assertFalse(pool.availablePool().contains(9));
+        // A 2x2 section (capacity 4) minus 2 pinned slots leaves a 2-slot pool.
+        assertEquals(2, pool.availablePool().size());
+        assertEquals(List.of(1, 10), pool.availablePool());
+    }
+
+    @Test
+    void computeSlotPoolWithNoPinnedItemsReturnsTheWholeFootprint() {
+        RuntimeMenuSection section = section(MenuOverflowMode.SCROLL, List.of());
+
+        RuntimeMenuSection.SlotPool pool = section.computeSlotPool(MENU_TOTAL_SLOTS);
+
+        assertTrue(pool.pinnedBySlot().isEmpty());
+        assertEquals(4, pool.availablePool().size());
+    }
+
+    /**
+     * A content-source-backed section's own {@link RuntimeMenuSection#items()}
+     * is expected to hold only pinned control buttons - {@link
+     * RuntimeMenuSection#resolveSlots} always reports zero auto content for
+     * such a section (knk-paper's {@code MenuRenderer} is expected to branch
+     * on {@link RuntimeMenuSection#hasContentSource()} before calling this at
+     * all, but this asserts the safe-by-construction fallback too).
+     */
+    @Test
+    void resolveSlotsReportsNoAutoContentForAContentSourceBackedSection() {
+        RuntimeMenuSection base = section(MenuOverflowMode.SCROLL, List.of(item(0), item(1), item(2)));
+        RuntimeMenuSection backed = new RuntimeMenuSection(base.id(), base.name(), base.kind(), base.sortOrder(),
+                base.displaySlot(), base.width(), base.height(), base.positionMode(), base.alignVertical(),
+                base.alignHorizontal(), base.overflow(), base.listMode(), base.priority(),
+                base.visibilityPermission(), base.searchable(), base.items(), base.variableBindings(),
+                "catalog.itemblueprints", Map.of());
+
+        SectionSlotAssignment assignment = backed.resolveSlots(MENU_TOTAL_SLOTS, 0);
+
+        assertEquals(0, assignment.totalPages());
+        assertTrue(assignment.itemsBySlot().isEmpty());
     }
 }

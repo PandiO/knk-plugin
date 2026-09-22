@@ -80,7 +80,9 @@ public final class MenuTemplateMapper {
                 dto.visibilityPermission(),
                 dto.searchable(),
                 items,
-                bindings
+                bindings,
+                dto.contentSourceId(),
+                dto.contentSourceParamsJson()
         );
     }
 

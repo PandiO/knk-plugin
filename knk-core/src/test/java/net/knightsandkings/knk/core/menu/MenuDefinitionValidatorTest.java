@@ -68,7 +68,7 @@ class MenuDefinitionValidatorTest {
         RuntimeMenuSection section = new RuntimeMenuSection(1, "Header", MenuSectionKind.STATIC_BUTTONS, 0, 0,
                 9, 1, MenuPositionMode.STATIC, MenuAlignVertical.TOP, MenuAlignHorizontal.LEFT,
                 MenuOverflowMode.HIDE, MenuListMode.DEFAULT, MenuRenderPriority.MEDIUM, null, false,
-                List.of(item), sectionBindings);
+                List.of(item), sectionBindings, null, null);
         RuntimeMenu menu = new RuntimeMenu("test.menu", "Test Menu", 3, MenuGrowth.STATIC, null, List.of(section));
 
         MenuAssemblyException ex = assertThrows(MenuAssemblyException.class,
@@ -115,6 +115,40 @@ class MenuDefinitionValidatorTest {
         assertTrue(ex.getMessage().contains("ownership"));
     }
 
+    @Test
+    void validatingRegisteredContentSourceIdPassesWhenKnown() {
+        RuntimeMenu menu = menuWithContentSource("catalog.itemblueprints");
+
+        assertDoesNotThrow(() -> MenuDefinitionValidator.validateContentSources(
+                menu, Set.of("catalog.itemblueprints")));
+    }
+
+    @Test
+    void anUnregisteredContentSourceIdIsRejectedLoudlyAtLoadTime() {
+        RuntimeMenu menu = menuWithContentSource("catalog.bogus");
+
+        MenuAssemblyException ex = assertThrows(MenuAssemblyException.class, () -> MenuDefinitionValidator
+                .validateContentSources(menu, Set.of("catalog.itemblueprints")));
+
+        assertTrue(ex.getMessage().contains("catalog.bogus"));
+        assertTrue(ex.getMessage().contains(menu.key()));
+    }
+
+    @Test
+    void aSectionWithNoContentSourceIdNeverFailsThisCheck() {
+        RuntimeMenu menu = menuWithActionAndCondition("menu.close", "always", "always");
+
+        assertDoesNotThrow(() -> MenuDefinitionValidator.validateContentSources(menu, Set.of()));
+    }
+
+    private static RuntimeMenu menuWithContentSource(String contentSourceId) {
+        RuntimeMenuSection section = new RuntimeMenuSection(1, "Content", MenuSectionKind.CONTENT_GRID, 0, 0,
+                9, 2, MenuPositionMode.STATIC, MenuAlignVertical.TOP, MenuAlignHorizontal.LEFT,
+                MenuOverflowMode.SCROLL, MenuListMode.GRID, MenuRenderPriority.MEDIUM, null, true,
+                List.of(), List.of(), contentSourceId, Map.of());
+        return new RuntimeMenu("test.menu", "Test Menu", 3, MenuGrowth.STATIC, null, List.of(section));
+    }
+
     /**
      * An item with one item-level condition ({@code itemConditionTypeId}) and
      * one action carrying one action-level condition ({@code actionConditionTypeId}).
@@ -130,7 +164,7 @@ class MenuDefinitionValidatorTest {
         RuntimeMenuSection section = new RuntimeMenuSection(1, "Content", MenuSectionKind.STATIC_BUTTONS, 0, 0,
                 9, 1, MenuPositionMode.STATIC, MenuAlignVertical.TOP, MenuAlignHorizontal.LEFT,
                 MenuOverflowMode.HIDE, MenuListMode.DEFAULT, MenuRenderPriority.MEDIUM, null, false,
-                List.of(item), List.of());
+                List.of(item), List.of(), null, null);
         return new RuntimeMenu("test.menu", "Test Menu", 3, MenuGrowth.STATIC, null, List.of(section));
     }
 
@@ -142,7 +176,7 @@ class MenuDefinitionValidatorTest {
         RuntimeMenuSection section = new RuntimeMenuSection(1, "Content", MenuSectionKind.CONTENT_GRID, 0, 0,
                 9, 1, MenuPositionMode.STATIC, MenuAlignVertical.TOP, MenuAlignHorizontal.LEFT,
                 MenuOverflowMode.HIDE, MenuListMode.DEFAULT, MenuRenderPriority.MEDIUM, null, false,
-                List.of(item), List.of());
+                List.of(item), List.of(), null, null);
         return new RuntimeMenu("test.menu", "Test Menu", 3, MenuGrowth.STATIC, null, List.of(section));
     }
 

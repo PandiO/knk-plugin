@@ -21,5 +21,7 @@ public record MenuSectionTemplateDto(
         @JsonProperty("visibilityPermission") String visibilityPermission,
         @JsonProperty("searchable") Boolean searchable,
         @JsonProperty("items") List<MenuItemTemplateDto> items,
-        @JsonProperty("variableBindings") List<VariableBindingDto> variableBindings
+        @JsonProperty("variableBindings") List<VariableBindingDto> variableBindings,
+        @JsonProperty("contentSourceId") String contentSourceId,
+        @JsonProperty("contentSourceParamsJson") String contentSourceParamsJson
 ) {}

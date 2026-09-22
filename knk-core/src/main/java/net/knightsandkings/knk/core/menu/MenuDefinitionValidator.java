@@ -172,4 +172,34 @@ public final class MenuDefinitionValidator {
             }
         }
     }
+
+    /**
+     * IMPLEMENTATION_PLAN.md Phase 8 "Load-time validation": confirms every
+     * {@code contentSourceId}-bound section references a registered
+     * {@link MenuContentSourceRegistry} id, the same load-time-not-click-time
+     * failure policy {@link #validateActionsAndConditions} already applies to
+     * {@link ActionRegistry}/{@link ConditionRegistry} ids. Deliberately
+     * separate (and Bukkit-free, taking a plain {@code Set<String>} snapshot
+     * rather than the registry itself) for the same reason as that method.
+     *
+     * @throws MenuAssemblyException aggregating every unregistered
+     *                                {@code contentSourceId} found anywhere in
+     *                                the menu, per the same per-menu (not
+     *                                per-server) failure policy.
+     */
+    public static void validateContentSources(RuntimeMenu menu, Set<String> registeredContentSourceIds) {
+        List<String> errors = new ArrayList<>();
+
+        for (RuntimeMenuSection section : menu.sections()) {
+            if (section.hasContentSource() && !registeredContentSourceIds.contains(section.contentSourceId())) {
+                errors.add("section '" + section.name() + "' (id " + section.id() + ") in menu '" + menu.key()
+                        + "' references an unregistered MenuContentSourceRegistry id '" + section.contentSourceId() + "'");
+            }
+        }
+
+        if (!errors.isEmpty()) {
+            throw new MenuAssemblyException(
+                    "Menu '" + menu.key() + "' references unregistered content source ids:\n - " + String.join("\n - ", errors));
+        }
+    }
 }

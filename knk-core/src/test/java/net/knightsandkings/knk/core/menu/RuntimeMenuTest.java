@@ -12,7 +12,8 @@ class RuntimeMenuTest {
     private static RuntimeMenuSection section(String name) {
         return new RuntimeMenuSection(1, name, MenuSectionKind.CONTENT_GRID, 0, 0, 9, 1,
                 MenuPositionMode.STATIC, MenuAlignVertical.TOP, MenuAlignHorizontal.LEFT,
-                MenuOverflowMode.HIDE, MenuListMode.DEFAULT, MenuRenderPriority.MEDIUM, null, false, List.of(), List.of());
+                MenuOverflowMode.HIDE, MenuListMode.DEFAULT, MenuRenderPriority.MEDIUM, null, false, List.of(), List.of(),
+                null, null);
     }
 
     @Test

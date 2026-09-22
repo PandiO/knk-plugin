@@ -30,7 +30,7 @@ class MenuTemplateAssemblerTest {
     private static KnkMenuSectionTemplate section(int id, String kind, int sortOrder, int displaySlot,
                                                     int width, int height, List<KnkMenuItemTemplate> items) {
         return new KnkMenuSectionTemplate(id, "section-" + id, kind, sortOrder, displaySlot, width, height,
-                "Static", "Top", "Left", "Hide", "Default", "Medium", null, null, items, List.of());
+                "Static", "Top", "Left", "Hide", "Default", "Medium", null, null, items, List.of(), null, null);
     }
 
     @Test
@@ -64,7 +64,7 @@ class MenuTemplateAssemblerTest {
     @Test
     void nullOptionalFieldsFallBackToSchemaDefaults() {
         KnkMenuSectionTemplate rawSection = new KnkMenuSectionTemplate(1, "s", null, null, null, null, null,
-                null, null, null, null, null, null, null, null, List.of(), List.of());
+                null, null, null, null, null, null, null, null, List.of(), List.of(), null, null);
         KnkMenuTemplate template = new KnkMenuTemplate(1, "k", "n", null, null, null, null, List.of(rawSection));
 
         RuntimeMenu menu = MenuTemplateAssembler.assemble(template);
@@ -84,7 +84,7 @@ class MenuTemplateAssemblerTest {
     @Test
     void searchableFlagCarriesThroughToTheRuntimeSection() {
         KnkMenuSectionTemplate rawSection = new KnkMenuSectionTemplate(1, "s", "ContentGrid", 0, 0, 9, 1,
-                "Static", "Top", "Left", "Hide", "Default", "Medium", null, true, List.of(), List.of());
+                "Static", "Top", "Left", "Hide", "Default", "Medium", null, true, List.of(), List.of(), null, null);
         KnkMenuTemplate template = new KnkMenuTemplate(1, "k", "n", null, 3, "Static", null, List.of(rawSection));
 
         RuntimeMenu menu = MenuTemplateAssembler.assemble(template);

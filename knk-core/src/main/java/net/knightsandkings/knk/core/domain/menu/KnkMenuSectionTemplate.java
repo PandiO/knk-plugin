@@ -22,5 +22,7 @@ public record KnkMenuSectionTemplate(
         String visibilityPermission,
         Boolean searchable,
         List<KnkMenuItemTemplate> items,
-        List<KnkVariableBinding> variableBindings
+        List<KnkVariableBinding> variableBindings,
+        String contentSourceId,
+        String contentSourceParamsJson
 ) {}

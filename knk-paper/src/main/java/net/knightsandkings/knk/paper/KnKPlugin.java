@@ -32,12 +32,15 @@ import net.knightsandkings.knk.core.dataaccess.MenuTemplatesDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
 import net.knightsandkings.knk.core.menu.ActionRegistry;
 import net.knightsandkings.knk.core.menu.ConditionRegistry;
+import net.knightsandkings.knk.core.menu.MenuContentSourceRegistry;
 import net.knightsandkings.knk.core.menu.MenuSessionRegistry;
 import net.knightsandkings.knk.paper.menu.AnvilCaptureManager;
 import net.knightsandkings.knk.paper.menu.MenuActionContext;
 import net.knightsandkings.knk.paper.menu.MenuActionHandlers;
 import net.knightsandkings.knk.paper.menu.MenuClickListener;
 import net.knightsandkings.knk.paper.menu.MenuConditionHandlers;
+import net.knightsandkings.knk.paper.menu.MenuContentSourceContext;
+import net.knightsandkings.knk.paper.menu.MenuContentSourceHandlers;
 import net.knightsandkings.knk.paper.menu.MenuDefinitionValidationRunner;
 import net.knightsandkings.knk.paper.menu.MenuLifecycleListener;
 import net.knightsandkings.knk.paper.menu.MenuRenderer;
@@ -128,6 +131,7 @@ public class KnKPlugin extends JavaPlugin {
     private MenuService menuService;
     private ActionRegistry<MenuActionContext> menuActionRegistry;
     private ConditionRegistry<MenuActionContext> menuConditionRegistry;
+    private MenuContentSourceRegistry<MenuContentSourceContext> menuContentSourceRegistry;
     private WorldTasksApi worldTasksApi;
     private GateStructuresApi gateStructuresApi;
     private GateDoorsApi gateDoorsApi;
@@ -380,7 +384,17 @@ public class KnKPlugin extends JavaPlugin {
             // rendering engine wiring, built on Phase 1's menuTemplatesDataAccess above.
             this.menuSessionRegistry = new MenuSessionRegistry();
             this.openMenuContextRegistry = new OpenMenuContextRegistry();
-            MenuRenderer menuRenderer = new MenuRenderer(minecraftMaterialRefsDataAccess);
+            // InventoryMenu Phase 8 (docs/specs/inventory-menu/IMPLEMENTATION_PLAN.md):
+            // MenuContentSourceRegistry wired before MenuRenderer since it now
+            // depends on it directly - a content-source-backed section's page
+            // content comes from a real paged/cursor query against the
+            // registered source, not from an in-memory items() list. The one
+            // real source shipped with this phase is backed by the already-
+            // existing itemBlueprintsDataAccess gateway above, not a synthetic
+            // dataset.
+            this.menuContentSourceRegistry = new MenuContentSourceRegistry<>();
+            MenuContentSourceHandlers.registerDefaults(menuContentSourceRegistry, itemBlueprintsDataAccess);
+            MenuRenderer menuRenderer = new MenuRenderer(minecraftMaterialRefsDataAccess, menuContentSourceRegistry);
             this.menuService = new MenuService(
                 this, menuTemplatesDataAccess, menuSessionRegistry, openMenuContextRegistry, menuRenderer,
                 anvilCaptureManager
@@ -417,8 +431,9 @@ public class KnKPlugin extends JavaPlugin {
             // literal-text tooltip or a click-time failure the first time someone
             // happens to open it or click it.
             MenuDefinitionValidationRunner.runAtStartup(menuTemplatesDataAccess, menuService, getLogger(),
-                menuActionRegistry.registeredIds(), menuConditionRegistry.registeredIds());
-            getLogger().info("InventoryMenu variable resolution + load-time validation initialized (Phase 3 + 6)");
+                menuActionRegistry.registeredIds(), menuConditionRegistry.registeredIds(),
+                menuContentSourceRegistry.registeredIds());
+            getLogger().info("InventoryMenu variable resolution + load-time validation initialized (Phase 3 + 6 + 8)");
 
             initializeEnchantmentRuntime();
             getLogger().info("Registered custom enchantment runtime listeners and /ce command");

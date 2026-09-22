@@ -125,12 +125,23 @@ public final class MenuService {
             }
 
             int sectionId = section.get().id();
-            int currentTotalPages = section.get()
-                    .resolveSlots(menu.totalSlots(), session.getPage(sectionId))
-                    .totalPages();
-
             if (forward) {
-                session.nextPage(sectionId, currentTotalPages);
+                if (section.get().hasContentSource()) {
+                    // IMPLEMENTATION_PLAN.md Phase 8: resolveSlots always
+                    // reports 0 totalPages for a content-source-backed
+                    // section (its auto content never comes from items()),
+                    // so the legacy resolveSlots-based clamp below would
+                    // pin nextPage() at page 0 forever. Advance unclamped;
+                    // MenuRenderer.resolveContentSourceAssignment clamps it
+                    // back down (and persists the clamp via session.setPage)
+                    // once the real paged fetch reveals the true page count.
+                    session.setPage(sectionId, session.getPage(sectionId) + 1);
+                } else {
+                    int currentTotalPages = section.get()
+                            .resolveSlots(menu.totalSlots(), session.getPage(sectionId))
+                            .totalPages();
+                    session.nextPage(sectionId, currentTotalPages);
+                }
             } else {
                 session.previousPage(sectionId);
             }
