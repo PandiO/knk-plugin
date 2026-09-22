@@ -4,8 +4,10 @@ import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
 import net.knightsandkings.knk.core.domain.common.Page;
 import net.knightsandkings.knk.core.domain.common.PagedQuery;
 import net.knightsandkings.knk.core.domain.material.KnkMinecraftMaterialRef;
+import net.knightsandkings.knk.core.domain.menu.KnkActionBinding;
 import net.knightsandkings.knk.core.menu.MenuContentQuery;
 import net.knightsandkings.knk.core.menu.MenuContentSourceRegistry;
+import net.knightsandkings.knk.core.menu.MenuParams;
 import net.knightsandkings.knk.core.menu.MenuRenderPriority;
 import net.knightsandkings.knk.core.menu.MenuSession;
 import net.knightsandkings.knk.core.menu.MenuSlotCalculator;
@@ -23,6 +25,7 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -122,6 +125,15 @@ public final class MenuRenderer {
             applyAssignment(assignment, namespaceKeysByMaterialRefId, session, variableContext, currentTick,
                     permissionChecker, itemStacksBySlot, itemsBySlot, sectionsBySlot, section);
 
+            // Post-Phase-8 QOL follow-up: pagination/filter/search/confirm
+            // preset buttons show their own live state in their lore
+            // (current page, active filter value, active search phrase,
+            // double-click-armed countdown) - appended directly onto the
+            // already-built ItemStack rather than through a new variable-
+            // binding placeholder syntax, since none of this is per-template
+            // author-supplied text, it's render-pass state.
+            appendPresetStateLore(section, assignment, session, currentTick, itemStacksBySlot);
+
             if (queryActive && matchedNoAutoContent(assignment)) {
                 placeEmptyResultsMarker(section, menu, assignment, itemStacksBySlot);
             }
@@ -159,6 +171,79 @@ public final class MenuRenderer {
                 itemsBySlot.put(entry.getKey(), item);
                 sectionsBySlot.put(entry.getKey(), section);
             }
+        }
+    }
+
+    /**
+     * Post-Phase-8 QOL follow-up: appends live render-state lore lines onto
+     * the already-built {@link ItemStack}s for this section's preset control
+     * buttons - "Page X/Y" on pagination arrows, the active value on a
+     * filter-cycle button, the active phrase on a search button, and a
+     * "click again to confirm" countdown on an armed
+     * {@code menu.confirm.doubleclick} button. Matched by
+     * {@link KnkActionBinding#actionTypeId()} on the item's own actions list,
+     * not by section kind or item name, so this works for any button wired
+     * to these action ids regardless of which menu/section it lives in.
+     */
+    private void appendPresetStateLore(RuntimeMenuSection section, SectionSlotAssignment assignment,
+                                        MenuSession session, long currentTick, Map<Integer, ItemStack> itemStacksBySlot) {
+        MenuContentQuery contentQuery = session.getContentQuery(section.id());
+
+        for (Map.Entry<Integer, RuntimeMenuItem> entry : assignment.itemsBySlot().entrySet()) {
+            RuntimeMenuItem item = entry.getValue();
+            ItemStack itemStack = itemStacksBySlot.get(entry.getKey());
+            if (itemStack == null) {
+                continue;
+            }
+
+            for (KnkActionBinding action : item.actions()) {
+                String actionTypeId = action.actionTypeId();
+                if (MenuActionHandlers.PAGE_NEXT.equals(actionTypeId) || MenuActionHandlers.PAGE_PREV.equals(actionTypeId)) {
+                    int totalPages = Math.max(assignment.totalPages(), 1);
+                    appendLoreLine(itemStack, ChatColor.GRAY + "Page " + (assignment.page() + 1) + "/" + totalPages);
+                } else if (MenuActionHandlers.FILTER_CYCLE.equals(actionTypeId)) {
+                    String facetKey = MenuParams.parse(action.paramsJson()).get("facetKey");
+                    String currentValue = facetKey != null ? contentQuery.filterValues().get(facetKey) : null;
+                    appendLoreLine(itemStack, ChatColor.GRAY + "Current: "
+                            + (currentValue != null ? currentValue : ChatColor.DARK_GRAY + "(none)" + ChatColor.GRAY));
+                } else if (MenuActionHandlers.SEARCH_PROMPT.equals(actionTypeId)) {
+                    String searchText = contentQuery.searchText();
+                    appendLoreLine(itemStack, ChatColor.GRAY + "Search: "
+                            + (searchText != null && !searchText.isBlank() ? searchText : ChatColor.DARK_GRAY + "(none)" + ChatColor.GRAY));
+                    appendLoreLine(itemStack, ChatColor.DARK_GRAY + "Shift-click to clear");
+                } else if (MenuActionHandlers.DOUBLECLICK_CONFIRM.equals(actionTypeId) && item.id() != null) {
+                    int windowTicks = parsePositiveIntOrDefault(
+                            MenuParams.parse(action.paramsJson()).get("windowTicks"), DEFAULT_DOUBLECLICK_WINDOW_TICKS);
+                    if (session.isDoubleClickArmed(item.id(), currentTick, windowTicks)) {
+                        appendLoreLine(itemStack, ChatColor.YELLOW + "Click again to confirm!");
+                    }
+                }
+            }
+        }
+    }
+
+    private static void appendLoreLine(ItemStack itemStack, String line) {
+        ItemMeta meta = itemStack.getItemMeta();
+        if (meta == null) {
+            return;
+        }
+        List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
+        lore.add(line);
+        meta.setLore(lore);
+        itemStack.setItemMeta(meta);
+    }
+
+    private static final int DEFAULT_DOUBLECLICK_WINDOW_TICKS = 60;
+
+    private static int parsePositiveIntOrDefault(String raw, int defaultValue) {
+        if (raw == null || raw.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            int parsed = Integer.parseInt(raw.trim());
+            return parsed > 0 ? parsed : defaultValue;
+        } catch (NumberFormatException e) {
+            return defaultValue;
         }
     }
 

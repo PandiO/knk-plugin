@@ -16,6 +16,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.Plugin;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -25,10 +26,22 @@ import java.util.function.Consumer;
  * In-house free-text capture via a virtual anvil GUI (IMPLEMENTATION_PLAN.md
  * Phase 7, DESIGN_REVIEW.md §2.1 (updated)/§2.5, QOL_BUGFIX_BACKLOG.md item
  * 8): opens an {@link AnvilInventory}, lets the player type into its rename
- * field the normal Minecraft way, reads the renamed text off a click on the
- * output slot, closes the anvil, and hands the text back - the exact
- * technique the (rejected-as-a-dependency) AnvilGUI library is built on,
- * built directly against Bukkit's own API instead. No third-party jar.
+ * field the normal Minecraft way, and hands the typed text back on an
+ * explicit Confirm click - the exact technique the (rejected-as-a-dependency)
+ * AnvilGUI library is built on, built directly against Bukkit's own API
+ * instead. No third-party jar.
+ * <p>
+ * Post-Phase-8 QOL follow-up: the first version of this class relied on
+ * vanilla anvil-combine semantics (an empty second slot, output computed by
+ * Bukkit from slot 0 alone) and had no visible Cancel affordance - closing
+ * the anvil (Escape) was the only way to cancel, which testing found
+ * unclear. This version places a real Cancel item in slot 1 and forces the
+ * result slot's contents unconditionally via {@link #onPrepareAnvil}
+ * (regardless of what combining slots 0+1 would normally produce - the
+ * Cancel item in slot 1 would otherwise feed into vanilla's repair/combine
+ * logic and corrupt the output), reading the actual typed text via {@link
+ * AnvilInventory#getRenameText()} rather than the result item's own display
+ * name (which is now a fixed "Confirm" label, not the raw text).
  * <p>
  * Deliberately mirrors {@code ChatCaptureManager.startTextCapture}'s
  * {@code (player, prompt, onComplete, onCancel)} signature so
@@ -52,6 +65,10 @@ import java.util.function.Consumer;
  */
 public final class AnvilCaptureManager implements Listener {
 
+    private static final int INPUT_SLOT = 0;
+    private static final int CANCEL_SLOT = 1;
+    private static final int CONFIRM_SLOT = 2;
+
     private final Plugin plugin;
     private final Map<UUID, AnvilCaptureSession> activeSessions = new ConcurrentHashMap<>();
 
@@ -62,34 +79,51 @@ public final class AnvilCaptureManager implements Listener {
     /**
      * @param promptMessage sent to the player as a chat line before the anvil opens
      *                       (the anvil GUI itself has no room for arbitrary prompt text)
-     * @param onComplete     receives the renamed text, stripped of color codes; blank
-     *                       (the item's unrenamed default name) is passed through as ""
-     *                       rather than treated specially - callers that mean "clear" on
-     *                       blank (search/filter) already handle that themselves
-     * @param onCancel       invoked if the player closes the anvil without confirming a
-     *                       rename (Escape, or clicking anywhere but the output slot then
-     *                       closing)
+     * @param onComplete     receives the typed text, stripped of color codes; blank
+     *                       is passed through as "" rather than treated specially -
+     *                       callers that mean "clear" on blank (search/filter) already
+     *                       handle that themselves
+     * @param onCancel       invoked if the player closes the anvil without confirming
+     *                       (Escape, or clicking the Cancel item, or closing after
+     *                       either)
      */
     public void startTextCapture(Player player, String promptMessage, Consumer<String> onComplete, Runnable onCancel) {
         player.sendMessage(promptMessage);
 
         Inventory anvil = Bukkit.createInventory(null, InventoryType.ANVIL, "Enter text");
-        ItemStack input = new ItemStack(Material.PAPER);
-        anvil.setItem(0, input);
+        anvil.setItem(INPUT_SLOT, namedItem(Material.PAPER, ChatColor.WHITE + "Type here"));
+        anvil.setItem(CANCEL_SLOT, namedItem(Material.BARRIER, ChatColor.RED + "Cancel"));
 
         activeSessions.put(player.getUniqueId(), new AnvilCaptureSession(anvil, onComplete, onCancel));
         player.openInventory(anvil);
     }
 
-    /** Zeroes the repair cost on every prepare so a plain rename never costs XP or hits the "Too Expensive!" cap. */
+    /**
+     * Forces the result slot unconditionally to a plain "Confirm" affordance
+     * showing the currently-typed text, and zeroes the repair cost - both
+     * regardless of whatever vanilla's real anvil-combine logic would have
+     * computed from slots 0+1 (the Cancel item sitting in slot 1 would
+     * otherwise be fed into that combine as a second ingredient, which could
+     * null out the result entirely or apply real repair/enchant-merge
+     * semantics neither slot is meant to trigger).
+     */
     @EventHandler
     public void onPrepareAnvil(PrepareAnvilEvent event) {
         if (!isTrackedAnvil(event.getInventory())) {
             return;
         }
-        if (event.getInventory() instanceof AnvilInventory anvilInventory) {
-            anvilInventory.setRepairCost(0);
+        AnvilInventory anvilInventory = event.getInventory();
+        anvilInventory.setRepairCost(0);
+
+        String typed = anvilInventory.getRenameText();
+        ItemStack confirmItem = namedItem(Material.PAPER, ChatColor.GREEN + "Confirm");
+        ItemMeta meta = confirmItem.getItemMeta();
+        if (meta != null) {
+            meta.setLore(List.of(ChatColor.GRAY + "You typed: " + ChatColor.WHITE
+                    + (typed != null && !typed.isBlank() ? typed : ChatColor.DARK_GRAY + "(nothing)" + ChatColor.GRAY)));
+            confirmItem.setItemMeta(meta);
         }
+        event.setResult(confirmItem);
     }
 
     @EventHandler
@@ -102,26 +136,22 @@ public final class AnvilCaptureManager implements Listener {
             return;
         }
 
-        // Never allow taking/moving items in a capture anvil - only a click
-        // directly on the output slot (handled below) completes the capture.
+        // Never allow taking/moving items in a capture anvil - only clicks
+        // directly on the Confirm (result) or Cancel slots do anything.
         event.setCancelled(true);
 
-        boolean clickedOutput = event.getSlotType() == InventoryType.SlotType.RESULT
-                && event.getClickedInventory() != null
+        boolean clickedInTopInventory = event.getClickedInventory() != null
                 && event.getClickedInventory().equals(session.inventory());
-        if (!clickedOutput) {
+        if (!clickedInTopInventory) {
             return;
         }
 
-        String text = extractText(event.getCurrentItem());
-        activeSessions.remove(player.getUniqueId());
-        // Deferred a tick: closing an Inventory from inside its own click
-        // handler is a common source of reentrancy trouble in Bukkit/Paper,
-        // so both the close and the completion callback happen next tick.
-        Bukkit.getScheduler().runTask(plugin, () -> {
-            player.closeInventory();
-            session.onComplete().accept(text);
-        });
+        if (event.getSlot() == CONFIRM_SLOT) {
+            String text = extractText(session.inventory());
+            complete(player, session, text);
+        } else if (event.getSlot() == CANCEL_SLOT) {
+            cancel(player, session);
+        }
     }
 
     @EventHandler
@@ -134,27 +164,56 @@ public final class AnvilCaptureManager implements Listener {
             return;
         }
 
-        // A successful output-slot click already removed the session (see
-        // #onClick) before closing the inventory itself, so reaching here
-        // means the player closed it some other way (Escape, etc.) without
-        // confirming a capture - a genuine cancel, not a double-completion.
+        // A successful Confirm/Cancel click already removed the session
+        // (see #complete/#cancel) before closing the inventory itself, so
+        // reaching here means the player closed it some other way (Escape,
+        // etc.) - a genuine cancel, not a double-completion.
         activeSessions.remove(player.getUniqueId());
         Bukkit.getScheduler().runTask(plugin, session.onCancel());
+    }
+
+    /**
+     * Deferred a tick: closing an Inventory from inside its own click handler
+     * is a common source of reentrancy trouble in Bukkit/Paper, so both the
+     * close and the completion callback happen next tick.
+     */
+    private void complete(Player player, AnvilCaptureSession session, String text) {
+        activeSessions.remove(player.getUniqueId());
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            player.closeInventory();
+            session.onComplete().accept(text);
+        });
+    }
+
+    private void cancel(Player player, AnvilCaptureSession session) {
+        activeSessions.remove(player.getUniqueId());
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            player.closeInventory();
+            session.onCancel().run();
+        });
     }
 
     private boolean isTrackedAnvil(Inventory inventory) {
         return activeSessions.values().stream().anyMatch(session -> session.inventory().equals(inventory));
     }
 
-    private static String extractText(ItemStack result) {
-        if (result == null) {
+    /** Reads the live typed text straight from the anvil's rename field - not the result item's own (now-fixed) display name. */
+    private static String extractText(Inventory inventory) {
+        if (!(inventory instanceof AnvilInventory anvilInventory)) {
             return "";
         }
-        ItemMeta meta = result.getItemMeta();
-        if (meta == null || !meta.hasDisplayName()) {
-            return "";
+        String renameText = anvilInventory.getRenameText();
+        return renameText != null ? ChatColor.stripColor(renameText) : "";
+    }
+
+    private static ItemStack namedItem(Material material, String displayName) {
+        ItemStack item = new ItemStack(material);
+        ItemMeta meta = item.getItemMeta();
+        if (meta != null) {
+            meta.setDisplayName(displayName);
+            item.setItemMeta(meta);
         }
-        return ChatColor.stripColor(meta.getDisplayName());
+        return item;
     }
 
     private record AnvilCaptureSession(Inventory inventory, Consumer<String> onComplete, Runnable onCancel) {

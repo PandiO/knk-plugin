@@ -33,6 +33,7 @@ public final class MenuSession {
     private volatile String currentMenuKey;
     private volatile boolean dirty;
     private volatile PendingConfirmation pendingConfirmation;
+    private volatile DoubleClickArm doubleClickArm;
 
     MenuSession(UUID playerId) {
         this.playerId = playerId;
@@ -206,5 +207,44 @@ public final class MenuSession {
 
     public void clearPendingConfirmation() {
         this.pendingConfirmation = null;
+    }
+
+    /**
+     * Post-Phase-8 QOL follow-up: the "click again within N ticks to confirm"
+     * pattern the developer asked for in place of {@code menu.confirm.request}
+     * / {@code .accept} / {@code .cancel}'s separate-button style - a real,
+     * independent alternative kept alongside that mechanism (not a
+     * replacement for it - a future screen may still want the two-button
+     * style for a genuinely destructive action a player shouldn't be able to
+     * trigger with two accidental clicks in a row). Keyed by the arming
+     * item's own persisted id (knk-paper's {@code MenuActionContext.item().id()})
+     * rather than a session-wide flag, since a menu could plausibly have more
+     * than one double-click-armed button and a click on one must not
+     * accidentally confirm a different one.
+     */
+    public record DoubleClickArm(int itemId, long armedAtTick) {
+    }
+
+    public Optional<DoubleClickArm> getDoubleClickArm() {
+        return Optional.ofNullable(doubleClickArm);
+    }
+
+    public void armDoubleClick(int itemId, long currentTick) {
+        this.doubleClickArm = new DoubleClickArm(itemId, currentTick);
+    }
+
+    public void clearDoubleClickArm() {
+        this.doubleClickArm = null;
+    }
+
+    /**
+     * Whether {@code itemId} currently has a live (unexpired) double-click
+     * arm - the single check both {@code menu.confirm.doubleclick}'s click
+     * handler and the render pass's lore feedback share, so "is this armed
+     * right now" can never drift between the two.
+     */
+    public boolean isDoubleClickArmed(int itemId, long currentTick, int windowTicks) {
+        DoubleClickArm arm = doubleClickArm;
+        return arm != null && arm.itemId() == itemId && (currentTick - arm.armedAtTick()) < windowTicks;
     }
 }

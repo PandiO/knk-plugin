@@ -39,6 +39,8 @@ public final class MenuActionHandlers {
     public static final String CONFIRM_REQUEST = "menu.confirm.request";
     public static final String CONFIRM_ACCEPT = "menu.confirm.accept";
     public static final String CONFIRM_CANCEL = "menu.confirm.cancel";
+    public static final String DOUBLECLICK_CONFIRM = "menu.confirm.doubleclick";
+    private static final int DEFAULT_DOUBLECLICK_WINDOW_TICKS = 60;
 
     private MenuActionHandlers() {
     }
@@ -62,6 +64,8 @@ public final class MenuActionHandlers {
         // re-invoke whatever action it names - see #confirmAccept.
         registry.register(CONFIRM_ACCEPT, (context, params) -> confirmAccept(context, registry));
         registry.register(CONFIRM_CANCEL, MenuActionHandlers::confirmCancel);
+        // Captures `registry` for the same reason CONFIRM_ACCEPT does.
+        registry.register(DOUBLECLICK_CONFIRM, (context, params) -> doubleClickConfirm(context, params, registry));
     }
 
     private static void close(MenuActionContext context, Map<String, String> params) {
@@ -158,6 +162,69 @@ public final class MenuActionHandlers {
                 .orElseThrow(() -> new MenuActionException(CONFIRM_CANCEL + " action has no pending confirmation to cancel"));
         context.session().clearPendingConfirmation();
         context.player().sendMessage(ChatColor.YELLOW + "Cancelled.");
+    }
+
+    /**
+     * Post-Phase-8 QOL follow-up (replaces the separate Confirm/Cancel-button
+     * style for cases that want it): the first click on a
+     * {@code menu.confirm.doubleclick} item arms it (starts a {@code
+     * windowTicks}-tick window on {@link MenuSession#armDoubleClick}); a
+     * second click on the <em>same</em> item within that window (checked via
+     * {@link MenuSession#isDoubleClickArmed}) actually re-invokes the wrapped
+     * {@code actionTypeId} and clears the arm. A click after the window
+     * expires (or on a different armed item - {@code isDoubleClickArmed}
+     * checks the item id) is treated as a fresh first click, not an error -
+     * same "just re-arm, don't fail" spirit as {@code filterCycle} wrapping
+     * back to "off" rather than throwing. {@link MenuRenderer} shows the
+     * live armed/expired state in this item's own lore (see its
+     * {@code appendPresetStateLore}), so the player sees the countdown
+     * without needing a chat message on every click.
+     */
+    private static void doubleClickConfirm(MenuActionContext context, Map<String, String> params,
+                                            ActionRegistry<MenuActionContext> registry) {
+        String actionTypeId = requireParam(params, "actionTypeId", DOUBLECLICK_CONFIRM);
+        String actionParamsJson = params.getOrDefault("actionParamsJson", "{}");
+        int windowTicks = parsePositiveIntOrDefault(params.get("windowTicks"), DEFAULT_DOUBLECLICK_WINDOW_TICKS);
+        int itemId = requireItemId(context, DOUBLECLICK_CONFIRM);
+        long currentTick = currentTick();
+
+        if (context.session().isDoubleClickArmed(itemId, currentTick, windowTicks)) {
+            context.session().clearDoubleClickArm();
+            registry.execute(actionTypeId, context, MenuParams.parse(actionParamsJson));
+            String confirmMessage = params.get("confirmMessage");
+            if (confirmMessage != null && !confirmMessage.isBlank()) {
+                context.player().sendMessage(ChatColor.GREEN + confirmMessage);
+            }
+        } else {
+            context.session().armDoubleClick(itemId, currentTick);
+            String armMessage = params.getOrDefault("armMessage",
+                    "Click again within " + (windowTicks / 20) + "s to confirm.");
+            context.player().sendMessage(ChatColor.YELLOW + armMessage);
+        }
+    }
+
+    private static int requireItemId(MenuActionContext context, String actionTypeId) {
+        if (context.item() == null || context.item().id() == null) {
+            throw new MenuActionException(actionTypeId + " action requires a persisted item with an id, but the clicked item has none");
+        }
+        return context.item().id();
+    }
+
+    private static int parsePositiveIntOrDefault(String raw, int defaultValue) {
+        if (raw == null || raw.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            int parsed = Integer.parseInt(raw.trim());
+            return parsed > 0 ? parsed : defaultValue;
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
+    }
+
+    /** Matches {@code MenuRenderer#currentTick} - 1 tick = 50ms, monotonic clock for TTL-style windows. */
+    private static long currentTick() {
+        return System.currentTimeMillis() / 50L;
     }
 
     private static RuntimeMenuSection requireSection(MenuActionContext context, String actionTypeId) {

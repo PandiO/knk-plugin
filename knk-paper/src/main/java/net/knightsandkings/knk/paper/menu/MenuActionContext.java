@@ -2,6 +2,7 @@ package net.knightsandkings.knk.paper.menu;
 
 import net.knightsandkings.knk.core.menu.MenuSession;
 import net.knightsandkings.knk.core.menu.RuntimeMenu;
+import net.knightsandkings.knk.core.menu.RuntimeMenuItem;
 import net.knightsandkings.knk.core.menu.RuntimeMenuSection;
 import org.bukkit.entity.Player;
 
@@ -42,6 +43,14 @@ import java.util.Map;
  * handlers that need it still check defensively rather than assume it, since
  * nothing prevents a future non-click caller from constructing a context
  * without one.
+ * <p>
+ * {@code item} (post-Phase-8 QOL follow-up): the clicked {@link RuntimeMenuItem}
+ * itself - added for the same reason {@code section} was: {@code
+ * menu.confirm.doubleclick} needs a stable per-button identity (the item's
+ * persisted id) to key its arm/confirm window on, and hand-typing a unique
+ * key into every instance's {@code paramsJson} would have the same
+ * reusable-preset-component problem {@code section}'s own javadoc already
+ * argues against. Like {@code section}, this is never null for a real click.
  */
 public record MenuActionContext(
         Player player,
@@ -49,6 +58,7 @@ public record MenuActionContext(
         Map<String, Object> variableContext,
         MenuService menuService,
         RuntimeMenu menu,
-        RuntimeMenuSection section
+        RuntimeMenuSection section,
+        RuntimeMenuItem item
 ) {
 }

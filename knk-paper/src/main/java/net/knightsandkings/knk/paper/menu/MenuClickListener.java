@@ -20,6 +20,7 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.Inventory;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.logging.Logger;
 
@@ -129,9 +130,19 @@ public final class MenuClickListener implements Listener {
         // click-time (re-)check instead of trusting render-time state alone.
         MenuActionContext actionContext = new MenuActionContext(
                 player, session.get(), MenuVariableContext.liveValues(player), menuService,
-                context.get().menu(), section);
+                context.get().menu(), section, item);
 
+        // Post-Phase-8 QOL follow-up: shift-clicking a search button clears
+        // the search instead of opening the anvil prompt - consolidates
+        // "Search"/"Clear Search" into one button rather than two. Checked
+        // before conditions/normal actions run at all, since clearing a
+        // search should never be blockable by whatever conditions gate the
+        // prompt action.
         try {
+            if (event.isShiftClick() && hasAction(item, MenuActionHandlers.SEARCH_PROMPT)) {
+                actionRegistry.execute(MenuActionHandlers.SEARCH_CLEAR, actionContext, Map.of());
+                return;
+            }
             executeClick(item, actionContext, player);
         } catch (MenuActionException e) {
             LOGGER.severe("Menu item (id " + item.id() + ") click failed for " + player.getName() + ": " + e.getMessage());
@@ -168,6 +179,16 @@ public final class MenuClickListener implements Listener {
             }
             actionRegistry.execute(action.actionTypeId(), context, MenuParams.parse(action.paramsJson()));
         }
+    }
+
+    /** Whether {@code item} has an action bound to the given {@code actionTypeId}, anywhere in its actions list. */
+    private static boolean hasAction(RuntimeMenuItem item, String actionTypeId) {
+        for (KnkActionBinding action : item.actions()) {
+            if (actionTypeId.equals(action.actionTypeId())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Every condition in the list must pass (AND); the first denial found wins and short-circuits the rest. */
