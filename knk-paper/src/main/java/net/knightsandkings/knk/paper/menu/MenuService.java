@@ -3,11 +3,13 @@ package net.knightsandkings.knk.paper.menu;
 import net.knightsandkings.knk.core.dataaccess.MenuTemplatesDataAccess;
 import net.knightsandkings.knk.core.domain.menu.KnkMenuTemplate;
 import net.knightsandkings.knk.core.menu.MenuAssemblyException;
+import net.knightsandkings.knk.core.menu.MenuContentQuery;
 import net.knightsandkings.knk.core.menu.MenuSession;
 import net.knightsandkings.knk.core.menu.MenuSessionRegistry;
 import net.knightsandkings.knk.core.menu.MenuTemplateAssembler;
 import net.knightsandkings.knk.core.menu.RuntimeMenu;
 import net.knightsandkings.knk.core.menu.RuntimeMenuSection;
+import net.knightsandkings.knk.paper.chat.ChatCaptureManager;
 import net.knightsandkings.knk.paper.utils.DisplayTextFormatter;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
@@ -19,6 +21,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.UnaryOperator;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -44,6 +47,7 @@ public final class MenuService {
     private final MenuSessionRegistry sessionRegistry;
     private final OpenMenuContextRegistry openMenuContextRegistry;
     private final MenuRenderer renderer;
+    private final ChatCaptureManager chatCaptureManager;
     private final Map<String, String> blockedMenus = new ConcurrentHashMap<>();
 
     public MenuService(
@@ -51,7 +55,8 @@ public final class MenuService {
             MenuTemplatesDataAccess menuTemplatesDataAccess,
             MenuSessionRegistry sessionRegistry,
             OpenMenuContextRegistry openMenuContextRegistry,
-            MenuRenderer renderer
+            MenuRenderer renderer,
+            ChatCaptureManager chatCaptureManager
     ) {
         this.plugin = plugin;
         this.logger = plugin.getLogger();
@@ -59,6 +64,7 @@ public final class MenuService {
         this.sessionRegistry = sessionRegistry;
         this.openMenuContextRegistry = openMenuContextRegistry;
         this.renderer = renderer;
+        this.chatCaptureManager = chatCaptureManager;
     }
 
     public void openMenu(Player player, String templateKey) {
@@ -129,6 +135,100 @@ public final class MenuService {
             } else {
                 session.previousPage(sectionId);
             }
+
+            renderAndOpen(player, menu, session);
+        });
+    }
+
+    /**
+     * IMPLEMENTATION_PLAN.md Phase 5: prompts (via the reused
+     * {@link ChatCaptureManager} text-input flow, not a one-off anvil GUI -
+     * see ACTIVE_SESSIONS.md's Phase 5 entry, open question 3) for a search
+     * query and applies it to {@code sectionName}. Vanilla Minecraft closes
+     * any open custom Inventory the instant a player opens chat (the same
+     * behavior {@link #nextPage}/{@link #previousPage}'s fallback already
+     * works around), so - exactly like those - this re-fetches and reopens
+     * the menu fresh once the query is captured rather than assuming the
+     * Inventory the player had open is still there.
+     */
+    public void promptSearch(Player player, String sectionName) {
+        chatCaptureManager.startTextCapture(
+                player,
+                ChatColor.YELLOW + "Type a search query for '" + sectionName + "' (or 'cancel'):",
+                query -> search(player, sectionName, query),
+                () -> player.sendMessage(ChatColor.YELLOW + "Search cancelled.")
+        );
+    }
+
+    /** IMPLEMENTATION_PLAN.md Phase 5: same as {@link #promptSearch}, for one FilterBar facet. */
+    public void promptFilter(Player player, String sectionName, String facetKey) {
+        chatCaptureManager.startTextCapture(
+                player,
+                ChatColor.YELLOW + "Type a value for filter '" + facetKey + "' on '" + sectionName + "' (or 'cancel'):",
+                value -> filter(player, sectionName, facetKey, value),
+                () -> player.sendMessage(ChatColor.YELLOW + "Filter cancelled.")
+        );
+    }
+
+    public void search(Player player, String sectionName, String queryText) {
+        applyContentQueryUpdate(player, sectionName, existing -> existing.withSearchText(queryText));
+    }
+
+    public void clearSearch(Player player, String sectionName) {
+        applyContentQueryUpdate(player, sectionName, existing -> existing.withSearchText(null));
+    }
+
+    public void filter(Player player, String sectionName, String facetKey, String value) {
+        applyContentQueryUpdate(player, sectionName, existing -> existing.withFilterValue(facetKey, value));
+    }
+
+    public void clearFilter(Player player, String sectionName, String facetKey) {
+        applyContentQueryUpdate(player, sectionName, existing -> existing.withFilterValue(facetKey, null));
+    }
+
+    /**
+     * Shared plumbing for every search/filter mutation: re-fetches the
+     * current menu (the {@link MenuSession} survives an Inventory close, per
+     * {@link #changePage}'s doc comment), resolves {@code sectionName},
+     * rejects non-searchable sections, updates the session's
+     * {@link MenuContentQuery} for that section, resets its page to 0 (a new
+     * query invalidates whatever page the player was previously on), and
+     * re-renders.
+     */
+    private void applyContentQueryUpdate(Player player, String sectionName, UnaryOperator<MenuContentQuery> update) {
+        Optional<MenuSession> sessionOpt = sessionRegistry.get(player.getUniqueId());
+        Optional<String> currentMenuKey = sessionOpt.flatMap(MenuSession::currentMenuKey);
+        if (sessionOpt.isEmpty() || currentMenuKey.isEmpty()) {
+            player.sendMessage(ChatColor.YELLOW + "You don't have a menu open.");
+            return;
+        }
+        MenuSession session = sessionOpt.get();
+
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            RuntimeMenu menu = loadAndAssemble(player, currentMenuKey.get());
+            if (menu == null) {
+                return;
+            }
+
+            Optional<RuntimeMenuSection> sectionOpt = menu.findSection(sectionName);
+            if (sectionOpt.isEmpty()) {
+                String available = menu.sections().stream().map(RuntimeMenuSection::name)
+                        .collect(Collectors.joining(", "));
+                Bukkit.getScheduler().runTask(plugin, () -> player.sendMessage(
+                        ChatColor.YELLOW + "No section named '" + sectionName + "' in this menu. Available: " + available));
+                return;
+            }
+
+            RuntimeMenuSection section = sectionOpt.get();
+            if (!section.searchable()) {
+                Bukkit.getScheduler().runTask(plugin, () -> player.sendMessage(
+                        ChatColor.YELLOW + "Section '" + sectionName + "' doesn't support search/filter."));
+                return;
+            }
+
+            MenuContentQuery updated = update.apply(session.getContentQuery(section.id()));
+            session.setContentQuery(section.id(), updated);
+            session.setPage(section.id(), 0);
 
             renderAndOpen(player, menu, session);
         });

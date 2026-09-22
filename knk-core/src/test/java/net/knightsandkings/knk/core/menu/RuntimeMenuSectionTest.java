@@ -30,10 +30,14 @@ class RuntimeMenuSectionTest {
     }
 
     private static RuntimeMenuSection section(MenuOverflowMode overflow, List<RuntimeMenuItem> items) {
+        return section(overflow, items, false);
+    }
+
+    private static RuntimeMenuSection section(MenuOverflowMode overflow, List<RuntimeMenuItem> items, boolean searchable) {
         // A 2x2 (capacity 4) content section starting at slot 0.
         return new RuntimeMenuSection(1, "content", MenuSectionKind.CONTENT_GRID, 0, 0, 2, 2,
                 MenuPositionMode.STATIC, MenuAlignVertical.TOP, MenuAlignHorizontal.LEFT,
-                overflow, MenuListMode.DEFAULT, MenuRenderPriority.MEDIUM, null, items, List.of());
+                overflow, MenuListMode.DEFAULT, MenuRenderPriority.MEDIUM, null, searchable, items, List.of());
     }
 
     @Test
@@ -150,9 +154,79 @@ class RuntimeMenuSectionTest {
         RuntimeMenuSection gated = new RuntimeMenuSection(base.id(), base.name(), base.kind(), base.sortOrder(),
                 base.displaySlot(), base.width(), base.height(), base.positionMode(), base.alignVertical(),
                 base.alignHorizontal(), base.overflow(), base.listMode(), base.priority(),
-                "knk.menu.example.debug", base.items(), base.variableBindings());
+                "knk.menu.example.debug", base.searchable(), base.items(), base.variableBindings());
 
         assertFalse(gated.isVisibleTo(node -> false));
         assertTrue(gated.isVisibleTo(node -> node.equals("knk.menu.example.debug")));
+    }
+
+    /**
+     * IMPLEMENTATION_PLAN.md Phase 5 / DESIGN_REVIEW.md §2.1: search/filter
+     * must narrow the content list BEFORE pagination runs, not conflict with
+     * it - narrowing 5 items to 2 with a 4-capacity section should yield one
+     * page, not the two pages the unfiltered set would need.
+     */
+    @Test
+    void contentFilterNarrowsBeforePaginationRuns() {
+        List<RuntimeMenuItem> items = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            items.add(item(i));
+        }
+        RuntimeMenuSection section = section(MenuOverflowMode.SCROLL, items, true);
+
+        SectionSlotAssignment filtered = section.resolveSlots(MENU_TOTAL_SLOTS, 0,
+                candidate -> candidate.sortOrder() < 2);
+
+        assertEquals(1, filtered.totalPages());
+        assertEquals(2, filtered.itemsBySlot().size());
+        assertFalse(filtered.hasNextPage());
+        assertEquals(List.of(0, 1), filtered.itemsBySlot().values().stream()
+                .map(RuntimeMenuItem::sortOrder).sorted().toList());
+    }
+
+    @Test
+    void contentFilterExcludingEverythingYieldsZeroPages() {
+        List<RuntimeMenuItem> items = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            items.add(item(i));
+        }
+        RuntimeMenuSection section = section(MenuOverflowMode.SCROLL, items, true);
+
+        SectionSlotAssignment filtered = section.resolveSlots(MENU_TOTAL_SLOTS, 0, candidate -> false);
+
+        assertEquals(0, filtered.totalPages());
+        assertTrue(filtered.itemsBySlot().isEmpty());
+    }
+
+    /**
+     * A pinned item (e.g. a persistent search/clear-filter button) opts out
+     * of pagination already; a content filter must not exclude it either -
+     * only the auto-placed content it sits alongside gets narrowed.
+     */
+    @Test
+    void contentFilterDoesNotExcludePinnedItems() {
+        List<RuntimeMenuItem> items = new ArrayList<>();
+        items.add(item(0, 0)); // pinned to slot 0
+        for (int i = 1; i <= 3; i++) {
+            items.add(item(i));
+        }
+        RuntimeMenuSection section = section(MenuOverflowMode.SCROLL, items, true);
+
+        SectionSlotAssignment filtered = section.resolveSlots(MENU_TOTAL_SLOTS, 0, candidate -> false);
+
+        assertEquals(item(0, 0), filtered.itemsBySlot().get(0));
+        assertEquals(1, filtered.itemsBySlot().size());
+    }
+
+    @Test
+    void noContentFilterArgumentBehavesAsUnfiltered() {
+        List<RuntimeMenuItem> items = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            items.add(item(i));
+        }
+        RuntimeMenuSection section = section(MenuOverflowMode.SCROLL, items, true);
+
+        assertEquals(section.resolveSlots(MENU_TOTAL_SLOTS, 0).itemsBySlot(),
+                section.resolveSlots(MENU_TOTAL_SLOTS, 0, candidate -> true).itemsBySlot());
     }
 }

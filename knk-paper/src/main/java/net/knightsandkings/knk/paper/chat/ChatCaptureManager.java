@@ -87,6 +87,39 @@ public class ChatCaptureManager {
     }
     
     /**
+     * IMPLEMENTATION_PLAN.md Phase 5: starts a single-line free-text capture
+     * for an arbitrary caller purpose (e.g. an InventoryMenu search query or
+     * filter value) - the standard, reusable text-input mechanism, chosen
+     * over a one-off anvil-GUI capture specifically because this mechanism
+     * already exists and is already idiomatic in this codebase (see
+     * ACTIVE_SESSIONS.md's Phase 5 entry, open question 3). Generic over
+     * {@link #startMergeFlow}'s account-specific flow: no fixed prompt text,
+     * no multi-step state - just "ask once, hand back whatever was typed".
+     *
+     * @param player      the player to prompt
+     * @param promptMessage the full message (already prefixed/colored by the caller) shown before capture starts
+     * @param onComplete  callback receiving the raw typed text
+     * @param onCancel    callback if the player types "cancel" or times out
+     */
+    public void startTextCapture(Player player, String promptMessage, Consumer<String> onComplete, Runnable onCancel) {
+        ChatCaptureSession session = new ChatCaptureSession(
+            player.getUniqueId(),
+            CaptureFlow.TEXT_INPUT,
+            CaptureStep.TEXT_INPUT
+        );
+
+        session.setOnComplete(data -> onComplete.accept(data.getOrDefault("text", "")));
+        session.setOnCancel(onCancel);
+
+        activeSessions.put(player.getUniqueId(), session);
+
+        player.sendMessage(promptMessage);
+        player.sendMessage(config.messages().prefix() + "§7Type 'cancel' to cancel.");
+
+        startTimeoutTask(player);
+    }
+
+    /**
      * Handle chat input for an active capture session.
      *
      * @param player the player sending chat
@@ -111,6 +144,9 @@ public class ChatCaptureManager {
             case ACCOUNT_MERGE:
                 handleMergeInput(player, session, message);
                 break;
+            case TEXT_INPUT:
+                handleTextInput(player, session, message);
+                break;
         }
         
         return true; // Event is cancelled
@@ -134,6 +170,14 @@ public class ChatCaptureManager {
         }
     }
     
+    /**
+     * Handle input for the generic single-line text-capture flow.
+     */
+    private void handleTextInput(Player player, ChatCaptureSession session, String input) {
+        session.putData("text", input);
+        completeSession(player, session);
+    }
+
     /**
      * Complete a session and invoke the onComplete callback.
      */

@@ -10,13 +10,20 @@ import org.bukkit.entity.Player;
 /**
  * Dev-harness command for exercising the rendering engine end-to-end against
  * a real server ({@code /knk menu open <key>},
- * {@code /knk menu page next|prev <sectionName>}, {@code /knk menu broken}) -
- * there's no real menu content to trigger this from yet (porting v1's
- * screens and Kits/Sieges is separate, later work per
+ * {@code /knk menu page next|prev <sectionName>},
+ * {@code /knk menu search <sectionName> [clear]},
+ * {@code /knk menu filter <sectionName> <facetKey> [clear]},
+ * {@code /knk menu broken}) - there's no real menu content to trigger this
+ * from yet (porting v1's screens and Kits/Sieges is separate, later work per
  * IMPLEMENTATION_PLAN.md's "explicitly out of scope" section), so this is
  * the only way to actually open a menu and verify assembly/layout/
- * pagination/variable-resolution/async-rendering on a live dev server rather
- * than stopping at unit tests.
+ * pagination/variable-resolution/search-filter/async-rendering on a live dev
+ * server rather than stopping at unit tests. {@code search}/{@code filter}
+ * (IMPLEMENTATION_PLAN.md Phase 5) are the trigger for
+ * {@link MenuService#promptSearch}/{@link MenuService#promptFilter}'s chat-
+ * capture flow, standing in for the actual clickable SearchBar/FilterBar
+ * button Phase 7's preset renderer will eventually provide - same relationship
+ * this dev harness already has to real pagination-button UI.
  */
 public class MenuDebugCommand implements CommandExecutor {
 
@@ -39,8 +46,7 @@ public class MenuDebugCommand implements CommandExecutor {
         }
 
         if (args.length == 0) {
-            sender.sendMessage(ChatColor.YELLOW
-                    + "Usage: /knk menu open <key> | /knk menu page next|prev <sectionName> | /knk menu broken");
+            sender.sendMessage(ChatColor.YELLOW + USAGE);
             return true;
         }
 
@@ -66,11 +72,40 @@ public class MenuDebugCommand implements CommandExecutor {
                     sender.sendMessage(ChatColor.YELLOW + "Usage: /knk menu page next|prev <sectionName>");
                 }
             }
-            default -> sender.sendMessage(ChatColor.YELLOW + "Unknown subcommand. Use: open, page, broken");
+            case "search" -> {
+                if (args.length < 2) {
+                    sender.sendMessage(ChatColor.YELLOW + "Usage: /knk menu search <sectionName> [clear]");
+                    return true;
+                }
+                String sectionName = args[1];
+                if (args.length >= 3 && args[2].equalsIgnoreCase("clear")) {
+                    menuService.clearSearch(player, sectionName);
+                } else {
+                    menuService.promptSearch(player, sectionName);
+                }
+            }
+            case "filter" -> {
+                if (args.length < 3) {
+                    sender.sendMessage(ChatColor.YELLOW + "Usage: /knk menu filter <sectionName> <facetKey> [clear]");
+                    return true;
+                }
+                String sectionName = args[1];
+                String facetKey = args[2];
+                if (args.length >= 4 && args[3].equalsIgnoreCase("clear")) {
+                    menuService.clearFilter(player, sectionName, facetKey);
+                } else {
+                    menuService.promptFilter(player, sectionName, facetKey);
+                }
+            }
+            default -> sender.sendMessage(ChatColor.YELLOW
+                    + "Unknown subcommand '" + String.join(" ", args) + "'. " + USAGE);
         }
 
         return true;
     }
+
+    private static final String USAGE = "Usage: /knk menu open <key> | /knk menu page next|prev <sectionName> | "
+            + "/knk menu search <sectionName> [clear] | /knk menu filter <sectionName> <facetKey> [clear] | /knk menu broken";
 
     /**
      * Lists menus {@link net.knightsandkings.knk.paper.menu.MenuDefinitionValidationRunner}

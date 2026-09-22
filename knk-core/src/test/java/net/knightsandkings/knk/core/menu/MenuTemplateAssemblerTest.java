@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -29,7 +30,7 @@ class MenuTemplateAssemblerTest {
     private static KnkMenuSectionTemplate section(int id, String kind, int sortOrder, int displaySlot,
                                                     int width, int height, List<KnkMenuItemTemplate> items) {
         return new KnkMenuSectionTemplate(id, "section-" + id, kind, sortOrder, displaySlot, width, height,
-                "Static", "Top", "Left", "Hide", "Default", "Medium", null, items, List.of());
+                "Static", "Top", "Left", "Hide", "Default", "Medium", null, null, items, List.of());
     }
 
     @Test
@@ -63,7 +64,7 @@ class MenuTemplateAssemblerTest {
     @Test
     void nullOptionalFieldsFallBackToSchemaDefaults() {
         KnkMenuSectionTemplate rawSection = new KnkMenuSectionTemplate(1, "s", null, null, null, null, null,
-                null, null, null, null, null, null, null, List.of(), List.of());
+                null, null, null, null, null, null, null, null, List.of(), List.of());
         KnkMenuTemplate template = new KnkMenuTemplate(1, "k", "n", null, null, null, null, List.of(rawSection));
 
         RuntimeMenu menu = MenuTemplateAssembler.assemble(template);
@@ -77,6 +78,18 @@ class MenuTemplateAssemblerTest {
         assertEquals(MenuOverflowMode.HIDE, section.overflow());
         assertEquals(9, section.width());
         assertEquals(1, section.height());
+        assertFalse(section.searchable());
+    }
+
+    @Test
+    void searchableFlagCarriesThroughToTheRuntimeSection() {
+        KnkMenuSectionTemplate rawSection = new KnkMenuSectionTemplate(1, "s", "ContentGrid", 0, 0, 9, 1,
+                "Static", "Top", "Left", "Hide", "Default", "Medium", null, true, List.of(), List.of());
+        KnkMenuTemplate template = new KnkMenuTemplate(1, "k", "n", null, 3, "Static", null, List.of(rawSection));
+
+        RuntimeMenu menu = MenuTemplateAssembler.assemble(template);
+
+        assertTrue(menu.sections().get(0).searchable());
     }
 
     @Test

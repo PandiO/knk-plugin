@@ -36,6 +36,7 @@ public record RuntimeMenuSection(
         MenuListMode listMode,
         MenuRenderPriority priority,
         String visibilityPermission,
+        boolean searchable,
         List<RuntimeMenuItem> items,
         List<KnkVariableBinding> variableBindings
 ) {
@@ -53,6 +54,30 @@ public record RuntimeMenuSection(
      * two aren't distinguished at this level).
      */
     public SectionSlotAssignment resolveSlots(int menuTotalSlots, int requestedPage) {
+        return resolveSlots(menuTotalSlots, requestedPage, item -> true);
+    }
+
+    /**
+     * IMPLEMENTATION_PLAN.md Phase 5 / DESIGN_REVIEW.md §2.1 §2.3: same as
+     * {@link #resolveSlots(int, int)}, but {@code contentFilter} narrows the
+     * {@code auto} (paginated) items before slotting - search/filter compose
+     * with pagination rather than conflicting with it, since filtering always
+     * happens first. Only applies to {@code auto} items: a pinned item
+     * ({@link RuntimeMenuItem#slotOverride()} set - e.g. a persistent search/
+     * clear-filter button) always renders regardless of the active content
+     * query, the same way it already opts out of pagination entirely.
+     * <p>
+     * {@code contentFilter} is an opaque {@code Predicate<RuntimeMenuItem>}
+     * rather than a query string here - this class stays Bukkit-free and has
+     * no way to resolve a variable-bound display name against live player
+     * context (that needs {@code VariableResolver} + a real {@code Player},
+     * which only exist in knk-paper); the caller (knk-paper's
+     * {@code MenuRenderer}) is responsible for resolving candidate items'
+     * display text and building the actual predicate from the session's
+     * {@link MenuContentQuery} before calling this overload.
+     */
+    public SectionSlotAssignment resolveSlots(int menuTotalSlots, int requestedPage,
+                                               Predicate<RuntimeMenuItem> contentFilter) {
         List<Integer> available = MenuSlotCalculator.calculateSlots(
                 displaySlot, menuTotalSlots, width, height, alignVertical, alignHorizontal
         );
@@ -62,7 +87,7 @@ public record RuntimeMenuSection(
         for (RuntimeMenuItem item : items) {
             if (item.slotOverride() != null) {
                 pinned.add(item);
-            } else {
+            } else if (contentFilter.test(item)) {
                 auto.add(item);
             }
         }

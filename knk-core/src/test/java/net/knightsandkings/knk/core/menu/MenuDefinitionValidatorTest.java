@@ -64,7 +64,7 @@ class MenuDefinitionValidatorTest {
                 new KnkVariableBinding(1, "Name", 0, "$player.getBogusMethod$", "Static", null));
         RuntimeMenuSection section = new RuntimeMenuSection(1, "Header", MenuSectionKind.STATIC_BUTTONS, 0, 0,
                 9, 1, MenuPositionMode.STATIC, MenuAlignVertical.TOP, MenuAlignHorizontal.LEFT,
-                MenuOverflowMode.HIDE, MenuListMode.DEFAULT, MenuRenderPriority.MEDIUM, null,
+                MenuOverflowMode.HIDE, MenuListMode.DEFAULT, MenuRenderPriority.MEDIUM, null, false,
                 List.of(item), sectionBindings);
         RuntimeMenu menu = new RuntimeMenu("test.menu", "Test Menu", 3, MenuGrowth.STATIC, null, List.of(section));
 
@@ -80,7 +80,7 @@ class MenuDefinitionValidatorTest {
                 MenuDisplayMode.NORMAL, null, null, itemBindings, List.of(), List.of());
         RuntimeMenuSection section = new RuntimeMenuSection(1, "Content", MenuSectionKind.CONTENT_GRID, 0, 0,
                 9, 1, MenuPositionMode.STATIC, MenuAlignVertical.TOP, MenuAlignHorizontal.LEFT,
-                MenuOverflowMode.HIDE, MenuListMode.DEFAULT, MenuRenderPriority.MEDIUM, null,
+                MenuOverflowMode.HIDE, MenuListMode.DEFAULT, MenuRenderPriority.MEDIUM, null, false,
                 List.of(item), List.of());
         return new RuntimeMenu("test.menu", "Test Menu", 3, MenuGrowth.STATIC, null, List.of(section));
     }

@@ -20,6 +20,7 @@ public record KnkMenuSectionTemplate(
         String listMode,
         String priority,
         String visibilityPermission,
+        Boolean searchable,
         List<KnkMenuItemTemplate> items,
         List<KnkVariableBinding> variableBindings
 ) {}

@@ -64,6 +64,23 @@ public final class VariableResolver {
     }
 
     /**
+     * IMPLEMENTATION_PLAN.md Phase 5 / DESIGN_REVIEW.md §2.3: the first
+     * binding targeting an arbitrary property name's resolved text, for
+     * FilterBar facet matching. {@code targetProperty} isn't restricted to
+     * "Name"/"Lore" - it's the same free-text column real templates already
+     * use for those two, so a content author can attach e.g. a "Category"-
+     * targeted binding to an item with no schema change, and a filter facet
+     * matches against it the same way search matches against "Name".
+     */
+    public static Optional<String> resolveByTargetProperty(List<KnkVariableBinding> bindings, String targetProperty,
+                                                             MenuSession session, Map<String, Object> contextValues,
+                                                             long currentTick) {
+        return bindingsFor(bindings, targetProperty)
+                .map(binding -> resolve(binding, session, contextValues, currentTick))
+                .findFirst();
+    }
+
+    /**
      * Resolves one binding's expression, consulting its {@code RefreshPolicy}
      * against the session's cache before doing any reflection work at all.
      */

@@ -75,6 +75,7 @@ public final class MenuTemplateAssembler {
         int height = sectionTemplate.height() != null ? sectionTemplate.height() : 1;
         int displaySlot = sectionTemplate.displaySlot() != null ? sectionTemplate.displaySlot() : 0;
         int sortOrder = sectionTemplate.sortOrder() != null ? sectionTemplate.sortOrder() : 0;
+        boolean searchable = sectionTemplate.searchable() != null && sectionTemplate.searchable();
 
         List<KnkMenuItemTemplate> sourceItems = sectionTemplate.items() != null ? sectionTemplate.items() : List.of();
         List<RuntimeMenuItem> items = new ArrayList<>(sourceItems.size());
@@ -86,7 +87,7 @@ public final class MenuTemplateAssembler {
         return new RuntimeMenuSection(
                 sectionTemplate.id(), sectionTemplate.name(), kind, sortOrder, displaySlot, width, height,
                 positionMode, alignVertical, alignHorizontal, overflow, listMode, priority,
-                sectionTemplate.visibilityPermission(), List.copyOf(items),
+                sectionTemplate.visibilityPermission(), searchable, List.copyOf(items),
                 sectionTemplate.variableBindings() != null ? sectionTemplate.variableBindings() : List.of()
         );
     }

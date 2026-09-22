@@ -364,7 +364,8 @@ public class KnKPlugin extends JavaPlugin {
             this.openMenuContextRegistry = new OpenMenuContextRegistry();
             MenuRenderer menuRenderer = new MenuRenderer(minecraftMaterialRefsDataAccess);
             this.menuService = new MenuService(
-                this, menuTemplatesDataAccess, menuSessionRegistry, openMenuContextRegistry, menuRenderer
+                this, menuTemplatesDataAccess, menuSessionRegistry, openMenuContextRegistry, menuRenderer,
+                chatCaptureManager
             );
             getServer().getPluginManager().registerEvents(new MenuClickListener(openMenuContextRegistry), this);
             getServer().getPluginManager().registerEvents(

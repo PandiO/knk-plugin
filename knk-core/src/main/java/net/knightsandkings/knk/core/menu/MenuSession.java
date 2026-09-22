@@ -29,6 +29,7 @@ public final class MenuSession {
     private final Deque<String> menuKeyHistory = new ArrayDeque<>();
     private final Map<Integer, Integer> sectionPages = new ConcurrentHashMap<>();
     private final Map<Integer, CachedVariable> variableCache = new ConcurrentHashMap<>();
+    private final Map<Integer, MenuContentQuery> contentQueries = new ConcurrentHashMap<>();
     private volatile String currentMenuKey;
     private volatile boolean dirty;
 
@@ -103,6 +104,37 @@ public final class MenuSession {
         int previous = Math.max(0, getPage(sectionTemplateId) - 1);
         setPage(sectionTemplateId, previous);
         return previous;
+    }
+
+    /**
+     * IMPLEMENTATION_PLAN.md Phase 5 / DESIGN_REVIEW.md §2.1 §2.3: the
+     * active search/filter content query for one searchable section
+     * (keyed by its template id, same as {@link #sectionPages}), or
+     * {@link MenuContentQuery#EMPTY} if none is set.
+     */
+    public MenuContentQuery getContentQuery(Integer sectionTemplateId) {
+        if (sectionTemplateId == null) {
+            return MenuContentQuery.EMPTY;
+        }
+        return contentQueries.getOrDefault(sectionTemplateId, MenuContentQuery.EMPTY);
+    }
+
+    /**
+     * Sets (or, if {@code query} is empty, clears) the active content query
+     * for a section, and marks the session dirty - DESIGN_REVIEW.md §1 names
+     * "a filter/search updated" explicitly as an {@code ON_DIRTY} trigger, so
+     * this is the one place that state transition happens.
+     */
+    public void setContentQuery(Integer sectionTemplateId, MenuContentQuery query) {
+        if (sectionTemplateId == null) {
+            return;
+        }
+        if (query == null || query.isEmpty()) {
+            contentQueries.remove(sectionTemplateId);
+        } else {
+            contentQueries.put(sectionTemplateId, query);
+        }
+        markDirty();
     }
 
     public void markDirty() {

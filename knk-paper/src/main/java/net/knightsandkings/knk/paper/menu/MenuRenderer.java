@@ -2,22 +2,29 @@ package net.knightsandkings.knk.paper.menu;
 
 import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
 import net.knightsandkings.knk.core.domain.material.KnkMinecraftMaterialRef;
+import net.knightsandkings.knk.core.menu.MenuContentQuery;
 import net.knightsandkings.knk.core.menu.MenuRenderPriority;
 import net.knightsandkings.knk.core.menu.MenuSession;
+import net.knightsandkings.knk.core.menu.MenuSlotCalculator;
 import net.knightsandkings.knk.core.menu.RuntimeMenu;
 import net.knightsandkings.knk.core.menu.RuntimeMenuItem;
 import net.knightsandkings.knk.core.menu.RuntimeMenuSection;
 import net.knightsandkings.knk.core.menu.SectionSlotAssignment;
+import net.knightsandkings.knk.core.menu.VariableResolver;
 import net.knightsandkings.knk.paper.mapper.MaterialNamespaceResolver;
+import net.knightsandkings.knk.paper.utils.DisplayTextFormatter;
+import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
 
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -77,7 +84,20 @@ public final class MenuRenderer {
                 continue;
             }
 
-            SectionSlotAssignment assignment = section.resolveSlots(menu.totalSlots(), session.getPage(section.id()));
+            // IMPLEMENTATION_PLAN.md Phase 5 / DESIGN_REVIEW.md §2.1 §2.3: a
+            // searchable section's active MenuContentQuery narrows its auto-
+            // placed content BEFORE resolveSlots paginates it - the predicate
+            // itself has to be built here, not in knk-core, since matching
+            // requires resolved display text (VariableResolver + the live
+            // Player context knk-core deliberately doesn't have).
+            MenuContentQuery contentQuery = session.getContentQuery(section.id());
+            boolean queryActive = section.searchable() && !contentQuery.isEmpty();
+            Predicate<RuntimeMenuItem> contentFilter = queryActive
+                    ? buildContentFilter(contentQuery, session, variableContext, currentTick)
+                    : item -> true;
+
+            SectionSlotAssignment assignment = section.resolveSlots(
+                    menu.totalSlots(), session.getPage(section.id()), contentFilter);
             for (Map.Entry<Integer, RuntimeMenuItem> entry : assignment.itemsBySlot().entrySet()) {
                 RuntimeMenuItem item = entry.getValue();
                 String namespaceKey = item.materialRefId() != null
@@ -91,12 +111,86 @@ public final class MenuRenderer {
                     itemsBySlot.put(entry.getKey(), item);
                 }
             }
+
+            if (queryActive && matchedNoAutoContent(assignment)) {
+                placeEmptyResultsMarker(section, menu, assignment, itemStacksBySlot);
+            }
         }
 
         fillBackground(menu, namespaceKeysByMaterialRefId, itemStacksBySlot);
         session.clearDirty();
 
         return new MenuRenderResult(Map.copyOf(itemStacksBySlot), Map.copyOf(itemsBySlot));
+    }
+
+    /**
+     * IMPLEMENTATION_PLAN.md Phase 5: builds the actual matching predicate
+     * from a session's raw {@link MenuContentQuery} - search text matches
+     * (case-insensitively, substring) against the item's resolved "Name"
+     * binding, and every filter facet must match the resolved binding for
+     * that {@code targetProperty} exactly (case-insensitively). Both must
+     * pass when both are set (DESIGN_REVIEW.md §2.3: search and filters
+     * compose, they don't override each other).
+     */
+    private static Predicate<RuntimeMenuItem> buildContentFilter(MenuContentQuery query, MenuSession session,
+                                                                   Map<String, Object> variableContext, long currentTick) {
+        String needle = query.searchText() != null ? query.searchText().trim().toLowerCase(Locale.ROOT) : null;
+        boolean hasSearch = needle != null && !needle.isEmpty();
+        Map<String, String> filters = query.filterValues();
+
+        return item -> {
+            if (hasSearch) {
+                String name = VariableResolver.resolveName(item.variableBindings(), session, variableContext, currentTick);
+                if (name == null || !name.toLowerCase(Locale.ROOT).contains(needle)) {
+                    return false;
+                }
+            }
+            for (Map.Entry<String, String> facet : filters.entrySet()) {
+                String resolved = VariableResolver.resolveByTargetProperty(
+                                item.variableBindings(), facet.getKey(), session, variableContext, currentTick)
+                        .orElse(null);
+                if (resolved == null || !resolved.equalsIgnoreCase(facet.getValue())) {
+                    return false;
+                }
+            }
+            return true;
+        };
+    }
+
+    /** Whether a searchable section's auto-placed (non-pinned) content came back empty after filtering. */
+    private static boolean matchedNoAutoContent(SectionSlotAssignment assignment) {
+        return assignment.itemsBySlot().values().stream().noneMatch(item -> item.slotOverride() == null);
+    }
+
+    /**
+     * IMPLEMENTATION_PLAN.md Phase 5 / DESIGN_REVIEW.md §2.1: an explicit
+     * empty-results state - neither legacy system had one. Placed into the
+     * first of the section's own layout slots not already occupied by a
+     * pinned item (e.g. a persistent search/clear button); silently skipped
+     * if none is free (a fully pinned section has nowhere to put it).
+     */
+    private static void placeEmptyResultsMarker(RuntimeMenuSection section, RuntimeMenu menu,
+                                                  SectionSlotAssignment assignment, Map<Integer, ItemStack> itemStacksBySlot) {
+        List<Integer> sectionSlots = MenuSlotCalculator.calculateSlots(
+                section.displaySlot(), menu.totalSlots(), section.width(), section.height(),
+                section.alignVertical(), section.alignHorizontal());
+
+        Integer targetSlot = sectionSlots.stream()
+                .filter(slot -> !assignment.itemsBySlot().containsKey(slot))
+                .findFirst()
+                .orElse(null);
+        if (targetSlot == null) {
+            return;
+        }
+
+        ItemStack marker = new ItemStack(Material.BARRIER);
+        ItemMeta meta = marker.getItemMeta();
+        if (meta != null) {
+            meta.setDisplayName(DisplayTextFormatter.translateToLegacy(ChatColor.RED + "No results found"));
+            meta.setLore(List.of(DisplayTextFormatter.translateToLegacy(ChatColor.GRAY + "Try a different search or filter")));
+            marker.setItemMeta(meta);
+        }
+        itemStacksBySlot.put(targetSlot, marker);
     }
 
     /**

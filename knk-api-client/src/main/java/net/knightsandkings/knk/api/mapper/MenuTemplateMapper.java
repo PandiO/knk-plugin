@@ -78,6 +78,7 @@ public final class MenuTemplateMapper {
                 dto.listMode(),
                 dto.priority(),
                 dto.visibilityPermission(),
+                dto.searchable(),
                 items,
                 bindings
         );
