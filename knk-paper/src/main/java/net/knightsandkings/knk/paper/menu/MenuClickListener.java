@@ -1,13 +1,24 @@
 package net.knightsandkings.knk.paper.menu;
 
+import net.knightsandkings.knk.core.domain.menu.KnkActionBinding;
+import net.knightsandkings.knk.core.domain.menu.KnkConditionBinding;
+import net.knightsandkings.knk.core.menu.ActionRegistry;
+import net.knightsandkings.knk.core.menu.ConditionOutcome;
+import net.knightsandkings.knk.core.menu.ConditionRegistry;
+import net.knightsandkings.knk.core.menu.MenuActionException;
 import net.knightsandkings.knk.core.menu.MenuDisplayMode;
+import net.knightsandkings.knk.core.menu.MenuParams;
+import net.knightsandkings.knk.core.menu.MenuSession;
+import net.knightsandkings.knk.core.menu.MenuSessionRegistry;
 import net.knightsandkings.knk.core.menu.RuntimeMenuItem;
+import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.Inventory;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.logging.Logger;
 
@@ -17,12 +28,12 @@ import java.util.logging.Logger;
  * items in a menu) and routes the click to the {@link RuntimeMenuItem} that
  * occupied the clicked slot in the last render.
  * <p>
- * Deliberately does not execute {@code item.actions()} - wiring
- * {@code ActionRegistry} is Phase 6's job (IMPLEMENTATION_PLAN.md). This
- * phase's click pipeline exists so the routing itself (identify which item
- * was clicked, respect DISABLED/HIDDEN, and reject a click actionPermission
- * denies) is in place and testable end-to-end against a live menu, without
- * pulling action execution forward.
+ * IMPLEMENTATION_PLAN.md Phase 6 wires actual click-time execution here:
+ * conditions are (re-)evaluated against a freshly-built live context - never
+ * anything cached from the render pass - closing the staleness window
+ * DESIGN_REVIEW.md §2.2 describes (state checked at render time can go stale
+ * before the click happens), and only then does a passing action actually
+ * run via {@link ActionRegistry}.
  * <p>
  * The {@code actionPermission} check here is IMPLEMENTATION_PLAN.md Phase 4's
  * click-time defense-in-depth half of DESIGN_REVIEW.md §2.4: render-time
@@ -34,9 +45,23 @@ public final class MenuClickListener implements Listener {
     private static final Logger LOGGER = Logger.getLogger(MenuClickListener.class.getName());
 
     private final OpenMenuContextRegistry openMenuContextRegistry;
+    private final MenuSessionRegistry sessionRegistry;
+    private final ActionRegistry<MenuActionContext> actionRegistry;
+    private final ConditionRegistry<MenuActionContext> conditionRegistry;
+    private final MenuService menuService;
 
-    public MenuClickListener(OpenMenuContextRegistry openMenuContextRegistry) {
+    public MenuClickListener(
+            OpenMenuContextRegistry openMenuContextRegistry,
+            MenuSessionRegistry sessionRegistry,
+            ActionRegistry<MenuActionContext> actionRegistry,
+            ConditionRegistry<MenuActionContext> conditionRegistry,
+            MenuService menuService
+    ) {
         this.openMenuContextRegistry = openMenuContextRegistry;
+        this.sessionRegistry = sessionRegistry;
+        this.actionRegistry = actionRegistry;
+        this.conditionRegistry = conditionRegistry;
+        this.menuService = menuService;
     }
 
     @EventHandler
@@ -84,7 +109,71 @@ public final class MenuClickListener implements Listener {
             return;
         }
 
-        LOGGER.fine(() -> "Player " + player.getName() + " clicked menu item (id " + item.id() + ", "
-                + item.actions().size() + " action(s)) - execution deferred to Phase 6 (ActionRegistry not wired yet)");
+        Optional<MenuSession> session = sessionRegistry.get(player.getUniqueId());
+        if (session.isEmpty()) {
+            LOGGER.warning(() -> "Player " + player.getName() + " clicked menu item (id " + item.id()
+                    + ") but has no MenuSession - ignoring click");
+            return;
+        }
+
+        // IMPLEMENTATION_PLAN.md Phase 6 / DESIGN_REVIEW.md §2.2: built fresh,
+        // right now - never reused from whatever render pass produced the
+        // Inventory the player is looking at, which is the entire point of a
+        // click-time (re-)check instead of trusting render-time state alone.
+        MenuActionContext actionContext = new MenuActionContext(
+                player, session.get(), MenuVariableContext.liveValues(player), menuService);
+
+        try {
+            executeClick(item, actionContext, player);
+        } catch (MenuActionException e) {
+            LOGGER.severe("Menu item (id " + item.id() + ") click failed for " + player.getName() + ": " + e.getMessage());
+            player.sendMessage(ChatColor.RED + "Something went wrong with that.");
+        }
+    }
+
+    /**
+     * IMPLEMENTATION_PLAN.md Phase 6, open question 3 (item-level vs
+     * action-level condition composition): a failing item-level condition
+     * (the item's own {@code conditions} list, {@code ActionBindingId} null)
+     * aborts every action on this item - no partial execution. Each
+     * action's own conditions then gate just that one action independently,
+     * per {@link KnkConditionBinding}'s own javadoc ("gates just that one
+     * action") - one action can fire while a sibling action on the very same
+     * item and the very same click doesn't.
+     */
+    private void executeClick(RuntimeMenuItem item, MenuActionContext context, Player player) {
+        ConditionOutcome itemOutcome = evaluateConditions(item.conditions(), context);
+        if (!itemOutcome.allowed()) {
+            if (itemOutcome.denialMessage() != null) {
+                player.sendMessage(ChatColor.YELLOW + itemOutcome.denialMessage());
+            }
+            return;
+        }
+
+        for (KnkActionBinding action : item.actions()) {
+            ConditionOutcome actionOutcome = evaluateConditions(action.conditions(), context);
+            if (!actionOutcome.allowed()) {
+                if (actionOutcome.denialMessage() != null) {
+                    player.sendMessage(ChatColor.YELLOW + actionOutcome.denialMessage());
+                }
+                continue;
+            }
+            actionRegistry.execute(action.actionTypeId(), context, MenuParams.parse(action.paramsJson()));
+        }
+    }
+
+    /** Every condition in the list must pass (AND); the first denial found wins and short-circuits the rest. */
+    private ConditionOutcome evaluateConditions(List<KnkConditionBinding> conditions, MenuActionContext context) {
+        if (conditions == null || conditions.isEmpty()) {
+            return ConditionOutcome.allow();
+        }
+        for (KnkConditionBinding condition : conditions) {
+            ConditionOutcome outcome = conditionRegistry.test(
+                    condition.conditionTypeId(), context, MenuParams.parse(condition.paramsJson()));
+            if (!outcome.allowed()) {
+                return outcome;
+            }
+        }
+        return ConditionOutcome.allow();
     }
 }

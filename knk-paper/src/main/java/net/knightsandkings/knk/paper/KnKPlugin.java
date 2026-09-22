@@ -30,8 +30,13 @@ import net.knightsandkings.knk.core.dataaccess.EnchantmentDefinitionsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.ItemBlueprintsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MenuTemplatesDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
+import net.knightsandkings.knk.core.menu.ActionRegistry;
+import net.knightsandkings.knk.core.menu.ConditionRegistry;
 import net.knightsandkings.knk.core.menu.MenuSessionRegistry;
+import net.knightsandkings.knk.paper.menu.MenuActionContext;
+import net.knightsandkings.knk.paper.menu.MenuActionHandlers;
 import net.knightsandkings.knk.paper.menu.MenuClickListener;
+import net.knightsandkings.knk.paper.menu.MenuConditionHandlers;
 import net.knightsandkings.knk.paper.menu.MenuDefinitionValidationRunner;
 import net.knightsandkings.knk.paper.menu.MenuLifecycleListener;
 import net.knightsandkings.knk.paper.menu.MenuRenderer;
@@ -120,6 +125,8 @@ public class KnKPlugin extends JavaPlugin {
     private MenuSessionRegistry menuSessionRegistry;
     private OpenMenuContextRegistry openMenuContextRegistry;
     private MenuService menuService;
+    private ActionRegistry<MenuActionContext> menuActionRegistry;
+    private ConditionRegistry<MenuActionContext> menuConditionRegistry;
     private WorldTasksApi worldTasksApi;
     private GateStructuresApi gateStructuresApi;
     private GateDoorsApi gateDoorsApi;
@@ -367,19 +374,36 @@ public class KnKPlugin extends JavaPlugin {
                 this, menuTemplatesDataAccess, menuSessionRegistry, openMenuContextRegistry, menuRenderer,
                 chatCaptureManager
             );
-            getServer().getPluginManager().registerEvents(new MenuClickListener(openMenuContextRegistry), this);
+            getLogger().info("InventoryMenu rendering engine initialized (Phase 2)");
+
+            // InventoryMenu Phase 6 (docs/specs/inventory-menu/IMPLEMENTATION_PLAN.md,
+            // DESIGN_REVIEW.md §2.2): wire ActionRegistry/ConditionRegistry with their
+            // real, currently-supportable handler library before the click listener
+            // and startup validator need them.
+            this.menuActionRegistry = new ActionRegistry<>();
+            this.menuConditionRegistry = new ConditionRegistry<>();
+            MenuActionHandlers.registerDefaults(menuActionRegistry);
+            MenuConditionHandlers.registerDefaults(menuConditionRegistry);
+            getServer().getPluginManager().registerEvents(
+                new MenuClickListener(
+                    openMenuContextRegistry, menuSessionRegistry, menuActionRegistry, menuConditionRegistry, menuService
+                ), this
+            );
             getServer().getPluginManager().registerEvents(
                 new MenuLifecycleListener(menuService, openMenuContextRegistry), this
             );
-            getLogger().info("InventoryMenu rendering engine initialized (Phase 2)");
+            getLogger().info("InventoryMenu conditional actions initialized (Phase 6)");
 
             // InventoryMenu Phase 3 (docs/specs/inventory-menu/IMPLEMENTATION_PLAN.md,
-            // DESIGN_REVIEW.md §1): validate every registered menu's variable bindings now,
-            // at enable, not lazily on first render - a broken menu is blocked in menuService
-            // and refuses to open for any player, rather than surfacing as a silent blank/
-            // literal-text tooltip the first time someone happens to open it.
-            MenuDefinitionValidationRunner.runAtStartup(menuTemplatesDataAccess, menuService, getLogger());
-            getLogger().info("InventoryMenu variable resolution + load-time validation initialized (Phase 3)");
+            // DESIGN_REVIEW.md §1) + Phase 6: validate every registered menu's variable
+            // bindings and action/condition registry references now, at enable, not
+            // lazily on first render - a broken menu is blocked in menuService and
+            // refuses to open for any player, rather than surfacing as a silent blank/
+            // literal-text tooltip or a click-time failure the first time someone
+            // happens to open it or click it.
+            MenuDefinitionValidationRunner.runAtStartup(menuTemplatesDataAccess, menuService, getLogger(),
+                menuActionRegistry.registeredIds(), menuConditionRegistry.registeredIds());
+            getLogger().info("InventoryMenu variable resolution + load-time validation initialized (Phase 3 + 6)");
 
             initializeEnchantmentRuntime();
             getLogger().info("Registered custom enchantment runtime listeners and /ce command");

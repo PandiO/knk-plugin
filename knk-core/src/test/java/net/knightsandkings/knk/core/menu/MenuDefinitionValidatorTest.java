@@ -1,10 +1,13 @@
 package net.knightsandkings.knk.core.menu;
 
+import net.knightsandkings.knk.core.domain.menu.KnkActionBinding;
+import net.knightsandkings.knk.core.domain.menu.KnkConditionBinding;
 import net.knightsandkings.knk.core.domain.menu.KnkVariableBinding;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -71,6 +74,64 @@ class MenuDefinitionValidatorTest {
         MenuAssemblyException ex = assertThrows(MenuAssemblyException.class,
                 () -> MenuDefinitionValidator.validate(menu, DECLARED_TYPES));
         assertTrue(ex.getMessage().contains("getBogusMethod"));
+    }
+
+    @Test
+    void validatingRegisteredActionAndConditionIdsPassesWhenEverythingIsKnown() {
+        RuntimeMenu menu = menuWithActionAndCondition("menu.close", "always", "always");
+
+        assertDoesNotThrow(() -> MenuDefinitionValidator.validateActionsAndConditions(
+                menu, Set.of("menu.close"), Set.of("always")));
+    }
+
+    @Test
+    void anUnregisteredActionTypeIdIsRejectedLoudlyAtLoadTime() {
+        RuntimeMenu menu = menuWithActionAndCondition("menu.teleport", "always", "always");
+
+        MenuAssemblyException ex = assertThrows(MenuAssemblyException.class, () -> MenuDefinitionValidator
+                .validateActionsAndConditions(menu, Set.of("menu.close"), Set.of("always")));
+
+        assertTrue(ex.getMessage().contains("menu.teleport"));
+        assertTrue(ex.getMessage().contains(menu.key()));
+    }
+
+    @Test
+    void anUnregisteredItemLevelConditionTypeIdIsRejected() {
+        RuntimeMenu menu = menuWithActionAndCondition("menu.close", "affordability", "always");
+
+        MenuAssemblyException ex = assertThrows(MenuAssemblyException.class, () -> MenuDefinitionValidator
+                .validateActionsAndConditions(menu, Set.of("menu.close"), Set.of("always")));
+
+        assertTrue(ex.getMessage().contains("affordability"));
+    }
+
+    @Test
+    void anUnregisteredActionLevelConditionTypeIdIsRejected() {
+        RuntimeMenu menu = menuWithActionAndCondition("menu.close", "always", "ownership");
+
+        MenuAssemblyException ex = assertThrows(MenuAssemblyException.class, () -> MenuDefinitionValidator
+                .validateActionsAndConditions(menu, Set.of("menu.close"), Set.of("always")));
+
+        assertTrue(ex.getMessage().contains("ownership"));
+    }
+
+    /**
+     * An item with one item-level condition ({@code itemConditionTypeId}) and
+     * one action carrying one action-level condition ({@code actionConditionTypeId}).
+     */
+    private static RuntimeMenu menuWithActionAndCondition(String actionTypeId, String itemConditionTypeId,
+                                                           String actionConditionTypeId) {
+        KnkConditionBinding actionCondition = new KnkConditionBinding(1, actionConditionTypeId, "{}", 0);
+        KnkActionBinding action = new KnkActionBinding(1, actionTypeId, "{}", 0, List.of(actionCondition));
+        KnkConditionBinding itemCondition = new KnkConditionBinding(2, itemConditionTypeId, "{}", 0);
+
+        RuntimeMenuItem item = new RuntimeMenuItem(1, 0, null, null, 1, null, null,
+                MenuDisplayMode.NORMAL, null, null, List.of(), List.of(action), List.of(itemCondition));
+        RuntimeMenuSection section = new RuntimeMenuSection(1, "Content", MenuSectionKind.STATIC_BUTTONS, 0, 0,
+                9, 1, MenuPositionMode.STATIC, MenuAlignVertical.TOP, MenuAlignHorizontal.LEFT,
+                MenuOverflowMode.HIDE, MenuListMode.DEFAULT, MenuRenderPriority.MEDIUM, null, false,
+                List.of(item), List.of());
+        return new RuntimeMenu("test.menu", "Test Menu", 3, MenuGrowth.STATIC, null, List.of(section));
     }
 
     private static RuntimeMenu menuWithItemBinding(String expression, String refreshPolicy) {

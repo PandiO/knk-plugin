@@ -9,6 +9,7 @@ import net.knightsandkings.knk.core.menu.MenuTemplateAssembler;
 import net.knightsandkings.knk.core.menu.RuntimeMenu;
 
 import java.util.List;
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -34,7 +35,8 @@ public final class MenuDefinitionValidationRunner {
     private MenuDefinitionValidationRunner() {
     }
 
-    public static void runAtStartup(MenuTemplatesDataAccess menuTemplatesDataAccess, MenuService menuService, Logger logger) {
+    public static void runAtStartup(MenuTemplatesDataAccess menuTemplatesDataAccess, MenuService menuService, Logger logger,
+                                     Set<String> registeredActionTypeIds, Set<String> registeredConditionTypeIds) {
         List<KnkMenuTemplateSummary> summaries;
         try {
             summaries = menuTemplatesDataAccess.listAllAsync().join();
@@ -51,7 +53,8 @@ public final class MenuDefinitionValidationRunner {
                 continue;
             }
             checked++;
-            if (!validateOne(summary.key(), menuTemplatesDataAccess, menuService, logger)) {
+            if (!validateOne(summary.key(), menuTemplatesDataAccess, menuService, logger,
+                    registeredActionTypeIds, registeredConditionTypeIds)) {
                 blocked++;
             }
         }
@@ -60,7 +63,8 @@ public final class MenuDefinitionValidationRunner {
 
     /** @return true if the menu registered cleanly (or couldn't be re-fetched - not this validator's job to flag that). */
     private static boolean validateOne(String key, MenuTemplatesDataAccess menuTemplatesDataAccess,
-                                        MenuService menuService, Logger logger) {
+                                        MenuService menuService, Logger logger,
+                                        Set<String> registeredActionTypeIds, Set<String> registeredConditionTypeIds) {
         try {
             KnkMenuTemplate template = menuTemplatesDataAccess.getByKeyAsync(key).join().value().orElse(null);
             if (template == null) {
@@ -71,6 +75,11 @@ public final class MenuDefinitionValidationRunner {
 
             RuntimeMenu menu = MenuTemplateAssembler.assemble(template);
             MenuDefinitionValidator.validate(menu, MenuVariableContext.DECLARED_TYPES);
+            // IMPLEMENTATION_PLAN.md Phase 6 "Load-time validation": the other
+            // half of "confirms every ActionBinding/ConditionBinding
+            // references a registered ID" - unbuilt until now since the
+            // registries themselves didn't exist before this phase.
+            MenuDefinitionValidator.validateActionsAndConditions(menu, registeredActionTypeIds, registeredConditionTypeIds);
             return true;
         } catch (MenuAssemblyException e) {
             logger.severe("InventoryMenu startup validation: menu '" + key + "' is broken and will refuse to open: "
