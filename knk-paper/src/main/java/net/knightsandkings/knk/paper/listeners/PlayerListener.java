@@ -258,6 +258,9 @@ public class PlayerListener implements Listener {
 
 	@EventHandler
 	public void onItemPickup(PlayerPickupItemEvent e) {
+		if (e.getPlayer().isOp()) {
+			return;
+		}
 		e.setCancelled(true);
 	}
 }
