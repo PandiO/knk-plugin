@@ -252,7 +252,31 @@ cache:
       allow-stale: true
       retry-attempts: 3
       retry-backoff-ms: 100
-    
+
+    grades:
+      ttl-minutes: 20
+      max-ttl-minutes: 120
+      default-policy: CACHE_FIRST
+      allow-stale: true
+      retry-attempts: 3
+      retry-backoff-ms: 100
+
+    tags:
+      ttl-minutes: 20
+      max-ttl-minutes: 120
+      default-policy: CACHE_FIRST
+      allow-stale: true
+      retry-attempts: 3
+      retry-backoff-ms: 100
+
+    domainCatalog:
+      ttl-minutes: 30
+      max-ttl-minutes: 240
+      default-policy: CACHE_FIRST
+      allow-stale: true
+      retry-attempts: 3
+      retry-backoff-ms: 100
+
     health:
       ttl-seconds: 30          # Health uses seconds (short TTL)
       max-ttl-seconds: 120

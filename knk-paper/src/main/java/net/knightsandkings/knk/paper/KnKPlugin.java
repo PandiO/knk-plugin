@@ -22,12 +22,18 @@ import net.knightsandkings.knk.core.ports.api.LocationsQueryApi;
 import net.knightsandkings.knk.core.ports.api.EnchantmentDefinitionsQueryApi;
 import net.knightsandkings.knk.core.ports.api.ItemBlueprintsQueryApi;
 import net.knightsandkings.knk.core.ports.api.MinecraftMaterialRefsQueryApi;
+import net.knightsandkings.knk.core.ports.api.GradesQueryApi;
+import net.knightsandkings.knk.core.ports.api.TagsQueryApi;
+import net.knightsandkings.knk.core.ports.api.DomainCatalogQueryApi;
 import net.knightsandkings.knk.core.ports.api.StreetsQueryApi;
 import net.knightsandkings.knk.core.dataaccess.TownsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
 import net.knightsandkings.knk.core.dataaccess.EnchantmentDefinitionsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.ItemBlueprintsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
+import net.knightsandkings.knk.core.dataaccess.GradesDataAccess;
+import net.knightsandkings.knk.core.dataaccess.TagsDataAccess;
+import net.knightsandkings.knk.core.dataaccess.DomainCatalogDataAccess;
 import net.knightsandkings.knk.core.ports.api.StructuresQueryApi;
 import net.knightsandkings.knk.core.ports.api.TownsQueryApi;
 import net.knightsandkings.knk.core.ports.api.UserAccountApi;
@@ -98,6 +104,9 @@ public class KnKPlugin extends JavaPlugin {
     private StreetsQueryApi streetsQueryApi;
     private StructuresQueryApi structuresQueryApi;
     private DomainsQueryApi domainsQueryApi;
+    private GradesQueryApi gradesQueryApi;
+    private TagsQueryApi tagsQueryApi;
+    private DomainCatalogQueryApi domainCatalogQueryApi;
     private UsersQueryApi usersQueryApi;
     private UsersCommandApi usersCommandApi;
     private UserAccountApi userAccountApi;
@@ -106,6 +115,9 @@ public class KnKPlugin extends JavaPlugin {
     private EnchantmentDefinitionsDataAccess enchantmentDefinitionsDataAccess;
     private ItemBlueprintsDataAccess itemBlueprintsDataAccess;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
+    private GradesDataAccess gradesDataAccess;
+    private TagsDataAccess tagsDataAccess;
+    private DomainCatalogDataAccess domainCatalogDataAccess;
     private WorldTasksApi worldTasksApi;
     private GateStructuresApi gateStructuresApi;
     private GateDoorsApi gateDoorsApi;
@@ -161,6 +173,9 @@ public class KnKPlugin extends JavaPlugin {
             this.streetsQueryApi = apiClient.getStreetsQueryApi();
             this.structuresQueryApi = apiClient.getStructuresQueryApi();
             this.domainsQueryApi = apiClient.getDomainsQueryApi();
+            this.gradesQueryApi = apiClient.getGradesQueryApi();
+            this.tagsQueryApi = apiClient.getTagsQueryApi();
+            this.domainCatalogQueryApi = apiClient.getDomainCatalogQueryApi();
             this.usersQueryApi = apiClient.getUsersQueryApi();
             this.usersCommandApi = apiClient.getUsersCommandApi();
             this.userAccountApi = apiClient.getUserAccountApi();
@@ -177,6 +192,9 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().info("StreetsQueryApi wired from API client");
             getLogger().info("StructuresQueryApi wired from API client");
             getLogger().info("DomainsQueryApi wired from API client");
+            getLogger().info("GradesQueryApi wired from API client");
+            getLogger().info("TagsQueryApi wired from API client");
+            getLogger().info("DomainCatalogQueryApi wired from API client");
             getLogger().info("UsersQueryApi wired from API client");
             getLogger().info("UsersCommandApi wired from API client");
             getLogger().info("WorldTasksApi wired from API client");
@@ -334,6 +352,18 @@ public class KnKPlugin extends JavaPlugin {
             this.minecraftMaterialRefsDataAccess = dataAccessFactory.createMinecraftMaterialRefsDataAccess(
                 config.cache().ttl(),
                 minecraftMaterialRefsQueryApi
+            );
+            this.gradesDataAccess = dataAccessFactory.createGradesDataAccess(
+                config.cache().ttl(),
+                gradesQueryApi
+            );
+            this.tagsDataAccess = dataAccessFactory.createTagsDataAccess(
+                config.cache().ttl(),
+                tagsQueryApi
+            );
+            this.domainCatalogDataAccess = dataAccessFactory.createDomainCatalogDataAccess(
+                config.cache().ttl(),
+                domainCatalogQueryApi
             );
             getLogger().info("Cache manager initialized with TTL: " + config.cache().ttl());
             getLogger().info("Data access factory initialized with entity-specific settings");

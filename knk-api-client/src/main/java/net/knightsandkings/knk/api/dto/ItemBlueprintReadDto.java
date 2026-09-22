@@ -14,5 +14,8 @@ public record ItemBlueprintReadDto(
         @JsonProperty("defaultDisplayDescription") String defaultDisplayDescription,
         @JsonProperty("defaultQuantity") Integer defaultQuantity,
         @JsonProperty("maxStackSize") Integer maxStackSize,
-        @JsonProperty("defaultEnchantments") List<ItemBlueprintDefaultEnchantmentDto> defaultEnchantments
+        @JsonProperty("defaultEnchantments") List<ItemBlueprintDefaultEnchantmentDto> defaultEnchantments,
+        @JsonProperty("grade") GradeDto grade,
+        @JsonProperty("tags") List<ItemBlueprintTagDto> tags,
+        @JsonProperty("origins") List<ItemBlueprintOriginDto> origins
 ) {}

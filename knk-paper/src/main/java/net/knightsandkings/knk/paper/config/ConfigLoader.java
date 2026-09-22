@@ -124,7 +124,10 @@ public class ConfigLoader {
             loadEntitySettings(entitiesSection, "itemBlueprints"),
             loadEntitySettings(entitiesSection, "minecraftMaterials"),
             loadEntitySettings(entitiesSection, "domains"),
-            loadEntitySettings(entitiesSection, "health")
+            loadEntitySettings(entitiesSection, "health"),
+            loadEntitySettings(entitiesSection, "grades"),
+            loadEntitySettings(entitiesSection, "tags"),
+            loadEntitySettings(entitiesSection, "domainCatalog")
         );
     }
     

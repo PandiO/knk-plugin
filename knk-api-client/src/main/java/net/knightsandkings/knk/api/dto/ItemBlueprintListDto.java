@@ -9,5 +9,8 @@ public record ItemBlueprintListDto(
         @JsonProperty("defaultDisplayName") String defaultDisplayName,
         @JsonProperty("iconMaterialRefId") Integer iconMaterialRefId,
         @JsonProperty("iconNamespaceKey") String iconNamespaceKey,
-        @JsonProperty("defaultEnchantmentsCount") Integer defaultEnchantmentsCount
+        @JsonProperty("defaultEnchantmentsCount") Integer defaultEnchantmentsCount,
+        @JsonProperty("gradeId") Integer gradeId,
+        @JsonProperty("gradeName") String gradeName,
+        @JsonProperty("tagsCount") Integer tagsCount
 ) {}

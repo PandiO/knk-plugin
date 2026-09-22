@@ -36,6 +36,12 @@ public final class ItemBlueprintBukkitMapper {
             }
 
             List<String> lore = buildLore(blueprint.defaultDisplayDescription());
+
+            String gradeLoreLine = buildGradeLoreLine(blueprint);
+            if (gradeLoreLine != null) {
+                lore.add(gradeLoreLine);
+            }
+
             if (!lore.isEmpty()) {
                 meta.setLore(lore);
             }
@@ -47,12 +53,12 @@ public final class ItemBlueprintBukkitMapper {
     }
 
     private static List<String> buildLore(String description) {
+        List<String> lore = new ArrayList<>();
         if (description == null || description.isBlank()) {
-            return List.of();
+            return lore;
         }
 
         String[] lines = description.split("\\r?\\n");
-        List<String> lore = new ArrayList<>();
         for (String line : lines) {
             String trimmed = line != null ? line.trim() : "";
             if (!trimmed.isEmpty()) {
@@ -61,6 +67,20 @@ public final class ItemBlueprintBukkitMapper {
         }
 
         return lore;
+    }
+
+    /**
+     * Revives v1's getGradeLore ("§l§bGrade: ★★★") star-lore mechanic (docs/specs/legacy/items.md;
+     * docs/specs/items/IMPLEMENTATION_PLAN.md §6/§7 open question 5, decided: include in Phase 1).
+     * Returns null when the blueprint has no Grade or a non-positive star count, so nothing is appended.
+     */
+    private static String buildGradeLoreLine(KnkItemBlueprint blueprint) {
+        if (blueprint.grade() == null || blueprint.grade().stars() == null || blueprint.grade().stars() <= 0) {
+            return null;
+        }
+
+        String stars = "★".repeat(blueprint.grade().stars());
+        return DisplayTextFormatter.translateToLegacy("&l&bGrade: " + stars);
     }
 
     private static Material resolveMaterial(String namespaceKey) {

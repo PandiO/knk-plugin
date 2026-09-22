@@ -13,5 +13,11 @@ public record KnkItemBlueprint(
         Integer defaultQuantity,
         Integer maxStackSize,
         List<KnkItemBlueprintDefaultEnchantment> defaultEnchantments,
-        Integer defaultEnchantmentsCount
+        Integer defaultEnchantmentsCount,
+        KnkGrade grade,
+        // Direct ItemBlueprintTag entries only, not category-inherited tags (docs/specs/items/
+        // IMPLEMENTATION_PLAN.md §7.9).
+        List<KnkTag> tags,
+        // Ordered by sequenceNumber; see KnkItemBlueprintOrigin's own doc comment.
+        List<KnkItemBlueprintOrigin> origins
 ) {}

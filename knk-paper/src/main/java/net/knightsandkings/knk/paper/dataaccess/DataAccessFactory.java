@@ -182,6 +182,51 @@ public class DataAccessFactory {
     }
     
     /**
+     * Create a GradesDataAccess gateway with configured settings.
+     *
+     * @param ttl Cache TTL duration
+     * @param gradesQueryApi Grades query API port
+     * @return Configured GradesDataAccess instance
+     */
+    public GradesDataAccess createGradesDataAccess(
+        Duration ttl,
+        GradesQueryApi gradesQueryApi
+    ) {
+        DataAccessSettings settings = buildSettings(entitySettings.grades(), "Grades");
+        return new GradesDataAccess(ttl, gradesQueryApi, settings);
+    }
+
+    /**
+     * Create a TagsDataAccess gateway with configured settings.
+     *
+     * @param ttl Cache TTL duration
+     * @param tagsQueryApi Tags query API port
+     * @return Configured TagsDataAccess instance
+     */
+    public TagsDataAccess createTagsDataAccess(
+        Duration ttl,
+        TagsQueryApi tagsQueryApi
+    ) {
+        DataAccessSettings settings = buildSettings(entitySettings.tags(), "Tags");
+        return new TagsDataAccess(ttl, tagsQueryApi, settings);
+    }
+
+    /**
+     * Create a DomainCatalogDataAccess gateway with configured settings.
+     *
+     * @param ttl Cache TTL duration
+     * @param domainCatalogQueryApi DomainCatalog query API port
+     * @return Configured DomainCatalogDataAccess instance
+     */
+    public DomainCatalogDataAccess createDomainCatalogDataAccess(
+        Duration ttl,
+        DomainCatalogQueryApi domainCatalogQueryApi
+    ) {
+        DataAccessSettings settings = buildSettings(entitySettings.domainCatalog(), "DomainCatalog");
+        return new DomainCatalogDataAccess(ttl, domainCatalogQueryApi, settings);
+    }
+
+    /**
      * Create a HealthDataAccess gateway with configured settings.
      *
      * @param ttl Cache TTL duration
