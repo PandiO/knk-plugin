@@ -253,12 +253,12 @@ public class EnchantmentDefinitionsDebugCommand implements CommandExecutor {
             }
         }
 
-        for (KnkEnchantmentDefinition definition : page.items()) {
-            if (definition != null && Boolean.TRUE.equals(definition.isCustom())) {
-                return definition;
-            }
-        }
-
+        // No unconditional "return whatever custom definition happens to be in the results"
+        // fallback here - that used to exist and, combined with the backend previously ignoring
+        // PagedQuery.Filters entirely (see EnchantmentDefinitionRepository.SearchAsync), meant
+        // /knk enchantments apply sharpness silently resolved to an arbitrary unrelated custom
+        // enchantment (e.g. armor_repair) instead of falling through to vanilla resolution below.
+        // No match in this result set means no match, full stop.
         return null;
     }
 

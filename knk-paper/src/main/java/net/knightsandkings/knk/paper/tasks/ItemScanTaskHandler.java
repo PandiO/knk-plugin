@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import net.knightsandkings.knk.api.impl.enchantment.LocalEnchantmentRepositoryImpl;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentRepository;
+import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
@@ -15,6 +16,7 @@ import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.logging.Logger;
 
@@ -109,8 +111,17 @@ public class ItemScanTaskHandler implements IWorldTaskHandler {
 
         ItemMeta meta = heldItem.hasItemMeta() ? heldItem.getItemMeta() : null;
 
-        if (meta != null && meta.hasDisplayName()) {
-            root.addProperty("displayName", meta.getDisplayName());
+        // Per developer feedback (2026-09-23 live testing): most items are never renamed, so
+        // ItemMeta.hasDisplayName() is false far more often than not - falling back to null left
+        // DefaultDisplayName empty for the common case. Fall back to a humanized Material name
+        // ("DIAMOND_SWORD" -> "Diamond Sword") instead, so vanilla item names are scanned too;
+        // only truly empty-handed scans (isEmptyHand above) leave displayName unset.
+        String displayName = meta != null && meta.hasDisplayName()
+            ? meta.getDisplayName()
+            : (isEmptyHand ? null : humanizeMaterialName(heldItem.getType()));
+
+        if (displayName != null) {
+            root.addProperty("displayName", displayName);
         } else {
             root.add("displayName", null);
         }
@@ -212,5 +223,28 @@ public class ItemScanTaskHandler implements IWorldTaskHandler {
             LOGGER.fine("Could not read PDC key " + key + " with a known primitive type: " + e.getMessage());
         }
         return "<unreadable>";
+    }
+
+    /**
+     * "DIAMOND_SWORD" -> "Diamond Sword". Bukkit has no client-authoritative "translated name"
+     * API without NMS (real translation happens client-side from the resource pack's lang file),
+     * so this is a best-effort fallback for un-renamed items, matching the same word-splitting
+     * convention {@code EnchantmentDefinitionsDebugCommand.toDisplayName} already uses for
+     * vanilla enchantment keys.
+     */
+    private String humanizeMaterialName(Material material) {
+        String[] words = material.name().toLowerCase(Locale.ROOT).split("_");
+        StringBuilder builder = new StringBuilder();
+        for (String word : words) {
+            if (word.isBlank()) continue;
+            if (builder.length() > 0) {
+                builder.append(' ');
+            }
+            builder.append(Character.toUpperCase(word.charAt(0)));
+            if (word.length() > 1) {
+                builder.append(word.substring(1));
+            }
+        }
+        return builder.toString();
     }
 }
