@@ -1,12 +1,14 @@
 package net.knightsandkings.knk.paper.mapper;
 
 import net.knightsandkings.knk.core.domain.item.KnkItemBlueprint;
+import net.knightsandkings.knk.core.domain.item.KnkItemBlueprintOrigin;
 import net.knightsandkings.knk.paper.utils.DisplayTextFormatter;
 import org.bukkit.Material;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 public final class ItemBlueprintBukkitMapper {
@@ -39,6 +41,11 @@ public final class ItemBlueprintBukkitMapper {
             String gradeLoreLine = buildGradeLoreLine(blueprint);
             if (gradeLoreLine != null) {
                 lore.add(gradeLoreLine);
+            }
+
+            String originLoreLine = buildOriginLoreLine(blueprint);
+            if (originLoreLine != null) {
+                lore.add(originLoreLine);
             }
 
             if (!lore.isEmpty()) {
@@ -80,5 +87,36 @@ public final class ItemBlueprintBukkitMapper {
 
         String stars = "★".repeat(blueprint.grade().stars());
         return DisplayTextFormatter.translateToLegacy("&l&bGrade: " + stars);
+    }
+
+    /**
+     * Renders the item's production/procurement origin (sequenceNumber 0 - the only entry
+     * actually populated in practice, per docs/specs/items/IMPLEMENTATION_PLAN.md §3.2) into
+     * lore, matching the same "worth doing since the data will be there anyway" precedent Phase 1
+     * already set for Grade's star-lore. This is vision.md §9.1's ItemInstance-era "lore is
+     * regenerated display output (soulbound, ghosted, grade stars, origin, enchantments...)"
+     * design, applied early at the ItemBlueprint/template level rather than waiting for
+     * ItemInstance to exist - developer-confirmed (2026-09-23) as worth doing now rather than
+     * deferring with the rest of that end-state. Returns null when the blueprint has no origins,
+     * so nothing is appended.
+     */
+    private static String buildOriginLoreLine(KnkItemBlueprint blueprint) {
+        if (blueprint.origins() == null || blueprint.origins().isEmpty()) {
+            return null;
+        }
+
+        KnkItemBlueprintOrigin productionOrigin = blueprint.origins().stream()
+                .min(Comparator.comparing(KnkItemBlueprintOrigin::sequenceNumber))
+                .orElse(null);
+
+        if (productionOrigin == null || productionOrigin.domainName() == null || productionOrigin.domainName().isBlank()) {
+            return null;
+        }
+
+        String label = productionOrigin.domainType() != null && !productionOrigin.domainType().isBlank()
+                ? productionOrigin.domainName() + " (" + productionOrigin.domainType() + ")"
+                : productionOrigin.domainName();
+
+        return DisplayTextFormatter.translateToLegacy("&7Origin: " + label);
     }
 }
