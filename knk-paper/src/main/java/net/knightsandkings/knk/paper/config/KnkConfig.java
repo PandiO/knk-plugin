@@ -128,6 +128,9 @@ public record KnkConfig(
         EntitySettings minecraftMaterials,
         EntitySettings domains,
         EntitySettings health,
+        EntitySettings grades,
+        EntitySettings tags,
+        EntitySettings domainCatalog,
         EntitySettings menus
     ) {
         public static EntityCacheSettings defaults() {
@@ -143,6 +146,9 @@ public record KnkConfig(
                 EntitySettings.defaults(), // minecraftMaterials
                 EntitySettings.defaults(), // domains
                 EntitySettings.defaults(), // health
+                EntitySettings.defaults(), // grades
+                EntitySettings.defaults(), // tags
+                EntitySettings.defaults(), // domainCatalog
                 EntitySettings.defaults()  // menus
             );
         }
