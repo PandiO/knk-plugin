@@ -125,7 +125,8 @@ public class ConfigLoader {
             loadEntitySettings(entitiesSection, "minecraftMaterials"),
             loadEntitySettings(entitiesSection, "domains"),
             loadEntitySettings(entitiesSection, "health"),
-            loadEntitySettings(entitiesSection, "menus")
+            loadEntitySettings(entitiesSection, "menus"),
+            loadEntitySettings(entitiesSection, "permissions")
         );
     }
     

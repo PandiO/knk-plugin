@@ -128,7 +128,8 @@ public record KnkConfig(
         EntitySettings minecraftMaterials,
         EntitySettings domains,
         EntitySettings health,
-        EntitySettings menus
+        EntitySettings menus,
+        EntitySettings permissions
     ) {
         public static EntityCacheSettings defaults() {
             return new EntityCacheSettings(
@@ -143,7 +144,11 @@ public record KnkConfig(
                 EntitySettings.defaults(), // minecraftMaterials
                 EntitySettings.defaults(), // domains
                 EntitySettings.defaults(), // health
-                EntitySettings.defaults()  // menus
+                EntitySettings.defaults(), // menus
+                // permissions: short TTL like health, not the 15-minute catalog-data default -
+                // checks must reflect a grant/revoke reasonably promptly (docs/specs/
+                // user-features/IMPLEMENTATION_PLAN.md §1)
+                new EntitySettings(null, 30, null, 120, "CACHE_FIRST", true, 3, 100)
             );
         }
     }

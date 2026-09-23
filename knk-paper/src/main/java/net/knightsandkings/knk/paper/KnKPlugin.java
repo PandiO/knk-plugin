@@ -28,6 +28,7 @@ import net.knightsandkings.knk.core.dataaccess.TownsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
 import net.knightsandkings.knk.core.dataaccess.EnchantmentDefinitionsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.ItemBlueprintsDataAccess;
+import net.knightsandkings.knk.core.dataaccess.PermissionsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MenuTemplatesDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
 import net.knightsandkings.knk.core.menu.ActionRegistry;
@@ -52,6 +53,7 @@ import net.knightsandkings.knk.core.ports.api.TownsQueryApi;
 import net.knightsandkings.knk.core.ports.api.UserAccountApi;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.core.ports.api.UsersQueryApi;
+import net.knightsandkings.knk.core.ports.api.PermissionsApi;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
 import net.knightsandkings.knk.core.ports.gates.GateControlPort;
 import net.knightsandkings.knk.core.gates.GateManager;
@@ -121,12 +123,14 @@ public class KnKPlugin extends JavaPlugin {
     private UsersQueryApi usersQueryApi;
     private UsersCommandApi usersCommandApi;
     private UserAccountApi userAccountApi;
+    private PermissionsApi permissionsApi;
     private UsersDataAccess usersDataAccess;
     private TownsDataAccess townsDataAccess;
     private EnchantmentDefinitionsDataAccess enchantmentDefinitionsDataAccess;
     private ItemBlueprintsDataAccess itemBlueprintsDataAccess;
     private MenuTemplatesDataAccess menuTemplatesDataAccess;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
+    private PermissionsDataAccess permissionsDataAccess;
     private MenuSessionRegistry menuSessionRegistry;
     private OpenMenuContextRegistry openMenuContextRegistry;
     private MenuService menuService;
@@ -193,6 +197,7 @@ public class KnKPlugin extends JavaPlugin {
             this.usersQueryApi = apiClient.getUsersQueryApi();
             this.usersCommandApi = apiClient.getUsersCommandApi();
             this.userAccountApi = apiClient.getUserAccountApi();
+            this.permissionsApi = apiClient.getPermissionsApi();
             this.worldTasksApi = apiClient.getWorldTasksApi();
             this.gateStructuresApi = apiClient.getGateStructuresApi();
             this.gateDoorsApi = apiClient.getGateDoorsApi();
@@ -209,6 +214,7 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().info("DomainsQueryApi wired from API client");
             getLogger().info("UsersQueryApi wired from API client");
             getLogger().info("UsersCommandApi wired from API client");
+            getLogger().info("PermissionsApi wired from API client");
             getLogger().info("WorldTasksApi wired from API client");
             getLogger().info("GateStructuresApi wired from API client");
             
@@ -365,6 +371,7 @@ public class KnKPlugin extends JavaPlugin {
                 config.cache().ttl(),
                 menuTemplatesQueryApi
             );
+            this.permissionsDataAccess = dataAccessFactory.createPermissionsDataAccess(permissionsApi);
             this.minecraftMaterialRefsDataAccess = dataAccessFactory.createMinecraftMaterialRefsDataAccess(
                 config.cache().ttl(),
                 minecraftMaterialRefsQueryApi

@@ -23,6 +23,7 @@ import net.knightsandkings.knk.api.impl.WorldTasksApiImpl;
 import net.knightsandkings.knk.api.impl.GateStructuresApiImpl;
 import net.knightsandkings.knk.api.impl.GateDoorsApiImpl;
 import net.knightsandkings.knk.api.impl.MenuTemplatesQueryApiImpl;
+import net.knightsandkings.knk.api.impl.PermissionsApiImpl;
 import net.knightsandkings.knk.core.ports.api.HealthApi;
 import net.knightsandkings.knk.core.ports.api.TownsQueryApi;
 import net.knightsandkings.knk.core.ports.api.LocationsQueryApi;
@@ -40,6 +41,7 @@ import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
 import net.knightsandkings.knk.api.GateStructuresApi;
 import net.knightsandkings.knk.api.GateDoorsApi;
 import net.knightsandkings.knk.core.ports.api.MenuTemplatesQueryApi;
+import net.knightsandkings.knk.core.ports.api.PermissionsApi;
 import net.knightsandkings.knk.core.ports.api.RegionsCommandApi;
 import okhttp3.OkHttpClient;
 
@@ -79,6 +81,7 @@ public class KnkApiClient {
     private final GateStructuresApi gateStructuresApi;
     private final GateDoorsApi gateDoorsApi;
     private final MenuTemplatesQueryApi menuTemplatesQueryApi;
+    private final PermissionsApi permissionsApi;
 
     private KnkApiClient(
         String baseUrl,
@@ -112,6 +115,7 @@ public class KnkApiClient {
         this.gateStructuresApi = new GateStructuresApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.gateDoorsApi = new GateDoorsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.menuTemplatesQueryApi = new MenuTemplatesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.permissionsApi = new PermissionsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
     }
     
     public HealthApi getHealthApi() {
@@ -180,6 +184,10 @@ public class KnkApiClient {
 
     public MenuTemplatesQueryApi getMenuTemplatesQueryApi() {
         return menuTemplatesQueryApi;
+    }
+
+    public PermissionsApi getPermissionsApi() {
+        return permissionsApi;
     }
 
     /**
