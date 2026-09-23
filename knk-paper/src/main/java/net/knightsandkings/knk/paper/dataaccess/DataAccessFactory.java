@@ -227,6 +227,21 @@ public class DataAccessFactory {
     }
 
     /**
+     * Create a MenuTemplatesDataAccess gateway with configured settings.
+     *
+     * @param ttl Cache TTL duration
+     * @param menuTemplatesQueryApi MenuTemplates query API port
+     * @return Configured MenuTemplatesDataAccess instance
+     */
+    public MenuTemplatesDataAccess createMenuTemplatesDataAccess(
+        Duration ttl,
+        MenuTemplatesQueryApi menuTemplatesQueryApi
+    ) {
+        DataAccessSettings settings = buildSettings(entitySettings.menus(), "MenuTemplates");
+        return new MenuTemplatesDataAccess(ttl, menuTemplatesQueryApi, settings);
+    }
+
+    /**
      * Create a HealthDataAccess gateway with configured settings.
      *
      * @param ttl Cache TTL duration

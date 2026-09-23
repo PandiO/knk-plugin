@@ -130,7 +130,8 @@ public record KnkConfig(
         EntitySettings health,
         EntitySettings grades,
         EntitySettings tags,
-        EntitySettings domainCatalog
+        EntitySettings domainCatalog,
+        EntitySettings menus
     ) {
         public static EntityCacheSettings defaults() {
             return new EntityCacheSettings(
@@ -147,7 +148,8 @@ public record KnkConfig(
                 EntitySettings.defaults(), // health
                 EntitySettings.defaults(), // grades
                 EntitySettings.defaults(), // tags
-                EntitySettings.defaults()  // domainCatalog
+                EntitySettings.defaults(), // domainCatalog
+                EntitySettings.defaults()  // menus
             );
         }
     }

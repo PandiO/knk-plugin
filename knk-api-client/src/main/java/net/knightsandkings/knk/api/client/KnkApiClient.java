@@ -25,6 +25,7 @@ import net.knightsandkings.knk.api.impl.GateDoorsApiImpl;
 import net.knightsandkings.knk.api.impl.GradesQueryApiImpl;
 import net.knightsandkings.knk.api.impl.TagsQueryApiImpl;
 import net.knightsandkings.knk.api.impl.DomainCatalogQueryApiImpl;
+import net.knightsandkings.knk.api.impl.MenuTemplatesQueryApiImpl;
 import net.knightsandkings.knk.core.ports.api.HealthApi;
 import net.knightsandkings.knk.core.ports.api.TownsQueryApi;
 import net.knightsandkings.knk.core.ports.api.LocationsQueryApi;
@@ -44,6 +45,7 @@ import net.knightsandkings.knk.api.GateDoorsApi;
 import net.knightsandkings.knk.core.ports.api.GradesQueryApi;
 import net.knightsandkings.knk.core.ports.api.TagsQueryApi;
 import net.knightsandkings.knk.core.ports.api.DomainCatalogQueryApi;
+import net.knightsandkings.knk.core.ports.api.MenuTemplatesQueryApi;
 import net.knightsandkings.knk.core.ports.api.RegionsCommandApi;
 import okhttp3.OkHttpClient;
 
@@ -85,6 +87,7 @@ public class KnkApiClient {
     private final GradesQueryApi gradesQueryApi;
     private final TagsQueryApi tagsQueryApi;
     private final DomainCatalogQueryApi domainCatalogQueryApi;
+    private final MenuTemplatesQueryApi menuTemplatesQueryApi;
 
     private KnkApiClient(
         String baseUrl,
@@ -120,6 +123,7 @@ public class KnkApiClient {
         this.gradesQueryApi = new GradesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.tagsQueryApi = new TagsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.domainCatalogQueryApi = new DomainCatalogQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.menuTemplatesQueryApi = new MenuTemplatesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
     }
     
     public HealthApi getHealthApi() {
@@ -196,6 +200,10 @@ public class KnkApiClient {
 
     public DomainCatalogQueryApi getDomainCatalogQueryApi() {
         return domainCatalogQueryApi;
+    }
+
+    public MenuTemplatesQueryApi getMenuTemplatesQueryApi() {
+        return menuTemplatesQueryApi;
     }
 
     /**

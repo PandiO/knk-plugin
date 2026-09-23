@@ -21,6 +21,7 @@ import net.knightsandkings.knk.core.ports.api.DomainsQueryApi;
 import net.knightsandkings.knk.core.ports.api.LocationsQueryApi;
 import net.knightsandkings.knk.core.ports.api.EnchantmentDefinitionsQueryApi;
 import net.knightsandkings.knk.core.ports.api.ItemBlueprintsQueryApi;
+import net.knightsandkings.knk.core.ports.api.MenuTemplatesQueryApi;
 import net.knightsandkings.knk.core.ports.api.MinecraftMaterialRefsQueryApi;
 import net.knightsandkings.knk.core.ports.api.GradesQueryApi;
 import net.knightsandkings.knk.core.ports.api.TagsQueryApi;
@@ -30,10 +31,28 @@ import net.knightsandkings.knk.core.dataaccess.TownsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
 import net.knightsandkings.knk.core.dataaccess.EnchantmentDefinitionsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.ItemBlueprintsDataAccess;
+import net.knightsandkings.knk.core.dataaccess.MenuTemplatesDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.GradesDataAccess;
 import net.knightsandkings.knk.core.dataaccess.TagsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.DomainCatalogDataAccess;
+import net.knightsandkings.knk.core.menu.ActionRegistry;
+import net.knightsandkings.knk.core.menu.ConditionRegistry;
+import net.knightsandkings.knk.core.menu.MenuContentSourceRegistry;
+import net.knightsandkings.knk.core.menu.MenuSessionRegistry;
+import net.knightsandkings.knk.paper.menu.AnvilCaptureManager;
+import net.knightsandkings.knk.paper.menu.MenuActionContext;
+import net.knightsandkings.knk.paper.menu.MenuActionHandlers;
+import net.knightsandkings.knk.paper.menu.MenuClickListener;
+import net.knightsandkings.knk.paper.menu.MenuConditionHandlers;
+import net.knightsandkings.knk.paper.menu.MenuContentSourceContext;
+import net.knightsandkings.knk.paper.menu.MenuContentSourceHandlers;
+import net.knightsandkings.knk.paper.menu.MenuControlHintListener;
+import net.knightsandkings.knk.paper.menu.MenuDefinitionValidationRunner;
+import net.knightsandkings.knk.paper.menu.MenuLifecycleListener;
+import net.knightsandkings.knk.paper.menu.MenuRenderer;
+import net.knightsandkings.knk.paper.menu.MenuService;
+import net.knightsandkings.knk.paper.menu.OpenMenuContextRegistry;
 import net.knightsandkings.knk.core.ports.api.StructuresQueryApi;
 import net.knightsandkings.knk.core.ports.api.TownsQueryApi;
 import net.knightsandkings.knk.core.ports.api.UserAccountApi;
@@ -99,6 +118,7 @@ public class KnKPlugin extends JavaPlugin {
     private LocationsQueryApi locationsQueryApi;
     private EnchantmentDefinitionsQueryApi enchantmentDefinitionsQueryApi;
     private ItemBlueprintsQueryApi itemBlueprintsQueryApi;
+    private MenuTemplatesQueryApi menuTemplatesQueryApi;
     private MinecraftMaterialRefsQueryApi minecraftMaterialRefsQueryApi;
     private DistrictsQueryApi districtsQueryApi;
     private StreetsQueryApi streetsQueryApi;
@@ -114,10 +134,17 @@ public class KnKPlugin extends JavaPlugin {
     private TownsDataAccess townsDataAccess;
     private EnchantmentDefinitionsDataAccess enchantmentDefinitionsDataAccess;
     private ItemBlueprintsDataAccess itemBlueprintsDataAccess;
+    private MenuTemplatesDataAccess menuTemplatesDataAccess;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private GradesDataAccess gradesDataAccess;
     private TagsDataAccess tagsDataAccess;
     private DomainCatalogDataAccess domainCatalogDataAccess;
+    private MenuSessionRegistry menuSessionRegistry;
+    private OpenMenuContextRegistry openMenuContextRegistry;
+    private MenuService menuService;
+    private ActionRegistry<MenuActionContext> menuActionRegistry;
+    private ConditionRegistry<MenuActionContext> menuConditionRegistry;
+    private MenuContentSourceRegistry<MenuContentSourceContext> menuContentSourceRegistry;
     private WorldTasksApi worldTasksApi;
     private GateStructuresApi gateStructuresApi;
     private GateDoorsApi gateDoorsApi;
@@ -130,6 +157,7 @@ public class KnKPlugin extends JavaPlugin {
     private HeadlessWorldTaskPoller headlessWorldTaskPoller;
     private UserManager userManager;
     private ChatCaptureManager chatCaptureManager;
+    private AnvilCaptureManager anvilCaptureManager;
     private CommandCooldownManager cooldownManager;
     private EnchantmentBootstrap.EnchantmentRuntime enchantmentRuntime;
     private ExecutorService regionLookupExecutor;
@@ -168,6 +196,7 @@ public class KnKPlugin extends JavaPlugin {
             this.locationsQueryApi = apiClient.getLocationsQueryApi();
             this.enchantmentDefinitionsQueryApi = apiClient.getEnchantmentDefinitionsQueryApi();
             this.itemBlueprintsQueryApi = apiClient.getItemBlueprintsQueryApi();
+            this.menuTemplatesQueryApi = apiClient.getMenuTemplatesQueryApi();
             this.minecraftMaterialRefsQueryApi = apiClient.getMinecraftMaterialRefsQueryApi();
             this.districtsQueryApi = apiClient.getDistrictsQueryApi();
             this.streetsQueryApi = apiClient.getStreetsQueryApi();
@@ -187,6 +216,7 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().info("LocationsQueryApi wired from API client");
             getLogger().info("EnchantmentDefinitionsQueryApi wired from API client");
             getLogger().info("ItemBlueprintsQueryApi wired from API client");
+            getLogger().info("MenuTemplatesQueryApi wired from API client");
             getLogger().info("MinecraftMaterialRefsQueryApi wired from API client");
             getLogger().info("DistrictsQueryApi wired from API client");
             getLogger().info("StreetsQueryApi wired from API client");
@@ -349,6 +379,10 @@ public class KnKPlugin extends JavaPlugin {
                 config.cache().ttl(),
                 itemBlueprintsQueryApi
             );
+            this.menuTemplatesDataAccess = dataAccessFactory.createMenuTemplatesDataAccess(
+                config.cache().ttl(),
+                menuTemplatesQueryApi
+            );
             this.minecraftMaterialRefsDataAccess = dataAccessFactory.createMinecraftMaterialRefsDataAccess(
                 config.cache().ttl(),
                 minecraftMaterialRefsQueryApi
@@ -367,6 +401,73 @@ public class KnKPlugin extends JavaPlugin {
             );
             getLogger().info("Cache manager initialized with TTL: " + config.cache().ttl());
             getLogger().info("Data access factory initialized with entity-specific settings");
+
+            // InventoryMenu Phase 7 (docs/specs/inventory-menu/IMPLEMENTATION_PLAN.md,
+            // DESIGN_REVIEW.md §2.1 (updated)/§2.5): the in-house anvil-capture
+            // component replacing ChatCaptureManager for InventoryMenu's search/
+            // filter text input specifically - built before MenuService since
+            // MenuService now depends on it directly.
+            this.anvilCaptureManager = new AnvilCaptureManager(this);
+            getServer().getPluginManager().registerEvents(anvilCaptureManager, this);
+            getLogger().info("InventoryMenu anvil-capture component initialized (Phase 7)");
+
+            // InventoryMenu Phase 2 (docs/specs/inventory-menu/IMPLEMENTATION_PLAN.md):
+            // rendering engine wiring, built on Phase 1's menuTemplatesDataAccess above.
+            this.menuSessionRegistry = new MenuSessionRegistry();
+            this.openMenuContextRegistry = new OpenMenuContextRegistry();
+            // InventoryMenu Phase 8 (docs/specs/inventory-menu/IMPLEMENTATION_PLAN.md):
+            // MenuContentSourceRegistry wired before MenuRenderer since it now
+            // depends on it directly - a content-source-backed section's page
+            // content comes from a real paged/cursor query against the
+            // registered source, not from an in-memory items() list. The one
+            // real source shipped with this phase is backed by the already-
+            // existing itemBlueprintsDataAccess gateway above, not a synthetic
+            // dataset.
+            this.menuContentSourceRegistry = new MenuContentSourceRegistry<>();
+            MenuContentSourceHandlers.registerDefaults(menuContentSourceRegistry, itemBlueprintsDataAccess);
+            MenuRenderer menuRenderer = new MenuRenderer(minecraftMaterialRefsDataAccess, menuContentSourceRegistry);
+            this.menuService = new MenuService(
+                this, menuTemplatesDataAccess, menuSessionRegistry, openMenuContextRegistry, menuRenderer,
+                anvilCaptureManager
+            );
+            getLogger().info("InventoryMenu rendering engine initialized (Phase 2)");
+
+            // InventoryMenu Phase 6 (docs/specs/inventory-menu/IMPLEMENTATION_PLAN.md,
+            // DESIGN_REVIEW.md §2.2): wire ActionRegistry/ConditionRegistry with their
+            // real, currently-supportable handler library before the click listener
+            // and startup validator need them. Phase 7 extends the same two
+            // registries in place with the pagination/search/filter/confirm preset
+            // library (MenuActionHandlers/MenuConditionHandlers.registerDefaults) -
+            // no separate Phase 7 registry, per that phase's own decision not to
+            // build a SectionTypeRegistry (see ACTIVE_SESSIONS.md's Phase 7 entry).
+            this.menuActionRegistry = new ActionRegistry<>();
+            this.menuConditionRegistry = new ConditionRegistry<>();
+            MenuActionHandlers.registerDefaults(menuActionRegistry);
+            MenuConditionHandlers.registerDefaults(menuConditionRegistry);
+            getServer().getPluginManager().registerEvents(
+                new MenuClickListener(
+                    openMenuContextRegistry, menuSessionRegistry, menuActionRegistry, menuConditionRegistry, menuService
+                ), this
+            );
+            getServer().getPluginManager().registerEvents(
+                new MenuLifecycleListener(menuService, openMenuContextRegistry), this
+            );
+            getServer().getPluginManager().registerEvents(
+                new MenuControlHintListener(openMenuContextRegistry), this
+            );
+            getLogger().info("InventoryMenu conditional actions + preset library initialized (Phase 6 + 7)");
+
+            // InventoryMenu Phase 3 (docs/specs/inventory-menu/IMPLEMENTATION_PLAN.md,
+            // DESIGN_REVIEW.md §1) + Phase 6: validate every registered menu's variable
+            // bindings and action/condition registry references now, at enable, not
+            // lazily on first render - a broken menu is blocked in menuService and
+            // refuses to open for any player, rather than surfacing as a silent blank/
+            // literal-text tooltip or a click-time failure the first time someone
+            // happens to open it or click it.
+            MenuDefinitionValidationRunner.runAtStartup(menuTemplatesDataAccess, menuService, getLogger(),
+                menuActionRegistry.registeredIds(), menuConditionRegistry.registeredIds(),
+                menuContentSourceRegistry.registeredIds());
+            getLogger().info("InventoryMenu variable resolution + load-time validation initialized (Phase 3 + 6 + 8)");
 
             initializeEnchantmentRuntime();
             getLogger().info("Registered custom enchantment runtime listeners and /ce command");
@@ -559,6 +660,14 @@ public class KnKPlugin extends JavaPlugin {
     public CacheManager getCacheManager() {
         return cacheManager;
     }
+
+    /**
+     * InventoryMenu Phase 2 (docs/specs/inventory-menu/IMPLEMENTATION_PLAN.md)
+     * rendering-engine entry point.
+     */
+    public MenuService getMenuService() {
+        return menuService;
+    }
     
     /**
      * Returns the WorldTask handler registry for accessing registered handlers.
@@ -596,7 +705,8 @@ public class KnKPlugin extends JavaPlugin {
                 usersCommandApi,
                 districtGateLoader,
                 gateDoorRegionCaptureHandler,
-                serverId
+                serverId,
+                menuService
             );
             knkCommand.setExecutor(knkAdminCommand);
             knkCommand.setTabCompleter(knkAdminCommand);

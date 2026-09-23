@@ -23,5 +23,10 @@ public enum CaptureStep {
     /**
      * Capturing account choice (A or B) for merge scenario
      */
-    ACCOUNT_CHOICE
+    ACCOUNT_CHOICE,
+
+    /**
+     * Capturing one free-text line for {@link CaptureFlow#TEXT_INPUT}.
+     */
+    TEXT_INPUT
 }

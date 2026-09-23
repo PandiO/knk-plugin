@@ -17,6 +17,7 @@ import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.api.GateStructuresApi;
 import net.knightsandkings.knk.api.GateDoorsApi;
 import net.knightsandkings.knk.paper.gates.DistrictGateLoader;
+import net.knightsandkings.knk.paper.menu.MenuService;
 import net.knightsandkings.knk.paper.tasks.GateDoorRegionCaptureHandler;
 import net.knightsandkings.knk.paper.tasks.WorldTaskHandlerRegistry;
 import net.knightsandkings.knk.paper.cache.CacheManager;
@@ -85,7 +86,8 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
             UsersCommandApi usersCommandApi,
             DistrictGateLoader districtGateLoader,
             GateDoorRegionCaptureHandler gateDoorRegionCaptureHandler,
-            String serverId
+            String serverId,
+            MenuService menuService
     ) {
                 this.plugin = plugin;
                 this.enchantmentDefinitionsDataAccess = enchantmentDefinitionsDataAccess;
@@ -221,7 +223,33 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                 (sender, args) -> itemBlueprintsCommand.onCommand(sender, null, "knk", args),
                 "itemblueprint"
         );
-        
+
+        // InventoryMenu Phases 2 & 5 dev harness (docs/specs/inventory-menu/IMPLEMENTATION_PLAN.md) -
+        // no real menu content exists yet to trigger this from, so this is the only way to open
+        // a menu and verify assembly/layout/pagination/search-filter/async-rendering on a live server.
+        if (menuService != null) {
+            MenuDebugCommand menuCommand = new MenuDebugCommand(menuService);
+            registry.register(
+                    new CommandMetadata(
+                            "menu",
+                            "Open a menu template / page / search / filter through its sections (dev harness)",
+                            "/knk menu open <key> | /knk menu page next|prev <sectionName> | "
+                                    + "/knk menu search <sectionName> [clear] | /knk menu filter <sectionName> <facetKey> [clear]",
+                            "knk.admin",
+                            List.of(
+                                    "/knk menu open example.placeholder",
+                                    "/knk menu page next content",
+                                    "/knk menu page prev content",
+                                    "/knk menu open example.search",
+                                    "/knk menu search Content",
+                                    "/knk menu filter Content Category",
+                                    "/knk menu search Content clear"
+                            )
+                    ),
+                    (sender, args) -> menuCommand.onCommand(sender, null, "knk", args)
+            );
+        }
+
         // Register streets
         StreetsDebugCommand streetsCommand = new StreetsDebugCommand(plugin, streetsApi);
         registry.register(

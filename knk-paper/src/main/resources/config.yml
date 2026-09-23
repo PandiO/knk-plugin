@@ -284,3 +284,11 @@ cache:
       allow-stale: false       # Don't serve stale health checks
       retry-attempts: 2        # Fewer retries for health checks
       retry-backoff-ms: 50
+
+    menus:
+      ttl-minutes: 20
+      max-ttl-minutes: 120
+      default-policy: CACHE_FIRST
+      allow-stale: true
+      retry-attempts: 3
+      retry-backoff-ms: 100
