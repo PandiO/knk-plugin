@@ -24,6 +24,19 @@ commands:
     aliases: [acc]
     permission: knk.account.use
 
+  ownermode:
+    description: "Toggle owner mode (vanish from non-staff players; persists across restarts)"
+    usage: "/ownermode [on|off] [onquit] | /ownermode help"
+    aliases: [om]
+    # No permission: here - gated on knk.mode.owner through KnkPermissible inside ModeCommand,
+    # for the same reason /knk has none (Bukkit would check its own permission tree first).
+
+  staffmode:
+    description: "Toggle staff mode (vanish from non-staff players; persists across restarts)"
+    usage: "/staffmode [on|off] [onquit] | /staffmode help"
+    aliases: [sm]
+    # No permission: here - gated on knk.mode.staff through KnkPermissible inside ModeCommand.
+
   ce:
     description: "Manage custom enchantments on held item"
     usage: "/ce <add|remove|info|cooldown|reload>"
@@ -121,7 +134,21 @@ permissions:
       short-circuits to allowed on every node, same as Bukkit's own default for an undeclared
       permission. A non-op needs a real PermissionGrant or group membership (authoring UI is
       docs/specs/user-features/IMPLEMENTATION_PLAN.md §6.2, a later phase) - until one exists,
-      this node resolves undeclared and fails closed for that player.
+      this node resolves undeclared and fails closed for that player. Gates /ownermode; holders
+      (like knk.mode.staff holders) can also see players vanished in owner/staff mode.
+    default: op
+
+  knk.mode.staff:
+    description: >-
+      Staff-mode status (docs/specs/user-features/DESIGN.md §6.1), replacing v1's k&k.staff. Gates
+      /staffmode, and holders can see players vanished in owner/staff mode. Resolved through the
+      new REST-backed permission model via KnkPermissible, not through Bukkit's own permission
+      tree - this plugin.yml declaration is for documentation/consistency only and isn't what
+      KnkPermissible actually checks. It does still bypass via KnkPermissible's own op check: a
+      Minecraft-op'd player short-circuits to allowed on every node, same as Bukkit's own default
+      for an undeclared permission. A non-op needs a real PermissionGrant or group membership
+      (authoring UI is docs/specs/user-features/IMPLEMENTATION_PLAN.md §6.2, a later phase) -
+      until one exists, this node resolves undeclared and fails closed for that player.
     default: op
 
   knk.gate.open.*:

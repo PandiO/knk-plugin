@@ -104,7 +104,11 @@ public class KnkPermissible {
     }
 
     private Integer resolveUserId(UUID uuid) {
-        return userCache.getByUuid(uuid).map(UserSummary::id).orElse(null);
+        // getStale, not getByUuid: the user cache's TTL is the short global cache TTL and
+        // nothing refreshes an online player's entry mid-session, so a fresh-only read stopped
+        // resolving (and every check failed closed for non-ops) about a minute after join. A
+        // UUID's knk user id never changes, so an expired entry is still a correct answer here.
+        return userCache.getStale(uuid).map(UserSummary::id).orElse(null);
     }
 
     private boolean checkCacheOnly(int userId, String node) {

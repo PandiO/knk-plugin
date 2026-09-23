@@ -10,10 +10,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import net.knightsandkings.knk.api.auth.AuthProvider;
 import net.knightsandkings.knk.api.dto.CoinsUpdateDto;
+import net.knightsandkings.knk.api.dto.ActiveModeUpdateDto;
 import net.knightsandkings.knk.api.dto.GatePassThroughMethodUpdateDto;
 import net.knightsandkings.knk.api.dto.UserCreateDto;
 import net.knightsandkings.knk.api.dto.UserDto;
 import net.knightsandkings.knk.api.mapper.UsersMapper;
+import net.knightsandkings.knk.core.domain.users.ActiveMode;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.domain.users.UserDetail;
 import net.knightsandkings.knk.core.exception.ApiException;
@@ -80,6 +82,20 @@ public class UsersCommandApiImpl extends BaseApiImpl implements UsersCommandApi 
                 return null;
             } catch (ApiException | IOException e) {
                 throw new RuntimeException("Failed to set gate pass-through method", e);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<Void> setActiveModeById(int id, ActiveMode mode) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + USERS_ENDPOINT + "/" + id + "/active-mode";
+            try {
+                String bodyJson = objectMapper.writeValueAsString(new ActiveModeUpdateDto(mode.toWireValue()));
+                putJson(url, bodyJson);
+                return null;
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to set active mode", e);
             }
         }, executor);
     }

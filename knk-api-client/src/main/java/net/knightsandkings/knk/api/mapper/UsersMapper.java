@@ -5,6 +5,7 @@ import net.knightsandkings.knk.api.dto.UserDto;
 import net.knightsandkings.knk.api.dto.UserListDto;
 import net.knightsandkings.knk.api.dto.UserSummaryDto;
 import net.knightsandkings.knk.core.domain.common.Page;
+import net.knightsandkings.knk.core.domain.users.ActiveMode;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.domain.users.UserDetail;
 import net.knightsandkings.knk.core.domain.users.UserListItem;
@@ -22,7 +23,8 @@ public class UsersMapper {
             dto.experiencePoints(),
             dto.isFullAccount(),
             false,
-            GatePassThroughMethod.fromWireValue(dto.gatePassThroughMethodDefault())
+            GatePassThroughMethod.fromWireValue(dto.gatePassThroughMethodDefault()),
+            ActiveMode.fromWireValue(dto.activeMode())
         );
     }
 
@@ -36,7 +38,8 @@ public class UsersMapper {
             domain.gems(),
             domain.experiencePoints(),
             domain.isFullAccount(),
-            domain.gatePassThroughMethodDefault().toWireValue()
+            domain.gatePassThroughMethodDefault().toWireValue(),
+            domain.activeMode().toWireValue()
         );
     }
 

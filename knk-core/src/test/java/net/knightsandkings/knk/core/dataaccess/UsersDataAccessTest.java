@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import net.knightsandkings.knk.core.cache.UserCache;
+import net.knightsandkings.knk.core.domain.users.ActiveMode;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.domain.users.UserDetail;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
@@ -250,6 +251,11 @@ public class UsersDataAccessTest {
 
         @Override
         public CompletableFuture<Void> setGatePassThroughMethodById(int id, GatePassThroughMethod method) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletableFuture<Void> setActiveModeById(int id, ActiveMode mode) {
             return CompletableFuture.completedFuture(null);
         }
     }

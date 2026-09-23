@@ -51,6 +51,7 @@ import net.knightsandkings.knk.paper.menu.OpenMenuContextRegistry;
 import net.knightsandkings.knk.core.ports.api.StructuresQueryApi;
 import net.knightsandkings.knk.core.ports.api.TownsQueryApi;
 import net.knightsandkings.knk.core.ports.api.UserAccountApi;
+import net.knightsandkings.knk.core.domain.users.ActiveMode;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.core.ports.api.UsersQueryApi;
 import net.knightsandkings.knk.core.ports.api.PermissionsApi;
@@ -66,6 +67,7 @@ import net.knightsandkings.knk.paper.chat.ChatCaptureManager;
 import net.knightsandkings.knk.paper.bootstrap.EnchantmentBootstrap;
 import net.knightsandkings.knk.paper.commands.AccountCommandRegistry;
 import net.knightsandkings.knk.paper.commands.KnkAdminCommand;
+import net.knightsandkings.knk.paper.commands.ModeCommand;
 import net.knightsandkings.knk.paper.config.ConfigLoader;
 import net.knightsandkings.knk.paper.config.KnkConfig;
 import net.knightsandkings.knk.paper.dataaccess.DataAccessFactory;
@@ -86,12 +88,14 @@ import net.knightsandkings.knk.paper.listeners.ChatCaptureListener;
 import net.knightsandkings.knk.paper.listeners.GateDamageConsequenceListener;
 import net.knightsandkings.knk.paper.listeners.GateEventListener;
 import net.knightsandkings.knk.paper.listeners.GatePassThroughConsequenceListener;
+import net.knightsandkings.knk.paper.listeners.ModeListener;
 import net.knightsandkings.knk.paper.listeners.PlayerListener;
 import net.knightsandkings.knk.paper.listeners.RegionTaskEventListener;
 import net.knightsandkings.knk.paper.listeners.UserAccountListener;
 import net.knightsandkings.knk.paper.listeners.WorldGuardRegionListener;
 import net.knightsandkings.knk.paper.listeners.WorldTaskChatListener;
 import net.knightsandkings.knk.paper.listeners.WorldTaskLocationSelectionListener;
+import net.knightsandkings.knk.paper.modes.ModeService;
 import net.knightsandkings.knk.paper.permissions.KnkPermissible;
 import net.knightsandkings.knk.paper.regions.WorldGuardRegionTracker;
 import net.knightsandkings.knk.paper.integration.WorldGuardIntegration;
@@ -133,6 +137,7 @@ public class KnKPlugin extends JavaPlugin {
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private PermissionsDataAccess permissionsDataAccess;
     private KnkPermissible knkPermissible;
+    private ModeService modeService;
     private MenuSessionRegistry menuSessionRegistry;
     private OpenMenuContextRegistry openMenuContextRegistry;
     private MenuService menuService;
@@ -375,6 +380,7 @@ public class KnKPlugin extends JavaPlugin {
             );
             this.permissionsDataAccess = dataAccessFactory.createPermissionsDataAccess(permissionsApi);
             this.knkPermissible = new KnkPermissible(cacheManager.getUserCache(), permissionsDataAccess);
+            this.modeService = new ModeService(this, knkPermissible, cacheManager.getUserCache(), usersCommandApi);
             this.minecraftMaterialRefsDataAccess = dataAccessFactory.createMinecraftMaterialRefsDataAccess(
                 config.cache().ttl(),
                 minecraftMaterialRefsQueryApi
@@ -630,6 +636,8 @@ public class KnKPlugin extends JavaPlugin {
         pluginManager.registerEvents(new PlayerListener(usersDataAccess, townsDataAccess, this.getCacheManager(), knkPermissible), this);
         pluginManager.registerEvents(new UserAccountListener(userManager, config.messages(), getLogger()), this);
         getLogger().info("Registered UserAccountListener for account management");
+        pluginManager.registerEvents(new ModeListener(modeService), this);
+        getLogger().info("Registered ModeListener for owner/staff mode restore");
     }
     
     /**
@@ -708,6 +716,21 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().info("Registered /account command with cooldown management");
         } else {
             getLogger().warning("Failed to register /account command - not defined in plugin.yml?");
+        }
+
+        registerModeCommand("ownermode", ActiveMode.OWNER);
+        registerModeCommand("staffmode", ActiveMode.STAFF);
+    }
+
+    private void registerModeCommand(String name, ActiveMode mode) {
+        PluginCommand modeCommand = getCommand(name);
+        if (modeCommand != null) {
+            ModeCommand executor = new ModeCommand(modeService, mode);
+            modeCommand.setExecutor(executor);
+            modeCommand.setTabCompleter(executor);
+            getLogger().info("Registered /" + name + " command");
+        } else {
+            getLogger().warning("Failed to register /" + name + " command - not defined in plugin.yml?");
         }
 
     }
