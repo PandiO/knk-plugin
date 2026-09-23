@@ -36,6 +36,7 @@ import net.knightsandkings.knk.core.domain.users.UserDetail;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.paper.KnKPlugin;
 import net.knightsandkings.knk.paper.cache.CacheManager;
+import net.knightsandkings.knk.paper.permissions.KnkPermissible;
 import net.knightsandkings.knk.paper.utils.ColorOptions;
 import net.knightsandkings.knk.paper.utils.ScoreboardUtil;
 import net.kyori.adventure.text.Component;
@@ -57,11 +58,13 @@ public class PlayerListener implements Listener {
 	private final UsersDataAccess usersDataAccess;
 	private final TownsDataAccess townsDataAccess;
 	private final CacheManager cacheManager;
+	private final KnkPermissible knkPermissible;
 
-	public PlayerListener(UsersDataAccess usersDataAccess, TownsDataAccess townsDataAccess, CacheManager cacheManager) {
+	public PlayerListener(UsersDataAccess usersDataAccess, TownsDataAccess townsDataAccess, CacheManager cacheManager, KnkPermissible knkPermissible) {
 		this.usersDataAccess = usersDataAccess;
 		this.townsDataAccess = townsDataAccess;
 		this.cacheManager = cacheManager;
+		this.knkPermissible = knkPermissible;
 	}
 
 	@EventHandler
@@ -137,7 +140,7 @@ public class PlayerListener implements Listener {
 			}
 		}
 
-		if (!player.hasPermission("k&k.join.owner")) {
+		if (!knkPermissible.hasPermission(player, "knk.mode.owner")) {
 			player.setGameMode(GameMode.SURVIVAL);
 			player.setFlying(false);
 			// Town town = (Town) RepositoryManager.getInstance().getRepository(Town.class, Dominion.KEY_CLASS).getList().get(0);
@@ -148,7 +151,7 @@ public class PlayerListener implements Listener {
 			// }
             player.teleport(Bukkit.getWorld(Bukkit.getWorlds().get(0).getName()).getSpawnLocation());
 		}
-		ScoreboardUtil.setScoreboard(Arrays.asList(player));
+		ScoreboardUtil.setScoreboard(Arrays.asList(player), knkPermissible);
 	}
 
 	@EventHandler
@@ -168,7 +171,7 @@ public class PlayerListener implements Listener {
 				|| cmd.equalsIgnoreCase("/plugin")
 				|| cmd.equalsIgnoreCase("/v")
 				|| cmd.equalsIgnoreCase("/version")) {
-			if (!player.hasPermission("k&k.owner")) {
+			if (!knkPermissible.hasPermission(player, "knk.mode.owner")) {
 				e.setCancelled(true);
 			}
 		}
@@ -187,7 +190,7 @@ public class PlayerListener implements Listener {
 		Component messageComponent = LegacyComponentSerializer.legacySection().deserialize(legacyFormattedMessage);
 
 		Component finalMessage;
-		if (player.hasPermission("k&k.owner")) {
+		if (knkPermissible.hasPermission(player, "knk.mode.owner")) {
 			// Build owner format with proper Components using ColorOptions TextColor objects
 			Component prefixComponent = Component.text("[")
 					.color(ColorOptions.ownerformat)

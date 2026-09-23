@@ -98,14 +98,14 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         // Register health
         HealthCommand healthCommand = new HealthCommand(plugin, healthApi);
         registry.register(
-                new CommandMetadata("health", "Check API backend health", "/knk health", "knk.admin"),
+                new CommandMetadata("health", "Check API backend health", "/knk health", "knk.admin.health"),
                 (sender, args) -> healthCommand.onCommand(sender, null, "knk", new String[0])
         );
         
         // Register cache command
         if (cacheManager != null) {
             registry.register(
-                new CommandMetadata("cache", "View cache statistics and health", "/knk cache", "knk.admin"),
+                new CommandMetadata("cache", "View cache statistics and health", "/knk cache", "knk.admin.cache"),
                 (sender, args) -> {
                     sender.sendMessage(ChatColor.translateAlternateColorCodes('§', cacheManager.getHealthSummary()));
                     return true;
@@ -116,14 +116,14 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         // Register towns
         TownsDebugCommand townsCommand = new TownsDebugCommand(plugin, townsApi);
         registry.register(
-                new CommandMetadata("towns", "List or search towns", "/knk towns list [page] [size]", "knk.admin",
+                new CommandMetadata("towns", "List or search towns", "/knk towns list [page] [size]", "knk.admin.towns",
                         List.of("/knk towns list", "/knk towns list 1 10")),
                 (sender, args) -> townsCommand.onCommand(sender, null, "knk", args)
         );
         
         // Register town (alias for get by ID)
         registry.register(
-                new CommandMetadata("town", "Get town details by ID", "/knk town <id>", "knk.admin",
+                new CommandMetadata("town", "Get town details by ID", "/knk town <id>", "knk.admin.town",
                         List.of("/knk town 1")),
                 (sender, args) -> {
                     String[] adjusted = new String[args.length + 1];
@@ -136,14 +136,14 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         // Register districts
         DistrictsDebugCommand districtsCommand = new DistrictsDebugCommand(plugin, districtsApi);
         registry.register(
-                new CommandMetadata("districts", "List or search districts", "/knk districts list [page] [size]", "knk.admin",
+                new CommandMetadata("districts", "List or search districts", "/knk districts list [page] [size]", "knk.admin.districts",
                         List.of("/knk districts list", "/knk districts list 1 10")),
                 (sender, args) -> districtsCommand.onCommand(sender, null, "knk", args)
         );
         
         // Register district (alias for get by ID)
         registry.register(
-                new CommandMetadata("district", "Get district details by ID", "/knk district <id>", "knk.admin",
+                new CommandMetadata("district", "Get district details by ID", "/knk district <id>", "knk.admin.district",
                         List.of("/knk district 1")),
                 (sender, args) -> {
                     String[] adjusted = new String[args.length + 1];
@@ -156,7 +156,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         // Register locations
         LocationsDebugCommand locationsCommand = new LocationsDebugCommand(plugin, locationsApi);
         registry.register(
-                new CommandMetadata("locations", "List or get locations", "/knk locations list <page> <size> | /knk locations <id>", "knk.admin",
+                new CommandMetadata("locations", "List or get locations", "/knk locations list <page> <size> | /knk locations <id>", "knk.admin.locations",
                         List.of("/knk locations list 1 10", "/knk locations 5")),
                 (sender, args) -> locationsCommand.onCommand(sender, null, "knk", args)
         );
@@ -164,7 +164,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         // Register location here
         LocationDebugCommand locationHereCommand = new LocationDebugCommand((org.bukkit.plugin.java.JavaPlugin) plugin);
         registry.register(
-                new CommandMetadata("location", "Show your current location", "/knk location here", "knk.admin",
+                new CommandMetadata("location", "Show your current location", "/knk location here", "knk.admin.location",
                         List.of("/knk location here")),
                 (sender, args) -> {
                     if (args.length == 0 || !args[0].equalsIgnoreCase("here")) {
@@ -186,7 +186,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                         "enchantments",
                         "List/search enchantment definitions and apply to held item",
                         "/knk enchantments list [page] [size] | /knk enchantments vanilla [page] [size] | /knk enchantments search <id|key|displayName> <value> [page] [size] | /knk enchantments apply <id|vanillaName|customKey> [level]",
-                        "knk.admin",
+                        "knk.admin.enchantments",
                         List.of(
                                 "/knk enchantments list 1 10",
                                 "/knk enchantments vanilla 1 10",
@@ -211,7 +211,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                         "itemblueprints",
                         "List/search item blueprints and give generated items",
                         "/knk itemblueprints list [page] [size] | /knk itemblueprints search <id|name|displayName> <value> [page] [size] | /knk itemblueprints give <id> [player]",
-                        "knk.admin",
+                        "knk.admin.itemblueprints",
                         List.of(
                                 "/knk itemblueprints list 1 10",
                                 "/knk itemblueprints search name Sword",
@@ -235,7 +235,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                             "Open a menu template / page / search / filter through its sections (dev harness)",
                             "/knk menu open <key> | /knk menu page next|prev <sectionName> | "
                                     + "/knk menu search <sectionName> [clear] | /knk menu filter <sectionName> <facetKey> [clear]",
-                            "knk.admin",
+                            "knk.admin.menu",
                             List.of(
                                     "/knk menu open example.placeholder",
                                     "/knk menu page next content",
@@ -253,14 +253,14 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         // Register streets
         StreetsDebugCommand streetsCommand = new StreetsDebugCommand(plugin, streetsApi);
         registry.register(
-                new CommandMetadata("streets", "List or search streets", "/knk streets list [page] [size]", "knk.admin",
+                new CommandMetadata("streets", "List or search streets", "/knk streets list [page] [size]", "knk.admin.streets",
                         List.of("/knk streets list", "/knk streets list 1 10")),
                 (sender, args) -> streetsCommand.onCommand(sender, null, "knk", args)
         );
         
         // Register street (alias for get by ID)
         registry.register(
-                new CommandMetadata("street", "Get street details by ID", "/knk street <id>", "knk.admin",
+                new CommandMetadata("street", "Get street details by ID", "/knk street <id>", "knk.admin.street",
                         List.of("/knk street 1")),
                 (sender, args) -> {
                     String[] adjusted = new String[args.length + 1];

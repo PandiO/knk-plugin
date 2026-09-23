@@ -11,6 +11,7 @@ import org.bukkit.scoreboard.RenderType;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.Team;
 
+import net.knightsandkings.knk.paper.permissions.KnkPermissible;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 
@@ -43,12 +44,12 @@ public class ScoreboardUtil {
         return scoreboard;
     }
 
-    public static void setScoreboard(List<Player> players) {
+    public static void setScoreboard(List<Player> players, KnkPermissible knkPermissible) {
         Scoreboard scoreboard = getScoreboard();
 
         for (Player p : players) {
             Team team = scoreboard.getTeam("default");
-            if (p.hasPermission("k&k.*")) {
+            if (knkPermissible.hasPermission(p, "knk.mode.owner")) {
                 team = scoreboard.getTeam("owner");
             }
 

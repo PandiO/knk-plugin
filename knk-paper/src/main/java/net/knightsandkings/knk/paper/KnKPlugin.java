@@ -92,6 +92,7 @@ import net.knightsandkings.knk.paper.listeners.UserAccountListener;
 import net.knightsandkings.knk.paper.listeners.WorldGuardRegionListener;
 import net.knightsandkings.knk.paper.listeners.WorldTaskChatListener;
 import net.knightsandkings.knk.paper.listeners.WorldTaskLocationSelectionListener;
+import net.knightsandkings.knk.paper.permissions.KnkPermissible;
 import net.knightsandkings.knk.paper.regions.WorldGuardRegionTracker;
 import net.knightsandkings.knk.paper.integration.WorldGuardIntegration;
 import net.knightsandkings.knk.paper.tasks.TempRegionRetentionTask;
@@ -131,6 +132,7 @@ public class KnKPlugin extends JavaPlugin {
     private MenuTemplatesDataAccess menuTemplatesDataAccess;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private PermissionsDataAccess permissionsDataAccess;
+    private KnkPermissible knkPermissible;
     private MenuSessionRegistry menuSessionRegistry;
     private OpenMenuContextRegistry openMenuContextRegistry;
     private MenuService menuService;
@@ -372,6 +374,7 @@ public class KnKPlugin extends JavaPlugin {
                 menuTemplatesQueryApi
             );
             this.permissionsDataAccess = dataAccessFactory.createPermissionsDataAccess(permissionsApi);
+            this.knkPermissible = new KnkPermissible(cacheManager.getUserCache(), permissionsDataAccess);
             this.minecraftMaterialRefsDataAccess = dataAccessFactory.createMinecraftMaterialRefsDataAccess(
                 config.cache().ttl(),
                 minecraftMaterialRefsQueryApi
@@ -624,7 +627,7 @@ public class KnKPlugin extends JavaPlugin {
         // Event registration moved to onEnable after region transition service setup
 
         pluginManager.registerEvents(new WorldGuardRegionListener(regionTracker), this);
-        pluginManager.registerEvents(new PlayerListener(usersDataAccess, townsDataAccess, this.getCacheManager()), this);
+        pluginManager.registerEvents(new PlayerListener(usersDataAccess, townsDataAccess, this.getCacheManager(), knkPermissible), this);
         pluginManager.registerEvents(new UserAccountListener(userManager, config.messages(), getLogger()), this);
         getLogger().info("Registered UserAccountListener for account management");
     }
