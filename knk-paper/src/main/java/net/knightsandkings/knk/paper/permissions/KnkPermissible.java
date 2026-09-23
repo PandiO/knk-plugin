@@ -37,11 +37,13 @@ import net.knightsandkings.knk.core.domain.users.UserSummary;
  * {@link #hasPermissionAsync(OfflinePlayer, String)} is for call sites that already run off the
  * main thread (or want a real, freshly-resolved answer rather than a cache-only snapshot).
  * <p>
- * Note this resolves purely against the new REST-backed permission model - it does not consult
- * Bukkit's own permission tree/op status at all. Until a real {@code PermissionGrant}/group
- * exists for a given node (authoring is docs/specs/user-features/IMPLEMENTATION_PLAN.md §6.2, a
- * later phase), every check for it resolves UNDECLARED and therefore fails closed for everyone,
- * including a Minecraft-op'd server owner.
+ * Op bypass: a Minecraft-op'd player short-circuits to {@code true} on every node, the same way
+ * Bukkit's own {@code hasPermission} treats an undeclared node for an op. This is a deliberate
+ * exception to "resolves purely through the new model" - without it, every check would fail
+ * closed for everyone (including the server owner) until a real {@code PermissionGrant}/group
+ * exists for that node, and authoring one is docs/specs/user-features/IMPLEMENTATION_PLAN.md
+ * §6.2, a later phase not built yet. A real grant/deny from the new model still takes over
+ * normally for a non-op.
  */
 public class KnkPermissible {
 
@@ -68,6 +70,10 @@ public class KnkPermissible {
      * Same as {@link #hasPermission(Player, String)}, for {@link OfflinePlayer} call sites.
      */
     public boolean hasPermission(OfflinePlayer player, String node) {
+        if (player.isOp()) {
+            return true;
+        }
+
         Integer userId = resolveUserId(player.getUniqueId());
         if (userId == null) {
             return false;
@@ -80,6 +86,10 @@ public class KnkPermissible {
      * freshly-resolved answer rather than a cache-only snapshot.
      */
     public CompletableFuture<Boolean> hasPermissionAsync(OfflinePlayer player, String node) {
+        if (player.isOp()) {
+            return CompletableFuture.completedFuture(true);
+        }
+
         Integer userId = resolveUserId(player.getUniqueId());
         if (userId == null) {
             return CompletableFuture.completedFuture(false);
