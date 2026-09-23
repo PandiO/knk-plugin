@@ -284,7 +284,23 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                         List.of("/knk task-claim 1", "/knk task-claim ABC123")),
                 (sender, args) -> taskClaimCommand.onCommand(sender, null, "knk", args)
         );
-        
+
+        // Dedicated ItemScan entry point (docs/specs/items/IMPLEMENTATION_PLAN.md §5.1) - a
+        // faster second way in alongside the standard /knk task-claim flow above, both
+        // ultimately invoking the exact same claim/handler-dispatch logic in
+        // KnkTaskClaimCommand.onCommand - no duplicated business logic.
+        registry.register(
+                new CommandMetadata("itemscan", "Claim and scan a held item for an ItemScan WorldTask", "/knk itemscan claim <linkCode>", "knk.tasks",
+                        List.of("/knk itemscan claim ABC123")),
+                (sender, args) -> {
+                    if (args.length < 2 || !args[0].equalsIgnoreCase("claim")) {
+                        sender.sendMessage(ChatColor.YELLOW + "Usage: /knk itemscan claim <linkCode>");
+                        return true;
+                    }
+                    return taskClaimCommand.onCommand(sender, null, "knk", new String[]{args[1]});
+                }
+        );
+
         KnkTaskStatusCommand taskStatusCommand = new KnkTaskStatusCommand(plugin, worldTasksApi);
         registry.register(
                 new CommandMetadata("task-status", "Check world task status", "/knk task-status <id|linkCode>", "knk.tasks",

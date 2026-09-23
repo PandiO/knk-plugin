@@ -105,6 +105,7 @@ import net.knightsandkings.knk.paper.tasks.WorldTaskHandlerRegistry;
 import net.knightsandkings.knk.paper.tasks.HeadlessWorldTaskPoller;
 import net.knightsandkings.knk.paper.tasks.GateBlockScanTaskHandler;
 import net.knightsandkings.knk.paper.tasks.GateDoorRegionCaptureHandler;
+import net.knightsandkings.knk.paper.tasks.ItemScanTaskHandler;
 import net.knightsandkings.knk.paper.user.UserManager;
 import net.knightsandkings.knk.paper.utils.CommandCooldownManager;
 
@@ -339,6 +340,12 @@ public class KnKPlugin extends JavaPlugin {
             LocationTaskHandler locationHandler = new LocationTaskHandler(worldTasksApi, this);
             worldTaskHandlerRegistry.registerHandler(locationHandler);
             worldTaskHandlerRegistry.registerHandler("LocationSelection", locationHandler);
+
+            // Register ItemScan handler (docs/specs/items/IMPLEMENTATION_PLAN.md §5) - player-
+            // driven, not headless (see ItemScanTaskHandler's javadoc), so it's registered here
+            // alongside Location/WgRegionId rather than on headlessWorldTaskPoller below.
+            ItemScanTaskHandler itemScanHandler = new ItemScanTaskHandler(worldTasksApi, this);
+            worldTaskHandlerRegistry.registerHandler(itemScanHandler);
 
             // Start lightweight HTTP server for region rename callbacks (default port 8081)
             int httpPort = 8081;
