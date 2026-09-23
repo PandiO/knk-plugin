@@ -109,6 +109,12 @@ public class ItemScanTaskHandler implements IWorldTaskHandler {
             warnings.add("Player was not holding an item in their main hand; scan captured an empty item.");
         }
 
+        // Per developer feedback (2026-09-23 live testing): MaxStackSize should come from the
+        // scanned material itself (it genuinely varies per item - 64 for most, 16 for e.g. snowballs,
+        // 1 for tools/weapons/armor) rather than a fixed form default, which only makes sense for
+        // DefaultQuantity (handled by the live FormConfiguration's own defaultValue instead).
+        root.addProperty("maxStackSize", heldItem.getType().getMaxStackSize());
+
         ItemMeta meta = heldItem.hasItemMeta() ? heldItem.getItemMeta() : null;
 
         // Per developer feedback (2026-09-23 live testing): most items are never renamed, so
