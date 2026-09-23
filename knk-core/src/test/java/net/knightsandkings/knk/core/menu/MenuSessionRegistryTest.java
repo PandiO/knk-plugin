@@ -74,16 +74,39 @@ class MenuSessionRegistryTest {
     }
 
     @Test
-    void sectionPagingClampsAndDefaultsToZero() {
+    void sectionPagingWrapsAndDefaultsToZero() {
         MenuSession session = new MenuSessionRegistry().open(UUID.randomUUID());
 
         assertEquals(0, session.getPage(7));
         assertEquals(1, session.nextPage(7, 3));
         assertEquals(2, session.nextPage(7, 3));
-        assertEquals(2, session.nextPage(7, 3)); // clamped at totalPages-1
-        assertEquals(1, session.previousPage(7));
-        assertEquals(0, session.previousPage(7));
-        assertEquals(0, session.previousPage(7)); // clamped at 0
+        assertEquals(0, session.nextPage(7, 3)); // wraps past the last page back to 0
+        assertEquals(2, session.previousPage(7, 3)); // wraps below 0 back to the last page
+        assertEquals(1, session.previousPage(7, 3));
+        assertEquals(0, session.previousPage(7, 3));
+    }
+
+    @Test
+    void firstPageJumpsToZeroRegardlessOfCurrentPage() {
+        MenuSession session = new MenuSessionRegistry().open(UUID.randomUUID());
+
+        session.nextPage(7, 3);
+        session.nextPage(7, 3);
+        assertEquals(2, session.getPage(7));
+
+        session.firstPage(7);
+        assertEquals(0, session.getPage(7));
+    }
+
+    @Test
+    void stepPageAllowsNegativeUnlikeSetPage() {
+        MenuSession session = new MenuSessionRegistry().open(UUID.randomUUID());
+
+        session.stepPage(7, -1);
+        assertEquals(-1, session.getPage(7));
+
+        session.stepPage(7, -2);
+        assertEquals(-3, session.getPage(7));
     }
 
     @Test

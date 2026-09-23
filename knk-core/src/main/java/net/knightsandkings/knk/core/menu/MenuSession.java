@@ -34,6 +34,7 @@ public final class MenuSession {
     private volatile boolean dirty;
     private volatile PendingConfirmation pendingConfirmation;
     private volatile DoubleClickArm doubleClickArm;
+    private volatile int lastClickedSlot = -1;
 
     MenuSession(UUID playerId) {
         this.playerId = playerId;
@@ -91,21 +92,55 @@ public final class MenuSession {
     }
 
     /**
-     * Advances a section's page by one, clamped to {@code totalPages - 1}. Safe
-     * to call with a stale/zero {@code totalPages} (e.g. before the section's
-     * been rendered once) - it just clamps to page 0.
+     * Post-Phase-8 QOL follow-up: advances/retreats a content-source-backed
+     * section's page by {@code delta} with no clamping at all - unlike
+     * {@link #setPage}, a negative result is allowed and preserved rather
+     * than floored to 0. A content-source section's true page count isn't
+     * known until {@code MenuRenderer}'s paged fetch reveals it, so
+     * {@code MenuService.changePage} uses this (never {@link #setPage}) to
+     * step such a section's page in either direction; the resulting
+     * out-of-range value (negative, or past the last page) is a deliberate
+     * signal {@code MenuRenderer.resolveContentSourceAssignment} wraps back
+     * in-bounds once that fetch completes (see its own javadoc).
+     * {@link #nextPage}/{@link #previousPage} remain the right call for the
+     * non-content-source (in-memory list) case, where totalPages is already
+     * known up front and wrapping can happen immediately.
+     */
+    public void stepPage(Integer sectionTemplateId, int delta) {
+        if (sectionTemplateId == null) {
+            return;
+        }
+        sectionPages.put(sectionTemplateId, getPage(sectionTemplateId) + delta);
+    }
+
+    /**
+     * Post-Phase-8 QOL follow-up: advances a section's page by one, wrapping
+     * back to page 0 from the last page instead of clamping there (the
+     * developer's explicit ask: "next and previous buttons cycle, instead of
+     * stop when at the beginning or end"). Safe to call with a stale/zero
+     * {@code totalPages} (e.g. before the section's been rendered once) - it
+     * just stays at page 0.
      */
     public int nextPage(Integer sectionTemplateId, int totalPages) {
-        int clamped = Math.max(0, totalPages - 1);
-        int next = Math.min(getPage(sectionTemplateId) + 1, clamped);
+        int next = totalPages > 0 ? Math.floorMod(getPage(sectionTemplateId) + 1, totalPages) : 0;
         setPage(sectionTemplateId, next);
         return next;
     }
 
-    public int previousPage(Integer sectionTemplateId) {
-        int previous = Math.max(0, getPage(sectionTemplateId) - 1);
+    /** @see #nextPage(Integer, int) - same wraparound, the other direction (last page from page 0). */
+    public int previousPage(Integer sectionTemplateId, int totalPages) {
+        int previous = totalPages > 0 ? Math.floorMod(getPage(sectionTemplateId) - 1, totalPages) : 0;
         setPage(sectionTemplateId, previous);
         return previous;
+    }
+
+    /**
+     * Post-Phase-8 QOL follow-up: jumps a section straight to page 0 -
+     * backing the shift-click-on-pagination-button shortcut, the same
+     * "shift-click resets/jumps" pattern already used for search.
+     */
+    public void firstPage(Integer sectionTemplateId) {
+        setPage(sectionTemplateId, 0);
     }
 
     /**
@@ -246,5 +281,27 @@ public final class MenuSession {
     public boolean isDoubleClickArmed(int itemId, long currentTick, int windowTicks) {
         DoubleClickArm arm = doubleClickArm;
         return arm != null && arm.itemId() == itemId && (currentTick - arm.armedAtTick()) < windowTicks;
+    }
+
+    /**
+     * Post-Phase-8 QOL follow-up: the last menu slot a normal (non-double-
+     * click-type) click resolved to a real {@code RuntimeMenuItem} in. Exists
+     * specifically so {@code MenuClickListener} can correlate a Bukkit
+     * {@code ClickType.DOUBLE_CLICK} event - which a genuinely fast physical
+     * double-click produces as ONE event, with an unreliable/absent slot of
+     * its own (Bukkit's {@code getClickedInventory()}/{@code getSlot()} don't
+     * reliably identify a location for that click type, since it represents
+     * a "gather" gesture rather than a single-slot interaction) - back to the
+     * item the player actually meant to double-click. Without this, a fast
+     * double-click would only ever register as a single ordinary click,
+     * which can arm a {@code menu.confirm.doubleclick} button but never
+     * confirm it on its own.
+     */
+    public int getLastClickedSlot() {
+        return lastClickedSlot;
+    }
+
+    public void setLastClickedSlot(int slot) {
+        this.lastClickedSlot = slot;
     }
 }

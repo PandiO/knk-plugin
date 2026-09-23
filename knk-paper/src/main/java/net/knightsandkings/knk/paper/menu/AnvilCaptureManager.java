@@ -31,17 +31,32 @@ import java.util.function.Consumer;
  * AnvilGUI library is built on, built directly against Bukkit's own API
  * instead. No third-party jar.
  * <p>
- * Post-Phase-8 QOL follow-up: the first version of this class relied on
- * vanilla anvil-combine semantics (an empty second slot, output computed by
- * Bukkit from slot 0 alone) and had no visible Cancel affordance - closing
- * the anvil (Escape) was the only way to cancel, which testing found
- * unclear. This version places a real Cancel item in slot 1 and forces the
- * result slot's contents unconditionally via {@link #onPrepareAnvil}
- * (regardless of what combining slots 0+1 would normally produce - the
- * Cancel item in slot 1 would otherwise feed into vanilla's repair/combine
- * logic and corrupt the output), reading the actual typed text via {@link
- * AnvilInventory#getRenameText()} rather than the result item's own display
- * name (which is now a fixed "Confirm" label, not the raw text).
+ * Post-Phase-8 QOL follow-up, second iteration: the first attempt at an
+ * explicit Cancel affordance placed a real Barrier item in slot 1 (the
+ * anvil's second/"sacrifice" input). Live testing found this broke the
+ * capture entirely - no Confirm item ever appeared, and confirming produced
+ * no text. Root cause: vanilla's anvil only treats a plain rename (no
+ * second ingredient) as its own always-valid mini-operation when slot 1 is
+ * genuinely empty; the moment slot 1 holds something, vanilla instead tries
+ * to validate a repair/combine using slots 0+1 together, and
+ * Paper+Barrier isn't a valid combination - the whole operation (including
+ * the name change) is treated as invalid, which can leave {@link
+ * AnvilInventory#getRenameText()} empty and the client unwilling to render
+ * a result item at all, regardless of what {@link #onPrepareAnvil} forces
+ * into the result slot via {@code setResult}. Slot 1 must stay empty for
+ * the rename to work reliably at all.
+ * <p>
+ * This version instead repurposes slot 0 (the input item itself) as Cancel:
+ * clicking it was already observed to "do nothing but reset the display" -
+ * since every click here is cancelled (never lets the item actually leave
+ * the slot), that reset was always just Bukkit re-syncing the inventory
+ * back to server state, not a bug in the rename mechanism itself. Made
+ * intentional: clicking slot 0 now explicitly triggers {@code onCancel}.
+ * Slot 1 stays empty. Slot 2 (the real result slot) still gets its result
+ * forced unconditionally via {@link #onPrepareAnvil} to a clear "Confirm"
+ * label (rather than left as vanilla's own renamed-item preview), reading
+ * the actual typed text via {@link AnvilInventory#getRenameText()} rather
+ * than the result item's own display name.
  * <p>
  * Deliberately mirrors {@code ChatCaptureManager.startTextCapture}'s
  * {@code (player, prompt, onComplete, onCancel)} signature so
@@ -65,8 +80,10 @@ import java.util.function.Consumer;
  */
 public final class AnvilCaptureManager implements Listener {
 
+    /** Doubles as the rename target and (since clicking it can never remove it - every click here is cancelled) the Cancel affordance. */
     private static final int INPUT_SLOT = 0;
-    private static final int CANCEL_SLOT = 1;
+    /** Must stay empty - see the class javadoc for why a real item here breaks the rename computation. */
+    private static final int SECOND_INGREDIENT_SLOT = 1;
     private static final int CONFIRM_SLOT = 2;
 
     private final Plugin plugin;
@@ -84,15 +101,21 @@ public final class AnvilCaptureManager implements Listener {
      *                       callers that mean "clear" on blank (search/filter) already
      *                       handle that themselves
      * @param onCancel       invoked if the player closes the anvil without confirming
-     *                       (Escape, or clicking the Cancel item, or closing after
-     *                       either)
+     *                       (Escape, or clicking the input/Cancel item, or closing
+     *                       after either)
      */
     public void startTextCapture(Player player, String promptMessage, Consumer<String> onComplete, Runnable onCancel) {
         player.sendMessage(promptMessage);
 
         Inventory anvil = Bukkit.createInventory(null, InventoryType.ANVIL, "Enter text");
-        anvil.setItem(INPUT_SLOT, namedItem(Material.PAPER, ChatColor.WHITE + "Type here"));
-        anvil.setItem(CANCEL_SLOT, namedItem(Material.BARRIER, ChatColor.RED + "Cancel"));
+        ItemStack input = namedItem(Material.PAPER, ChatColor.WHITE + "Type here");
+        ItemMeta inputMeta = input.getItemMeta();
+        if (inputMeta != null) {
+            inputMeta.setLore(List.of(ChatColor.RED + "Click to cancel"));
+            input.setItemMeta(inputMeta);
+        }
+        anvil.setItem(INPUT_SLOT, input);
+        // SECOND_INGREDIENT_SLOT deliberately left empty.
 
         activeSessions.put(player.getUniqueId(), new AnvilCaptureSession(anvil, onComplete, onCancel));
         player.openInventory(anvil);
@@ -100,12 +123,13 @@ public final class AnvilCaptureManager implements Listener {
 
     /**
      * Forces the result slot unconditionally to a plain "Confirm" affordance
-     * showing the currently-typed text, and zeroes the repair cost - both
-     * regardless of whatever vanilla's real anvil-combine logic would have
-     * computed from slots 0+1 (the Cancel item sitting in slot 1 would
-     * otherwise be fed into that combine as a second ingredient, which could
-     * null out the result entirely or apply real repair/enchant-merge
-     * semantics neither slot is meant to trigger).
+     * showing the currently-typed text, and zeroes the repair cost. With
+     * {@code SECOND_INGREDIENT_SLOT} empty, vanilla's own rename-only
+     * computation is already valid on its own (this is what makes {@code
+     * getRenameText()} reliable at all) - this override only swaps the
+     * cosmetic result item for a clearer "Confirm" label, it doesn't need to
+     * rescue an otherwise-broken computation the way it would if slot 1 held
+     * something.
      */
     @EventHandler
     public void onPrepareAnvil(PrepareAnvilEvent event) {
@@ -149,7 +173,7 @@ public final class AnvilCaptureManager implements Listener {
         if (event.getSlot() == CONFIRM_SLOT) {
             String text = extractText(session.inventory());
             complete(player, session, text);
-        } else if (event.getSlot() == CANCEL_SLOT) {
+        } else if (event.getSlot() == INPUT_SLOT) {
             cancel(player, session);
         }
     }

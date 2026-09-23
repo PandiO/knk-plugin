@@ -41,6 +41,7 @@ import net.knightsandkings.knk.paper.menu.MenuClickListener;
 import net.knightsandkings.knk.paper.menu.MenuConditionHandlers;
 import net.knightsandkings.knk.paper.menu.MenuContentSourceContext;
 import net.knightsandkings.knk.paper.menu.MenuContentSourceHandlers;
+import net.knightsandkings.knk.paper.menu.MenuControlHintListener;
 import net.knightsandkings.knk.paper.menu.MenuDefinitionValidationRunner;
 import net.knightsandkings.knk.paper.menu.MenuLifecycleListener;
 import net.knightsandkings.knk.paper.menu.MenuRenderer;
@@ -420,6 +421,9 @@ public class KnKPlugin extends JavaPlugin {
             );
             getServer().getPluginManager().registerEvents(
                 new MenuLifecycleListener(menuService, openMenuContextRegistry), this
+            );
+            getServer().getPluginManager().registerEvents(
+                new MenuControlHintListener(openMenuContextRegistry), this
             );
             getLogger().info("InventoryMenu conditional actions + preset library initialized (Phase 6 + 7)");
 

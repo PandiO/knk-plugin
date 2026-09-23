@@ -94,15 +94,21 @@ class RuntimeMenuSectionTest {
     }
 
     @Test
-    void requestedPageIsClampedToValidRange() {
+    void requestedPageWrapsToValidRange() {
+        // 5 items, capacity 4 -> totalPages() == 2 (see scrollOverflowPaginatesAcrossMultiplePages).
         List<RuntimeMenuItem> items = new ArrayList<>();
         for (int i = 0; i < 5; i++) {
             items.add(item(i));
         }
         RuntimeMenuSection section = section(MenuOverflowMode.SCROLL, items);
 
-        assertEquals(0, section.resolveSlots(MENU_TOTAL_SLOTS, -5).page());
-        assertEquals(1, section.resolveSlots(MENU_TOTAL_SLOTS, 999).page());
+        // Post-Phase-8 QOL follow-up: out-of-range requests wrap (floorMod)
+        // rather than clamp - the basis of pagination "cycling" instead of
+        // stopping at either end.
+        assertEquals(1, section.resolveSlots(MENU_TOTAL_SLOTS, -1).page());
+        assertEquals(0, section.resolveSlots(MENU_TOTAL_SLOTS, -2).page());
+        assertEquals(0, section.resolveSlots(MENU_TOTAL_SLOTS, 2).page());
+        assertEquals(1, section.resolveSlots(MENU_TOTAL_SLOTS, 3).page());
     }
 
     @Test

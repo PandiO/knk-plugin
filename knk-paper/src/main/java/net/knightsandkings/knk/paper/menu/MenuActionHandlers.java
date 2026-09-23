@@ -31,6 +31,7 @@ public final class MenuActionHandlers {
     public static final String OPEN = "menu.open";
     public static final String PAGE_NEXT = "menu.page.next";
     public static final String PAGE_PREV = "menu.page.prev";
+    public static final String PAGE_FIRST = "menu.page.first";
     public static final String SEARCH_PROMPT = "menu.search.prompt";
     public static final String SEARCH_CLEAR = "menu.search.clear";
     public static final String FILTER_PROMPT = "menu.filter.prompt";
@@ -52,6 +53,14 @@ public final class MenuActionHandlers {
                 context.menuService().nextPage(context.player(), requireSection(context, PAGE_NEXT).name()));
         registry.register(PAGE_PREV, (context, params) ->
                 context.menuService().previousPage(context.player(), requireSection(context, PAGE_PREV).name()));
+        // Post-Phase-8 QOL follow-up: shift-click-on-pagination-button
+        // shortcut - never bound directly to a menu item's own actions list,
+        // only invoked by MenuClickListener's shift-click check (mirroring
+        // SEARCH_CLEAR's own shift-click-only wiring) on a PAGE_NEXT/PAGE_PREV
+        // item, so it's registered here for that lookup even though no seed
+        // template ever references it by name.
+        registry.register(PAGE_FIRST, (context, params) ->
+                context.menuService().firstPage(context.player(), requireSection(context, PAGE_FIRST).name()));
         registry.register(SEARCH_PROMPT, (context, params) ->
                 context.menuService().promptSearch(context.player(), requireSection(context, SEARCH_PROMPT).name()));
         registry.register(SEARCH_CLEAR, (context, params) ->

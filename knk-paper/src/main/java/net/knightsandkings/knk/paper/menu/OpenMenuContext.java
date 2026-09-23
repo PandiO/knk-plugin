@@ -6,6 +6,7 @@ import net.knightsandkings.knk.core.menu.RuntimeMenuSection;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -26,15 +27,18 @@ public final class OpenMenuContext {
     private volatile RuntimeMenu menu;
     private volatile Map<Integer, RuntimeMenuItem> itemsBySlot;
     private volatile Map<Integer, RuntimeMenuSection> sectionsBySlot;
+    private volatile Map<Integer, List<String>> controlHintLoreBySlot;
 
     public OpenMenuContext(Player player, Inventory inventory, RuntimeMenu menu,
                             Map<Integer, RuntimeMenuItem> itemsBySlot,
-                            Map<Integer, RuntimeMenuSection> sectionsBySlot) {
+                            Map<Integer, RuntimeMenuSection> sectionsBySlot,
+                            Map<Integer, List<String>> controlHintLoreBySlot) {
         this.player = player;
         this.inventory = inventory;
         this.menu = menu;
         this.itemsBySlot = itemsBySlot;
         this.sectionsBySlot = sectionsBySlot;
+        this.controlHintLoreBySlot = controlHintLoreBySlot;
     }
 
     public Player player() {
@@ -63,11 +67,24 @@ public final class OpenMenuContext {
         return sectionsBySlot;
     }
 
+    /**
+     * Post-Phase-8 QOL follow-up: the last-rendered "what does this button
+     * do" hint lore per slot ({@code MenuRenderer.resolveControlHints}),
+     * kept here (not just inside the render pass that produced it) so
+     * {@link MenuControlHintListener} can add/remove these lines on a live
+     * sneak toggle without needing a full re-render.
+     */
+    public Map<Integer, List<String>> controlHintLoreBySlot() {
+        return controlHintLoreBySlot;
+    }
+
     /** Called after re-rendering into the same, already-open Inventory (e.g. a page turn). */
     public void update(RuntimeMenu menu, Map<Integer, RuntimeMenuItem> itemsBySlot,
-                        Map<Integer, RuntimeMenuSection> sectionsBySlot) {
+                        Map<Integer, RuntimeMenuSection> sectionsBySlot,
+                        Map<Integer, List<String>> controlHintLoreBySlot) {
         this.menu = menu;
         this.itemsBySlot = itemsBySlot;
         this.sectionsBySlot = sectionsBySlot;
+        this.controlHintLoreBySlot = controlHintLoreBySlot;
     }
 }

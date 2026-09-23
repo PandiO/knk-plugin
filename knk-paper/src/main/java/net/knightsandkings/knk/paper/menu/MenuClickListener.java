@@ -16,6 +16,7 @@ import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.Inventory;
 
@@ -88,12 +89,18 @@ public final class MenuClickListener implements Listener {
         // Never allow taking, rearranging, or shift-clicking items into a KnK menu.
         event.setCancelled(true);
 
-        Inventory clickedInventory = event.getClickedInventory();
-        if (clickedInventory == null || !clickedInventory.equals(menuInventory)) {
+        Optional<MenuSession> session = sessionRegistry.get(player.getUniqueId());
+        if (session.isEmpty()) {
+            LOGGER.warning(() -> "Player " + player.getName() + " clicked in a menu Inventory but has no MenuSession - ignoring click");
             return;
         }
 
-        RuntimeMenuItem item = context.get().itemsBySlot().get(event.getSlot());
+        int slot = resolveClickedSlot(event, menuInventory, session.get());
+        if (slot < 0) {
+            return;
+        }
+
+        RuntimeMenuItem item = context.get().itemsBySlot().get(slot);
         if (item == null || item.displayMode() == MenuDisplayMode.DISABLED || item.displayMode() == MenuDisplayMode.HIDDEN) {
             return;
         }
@@ -111,18 +118,11 @@ public final class MenuClickListener implements Listener {
             return;
         }
 
-        Optional<MenuSession> session = sessionRegistry.get(player.getUniqueId());
-        if (session.isEmpty()) {
-            LOGGER.warning(() -> "Player " + player.getName() + " clicked menu item (id " + item.id()
-                    + ") but has no MenuSession - ignoring click");
-            return;
-        }
-
         // IMPLEMENTATION_PLAN.md Phase 7: which section the clicked item lives
         // in - section-scoped actions (pagination, search/filter) need this;
         // see MenuActionContext's javadoc for why it comes from context here
         // rather than a paramsJson-carried section name.
-        RuntimeMenuSection section = context.get().sectionsBySlot().get(event.getSlot());
+        RuntimeMenuSection section = context.get().sectionsBySlot().get(slot);
 
         // IMPLEMENTATION_PLAN.md Phase 6 / DESIGN_REVIEW.md §2.2: built fresh,
         // right now - never reused from whatever render pass produced the
@@ -143,11 +143,49 @@ public final class MenuClickListener implements Listener {
                 actionRegistry.execute(MenuActionHandlers.SEARCH_CLEAR, actionContext, Map.of());
                 return;
             }
+            // Post-Phase-8 QOL follow-up: shift-clicking either pagination
+            // button jumps straight to page 0 instead of stepping one page -
+            // same "shift-click for the shortcut" pattern as the search
+            // branch above, checked ahead of PAGE_NEXT/PAGE_PREV's own step
+            // action for the same reason.
+            if (event.isShiftClick()
+                    && (hasAction(item, MenuActionHandlers.PAGE_NEXT) || hasAction(item, MenuActionHandlers.PAGE_PREV))) {
+                actionRegistry.execute(MenuActionHandlers.PAGE_FIRST, actionContext, Map.of());
+                return;
+            }
             executeClick(item, actionContext, player);
         } catch (MenuActionException e) {
             LOGGER.severe("Menu item (id " + item.id() + ") click failed for " + player.getName() + ": " + e.getMessage());
             player.sendMessage(ChatColor.RED + "Something went wrong with that.");
         }
+    }
+
+    /**
+     * Post-Phase-8 QOL follow-up: resolves the slot a click actually applies
+     * to, correlating a {@link ClickType#DOUBLE_CLICK} event - which Bukkit
+     * fires as a single event with unreliable/absent
+     * {@link InventoryClickEvent#getClickedInventory()}/{@code getSlot()}
+     * (it represents a "gather" gesture, not a single-slot interaction) -
+     * back to {@link MenuSession#getLastClickedSlot()}, the slot the
+     * player's immediately-preceding ordinary click resolved to. Every other
+     * click type is resolved (and recorded as the new "last clicked slot")
+     * directly from the event as before. Returns -1 if there's nothing
+     * meaningful to act on (a double-click with no prior recorded slot, or a
+     * click whose target inventory isn't this menu's).
+     */
+    private int resolveClickedSlot(InventoryClickEvent event, Inventory menuInventory, MenuSession session) {
+        if (event.getClick() == ClickType.DOUBLE_CLICK) {
+            return session.getLastClickedSlot();
+        }
+
+        Inventory clickedInventory = event.getClickedInventory();
+        if (clickedInventory == null || !clickedInventory.equals(menuInventory)) {
+            return -1;
+        }
+
+        int slot = event.getSlot();
+        session.setLastClickedSlot(slot);
+        return slot;
     }
 
     /**

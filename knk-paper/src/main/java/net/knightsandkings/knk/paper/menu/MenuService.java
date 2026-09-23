@@ -100,7 +100,52 @@ public final class MenuService {
         changePage(player, sectionName, false);
     }
 
+    /**
+     * Post-Phase-8 QOL follow-up: shift-click-on-pagination-button shortcut
+     * (the developer's ask, mirroring the existing shift-click-clears-search
+     * pattern) - jumps straight to page 0 regardless of section kind, since
+     * page 0 needs no {@code totalPages} lookup to be valid either way.
+     */
+    public void firstPage(Player player, String sectionName) {
+        mutateSectionPage(player, sectionName, (menu, section, session) -> session.firstPage(section.id()));
+    }
+
     private void changePage(Player player, String sectionName, boolean forward) {
+        mutateSectionPage(player, sectionName, (menu, section, session) -> {
+            int sectionId = section.id();
+            if (section.hasContentSource()) {
+                // IMPLEMENTATION_PLAN.md Phase 8 / post-Phase-8 QOL follow-up:
+                // resolveSlots always reports 0 totalPages for a content-
+                // source-backed section (its auto content never comes from
+                // items()), so a resolveSlots-based totalPages is never
+                // available here. Advance/retreat unclamped in either
+                // direction - including past 0 into negative territory -
+                // and let MenuRenderer.resolveContentSourceAssignment wrap it
+                // back in-bounds (persisting the wrap via session.setPage)
+                // once the real paged fetch reveals the true page count.
+                session.stepPage(sectionId, forward ? 1 : -1);
+            } else {
+                int currentTotalPages = section
+                        .resolveSlots(menu.totalSlots(), session.getPage(sectionId))
+                        .totalPages();
+                if (forward) {
+                    session.nextPage(sectionId, currentTotalPages);
+                } else {
+                    session.previousPage(sectionId, currentTotalPages);
+                }
+            }
+        });
+    }
+
+    /**
+     * Shared plumbing for every section-page mutation ({@link #nextPage},
+     * {@link #previousPage}, {@link #firstPage}): resolves the currently
+     * open menu and named section (see {@link #changePage}'s own doc comment
+     * for why this re-fetches rather than trusting a possibly-already-closed
+     * {@link OpenMenuContext}), lets {@code mutation} update the session's
+     * page state for that section however it needs to, then re-renders.
+     */
+    private void mutateSectionPage(Player player, String sectionName, SectionPageMutation mutation) {
         Optional<MenuSession> sessionOpt = sessionRegistry.get(player.getUniqueId());
         Optional<String> currentMenuKey = sessionOpt.flatMap(MenuSession::currentMenuKey);
         if (sessionOpt.isEmpty() || currentMenuKey.isEmpty()) {
@@ -124,30 +169,14 @@ public final class MenuService {
                 return;
             }
 
-            int sectionId = section.get().id();
-            if (forward) {
-                if (section.get().hasContentSource()) {
-                    // IMPLEMENTATION_PLAN.md Phase 8: resolveSlots always
-                    // reports 0 totalPages for a content-source-backed
-                    // section (its auto content never comes from items()),
-                    // so the legacy resolveSlots-based clamp below would
-                    // pin nextPage() at page 0 forever. Advance unclamped;
-                    // MenuRenderer.resolveContentSourceAssignment clamps it
-                    // back down (and persists the clamp via session.setPage)
-                    // once the real paged fetch reveals the true page count.
-                    session.setPage(sectionId, session.getPage(sectionId) + 1);
-                } else {
-                    int currentTotalPages = section.get()
-                            .resolveSlots(menu.totalSlots(), session.getPage(sectionId))
-                            .totalPages();
-                    session.nextPage(sectionId, currentTotalPages);
-                }
-            } else {
-                session.previousPage(sectionId);
-            }
-
+            mutation.apply(menu, section.get(), session);
             renderAndOpen(player, menu, session);
         });
+    }
+
+    @FunctionalInterface
+    private interface SectionPageMutation {
+        void apply(RuntimeMenu menu, RuntimeMenuSection section, MenuSession session);
     }
 
     /**
@@ -166,7 +195,8 @@ public final class MenuService {
     public void promptSearch(Player player, String sectionName) {
         anvilCaptureManager.startTextCapture(
                 player,
-                ChatColor.YELLOW + "Type a search query for '" + sectionName + "':",
+                ChatColor.YELLOW + "Type a search query for '" + sectionName
+                        + "', then click the left paper to cancel or the right paper to confirm:",
                 query -> search(player, sectionName, query),
                 () -> player.sendMessage(ChatColor.YELLOW + "Search cancelled.")
         );
@@ -176,7 +206,8 @@ public final class MenuService {
     public void promptFilter(Player player, String sectionName, String facetKey) {
         anvilCaptureManager.startTextCapture(
                 player,
-                ChatColor.YELLOW + "Type a value for filter '" + facetKey + "' on '" + sectionName + "':",
+                ChatColor.YELLOW + "Type a value for filter '" + facetKey + "' on '" + sectionName
+                        + "', then click the left paper to cancel or the right paper to confirm:",
                 value -> filter(player, sectionName, facetKey, value),
                 () -> player.sendMessage(ChatColor.YELLOW + "Filter cancelled.")
         );
@@ -251,20 +282,28 @@ public final class MenuService {
         MenuRenderResult result = renderer.computeState(menu, session, player);
 
         Bukkit.getScheduler().runTask(plugin, () -> {
+            // Post-Phase-8 QOL follow-up: a render that happens to land while
+            // the player is already sneaking (e.g. a page turn triggered
+            // mid-sneak) shows control hints immediately rather than waiting
+            // for the next sneak toggle - see MenuRenderer.applyToInventory's
+            // own doc comment.
+            boolean revealControls = player.isSneaking();
+
             Optional<OpenMenuContext> existing = openMenuContextRegistry.get(player.getUniqueId());
             if (existing.isPresent() && player.getOpenInventory().getTopInventory().equals(existing.get().inventory())) {
                 // Still looking at it (e.g. a click-driven page turn) - refresh in place.
-                renderer.applyToInventory(existing.get().inventory(), result);
-                existing.get().update(menu, result.itemsBySlot(), result.sectionsBySlot());
+                renderer.applyToInventory(existing.get().inventory(), result, revealControls);
+                existing.get().update(menu, result.itemsBySlot(), result.sectionsBySlot(), result.controlHintLoreBySlot());
                 return;
             }
 
             Inventory inventory = Bukkit.createInventory(null, menu.totalSlots(),
                     DisplayTextFormatter.toComponent(menu.title()));
-            renderer.applyToInventory(inventory, result);
+            renderer.applyToInventory(inventory, result, revealControls);
             player.openInventory(inventory);
             openMenuContextRegistry.register(player.getUniqueId(),
-                    new OpenMenuContext(player, inventory, menu, result.itemsBySlot(), result.sectionsBySlot()));
+                    new OpenMenuContext(player, inventory, menu, result.itemsBySlot(), result.sectionsBySlot(),
+                            result.controlHintLoreBySlot()));
         });
     }
 

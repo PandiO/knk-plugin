@@ -173,7 +173,12 @@ public record RuntimeMenuSection(
             page = 0;
         } else {
             totalPages = (int) Math.ceil(auto.size() / (double) capacity);
-            page = Math.max(0, Math.min(requestedPage, totalPages - 1));
+            // Post-Phase-8 QOL follow-up: wrap rather than clamp - lets a
+            // caller (MenuSession.nextPage/previousPage) advance/retreat past
+            // either end unconditionally and land back in-bounds here, the
+            // basis of the developer's requested "cycle instead of stop"
+            // pagination behavior.
+            page = Math.floorMod(requestedPage, totalPages);
         }
 
         if (totalPages > 0) {

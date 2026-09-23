@@ -87,6 +87,7 @@ public final class MenuRenderer {
         Map<Integer, ItemStack> itemStacksBySlot = new HashMap<>();
         Map<Integer, RuntimeMenuItem> itemsBySlot = new HashMap<>();
         Map<Integer, RuntimeMenuSection> sectionsBySlot = new HashMap<>();
+        Map<Integer, List<String>> controlHintLoreBySlot = new HashMap<>();
 
         List<RuntimeMenuSection> sectionsByRenderOrder = menu.sections().stream()
                 .sorted(Comparator.comparingInt(section -> priorityRank(section.priority())))
@@ -123,7 +124,7 @@ public final class MenuRenderer {
             }
 
             applyAssignment(assignment, namespaceKeysByMaterialRefId, session, variableContext, currentTick,
-                    permissionChecker, itemStacksBySlot, itemsBySlot, sectionsBySlot, section);
+                    permissionChecker, itemStacksBySlot, itemsBySlot, sectionsBySlot, controlHintLoreBySlot, section);
 
             // Post-Phase-8 QOL follow-up: pagination/filter/search/confirm
             // preset buttons show their own live state in their lore
@@ -142,7 +143,8 @@ public final class MenuRenderer {
         fillBackground(menu, namespaceKeysByMaterialRefId, itemStacksBySlot);
         session.clearDirty();
 
-        return new MenuRenderResult(Map.copyOf(itemStacksBySlot), Map.copyOf(itemsBySlot), Map.copyOf(sectionsBySlot));
+        return new MenuRenderResult(Map.copyOf(itemStacksBySlot), Map.copyOf(itemsBySlot), Map.copyOf(sectionsBySlot),
+                Map.copyOf(controlHintLoreBySlot));
     }
 
     /**
@@ -157,7 +159,7 @@ public final class MenuRenderer {
                                   MenuSession session, Map<String, Object> variableContext, long currentTick,
                                   Predicate<String> permissionChecker, Map<Integer, ItemStack> itemStacksBySlot,
                                   Map<Integer, RuntimeMenuItem> itemsBySlot, Map<Integer, RuntimeMenuSection> sectionsBySlot,
-                                  RuntimeMenuSection section) {
+                                  Map<Integer, List<String>> controlHintLoreBySlot, RuntimeMenuSection section) {
         for (Map.Entry<Integer, RuntimeMenuItem> entry : assignment.itemsBySlot().entrySet()) {
             RuntimeMenuItem item = entry.getValue();
             String namespaceKey = item.materialRefId() != null
@@ -170,8 +172,59 @@ public final class MenuRenderer {
                 itemStacksBySlot.put(entry.getKey(), itemStack);
                 itemsBySlot.put(entry.getKey(), item);
                 sectionsBySlot.put(entry.getKey(), section);
+
+                List<String> hints = resolveControlHints(item);
+                if (!hints.isEmpty()) {
+                    controlHintLoreBySlot.put(entry.getKey(), hints);
+                }
             }
         }
+    }
+
+    /**
+     * Post-Phase-8 QOL follow-up: the "what does this button do" hint lines
+     * for one item, shown only while the viewing player holds shift (see
+     * {@link MenuControlHintListener}) rather than as always-on lore clutter
+     * - the developer's explicit ask ("make all function buttons reveal the
+     * controls in the lore when hovering with shift"). Static per {@code
+     * actionTypeId} - unlike {@link #appendPresetStateLore}'s lines, these
+     * never depend on session/query state, so they're computed once here and
+     * replayed live by the sneak-toggle listener without a full re-render.
+     */
+    private static List<String> resolveControlHints(RuntimeMenuItem item) {
+        List<String> hints = new ArrayList<>();
+        for (KnkActionBinding action : item.actions()) {
+            String actionTypeId = action.actionTypeId();
+            if (MenuActionHandlers.CLOSE.equals(actionTypeId)) {
+                hints.add(ChatColor.DARK_GRAY + "Click: close menu");
+            } else if (MenuActionHandlers.OPEN.equals(actionTypeId)) {
+                hints.add(ChatColor.DARK_GRAY + "Click: open menu");
+            } else if (MenuActionHandlers.PAGE_NEXT.equals(actionTypeId)) {
+                hints.add(ChatColor.DARK_GRAY + "Click: next page");
+                hints.add(ChatColor.DARK_GRAY + "Shift-click: first page");
+            } else if (MenuActionHandlers.PAGE_PREV.equals(actionTypeId)) {
+                hints.add(ChatColor.DARK_GRAY + "Click: previous page");
+                hints.add(ChatColor.DARK_GRAY + "Shift-click: first page");
+            } else if (MenuActionHandlers.SEARCH_PROMPT.equals(actionTypeId)) {
+                hints.add(ChatColor.DARK_GRAY + "Click: search");
+                hints.add(ChatColor.DARK_GRAY + "Shift-click: clear search");
+            } else if (MenuActionHandlers.FILTER_PROMPT.equals(actionTypeId)) {
+                hints.add(ChatColor.DARK_GRAY + "Click: set filter value");
+            } else if (MenuActionHandlers.FILTER_CYCLE.equals(actionTypeId)) {
+                hints.add(ChatColor.DARK_GRAY + "Click: cycle filter value");
+            } else if (MenuActionHandlers.FILTER_CLEAR.equals(actionTypeId)) {
+                hints.add(ChatColor.DARK_GRAY + "Click: clear filter");
+            } else if (MenuActionHandlers.CONFIRM_REQUEST.equals(actionTypeId)) {
+                hints.add(ChatColor.DARK_GRAY + "Click: request confirmation");
+            } else if (MenuActionHandlers.CONFIRM_ACCEPT.equals(actionTypeId)) {
+                hints.add(ChatColor.DARK_GRAY + "Click: confirm");
+            } else if (MenuActionHandlers.CONFIRM_CANCEL.equals(actionTypeId)) {
+                hints.add(ChatColor.DARK_GRAY + "Click: cancel");
+            } else if (MenuActionHandlers.DOUBLECLICK_CONFIRM.equals(actionTypeId)) {
+                hints.add(ChatColor.DARK_GRAY + "Double-click: confirm");
+            }
+        }
+        return hints;
     }
 
     /**
@@ -210,7 +263,6 @@ public final class MenuRenderer {
                     String searchText = contentQuery.searchText();
                     appendLoreLine(itemStack, ChatColor.GRAY + "Search: "
                             + (searchText != null && !searchText.isBlank() ? searchText : ChatColor.DARK_GRAY + "(none)" + ChatColor.GRAY));
-                    appendLoreLine(itemStack, ChatColor.DARK_GRAY + "Shift-click to clear");
                 } else if (MenuActionHandlers.DOUBLECLICK_CONFIRM.equals(actionTypeId) && item.id() != null) {
                     int windowTicks = parsePositiveIntOrDefault(
                             MenuParams.parse(action.paramsJson()).get("windowTicks"), DEFAULT_DOUBLECLICK_WINDOW_TICKS);
@@ -229,6 +281,17 @@ public final class MenuRenderer {
         }
         List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
         lore.add(line);
+        meta.setLore(lore);
+        itemStack.setItemMeta(meta);
+    }
+
+    private static void appendLoreLines(ItemStack itemStack, List<String> lines) {
+        ItemMeta meta = itemStack.getItemMeta();
+        if (meta == null) {
+            return;
+        }
+        List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
+        lore.addAll(lines);
         meta.setLore(lore);
         itemStack.setItemMeta(meta);
     }
@@ -270,12 +333,14 @@ public final class MenuRenderer {
      * {@code Skip((PageNumber - 1) * PageSize)}) - the {@code +1}/{@code -1}
      * conversions below are that boundary, not an off-by-one bug.
      * <p>
-     * A page request that overshoots the real last page (e.g. a filter just
-     * narrowed the result set, or a stale click) comes back with zero items
-     * but a correct {@code totalCount}; this re-fetches once at the clamped
-     * page, the same "safe, harmless, one extra round-trip" cost
-     * {@code RuntimeMenuSection#resolveSlots}'s in-memory clamp accepts for
-     * free - accepted here too since the true last page can only be known
+     * A page request that overshoots the real last page (from
+     * {@code MenuService.changePage}'s unclamped advance) or goes negative
+     * (from wrapping backward past page 0) comes back with zero items but a
+     * correct {@code totalCount}; this re-fetches once at the wrapped page
+     * ({@link RuntimeMenuSection#resolveSlots}'s in-memory pagination wraps
+     * the same way - see its own javadoc), the same "safe, harmless, one
+     * extra round-trip" cost accepted there, for the same reason: the true
+     * page count - and so where wrapping actually lands - can only be known
      * after the first fetch reveals {@code totalCount}.
      */
     private SectionSlotAssignment resolveContentSourceAssignment(RuntimeMenuSection section, RuntimeMenu menu,
@@ -292,11 +357,21 @@ public final class MenuRenderer {
         MenuContentSourceContext context = new MenuContentSourceContext(player, session);
         int requestedPage = session.getPage(section.id());
 
-        Page<RuntimeMenuItem> page = fetchContentPage(section, context, requestedPage, pageSize, contentQuery);
+        // Post-Phase-8 QOL follow-up: MenuService.changePage now advances a
+        // content-source section's page unconditionally in either direction
+        // (page + 1 past the last page, or page - 1 below 0 from
+        // MenuSession.previousPage's own wraparound) rather than clamping -
+        // the real totalPages count (and therefore where "wrap around" lands)
+        // is only known once the fetch below reveals totalCount. A negative
+        // requestedPage can't be sent to the 1-based PagedQuery API at all,
+        // so the first fetch always uses page 0 in that case; the wrap below
+        // then resolves the real target page and re-fetches it.
+        int firstFetchPage = Math.max(requestedPage, 0);
+        Page<RuntimeMenuItem> page = fetchContentPage(section, context, firstFetchPage, pageSize, contentQuery);
         int totalPages = (int) Math.ceil(page.totalCount() / (double) pageSize);
-        int clampedPage = totalPages > 0 ? Math.max(0, Math.min(requestedPage, totalPages - 1)) : 0;
+        int clampedPage = totalPages > 0 ? Math.floorMod(requestedPage, totalPages) : 0;
 
-        if (clampedPage != requestedPage) {
+        if (clampedPage != firstFetchPage) {
             session.setPage(section.id(), clampedPage);
             page = fetchContentPage(section, context, clampedPage, pageSize, contentQuery);
         }
@@ -436,11 +511,25 @@ public final class MenuRenderer {
         return System.currentTimeMillis() / 50L;
     }
 
-    /** Must only be called from the main thread. */
-    public void applyToInventory(Inventory inventory, MenuRenderResult result) {
+    /**
+     * Must only be called from the main thread. {@code revealControls}
+     * (post-Phase-8 QOL follow-up) is the render-time equivalent of
+     * {@link MenuControlHintListener}'s live sneak-toggle: a render that
+     * happens to occur while the player is already sneaking (e.g. a page
+     * turn) should come out of the gate showing control hints too, not wait
+     * for the next sneak toggle to add them.
+     */
+    public void applyToInventory(Inventory inventory, MenuRenderResult result, boolean revealControls) {
         inventory.clear();
         for (Map.Entry<Integer, ItemStack> entry : result.itemStacksBySlot().entrySet()) {
-            inventory.setItem(entry.getKey(), entry.getValue());
+            ItemStack itemStack = entry.getValue();
+            if (revealControls) {
+                List<String> hints = result.controlHintLoreBySlot().get(entry.getKey());
+                if (hints != null && !hints.isEmpty()) {
+                    appendLoreLines(itemStack, hints);
+                }
+            }
+            inventory.setItem(entry.getKey(), itemStack);
         }
     }
 

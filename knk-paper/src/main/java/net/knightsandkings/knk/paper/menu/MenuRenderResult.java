@@ -4,6 +4,7 @@ import net.knightsandkings.knk.core.menu.RuntimeMenuItem;
 import net.knightsandkings.knk.core.menu.RuntimeMenuSection;
 import org.bukkit.inventory.ItemStack;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -20,10 +21,21 @@ import java.util.Map;
  * {@link RuntimeMenuSection} the clicked item lives in, not just which item
  * was clicked - see {@link MenuActionContext}'s javadoc for the full
  * rationale.
+ * <p>
+ * {@code controlHintLoreBySlot} (post-Phase-8 QOL follow-up) is a third,
+ * independent slot-keyed map: the "what does this button do" lore lines
+ * {@code MenuRenderer.resolveControlHints} precomputes for every function
+ * button, shown only while the viewing player holds shift. Captured here
+ * (and copied onto {@link OpenMenuContext} alongside the other two maps)
+ * so {@link MenuControlHintListener} can toggle them live off a
+ * {@code PlayerToggleSneakEvent} without a full re-render - see that
+ * class's own javadoc for why a sneak toggle, not literal hover+shift, is
+ * what's actually observable here.
  */
 public record MenuRenderResult(
         Map<Integer, ItemStack> itemStacksBySlot,
         Map<Integer, RuntimeMenuItem> itemsBySlot,
-        Map<Integer, RuntimeMenuSection> sectionsBySlot
+        Map<Integer, RuntimeMenuSection> sectionsBySlot,
+        Map<Integer, List<String>> controlHintLoreBySlot
 ) {
 }
