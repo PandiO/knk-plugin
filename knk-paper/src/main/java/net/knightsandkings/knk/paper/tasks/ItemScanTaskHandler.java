@@ -32,11 +32,6 @@ import java.util.logging.Logger;
 public class ItemScanTaskHandler implements IWorldTaskHandler {
     private static final Logger LOGGER = Logger.getLogger(ItemScanTaskHandler.class.getName());
     private static final String FIELD_NAME = "ItemScan";
-    // Matches EnchantmentDefinition.Key's documented convention on the web-api side
-    // ("minecraft:sharpness" or "knk:lifesteal") - EnchantmentRegistry's own ids are bare
-    // ("poison", "chaos"), so this prefix is applied only when building scan output, not
-    // anywhere in the registry/repository itself.
-    private static final String CUSTOM_ENCHANTMENT_KEY_PREFIX = "knk:";
 
     private final WorldTasksApi worldTasksApi;
     private final Plugin plugin;
@@ -139,12 +134,18 @@ public class ItemScanTaskHandler implements IWorldTaskHandler {
         root.add("vanillaEnchantments", vanillaEnchantments);
 
         // Reuse the existing lore-based custom-enchantment parser (already used by /ce info) -
-        // per §5.2, this must not be reimplemented.
+        // per §5.2, this must not be reimplemented. Output the bare id as-is (no "knk:" prefix):
+        // confirmed live against the real dev DB that AbilityDefinition.SeedCanonicalAsync's
+        // EnchantmentDefinition rows for these same canonical ids store Key as the bare id
+        // ("chaos", "armor_repair", ...), matching EnchantmentRegistry's own ids exactly - not
+        // the "knk:lifesteal"-style prefix the EnchantmentDefinition model's doc-comment
+        // suggests, which only reflects a convention for admin-authored rows, not this scannable
+        // canonical set. A prefixed key here would never match on the web-app's lookup.
         JsonArray customEnchantments = new JsonArray();
         Map<String, Integer> parsedCustomEnchantments = customEnchantmentRepository.getEnchantments(lore).join();
         for (Map.Entry<String, Integer> entry : parsedCustomEnchantments.entrySet()) {
             JsonObject enchantmentObj = new JsonObject();
-            enchantmentObj.addProperty("key", CUSTOM_ENCHANTMENT_KEY_PREFIX + entry.getKey());
+            enchantmentObj.addProperty("key", entry.getKey());
             enchantmentObj.addProperty("level", entry.getValue());
             customEnchantments.add(enchantmentObj);
         }
