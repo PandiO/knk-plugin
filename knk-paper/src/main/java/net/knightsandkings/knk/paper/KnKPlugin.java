@@ -23,6 +23,9 @@ import net.knightsandkings.knk.core.ports.api.EnchantmentDefinitionsQueryApi;
 import net.knightsandkings.knk.core.ports.api.ItemBlueprintsQueryApi;
 import net.knightsandkings.knk.core.ports.api.MenuTemplatesQueryApi;
 import net.knightsandkings.knk.core.ports.api.MinecraftMaterialRefsQueryApi;
+import net.knightsandkings.knk.core.ports.api.GradesQueryApi;
+import net.knightsandkings.knk.core.ports.api.TagsQueryApi;
+import net.knightsandkings.knk.core.ports.api.DomainCatalogQueryApi;
 import net.knightsandkings.knk.core.ports.api.StreetsQueryApi;
 import net.knightsandkings.knk.core.dataaccess.TownsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
@@ -31,6 +34,9 @@ import net.knightsandkings.knk.core.dataaccess.ItemBlueprintsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.PermissionsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MenuTemplatesDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
+import net.knightsandkings.knk.core.dataaccess.GradesDataAccess;
+import net.knightsandkings.knk.core.dataaccess.TagsDataAccess;
+import net.knightsandkings.knk.core.dataaccess.DomainCatalogDataAccess;
 import net.knightsandkings.knk.core.menu.ActionRegistry;
 import net.knightsandkings.knk.core.menu.ConditionRegistry;
 import net.knightsandkings.knk.core.menu.MenuContentSourceRegistry;
@@ -106,6 +112,7 @@ import net.knightsandkings.knk.paper.tasks.WorldTaskHandlerRegistry;
 import net.knightsandkings.knk.paper.tasks.HeadlessWorldTaskPoller;
 import net.knightsandkings.knk.paper.tasks.GateBlockScanTaskHandler;
 import net.knightsandkings.knk.paper.tasks.GateDoorRegionCaptureHandler;
+import net.knightsandkings.knk.paper.tasks.ItemScanTaskHandler;
 import net.knightsandkings.knk.paper.user.UserManager;
 import net.knightsandkings.knk.paper.utils.CommandCooldownManager;
 
@@ -125,6 +132,9 @@ public class KnKPlugin extends JavaPlugin {
     private StreetsQueryApi streetsQueryApi;
     private StructuresQueryApi structuresQueryApi;
     private DomainsQueryApi domainsQueryApi;
+    private GradesQueryApi gradesQueryApi;
+    private TagsQueryApi tagsQueryApi;
+    private DomainCatalogQueryApi domainCatalogQueryApi;
     private UsersQueryApi usersQueryApi;
     private UsersCommandApi usersCommandApi;
     private UserAccountApi userAccountApi;
@@ -138,6 +148,9 @@ public class KnKPlugin extends JavaPlugin {
     private PermissionsDataAccess permissionsDataAccess;
     private KnkPermissible knkPermissible;
     private ModeService modeService;
+    private GradesDataAccess gradesDataAccess;
+    private TagsDataAccess tagsDataAccess;
+    private DomainCatalogDataAccess domainCatalogDataAccess;
     private MenuSessionRegistry menuSessionRegistry;
     private OpenMenuContextRegistry openMenuContextRegistry;
     private MenuService menuService;
@@ -201,6 +214,9 @@ public class KnKPlugin extends JavaPlugin {
             this.streetsQueryApi = apiClient.getStreetsQueryApi();
             this.structuresQueryApi = apiClient.getStructuresQueryApi();
             this.domainsQueryApi = apiClient.getDomainsQueryApi();
+            this.gradesQueryApi = apiClient.getGradesQueryApi();
+            this.tagsQueryApi = apiClient.getTagsQueryApi();
+            this.domainCatalogQueryApi = apiClient.getDomainCatalogQueryApi();
             this.usersQueryApi = apiClient.getUsersQueryApi();
             this.usersCommandApi = apiClient.getUsersCommandApi();
             this.userAccountApi = apiClient.getUserAccountApi();
@@ -219,6 +235,9 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().info("StreetsQueryApi wired from API client");
             getLogger().info("StructuresQueryApi wired from API client");
             getLogger().info("DomainsQueryApi wired from API client");
+            getLogger().info("GradesQueryApi wired from API client");
+            getLogger().info("TagsQueryApi wired from API client");
+            getLogger().info("DomainCatalogQueryApi wired from API client");
             getLogger().info("UsersQueryApi wired from API client");
             getLogger().info("UsersCommandApi wired from API client");
             getLogger().info("PermissionsApi wired from API client");
@@ -335,6 +354,21 @@ public class KnKPlugin extends JavaPlugin {
             worldTaskHandlerRegistry.registerHandler(locationHandler);
             worldTaskHandlerRegistry.registerHandler("LocationSelection", locationHandler);
 
+            // Register ItemScan handler (docs/specs/items/IMPLEMENTATION_PLAN.md §5) - player-
+            // driven, not headless (see ItemScanTaskHandler's javadoc), so it's registered here
+            // alongside Location/WgRegionId rather than on headlessWorldTaskPoller below.
+            // ItemBlueprint has no dedicated "scan result" field the way GateDoor has
+            // BlockSnapshots, so the live FormConfiguration binds the WorldTask panel onto the
+            // real DefaultDisplayName field instead (see ACTIVE_SESSIONS.md's Items Phase 4/5
+            // row) - meaning the FormField's own fieldName ("defaultDisplayName") will never
+            // match this handler's field-name registration. Also register by taskType
+            // ("ItemScan"), the same dual-registration WorldTaskHandlerRegistry.getHandler
+            // already supports and LocationTaskHandler already uses (its "LocationSelection"
+            // alias below) for exactly this kind of mismatch.
+            ItemScanTaskHandler itemScanHandler = new ItemScanTaskHandler(worldTasksApi, this);
+            worldTaskHandlerRegistry.registerHandler(itemScanHandler);
+            worldTaskHandlerRegistry.registerHandler("ItemScan", itemScanHandler);
+
             // Start lightweight HTTP server for region rename callbacks (default port 8081)
             int httpPort = 8081;
             try {
@@ -384,6 +418,18 @@ public class KnKPlugin extends JavaPlugin {
             this.minecraftMaterialRefsDataAccess = dataAccessFactory.createMinecraftMaterialRefsDataAccess(
                 config.cache().ttl(),
                 minecraftMaterialRefsQueryApi
+            );
+            this.gradesDataAccess = dataAccessFactory.createGradesDataAccess(
+                config.cache().ttl(),
+                gradesQueryApi
+            );
+            this.tagsDataAccess = dataAccessFactory.createTagsDataAccess(
+                config.cache().ttl(),
+                tagsQueryApi
+            );
+            this.domainCatalogDataAccess = dataAccessFactory.createDomainCatalogDataAccess(
+                config.cache().ttl(),
+                domainCatalogQueryApi
             );
             getLogger().info("Cache manager initialized with TTL: " + config.cache().ttl());
             getLogger().info("Data access factory initialized with entity-specific settings");

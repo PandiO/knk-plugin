@@ -22,6 +22,9 @@ import net.knightsandkings.knk.api.impl.UserAccountApiImpl;
 import net.knightsandkings.knk.api.impl.WorldTasksApiImpl;
 import net.knightsandkings.knk.api.impl.GateStructuresApiImpl;
 import net.knightsandkings.knk.api.impl.GateDoorsApiImpl;
+import net.knightsandkings.knk.api.impl.GradesQueryApiImpl;
+import net.knightsandkings.knk.api.impl.TagsQueryApiImpl;
+import net.knightsandkings.knk.api.impl.DomainCatalogQueryApiImpl;
 import net.knightsandkings.knk.api.impl.MenuTemplatesQueryApiImpl;
 import net.knightsandkings.knk.api.impl.PermissionsApiImpl;
 import net.knightsandkings.knk.core.ports.api.HealthApi;
@@ -40,6 +43,9 @@ import net.knightsandkings.knk.core.ports.api.UserAccountApi;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
 import net.knightsandkings.knk.api.GateStructuresApi;
 import net.knightsandkings.knk.api.GateDoorsApi;
+import net.knightsandkings.knk.core.ports.api.GradesQueryApi;
+import net.knightsandkings.knk.core.ports.api.TagsQueryApi;
+import net.knightsandkings.knk.core.ports.api.DomainCatalogQueryApi;
 import net.knightsandkings.knk.core.ports.api.MenuTemplatesQueryApi;
 import net.knightsandkings.knk.core.ports.api.PermissionsApi;
 import net.knightsandkings.knk.core.ports.api.RegionsCommandApi;
@@ -80,6 +86,9 @@ public class KnkApiClient {
     private final WorldTasksApi worldTasksApi;
     private final GateStructuresApi gateStructuresApi;
     private final GateDoorsApi gateDoorsApi;
+    private final GradesQueryApi gradesQueryApi;
+    private final TagsQueryApi tagsQueryApi;
+    private final DomainCatalogQueryApi domainCatalogQueryApi;
     private final MenuTemplatesQueryApi menuTemplatesQueryApi;
     private final PermissionsApi permissionsApi;
 
@@ -114,6 +123,9 @@ public class KnkApiClient {
         this.worldTasksApi = new WorldTasksApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.gateStructuresApi = new GateStructuresApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.gateDoorsApi = new GateDoorsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.gradesQueryApi = new GradesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.tagsQueryApi = new TagsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.domainCatalogQueryApi = new DomainCatalogQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.menuTemplatesQueryApi = new MenuTemplatesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.permissionsApi = new PermissionsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
     }
@@ -180,6 +192,18 @@ public class KnkApiClient {
 
     public GateDoorsApi getGateDoorsApi() {
         return gateDoorsApi;
+    }
+
+    public GradesQueryApi getGradesQueryApi() {
+        return gradesQueryApi;
+    }
+
+    public TagsQueryApi getTagsQueryApi() {
+        return tagsQueryApi;
+    }
+
+    public DomainCatalogQueryApi getDomainCatalogQueryApi() {
+        return domainCatalogQueryApi;
     }
 
     public MenuTemplatesQueryApi getMenuTemplatesQueryApi() {

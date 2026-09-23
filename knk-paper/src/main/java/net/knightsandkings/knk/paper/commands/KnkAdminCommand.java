@@ -179,25 +179,33 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                 }
         );
 
-        // Register enchantment definitions
+        // Held-item editing (rename/lore) plus the enchantment definition catalog, merged into
+        // one /knk item tree per developer request (2026-09-23) - enchantmentsCommand itself is
+        // unchanged, only reachable through a different path now (no more standalone
+        // /knk enchantments; see ItemCommand's own javadoc for the sub-dispatch).
         EnchantmentDefinitionsDebugCommand enchantmentsCommand = new EnchantmentDefinitionsDebugCommand(plugin, enchantmentDefinitionsDataAccess);
+        ItemCommand itemCommand = new ItemCommand(plugin, enchantmentsCommand);
         registry.register(
                 new CommandMetadata(
-                        "enchantments",
-                        "List/search enchantment definitions and apply to held item",
-                        "/knk enchantments list [page] [size] | /knk enchantments vanilla [page] [size] | /knk enchantments search <id|key|displayName> <value> [page] [size] | /knk enchantments apply <id|vanillaName|customKey> [level]",
-                        "knk.admin.enchantments",
+                        "item",
+                        "Rename/edit lore on your held item, or manage the enchantment definition catalog",
+                        "/knk item rename <displayName> | /knk item lore <add <text>|set <line> <text>|remove <line>> | " +
+                                "/knk item enchantments <list|vanilla|search|apply>",
+                        "knk.admin",
                         List.of(
-                                "/knk enchantments list 1 10",
-                                "/knk enchantments vanilla 1 10",
-                                "/knk enchantments search key minecraft:sharpness",
-                                "/knk enchantments apply 1 3",
-                                "/knk enchantments apply sharpness 3",
-                                "/knk enchantments apply poison 2"
+                                "/knk item rename &6&lFlametongue",
+                                "/knk item lore add &7A blade wreathed in fire",
+                                "/knk item lore set 1 &7Forged by dragons",
+                                "/knk item lore remove 2",
+                                "/knk item enchantments list 1 10",
+                                "/knk item enchantments vanilla 1 10",
+                                "/knk item enchantments search key minecraft:sharpness",
+                                "/knk item enchantments apply 1 3",
+                                "/knk item enchantments apply sharpness 3",
+                                "/knk item enchantments apply poison 2"
                         )
                 ),
-                (sender, args) -> enchantmentsCommand.onCommand(sender, null, "knk", args),
-                "enchantment"
+                (sender, args) -> itemCommand.onCommand(sender, null, "knk", args)
         );
 
         ItemBlueprintsDebugCommand itemBlueprintsCommand = new ItemBlueprintsDebugCommand(
@@ -284,7 +292,23 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                         List.of("/knk task-claim 1", "/knk task-claim ABC123")),
                 (sender, args) -> taskClaimCommand.onCommand(sender, null, "knk", args)
         );
-        
+
+        // Dedicated ItemScan entry point (docs/specs/items/IMPLEMENTATION_PLAN.md §5.1) - a
+        // faster second way in alongside the standard /knk task-claim flow above, both
+        // ultimately invoking the exact same claim/handler-dispatch logic in
+        // KnkTaskClaimCommand.onCommand - no duplicated business logic.
+        registry.register(
+                new CommandMetadata("itemscan", "Claim and scan a held item for an ItemScan WorldTask", "/knk itemscan claim <linkCode>", "knk.tasks",
+                        List.of("/knk itemscan claim ABC123")),
+                (sender, args) -> {
+                    if (args.length < 2 || !args[0].equalsIgnoreCase("claim")) {
+                        sender.sendMessage(ChatColor.YELLOW + "Usage: /knk itemscan claim <linkCode>");
+                        return true;
+                    }
+                    return taskClaimCommand.onCommand(sender, null, "knk", new String[]{args[1]});
+                }
+        );
+
         KnkTaskStatusCommand taskStatusCommand = new KnkTaskStatusCommand(plugin, worldTasksApi);
         registry.register(
                 new CommandMetadata("task-status", "Check world task status", "/knk task-status <id|linkCode>", "knk.tasks",
@@ -356,60 +380,98 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                 }
 
                 String root = args[0].toLowerCase(Locale.ROOT);
-                if (!"enchantments".equals(root) && !"enchantment".equals(root)) {
+                if (!"item".equals(root)) {
                         return Collections.emptyList();
                 }
 
-                if (args.length == 2) {
-                        return filterByPrefix(List.of("list", "vanilla", "search", "apply"), args[1]);
+                return completeItemSubcommand(Arrays.copyOfRange(args, 1, args.length));
+                } catch (Exception ex) {
+                        plugin.getLogger().warning("Tab completion failed for /knk: " + ex.getMessage());
+                        return Collections.emptyList();
+                }
+        }
+
+        // /knk item rename|lore|enchantments - itemArgs is args with "item" already stripped, so
+        // itemArgs[0] is the second-level subcommand name.
+        private List<String> completeItemSubcommand(String[] itemArgs) {
+                if (itemArgs.length == 0) {
+                        return Collections.emptyList();
+                }
+                if (itemArgs.length == 1) {
+                        return filterByPrefix(List.of("rename", "lore", "enchantments"), itemArgs[0]);
                 }
 
-                String enchantmentsSubcommand = args[1].toLowerCase(Locale.ROOT);
+                String sub = itemArgs[0].toLowerCase(Locale.ROOT);
+
+                if ("lore".equals(sub) && itemArgs.length == 2) {
+                        return filterByPrefix(List.of("add", "set", "remove"), itemArgs[1]);
+                }
+
+                if (!"enchantments".equals(sub) && !"enchantment".equals(sub)) {
+                        return Collections.emptyList();
+                }
+
+                // Merged in from the former standalone /knk enchantments command (2026-09-23) -
+                // args here is itemArgs with "enchantments" also stripped, so args[0] is list/
+                // vanilla/search/apply, exactly matching this logic's original indexing before
+                // the merge.
+                return completeEnchantmentsSubcommand(Arrays.copyOfRange(itemArgs, 1, itemArgs.length));
+        }
+
+        private List<String> completeEnchantmentsSubcommand(String[] args) {
+                if (args.length == 0) {
+                        return Collections.emptyList();
+                }
+                if (args.length == 1) {
+                        return filterByPrefix(List.of("list", "vanilla", "search", "apply"), args[0]);
+                }
+
+                String enchantmentsSubcommand = args[0].toLowerCase(Locale.ROOT);
 
                 if ("list".equals(enchantmentsSubcommand) || "vanilla".equals(enchantmentsSubcommand)) {
-                        if (args.length == 3) {
-                                return filterByPrefix(List.of("1", "2", "3", "4", "5"), args[2]);
+                        if (args.length == 2) {
+                                return filterByPrefix(List.of("1", "2", "3", "4", "5"), args[1]);
                         }
-                        if (args.length == 4) {
-                                return filterByPrefix(List.of("10", "25", "50", "100"), args[3]);
+                        if (args.length == 3) {
+                                return filterByPrefix(List.of("10", "25", "50", "100"), args[2]);
                         }
                         return Collections.emptyList();
                 }
 
-                if ("search".equals(enchantmentsSubcommand) && args.length == 3) {
-                        return filterByPrefix(List.of("id", "key", "displayName"), args[2]);
+                if ("search".equals(enchantmentsSubcommand) && args.length == 2) {
+                        return filterByPrefix(List.of("id", "key", "displayName"), args[1]);
                 }
 
                 if ("search".equals(enchantmentsSubcommand)) {
                         refreshKnkIdsIfStale();
 
-                        if (args.length == 4) {
-                                String searchField = args[2].toLowerCase(Locale.ROOT);
+                        if (args.length == 3) {
+                                String searchField = args[1].toLowerCase(Locale.ROOT);
                                 return switch (searchField) {
-                                        case "id" -> filterByPrefix(cachedKnkEnchantmentIds, args[3]);
+                                        case "id" -> filterByPrefix(cachedKnkEnchantmentIds, args[2]);
                                         case "key" -> filterByPrefix(mergeSuggestions(
                                                         cachedKnkEnchantmentKeys,
                                                         cachedRegistryCustomEnchantmentTokens,
                                                         cachedVanillaEnchantmentTokens
-                                                ), args[3]);
-                                        case "displayname", "display_name", "display-name" -> filterByPrefix(cachedKnkEnchantmentDisplayNames, args[3]);
+                                                ), args[2]);
+                                        case "displayname", "display_name", "display-name" -> filterByPrefix(cachedKnkEnchantmentDisplayNames, args[2]);
                                         default -> Collections.emptyList();
                                 };
                         }
 
-                        if (args.length == 5) {
-                                return filterByPrefix(List.of("1", "2", "3", "4", "5"), args[4]);
+                        if (args.length == 4) {
+                                return filterByPrefix(List.of("1", "2", "3", "4", "5"), args[3]);
                         }
 
-                        if (args.length == 6) {
-                                return filterByPrefix(List.of("10", "25", "50", "100"), args[5]);
+                        if (args.length == 5) {
+                                return filterByPrefix(List.of("10", "25", "50", "100"), args[4]);
                         }
 
                         return Collections.emptyList();
                 }
 
                 if ("apply".equals(enchantmentsSubcommand)) {
-                        if (args.length == 3) {
+                        if (args.length == 2) {
                                 refreshKnkIdsIfStale();
 
                                 List<String> suggestions = new ArrayList<>();
@@ -417,11 +479,11 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                                 suggestions.addAll(cachedKnkEnchantmentKeys);
                                 suggestions.addAll(cachedRegistryCustomEnchantmentTokens);
                                 suggestions.addAll(cachedVanillaEnchantmentTokens);
-                                return filterByPrefix(suggestions, args[2]);
+                                return filterByPrefix(suggestions, args[1]);
                         }
 
                         // Suggest common levels when user is likely entering the optional level
-                        if (args.length >= 4) {
+                        if (args.length >= 3) {
                                 String current = args[args.length - 1];
                                 if (current.isBlank() || current.chars().allMatch(Character::isDigit)) {
                                         return filterByPrefix(List.of("1", "2", "3", "4", "5"), current);
@@ -430,10 +492,6 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                 }
 
                 return Collections.emptyList();
-                } catch (Exception ex) {
-                        plugin.getLogger().warning("Tab completion failed for /knk: " + ex.getMessage());
-                        return Collections.emptyList();
-                }
         }
 
         private void refreshKnkIdsIfStale() {

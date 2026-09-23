@@ -126,7 +126,10 @@ public class ConfigLoader {
             loadEntitySettings(entitiesSection, "domains"),
             loadEntitySettings(entitiesSection, "health"),
             loadEntitySettings(entitiesSection, "menus"),
-            loadEntitySettings(entitiesSection, "permissions")
+            loadEntitySettings(entitiesSection, "permissions"),
+            loadEntitySettings(entitiesSection, "grades"),
+            loadEntitySettings(entitiesSection, "tags"),
+            loadEntitySettings(entitiesSection, "domainCatalog")
         );
     }
     
