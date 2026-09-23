@@ -344,8 +344,17 @@ public class KnKPlugin extends JavaPlugin {
             // Register ItemScan handler (docs/specs/items/IMPLEMENTATION_PLAN.md §5) - player-
             // driven, not headless (see ItemScanTaskHandler's javadoc), so it's registered here
             // alongside Location/WgRegionId rather than on headlessWorldTaskPoller below.
+            // ItemBlueprint has no dedicated "scan result" field the way GateDoor has
+            // BlockSnapshots, so the live FormConfiguration binds the WorldTask panel onto the
+            // real DefaultDisplayName field instead (see ACTIVE_SESSIONS.md's Items Phase 4/5
+            // row) - meaning the FormField's own fieldName ("defaultDisplayName") will never
+            // match this handler's field-name registration. Also register by taskType
+            // ("ItemScan"), the same dual-registration WorldTaskHandlerRegistry.getHandler
+            // already supports and LocationTaskHandler already uses (its "LocationSelection"
+            // alias below) for exactly this kind of mismatch.
             ItemScanTaskHandler itemScanHandler = new ItemScanTaskHandler(worldTasksApi, this);
             worldTaskHandlerRegistry.registerHandler(itemScanHandler);
+            worldTaskHandlerRegistry.registerHandler("ItemScan", itemScanHandler);
 
             // Start lightweight HTTP server for region rename callbacks (default port 8081)
             int httpPort = 8081;
