@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import net.knightsandkings.knk.api.auth.AuthProvider;
 import net.knightsandkings.knk.api.dto.CoinsUpdateDto;
 import net.knightsandkings.knk.api.dto.GatePassThroughMethodUpdateDto;
+import net.knightsandkings.knk.api.dto.PresenceUpdateDto;
 import net.knightsandkings.knk.api.dto.UserCreateDto;
 import net.knightsandkings.knk.api.dto.UserDto;
 import net.knightsandkings.knk.api.mapper.UsersMapper;
@@ -80,6 +81,20 @@ public class UsersCommandApiImpl extends BaseApiImpl implements UsersCommandApi 
                 return null;
             } catch (ApiException | IOException e) {
                 throw new RuntimeException("Failed to set gate pass-through method", e);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<Void> setPresenceById(int id, boolean isOnline) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + USERS_ENDPOINT + "/" + id + "/presence";
+            try {
+                String bodyJson = objectMapper.writeValueAsString(new PresenceUpdateDto(isOnline));
+                putJson(url, bodyJson);
+                return null;
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to set presence", e);
             }
         }, executor);
     }

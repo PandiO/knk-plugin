@@ -34,6 +34,7 @@ import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
 import net.knightsandkings.knk.core.domain.towns.TownDetail;
 import net.knightsandkings.knk.core.domain.users.UserDetail;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
+import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.paper.KnKPlugin;
 import net.knightsandkings.knk.paper.cache.CacheManager;
 import net.knightsandkings.knk.paper.utils.ColorOptions;
@@ -57,11 +58,14 @@ public class PlayerListener implements Listener {
 	private final UsersDataAccess usersDataAccess;
 	private final TownsDataAccess townsDataAccess;
 	private final CacheManager cacheManager;
+	private final UsersCommandApi usersCommandApi;
 
-	public PlayerListener(UsersDataAccess usersDataAccess, TownsDataAccess townsDataAccess, CacheManager cacheManager) {
+	public PlayerListener(UsersDataAccess usersDataAccess, TownsDataAccess townsDataAccess, CacheManager cacheManager,
+			UsersCommandApi usersCommandApi) {
 		this.usersDataAccess = usersDataAccess;
 		this.townsDataAccess = townsDataAccess;
 		this.cacheManager = cacheManager;
+		this.usersCommandApi = usersCommandApi;
 	}
 
 	@EventHandler
@@ -126,6 +130,7 @@ public class PlayerListener implements Listener {
 	public void onJoin(PlayerJoinEvent e) {
 		Player player = e.getPlayer();
         UserSummary user = cacheManager.getUserCache().getByUuid(player.getUniqueId()).orElse(null);
+        reportPresence(user, true);
 
 		e.joinMessage(Component.text("► " + "Player " + player.getName() + " joined").color(ColorOptions.message));
         
@@ -154,8 +159,32 @@ public class PlayerListener implements Listener {
 	@EventHandler
 	public void onLeave(PlayerQuitEvent e) {
 		Player player = e.getPlayer();
+        UserSummary user = cacheManager.getUserCache().getByUuid(player.getUniqueId()).orElse(null);
+        reportPresence(user, false);
+
 		e.quitMessage(Component.text(ColorOptions.messageArrow + "Player " + player.getName() + " left").color(ColorOptions.message));
 		e.quitMessage(Component.text(ColorOptions.messageArrow + "Player " + player.getName() + " left").color(ColorOptions.message));
+	}
+
+	/**
+	 * Reports online presence to knk-web-api (docs/specs/user-management/DESIGN.md §5/§7 item 2)
+	 * for the moderation view's "currently online" filter. A dedicated PUT
+	 * /api/users/{id}/presence call rather than piggybacking on a periodic sync — there is no
+	 * such sync loop for users to attach to (UsersDataAccess only refreshes on-demand when a
+	 * lookup finds the cache stale), so this is the only mechanism that gets presence reported at
+	 * all. Silently no-ops if the user isn't cached yet (e.g. a brand new account created moments
+	 * ago by onValidateLogin, whose UserSummary the join event's cache read may race) — a missed
+	 * presence ping is not worth failing login over, and the next join/quit will catch up.
+	 */
+	private void reportPresence(UserSummary user, boolean isOnline) {
+		if (user == null || user.id() == null) {
+			return;
+		}
+		usersCommandApi.setPresenceById(user.id(), isOnline)
+			.exceptionally(ex -> {
+				LOGGER.log(Level.WARNING, "Failed to report presence (isOnline=" + isOnline + ") for user " + user.id(), ex);
+				return null;
+			});
 	}
 
 	@EventHandler

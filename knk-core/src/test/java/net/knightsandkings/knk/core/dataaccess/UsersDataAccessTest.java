@@ -252,5 +252,10 @@ public class UsersDataAccessTest {
         public CompletableFuture<Void> setGatePassThroughMethodById(int id, GatePassThroughMethod method) {
             return CompletableFuture.completedFuture(null);
         }
+
+        @Override
+        public CompletableFuture<Void> setPresenceById(int id, boolean isOnline) {
+            return CompletableFuture.completedFuture(null);
+        }
     }
 }

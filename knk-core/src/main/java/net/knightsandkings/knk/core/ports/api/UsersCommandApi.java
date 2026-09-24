@@ -19,4 +19,11 @@ public interface UsersCommandApi {
      * Persist a player's preferred gate pass-through method (set via /knk gate passthrough).
      */
     CompletableFuture<Void> setGatePassThroughMethodById(int id, GatePassThroughMethod method);
+
+    /**
+     * Report online presence for the moderation view's "currently online" filter
+     * (docs/specs/user-management/DESIGN.md §5/§7 item 2). Called from PlayerListener's
+     * PlayerJoinEvent (true) and PlayerQuitEvent (false) handlers.
+     */
+    CompletableFuture<Void> setPresenceById(int id, boolean isOnline);
 }
