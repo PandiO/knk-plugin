@@ -14,7 +14,10 @@ public record UserSummary(
     boolean isFullAccount,
     boolean isNewUser,
     GatePassThroughMethod gatePassThroughMethodDefault,
-    ActiveMode activeMode
+    ActiveMode activeMode,
+    Integer titleBracketId,
+    String titleName,
+    int prestigeExperience
 ) {
     public UserSummary {
         if (activeMode == null) {
@@ -22,25 +25,31 @@ public record UserSummary(
         }
     }
 
+    // Constructor without title fields - resolved server-side from experiencePoints
+    // (docs/specs/user-features/IMPLEMENTATION_PLAN.md §4); null/0 until a real fetch fills them.
+    public UserSummary(Integer id, String username, UUID uuid, String email, int coins, int gems, int experiencePoints, boolean isFullAccount, boolean isNewUser, GatePassThroughMethod gatePassThroughMethodDefault, ActiveMode activeMode) {
+        this(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, null, null, 0);
+    }
+
     // Constructor without activeMode - defaults to NONE
     public UserSummary(Integer id, String username, UUID uuid, String email, int coins, int gems, int experiencePoints, boolean isFullAccount, boolean isNewUser, GatePassThroughMethod gatePassThroughMethodDefault) {
-        this(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, ActiveMode.NONE);
+        this(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, ActiveMode.NONE, null, null, 0);
     }
 
     // Constructor without isNewUser/gatePassThroughMethodDefault - defaults to false/DEFAULT
     public UserSummary(Integer id, String username, UUID uuid, String email, int coins, int gems, int experiencePoints, boolean isFullAccount) {
-        this(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, false, GatePassThroughMethod.DEFAULT, ActiveMode.NONE);
+        this(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, false, GatePassThroughMethod.DEFAULT, ActiveMode.NONE, null, null, 0);
     }
 
     // Legacy constructor for backwards compatibility (minimal user data)
     public UserSummary(Integer id, String username, UUID uuid, int coins) {
-        this(id, username, uuid, null, coins, 0, 0, false, false, GatePassThroughMethod.DEFAULT, ActiveMode.NONE);
+        this(id, username, uuid, null, coins, 0, 0, false, false, GatePassThroughMethod.DEFAULT, ActiveMode.NONE, null, null, 0);
     }
 
     /**
      * Copy with an updated owner/staff mode (after /ownermode or /staffmode).
      */
     public UserSummary withActiveMode(ActiveMode activeMode) {
-        return new UserSummary(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode);
+        return new UserSummary(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience);
     }
 }

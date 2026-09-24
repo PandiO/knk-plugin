@@ -11,6 +11,7 @@ import org.bukkit.scoreboard.RenderType;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.Team;
 
+import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.paper.permissions.KnkPermissible;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -45,6 +46,21 @@ public class ScoreboardUtil {
     }
 
     public static void setScoreboard(List<Player> players, KnkPermissible knkPermissible) {
+        setScoreboard(players, knkPermissible, null);
+    }
+
+    /**
+     * @param userSummary The joining player's summary, used to render their title/prestige XP in
+     * the tab list footer (docs/specs/user-features/IMPLEMENTATION_PLAN.md §4). Null skips the
+     * title line (e.g. summary not yet cached). Only meaningful when {@code players} has exactly
+     * one player — {@link #getScoreboard()} is one Scoreboard instance shared by every player
+     * (each player calls {@link Player#setScoreboard}, but they all get the *same* object), and
+     * Bukkit scores on a shared Scoreboard are visible identically to everyone who has it set, so
+     * there is no sidebar Objective this method could use to show a different value per viewer.
+     * The tab list header/footer, sent to each player individually below, is the one place here
+     * that actually is per-player — which is why title/prestige is rendered there instead.
+     */
+    public static void setScoreboard(List<Player> players, KnkPermissible knkPermissible, UserSummary userSummary) {
         Scoreboard scoreboard = getScoreboard();
 
         for (Player p : players) {
@@ -55,11 +71,24 @@ public class ScoreboardUtil {
 
             team.addPlayer(p);
             p.setScoreboard(scoreboard);
-            
+
             // Set tab layout header/footer
             Component header = Component.text("§7Welcome to §9Knights and Kings");
-            Component footer = Component.text("§cOpen Beta\n§cFollow us on instagram @knightsandkings.official");
+            Component footer = Component.text("§cOpen Beta\n§cFollow us on instagram @knightsandkings.official")
+                .append(titleFooterLine(userSummary));
             p.sendPlayerListHeaderAndFooter(header, footer);
         }
+    }
+
+    private static Component titleFooterLine(UserSummary userSummary) {
+        if (userSummary == null || userSummary.titleName() == null) {
+            return Component.empty();
+        }
+
+        Component line = Component.text("\n§b" + userSummary.titleName());
+        if (userSummary.prestigeExperience() > 0) {
+            line = line.append(Component.text(" §7(+" + userSummary.prestigeExperience() + " prestige XP)"));
+        }
+        return line;
     }
 }

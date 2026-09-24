@@ -24,7 +24,10 @@ public class UsersMapper {
             dto.isFullAccount(),
             false,
             GatePassThroughMethod.fromWireValue(dto.gatePassThroughMethodDefault()),
-            ActiveMode.fromWireValue(dto.activeMode())
+            ActiveMode.fromWireValue(dto.activeMode()),
+            dto.titleBracketId(),
+            dto.titleName(),
+            dto.prestigeExperience()
         );
     }
 
@@ -39,7 +42,10 @@ public class UsersMapper {
             domain.experiencePoints(),
             domain.isFullAccount(),
             domain.gatePassThroughMethodDefault().toWireValue(),
-            domain.activeMode().toWireValue()
+            domain.activeMode().toWireValue(),
+            domain.titleBracketId(),
+            domain.titleName(),
+            domain.prestigeExperience()
         );
     }
 

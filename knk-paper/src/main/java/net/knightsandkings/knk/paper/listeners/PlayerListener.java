@@ -151,7 +151,7 @@ public class PlayerListener implements Listener {
 			// }
             player.teleport(Bukkit.getWorld(Bukkit.getWorlds().get(0).getName()).getSpawnLocation());
 		}
-		ScoreboardUtil.setScoreboard(Arrays.asList(player), knkPermissible);
+		ScoreboardUtil.setScoreboard(Arrays.asList(player), knkPermissible, user);
 	}
 
 	@EventHandler

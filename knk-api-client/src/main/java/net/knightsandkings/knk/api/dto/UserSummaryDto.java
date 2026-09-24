@@ -12,5 +12,8 @@ public record UserSummaryDto (
     @JsonProperty("experiencePoints") int experiencePoints,
     @JsonProperty("isFullAccount") boolean isFullAccount,
     @JsonProperty("gatePassThroughMethodDefault") String gatePassThroughMethodDefault,
-    @JsonProperty("activeMode") String activeMode
+    @JsonProperty("activeMode") String activeMode,
+    @JsonProperty("titleBracketId") Integer titleBracketId,
+    @JsonProperty("titleName") String titleName,
+    @JsonProperty("prestigeExperience") int prestigeExperience
 ) {}
