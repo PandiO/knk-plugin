@@ -34,6 +34,7 @@ import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
 import net.knightsandkings.knk.core.domain.towns.TownDetail;
 import net.knightsandkings.knk.core.domain.users.UserDetail;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
+import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.paper.KnKPlugin;
 import net.knightsandkings.knk.paper.cache.CacheManager;
 import net.knightsandkings.knk.paper.permissions.KnkPermissible;
@@ -59,12 +60,14 @@ public class PlayerListener implements Listener {
 	private final TownsDataAccess townsDataAccess;
 	private final CacheManager cacheManager;
 	private final KnkPermissible knkPermissible;
+	private final UsersCommandApi usersCommandApi;
 
-	public PlayerListener(UsersDataAccess usersDataAccess, TownsDataAccess townsDataAccess, CacheManager cacheManager, KnkPermissible knkPermissible) {
+	public PlayerListener(UsersDataAccess usersDataAccess, TownsDataAccess townsDataAccess, CacheManager cacheManager, KnkPermissible knkPermissible, UsersCommandApi usersCommandApi) {
 		this.usersDataAccess = usersDataAccess;
 		this.townsDataAccess = townsDataAccess;
 		this.cacheManager = cacheManager;
 		this.knkPermissible = knkPermissible;
+		this.usersCommandApi = usersCommandApi;
 	}
 
 	@EventHandler
@@ -152,6 +155,38 @@ public class PlayerListener implements Listener {
             player.teleport(Bukkit.getWorld(Bukkit.getWorlds().get(0).getName()).getSpawnLocation());
 		}
 		ScoreboardUtil.setScoreboard(Arrays.asList(player), knkPermissible, user);
+
+		if (user != null) {
+			triggerBackgroundSalaryPayout(player, user.id());
+		}
+	}
+
+	/**
+	 * Pays out the offline-gap-covering salary on join (docs/specs/user-features/
+	 * IMPLEMENTATION_PLAN.md §6's intended trigger). Runs off the main thread and never blocks
+	 * or delays the join; a failure here is logged and otherwise invisible to the player.
+	 */
+	private void triggerBackgroundSalaryPayout(Player player, int userId) {
+		if (usersCommandApi == null) {
+			return;
+		}
+		usersCommandApi.payOutSalaryById(userId)
+			.thenAccept(result -> {
+				if (!result.paid()) {
+					return;
+				}
+				LOGGER.fine("Paid out " + result.amountPaid() + " salary coins to user " + userId);
+				Bukkit.getScheduler().runTask(KnKPlugin.getPlugin(KnKPlugin.class), () -> {
+					if (player.isOnline()) {
+						player.sendMessage(Component.text("You earned " + result.amountPaid()
+							+ " coins in salary while you were away.").color(ColorOptions.messageachievement));
+					}
+				});
+			})
+			.exceptionally(ex -> {
+				LOGGER.log(Level.WARNING, "Failed to pay out salary for user " + userId, ex);
+				return null;
+			});
 	}
 
 	@EventHandler
