@@ -15,5 +15,8 @@ public record UserSummaryDto (
     @JsonProperty("activeMode") String activeMode,
     @JsonProperty("titleBracketId") Integer titleBracketId,
     @JsonProperty("titleName") String titleName,
-    @JsonProperty("prestigeExperience") int prestigeExperience
+    @JsonProperty("prestigeExperience") int prestigeExperience,
+    @JsonProperty("premiumTierGroupId") Integer premiumTierGroupId,
+    @JsonProperty("premiumTierName") String premiumTierName,
+    @JsonProperty("premiumTierExpiresAt") java.time.OffsetDateTime premiumTierExpiresAt
 ) {}

@@ -27,7 +27,10 @@ public class UsersMapper {
             ActiveMode.fromWireValue(dto.activeMode()),
             dto.titleBracketId(),
             dto.titleName(),
-            dto.prestigeExperience()
+            dto.prestigeExperience(),
+            dto.premiumTierGroupId(),
+            dto.premiumTierName(),
+            dto.premiumTierExpiresAt()
         );
     }
 
@@ -45,7 +48,10 @@ public class UsersMapper {
             domain.activeMode().toWireValue(),
             domain.titleBracketId(),
             domain.titleName(),
-            domain.prestigeExperience()
+            domain.prestigeExperience(),
+            domain.premiumTierGroupId(),
+            domain.premiumTierName(),
+            domain.premiumTierExpiresAt()
         );
     }
 

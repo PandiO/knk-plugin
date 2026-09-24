@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.core.domain.users;
 
+import java.time.OffsetDateTime;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -17,12 +18,22 @@ public record UserSummary(
     ActiveMode activeMode,
     Integer titleBracketId,
     String titleName,
-    int prestigeExperience
+    int prestigeExperience,
+    Integer premiumTierGroupId,
+    String premiumTierName,
+    OffsetDateTime premiumTierExpiresAt
 ) {
     public UserSummary {
         if (activeMode == null) {
             activeMode = ActiveMode.NONE;
         }
+    }
+
+    // Constructor without premium tier fields - resolved server-side from the user's premium
+    // PermissionGroup memberships (docs/specs/user-features/IMPLEMENTATION_PLAN.md §5); null
+    // until a real fetch fills them, and null afterwards if the user holds no premium tier.
+    public UserSummary(Integer id, String username, UUID uuid, String email, int coins, int gems, int experiencePoints, boolean isFullAccount, boolean isNewUser, GatePassThroughMethod gatePassThroughMethodDefault, ActiveMode activeMode, Integer titleBracketId, String titleName, int prestigeExperience) {
+        this(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience, null, null, null);
     }
 
     // Constructor without title fields - resolved server-side from experiencePoints
@@ -50,6 +61,6 @@ public record UserSummary(
      * Copy with an updated owner/staff mode (after /ownermode or /staffmode).
      */
     public UserSummary withActiveMode(ActiveMode activeMode) {
-        return new UserSummary(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience);
+        return new UserSummary(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience, premiumTierGroupId, premiumTierName, premiumTierExpiresAt);
     }
 }

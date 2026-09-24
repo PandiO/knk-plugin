@@ -1,5 +1,7 @@
 package net.knightsandkings.knk.paper.utils;
 
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 import org.bukkit.Bukkit;
@@ -50,9 +52,9 @@ public class ScoreboardUtil {
     }
 
     /**
-     * @param userSummary The joining player's summary, used to render their title/prestige XP in
-     * the tab list footer (docs/specs/user-features/IMPLEMENTATION_PLAN.md §4). Null skips the
-     * title line (e.g. summary not yet cached). Only meaningful when {@code players} has exactly
+     * @param userSummary The joining player's summary, used to render their title/prestige XP
+     * (docs/specs/user-features/IMPLEMENTATION_PLAN.md §4) and premium tier (§5) in the tab list
+     * footer. Null skips both lines (e.g. summary not yet cached). Only meaningful when {@code players} has exactly
      * one player — {@link #getScoreboard()} is one Scoreboard instance shared by every player
      * (each player calls {@link Player#setScoreboard}, but they all get the *same* object), and
      * Bukkit scores on a shared Scoreboard are visible identically to everyone who has it set, so
@@ -75,12 +77,14 @@ public class ScoreboardUtil {
             // Set tab layout header/footer
             Component header = Component.text("§7Welcome to §9Knights and Kings");
             Component footer = Component.text("§cOpen Beta\n§cFollow us on instagram @knightsandkings.official")
-                .append(titleFooterLine(userSummary));
+                .append(titleFooterLine(userSummary))
+                .append(premiumTierFooterLine(userSummary));
             p.sendPlayerListHeaderAndFooter(header, footer);
         }
     }
 
-    private static Component titleFooterLine(UserSummary userSummary) {
+    // Package-private for ScoreboardUtilTest (setScoreboard itself needs a live Bukkit server).
+    static Component titleFooterLine(UserSummary userSummary) {
         if (userSummary == null || userSummary.titleName() == null) {
             return Component.empty();
         }
@@ -91,4 +95,22 @@ public class ScoreboardUtil {
         }
         return line;
     }
+
+    static Component premiumTierFooterLine(UserSummary userSummary) {
+        if (userSummary == null || userSummary.premiumTierName() == null) {
+            return Component.empty();
+        }
+
+        Component line = Component.text("\n§6" + userSummary.premiumTierName());
+        if (userSummary.premiumTierExpiresAt() != null) {
+            // Date only, in UTC — the footer is only refreshed on join, so a to-the-minute
+            // countdown would just go stale.
+            line = line.append(Component.text(" §7(until "
+                + PREMIUM_EXPIRY_FORMAT.format(userSummary.premiumTierExpiresAt()) + ")"));
+        }
+        return line;
+    }
+
+    private static final DateTimeFormatter PREMIUM_EXPIRY_FORMAT =
+        DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneOffset.UTC);
 }
