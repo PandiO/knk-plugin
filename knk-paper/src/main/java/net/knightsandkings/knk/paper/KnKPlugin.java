@@ -21,6 +21,8 @@ import net.knightsandkings.knk.core.ports.api.DomainsQueryApi;
 import net.knightsandkings.knk.core.ports.api.LocationsQueryApi;
 import net.knightsandkings.knk.core.ports.api.EnchantmentDefinitionsQueryApi;
 import net.knightsandkings.knk.core.ports.api.ItemBlueprintsQueryApi;
+import net.knightsandkings.knk.core.ports.api.KitsQueryApi;
+import net.knightsandkings.knk.core.ports.api.KitsCommandApi;
 import net.knightsandkings.knk.core.ports.api.MenuTemplatesQueryApi;
 import net.knightsandkings.knk.core.ports.api.MinecraftMaterialRefsQueryApi;
 import net.knightsandkings.knk.core.ports.api.GradesQueryApi;
@@ -31,6 +33,7 @@ import net.knightsandkings.knk.core.dataaccess.TownsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
 import net.knightsandkings.knk.core.dataaccess.EnchantmentDefinitionsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.ItemBlueprintsDataAccess;
+import net.knightsandkings.knk.core.dataaccess.KitsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.PermissionsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MenuTemplatesDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
@@ -115,6 +118,7 @@ import net.knightsandkings.knk.paper.tasks.PlayerNotificationPoller;
 import net.knightsandkings.knk.paper.tasks.GateBlockScanTaskHandler;
 import net.knightsandkings.knk.paper.tasks.GateDoorRegionCaptureHandler;
 import net.knightsandkings.knk.paper.tasks.ItemScanTaskHandler;
+import net.knightsandkings.knk.paper.tasks.KitScanTaskHandler;
 import net.knightsandkings.knk.paper.user.JoinLoadingGuard;
 import net.knightsandkings.knk.paper.user.UserManager;
 import net.knightsandkings.knk.paper.utils.CommandCooldownManager;
@@ -129,6 +133,8 @@ public class KnKPlugin extends JavaPlugin {
     private LocationsQueryApi locationsQueryApi;
     private EnchantmentDefinitionsQueryApi enchantmentDefinitionsQueryApi;
     private ItemBlueprintsQueryApi itemBlueprintsQueryApi;
+    private KitsQueryApi kitsQueryApi;
+    private KitsCommandApi kitsCommandApi;
     private MenuTemplatesQueryApi menuTemplatesQueryApi;
     private MinecraftMaterialRefsQueryApi minecraftMaterialRefsQueryApi;
     private DistrictsQueryApi districtsQueryApi;
@@ -146,6 +152,7 @@ public class KnKPlugin extends JavaPlugin {
     private TownsDataAccess townsDataAccess;
     private EnchantmentDefinitionsDataAccess enchantmentDefinitionsDataAccess;
     private ItemBlueprintsDataAccess itemBlueprintsDataAccess;
+    private KitsDataAccess kitsDataAccess;
     private MenuTemplatesDataAccess menuTemplatesDataAccess;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private PermissionsDataAccess permissionsDataAccess;
@@ -216,6 +223,8 @@ public class KnKPlugin extends JavaPlugin {
             this.locationsQueryApi = apiClient.getLocationsQueryApi();
             this.enchantmentDefinitionsQueryApi = apiClient.getEnchantmentDefinitionsQueryApi();
             this.itemBlueprintsQueryApi = apiClient.getItemBlueprintsQueryApi();
+            this.kitsQueryApi = apiClient.getKitsQueryApi();
+            this.kitsCommandApi = apiClient.getKitsCommandApi();
             this.menuTemplatesQueryApi = apiClient.getMenuTemplatesQueryApi();
             this.minecraftMaterialRefsQueryApi = apiClient.getMinecraftMaterialRefsQueryApi();
             this.districtsQueryApi = apiClient.getDistrictsQueryApi();
@@ -377,6 +386,16 @@ public class KnKPlugin extends JavaPlugin {
             worldTaskHandlerRegistry.registerHandler(itemScanHandler);
             worldTaskHandlerRegistry.registerHandler("ItemScan", itemScanHandler);
 
+            // Register KitScan handler (docs/specs/kits/DESIGN.md §6) - player-driven like
+            // ItemScan. This registration is what makes the generic /knk task-claim <linkCode>
+            // work for KitScan (/knk kitscan claim is only a shortcut into the same claim
+            // command). Registered by taskType too, for the same reason as ItemScan above: the
+            // Kit form binds the WorldTask panel onto a real Kit field, so the claimed task's
+            // fieldName won't be "KitScan" and KnkTaskClaimCommand resolves by taskType first.
+            KitScanTaskHandler kitScanHandler = new KitScanTaskHandler(worldTasksApi, this);
+            worldTaskHandlerRegistry.registerHandler(kitScanHandler);
+            worldTaskHandlerRegistry.registerHandler("KitScan", kitScanHandler);
+
             // Start lightweight HTTP server for region rename callbacks (default port 8081)
             int httpPort = 8081;
             try {
@@ -420,6 +439,10 @@ public class KnKPlugin extends JavaPlugin {
             this.itemBlueprintsDataAccess = dataAccessFactory.createItemBlueprintsDataAccess(
                 config.cache().ttl(),
                 itemBlueprintsQueryApi
+            );
+            this.kitsDataAccess = dataAccessFactory.createKitsDataAccess(
+                config.cache().ttl(),
+                kitsQueryApi
             );
             this.menuTemplatesDataAccess = dataAccessFactory.createMenuTemplatesDataAccess(
                 config.cache().ttl(),
@@ -699,7 +722,7 @@ public class KnKPlugin extends JavaPlugin {
         // Event registration moved to onEnable after region transition service setup
 
         pluginManager.registerEvents(new WorldGuardRegionListener(regionTracker), this);
-        pluginManager.registerEvents(new PlayerListener(usersDataAccess, townsDataAccess, this.getCacheManager(), knkPermissible, usersCommandApi), this);
+        pluginManager.registerEvents(new PlayerListener(usersDataAccess, townsDataAccess, this.getCacheManager(), knkPermissible, usersCommandApi, kitsCommandApi, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess), this);
         pluginManager.registerEvents(new UserAccountListener(this, userManager, joinLoadingGuard, config.messages(), getLogger()), this);
         getLogger().info("Registered UserAccountListener for account management");
         pluginManager.registerEvents(new JoinLoadingRestrictionListener(joinLoadingGuard), this);
@@ -801,6 +824,16 @@ public class KnKPlugin extends JavaPlugin {
         registerSimpleCommand("staffchat", new net.knightsandkings.knk.paper.commands.StaffChatCommand());
         registerSimpleCommand("msg", new net.knightsandkings.knk.paper.commands.MessageCommand(messagingService));
         registerSimpleCommand("reply", new net.knightsandkings.knk.paper.commands.ReplyCommand(messagingService));
+
+        registerSimpleCommand("kit", new net.knightsandkings.knk.paper.commands.KitCommand(
+            this,
+            kitsDataAccess,
+            kitsCommandApi,
+            itemBlueprintsDataAccess,
+            minecraftMaterialRefsDataAccess,
+            knkPermissible,
+            this.getCacheManager()
+        ));
     }
 
     private void registerSimpleCommand(String name, org.bukkit.command.CommandExecutor executor) {

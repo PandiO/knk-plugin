@@ -29,6 +29,8 @@ import net.knightsandkings.knk.api.impl.DomainCatalogQueryApiImpl;
 import net.knightsandkings.knk.api.impl.MenuTemplatesQueryApiImpl;
 import net.knightsandkings.knk.api.impl.PermissionsApiImpl;
 import net.knightsandkings.knk.api.impl.PermissionGroupsQueryApiImpl;
+import net.knightsandkings.knk.api.impl.KitsQueryApiImpl;
+import net.knightsandkings.knk.api.impl.KitsCommandApiImpl;
 import net.knightsandkings.knk.core.ports.api.HealthApi;
 import net.knightsandkings.knk.core.ports.api.TownsQueryApi;
 import net.knightsandkings.knk.core.ports.api.LocationsQueryApi;
@@ -52,6 +54,8 @@ import net.knightsandkings.knk.core.ports.api.DomainCatalogQueryApi;
 import net.knightsandkings.knk.core.ports.api.MenuTemplatesQueryApi;
 import net.knightsandkings.knk.core.ports.api.PermissionsApi;
 import net.knightsandkings.knk.core.ports.api.PermissionGroupsQueryApi;
+import net.knightsandkings.knk.core.ports.api.KitsQueryApi;
+import net.knightsandkings.knk.core.ports.api.KitsCommandApi;
 import net.knightsandkings.knk.core.ports.api.RegionsCommandApi;
 import okhttp3.OkHttpClient;
 
@@ -97,6 +101,8 @@ public class KnkApiClient {
     private final MenuTemplatesQueryApi menuTemplatesQueryApi;
     private final PermissionsApi permissionsApi;
     private final PermissionGroupsQueryApi permissionGroupsQueryApi;
+    private final KitsQueryApi kitsQueryApi;
+    private final KitsCommandApi kitsCommandApi;
 
     private KnkApiClient(
         String baseUrl,
@@ -136,6 +142,8 @@ public class KnkApiClient {
         this.menuTemplatesQueryApi = new MenuTemplatesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.permissionsApi = new PermissionsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.permissionGroupsQueryApi = new PermissionGroupsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.kitsQueryApi = new KitsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.kitsCommandApi = new KitsCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
     }
     
     public HealthApi getHealthApi() {
@@ -156,6 +164,14 @@ public class KnkApiClient {
 
     public ItemBlueprintsQueryApi getItemBlueprintsQueryApi() {
         return itemBlueprintsQueryApi;
+    }
+
+    public KitsQueryApi getKitsQueryApi() {
+        return kitsQueryApi;
+    }
+
+    public KitsCommandApi getKitsCommandApi() {
+        return kitsCommandApi;
     }
 
     public MinecraftMaterialRefsQueryApi getMinecraftMaterialRefsQueryApi() {

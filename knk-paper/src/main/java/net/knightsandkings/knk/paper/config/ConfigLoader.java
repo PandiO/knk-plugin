@@ -129,7 +129,8 @@ public class ConfigLoader {
             loadEntitySettings(entitiesSection, "permissions"),
             loadEntitySettings(entitiesSection, "grades"),
             loadEntitySettings(entitiesSection, "tags"),
-            loadEntitySettings(entitiesSection, "domainCatalog")
+            loadEntitySettings(entitiesSection, "domainCatalog"),
+            loadEntitySettings(entitiesSection, "kits")
         );
     }
     

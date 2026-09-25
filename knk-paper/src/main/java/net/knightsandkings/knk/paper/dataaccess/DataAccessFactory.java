@@ -152,6 +152,21 @@ public class DataAccessFactory {
     }
 
     /**
+     * Create a KitsDataAccess gateway with configured settings.
+     *
+     * @param ttl Cache TTL duration
+     * @param kitsQueryApi Kits query API port
+     * @return Configured KitsDataAccess instance
+     */
+    public KitsDataAccess createKitsDataAccess(
+        Duration ttl,
+        KitsQueryApi kitsQueryApi
+    ) {
+        DataAccessSettings settings = buildSettings(entitySettings.kits(), "Kits");
+        return new KitsDataAccess(ttl, kitsQueryApi, settings);
+    }
+
+    /**
      * Create a MinecraftMaterialRefsDataAccess gateway with configured settings.
      *
      * @param ttl Cache TTL duration
