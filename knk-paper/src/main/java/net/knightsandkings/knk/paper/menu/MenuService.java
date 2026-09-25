@@ -20,6 +20,7 @@ import org.bukkit.plugin.Plugin;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
@@ -65,6 +66,8 @@ public final class MenuService {
     private final MenuRefreshSchedule refreshSchedule;
     private final Executor mainThread;
     private final Map<String, String> blockedMenus = new ConcurrentHashMap<>();
+    /** Keys that passed {@link MenuDefinitionValidationRunner} at startup (content port CP1, {@code menu-available}). */
+    private final Set<String> validatedMenus = ConcurrentHashMap.newKeySet();
 
     public MenuService(
             Plugin plugin,
@@ -492,6 +495,24 @@ public final class MenuService {
      */
     public void blockMenu(String templateKey, String reason) {
         blockedMenus.put(templateKey, reason != null ? reason : "failed startup validation");
+    }
+
+    /**
+     * Content port CP1: records that {@code templateKey} was fetched, assembled and passed every
+     * startup validation step. Only {@link MenuDefinitionValidationRunner} calls this.
+     */
+    public void markValidated(String templateKey) {
+        validatedMenus.add(templateKey);
+    }
+
+    /**
+     * Content port CP1 ({@code menu-available} condition): true when a template with this key
+     * was registered at startup and passed validation (and has not been blocked since). A
+     * template created through the CRUD API after startup is not available until the next
+     * restart validates it - the same rule every other menu follows.
+     */
+    public boolean isMenuAvailable(String templateKey) {
+        return templateKey != null && validatedMenus.contains(templateKey) && !blockedMenus.containsKey(templateKey);
     }
 
     /** Currently-blocked menu keys and why, for admin visibility (e.g. {@code /knk menu broken}). */

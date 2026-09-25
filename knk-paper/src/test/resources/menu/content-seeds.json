@@ -1,0 +1,523 @@
+[
+  {
+    "id": 10,
+    "key": "main",
+    "name": "&8Knights and Kings",
+    "description": "Main menu (/menu): one tile per ported feature. Content port CP1.",
+    "height": 3,
+    "growth": "Static",
+    "backgroundMaterialRefId": null,
+    "autoRefreshTicks": null,
+    "sections": [
+      {
+        "id": 18,
+        "name": "Tiles",
+        "kind": "StaticButtons",
+        "sortOrder": 0,
+        "displaySlot": 0,
+        "width": 9,
+        "height": 3,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "searchable": false,
+        "contentSourceId": null,
+        "contentSourceParamsJson": "{}",
+        "items": [
+          {
+            "id": 66,
+            "sortOrder": 0,
+            "slotOverride": 4,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 146,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "PLAYER_HEAD",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 147,
+                "targetProperty": "SkullOwner",
+                "sortOrder": 0,
+                "expression": "$player.getName$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 148,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&f$player.getName$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 149,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Click to view your profile",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 22,
+                "actionTypeId": "menu.open",
+                "paramsJson": "{\"key\":\"profile.main\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 10,
+                "conditionTypeId": "menu-available",
+                "paramsJson": "{\"key\":\"profile.main\"}",
+                "sortOrder": 0,
+                "phase": "Render"
+              }
+            ]
+          },
+          {
+            "id": 67,
+            "sortOrder": 1,
+            "slotOverride": 8,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 150,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BARRIER",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 151,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&c$menu.getBackLabel$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 152,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7$menu.getBackHint$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 23,
+                "actionTypeId": "menu.back",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 68,
+            "sortOrder": 2,
+            "slotOverride": 10,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 153,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "ARMOR_STAND",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 154,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aKits",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 155,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7See all kits and claim one",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 24,
+                "actionTypeId": "menu.open",
+                "paramsJson": "{\"key\":\"kits.overview\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 11,
+                "conditionTypeId": "menu-available",
+                "paramsJson": "{\"key\":\"kits.overview\"}",
+                "sortOrder": 0,
+                "phase": "Render"
+              }
+            ]
+          },
+          {
+            "id": 69,
+            "sortOrder": 3,
+            "slotOverride": 12,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 156,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "WHITE_BANNER",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 157,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aSiege Minigame",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 158,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Click here to see",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 159,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "&7and join active Siege games",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 160,
+                "targetProperty": "Lore",
+                "sortOrder": 2,
+                "expression": "",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 161,
+                "targetProperty": "Lore",
+                "sortOrder": 3,
+                "expression": "&eDescription",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 162,
+                "targetProperty": "Lore",
+                "sortOrder": 4,
+                "expression": "&7Siege is a minigame where",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 163,
+                "targetProperty": "Lore",
+                "sortOrder": 5,
+                "expression": "&7teams fight against each other.",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 164,
+                "targetProperty": "Lore",
+                "sortOrder": 6,
+                "expression": "&7The defending team defends",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 165,
+                "targetProperty": "Lore",
+                "sortOrder": 7,
+                "expression": "&7a main objective and multiple",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 166,
+                "targetProperty": "Lore",
+                "sortOrder": 8,
+                "expression": "&7side objectives against the attackers.",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 167,
+                "targetProperty": "Lore",
+                "sortOrder": 9,
+                "expression": "&6The goal:",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 168,
+                "targetProperty": "Lore",
+                "sortOrder": 10,
+                "expression": "&6- Attackers: capture the objectives",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 169,
+                "targetProperty": "Lore",
+                "sortOrder": 11,
+                "expression": "&6- Defenders: defend the objectives",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 25,
+                "actionTypeId": "menu.open",
+                "paramsJson": "{\"key\":\"siege.overview\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 12,
+                "conditionTypeId": "menu-available",
+                "paramsJson": "{\"key\":\"siege.overview\"}",
+                "sortOrder": 0,
+                "phase": "Render"
+              }
+            ]
+          },
+          {
+            "id": 70,
+            "sortOrder": 4,
+            "slotOverride": 14,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 170,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "DIAMOND_SWORD",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 171,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&bItem catalogue",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 172,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7A list of all items in the game",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 26,
+                "actionTypeId": "menu.open",
+                "paramsJson": "{\"key\":\"items.catalog\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 13,
+                "conditionTypeId": "menu-available",
+                "paramsJson": "{\"key\":\"items.catalog\"}",
+                "sortOrder": 0,
+                "phase": "Render"
+              }
+            ]
+          },
+          {
+            "id": 71,
+            "sortOrder": 5,
+            "slotOverride": 16,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 173,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "GOLD_BLOCK",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 174,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&6Premium tiers",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 175,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7See every premium tier and your own",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 27,
+                "actionTypeId": "menu.open",
+                "paramsJson": "{\"key\":\"premium.tiers\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 14,
+                "conditionTypeId": "menu-available",
+                "paramsJson": "{\"key\":\"premium.tiers\"}",
+                "sortOrder": 0,
+                "phase": "Render"
+              }
+            ]
+          },
+          {
+            "id": 72,
+            "sortOrder": 6,
+            "slotOverride": 22,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": "knk.admin.user.manage",
+            "actionPermission": "knk.admin.user.manage",
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 176,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "PLAYER_HEAD",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 177,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&cPlayer manager",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 178,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Manage online players (staff)",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 28,
+                "actionTypeId": "menu.open",
+                "paramsJson": "{\"key\":\"users.manager\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 15,
+                "conditionTypeId": "menu-available",
+                "paramsJson": "{\"key\":\"users.manager\"}",
+                "sortOrder": 0,
+                "phase": "Render"
+              }
+            ]
+          }
+        ],
+        "variableBindings": []
+      }
+    ]
+  }
+]

@@ -103,6 +103,7 @@ public final class MenuDefinitionValidationRunner {
             // IMPLEMENTATION_PLAN.md Phase 8: same load-time-not-click-time
             // policy for contentSourceId references.
             MenuDefinitionValidator.validateContentSources(menu, registeredContentSourceIds);
+            menuService.markValidated(key);
             return true;
         } catch (MenuAssemblyException e) {
             logger.severe("InventoryMenu startup validation: menu '" + key + "' is broken and will refuse to open: "

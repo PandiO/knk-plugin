@@ -61,6 +61,7 @@ import net.knightsandkings.knk.paper.menu.MenuFeature;
 import net.knightsandkings.knk.paper.menu.MenuFeatureRegistries;
 import net.knightsandkings.knk.paper.menu.MenuVariableContext;
 import net.knightsandkings.knk.paper.menu.example.ExampleDomainMenuFeature;
+import net.knightsandkings.knk.paper.menu.content.HubMenuFeature;
 import net.knightsandkings.knk.paper.menu.MenuLifecycleListener;
 import net.knightsandkings.knk.paper.menu.MenuRenderer;
 import net.knightsandkings.knk.paper.menu.MenuService;
@@ -528,7 +529,8 @@ public class KnKPlugin extends JavaPlugin {
                     MenuActionHandlers.registerDefaults(registries.actions());
                     MenuConditionHandlers.registerDefaults(registries.conditions());
                 },
-                new ExampleDomainMenuFeature()
+                new ExampleDomainMenuFeature(),
+                new HubMenuFeature()
             );
             menuFeatures.forEach(feature -> feature.registerMenuHandlers(menuRegistries));
 
@@ -861,6 +863,9 @@ public class KnKPlugin extends JavaPlugin {
             knkPermissible,
             this.getCacheManager()
         ));
+
+        // Content port CP1: /menu opens the InventoryMenu hub (docs/specs/inventory-menu/CONTENT_PORT_PLAN.md §3).
+        registerSimpleCommand("menu", new net.knightsandkings.knk.paper.commands.MenuCommand(() -> menuService));
     }
 
     private void registerSimpleCommand(String name, org.bukkit.command.CommandExecutor executor) {

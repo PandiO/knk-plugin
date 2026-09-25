@@ -78,6 +78,11 @@ commands:
     # node through KnkPermissible inside KitCommand, same reasoning /knk and /ownermode|/staffmode
     # have none (Bukkit would check its own permission tree before this executor ever ran).
 
+  menu:
+    description: "Open the Knights and Kings menu (InventoryMenu hub, docs/specs/inventory-menu/CONTENT_PORT_PLAN.md §3)"
+    usage: "/menu"
+    permission: knk.menu
+
 permissions:
   knk.admin:
     description: >-
@@ -108,6 +113,7 @@ permissions:
       knk.admin.user.xp: true
       knk.admin.user.group: true
       knk.admin.user.perm: true
+      knk.admin.user.manage: true
       knk.admin.tp: true
 
   knk.admin.health:
@@ -160,6 +166,12 @@ permissions:
 
   knk.admin.street:
     description: Access to /knk street
+    default: false
+
+  knk.admin.user.manage:
+    description: >-
+      Open the in-game Player manager (InventoryMenu users.manager, content port CP8) and see its
+      hub tile. Every edit inside it is still gated by its own knk.admin.user.<property> node.
     default: false
 
   knk.admin.user.info:
@@ -354,3 +366,7 @@ permissions:
   customenchantments.command.reload:
     description: Allows reloading custom enchantment config with /ce reload
     default: op
+
+  knk.menu:
+    description: Open the InventoryMenu hub with /menu (content port CP1).
+    default: true
