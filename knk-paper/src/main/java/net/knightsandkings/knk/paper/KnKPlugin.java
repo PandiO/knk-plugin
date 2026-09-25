@@ -165,6 +165,7 @@ public class KnKPlugin extends JavaPlugin {
     private MenuTemplatesDataAccess menuTemplatesDataAccess;
     private net.knightsandkings.knk.paper.kit.KitGrantFlow kitGrantFlow;
     private net.knightsandkings.knk.core.dataaccess.TitleBracketsDataAccess titleBracketsDataAccess;
+    private net.knightsandkings.knk.core.dataaccess.PermissionGroupsDataAccess permissionGroupsDataAccess;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private PermissionsDataAccess permissionsDataAccess;
     private KnkPermissible knkPermissible;
@@ -533,6 +534,9 @@ public class KnKPlugin extends JavaPlugin {
             this.titleBracketsDataAccess = new net.knightsandkings.knk.core.dataaccess.TitleBracketsDataAccess(
                 apiClient.getTitleBracketsQueryApi(), java.time.Duration.ofMinutes(10)
             );
+            this.permissionGroupsDataAccess = new net.knightsandkings.knk.core.dataaccess.PermissionGroupsDataAccess(
+                apiClient.getPermissionGroupsQueryApi(), java.time.Duration.ofMinutes(2), java.time.Clock.systemUTC()
+            );
             List<MenuFeature> menuFeatures = List.of(
                 registries -> {
                     MenuVariableContext.registerDefaults(registries.variables());
@@ -548,7 +552,9 @@ public class KnKPlugin extends JavaPlugin {
                 new net.knightsandkings.knk.paper.menu.content.ProfileMenuFeature(
                     usersQueryApi, cacheManager.getUserCache(), titleBracketsDataAccess),
                 new net.knightsandkings.knk.paper.menu.content.ItemsCatalogMenuFeature(
-                    itemBlueprintsDataAccess, java.time.Clock.systemUTC())
+                    itemBlueprintsDataAccess, java.time.Clock.systemUTC()),
+                new net.knightsandkings.knk.paper.menu.content.PremiumMenuFeature(
+                    permissionGroupsDataAccess, usersQueryApi, cacheManager.getUserCache())
             );
             menuFeatures.forEach(feature -> feature.registerMenuHandlers(menuRegistries));
 

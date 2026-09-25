@@ -9,5 +9,12 @@ public record PermissionGroupSummary(
     int id,
     String name,
     int weight,
-    boolean isPremiumTier
-) {}
+    boolean isPremiumTier,
+    // PermissionGroup.SalaryMultiplier (1.0 = none) - shown by the InventoryMenu premium-tier
+    // screen (docs/specs/inventory-menu/CONTENT_PORT_PLAN.md CP5).
+    double salaryMultiplier
+) {
+    public PermissionGroupSummary(int id, String name, int weight, boolean isPremiumTier) {
+        this(id, name, weight, isPremiumTier, 1.0);
+    }
+}

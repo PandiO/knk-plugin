@@ -1738,5 +1738,298 @@
         "variableBindings": []
       }
     ]
+  },
+  {
+    "id": 14,
+    "key": "premium.tiers",
+    "name": "&8Premium tiers",
+    "description": "Every premium tier (premium permission groups by weight) and the viewer's own. Content port CP5.",
+    "height": 3,
+    "growth": "Static",
+    "backgroundMaterialRefId": null,
+    "autoRefreshTicks": null,
+    "sections": [
+      {
+        "id": 25,
+        "name": "Header",
+        "kind": "StaticButtons",
+        "sortOrder": 0,
+        "displaySlot": 0,
+        "width": 9,
+        "height": 1,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "searchable": false,
+        "contentSourceId": null,
+        "contentSourceParamsJson": "{}",
+        "items": [
+          {
+            "id": 93,
+            "sortOrder": 0,
+            "slotOverride": 4,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 250,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "GOLD_BLOCK",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 251,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&6Premium tiers",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 252,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$premium.getTierLine$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 94,
+            "sortOrder": 1,
+            "slotOverride": 8,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 253,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BARRIER",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 254,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&c$menu.getBackLabel$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 255,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7$menu.getBackHint$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 43,
+                "actionTypeId": "menu.back",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      },
+      {
+        "id": 26,
+        "name": "Tiers",
+        "kind": "ContentGrid",
+        "sortOrder": 1,
+        "displaySlot": 9,
+        "width": 9,
+        "height": 1,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Scroll",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "searchable": false,
+        "contentSourceId": "premium.tiers",
+        "contentSourceParamsJson": "{}",
+        "items": [
+          {
+            "id": 97,
+            "sortOrder": 0,
+            "slotOverride": null,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": true,
+            "variableBindings": [
+              {
+                "id": 262,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "$row.getMaterial$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 263,
+                "targetProperty": "DisplayMode",
+                "sortOrder": 0,
+                "expression": "$row.getDisplayMode$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 264,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&6$row.getName$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 265,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$row.getLoreLines$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 95,
+            "sortOrder": 118,
+            "slotOverride": 18,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 256,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "ARROW",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 257,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aPrevious page",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 258,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 44,
+                "actionTypeId": "menu.page.prev",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 96,
+            "sortOrder": 126,
+            "slotOverride": 26,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 259,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "ARROW",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 260,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aNext page",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 261,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 45,
+                "actionTypeId": "menu.page.next",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      }
+    ]
   }
 ]
