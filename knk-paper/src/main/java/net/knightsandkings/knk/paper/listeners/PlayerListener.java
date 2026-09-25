@@ -11,7 +11,9 @@ import java.util.logging.Logger;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.GameMode;
+import org.bukkit.Location;
 import org.bukkit.Sound;
+import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -37,6 +39,7 @@ import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.paper.KnKPlugin;
 import net.knightsandkings.knk.paper.cache.CacheManager;
+import net.knightsandkings.knk.paper.modes.ModeService;
 import net.knightsandkings.knk.paper.permissions.KnkPermissible;
 import net.knightsandkings.knk.paper.utils.ColorOptions;
 import net.knightsandkings.knk.paper.utils.ScoreboardUtil;
@@ -134,15 +137,12 @@ public class PlayerListener implements Listener {
         UserSummary user = cacheManager.getUserCache().getByUuid(player.getUniqueId()).orElse(null);
         reportPresence(user, true);
 
+		// The vanilla "X joined the game" broadcast is replaced with this custom line; the
+		// personal "Welcome back"/balance greeting is UserAccountListener's job (it fetches
+		// fresh userData asynchronously and also handles duplicate-account/link prompts) — this
+		// listener used to send its own, duplicate "Welcome back" message from a synchronous,
+		// possibly-stale cache read. Removed rather than kept in sync with two sources of truth.
 		e.joinMessage(Component.text("► " + "Player " + player.getName() + " joined").color(ColorOptions.message));
-        
-        player.sendMessage(Component.text("Welcome back " + player.getName()).color(ColorOptions.messageachievement));
-		if (user != null) {
-			player.sendMessage(Component.text("You have " + user.coins() + " coins.").color(ColorOptions.messageachievement));
-			if (user.isNewUser()) {
-				player.sendMessage(Component.text("It looks like this is your first time playing! Enjoy your adventure!").color(ColorOptions.messageachievement));
-			}
-		}
 
 		if (!knkPermissible.hasPermission(player, "knk.mode.owner")) {
 			player.setGameMode(GameMode.SURVIVAL);
@@ -297,26 +297,49 @@ public class PlayerListener implements Listener {
 		player.sendMessage(Component.text("You died").color(ColorOptions.message));
 	}
 
+	/**
+	 * Forces respawn to the default town for regular (default-rank or premium-tier) players.
+	 * Staff/owner-mode players are exempt, matching the same {@code knk.mode.*} gate the join
+	 * handler above already uses for its gamemode/teleport reset — an elevated-rank player who
+	 * dies should respawn normally (bed/anchor/world spawn), not get routed back to town.
+	 *
+	 * {@code PlayerRespawnEvent} requires the location to be set before the handler returns, so
+	 * this blocks on the fetch rather than using {@code .thenAccept(...)} (the previous version's
+	 * bug — its async callback always ran after Bukkit had already finished processing the
+	 * respawn, so {@code setRespawnLocation} was never actually reachable). {@code CACHE_FIRST}
+	 * means this only round-trips to the API on a cold cache, matching the blocking {@code .join()}
+	 * already used for {@link #onValidateLogin}'s comparable bounded lookups.
+	 */
 	@EventHandler
 	public void onPlayerRespawn(PlayerRespawnEvent e) {
 		Player player = e.getPlayer();
-		
-		// Fetch default town using TownsDataAccess (typically cached after server startup)
-		townsDataAccess.getByIdAsync(4, FetchPolicy.CACHE_FIRST).thenAccept(result -> {
-			if (!result.isSuccess()) {
-				LOGGER.severe("Failed to load default town for respawn");
-				return;
-			}
 
-			TownDetail town = result.value().orElseThrow();
-			/**
-			 * TODO Implement logic to retrieve Bukkit Location from KnK location entity to set respawn location.
-			 */
-			// e.setRespawnLocation()
-		}).exceptionally(e2 -> {
-			LOGGER.log(Level.WARNING, "Error fetching default town for respawn", e2);
-			return null;
-		});
+		if (knkPermissible.hasPermission(player, ModeService.OWNER_NODE)
+				|| knkPermissible.hasPermission(player, ModeService.STAFF_NODE)) {
+			return;
+		}
+
+		FetchResult<TownDetail> result = townsDataAccess.getByIdAsync(DEFAULT_RESPAWN_TOWN_ID, FetchPolicy.CACHE_FIRST).join();
+		if (!result.isSuccess()) {
+			LOGGER.severe("Failed to load default town (id " + DEFAULT_RESPAWN_TOWN_ID + ") for respawn");
+			return;
+		}
+
+		TownDetail.Location location = result.value().orElseThrow().location();
+		if (location == null || location.world() == null || location.x() == null || location.y() == null || location.z() == null) {
+			LOGGER.warning("Default town (id " + DEFAULT_RESPAWN_TOWN_ID + ") has no location configured; respawn not overridden");
+			return;
+		}
+
+		World world = Bukkit.getWorld(location.world());
+		if (world == null) {
+			LOGGER.warning("Default town respawn world '" + location.world() + "' is not loaded; respawn not overridden");
+			return;
+		}
+
+		float yaw = location.yaw() != null ? location.yaw() : 0f;
+		float pitch = location.pitch() != null ? location.pitch() : 0f;
+		e.setRespawnLocation(new Location(world, location.x(), location.y(), location.z(), yaw, pitch));
 	}
 
 	@EventHandler
