@@ -116,6 +116,20 @@ class MenuRegistriesPhase9Test {
         assertEquals(1, calls.get());
     }
 
+    @Test
+    void aThrowingProviderResolvesAsNullInsteadOfBreakingThePass() {
+        MenuVariableProviderRegistry<String> registry = new MenuVariableProviderRegistry<>();
+        registry.register("broken", String.class, (player, ctx) -> {
+            throw new IllegalStateException("siege runtime not ready");
+        });
+        MenuVariableScope scope = registry.scope("Steve", MenuContextParams.EMPTY, Map.of());
+
+        assertNull(scope.get("broken"));
+        assertEquals("[]", VariableResolver.resolveLore(List.of(
+                Phase9Fixtures.binding(1, "Lore", 0, "$broken.length$", "OnDirty", null)),
+                new MenuSession(java.util.UUID.randomUUID()), scope, 0L).toString());
+    }
+
     // ---- E3: row sources ----
 
     @Test

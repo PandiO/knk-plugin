@@ -5,6 +5,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * InventoryMenu Phase 9 (E2): the registry of getter-chain <em>root</em>
@@ -35,6 +37,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * click pass - see {@link #scope}.
  */
 public final class MenuVariableProviderRegistry<P> {
+
+    private static final Logger LOGGER = Logger.getLogger(MenuVariableProviderRegistry.class.getName());
 
     public static final String ROOT_CTX = "ctx";
     public static final String ROOT_MENU = "menu";
@@ -126,7 +130,15 @@ public final class MenuVariableProviderRegistry<P> {
             });
         }
         Map<String, Registration<P>> snapshot = Map.copyOf(roots);
-        return MenuVariableScope.root(engine, snapshot.keySet(),
-                root -> snapshot.get(root).provider().provide(player, ctx));
+        return MenuVariableScope.root(engine, snapshot.keySet(), root -> {
+            try {
+                return snapshot.get(root).provider().provide(player, ctx);
+            } catch (RuntimeException e) {
+                // A broken provider must not take the whole render/click down:
+                // its root resolves as null (lines using it are dropped/blank).
+                LOGGER.log(Level.WARNING, "Menu variable provider for root '" + root + "' failed", e);
+                return null;
+            }
+        });
     }
 }
