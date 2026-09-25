@@ -2,8 +2,10 @@ package net.knightsandkings.knk.paper.listeners;
 
 import java.util.Arrays;
 import java.util.Date;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -31,14 +33,18 @@ import io.papermc.paper.event.player.AsyncChatEvent;
 import net.knightsandkings.knk.core.dataaccess.FetchPolicy;
 import net.knightsandkings.knk.core.dataaccess.FetchResult;
 import net.knightsandkings.knk.core.dataaccess.FetchStatus;
+import net.knightsandkings.knk.core.dataaccess.ItemBlueprintsDataAccess;
+import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.TownsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
 import net.knightsandkings.knk.core.domain.towns.TownDetail;
 import net.knightsandkings.knk.core.domain.users.UserDetail;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
+import net.knightsandkings.knk.core.ports.api.KitsCommandApi;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.paper.KnKPlugin;
 import net.knightsandkings.knk.paper.cache.CacheManager;
+import net.knightsandkings.knk.paper.kit.KitGrantPlacer;
 import net.knightsandkings.knk.paper.modes.ModeService;
 import net.knightsandkings.knk.paper.permissions.KnkPermissible;
 import net.knightsandkings.knk.paper.utils.ColorOptions;
@@ -64,13 +70,28 @@ public class PlayerListener implements Listener {
 	private final CacheManager cacheManager;
 	private final KnkPermissible knkPermissible;
 	private final UsersCommandApi usersCommandApi;
+	private final KitsCommandApi kitsCommandApi;
+	private final ItemBlueprintsDataAccess itemBlueprintsDataAccess;
+	private final MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
 
-	public PlayerListener(UsersDataAccess usersDataAccess, TownsDataAccess townsDataAccess, CacheManager cacheManager, KnkPermissible knkPermissible, UsersCommandApi usersCommandApi) {
+	public PlayerListener(
+			UsersDataAccess usersDataAccess,
+			TownsDataAccess townsDataAccess,
+			CacheManager cacheManager,
+			KnkPermissible knkPermissible,
+			UsersCommandApi usersCommandApi,
+			KitsCommandApi kitsCommandApi,
+			ItemBlueprintsDataAccess itemBlueprintsDataAccess,
+			MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess
+	) {
 		this.usersDataAccess = usersDataAccess;
 		this.townsDataAccess = townsDataAccess;
 		this.cacheManager = cacheManager;
 		this.knkPermissible = knkPermissible;
 		this.usersCommandApi = usersCommandApi;
+		this.kitsCommandApi = kitsCommandApi;
+		this.itemBlueprintsDataAccess = itemBlueprintsDataAccess;
+		this.minecraftMaterialRefsDataAccess = minecraftMaterialRefsDataAccess;
 	}
 
 	@EventHandler
@@ -159,7 +180,59 @@ public class PlayerListener implements Listener {
 
 		if (user != null) {
 			triggerBackgroundSalaryPayout(player, user.id());
+
+			// docs/specs/kits/DESIGN.md §4.4: unifies starter-kit granting into the general Kit
+			// system - a brand-new account, not a real "if (user.isNewUser())" branch that
+			// predates this (none existed here; UserAccountListener's welcome message doesn't
+			// distinguish new/returning either - verified by reading both listeners directly).
+			if (user.isNewUser()) {
+				triggerBackgroundFirstJoinKits(player, user.id());
+			}
 		}
+	}
+
+	/**
+	 * Grants every GrantOnFirstJoin kit the account is gated to receive (docs/specs/kits/
+	 * DESIGN.md §4.4). Runs off the main thread and never blocks or delays the join; a failure
+	 * here is logged and otherwise invisible to the player - mirrors
+	 * {@link #triggerBackgroundSalaryPayout(Player, int)}'s exact fire-and-forget/logged-failure
+	 * pattern immediately above.
+	 */
+	private void triggerBackgroundFirstJoinKits(Player player, int userId) {
+		if (kitsCommandApi == null) {
+			return;
+		}
+		UUID uuid = player.getUniqueId();
+		kitsCommandApi.grantFirstJoinKitsAsync(userId)
+			.thenCompose(claimResults -> {
+				if (claimResults == null || claimResults.isEmpty()) {
+					return CompletableFuture.completedFuture(List.<KitGrantPlacer.ResolvedItem>of());
+				}
+				List<CompletableFuture<List<KitGrantPlacer.ResolvedItem>>> resolveFutures = claimResults.stream()
+					.map(claimResult -> KitGrantPlacer.resolveAsync(claimResult, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess))
+					.toList();
+				return CompletableFuture.allOf(resolveFutures.toArray(new CompletableFuture[0]))
+					.thenApply(unused -> resolveFutures.stream()
+						.flatMap(f -> f.join().stream())
+						.toList());
+			})
+			.thenAccept(resolvedItems -> {
+				if (resolvedItems.isEmpty()) {
+					return;
+				}
+				Bukkit.getScheduler().runTask(KnKPlugin.getPlugin(KnKPlugin.class), () -> {
+					Player online = Bukkit.getPlayer(uuid);
+					if (online == null) {
+						return;
+					}
+					KitGrantPlacer.place(online, resolvedItems);
+					online.sendMessage(Component.text("You received your starter kit!").color(ColorOptions.messageachievement));
+				});
+			})
+			.exceptionally(ex -> {
+				LOGGER.log(Level.WARNING, "Failed to grant first-join kits for user " + userId, ex);
+				return null;
+			});
 	}
 
 	/**

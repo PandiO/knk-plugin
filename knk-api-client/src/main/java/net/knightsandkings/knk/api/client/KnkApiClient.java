@@ -31,6 +31,8 @@ import net.knightsandkings.knk.api.impl.PermissionGroupsQueryApiImpl;
 import net.knightsandkings.knk.api.impl.ClansQueryApiImpl;
 import net.knightsandkings.knk.api.impl.SiegeLobbiesQueryApiImpl;
 import net.knightsandkings.knk.api.impl.SiegeScenariosQueryApiImpl;
+import net.knightsandkings.knk.api.impl.KitsQueryApiImpl;
+import net.knightsandkings.knk.api.impl.KitsCommandApiImpl;
 import net.knightsandkings.knk.core.ports.api.HealthApi;
 import net.knightsandkings.knk.core.ports.api.TownsQueryApi;
 import net.knightsandkings.knk.core.ports.api.LocationsQueryApi;
@@ -56,6 +58,8 @@ import net.knightsandkings.knk.core.ports.api.PermissionGroupsQueryApi;
 import net.knightsandkings.knk.core.ports.api.ClansQueryApi;
 import net.knightsandkings.knk.core.ports.api.SiegeLobbiesQueryApi;
 import net.knightsandkings.knk.core.ports.api.SiegeScenariosQueryApi;
+import net.knightsandkings.knk.core.ports.api.KitsQueryApi;
+import net.knightsandkings.knk.core.ports.api.KitsCommandApi;
 import net.knightsandkings.knk.core.ports.api.RegionsCommandApi;
 import okhttp3.OkHttpClient;
 
@@ -103,6 +107,8 @@ public class KnkApiClient {
     private final ClansQueryApi clansQueryApi;
     private final SiegeLobbiesQueryApi siegeLobbiesQueryApi;
     private final SiegeScenariosQueryApi siegeScenariosQueryApi;
+    private final KitsQueryApi kitsQueryApi;
+    private final KitsCommandApi kitsCommandApi;
 
     private KnkApiClient(
         String baseUrl,
@@ -144,6 +150,8 @@ public class KnkApiClient {
         this.clansQueryApi = new ClansQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeLobbiesQueryApi = new SiegeLobbiesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeScenariosQueryApi = new SiegeScenariosQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.kitsQueryApi = new KitsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.kitsCommandApi = new KitsCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
     }
     
     public HealthApi getHealthApi() {
@@ -164,6 +172,14 @@ public class KnkApiClient {
 
     public ItemBlueprintsQueryApi getItemBlueprintsQueryApi() {
         return itemBlueprintsQueryApi;
+    }
+
+    public KitsQueryApi getKitsQueryApi() {
+        return kitsQueryApi;
+    }
+
+    public KitsCommandApi getKitsCommandApi() {
+        return kitsCommandApi;
     }
 
     public MinecraftMaterialRefsQueryApi getMinecraftMaterialRefsQueryApi() {

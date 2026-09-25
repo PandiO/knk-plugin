@@ -328,6 +328,20 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                 }
         );
 
+        // Dedicated KitScan entry point (docs/specs/kits/DESIGN.md §6.2), same shape as itemscan
+        // above: a shortcut into the same KnkTaskClaimCommand.onCommand /knk task-claim uses.
+        registry.register(
+                new CommandMetadata("kitscan", "Claim and scan your inventory for a KitScan WorldTask", "/knk kitscan claim <linkCode>", "knk.tasks",
+                        List.of("/knk kitscan claim ABC123")),
+                (sender, args) -> {
+                    if (args.length < 2 || !args[0].equalsIgnoreCase("claim")) {
+                        sender.sendMessage(ChatColor.YELLOW + "Usage: /knk kitscan claim <linkCode>");
+                        return true;
+                    }
+                    return taskClaimCommand.onCommand(sender, null, "knk", new String[]{args[1]});
+                }
+        );
+
         KnkTaskStatusCommand taskStatusCommand = new KnkTaskStatusCommand(plugin, worldTasksApi);
         registry.register(
                 new CommandMetadata("task-status", "Check world task status", "/knk task-status <id|linkCode>", "knk.tasks",

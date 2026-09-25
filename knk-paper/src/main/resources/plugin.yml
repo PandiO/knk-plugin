@@ -71,6 +71,13 @@ commands:
     aliases: [r]
     # No permission gate - same as /msg.
 
+  kit:
+    description: "List, claim, give, and purchase Kits (docs/specs/kits/DESIGN.md §4.3)"
+    usage: "/kit list | /kit get <name> | /kit give <player> <name> | /kit purchase <name> | /kit manage ..."
+    # No permission: here - each subcommand is gated individually on its own knk.kit.<action>
+    # node through KnkPermissible inside KitCommand, same reasoning /knk and /ownermode|/staffmode
+    # have none (Bukkit would check its own permission tree before this executor ever ran).
+
 permissions:
   knk.admin:
     description: >-
@@ -223,6 +230,42 @@ permissions:
       for an undeclared permission. A non-op needs a real PermissionGrant or group membership
       (authoring UI is docs/specs/user-features/IMPLEMENTATION_PLAN.md §6.2, a later phase) -
       until one exists, this node resolves undeclared and fails closed for that player.
+    default: op
+
+  knk.kit.list:
+    description: >-
+      List available kits via /kit list (docs/specs/kits/DESIGN.md §4.3). Resolved through the
+      new REST-backed permission model via KnkPermissible, not through Bukkit's own permission
+      tree - this plugin.yml declaration is for documentation/consistency only and isn't what
+      KnkPermissible actually checks. A Minecraft-op'd player short-circuits to allowed on every
+      node via KnkPermissible's own op check; a non-op needs a real PermissionGrant or group
+      membership, until which this node resolves undeclared and fails closed.
+    default: op
+
+  knk.kit.get:
+    description: >-
+      Self-claim a kit via /kit get <name> (docs/specs/kits/DESIGN.md §4.3). Same
+      KnkPermissible/op-bypass caveat as knk.kit.list.
+    default: op
+
+  knk.kit.give:
+    description: >-
+      Staff-give a kit to another player via /kit give <player> <name>, bypassing the
+      recipient's own gating/cooldown/cost (docs/specs/kits/DESIGN.md §0b/§4.1/§4.3). Same
+      KnkPermissible/op-bypass caveat as knk.kit.list.
+    default: op
+
+  knk.kit.purchase:
+    description: >-
+      Purchase a single-purchase-premium kit via /kit purchase <name> (docs/specs/kits/
+      DESIGN.md §4.3/§5.2). Same KnkPermissible/op-bypass caveat as knk.kit.list.
+    default: op
+
+  knk.kit.manage:
+    description: >-
+      Gates /kit manage's FormWizard-pointer subcommands (docs/specs/kits/DESIGN.md §0c/§4.5) -
+      no in-game Kit CRUD exists, this only guards advertising the FormWizard route to players
+      with no reason to see it. Same KnkPermissible/op-bypass caveat as knk.kit.list.
     default: op
 
   knk.freeze:
