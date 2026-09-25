@@ -1,19 +1,30 @@
 package net.knightsandkings.knk.paper.menu.content;
 
+import net.knightsandkings.knk.core.dataaccess.ItemBlueprintsDataAccess;
+import net.knightsandkings.knk.core.dataaccess.KitsDataAccess;
+import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
 import net.knightsandkings.knk.core.menu.ActionRegistry;
 import net.knightsandkings.knk.core.menu.ConditionRegistry;
 import net.knightsandkings.knk.core.menu.MenuContentSourceRegistry;
 import net.knightsandkings.knk.core.menu.MenuVariableProviderRegistry;
+import net.knightsandkings.knk.paper.kit.KitGrantFlow;
 import net.knightsandkings.knk.paper.menu.MenuActionHandlers;
 import net.knightsandkings.knk.paper.menu.MenuConditionHandlers;
 import net.knightsandkings.knk.paper.menu.MenuContentSourceHandlers;
+import net.knightsandkings.knk.paper.menu.MenuFeature;
 import net.knightsandkings.knk.paper.menu.MenuFeatureRegistries;
 import net.knightsandkings.knk.paper.menu.MenuVariableContext;
-import net.knightsandkings.knk.core.dataaccess.ItemBlueprintsDataAccess;
+
+import java.time.Clock;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.mockito.Mockito.mock;
 
-/** Test registries: engine defaults + every content-port feature, as {@code KnKPlugin} registers them. */
+/**
+ * Test registries: engine defaults + every content-port feature, as {@code KnKPlugin} registers
+ * them. Features are built over mocks unless a test passes its own instance (matched by class).
+ */
 final class ContentFeatures {
 
     private ContentFeatures() {
@@ -29,9 +40,26 @@ final class ContentFeatures {
         return registries;
     }
 
-    static MenuFeatureRegistries all() {
+    static List<MenuFeature> defaultFeatures() {
+        List<MenuFeature> features = new ArrayList<>();
+        features.add(new HubMenuFeature());
+        features.add(new KitsMenuFeature(mock(KitsDataAccess.class), mock(ItemBlueprintsDataAccess.class),
+                mock(MinecraftMaterialRefsDataAccess.class), mock(KitGrantFlow.class), Clock.systemUTC()));
+        return features;
+    }
+
+    /** Engine defaults + every content feature; {@code overrides} replace the default of the same class. */
+    static MenuFeatureRegistries all(MenuFeature... overrides) {
         MenuFeatureRegistries registries = engineDefaults();
-        new HubMenuFeature().registerMenuHandlers(registries);
+        for (MenuFeature feature : defaultFeatures()) {
+            MenuFeature chosen = feature;
+            for (MenuFeature override : overrides) {
+                if (override.getClass() == feature.getClass()) {
+                    chosen = override;
+                }
+            }
+            chosen.registerMenuHandlers(registries);
+        }
         return registries;
     }
 }

@@ -1,19 +1,10 @@
 package net.knightsandkings.knk.paper.commands;
 
-import net.knightsandkings.knk.core.dataaccess.ItemBlueprintsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.KitsDataAccess;
-import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
 import net.knightsandkings.knk.core.domain.common.PagedQuery;
 import net.knightsandkings.knk.core.domain.item.KnkKit;
 import net.knightsandkings.knk.core.domain.item.KnkKitAvailability;
-import net.knightsandkings.knk.core.domain.item.KnkKitClaimResult;
-import net.knightsandkings.knk.core.domain.item.KnkKitPurchaseResult;
-import net.knightsandkings.knk.core.domain.users.UserSummary;
-import net.knightsandkings.knk.core.exception.ApiException;
-import net.knightsandkings.knk.core.ports.api.KitsCommandApi;
-import net.knightsandkings.knk.paper.cache.CacheManager;
-import net.knightsandkings.knk.paper.kit.KitGrantPlacer;
-import net.knightsandkings.knk.paper.permissions.KnkPermissible;
+import net.knightsandkings.knk.paper.kit.KitGrantFlow;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
@@ -38,33 +29,21 @@ import java.util.concurrent.CompletableFuture;
  * {@code ModeCommand}'s precedent: Bukkit would check a plugin.yml node before this executor
  * ever ran, which would make per-subcommand gating (list/get/give/purchase/manage each their
  * own node) unreachable.
+ * <p>
+ * get/give/purchase go through {@link KitGrantFlow} - the same code path the
+ * {@code kits.overview} menu uses (Kits DESIGN.md §7, CONTENT_PORT_PLAN.md CP2); this class only
+ * parses arguments and resolves the kit by name.
  */
 public class KitCommand implements CommandExecutor {
 
     private final Plugin plugin;
     private final KitsDataAccess kitsDataAccess;
-    private final KitsCommandApi kitsCommandApi;
-    private final ItemBlueprintsDataAccess itemBlueprintsDataAccess;
-    private final MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
-    private final KnkPermissible knkPermissible;
-    private final CacheManager cacheManager;
+    private final KitGrantFlow kitGrantFlow;
 
-    public KitCommand(
-            Plugin plugin,
-            KitsDataAccess kitsDataAccess,
-            KitsCommandApi kitsCommandApi,
-            ItemBlueprintsDataAccess itemBlueprintsDataAccess,
-            MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess,
-            KnkPermissible knkPermissible,
-            CacheManager cacheManager
-    ) {
+    public KitCommand(Plugin plugin, KitsDataAccess kitsDataAccess, KitGrantFlow kitGrantFlow) {
         this.plugin = plugin;
         this.kitsDataAccess = kitsDataAccess;
-        this.kitsCommandApi = kitsCommandApi;
-        this.itemBlueprintsDataAccess = itemBlueprintsDataAccess;
-        this.minecraftMaterialRefsDataAccess = minecraftMaterialRefsDataAccess;
-        this.knkPermissible = knkPermissible;
-        this.cacheManager = cacheManager;
+        this.kitGrantFlow = kitGrantFlow;
     }
 
     @Override
@@ -159,18 +138,15 @@ public class KitCommand implements CommandExecutor {
         String kitName = String.join(" ", args);
         sender.sendMessage(ChatColor.GRAY + "Claiming kit \"" + kitName + "\"...");
 
-        resolveKitIdByName(kitName)
-                .thenCompose(kitId -> {
-                    if (kitId == null) {
-                        return CompletableFuture.completedFuture((KnkKitClaimResult) null);
-                    }
-                    return kitsCommandApi.claimAsync(userId, kitId);
-                })
-                .thenCompose(claimResult -> grantAndPlace(claimResult, sender, player, kitName, "claimed"))
-                .exceptionally(ex -> {
-                    Bukkit.getScheduler().runTask(plugin, () -> printError(sender, ex));
-                    return null;
-                });
+        resolveKitIdByName(kitName).whenComplete((kitId, ex) -> Bukkit.getScheduler().runTask(plugin, () -> {
+            if (ex != null) {
+                KitGrantFlow.printError(sender, ex);
+            } else if (kitId == null) {
+                sender.sendMessage(ChatColor.RED + "No kit named \"" + kitName + "\" found.");
+            } else {
+                kitGrantFlow.claim(player, userId, kitId, kitName);
+            }
+        }));
     }
 
     // ===== /kit give <player> <name> =====
@@ -194,7 +170,7 @@ public class KitCommand implements CommandExecutor {
             return;
         }
 
-        Integer targetUserId = resolveUserId(targetPlayer);
+        Integer targetUserId = kitGrantFlow.resolveUserId(targetPlayer);
         if (targetUserId == null) {
             sender.sendMessage(ChatColor.RED + "That player's account isn't loaded yet - try again in a moment.");
             return;
@@ -203,18 +179,15 @@ public class KitCommand implements CommandExecutor {
         String kitName = String.join(" ", Arrays.copyOfRange(args, 1, args.length));
         sender.sendMessage(ChatColor.GRAY + "Giving kit \"" + kitName + "\" to " + targetPlayer.getName() + "...");
 
-        resolveKitIdByName(kitName)
-                .thenCompose(kitId -> {
-                    if (kitId == null) {
-                        return CompletableFuture.completedFuture((KnkKitClaimResult) null);
-                    }
-                    return kitsCommandApi.giveAsync(targetUserId, kitId);
-                })
-                .thenCompose(claimResult -> grantAndPlace(claimResult, sender, targetPlayer, kitName, "given"))
-                .exceptionally(ex -> {
-                    Bukkit.getScheduler().runTask(plugin, () -> printError(sender, ex));
-                    return null;
-                });
+        resolveKitIdByName(kitName).whenComplete((kitId, ex) -> Bukkit.getScheduler().runTask(plugin, () -> {
+            if (ex != null) {
+                KitGrantFlow.printError(sender, ex);
+            } else if (kitId == null) {
+                sender.sendMessage(ChatColor.RED + "No kit named \"" + kitName + "\" found.");
+            } else {
+                kitGrantFlow.give(senderPlayer, targetPlayer, targetUserId, kitId, kitName);
+            }
+        }));
     }
 
     // ===== /kit purchase <name> =====
@@ -235,27 +208,15 @@ public class KitCommand implements CommandExecutor {
         String kitName = String.join(" ", args);
         sender.sendMessage(ChatColor.GRAY + "Purchasing kit \"" + kitName + "\"...");
 
-        resolveKitIdByName(kitName)
-                .thenCompose(kitId -> {
-                    if (kitId == null) {
-                        return CompletableFuture.completedFuture((KnkKitPurchaseResult) null);
-                    }
-                    return kitsCommandApi.purchaseAsync(userId, kitId);
-                })
-                .thenAccept(result -> Bukkit.getScheduler().runTask(plugin, () -> printPurchaseResult(sender, kitName, result)))
-                .exceptionally(ex -> {
-                    Bukkit.getScheduler().runTask(plugin, () -> printError(sender, ex));
-                    return null;
-                });
-    }
-
-    private void printPurchaseResult(CommandSender sender, String kitName, KnkKitPurchaseResult result) {
-        if (result == null) {
-            sender.sendMessage(ChatColor.RED + "No kit named \"" + kitName + "\" found.");
-            return;
-        }
-        sender.sendMessage(ChatColor.GREEN + "Purchased \"" + kitName + "\" for " + ChatColor.GOLD +
-                result.gemsPaid() + " gems" + ChatColor.GREEN + ". Use /kit get " + kitName + " to claim it.");
+        resolveKitIdByName(kitName).whenComplete((kitId, ex) -> Bukkit.getScheduler().runTask(plugin, () -> {
+            if (ex != null) {
+                KitGrantFlow.printError(sender, ex);
+            } else if (kitId == null) {
+                sender.sendMessage(ChatColor.RED + "No kit named \"" + kitName + "\" found.");
+            } else {
+                kitGrantFlow.purchase(player, userId, kitId, kitName);
+            }
+        }));
     }
 
     // ===== /kit manage - FormWizard pointer only, no CRUD (DESIGN.md §0c/§4.5) =====
@@ -275,38 +236,6 @@ public class KitCommand implements CommandExecutor {
         };
 
         sender.sendMessage(ChatColor.YELLOW + message);
-    }
-
-    // ===== Shared grant/place plumbing (DESIGN.md §4.2) =====
-
-    private CompletableFuture<Void> grantAndPlace(
-            KnkKitClaimResult claimResult,
-            CommandSender sender,
-            Player recipient,
-            String kitName,
-            String verb
-    ) {
-        if (claimResult == null) {
-            Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(ChatColor.RED + "No kit named \"" + kitName + "\" found."));
-            return CompletableFuture.completedFuture(null);
-        }
-
-        return KitGrantPlacer.resolveAsync(claimResult, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess)
-                .thenAccept(resolvedItems -> Bukkit.getScheduler().runTask(plugin, () -> {
-                    if (!recipient.isOnline()) {
-                        return;
-                    }
-                    KitGrantPlacer.PlacementSummary summary = KitGrantPlacer.place(recipient, resolvedItems);
-                    sender.sendMessage(ChatColor.GREEN + "Kit \"" + kitName + "\" " + verb + " to " +
-                            ChatColor.AQUA + recipient.getName() + ChatColor.GREEN + ".");
-                    if (summary.displaced() > 0 || summary.dropped() > 0) {
-                        sender.sendMessage(ChatColor.GRAY + "  placed=" + summary.placed() + " merged=" + summary.merged() +
-                                " displaced=" + summary.displaced() + " dropped=" + summary.dropped());
-                    }
-                    if (!recipient.equals(sender)) {
-                        recipient.sendMessage(ChatColor.GREEN + "You received the \"" + kitName + "\" kit.");
-                    }
-                }));
     }
 
     // ===== Helpers =====
@@ -335,42 +264,15 @@ public class KitCommand implements CommandExecutor {
     }
 
     private boolean requirePermission(Player player, String node) {
-        if (knkPermissible.hasPermission(player, node)) {
-            return true;
-        }
-        player.sendMessage(ChatColor.RED + "You don't have permission to do that.");
-        return false;
+        return kitGrantFlow.requirePermission(player, node);
     }
 
     private Integer requireUserId(Player player) {
-        Integer userId = resolveUserId(player);
-        if (userId == null) {
-            player.sendMessage(ChatColor.RED + "Your account isn't loaded yet - try again in a moment.");
-        }
-        return userId;
-    }
-
-    private Integer resolveUserId(Player player) {
-        return cacheManager.getUserCache().getByUuid(player.getUniqueId())
-                .map(UserSummary::id)
-                .orElse(null);
+        return kitGrantFlow.requireUserId(player);
     }
 
     private void printError(CommandSender sender, Throwable ex) {
-        Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-
-        if (cause instanceof ApiException apiEx) {
-            if (apiEx.getStatusCode() > 0) {
-                sender.sendMessage(ChatColor.RED + "HTTP " + apiEx.getStatusCode());
-                if (apiEx.getResponseBody() != null && !apiEx.getResponseBody().isEmpty()) {
-                    sender.sendMessage(ChatColor.RED + apiEx.getResponseBody());
-                }
-            } else {
-                sender.sendMessage(ChatColor.RED + apiEx.getMessage());
-            }
-        } else {
-            sender.sendMessage(ChatColor.RED + (cause.getMessage() != null ? cause.getMessage() : cause.getClass().getSimpleName()));
-        }
+        KitGrantFlow.printError(sender, ex);
     }
 
     private String safe(String value, String fallback) {

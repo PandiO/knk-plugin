@@ -163,6 +163,7 @@ public class KnKPlugin extends JavaPlugin {
     private ItemBlueprintsDataAccess itemBlueprintsDataAccess;
     private KitsDataAccess kitsDataAccess;
     private MenuTemplatesDataAccess menuTemplatesDataAccess;
+    private net.knightsandkings.knk.paper.kit.KitGrantFlow kitGrantFlow;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private PermissionsDataAccess permissionsDataAccess;
     private KnkPermissible knkPermissible;
@@ -522,6 +523,11 @@ public class KnKPlugin extends JavaPlugin {
             // MenuDefinitionValidationRunner below, which locks all four registries
             // (a later registration throws). Engine defaults first. Siege Phase 8b:
             // add the SiegeMenuFeature to this list.
+            // Content port CP2: /kit and the kits.overview menu share one grant path.
+            this.kitGrantFlow = new net.knightsandkings.knk.paper.kit.KitGrantFlow(
+                MenuService.mainThreadExecutor(this), kitsCommandApi, itemBlueprintsDataAccess,
+                minecraftMaterialRefsDataAccess, knkPermissible, cacheManager.getUserCache()
+            );
             List<MenuFeature> menuFeatures = List.of(
                 registries -> {
                     MenuVariableContext.registerDefaults(registries.variables());
@@ -530,7 +536,10 @@ public class KnKPlugin extends JavaPlugin {
                     MenuConditionHandlers.registerDefaults(registries.conditions());
                 },
                 new ExampleDomainMenuFeature(),
-                new HubMenuFeature()
+                new HubMenuFeature(),
+                new net.knightsandkings.knk.paper.menu.content.KitsMenuFeature(
+                    kitsDataAccess, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, kitGrantFlow,
+                    java.time.Clock.systemUTC())
             );
             menuFeatures.forEach(feature -> feature.registerMenuHandlers(menuRegistries));
 
@@ -857,11 +866,7 @@ public class KnKPlugin extends JavaPlugin {
         registerSimpleCommand("kit", new net.knightsandkings.knk.paper.commands.KitCommand(
             this,
             kitsDataAccess,
-            kitsCommandApi,
-            itemBlueprintsDataAccess,
-            minecraftMaterialRefsDataAccess,
-            knkPermissible,
-            this.getCacheManager()
+            kitGrantFlow
         ));
 
         // Content port CP1: /menu opens the InventoryMenu hub (docs/specs/inventory-menu/CONTENT_PORT_PLAN.md §3).
