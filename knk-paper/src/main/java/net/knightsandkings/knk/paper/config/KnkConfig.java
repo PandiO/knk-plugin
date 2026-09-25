@@ -132,7 +132,8 @@ public record KnkConfig(
         EntitySettings permissions,
         EntitySettings grades,
         EntitySettings tags,
-        EntitySettings domainCatalog
+        EntitySettings domainCatalog,
+        EntitySettings siege
     ) {
         public static EntityCacheSettings defaults() {
             return new EntityCacheSettings(
@@ -154,7 +155,10 @@ public record KnkConfig(
                 new EntitySettings(null, 30, null, 120, "CACHE_FIRST", true, 3, 100),
                 EntitySettings.defaults(), // grades
                 EntitySettings.defaults(), // tags
-                EntitySettings.defaults()  // domainCatalog
+                EntitySettings.defaults(), // domainCatalog
+                // siege runtime-config: refreshed explicitly between matches (Siege Phase 4), so a
+                // long TTL only bounds how old a cache-first read may be
+                new EntitySettings(30, null, 240, null, "CACHE_FIRST", true, 3, 200)
             );
         }
     }

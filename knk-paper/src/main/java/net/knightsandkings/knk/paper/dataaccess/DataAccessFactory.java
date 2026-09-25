@@ -276,6 +276,26 @@ public class DataAccessFactory {
         return new HealthDataAccess(ttl, healthApi, settings);
     }
     
+    /**
+     * Create the SiegeDataAccess gateway (Siege Phase 4) with configured settings.
+     * <p>
+     * Like {@link #createPermissionsDataAccess}, the TTL comes from config.yml's own
+     * entities.siege block rather than the global cache TTL: the runtime config is refreshed
+     * explicitly between matches, so its TTL is long.
+     *
+     * @param siegeLobbiesQueryApi SiegeLobbies query API port (runtime-config)
+     * @param siegeScenariosQueryApi SiegeScenarios query API port (readiness)
+     * @return Configured SiegeDataAccess instance
+     */
+    public SiegeDataAccess createSiegeDataAccess(
+        SiegeLobbiesQueryApi siegeLobbiesQueryApi,
+        SiegeScenariosQueryApi siegeScenariosQueryApi
+    ) {
+        KnkConfig.EntitySettings entityConfig = entitySettings.siege();
+        DataAccessSettings settings = buildSettings(entityConfig, "Siege");
+        return new SiegeDataAccess(entityConfig.ttl(), siegeLobbiesQueryApi, siegeScenariosQueryApi, settings);
+    }
+
     // ==================== Helper Methods ====================
     
     /**
