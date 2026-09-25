@@ -8,6 +8,8 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 
+import java.util.function.Consumer;
+
 /**
  * Siege session handling (DESIGN §6.8, §9.2):
  * <ul>
@@ -18,14 +20,18 @@ import org.bukkit.event.player.PlayerQuitEvent;
  *       crash restore everything. Runs two ticks later so it lands after {@code PlayerListener.onJoin}'s
  *       spawn teleport and the other join handlers.</li>
  * </ul>
+ * Every join then runs the siege-enchantment stripping sweep (DESIGN §9.4: a crash or failed restore).
  * Phase 7 adds the scenario-area lockdown (region entry, teleports) here.
  */
 public class SiegeSessionListener implements Listener {
 
     private final SiegeService service;
+    private final Consumer<Player> joinSweep;
 
-    public SiegeSessionListener(SiegeService service) {
+    /** @param joinSweep runs after the join restore for everyone (5c: siege-enchantment stripping sweep) */
+    public SiegeSessionListener(SiegeService service, Consumer<Player> joinSweep) {
         this.service = service;
+        this.joinSweep = joinSweep == null ? p -> { } : joinSweep;
     }
 
     @EventHandler(priority = EventPriority.LOW)
@@ -37,7 +43,9 @@ public class SiegeSessionListener implements Listener {
     public void onJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
         service.later(2L, () -> {
-            if (player.isOnline()) service.handleJoin(player);
+            if (!player.isOnline()) return;
+            service.handleJoin(player);
+            joinSweep.accept(player);
         });
     }
 }
