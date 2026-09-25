@@ -240,6 +240,11 @@ public class UsersDataAccessTest {
      */
     private class StubUsersCommandApi implements UsersCommandApi {
         @Override
+        public UsersCommandApi withActor(int actorUserId) {
+            return this;
+        }
+
+        @Override
         public CompletableFuture<Void> setCoinsById(int id, int coins) {
             return CompletableFuture.completedFuture(null);
         }

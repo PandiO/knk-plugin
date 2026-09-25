@@ -175,7 +175,7 @@ public class UserManagementCommand implements CommandExecutor {
             // Offline target: let the API queue it so it shows when they next join.
             boolean targetOnline = Bukkit.getPlayerExact(target.username()) != null;
 
-            usersCommandApi.adjustBalancesById(target.id(), coinsDelta, gemsDelta, experienceDelta, reason, !targetOnline)
+            actorApi(sender).thenCompose(api -> api.adjustBalancesById(target.id(), coinsDelta, gemsDelta, experienceDelta, reason, !targetOnline))
                 .thenAccept(result -> Bukkit.getScheduler().runTask(plugin, () -> {
                     String verb = delta > 0 ? "Increased" : "Decreased";
                     sender.sendMessage(ChatColor.GREEN + verb + " " + target.username() + "'s " + property
@@ -212,7 +212,7 @@ public class UserManagementCommand implements CommandExecutor {
             return;
         }
 
-        resolveTarget(sender, targetName, target -> withRankCheck(sender, target, () ->
+        resolveTarget(sender, targetName, target -> withRankCheck(sender, target, api ->
             permissionGroupsQueryApi.list().thenAccept(groups -> {
                 PermissionGroupSummary group = groups.stream()
                     .filter(g -> g.name().equalsIgnoreCase(groupName))
@@ -223,8 +223,8 @@ public class UserManagementCommand implements CommandExecutor {
                     return;
                 }
                 CompletableFuture<Void> action_ = action.equals("add")
-                    ? usersCommandApi.addGroupMembership(target.id(), group.id(), expiresAt)
-                    : usersCommandApi.removeGroupMembership(target.id(), group.id());
+                    ? api.addGroupMembership(target.id(), group.id(), expiresAt)
+                    : api.removeGroupMembership(target.id(), group.id());
                 boolean adding = action.equals("add");
                 action_.thenAccept(v -> Bukkit.getScheduler().runTask(plugin, () -> {
                     String verb = adding ? "Added" : "Removed";
@@ -265,10 +265,10 @@ public class UserManagementCommand implements CommandExecutor {
         }
         java.time.OffsetDateTime finalExpiresAt = expiresAt;
 
-        resolveTarget(sender, targetName, target -> withRankCheck(sender, target, () -> {
+        resolveTarget(sender, targetName, target -> withRankCheck(sender, target, api -> {
             CompletableFuture<Void> action_ = action.equals("grant")
-                ? usersCommandApi.grantPermission(target.id(), node, finalExpiresAt)
-                : usersCommandApi.revokePermission(target.id(), node);
+                ? api.grantPermission(target.id(), node, finalExpiresAt)
+                : api.revokePermission(target.id(), node);
             action_.thenAccept(v -> Bukkit.getScheduler().runTask(plugin, () -> {
                 String verb = action.equals("grant") ? "Granted" : "Revoked";
                 String prep = action.equals("grant") ? " to " : " from ";
@@ -284,11 +284,12 @@ public class UserManagementCommand implements CommandExecutor {
     /**
      * Resolves the sender's own account (Bukkit.getPlayer only, console senders are already
      * assumed to outrank everyone by convention elsewhere in /knk), checks RankHierarchy, and
-     * only runs onAllowed if the actor's highest group weight exceeds the target's.
+     * only runs onAllowed if the actor's highest group weight exceeds the target's. onAllowed gets
+     * the command API attributed to that actor (content port CP7); console gets the plain one.
      */
-    private void withRankCheck(CommandSender sender, UserSummary target, Runnable onAllowed) {
+    private void withRankCheck(CommandSender sender, UserSummary target, Consumer<UsersCommandApi> onAllowed) {
         if (!(sender instanceof Player senderPlayer)) {
-            onAllowed.run(); // Console always allowed - matches /knk gate admin's console-safe precedent.
+            onAllowed.accept(usersCommandApi); // Console always allowed - matches /knk gate admin's console-safe precedent.
             return;
         }
         resolveTarget(sender, senderPlayer.getName(), actor ->
@@ -297,12 +298,28 @@ public class UserManagementCommand implements CommandExecutor {
                     sender.sendMessage(ChatColor.RED + "You cannot act on a player of equal or higher rank.");
                     return;
                 }
-                onAllowed.run();
+                onAllowed.accept(usersCommandApi.withActor(actor.id()));
             })).exceptionally(ex -> {
                 Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(ChatColor.RED + "Failed to check rank: " + describeError(ex)));
                 return null;
             })
         );
+    }
+
+    /**
+     * Content port CP7: the command API attributed to the acting player (their knk user id, via
+     * the cache-first user lookup), or the plain API for the console / an unresolvable account -
+     * a missing actor never blocks the action, it only leaves the audit actor empty as before.
+     */
+    CompletableFuture<UsersCommandApi> actorApi(CommandSender sender) {
+        if (!(sender instanceof Player player)) {
+            return CompletableFuture.completedFuture(usersCommandApi);
+        }
+        return usersDataAccess.getByUuidAsync(player.getUniqueId())
+            .thenApply(result -> result != null && result.isSuccess() && result.value().isPresent()
+                ? usersCommandApi.withActor(result.value().get().id())
+                : usersCommandApi)
+            .exceptionally(ex -> usersCommandApi);
     }
 
     /**
