@@ -119,25 +119,37 @@ public class UsersMapper {
     public static net.knightsandkings.knk.core.domain.users.BalanceAdjustmentResult mapBalanceAdjustmentResult(
         net.knightsandkings.knk.api.dto.BalanceAdjustmentResultDto dto
     ) {
-        net.knightsandkings.knk.core.domain.users.TitleChangeResult titleChange = null;
-        if (dto.titleChange() != null) {
-            var tc = dto.titleChange();
-            titleChange = new net.knightsandkings.knk.core.domain.users.TitleChangeResult(
-                tc.direction(),
-                tc.fromTitleBracketId(),
-                tc.fromTitleName(),
-                tc.toTitleBracketId(),
-                tc.toTitleName(),
-                tc.crossedTitles().stream()
-                    .map(c -> new net.knightsandkings.knk.core.domain.users.TitleCrossing(c.titleBracketId(), c.titleName()))
-                    .toList(),
-                tc.coinBonusGranted(),
-                tc.gemBonusGranted(),
-                tc.expBonusGranted()
-            );
-        }
         return new net.knightsandkings.knk.core.domain.users.BalanceAdjustmentResult(
-            dto.newCoins(), dto.newGems(), dto.newExperiencePoints(), titleChange
+            dto.newCoins(), dto.newGems(), dto.newExperiencePoints(), mapTitleChange(dto.titleChange())
+        );
+    }
+
+    public static net.knightsandkings.knk.core.domain.users.PlayerNotification mapPlayerNotification(
+        net.knightsandkings.knk.api.dto.PlayerNotificationDto dto
+    ) {
+        return new net.knightsandkings.knk.core.domain.users.PlayerNotification(
+            dto.id(), dto.userId(), dto.uuid(), dto.username(), dto.type(), mapTitleChange(dto.titleChange())
+        );
+    }
+
+    private static net.knightsandkings.knk.core.domain.users.TitleChangeResult mapTitleChange(
+        net.knightsandkings.knk.api.dto.TitleChangeResultDto tc
+    ) {
+        if (tc == null) {
+            return null;
+        }
+        return new net.knightsandkings.knk.core.domain.users.TitleChangeResult(
+            tc.direction(),
+            tc.fromTitleBracketId(),
+            tc.fromTitleName(),
+            tc.toTitleBracketId(),
+            tc.toTitleName(),
+            tc.crossedTitles() == null ? java.util.List.of() : tc.crossedTitles().stream()
+                .map(c -> new net.knightsandkings.knk.core.domain.users.TitleCrossing(c.titleBracketId(), c.titleName()))
+                .toList(),
+            tc.coinBonusGranted(),
+            tc.gemBonusGranted(),
+            tc.expBonusGranted()
         );
     }
 }

@@ -111,6 +111,7 @@ import net.knightsandkings.knk.paper.tasks.WgRegionIdTaskHandler;
 import net.knightsandkings.knk.paper.tasks.LocationTaskHandler;
 import net.knightsandkings.knk.paper.tasks.WorldTaskHandlerRegistry;
 import net.knightsandkings.knk.paper.tasks.HeadlessWorldTaskPoller;
+import net.knightsandkings.knk.paper.tasks.PlayerNotificationPoller;
 import net.knightsandkings.knk.paper.tasks.GateBlockScanTaskHandler;
 import net.knightsandkings.knk.paper.tasks.GateDoorRegionCaptureHandler;
 import net.knightsandkings.knk.paper.tasks.ItemScanTaskHandler;
@@ -173,6 +174,7 @@ public class KnKPlugin extends JavaPlugin {
     private DistrictGateLoader districtGateLoader;
     private WorldTaskHandlerRegistry worldTaskHandlerRegistry;
     private HeadlessWorldTaskPoller headlessWorldTaskPoller;
+    private PlayerNotificationPoller playerNotificationPoller;
     private UserManager userManager;
     private ChatCaptureManager chatCaptureManager;
     private AnvilCaptureManager anvilCaptureManager;
@@ -391,6 +393,11 @@ public class KnKPlugin extends JavaPlugin {
             headlessWorldTaskPoller = new HeadlessWorldTaskPoller(worldTasksApi, this);
             headlessWorldTaskPoller.registerHandler(new GateBlockScanTaskHandler(gateDoorsApi, worldTasksApi, this));
             headlessWorldTaskPoller.start();
+
+            // Promotion effects etc. for writes made through the web app (not a plugin command)
+            playerNotificationPoller = new PlayerNotificationPoller(
+                apiClient.getPlayerNotificationsApi(), this);
+            playerNotificationPoller.start();
             
             getLogger().info("WorldTaskHandlerRegistry initialized with handlers");
             
@@ -662,6 +669,9 @@ public class KnKPlugin extends JavaPlugin {
         }
         if (headlessWorldTaskPoller != null) {
             headlessWorldTaskPoller.stop();
+        }
+        if (playerNotificationPoller != null) {
+            playerNotificationPoller.stop();
         }
         if (tempRegionRetentionTask != null) {
             tempRegionRetentionTask.stop();
