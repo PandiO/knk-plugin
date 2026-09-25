@@ -1,8 +1,10 @@
 package net.knightsandkings.knk.paper.menu;
 
+import net.knightsandkings.knk.core.menu.MenuContextParams;
 import net.knightsandkings.knk.core.menu.RuntimeMenu;
 import net.knightsandkings.knk.core.menu.RuntimeMenuItem;
 import net.knightsandkings.knk.core.menu.RuntimeMenuSection;
+import net.knightsandkings.knk.core.menu.SectionView;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
 
@@ -17,28 +19,26 @@ import java.util.Map;
  * - see that class's javadoc for why the split exists.
  * <p>
  * Mutable (not a record): {@link #update} is called on every re-render
- * (e.g. a page turn) so the click-routing snapshot always matches what's
- * actually in the Inventory right now.
+ * (a page turn, an auto-refresh) so the click-routing snapshot always matches
+ * what's actually in the Inventory right now.
+ * <p>
+ * InventoryMenu Phase 9: also the unit {@code MenuService.refreshOpenMenus}
+ * predicates select on ({@link #menuKey()}, {@link #menuContext()}), and it
+ * keeps what an auto-refresh (E4) reuses instead of re-fetching: the assembled
+ * {@link #menu()} and the material-ref lookups of the last render.
  */
 public final class OpenMenuContext {
 
     private final Player player;
     private final Inventory inventory;
     private volatile RuntimeMenu menu;
-    private volatile Map<Integer, RuntimeMenuItem> itemsBySlot;
-    private volatile Map<Integer, RuntimeMenuSection> sectionsBySlot;
-    private volatile Map<Integer, List<String>> controlHintLoreBySlot;
+    private volatile MenuRenderResult lastRender;
 
-    public OpenMenuContext(Player player, Inventory inventory, RuntimeMenu menu,
-                            Map<Integer, RuntimeMenuItem> itemsBySlot,
-                            Map<Integer, RuntimeMenuSection> sectionsBySlot,
-                            Map<Integer, List<String>> controlHintLoreBySlot) {
+    public OpenMenuContext(Player player, Inventory inventory, RuntimeMenu menu, MenuRenderResult result) {
         this.player = player;
         this.inventory = inventory;
         this.menu = menu;
-        this.itemsBySlot = itemsBySlot;
-        this.sectionsBySlot = sectionsBySlot;
-        this.controlHintLoreBySlot = controlHintLoreBySlot;
+        this.lastRender = result;
     }
 
     public Player player() {
@@ -53,8 +53,19 @@ public final class OpenMenuContext {
         return menu;
     }
 
+    /** The open menu's template key - e.g. for {@code refreshOpenMenus(ctx -> ctx.menuKey().startsWith("siege."))}. */
+    public String menuKey() {
+        return menu.key();
+    }
+
+    /** The ctx params the open menu was rendered with (E1). */
+    public MenuContextParams menuContext() {
+        return lastRender.menuContext();
+    }
+
+    /** The rendered snapshot per slot (effective display mode, Render-filtered actions). */
     public Map<Integer, RuntimeMenuItem> itemsBySlot() {
-        return itemsBySlot;
+        return lastRender.itemsBySlot();
     }
 
     /**
@@ -64,27 +75,36 @@ public final class OpenMenuContext {
      * {@link MenuActionContext}'s javadoc.
      */
     public Map<Integer, RuntimeMenuSection> sectionsBySlot() {
-        return sectionsBySlot;
+        return lastRender.sectionsBySlot();
     }
 
     /**
      * Post-Phase-8 QOL follow-up: the last-rendered "what does this button
-     * do" hint lore per slot ({@code MenuRenderer.resolveControlHints}),
-     * kept here (not just inside the render pass that produced it) so
-     * {@link MenuControlHintListener} can add/remove these lines on a live
-     * sneak toggle without needing a full re-render.
+     * do" hint lore per slot, kept here so {@link MenuControlHintListener} can
+     * add/remove these lines on a live sneak toggle without a full re-render.
      */
     public Map<Integer, List<String>> controlHintLoreBySlot() {
-        return controlHintLoreBySlot;
+        return lastRender.controlHintLoreBySlot();
     }
 
-    /** Called after re-rendering into the same, already-open Inventory (e.g. a page turn). */
-    public void update(RuntimeMenu menu, Map<Integer, RuntimeMenuItem> itemsBySlot,
-                        Map<Integer, RuntimeMenuSection> sectionsBySlot,
-                        Map<Integer, List<String>> controlHintLoreBySlot) {
+    /** InventoryMenu Phase 9 (E3): the row each row-template slot was rendered for. */
+    public Map<Integer, Object> rowsBySlot() {
+        return lastRender.rowsBySlot();
+    }
+
+    /** InventoryMenu Phase 9 (E9): the {@code $section$} view of a section as last rendered, or null. */
+    public SectionView sectionView(Integer sectionId) {
+        return sectionId != null ? lastRender.sectionViewsBySectionId().get(sectionId) : null;
+    }
+
+    /** Material-ref lookups of the last render - reused by an auto-refresh. */
+    public Map<Integer, String> materialNamespaceKeys() {
+        return lastRender.materialNamespaceKeys();
+    }
+
+    /** Called after re-rendering into the same, already-open Inventory (a page turn, a refresh). */
+    public void update(RuntimeMenu menu, MenuRenderResult result) {
         this.menu = menu;
-        this.itemsBySlot = itemsBySlot;
-        this.sectionsBySlot = sectionsBySlot;
-        this.controlHintLoreBySlot = controlHintLoreBySlot;
+        this.lastRender = result;
     }
 }

@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.menu;
 
+import net.knightsandkings.knk.core.menu.MenuContextParams;
 import net.knightsandkings.knk.core.menu.MenuSession;
 import net.knightsandkings.knk.core.menu.RuntimeMenu;
 import net.knightsandkings.knk.core.menu.RuntimeMenuItem;
@@ -51,6 +52,14 @@ import java.util.Map;
  * key into every instance's {@code paramsJson} would have the same
  * reusable-preset-component problem {@code section}'s own javadoc already
  * argues against. Like {@code section}, this is never null for a real click.
+ * <p>
+ * InventoryMenu Phase 9: the same record is also the context of
+ * <em>Render</em>-phase conditions (E5), built per item - per row on a row
+ * template - during the render pass. {@code variableContext} is then the
+ * render scope and {@code row} (E3) is the row the item was rendered for
+ * (null for ordinary items); at click time {@code row} is the row the clicked
+ * slot was rendered with, so handlers see what the player saw.
+ * {@link #menuContext()} (E1) exposes the ctx params.
  */
 public record MenuActionContext(
         Player player,
@@ -59,6 +68,12 @@ public record MenuActionContext(
         MenuService menuService,
         RuntimeMenu menu,
         RuntimeMenuSection section,
-        RuntimeMenuItem item
+        RuntimeMenuItem item,
+        Object row
 ) {
+
+    /** InventoryMenu Phase 9 (E1): the context parameters the current menu was opened with. */
+    public MenuContextParams menuContext() {
+        return session != null ? session.currentContext() : MenuContextParams.EMPTY;
+    }
 }
