@@ -60,8 +60,10 @@ public final class MenuDefinitionValidator {
      * InventoryMenu Phase 9: {@link #validate(RuntimeMenu, Map)} plus
      * <ul>
      *   <li>engine roots - {@code ctx} ({@link MenuContextParams}: any hop is a
-     *       key, typed {@code String}), {@code menu} ({@link MenuView}) and
-     *       {@code section} ({@link SectionView}) - are always declared (E1/E9);</li>
+     *       key, typed {@code String}), {@code menu} ({@link MenuView}),
+     *       {@code section} ({@link SectionView}) and {@code state}
+     *       ({@link MenuStateView}: every remaining hop is one dotted {@code String}
+     *       key, content port G1) - are always declared (E1/E9/G1);</li>
      *   <li>{@code $row$} on a row template is checked against the declared row
      *       type of the section's content source ({@code rowTypesBySourceId},
      *       from {@link MenuContentSourceRegistry#rowTypes()}), and is an error
@@ -130,6 +132,7 @@ public final class MenuDefinitionValidator {
         types.put(MenuVariableProviderRegistry.ROOT_CTX, MenuContextParams.class);
         types.put(MenuVariableProviderRegistry.ROOT_MENU, MenuView.class);
         types.put(MenuVariableProviderRegistry.ROOT_SECTION, SectionView.class);
+        types.put(MenuVariableProviderRegistry.ROOT_STATE, MenuStateView.class);
         if (declaredContextTypes != null) {
             types.putAll(declaredContextTypes);
         }
@@ -185,6 +188,10 @@ public final class MenuDefinitionValidator {
         }
 
         for (int i = 1; i < hops.length; i++) {
+            if (MenuStateView.class.equals(currentType)) {
+                // G1: $state.<dotted key>$ - every remaining hop is part of one String key lookup.
+                return;
+            }
             if (MenuContextParams.class.equals(currentType)) {
                 // E1: $ctx.<name>$ is a key lookup, always a String.
                 currentType = String.class;

@@ -18,6 +18,7 @@ import net.knightsandkings.knk.core.menu.MenuSession;
 import net.knightsandkings.knk.core.menu.MenuSlotCalculator;
 import net.knightsandkings.knk.core.menu.MenuVariableProviderRegistry;
 import net.knightsandkings.knk.core.menu.MenuVariableScope;
+import net.knightsandkings.knk.core.menu.MenuStateView;
 import net.knightsandkings.knk.core.menu.MenuView;
 import net.knightsandkings.knk.core.menu.RuntimeMenu;
 import net.knightsandkings.knk.core.menu.RuntimeMenuItem;
@@ -135,7 +136,8 @@ public final class MenuRenderer {
         MenuContextParams menuContext = session.currentContext();
         long currentTick = currentTick();
         MenuVariableScope rootScope = variableRegistry.scope(player, menuContext,
-                Map.of(MenuVariableProviderRegistry.ROOT_MENU, MenuView.of(menu.key(), menu.title(), session)));
+                Map.of(MenuVariableProviderRegistry.ROOT_MENU, MenuView.of(menu.key(), menu.title(), session),
+                        MenuVariableProviderRegistry.ROOT_STATE, MenuStateView.of(session)));
         Predicate<String> permissionChecker = player::hasPermission;
 
         // Step 2 (main thread): start every content-source fetch.

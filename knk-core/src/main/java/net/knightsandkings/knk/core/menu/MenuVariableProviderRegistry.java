@@ -23,7 +23,8 @@ import java.util.logging.Logger;
  * <p>
  * <b>Engine roots</b> ({@link #ENGINE_ROOTS}) are owned by the engine and can't be
  * registered: {@code ctx} ({@link MenuContextParams}), {@code menu}
- * ({@link MenuView}), {@code section} ({@link SectionView}) and {@code row}
+ * ({@link MenuView}), {@code section} ({@link SectionView}), {@code state}
+ * ({@link MenuStateView}, content port G1) and {@code row}
  * (a row template's row - its type is declared per content source, see
  * {@link MenuContentSourceRegistry#registerRows}).
  * <p>
@@ -44,13 +45,16 @@ public final class MenuVariableProviderRegistry<P> {
     public static final String ROOT_MENU = "menu";
     public static final String ROOT_SECTION = "section";
     public static final String ROOT_ROW = "row";
-    public static final Set<String> ENGINE_ROOTS = Set.of(ROOT_CTX, ROOT_MENU, ROOT_SECTION, ROOT_ROW);
+    /** Content port CP6 (G1): per-session menu state, see {@link MenuStateView}. */
+    public static final String ROOT_STATE = "state";
+    public static final Set<String> ENGINE_ROOTS = Set.of(ROOT_CTX, ROOT_MENU, ROOT_SECTION, ROOT_ROW, ROOT_STATE);
 
     /** Declared types of the engine roots whose type doesn't depend on the section ({@code row} does). */
     private static final Map<String, Class<?>> ENGINE_ROOT_TYPES = Map.of(
             ROOT_CTX, MenuContextParams.class,
             ROOT_MENU, MenuView.class,
-            ROOT_SECTION, SectionView.class
+            ROOT_SECTION, SectionView.class,
+            ROOT_STATE, MenuStateView.class
     );
 
     @FunctionalInterface
