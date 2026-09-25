@@ -32,6 +32,7 @@ import net.knightsandkings.knk.api.impl.PermissionGroupsQueryApiImpl;
 import net.knightsandkings.knk.api.impl.ClansQueryApiImpl;
 import net.knightsandkings.knk.api.impl.SiegeLobbiesQueryApiImpl;
 import net.knightsandkings.knk.api.impl.SiegeScenariosQueryApiImpl;
+import net.knightsandkings.knk.api.impl.TitleBracketsQueryApiImpl;
 import net.knightsandkings.knk.api.impl.KitsQueryApiImpl;
 import net.knightsandkings.knk.api.impl.KitsCommandApiImpl;
 import net.knightsandkings.knk.core.ports.api.HealthApi;
@@ -60,6 +61,7 @@ import net.knightsandkings.knk.core.ports.api.PermissionGroupsQueryApi;
 import net.knightsandkings.knk.core.ports.api.ClansQueryApi;
 import net.knightsandkings.knk.core.ports.api.SiegeLobbiesQueryApi;
 import net.knightsandkings.knk.core.ports.api.SiegeScenariosQueryApi;
+import net.knightsandkings.knk.core.ports.api.TitleBracketsQueryApi;
 import net.knightsandkings.knk.core.ports.api.KitsQueryApi;
 import net.knightsandkings.knk.core.ports.api.KitsCommandApi;
 import net.knightsandkings.knk.core.ports.api.RegionsCommandApi;
@@ -110,6 +112,7 @@ public class KnkApiClient {
     private final ClansQueryApi clansQueryApi;
     private final SiegeLobbiesQueryApi siegeLobbiesQueryApi;
     private final SiegeScenariosQueryApi siegeScenariosQueryApi;
+    private final TitleBracketsQueryApi titleBracketsQueryApi;
     private final KitsQueryApi kitsQueryApi;
     private final KitsCommandApi kitsCommandApi;
 
@@ -154,6 +157,7 @@ public class KnkApiClient {
         this.clansQueryApi = new ClansQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeLobbiesQueryApi = new SiegeLobbiesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeScenariosQueryApi = new SiegeScenariosQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.titleBracketsQueryApi = new TitleBracketsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.kitsQueryApi = new KitsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.kitsCommandApi = new KitsCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
     }
@@ -268,6 +272,10 @@ public class KnkApiClient {
 
     public SiegeScenariosQueryApi getSiegeScenariosQueryApi() {
         return siegeScenariosQueryApi;
+    }
+
+    public TitleBracketsQueryApi getTitleBracketsQueryApi() {
+        return titleBracketsQueryApi;
     }
 
     /**

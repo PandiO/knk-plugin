@@ -129,6 +129,11 @@ import net.knightsandkings.knk.paper.tasks.ItemScanTaskHandler;
 import net.knightsandkings.knk.paper.tasks.KitScanTaskHandler;
 import net.knightsandkings.knk.paper.user.JoinLoadingGuard;
 import net.knightsandkings.knk.paper.user.UserManager;
+import net.knightsandkings.knk.paper.siege.LoggingSiegeMatchesCommandApi;
+import net.knightsandkings.knk.paper.siege.SiegePlayerVault;
+import net.knightsandkings.knk.paper.siege.SiegeService;
+import net.knightsandkings.knk.paper.commands.SiegeCommand;
+import net.knightsandkings.knk.paper.listeners.SiegeSessionListener;
 import net.knightsandkings.knk.paper.utils.CommandCooldownManager;
 
 public class KnKPlugin extends JavaPlugin {
@@ -198,6 +203,7 @@ public class KnKPlugin extends JavaPlugin {
     private EnchantmentBootstrap.EnchantmentRuntime enchantmentRuntime;
     private ExecutorService regionLookupExecutor;
     private TempRegionRetentionTask tempRegionRetentionTask;
+    private SiegeService siegeService;
     
     @Override
     public void onEnable() {
@@ -697,6 +703,8 @@ public class KnKPlugin extends JavaPlugin {
             
             getLogger().info("Region transition service initialized with domain resolver and gate control");
 
+            initializeSiege();
+
             getLogger().info("KnightsAndKings Plugin Enabled!");
             
         } catch (Exception e) {
@@ -709,6 +717,15 @@ public class KnKPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        // Siege first (DESIGN §5.1/§9.2): stops every lobby with SERVER_RESTART, which aborts running
+        // matches and restores every member's vault while the players and the API client still exist.
+        if (siegeService != null) {
+            try {
+                siegeService.shutdown();
+            } catch (RuntimeException e) {
+                getLogger().log(java.util.logging.Level.SEVERE, "Siege shutdown failed", e);
+            }
+        }
         if (gateStateSyncTask != null) {
             gateStateSyncTask.stop();
             getLogger().info("Persisting final gate states before shutdown...");
@@ -909,6 +926,50 @@ public class KnKPlugin extends JavaPlugin {
 
     public WorldTasksApi getWorldTasksApi() {
         return worldTasksApi;
+    }
+
+    /**
+     * Siege minigame runtime (docs/specs/siege-minigame/IMPLEMENTATION_PLAN.md Phase 5): the
+     * runtime-config gateway, one SiegeService (one shared SiegeRuntimeLocks and one long-lived
+     * RandomGenerator inside), the /siege command and the siege listeners. The match API is the
+     * Phase 6 placeholder that only logs (LoggingSiegeMatchesCommandApi) until the real endpoints exist.
+     */
+    private void initializeSiege() {
+        var siegeDataAccess = dataAccessFactory.createSiegeDataAccess(
+            apiClient.getSiegeLobbiesQueryApi(),
+            apiClient.getSiegeScenariosQueryApi()
+        );
+        SiegePlayerVault siegeVault = new SiegePlayerVault(new java.io.File(getDataFolder(), "siege-vault"), getLogger());
+        this.siegeService = new SiegeService(
+            this,
+            siegeDataAccess,
+            apiClient.getTitleBracketsQueryApi(),
+            new LoggingSiegeMatchesCommandApi(getLogger()),
+            siegeVault,
+            knkPermissible,
+            cacheManager.getUserCache(),
+            new java.util.SplittableRandom()
+        );
+
+        PluginCommand siegeCommand = getCommand("siege");
+        if (siegeCommand != null) {
+            SiegeCommand executor = new SiegeCommand(siegeService);
+            siegeCommand.setExecutor(executor);
+            siegeCommand.setTabCompleter(executor);
+            getLogger().info("Registered /siege command");
+        } else {
+            getLogger().warning("Failed to register /siege command - not defined in plugin.yml?");
+        }
+
+        var pluginManager = getServer().getPluginManager();
+        pluginManager.registerEvents(new SiegeSessionListener(siegeService), this);
+
+        siegeService.start();
+        getLogger().info("Siege runtime initialized (Phase 5)");
+    }
+
+    public SiegeService getSiegeService() {
+        return siegeService;
     }
 
     private void initializeEnchantmentRuntime() {
