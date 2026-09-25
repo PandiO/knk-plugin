@@ -37,6 +37,7 @@ import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.paper.KnKPlugin;
 import net.knightsandkings.knk.paper.cache.CacheManager;
+import net.knightsandkings.knk.paper.permissions.KnkPermissible;
 import net.knightsandkings.knk.paper.utils.ColorOptions;
 import net.knightsandkings.knk.paper.utils.ScoreboardUtil;
 import net.kyori.adventure.text.Component;
@@ -58,13 +59,14 @@ public class PlayerListener implements Listener {
 	private final UsersDataAccess usersDataAccess;
 	private final TownsDataAccess townsDataAccess;
 	private final CacheManager cacheManager;
+	private final KnkPermissible knkPermissible;
 	private final UsersCommandApi usersCommandApi;
 
-	public PlayerListener(UsersDataAccess usersDataAccess, TownsDataAccess townsDataAccess, CacheManager cacheManager,
-			UsersCommandApi usersCommandApi) {
+	public PlayerListener(UsersDataAccess usersDataAccess, TownsDataAccess townsDataAccess, CacheManager cacheManager, KnkPermissible knkPermissible, UsersCommandApi usersCommandApi) {
 		this.usersDataAccess = usersDataAccess;
 		this.townsDataAccess = townsDataAccess;
 		this.cacheManager = cacheManager;
+		this.knkPermissible = knkPermissible;
 		this.usersCommandApi = usersCommandApi;
 	}
 
@@ -142,7 +144,7 @@ public class PlayerListener implements Listener {
 			}
 		}
 
-		if (!player.hasPermission("k&k.join.owner")) {
+		if (!knkPermissible.hasPermission(player, "knk.mode.owner")) {
 			player.setGameMode(GameMode.SURVIVAL);
 			player.setFlying(false);
 			// Town town = (Town) RepositoryManager.getInstance().getRepository(Town.class, Dominion.KEY_CLASS).getList().get(0);
@@ -153,7 +155,39 @@ public class PlayerListener implements Listener {
 			// }
             player.teleport(Bukkit.getWorld(Bukkit.getWorlds().get(0).getName()).getSpawnLocation());
 		}
-		ScoreboardUtil.setScoreboard(Arrays.asList(player));
+		ScoreboardUtil.setScoreboard(Arrays.asList(player), knkPermissible, user);
+
+		if (user != null) {
+			triggerBackgroundSalaryPayout(player, user.id());
+		}
+	}
+
+	/**
+	 * Pays out the offline-gap-covering salary on join (docs/specs/user-features/
+	 * IMPLEMENTATION_PLAN.md §6's intended trigger). Runs off the main thread and never blocks
+	 * or delays the join; a failure here is logged and otherwise invisible to the player.
+	 */
+	private void triggerBackgroundSalaryPayout(Player player, int userId) {
+		if (usersCommandApi == null) {
+			return;
+		}
+		usersCommandApi.payOutSalaryById(userId)
+			.thenAccept(result -> {
+				if (!result.paid()) {
+					return;
+				}
+				LOGGER.fine("Paid out " + result.amountPaid() + " salary coins to user " + userId);
+				Bukkit.getScheduler().runTask(KnKPlugin.getPlugin(KnKPlugin.class), () -> {
+					if (player.isOnline()) {
+						player.sendMessage(Component.text("You earned " + result.amountPaid()
+							+ " coins in salary while you were away.").color(ColorOptions.messageachievement));
+					}
+				});
+			})
+			.exceptionally(ex -> {
+				LOGGER.log(Level.WARNING, "Failed to pay out salary for user " + userId, ex);
+				return null;
+			});
 	}
 
 	@EventHandler
@@ -177,7 +211,7 @@ public class PlayerListener implements Listener {
 	 * presence ping is not worth failing login over, and the next join/quit will catch up.
 	 */
 	private void reportPresence(UserSummary user, boolean isOnline) {
-		if (user == null || user.id() == null) {
+		if (user == null || user.id() == null || usersCommandApi == null) {
 			return;
 		}
 		usersCommandApi.setPresenceById(user.id(), isOnline)
@@ -197,7 +231,7 @@ public class PlayerListener implements Listener {
 				|| cmd.equalsIgnoreCase("/plugin")
 				|| cmd.equalsIgnoreCase("/v")
 				|| cmd.equalsIgnoreCase("/version")) {
-			if (!player.hasPermission("k&k.owner")) {
+			if (!knkPermissible.hasPermission(player, "knk.mode.owner")) {
 				e.setCancelled(true);
 			}
 		}
@@ -216,7 +250,7 @@ public class PlayerListener implements Listener {
 		Component messageComponent = LegacyComponentSerializer.legacySection().deserialize(legacyFormattedMessage);
 
 		Component finalMessage;
-		if (player.hasPermission("k&k.owner")) {
+		if (knkPermissible.hasPermission(player, "knk.mode.owner")) {
 			// Build owner format with proper Components using ColorOptions TextColor objects
 			Component prefixComponent = Component.text("[")
 					.color(ColorOptions.ownerformat)

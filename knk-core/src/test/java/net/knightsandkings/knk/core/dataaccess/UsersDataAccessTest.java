@@ -11,7 +11,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import net.knightsandkings.knk.core.cache.UserCache;
+import net.knightsandkings.knk.core.domain.users.ActiveMode;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
+import net.knightsandkings.knk.core.domain.users.SalaryPayoutResult;
 import net.knightsandkings.knk.core.domain.users.UserDetail;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
@@ -256,6 +258,18 @@ public class UsersDataAccessTest {
         @Override
         public CompletableFuture<Void> setPresenceById(int id, boolean isOnline) {
             return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletableFuture<Void> setActiveModeById(int id, ActiveMode mode) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletableFuture<SalaryPayoutResult> payOutSalaryById(int id) {
+            java.time.OffsetDateTime now = java.time.OffsetDateTime.now();
+            return CompletableFuture.completedFuture(
+                new SalaryPayoutResult(false, 0, 0, 0, 0, 0, 0, now, now));
         }
     }
 }

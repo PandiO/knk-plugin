@@ -12,13 +12,30 @@ commands:
   knk:
     description: KnK admin and debug commands
     usage: /knk help
-    permission: knk.admin
+    # No top-level permission gate (docs/specs/user-features/DESIGN.md §2.3/§6.1): each
+    # subcommand is gated individually on its own knk.admin.<subcommand> node (checked in
+    # KnkAdminCommand#onCommand), so a holder of just one subcommand's node - not the knk.admin
+    # umbrella - can still reach /knk at all. Gating the whole command behind knk.admin here
+    # would make that per-subcommand granularity unreachable.
 
   account:
     description: "Manage your in-game account (create, link, view status)"
     usage: "/account [create|link|status]"
     aliases: [acc]
     permission: knk.account.use
+
+  ownermode:
+    description: "Toggle owner mode (vanish from non-staff players; persists across restarts)"
+    usage: "/ownermode [on|off] [onquit] | /ownermode help"
+    aliases: [om]
+    # No permission: here - gated on knk.mode.owner through KnkPermissible inside ModeCommand,
+    # for the same reason /knk has none (Bukkit would check its own permission tree first).
+
+  staffmode:
+    description: "Toggle staff mode (vanish from non-staff players; persists across restarts)"
+    usage: "/staffmode [on|off] [onquit] | /staffmode help"
+    aliases: [sm]
+    # No permission: here - gated on knk.mode.staff through KnkPermissible inside ModeCommand.
 
   ce:
     description: "Manage custom enchantments on held item"
@@ -28,9 +45,112 @@ commands:
 
 permissions:
   knk.admin:
-    description: Access to KnK admin commands
+    description: >-
+      Umbrella node for all /knk admin subcommands (docs/specs/user-features/DESIGN.md §2.3).
+      Granting this still grants every knk.admin.<subcommand> child below, so existing
+      op-based grants keep working unchanged; a future group/grant can instead assign just
+      one child node for finer-grained access. /knk gate is deliberately not one of these
+      children - its own subactions are already individually gated (knk.gate.admin,
+      knk.gate.open.*, knk.gate.close.*, etc.), which is finer-grained than a single node.
     default: op
-    
+    children:
+      knk.admin.health: true
+      knk.admin.cache: true
+      knk.admin.towns: true
+      knk.admin.town: true
+      knk.admin.districts: true
+      knk.admin.district: true
+      knk.admin.locations: true
+      knk.admin.location: true
+      knk.admin.enchantments: true
+      knk.admin.itemblueprints: true
+      knk.admin.menu: true
+      knk.admin.streets: true
+      knk.admin.street: true
+
+  knk.admin.health:
+    description: Access to /knk health
+    default: false
+
+  knk.admin.cache:
+    description: Access to /knk cache
+    default: false
+
+  knk.admin.towns:
+    description: Access to /knk towns
+    default: false
+
+  knk.admin.town:
+    description: Access to /knk town
+    default: false
+
+  knk.admin.districts:
+    description: Access to /knk districts
+    default: false
+
+  knk.admin.district:
+    description: Access to /knk district
+    default: false
+
+  knk.admin.locations:
+    description: Access to /knk locations
+    default: false
+
+  knk.admin.location:
+    description: Access to /knk location
+    default: false
+
+  knk.admin.enchantments:
+    description: Access to /knk enchantments
+    default: false
+
+  knk.admin.itemblueprints:
+    description: Access to /knk itemblueprints
+    default: false
+
+  knk.admin.menu:
+    description: Access to /knk menu (InventoryMenu dev harness)
+    default: false
+
+  knk.admin.streets:
+    description: Access to /knk streets
+    default: false
+
+  knk.admin.street:
+    description: Access to /knk street
+    default: false
+
+  knk.tasks:
+    description: Access to /knk tasks, /knk task-claim, /knk task-status (world task management)
+    default: op
+
+  knk.mode.owner:
+    description: >-
+      Owner-mode status (docs/specs/user-features/DESIGN.md §6.1), replacing the dead legacy
+      k&k.join.owner/k&k.owner/k&k.* checks. Resolved through the new REST-backed permission
+      model via KnkPermissible, not through Bukkit's own permission tree - this plugin.yml
+      declaration is for documentation/consistency only and isn't what KnkPermissible actually
+      checks. It does still bypass via KnkPermissible's own op check: a Minecraft-op'd player
+      short-circuits to allowed on every node, same as Bukkit's own default for an undeclared
+      permission. A non-op needs a real PermissionGrant or group membership (authoring UI is
+      docs/specs/user-features/IMPLEMENTATION_PLAN.md §6.2, a later phase) - until one exists,
+      this node resolves undeclared and fails closed for that player. Gates /ownermode; holders
+      (like knk.mode.staff holders) can also see players vanished in owner/staff mode.
+    default: op
+
+  knk.mode.staff:
+    description: >-
+      Staff-mode status (docs/specs/user-features/DESIGN.md §6.1), replacing v1's k&k.staff. Gates
+      /staffmode, and holders can see players vanished in owner/staff mode. Resolved through the
+      new REST-backed permission model via KnkPermissible, not through Bukkit's own permission
+      tree - this plugin.yml declaration is for documentation/consistency only and isn't what
+      KnkPermissible actually checks. It does still bypass via KnkPermissible's own op check: a
+      Minecraft-op'd player short-circuits to allowed on every node, same as Bukkit's own default
+      for an undeclared permission. A non-op needs a real PermissionGrant or group membership
+      (authoring UI is docs/specs/user-features/IMPLEMENTATION_PLAN.md §6.2, a later phase) -
+      until one exists, this node resolves undeclared and fails closed for that player.
+    default: op
+
   knk.gate.open.*:
     description: Permission to open any gate
     default: false

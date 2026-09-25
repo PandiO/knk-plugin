@@ -292,3 +292,14 @@ cache:
       allow-stale: true
       retry-attempts: 3
       retry-backoff-ms: 100
+
+    # user-features permission system (docs/specs/user-features/IMPLEMENTATION_PLAN.md §1).
+    # Short TTL like health - permission checks happen constantly and need to reflect a
+    # grant/revoke reasonably promptly, unlike mostly-static catalog data above.
+    permissions:
+      ttl-seconds: 30
+      max-ttl-seconds: 120
+      default-policy: CACHE_FIRST
+      allow-stale: true
+      retry-attempts: 3
+      retry-backoff-ms: 100

@@ -31,6 +31,7 @@ import net.knightsandkings.knk.core.dataaccess.TownsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
 import net.knightsandkings.knk.core.dataaccess.EnchantmentDefinitionsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.ItemBlueprintsDataAccess;
+import net.knightsandkings.knk.core.dataaccess.PermissionsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MenuTemplatesDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.GradesDataAccess;
@@ -56,8 +57,10 @@ import net.knightsandkings.knk.paper.menu.OpenMenuContextRegistry;
 import net.knightsandkings.knk.core.ports.api.StructuresQueryApi;
 import net.knightsandkings.knk.core.ports.api.TownsQueryApi;
 import net.knightsandkings.knk.core.ports.api.UserAccountApi;
+import net.knightsandkings.knk.core.domain.users.ActiveMode;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.core.ports.api.UsersQueryApi;
+import net.knightsandkings.knk.core.ports.api.PermissionsApi;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
 import net.knightsandkings.knk.core.ports.gates.GateControlPort;
 import net.knightsandkings.knk.core.gates.GateManager;
@@ -70,6 +73,7 @@ import net.knightsandkings.knk.paper.chat.ChatCaptureManager;
 import net.knightsandkings.knk.paper.bootstrap.EnchantmentBootstrap;
 import net.knightsandkings.knk.paper.commands.AccountCommandRegistry;
 import net.knightsandkings.knk.paper.commands.KnkAdminCommand;
+import net.knightsandkings.knk.paper.commands.ModeCommand;
 import net.knightsandkings.knk.paper.config.ConfigLoader;
 import net.knightsandkings.knk.paper.config.KnkConfig;
 import net.knightsandkings.knk.paper.dataaccess.DataAccessFactory;
@@ -90,12 +94,15 @@ import net.knightsandkings.knk.paper.listeners.ChatCaptureListener;
 import net.knightsandkings.knk.paper.listeners.GateDamageConsequenceListener;
 import net.knightsandkings.knk.paper.listeners.GateEventListener;
 import net.knightsandkings.knk.paper.listeners.GatePassThroughConsequenceListener;
+import net.knightsandkings.knk.paper.listeners.ModeListener;
 import net.knightsandkings.knk.paper.listeners.PlayerListener;
 import net.knightsandkings.knk.paper.listeners.RegionTaskEventListener;
 import net.knightsandkings.knk.paper.listeners.UserAccountListener;
 import net.knightsandkings.knk.paper.listeners.WorldGuardRegionListener;
 import net.knightsandkings.knk.paper.listeners.WorldTaskChatListener;
 import net.knightsandkings.knk.paper.listeners.WorldTaskLocationSelectionListener;
+import net.knightsandkings.knk.paper.modes.ModeService;
+import net.knightsandkings.knk.paper.permissions.KnkPermissible;
 import net.knightsandkings.knk.paper.regions.WorldGuardRegionTracker;
 import net.knightsandkings.knk.paper.integration.WorldGuardIntegration;
 import net.knightsandkings.knk.paper.tasks.TempRegionRetentionTask;
@@ -131,12 +138,16 @@ public class KnKPlugin extends JavaPlugin {
     private UsersQueryApi usersQueryApi;
     private UsersCommandApi usersCommandApi;
     private UserAccountApi userAccountApi;
+    private PermissionsApi permissionsApi;
     private UsersDataAccess usersDataAccess;
     private TownsDataAccess townsDataAccess;
     private EnchantmentDefinitionsDataAccess enchantmentDefinitionsDataAccess;
     private ItemBlueprintsDataAccess itemBlueprintsDataAccess;
     private MenuTemplatesDataAccess menuTemplatesDataAccess;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
+    private PermissionsDataAccess permissionsDataAccess;
+    private KnkPermissible knkPermissible;
+    private ModeService modeService;
     private GradesDataAccess gradesDataAccess;
     private TagsDataAccess tagsDataAccess;
     private DomainCatalogDataAccess domainCatalogDataAccess;
@@ -209,6 +220,7 @@ public class KnKPlugin extends JavaPlugin {
             this.usersQueryApi = apiClient.getUsersQueryApi();
             this.usersCommandApi = apiClient.getUsersCommandApi();
             this.userAccountApi = apiClient.getUserAccountApi();
+            this.permissionsApi = apiClient.getPermissionsApi();
             this.worldTasksApi = apiClient.getWorldTasksApi();
             this.gateStructuresApi = apiClient.getGateStructuresApi();
             this.gateDoorsApi = apiClient.getGateDoorsApi();
@@ -228,6 +240,7 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().info("DomainCatalogQueryApi wired from API client");
             getLogger().info("UsersQueryApi wired from API client");
             getLogger().info("UsersCommandApi wired from API client");
+            getLogger().info("PermissionsApi wired from API client");
             getLogger().info("WorldTasksApi wired from API client");
             getLogger().info("GateStructuresApi wired from API client");
             
@@ -399,6 +412,9 @@ public class KnKPlugin extends JavaPlugin {
                 config.cache().ttl(),
                 menuTemplatesQueryApi
             );
+            this.permissionsDataAccess = dataAccessFactory.createPermissionsDataAccess(permissionsApi);
+            this.knkPermissible = new KnkPermissible(cacheManager.getUserCache(), permissionsDataAccess);
+            this.modeService = new ModeService(this, knkPermissible, cacheManager.getUserCache(), usersCommandApi);
             this.minecraftMaterialRefsDataAccess = dataAccessFactory.createMinecraftMaterialRefsDataAccess(
                 config.cache().ttl(),
                 minecraftMaterialRefsQueryApi
@@ -663,9 +679,11 @@ public class KnKPlugin extends JavaPlugin {
         // Event registration moved to onEnable after region transition service setup
 
         pluginManager.registerEvents(new WorldGuardRegionListener(regionTracker), this);
-        pluginManager.registerEvents(new PlayerListener(usersDataAccess, townsDataAccess, this.getCacheManager(), this.usersCommandApi), this);
+        pluginManager.registerEvents(new PlayerListener(usersDataAccess, townsDataAccess, this.getCacheManager(), knkPermissible, usersCommandApi), this);
         pluginManager.registerEvents(new UserAccountListener(userManager, config.messages(), getLogger()), this);
         getLogger().info("Registered UserAccountListener for account management");
+        pluginManager.registerEvents(new ModeListener(modeService), this);
+        getLogger().info("Registered ModeListener for owner/staff mode restore");
     }
     
     /**
@@ -744,6 +762,21 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().info("Registered /account command with cooldown management");
         } else {
             getLogger().warning("Failed to register /account command - not defined in plugin.yml?");
+        }
+
+        registerModeCommand("ownermode", ActiveMode.OWNER);
+        registerModeCommand("staffmode", ActiveMode.STAFF);
+    }
+
+    private void registerModeCommand(String name, ActiveMode mode) {
+        PluginCommand modeCommand = getCommand(name);
+        if (modeCommand != null) {
+            ModeCommand executor = new ModeCommand(modeService, mode);
+            modeCommand.setExecutor(executor);
+            modeCommand.setTabCompleter(executor);
+            getLogger().info("Registered /" + name + " command");
+        } else {
+            getLogger().warning("Failed to register /" + name + " command - not defined in plugin.yml?");
         }
 
     }

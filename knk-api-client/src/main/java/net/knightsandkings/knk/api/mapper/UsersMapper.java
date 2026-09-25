@@ -1,11 +1,14 @@
 package net.knightsandkings.knk.api.mapper;
 
 import net.knightsandkings.knk.api.dto.PagedResultDto;
+import net.knightsandkings.knk.api.dto.SalaryPayoutResultDto;
 import net.knightsandkings.knk.api.dto.UserDto;
 import net.knightsandkings.knk.api.dto.UserListDto;
 import net.knightsandkings.knk.api.dto.UserSummaryDto;
 import net.knightsandkings.knk.core.domain.common.Page;
+import net.knightsandkings.knk.core.domain.users.ActiveMode;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
+import net.knightsandkings.knk.core.domain.users.SalaryPayoutResult;
 import net.knightsandkings.knk.core.domain.users.UserDetail;
 import net.knightsandkings.knk.core.domain.users.UserListItem;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
@@ -22,7 +25,14 @@ public class UsersMapper {
             dto.experiencePoints(),
             dto.isFullAccount(),
             false,
-            GatePassThroughMethod.fromWireValue(dto.gatePassThroughMethodDefault())
+            GatePassThroughMethod.fromWireValue(dto.gatePassThroughMethodDefault()),
+            ActiveMode.fromWireValue(dto.activeMode()),
+            dto.titleBracketId(),
+            dto.titleName(),
+            dto.prestigeExperience(),
+            dto.premiumTierGroupId(),
+            dto.premiumTierName(),
+            dto.premiumTierExpiresAt()
         );
     }
 
@@ -36,7 +46,14 @@ public class UsersMapper {
             domain.gems(),
             domain.experiencePoints(),
             domain.isFullAccount(),
-            domain.gatePassThroughMethodDefault().toWireValue()
+            domain.gatePassThroughMethodDefault().toWireValue(),
+            domain.activeMode().toWireValue(),
+            domain.titleBracketId(),
+            domain.titleName(),
+            domain.prestigeExperience(),
+            domain.premiumTierGroupId(),
+            domain.premiumTierName(),
+            domain.premiumTierExpiresAt()
         );
     }
 
@@ -69,6 +86,20 @@ public class UsersMapper {
             dto.uuid(),
             dto.email(),
             dto.coins()
+        );
+    }
+
+    public static SalaryPayoutResult mapSalaryPayoutResult(SalaryPayoutResultDto dto) {
+        return new SalaryPayoutResult(
+            dto.paid(),
+            dto.amountPaid(),
+            dto.hoursCovered(),
+            dto.globalMultiplier(),
+            dto.personalMultiplier(),
+            dto.rankMultiplier(),
+            dto.newCoinsBalance(),
+            dto.lastSalaryPayoutAt(),
+            dto.nextEligibleAt()
         );
     }
 

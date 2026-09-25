@@ -242,6 +242,26 @@ public class DataAccessFactory {
     }
 
     /**
+     * Create a PermissionsDataAccess gateway with configured settings.
+     * <p>
+     * Unlike every other create*DataAccess method here, the TTL is drawn directly from
+     * config.yml's entities.permissions block (entitySettings.permissions().ttl()) rather than
+     * being passed in by the caller as the global cache TTL - permission checks need their own
+     * short TTL (see config.yml's comment on the permissions block), and every other entity's
+     * ttl-minutes/-seconds value is actually unused dead config today (each caller in
+     * KnKPlugin.java passes config.cache().ttl(), the global default, instead) - a pre-existing
+     * gap worth a follow-up cleanup, not fixed here since it's out of this feature's scope.
+     *
+     * @param permissionsApi Permissions API port
+     * @return Configured PermissionsDataAccess instance
+     */
+    public PermissionsDataAccess createPermissionsDataAccess(PermissionsApi permissionsApi) {
+        KnkConfig.EntitySettings entityConfig = entitySettings.permissions();
+        DataAccessSettings settings = buildSettings(entityConfig, "Permissions");
+        return new PermissionsDataAccess(entityConfig.ttl(), permissionsApi, settings);
+    }
+
+    /**
      * Create a HealthDataAccess gateway with configured settings.
      *
      * @param ttl Cache TTL duration

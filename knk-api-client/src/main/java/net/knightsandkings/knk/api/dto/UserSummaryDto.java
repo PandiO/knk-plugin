@@ -11,5 +11,12 @@ public record UserSummaryDto (
     @JsonProperty("gems") int gems,
     @JsonProperty("experiencePoints") int experiencePoints,
     @JsonProperty("isFullAccount") boolean isFullAccount,
-    @JsonProperty("gatePassThroughMethodDefault") String gatePassThroughMethodDefault
+    @JsonProperty("gatePassThroughMethodDefault") String gatePassThroughMethodDefault,
+    @JsonProperty("activeMode") String activeMode,
+    @JsonProperty("titleBracketId") Integer titleBracketId,
+    @JsonProperty("titleName") String titleName,
+    @JsonProperty("prestigeExperience") int prestigeExperience,
+    @JsonProperty("premiumTierGroupId") Integer premiumTierGroupId,
+    @JsonProperty("premiumTierName") String premiumTierName,
+    @JsonProperty("premiumTierExpiresAt") java.time.OffsetDateTime premiumTierExpiresAt
 ) {}

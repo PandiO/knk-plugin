@@ -10,12 +10,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import net.knightsandkings.knk.api.auth.AuthProvider;
 import net.knightsandkings.knk.api.dto.CoinsUpdateDto;
+import net.knightsandkings.knk.api.dto.ActiveModeUpdateDto;
 import net.knightsandkings.knk.api.dto.GatePassThroughMethodUpdateDto;
 import net.knightsandkings.knk.api.dto.PresenceUpdateDto;
+import net.knightsandkings.knk.api.dto.SalaryPayoutResultDto;
 import net.knightsandkings.knk.api.dto.UserCreateDto;
 import net.knightsandkings.knk.api.dto.UserDto;
 import net.knightsandkings.knk.api.mapper.UsersMapper;
+import net.knightsandkings.knk.core.domain.users.ActiveMode;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
+import net.knightsandkings.knk.core.domain.users.SalaryPayoutResult;
 import net.knightsandkings.knk.core.domain.users.UserDetail;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
@@ -95,6 +99,34 @@ public class UsersCommandApiImpl extends BaseApiImpl implements UsersCommandApi 
                 return null;
             } catch (ApiException | IOException e) {
                 throw new RuntimeException("Failed to set presence", e);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<Void> setActiveModeById(int id, ActiveMode mode) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + USERS_ENDPOINT + "/" + id + "/active-mode";
+            try {
+                String bodyJson = objectMapper.writeValueAsString(new ActiveModeUpdateDto(mode.toWireValue()));
+                putJson(url, bodyJson);
+                return null;
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to set active mode", e);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<SalaryPayoutResult> payOutSalaryById(int id) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + USERS_ENDPOINT + "/" + id + "/salary/payout";
+            try {
+                String responseJson = postJson(url, "{}");
+                SalaryPayoutResultDto dto = objectMapper.readValue(responseJson, SalaryPayoutResultDto.class);
+                return UsersMapper.mapSalaryPayoutResult(dto);
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to pay out salary", e);
             }
         }, executor);
     }
