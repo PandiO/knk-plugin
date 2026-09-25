@@ -1,15 +1,18 @@
 package net.knightsandkings.knk.api.impl;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import net.knightsandkings.knk.api.auth.AuthProvider;
+import net.knightsandkings.knk.api.dto.GroupMembershipDto;
 import net.knightsandkings.knk.api.dto.PagedQueryDto;
 import net.knightsandkings.knk.api.dto.PagedResultDto;
 import net.knightsandkings.knk.api.dto.UserDto;
@@ -18,6 +21,7 @@ import net.knightsandkings.knk.api.dto.UserSummaryDto;
 import net.knightsandkings.knk.api.mapper.UsersMapper;
 import net.knightsandkings.knk.core.domain.common.Page;
 import net.knightsandkings.knk.core.domain.common.PagedQuery;
+import net.knightsandkings.knk.core.domain.users.GroupMembershipSummary;
 import net.knightsandkings.knk.core.domain.users.UserDetail;
 import net.knightsandkings.knk.core.domain.users.UserListItem;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
@@ -322,4 +326,19 @@ public class UsersQueryApiImpl extends BaseApiImpl implements UsersQueryApi{
         }, executor);
     }
 
+    @Override
+    public CompletableFuture<List<GroupMembershipSummary>> getGroupMemberships(int userId) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + "/UserPermissionGroups?userId=" + userId;
+            try {
+                String json = get(url);
+                List<GroupMembershipDto> dtos = parse(json, new TypeReference<List<GroupMembershipDto>>() {}, url);
+                return dtos.stream()
+                    .map(d -> new GroupMembershipSummary(d.permissionGroupId(), d.permissionGroupName(), d.weight(), d.isPremiumTier(), d.expiresAt(), d.isActive()))
+                    .collect(Collectors.toList());
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to fetch group memberships for user " + userId, e);
+            }
+        }, executor);
+    }
 }

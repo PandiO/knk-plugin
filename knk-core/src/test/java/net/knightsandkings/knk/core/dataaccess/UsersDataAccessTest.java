@@ -228,8 +228,13 @@ public class UsersDataAccessTest {
         ) {
             return CompletableFuture.completedFuture(null);
         }
+
+        @Override
+        public CompletableFuture<java.util.List<net.knightsandkings.knk.core.domain.users.GroupMembershipSummary>> getGroupMemberships(int userId) {
+            return CompletableFuture.completedFuture(java.util.Collections.emptyList());
+        }
     }
-    
+
     /**
      * Stub implementation of UsersCommandApi for testing.
      */
@@ -273,7 +278,38 @@ public class UsersDataAccessTest {
         }
 
         @Override
-        public CompletableFuture<Void> adjustBalancesById(int id, int coinsDelta, int gemsDelta, int experienceDelta, String reason) {
+        public CompletableFuture<net.knightsandkings.knk.core.domain.users.BalanceAdjustmentResult> adjustBalancesById(int id, int coinsDelta, int gemsDelta, int experienceDelta, String reason) {
+            return CompletableFuture.completedFuture(
+                new net.knightsandkings.knk.core.domain.users.BalanceAdjustmentResult(coinsDelta, gemsDelta, experienceDelta, null));
+        }
+
+        @Override
+        public CompletableFuture<Void> addGroupMembership(int userId, int groupId, java.time.OffsetDateTime expiresAt) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletableFuture<Void> removeGroupMembership(int userId, int groupId) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletableFuture<Void> grantPermission(int userId, String node, java.time.OffsetDateTime expiresAt) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletableFuture<Void> revokePermission(int userId, String node) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletableFuture<Void> freezeById(int userId, String reason) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletableFuture<Void> unfreezeById(int userId) {
             return CompletableFuture.completedFuture(null);
         }
     }

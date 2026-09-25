@@ -21,12 +21,21 @@ public record UserSummary(
     int prestigeExperience,
     Integer premiumTierGroupId,
     String premiumTierName,
-    OffsetDateTime premiumTierExpiresAt
+    OffsetDateTime premiumTierExpiresAt,
+    boolean isFrozen,
+    String frozenReason
 ) {
     public UserSummary {
         if (activeMode == null) {
             activeMode = ActiveMode.NONE;
         }
+    }
+
+    // Constructor without freeze fields - defaults to not frozen. Kept alongside the shorter
+    // legacy constructors below rather than threading isFrozen/frozenReason through every one of
+    // them (this record already has 5 telescoping constructors for older call sites).
+    public UserSummary(Integer id, String username, UUID uuid, String email, int coins, int gems, int experiencePoints, boolean isFullAccount, boolean isNewUser, GatePassThroughMethod gatePassThroughMethodDefault, ActiveMode activeMode, Integer titleBracketId, String titleName, int prestigeExperience, Integer premiumTierGroupId, String premiumTierName, OffsetDateTime premiumTierExpiresAt) {
+        this(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience, premiumTierGroupId, premiumTierName, premiumTierExpiresAt, false, null);
     }
 
     // Constructor without premium tier fields - resolved server-side from the user's premium
@@ -61,6 +70,14 @@ public record UserSummary(
      * Copy with an updated owner/staff mode (after /ownermode or /staffmode).
      */
     public UserSummary withActiveMode(ActiveMode activeMode) {
-        return new UserSummary(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience, premiumTierGroupId, premiumTierName, premiumTierExpiresAt);
+        return new UserSummary(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience, premiumTierGroupId, premiumTierName, premiumTierExpiresAt, isFrozen, frozenReason);
+    }
+
+    /**
+     * Copy with an updated admin-freeze state (after /freeze or /unfreeze) - used by
+     * AdminFreezeManager to keep the cached UserSummary consistent with the join-time restore.
+     */
+    public UserSummary withFrozen(boolean isFrozen, String frozenReason) {
+        return new UserSummary(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience, premiumTierGroupId, premiumTierName, premiumTierExpiresAt, isFrozen, frozenReason);
     }
 }

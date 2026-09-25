@@ -43,6 +43,34 @@ commands:
     aliases: [customench]
     permission: customenchantments.command.use
 
+  freeze:
+    description: "Freeze a player - locks movement/chat/commands/damage until unfrozen (rebuild of v1's FreezeCommands, a dead no-op stub there)"
+    usage: "/freeze <player> <reason...>"
+    permission: knk.freeze
+
+  unfreeze:
+    description: "Unfreeze a previously-frozen player"
+    usage: "/unfreeze <player>"
+    permission: knk.unfreeze
+
+  staffchat:
+    description: "Broadcast a message to online staff (rebuild of v1's StaffChatCommand)"
+    usage: "/staffchat <message>"
+    aliases: [sc]
+    permission: knk.staffchat
+
+  msg:
+    description: "Send a private message to another player (rebuild of v1's MessageCommands)"
+    usage: "/msg <player> <message>"
+    aliases: [tell, w]
+    # No permission gate - matches v1's player-to-player intent (any player may message another).
+
+  reply:
+    description: "Reply to the last player who messaged you"
+    usage: "/reply <message>"
+    aliases: [r]
+    # No permission gate - same as /msg.
+
 permissions:
   knk.admin:
     description: >-
@@ -71,6 +99,9 @@ permissions:
       knk.admin.user.coins: true
       knk.admin.user.gems: true
       knk.admin.user.xp: true
+      knk.admin.user.group: true
+      knk.admin.user.perm: true
+      knk.admin.tp: true
 
   knk.admin.health:
     description: Access to /knk health
@@ -140,6 +171,24 @@ permissions:
     description: Adjust a player's XP (and, indirectly, title) via /knk user <player> xp set|add|remove
     default: false
 
+  knk.admin.user.group:
+    description: >-
+      Add/remove a player's PermissionGroup membership via /knk user <player> group add|remove
+      <groupName> [duration]. Requires the actor's highest group weight to exceed the target's
+      (RankHierarchy) - cannot act on an equal-or-higher-ranked player.
+    default: false
+
+  knk.admin.user.perm:
+    description: >-
+      Grant/revoke a permission node directly on a player via /knk user <player> perm
+      grant|revoke <node> [duration] - e.g. granting knk.mode.staff. Hierarchy-checked, same as
+      knk.admin.user.group.
+    default: false
+
+  knk.admin.tp:
+    description: Teleport to an online player via /knk tp <player>. Hierarchy-checked (RankHierarchy).
+    default: false
+
   knk.tasks:
     description: Access to /knk tasks, /knk task-claim, /knk task-status (world task management)
     default: op
@@ -169,6 +218,24 @@ permissions:
       for an undeclared permission. A non-op needs a real PermissionGrant or group membership
       (authoring UI is docs/specs/user-features/IMPLEMENTATION_PLAN.md §6.2, a later phase) -
       until one exists, this node resolves undeclared and fails closed for that player.
+    default: op
+
+  knk.freeze:
+    description: >-
+      Freeze a player via /freeze <player> <reason> - locks their movement, chat, commands, and
+      damage until unfrozen. Persisted server-side so it applies even to an offline target and
+      takes effect on their next join. Hierarchy-checked (RankHierarchy) - cannot freeze an
+      equal-or-higher-ranked player.
+    default: false
+
+  knk.unfreeze:
+    description: Unfreeze a player via /unfreeze <player>. Hierarchy-checked, same as knk.freeze.
+    default: false
+
+  knk.staffchat:
+    description: >-
+      Send and receive /staffchat (/sc) broadcasts. Also determines who receives the /msg
+      "social spy" broadcast (every private message is echoed to holders of this node).
     default: op
 
   knk.gate.open.*:

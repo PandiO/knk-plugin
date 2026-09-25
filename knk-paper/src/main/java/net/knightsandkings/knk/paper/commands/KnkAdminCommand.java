@@ -14,7 +14,9 @@ import net.knightsandkings.knk.core.ports.api.StreetsQueryApi;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
 import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
+import net.knightsandkings.knk.core.ports.api.PermissionGroupsQueryApi;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
+import net.knightsandkings.knk.paper.commands.support.RankHierarchy;
 import net.knightsandkings.knk.api.GateStructuresApi;
 import net.knightsandkings.knk.api.GateDoorsApi;
 import net.knightsandkings.knk.paper.gates.DistrictGateLoader;
@@ -87,6 +89,8 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
             UserManager userManager,
             UsersCommandApi usersCommandApi,
             UsersDataAccess usersDataAccess,
+            PermissionGroupsQueryApi permissionGroupsQueryApi,
+            RankHierarchy rankHierarchy,
             DistrictGateLoader districtGateLoader,
             GateDoorRegionCaptureHandler gateDoorRegionCaptureHandler,
             String serverId,
@@ -326,14 +330,26 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                 (sender, args) -> gateCommand.onCommand(sender, null, "knk", args)
         );
 
-        // Register user management (developer request 2026-09-25) - null top-level permission,
-        // same as gate, since it gates coins/gems/xp on their own separate nodes internally
-        // rather than one umbrella (see UserManagementCommand's own javadoc).
-        UserManagementCommand userManagementCommand = new UserManagementCommand(plugin, usersDataAccess, usersCommandApi);
+        // Register user management (developer request 2026-09-25, extended with group/perm
+        // 2026-09-25 same day) - null top-level permission, same as gate, since it gates
+        // coins/gems/xp/group/perm on their own separate nodes internally rather than one
+        // umbrella (see UserManagementCommand's own javadoc).
+        UserManagementCommand userManagementCommand = new UserManagementCommand(plugin, usersDataAccess, usersCommandApi, permissionGroupsQueryApi, rankHierarchy);
         registry.register(
-                new CommandMetadata("user", "View or edit a player's coins/gems/XP", "/knk user <player> info | /knk user <player> coins|gems|xp set|add|remove <amount> [reason]", null,
-                        List.of("/knk user Steve info", "/knk user Steve coins add 100", "/knk user Steve xp set 50 promoted for good behavior", "/knk user Steve gems remove 10")),
+                new CommandMetadata("user", "View or edit a player's coins/gems/XP/rank/permissions",
+                        "/knk user <player> info | coins|gems|xp set|add|remove <amount> [reason] | group add|remove <groupName> [duration] | perm grant|revoke <node> [duration]", null,
+                        List.of("/knk user Steve info", "/knk user Steve coins add 100", "/knk user Steve xp set 50 promoted for good behavior", "/knk user Steve gems remove 10",
+                                "/knk user Steve group add Royal 2h", "/knk user Steve perm grant knk.mode.staff")),
                 (sender, args) -> userManagementCommand.onCommand(sender, null, "knk", args)
+        );
+
+        // Register teleport-to-player (developer request, same round as group/perm/freeze/
+        // staffchat/msg - rebuild of the one real, working part of v1's PlayerTeleportCommand).
+        TeleportToPlayerCommand teleportToPlayerCommand = new TeleportToPlayerCommand(plugin, usersDataAccess, rankHierarchy);
+        registry.register(
+                new CommandMetadata("tp", "Teleport to an online player", "/knk tp <player>", "knk.admin.tp",
+                        List.of("/knk tp Steve")),
+                (sender, args) -> teleportToPlayerCommand.onCommand(sender, args)
         );
 
         // Register help

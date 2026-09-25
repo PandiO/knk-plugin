@@ -32,7 +32,9 @@ public class UsersMapper {
             dto.prestigeExperience(),
             dto.premiumTierGroupId(),
             dto.premiumTierName(),
-            dto.premiumTierExpiresAt()
+            dto.premiumTierExpiresAt(),
+            dto.isFrozen(),
+            dto.frozenReason()
         );
     }
 
@@ -53,7 +55,9 @@ public class UsersMapper {
             domain.prestigeExperience(),
             domain.premiumTierGroupId(),
             domain.premiumTierName(),
-            domain.premiumTierExpiresAt()
+            domain.premiumTierExpiresAt(),
+            domain.isFrozen(),
+            domain.frozenReason()
         );
     }
 
@@ -109,6 +113,31 @@ public class UsersMapper {
             dtoPage.totalCount(),
             dtoPage.pageNumber(),
             dtoPage.pageSize()
+        );
+    }
+
+    public static net.knightsandkings.knk.core.domain.users.BalanceAdjustmentResult mapBalanceAdjustmentResult(
+        net.knightsandkings.knk.api.dto.BalanceAdjustmentResultDto dto
+    ) {
+        net.knightsandkings.knk.core.domain.users.TitleChangeResult titleChange = null;
+        if (dto.titleChange() != null) {
+            var tc = dto.titleChange();
+            titleChange = new net.knightsandkings.knk.core.domain.users.TitleChangeResult(
+                tc.direction(),
+                tc.fromTitleBracketId(),
+                tc.fromTitleName(),
+                tc.toTitleBracketId(),
+                tc.toTitleName(),
+                tc.crossedTitles().stream()
+                    .map(c -> new net.knightsandkings.knk.core.domain.users.TitleCrossing(c.titleBracketId(), c.titleName()))
+                    .toList(),
+                tc.coinBonusGranted(),
+                tc.gemBonusGranted(),
+                tc.expBonusGranted()
+            );
+        }
+        return new net.knightsandkings.knk.core.domain.users.BalanceAdjustmentResult(
+            dto.newCoins(), dto.newGems(), dto.newExperiencePoints(), titleChange
         );
     }
 }

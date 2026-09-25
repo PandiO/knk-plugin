@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.api.impl;
 
 import java.io.IOException;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -10,15 +11,20 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import net.knightsandkings.knk.api.auth.AuthProvider;
 import net.knightsandkings.knk.api.dto.AdjustBalancesDto;
+import net.knightsandkings.knk.api.dto.BalanceAdjustmentResultDto;
 import net.knightsandkings.knk.api.dto.CoinsUpdateDto;
 import net.knightsandkings.knk.api.dto.ActiveModeUpdateDto;
+import net.knightsandkings.knk.api.dto.FreezePlayerDto;
 import net.knightsandkings.knk.api.dto.GatePassThroughMethodUpdateDto;
 import net.knightsandkings.knk.api.dto.PresenceUpdateDto;
 import net.knightsandkings.knk.api.dto.SalaryPayoutResultDto;
+import net.knightsandkings.knk.api.dto.UpsertGroupMembershipDto;
+import net.knightsandkings.knk.api.dto.UpsertPermissionGrantByNodeDto;
 import net.knightsandkings.knk.api.dto.UserCreateDto;
 import net.knightsandkings.knk.api.dto.UserDto;
 import net.knightsandkings.knk.api.mapper.UsersMapper;
 import net.knightsandkings.knk.core.domain.users.ActiveMode;
+import net.knightsandkings.knk.core.domain.users.BalanceAdjustmentResult;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.domain.users.SalaryPayoutResult;
 import net.knightsandkings.knk.core.domain.users.UserDetail;
@@ -133,15 +139,97 @@ public class UsersCommandApiImpl extends BaseApiImpl implements UsersCommandApi 
     }
 
     @Override
-    public CompletableFuture<Void> adjustBalancesById(int id, int coinsDelta, int gemsDelta, int experienceDelta, String reason) {
+    public CompletableFuture<BalanceAdjustmentResult> adjustBalancesById(int id, int coinsDelta, int gemsDelta, int experienceDelta, String reason) {
         return CompletableFuture.supplyAsync(() -> {
             String url = baseUrl + USERS_ENDPOINT + "/" + id + "/balances";
             try {
                 String bodyJson = objectMapper.writeValueAsString(new AdjustBalancesDto(coinsDelta, gemsDelta, experienceDelta, reason));
+                String responseJson = putJson(url, bodyJson);
+                BalanceAdjustmentResultDto dto = objectMapper.readValue(responseJson, BalanceAdjustmentResultDto.class);
+                return UsersMapper.mapBalanceAdjustmentResult(dto);
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to adjust balances", e);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<Void> addGroupMembership(int userId, int groupId, OffsetDateTime expiresAt) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + "/UserPermissionGroups";
+            try {
+                String bodyJson = objectMapper.writeValueAsString(new UpsertGroupMembershipDto(userId, groupId, expiresAt));
                 putJson(url, bodyJson);
                 return null;
             } catch (ApiException | IOException e) {
-                throw new RuntimeException("Failed to adjust balances", e);
+                throw new RuntimeException("Failed to add group membership", e);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<Void> removeGroupMembership(int userId, int groupId) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + "/UserPermissionGroups/" + userId + "/" + groupId;
+            try {
+                delete(url);
+                return null;
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to remove group membership", e);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<Void> grantPermission(int userId, String node, OffsetDateTime expiresAt) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + "/PermissionGrants/by-node";
+            try {
+                String bodyJson = objectMapper.writeValueAsString(new UpsertPermissionGrantByNodeDto(userId, node, true, expiresAt));
+                putJson(url, bodyJson);
+                return null;
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to grant permission", e);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<Void> revokePermission(int userId, String node) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + "/PermissionGrants/by-node?holderId=" + userId + "&node=" + node;
+            try {
+                delete(url);
+                return null;
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to revoke permission", e);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<Void> freezeById(int userId, String reason) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + USERS_ENDPOINT + "/" + userId + "/freeze";
+            try {
+                String bodyJson = objectMapper.writeValueAsString(new FreezePlayerDto(reason));
+                putJson(url, bodyJson);
+                return null;
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to freeze player", e);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<Void> unfreezeById(int userId) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + USERS_ENDPOINT + "/" + userId + "/unfreeze";
+            try {
+                putJson(url, "{}");
+                return null;
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to unfreeze player", e);
             }
         }, executor);
     }

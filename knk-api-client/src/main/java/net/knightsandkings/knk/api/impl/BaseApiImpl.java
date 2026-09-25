@@ -110,6 +110,12 @@ public class BaseApiImpl {
         return execute(request, url);
     }
 
+    protected String delete(String url) throws ApiException, IOException {
+        Request request = newRequest(url).delete().build();
+        if (debugLogging) LOGGER.info("API Request: DELETE " + url);
+        return execute(request, url);
+    }
+
     protected String putJson(String url, String json) throws ApiException, IOException {
         Request request = newRequest(url)
             .addHeader("Content-Type", "application/json")

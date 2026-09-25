@@ -151,6 +151,9 @@ public class KnKPlugin extends JavaPlugin {
     private KnkPermissible knkPermissible;
     private JoinLoadingGuard joinLoadingGuard;
     private ModeService modeService;
+    private net.knightsandkings.knk.paper.user.AdminFreezeManager adminFreezeManager;
+    private net.knightsandkings.knk.paper.user.MessagingService messagingService;
+    private net.knightsandkings.knk.paper.commands.support.RankHierarchy rankHierarchy;
     private GradesDataAccess gradesDataAccess;
     private TagsDataAccess tagsDataAccess;
     private DomainCatalogDataAccess domainCatalogDataAccess;
@@ -419,6 +422,9 @@ public class KnKPlugin extends JavaPlugin {
             this.knkPermissible = new KnkPermissible(cacheManager.getUserCache(), permissionsDataAccess);
             this.joinLoadingGuard = new JoinLoadingGuard(this, knkPermissible);
             this.modeService = new ModeService(this, knkPermissible, cacheManager.getUserCache(), usersCommandApi);
+            this.adminFreezeManager = new net.knightsandkings.knk.paper.user.AdminFreezeManager();
+            this.messagingService = new net.knightsandkings.knk.paper.user.MessagingService();
+            this.rankHierarchy = new net.knightsandkings.knk.paper.commands.support.RankHierarchy(usersQueryApi);
             this.minecraftMaterialRefsDataAccess = dataAccessFactory.createMinecraftMaterialRefsDataAccess(
                 config.cache().ttl(),
                 minecraftMaterialRefsQueryApi
@@ -689,6 +695,8 @@ public class KnKPlugin extends JavaPlugin {
         pluginManager.registerEvents(new JoinLoadingRestrictionListener(joinLoadingGuard), this);
         pluginManager.registerEvents(new ModeListener(modeService), this);
         getLogger().info("Registered ModeListener for owner/staff mode restore");
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.AdminFreezeListener(this, adminFreezeManager, usersDataAccess), this);
+        getLogger().info("Registered AdminFreezeListener for /freeze enforcement");
     }
     
     /**
@@ -743,6 +751,8 @@ public class KnKPlugin extends JavaPlugin {
                 userManager,
                 usersCommandApi,
                 usersDataAccess,
+                apiClient.getPermissionGroupsQueryApi(),
+                rankHierarchy,
                 districtGateLoader,
                 gateDoorRegionCaptureHandler,
                 serverId,
@@ -772,6 +782,24 @@ public class KnKPlugin extends JavaPlugin {
 
         registerModeCommand("ownermode", ActiveMode.OWNER);
         registerModeCommand("staffmode", ActiveMode.STAFF);
+
+        registerSimpleCommand("freeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(
+            this, usersDataAccess, usersCommandApi, rankHierarchy, adminFreezeManager, true));
+        registerSimpleCommand("unfreeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(
+            this, usersDataAccess, usersCommandApi, rankHierarchy, adminFreezeManager, false));
+        registerSimpleCommand("staffchat", new net.knightsandkings.knk.paper.commands.StaffChatCommand());
+        registerSimpleCommand("msg", new net.knightsandkings.knk.paper.commands.MessageCommand(messagingService));
+        registerSimpleCommand("reply", new net.knightsandkings.knk.paper.commands.ReplyCommand(messagingService));
+    }
+
+    private void registerSimpleCommand(String name, org.bukkit.command.CommandExecutor executor) {
+        PluginCommand pluginCommand = getCommand(name);
+        if (pluginCommand != null) {
+            pluginCommand.setExecutor(executor);
+            getLogger().info("Registered /" + name + " command");
+        } else {
+            getLogger().warning("Failed to register /" + name + " command - not defined in plugin.yml?");
+        }
     }
 
     private void registerModeCommand(String name, ActiveMode mode) {
