@@ -753,6 +753,7 @@ public class KnKPlugin extends JavaPlugin {
                 usersDataAccess,
                 apiClient.getPermissionGroupsQueryApi(),
                 rankHierarchy,
+                modeService,
                 districtGateLoader,
                 gateDoorRegionCaptureHandler,
                 serverId,

@@ -22,6 +22,7 @@ import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.paper.commands.support.DurationParser;
 import net.knightsandkings.knk.paper.commands.support.PromotionEffects;
 import net.knightsandkings.knk.paper.commands.support.RankHierarchy;
+import net.knightsandkings.knk.paper.modes.ModeService;
 
 /**
  * /knk user &lt;player&gt; info | coins|gems|xp set|add|remove &lt;amount&gt; [reason...]
@@ -60,19 +61,22 @@ public class UserManagementCommand implements CommandExecutor {
     private final UsersCommandApi usersCommandApi;
     private final PermissionGroupsQueryApi permissionGroupsQueryApi;
     private final RankHierarchy rankHierarchy;
+    private final ModeService modeService;
 
     public UserManagementCommand(
         Plugin plugin,
         UsersDataAccess usersDataAccess,
         UsersCommandApi usersCommandApi,
         PermissionGroupsQueryApi permissionGroupsQueryApi,
-        RankHierarchy rankHierarchy
+        RankHierarchy rankHierarchy,
+        ModeService modeService
     ) {
         this.plugin = plugin;
         this.usersDataAccess = usersDataAccess;
         this.usersCommandApi = usersCommandApi;
         this.permissionGroupsQueryApi = permissionGroupsQueryApi;
         this.rankHierarchy = rankHierarchy;
+        this.modeService = modeService;
     }
 
     @Override
@@ -223,6 +227,7 @@ public class UserManagementCommand implements CommandExecutor {
                     sender.sendMessage(ChatColor.GREEN + verb + " " + target.username() + "'s membership in "
                         + group.name() + durationSuffix + ".");
                     notifyGroupChange(target, group, adding);
+                    refreshTargetVisibility(target);
                 })).exceptionally(ex -> {
                     Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(ChatColor.RED + "Failed: " + describeError(ex)));
                     return null;
@@ -263,6 +268,7 @@ public class UserManagementCommand implements CommandExecutor {
                 String verb = action.equals("grant") ? "Granted" : "Revoked";
                 String prep = action.equals("grant") ? " to " : " from ";
                 sender.sendMessage(ChatColor.GREEN + verb + " '" + node + "'" + prep + target.username() + ".");
+                refreshTargetVisibility(target);
             })).exceptionally(ex -> {
                 Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(ChatColor.RED + "Failed: " + describeError(ex)));
                 return null;
@@ -292,6 +298,24 @@ public class UserManagementCommand implements CommandExecutor {
                 return null;
             })
         );
+    }
+
+    /**
+     * A group/perm change can affect what an online target may now see (e.g. granting
+     * knk.mode.staff should let them immediately see already-vanished players, not just after
+     * their next relog). Fixes the gap docs/specs/user-features/IMPLEMENTATION_PLAN.md §3's
+     * "Gaps/bugs carried forward" item 3 flagged in advance: "Fine until §6.2's in-game grant
+     * commands exist; those should call ModeService.refreshVisibilityFor(player) after changing
+     * a player's grants." No-op if the target is offline or modeService wasn't wired.
+     */
+    private void refreshTargetVisibility(UserSummary target) {
+        if (modeService == null) {
+            return;
+        }
+        Player targetPlayer = Bukkit.getPlayerExact(target.username());
+        if (targetPlayer != null) {
+            modeService.refreshVisibilityFor(targetPlayer);
+        }
     }
 
     private void notifyGroupChange(UserSummary target, PermissionGroupSummary group, boolean added) {
