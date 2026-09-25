@@ -19,6 +19,7 @@ import okhttp3.Response;
 import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public class ItemBlueprintsQueryApiImpl implements ItemBlueprintsQueryApi {
@@ -111,7 +112,7 @@ public class ItemBlueprintsQueryApiImpl implements ItemBlueprintsQueryApi {
                         );
                         return ItemBlueprintMapper.mapPagedList(result);
                     } catch (Exception parseEx) {
-                        LOGGER.warning("Failed to parse response: " + responseBody);
+                        LOGGER.log(Level.WARNING, "Failed to parse response: " + responseBody, parseEx);
                         throw new ApiException(
                                 url,
                                 response.code(),
@@ -173,7 +174,7 @@ public class ItemBlueprintsQueryApiImpl implements ItemBlueprintsQueryApi {
                     ItemBlueprintReadDto dto = objectMapper.readValue(responseBody, ItemBlueprintReadDto.class);
                     return ItemBlueprintMapper.toCore(dto);
                 } catch (Exception parseEx) {
-                    LOGGER.warning("Failed to parse response: " + responseBody);
+                    LOGGER.log(Level.WARNING, "Failed to parse response: " + responseBody, parseEx);
                     throw new ApiException(
                             url,
                             response.code(),

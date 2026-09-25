@@ -17,6 +17,7 @@ import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
 import net.knightsandkings.knk.core.ports.api.PermissionGroupsQueryApi;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.paper.commands.support.RankHierarchy;
+import net.knightsandkings.knk.paper.modes.ModeService;
 import net.knightsandkings.knk.api.GateStructuresApi;
 import net.knightsandkings.knk.api.GateDoorsApi;
 import net.knightsandkings.knk.paper.gates.DistrictGateLoader;
@@ -91,6 +92,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
             UsersDataAccess usersDataAccess,
             PermissionGroupsQueryApi permissionGroupsQueryApi,
             RankHierarchy rankHierarchy,
+            ModeService modeService,
             DistrictGateLoader districtGateLoader,
             GateDoorRegionCaptureHandler gateDoorRegionCaptureHandler,
             String serverId,
@@ -334,7 +336,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         // 2026-09-25 same day) - null top-level permission, same as gate, since it gates
         // coins/gems/xp/group/perm on their own separate nodes internally rather than one
         // umbrella (see UserManagementCommand's own javadoc).
-        UserManagementCommand userManagementCommand = new UserManagementCommand(plugin, usersDataAccess, usersCommandApi, permissionGroupsQueryApi, rankHierarchy);
+        UserManagementCommand userManagementCommand = new UserManagementCommand(plugin, usersDataAccess, usersCommandApi, permissionGroupsQueryApi, rankHierarchy, modeService);
         registry.register(
                 new CommandMetadata("user", "View or edit a player's coins/gems/XP/rank/permissions",
                         "/knk user <player> info | coins|gems|xp set|add|remove <amount> [reason] | group add|remove <groupName> [duration] | perm grant|revoke <node> [duration]", null,
