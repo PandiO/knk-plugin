@@ -12,6 +12,9 @@ import java.util.List;
  * {@code String} rather than Java enums, matching {@code KnkItemBlueprint}'s
  * precedent - parsing into whatever internal representation the Phase 2
  * rendering engine needs is that engine's concern, not this data-access layer's.
+ * <p>
+ * {@code autoRefreshTicks} (InventoryMenu Phase 9, E4): re-render open instances
+ * every N ticks; null/0 = off.
  */
 public record KnkMenuTemplate(
         Integer id,
@@ -21,5 +24,16 @@ public record KnkMenuTemplate(
         Integer height,
         String growth,
         Integer backgroundMaterialRefId,
-        List<KnkMenuSectionTemplate> sections
-) {}
+        List<KnkMenuSectionTemplate> sections,
+        Integer autoRefreshTicks
+) {
+
+    /**
+     * Pre-Phase-9 shape (no {@code autoRefreshTicks}) - kept so existing
+     * callers/tests don't all have to change for one optional field.
+     */
+    public KnkMenuTemplate(Integer id, String key, String name, String description, Integer height, String growth,
+                           Integer backgroundMaterialRefId, List<KnkMenuSectionTemplate> sections) {
+        this(id, key, name, description, height, growth, backgroundMaterialRefId, sections, null);
+    }
+}

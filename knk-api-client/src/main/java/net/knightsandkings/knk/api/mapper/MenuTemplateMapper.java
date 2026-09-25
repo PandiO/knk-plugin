@@ -36,7 +36,8 @@ public final class MenuTemplateMapper {
                 dto.height(),
                 dto.growth(),
                 dto.backgroundMaterialRefId(),
-                sections
+                sections,
+                dto.autoRefreshTicks()
         );
     }
 
@@ -114,7 +115,8 @@ public final class MenuTemplateMapper {
                 dto.actionPermission(),
                 bindings,
                 actions,
-                conditions
+                conditions,
+                dto.isRowTemplate()
         );
     }
 
@@ -154,7 +156,8 @@ public final class MenuTemplateMapper {
                 dto.id(),
                 dto.conditionTypeId(),
                 dto.paramsJson(),
-                dto.sortOrder()
+                dto.sortOrder(),
+                dto.phase()
         );
     }
 }

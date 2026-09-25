@@ -45,8 +45,11 @@ public final class MenuTemplateAssembler {
         }
         sections.sort(Comparator.comparingInt(RuntimeMenuSection::sortOrder));
 
+        // InventoryMenu Phase 9 (E4): null/0/negative all mean "no auto-refresh".
+        int autoRefreshTicks = template.autoRefreshTicks() != null ? Math.max(0, template.autoRefreshTicks()) : 0;
+
         RuntimeMenu menu = new RuntimeMenu(template.key(), template.name(), height, growth,
-                template.backgroundMaterialRefId(), List.copyOf(sections));
+                template.backgroundMaterialRefId(), List.copyOf(sections), autoRefreshTicks);
 
         MenuLayoutValidator.validate(menu);
 
@@ -111,13 +114,27 @@ public final class MenuTemplateAssembler {
         int sortOrder = itemTemplate.sortOrder() != null ? itemTemplate.sortOrder() : 0;
         int amount = itemTemplate.amount() != null ? itemTemplate.amount() : 1;
 
+        // InventoryMenu Phase 9 (E5): a typo'd condition phase is a data bug -
+        // reject it at assembly like any other unparseable enum field, rather
+        // than silently treating it as Click.
+        if (itemTemplate.conditions() != null) {
+            itemTemplate.conditions().forEach(condition -> MenuConditionPhase.parse(condition.phase(), context));
+        }
+        if (itemTemplate.actions() != null) {
+            itemTemplate.actions().stream()
+                    .filter(action -> action.conditions() != null)
+                    .flatMap(action -> action.conditions().stream())
+                    .forEach(condition -> MenuConditionPhase.parse(condition.phase(), context));
+        }
+
         return new RuntimeMenuItem(
                 itemTemplate.id(), sortOrder, itemTemplate.slotOverride(), itemTemplate.materialRefId(), amount,
                 itemTemplate.chatColorName(), itemTemplate.chatColorDescription(), displayMode,
                 itemTemplate.visibilityPermission(), itemTemplate.actionPermission(),
                 itemTemplate.variableBindings() != null ? itemTemplate.variableBindings() : List.of(),
                 itemTemplate.actions() != null ? itemTemplate.actions() : List.of(),
-                itemTemplate.conditions() != null ? itemTemplate.conditions() : List.of()
+                itemTemplate.conditions() != null ? itemTemplate.conditions() : List.of(),
+                Boolean.TRUE.equals(itemTemplate.rowTemplate())
         );
     }
 }

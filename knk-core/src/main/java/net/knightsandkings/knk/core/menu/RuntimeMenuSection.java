@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Predicate;
 
 /**
@@ -60,6 +61,15 @@ public record RuntimeMenuSection(
      */
     public boolean hasContentSource() {
         return contentSourceId != null && !contentSourceId.isBlank();
+    }
+
+    /**
+     * InventoryMenu Phase 9 (E3): this section's row template (the item with
+     * {@link RuntimeMenuItem#rowTemplate()} set), if any - the item every row a
+     * row-yielding content source returns is rendered through.
+     */
+    public Optional<RuntimeMenuItem> rowTemplate() {
+        return items.stream().filter(RuntimeMenuItem::rowTemplate).findFirst();
     }
 
     /**
@@ -154,7 +164,10 @@ public record RuntimeMenuSection(
         List<RuntimeMenuItem> auto = new ArrayList<>();
         if (!hasContentSource()) {
             for (RuntimeMenuItem item : items) {
-                if (item.slotOverride() == null && contentFilter.test(item)) {
+                // A row template is never placed itself (InventoryMenu Phase 9, E3) -
+                // MenuDefinitionValidator rejects one outside a content-source
+                // section, this just keeps a broken menu from rendering it raw.
+                if (item.slotOverride() == null && !item.rowTemplate() && contentFilter.test(item)) {
                     auto.add(item);
                 }
             }

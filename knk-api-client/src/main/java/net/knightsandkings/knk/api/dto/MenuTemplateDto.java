@@ -12,5 +12,7 @@ public record MenuTemplateDto(
         @JsonProperty("height") Integer height,
         @JsonProperty("growth") String growth,
         @JsonProperty("backgroundMaterialRefId") Integer backgroundMaterialRefId,
-        @JsonProperty("sections") List<MenuSectionTemplateDto> sections
+        @JsonProperty("sections") List<MenuSectionTemplateDto> sections,
+        // InventoryMenu Phase 9 (E4): re-render open instances every N ticks; null = off.
+        @JsonProperty("autoRefreshTicks") Integer autoRefreshTicks
 ) {}

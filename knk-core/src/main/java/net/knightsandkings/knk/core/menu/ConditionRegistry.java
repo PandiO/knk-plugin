@@ -22,8 +22,24 @@ public final class ConditionRegistry<C> {
 
     private final Map<String, ConditionHandler<C>> handlers = new ConcurrentHashMap<>();
 
+    private volatile boolean locked;
+
+    /**
+     * @throws IllegalStateException if called after {@link #lock()} (InventoryMenu
+     *                               Phase 9, E2: every handler must be registered
+     *                               before menu definitions are validated at enable)
+     */
     public void register(String conditionTypeId, ConditionHandler<C> handler) {
+        if (locked) {
+            throw new IllegalStateException("Menu condition '" + conditionTypeId + "' registered after menu validation ran"
+                    + " - register it in a MenuFeature before MenuDefinitionValidationRunner (IMPLEMENTATION_PLAN.md Phase 9)");
+        }
         handlers.put(conditionTypeId, handler);
+    }
+
+    /** Called once by the validation runner; later registrations throw. */
+    public void lock() {
+        locked = true;
     }
 
     public boolean isRegistered(String conditionTypeId) {
