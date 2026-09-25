@@ -13,6 +13,7 @@ import net.knightsandkings.knk.core.ports.api.DistrictsQueryApi;
 import net.knightsandkings.knk.core.ports.api.StreetsQueryApi;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
 import net.knightsandkings.knk.core.gates.GateManager;
+import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.api.GateStructuresApi;
 import net.knightsandkings.knk.api.GateDoorsApi;
@@ -22,6 +23,7 @@ import net.knightsandkings.knk.paper.tasks.GateDoorRegionCaptureHandler;
 import net.knightsandkings.knk.paper.tasks.WorldTaskHandlerRegistry;
 import net.knightsandkings.knk.paper.cache.CacheManager;
 import net.knightsandkings.knk.paper.user.UserManager;
+import org.bukkit.Bukkit;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Registry;
 import org.bukkit.ChatColor;
@@ -84,6 +86,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
             GateDoorsApi gateDoorsApi,
             UserManager userManager,
             UsersCommandApi usersCommandApi,
+            UsersDataAccess usersDataAccess,
             DistrictGateLoader districtGateLoader,
             GateDoorRegionCaptureHandler gateDoorRegionCaptureHandler,
             String serverId,
@@ -322,7 +325,17 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                         List.of("/knk gate list", "/knk gate info <name>", "/knk gate open <name>", "/knk gate passthrough <default|instant|teleport>")),
                 (sender, args) -> gateCommand.onCommand(sender, null, "knk", args)
         );
-        
+
+        // Register user management (developer request 2026-09-25) - null top-level permission,
+        // same as gate, since it gates coins/gems/xp on their own separate nodes internally
+        // rather than one umbrella (see UserManagementCommand's own javadoc).
+        UserManagementCommand userManagementCommand = new UserManagementCommand(plugin, usersDataAccess, usersCommandApi);
+        registry.register(
+                new CommandMetadata("user", "View or edit a player's coins/gems/XP", "/knk user <player> info | /knk user <player> coins|gems|xp set|add|remove <amount> [reason]", null,
+                        List.of("/knk user Steve info", "/knk user Steve coins add 100", "/knk user Steve xp set 50 promoted for good behavior", "/knk user Steve gems remove 10")),
+                (sender, args) -> userManagementCommand.onCommand(sender, null, "knk", args)
+        );
+
         // Register help
         registry.register(
                 new CommandMetadata("help", "Show available commands or command details", "/knk help [command]", null,
@@ -380,6 +393,9 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                 }
 
                 String root = args[0].toLowerCase(Locale.ROOT);
+                if ("user".equals(root)) {
+                        return completeUserSubcommand(Arrays.copyOfRange(args, 1, args.length));
+                }
                 if (!"item".equals(root)) {
                         return Collections.emptyList();
                 }
@@ -618,6 +634,27 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                 tokens.add(key.getKey());
                 tokens.add(key.toString());
                 tokens.add(key.getKey().replace('_', '-'));
+        }
+
+        // /knk user <player> info|coins|gems|xp <set|add|remove> <amount> - userArgs is args
+        // with "user" already stripped, so userArgs[0] is the player name.
+        private List<String> completeUserSubcommand(String[] userArgs) {
+                if (userArgs.length == 0) {
+                        return Collections.emptyList();
+                }
+                if (userArgs.length == 1) {
+                        List<String> onlineNames = Bukkit.getOnlinePlayers().stream()
+                                        .map(Player::getName)
+                                        .toList();
+                        return filterByPrefix(onlineNames, userArgs[0]);
+                }
+                if (userArgs.length == 2) {
+                        return filterByPrefix(List.of("info", "coins", "gems", "xp"), userArgs[1]);
+                }
+                if (userArgs.length == 3 && !"info".equalsIgnoreCase(userArgs[1])) {
+                        return filterByPrefix(List.of("set", "add", "remove"), userArgs[2]);
+                }
+                return Collections.emptyList();
         }
 
         private List<String> filterByPrefix(List<String> values, String rawPrefix) {

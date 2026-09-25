@@ -737,6 +737,7 @@ public class KnKPlugin extends JavaPlugin {
                 gateDoorsApi,
                 userManager,
                 usersCommandApi,
+                usersDataAccess,
                 districtGateLoader,
                 gateDoorRegionCaptureHandler,
                 serverId,

@@ -271,5 +271,10 @@ public class UsersDataAccessTest {
             return CompletableFuture.completedFuture(
                 new SalaryPayoutResult(false, 0, 0, 0, 0, 0, 0, now, now));
         }
+
+        @Override
+        public CompletableFuture<Void> adjustBalancesById(int id, int coinsDelta, int gemsDelta, int experienceDelta, String reason) {
+            return CompletableFuture.completedFuture(null);
+        }
     }
 }

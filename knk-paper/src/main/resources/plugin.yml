@@ -67,6 +67,10 @@ permissions:
       knk.admin.menu: true
       knk.admin.streets: true
       knk.admin.street: true
+      knk.admin.user.info: true
+      knk.admin.user.coins: true
+      knk.admin.user.gems: true
+      knk.admin.user.xp: true
 
   knk.admin.health:
     description: Access to /knk health
@@ -118,6 +122,22 @@ permissions:
 
   knk.admin.street:
     description: Access to /knk street
+    default: false
+
+  knk.admin.user.info:
+    description: View a player's coins/gems/XP/title via /knk user <player> info
+    default: false
+
+  knk.admin.user.coins:
+    description: Adjust a player's coin balance via /knk user <player> coins set|add|remove
+    default: false
+
+  knk.admin.user.gems:
+    description: Adjust a player's gem balance via /knk user <player> gems set|add|remove
+    default: false
+
+  knk.admin.user.xp:
+    description: Adjust a player's XP (and, indirectly, title) via /knk user <player> xp set|add|remove
     default: false
 
   knk.tasks:

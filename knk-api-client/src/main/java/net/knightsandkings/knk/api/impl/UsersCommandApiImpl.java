@@ -9,6 +9,7 @@ import java.util.logging.Logger;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import net.knightsandkings.knk.api.auth.AuthProvider;
+import net.knightsandkings.knk.api.dto.AdjustBalancesDto;
 import net.knightsandkings.knk.api.dto.CoinsUpdateDto;
 import net.knightsandkings.knk.api.dto.ActiveModeUpdateDto;
 import net.knightsandkings.knk.api.dto.GatePassThroughMethodUpdateDto;
@@ -127,6 +128,20 @@ public class UsersCommandApiImpl extends BaseApiImpl implements UsersCommandApi 
                 return UsersMapper.mapSalaryPayoutResult(dto);
             } catch (ApiException | IOException e) {
                 throw new RuntimeException("Failed to pay out salary", e);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<Void> adjustBalancesById(int id, int coinsDelta, int gemsDelta, int experienceDelta, String reason) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + USERS_ENDPOINT + "/" + id + "/balances";
+            try {
+                String bodyJson = objectMapper.writeValueAsString(new AdjustBalancesDto(coinsDelta, gemsDelta, experienceDelta, reason));
+                putJson(url, bodyJson);
+                return null;
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to adjust balances", e);
             }
         }, executor);
     }

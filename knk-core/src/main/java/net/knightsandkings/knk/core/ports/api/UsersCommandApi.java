@@ -42,4 +42,14 @@ public interface UsersCommandApi {
      * from "not yet eligible" rather than relying on the future failing.
      */
     CompletableFuture<SalaryPayoutResult> payOutSalaryById(int id);
+
+    /**
+     * Adjusts a user's coins/gems/experience by a signed delta, with an audit reason (backs
+     * /knk user &lt;player&gt; coins|gems|xp set|add|remove, developer request 2026-09-25).
+     * Server-side rejects any delta that would take a balance negative, and - for a non-zero
+     * experienceDelta - automatically resolves and audit-logs a title change if the new XP total
+     * crosses a bracket boundary (same PUT /api/users/{id}/balances endpoint the web admin's
+     * quick actions already use, so this gets that behavior for free).
+     */
+    CompletableFuture<Void> adjustBalancesById(int id, int coinsDelta, int gemsDelta, int experienceDelta, String reason);
 }
