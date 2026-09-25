@@ -784,7 +784,8 @@ public class KnKPlugin extends JavaPlugin {
                 districtGateLoader,
                 gateDoorRegionCaptureHandler,
                 serverId,
-                menuService
+                menuService,
+                apiClient.getClansQueryApi()
             );
             knkCommand.setExecutor(knkAdminCommand);
             knkCommand.setTabCompleter(knkAdminCommand);

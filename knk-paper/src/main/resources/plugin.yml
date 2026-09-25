@@ -84,6 +84,7 @@ permissions:
     children:
       knk.admin.health: true
       knk.admin.cache: true
+      knk.admin.clans: true
       knk.admin.towns: true
       knk.admin.town: true
       knk.admin.districts: true
@@ -109,6 +110,10 @@ permissions:
 
   knk.admin.cache:
     description: Access to /knk cache
+    default: false
+
+  knk.admin.clans:
+    description: Access to /knk clans (Siege Phase 1 clan/banner inspection)
     default: false
 
   knk.admin.towns:
