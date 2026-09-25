@@ -12,13 +12,17 @@ import net.knightsandkings.knk.core.domain.siege.KnkSiegeMatchRecords.RewardSumm
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeObjective;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeRuntimeConfig;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeScenario;
+import net.knightsandkings.knk.core.domain.siege.KnkSiegeSpawnpoint;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeTeam;
 import net.knightsandkings.knk.core.domain.siege.SiegeEndReason;
 import net.knightsandkings.knk.core.domain.siege.SiegeLobbyMode;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.core.ports.api.SiegeMatchesCommandApi;
 import net.knightsandkings.knk.core.ports.api.TitleBracketsQueryApi;
+import net.knightsandkings.knk.core.siege.AllianceResolver;
 import net.knightsandkings.knk.core.siege.ObjectiveState;
+import net.knightsandkings.knk.core.siege.SiegeCombatRules;
+import net.knightsandkings.knk.core.siege.SiegeCommandFilter;
 import net.knightsandkings.knk.core.siege.ObjectiveState.CaptureEvent;
 import net.knightsandkings.knk.core.siege.ObjectiveState.Presence;
 import net.knightsandkings.knk.core.siege.ProvisionalRewardCalculator;
@@ -388,6 +392,7 @@ public final class SiegeService {
                 continue;
             }
             if (player.isDead()) player.spigot().respawn();
+            player.closeInventory();
             if (!vault.snapshot(player, rt.id(), token)) {
                 player.sendMessage(SiegeMessages.bad("Your inventory couldn't be saved safely, so you can't take part "
                         + "in this siege. Please tell an admin."));
@@ -980,6 +985,127 @@ public final class SiegeService {
             notifyChanged(rt);
         }
         return new Reply(outcome.skipped(), SiegeMessages.skipResult(outcome.result(), rt.displayName(), before, admin));
+    }
+
+    // ==================== Listener support (5b) ====================
+
+    /**
+     * The player as a combatant (DESIGN §6.7), or null when they aren't away in a siege match
+     * (HUB/IN_PROGRESS). Safe zones are their own team's spawnpoints only.
+     */
+    public SiegeCombatRules.Combatant combatantOf(Player player) {
+        Optional<SiegeLobbyRuntime> rt = activeLobbyOf(player.getUniqueId());
+        if (rt.isEmpty()) return null;
+        SiegeMatch match = rt.get().match().orElse(null);
+        boolean inProgress = rt.get().phase() == SiegePhase.IN_PROGRESS && match != null
+                && match.roster().contains(player.getUniqueId());
+        int teamId = inProgress ? match.roster().teamOf(player.getUniqueId()).orElse(-1) : -1;
+        boolean safe = inProgress && isInOwnSafeZone(player, match);
+        return new SiegeCombatRules.Combatant(rt.get().id(), inProgress, teamId, safe);
+    }
+
+    /** The alliances of the lobby's running match, or null. */
+    public AllianceResolver alliancesOf(int lobbyId) {
+        SiegeLobbyRuntime rt = lobbies.get(lobbyId);
+        return rt == null ? null : rt.match().map(SiegeMatch::alliances).orElse(null);
+    }
+
+    public double headshotMultiplier(int lobbyId) {
+        SiegeLobbyRuntime rt = lobbies.get(lobbyId);
+        return rt == null ? 1.0 : rt.machine().configuration().headshotMultiplier();
+    }
+
+    private static boolean isInOwnSafeZone(Player player, SiegeMatch match) {
+        KnkSiegeTeam team = match.teamOf(player.getUniqueId()).orElse(null);
+        if (team == null) return false;
+        Location at = player.getLocation();
+        for (KnkSiegeSpawnpoint spawn : team.spawnpoints()) {
+            Optional<Location> center = SiegeBukkit.toLocation(spawn.location());
+            if (center.isEmpty() || !Objects.equals(center.get().getWorld(), at.getWorld())) continue;
+            if (SiegeCombatRules.withinRadius(at.getX() - center.get().getX(), at.getY() - center.get().getY(),
+                    at.getZ() - center.get().getZ(), spawn.safeZoneRadius())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * A member of a running match died (DESIGN §6.6): death for the victim, kill and streak for a
+     * killer in the same match, announcements to the killer's team at the configured kill counts and
+     * streaks (N12: the streak message carries the streak). Null-safe for non-PvP deaths.
+     *
+     * @return true when the victim is in a running match (the listener then applies keepInventory etc.)
+     */
+    public boolean handleMemberDeath(Player victim, Player killer) {
+        Optional<SiegeMatch> found = runningMatchOf(victim.getUniqueId());
+        if (found.isEmpty()) return false;
+        SiegeMatch match = found.get();
+        match.closeSpawnPick(victim.getUniqueId());
+        UUID killerId = killer != null && match.roster().contains(killer.getUniqueId()) ? killer.getUniqueId() : null;
+        match.roster().recordDeath(victim.getUniqueId(), killerId, match.configuration()).ifPresent(credit -> {
+            int team = match.roster().teamOf(credit.killerId()).orElse(-1);
+            String name = killer.getName();
+            credit.killsMilestone().ifPresent(kills -> tellTeam(match, team, SiegeMessages.prefixed(
+                    Component.text(name + " is an efficient killer with a total of ", SiegeMessages.INFO)
+                            .append(Component.text(kills + " kills!", SiegeMessages.HIGHLIGHT)))));
+            credit.streak().ifPresent(streak -> tellTeam(match, team, SiegeMessages.prefixed(
+                    Component.text(name + " is on a killstreak of ", SiegeMessages.BAD)
+                            .append(Component.text(streak + " kills!", SiegeMessages.HIGHLIGHT)))));
+            killer.sendActionBar(Component.text("You killed " + victim.getName(), SiegeMessages.GOOD));
+        });
+        return true;
+    }
+
+    private static void tellTeam(SiegeMatch match, int teamId, Component message) {
+        match.roster().membersOf(teamId).forEach(id -> tell(id, message));
+    }
+
+    /**
+     * Where the player respawns: a member restored while dead goes back to their pre-siege location;
+     * a member of a running match respawns at their current spawn choice, falling back to the team's
+     * default spawnpoint (DESIGN §6.6). Empty: not a siege matter.
+     */
+    public Optional<Location> respawnLocation(Player player) {
+        Optional<Location> restored = vault.takePendingRespawn(player.getUniqueId());
+        if (restored.isPresent()) return restored;
+        Optional<SiegeLobbyRuntime> hub = activeLobbyOf(player.getUniqueId()).filter(rt -> rt.phase() == SiegePhase.HUB);
+        if (hub.isPresent()) {
+            return hub.get().drawnScenario().flatMap(s -> SiegeBukkit.toLocation(s.hubLocation()));
+        }
+        Optional<SiegeMatch> found = runningMatchOf(player.getUniqueId());
+        if (found.isEmpty()) return Optional.empty();
+        SiegeMatch match = found.get();
+        KnkSiegeTeam team = match.teamOf(player.getUniqueId()).orElse(null);
+        if (team == null) return Optional.empty();
+        return SiegeSpawnOptions.resolveRespawn(team, match.board(), match.roster().spawnChoice(player.getUniqueId()).orElse(null))
+                .flatMap(o -> SiegeBukkit.toLocation(o.location()));
+    }
+
+    /** After a member respawned: open the spawn picker after the configured delay when the team has 2+ options. */
+    public void afterRespawn(Player player) {
+        Optional<SiegeMatch> found = runningMatchOf(player.getUniqueId());
+        if (found.isEmpty()) return;
+        long delay = Math.max(1, found.get().configuration().spawnPickerDelayTicks());
+        later(delay, () -> {
+            if (!player.isOnline() || player.isDead()) return;
+            runningMatchOf(player.getUniqueId()).ifPresent(match -> match.teamOf(player.getUniqueId()).ifPresent(team -> {
+                if (SiegeSpawnOptions.pickerWorthOpening(team, match.board())) offerSpawnPicker(player, match, team);
+            }));
+        });
+    }
+
+    /** DESIGN §6.9: may this member run this command right now? True for everyone not away in a match. */
+    public boolean isCommandAllowed(Player player, String message) {
+        Optional<SiegeLobbyRuntime> rt = activeLobbyOf(player.getUniqueId());
+        if (rt.isEmpty()) return true;
+        if (hasPermission(player, PERMISSION_BYPASS_COMMANDS)) return true;
+        return SiegeCommandFilter.isAllowed(message, rt.get().machine().configuration().allowedCommands());
+    }
+
+    /** The allowed-command list for the member's match, for the denial message. */
+    public List<String> allowedCommandsFor(Player player) {
+        return activeLobbyOf(player.getUniqueId()).map(rt -> rt.machine().configuration().allowedCommands()).orElse(List.of());
     }
 
     // ==================== Admin operations ====================

@@ -65,8 +65,23 @@ public final class BannerDesignBukkitMapper {
         return item;
     }
 
+    /**
+     * The spec's layers as Bukkit patterns, bottom first, for a banner <em>block</em> (Siege Phase 5:
+     * the objective banner's capture gradient); unknown keys are skipped and reported via {@code warn}.
+     */
+    public static List<Pattern> toPatterns(BannerPatternSpec spec, Consumer<String> warn) {
+        spec.errors().forEach(warn);
+        return toLayers(spec, BannerDesignBukkitMapper::resolvePatternType, Pattern::new,
+                key -> warn.accept("unknown banner pattern '" + key + "' - layer skipped"));
+    }
+
+    /** The team's banner base colour (a dye colour name), or null when the team came without a banner. */
+    public static String baseColor(KnkBannerDesign design) {
+        return design == null ? null : design.toPatternSpec().baseColor();
+    }
+
     /** {@code <COLOR>_BANNER}; white when the colour is missing or unknown. */
-    static Material bannerMaterial(String baseColor) {
+    public static Material bannerMaterial(String baseColor) {
         if (baseColor == null) return Material.WHITE_BANNER;
         Material material = Material.matchMaterial(baseColor.toUpperCase(Locale.ROOT) + "_BANNER");
         return material != null ? material : Material.WHITE_BANNER;

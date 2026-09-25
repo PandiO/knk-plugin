@@ -939,7 +939,8 @@ public class KnKPlugin extends JavaPlugin {
             apiClient.getSiegeLobbiesQueryApi(),
             apiClient.getSiegeScenariosQueryApi()
         );
-        SiegePlayerVault siegeVault = new SiegePlayerVault(new java.io.File(getDataFolder(), "siege-vault"), getLogger());
+        java.io.File siegeVaultDirectory = new java.io.File(getDataFolder(), "siege-vault");
+        SiegePlayerVault siegeVault = new SiegePlayerVault(siegeVaultDirectory, getLogger());
         this.siegeService = new SiegeService(
             this,
             siegeDataAccess,
@@ -961,8 +962,16 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().warning("Failed to register /siege command - not defined in plugin.yml?");
         }
 
+        siegeService.addObserver(new net.knightsandkings.knk.paper.siege.SiegeWorldPresenter(this, siegeVaultDirectory));
+        siegeService.addObserver(new net.knightsandkings.knk.paper.siege.SiegeScoreboardPresenter());
+
         var pluginManager = getServer().getPluginManager();
         pluginManager.registerEvents(new SiegeSessionListener(siegeService), this);
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeCombatListener(siegeService,
+            uuid -> adminFreezeManager.isFrozen(uuid) || joinLoadingGuard.isLoading(uuid)), this);
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeDeathRespawnListener(siegeService), this);
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeCommandFilterListener(siegeService), this);
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeInventoryGuardListener(siegeService), this);
 
         siegeService.start();
         getLogger().info("Siege runtime initialized (Phase 5)");
