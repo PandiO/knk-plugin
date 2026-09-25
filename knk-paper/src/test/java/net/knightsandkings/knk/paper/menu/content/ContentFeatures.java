@@ -45,6 +45,9 @@ final class ContentFeatures {
         features.add(new HubMenuFeature());
         features.add(new KitsMenuFeature(mock(KitsDataAccess.class), mock(ItemBlueprintsDataAccess.class),
                 mock(MinecraftMaterialRefsDataAccess.class), mock(KitGrantFlow.class), Clock.systemUTC()));
+        features.add(new ProfileMenuFeature(mock(net.knightsandkings.knk.core.ports.api.UsersQueryApi.class),
+                new net.knightsandkings.knk.core.cache.UserCache(java.time.Duration.ofMinutes(5)),
+                mock(net.knightsandkings.knk.core.dataaccess.TitleBracketsDataAccess.class)));
         return features;
     }
 

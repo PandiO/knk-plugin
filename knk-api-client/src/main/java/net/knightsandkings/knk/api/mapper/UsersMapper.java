@@ -34,7 +34,8 @@ public class UsersMapper {
             dto.premiumTierName(),
             dto.premiumTierExpiresAt(),
             dto.isFrozen(),
-            dto.frozenReason()
+            dto.frozenReason(),
+            dto.gender()
         );
     }
 
@@ -57,7 +58,8 @@ public class UsersMapper {
             domain.premiumTierName(),
             domain.premiumTierExpiresAt(),
             domain.isFrozen(),
-            domain.frozenReason()
+            domain.frozenReason(),
+            domain.gender()
         );
     }
 

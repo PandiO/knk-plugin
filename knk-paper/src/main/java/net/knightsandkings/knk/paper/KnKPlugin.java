@@ -164,6 +164,7 @@ public class KnKPlugin extends JavaPlugin {
     private KitsDataAccess kitsDataAccess;
     private MenuTemplatesDataAccess menuTemplatesDataAccess;
     private net.knightsandkings.knk.paper.kit.KitGrantFlow kitGrantFlow;
+    private net.knightsandkings.knk.core.dataaccess.TitleBracketsDataAccess titleBracketsDataAccess;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private PermissionsDataAccess permissionsDataAccess;
     private KnkPermissible knkPermissible;
@@ -528,6 +529,10 @@ public class KnKPlugin extends JavaPlugin {
                 MenuService.mainThreadExecutor(this), kitsCommandApi, itemBlueprintsDataAccess,
                 minecraftMaterialRefsDataAccess, knkPermissible, cacheManager.getUserCache()
             );
+            // Content port CP3/CP8: title brackets are seeded data - cache the list for 10 minutes.
+            this.titleBracketsDataAccess = new net.knightsandkings.knk.core.dataaccess.TitleBracketsDataAccess(
+                apiClient.getTitleBracketsQueryApi(), java.time.Duration.ofMinutes(10)
+            );
             List<MenuFeature> menuFeatures = List.of(
                 registries -> {
                     MenuVariableContext.registerDefaults(registries.variables());
@@ -539,7 +544,9 @@ public class KnKPlugin extends JavaPlugin {
                 new HubMenuFeature(),
                 new net.knightsandkings.knk.paper.menu.content.KitsMenuFeature(
                     kitsDataAccess, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, kitGrantFlow,
-                    java.time.Clock.systemUTC())
+                    java.time.Clock.systemUTC()),
+                new net.knightsandkings.knk.paper.menu.content.ProfileMenuFeature(
+                    usersQueryApi, cacheManager.getUserCache(), titleBracketsDataAccess)
             );
             menuFeatures.forEach(feature -> feature.registerMenuHandlers(menuRegistries));
 

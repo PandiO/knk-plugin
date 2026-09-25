@@ -178,18 +178,26 @@ public final class KitGrantFlow {
     }
 
     /**
-     * Shows a failed call. A server-side denial ({@code 409 {"code": "ClaimDenied", "message": …}}
-     * from {@code KitsController}) is shown as its message; anything else as before (status +
-     * body, or the exception message).
+     * Shows a failed call. The api-client wraps its {@link ApiException} in a
+     * {@code RuntimeException("Failed to claim kit …")} inside the future's
+     * {@code CompletionException}, so the whole cause chain is searched. A server-side denial
+     * ({@code 409 {"code": "ClaimDenied", "message": …}} from {@code KitsController}) is shown as
+     * its message; any other API error as status + body; anything else as its message.
      */
     public static void printError(CommandSender sender, Throwable ex) {
-        Throwable cause = ex;
-        while ((cause instanceof CompletionException || cause instanceof java.util.concurrent.ExecutionException)
-                && cause.getCause() != null) {
-            cause = cause.getCause();
+        Throwable outer = ex;
+        while ((outer instanceof CompletionException || outer instanceof java.util.concurrent.ExecutionException)
+                && outer.getCause() != null) {
+            outer = outer.getCause();
+        }
+        ApiException apiEx = null;
+        for (Throwable t = outer; t != null && apiEx == null; t = t.getCause() == t ? null : t.getCause()) {
+            if (t instanceof ApiException found) {
+                apiEx = found;
+            }
         }
 
-        if (cause instanceof ApiException apiEx) {
+        if (apiEx != null) {
             String denial = denialMessage(apiEx);
             if (denial != null) {
                 sender.sendMessage(ChatColor.RED + denial);
@@ -202,7 +210,7 @@ public final class KitGrantFlow {
                 sender.sendMessage(ChatColor.RED + apiEx.getMessage());
             }
         } else {
-            sender.sendMessage(ChatColor.RED + (cause.getMessage() != null ? cause.getMessage() : cause.getClass().getSimpleName()));
+            sender.sendMessage(ChatColor.RED + (outer.getMessage() != null ? outer.getMessage() : outer.getClass().getSimpleName()));
         }
     }
 

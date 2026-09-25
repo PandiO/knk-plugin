@@ -67,8 +67,10 @@ class KitGrantFlowTest {
     @Test
     void serverDenialIsShownAsItsMessage() {
         when(permissible.hasPermission(player, KitGrantFlow.GET_NODE)).thenReturn(true);
-        when(api.claimAsync(1, 7)).thenReturn(CompletableFuture.failedFuture(new ApiException("/api/kits/7/claim", 409,
-                "Conflict", "{\"code\":\"ClaimDenied\",\"message\":\"Kit is on cooldown for 4 more minutes.\"}")));
+        // Wrapped exactly as KitsCommandApiImpl does: RuntimeException("Failed to claim …", ApiException).
+        when(api.claimAsync(1, 7)).thenReturn(CompletableFuture.failedFuture(new RuntimeException("Failed to claim kit 7",
+                new ApiException("/api/kits/7/claim", 409, "Conflict",
+                        "{\"code\":\"ClaimDenied\",\"message\":\"Kit is on cooldown for 4 more minutes.\"}"))));
 
         assertFalse(flow.claim(player, 1, 7, "Starter").join());
 
@@ -78,8 +80,8 @@ class KitGrantFlowTest {
     @Test
     void otherErrorsKeepTheStatusAndBody() {
         when(permissible.hasPermission(player, KitGrantFlow.PURCHASE_NODE)).thenReturn(true);
-        when(api.purchaseAsync(1, 7)).thenReturn(CompletableFuture.failedFuture(
-                new ApiException("/api/kits/7/purchase", 400, "Bad Request", "Not a premium kit")));
+        when(api.purchaseAsync(1, 7)).thenReturn(CompletableFuture.failedFuture(new RuntimeException("Failed to purchase",
+                new ApiException("/api/kits/7/purchase", 400, "Bad Request", "Not a premium kit"))));
 
         assertFalse(flow.purchase(player, 1, 7, "Starter").join());
 
