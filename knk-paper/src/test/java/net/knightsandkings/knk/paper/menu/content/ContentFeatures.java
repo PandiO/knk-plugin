@@ -48,6 +48,10 @@ final class ContentFeatures {
         features.add(new ProfileMenuFeature(mock(net.knightsandkings.knk.core.ports.api.UsersQueryApi.class),
                 new net.knightsandkings.knk.core.cache.UserCache(java.time.Duration.ofMinutes(5)),
                 mock(net.knightsandkings.knk.core.dataaccess.TitleBracketsDataAccess.class)));
+        ItemBlueprintsDataAccess catalog = mock(ItemBlueprintsDataAccess.class);
+        org.mockito.Mockito.when(catalog.searchAsync(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new java.util.concurrent.CompletableFuture<>());
+        features.add(new ItemsCatalogMenuFeature(catalog, Clock.systemUTC()));
         return features;
     }
 

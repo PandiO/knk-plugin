@@ -546,7 +546,9 @@ public class KnKPlugin extends JavaPlugin {
                     kitsDataAccess, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, kitGrantFlow,
                     java.time.Clock.systemUTC()),
                 new net.knightsandkings.knk.paper.menu.content.ProfileMenuFeature(
-                    usersQueryApi, cacheManager.getUserCache(), titleBracketsDataAccess)
+                    usersQueryApi, cacheManager.getUserCache(), titleBracketsDataAccess),
+                new net.knightsandkings.knk.paper.menu.content.ItemsCatalogMenuFeature(
+                    itemBlueprintsDataAccess, java.time.Clock.systemUTC())
             );
             menuFeatures.forEach(feature -> feature.registerMenuHandlers(menuRegistries));
 
