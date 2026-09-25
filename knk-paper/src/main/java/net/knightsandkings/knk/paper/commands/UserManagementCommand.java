@@ -2,27 +2,15 @@ package net.knightsandkings.knk.paper.commands;
 
 import java.util.List;
 import java.util.Locale;
-import java.util.concurrent.CompletableFuture;
-import java.util.function.Consumer;
 
-import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
-import org.bukkit.entity.Player;
-import org.bukkit.plugin.Plugin;
 
-import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
-import net.knightsandkings.knk.core.domain.permissions.PermissionGroupSummary;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
-import net.knightsandkings.knk.core.exception.ApiException;
-import net.knightsandkings.knk.core.ports.api.PermissionGroupsQueryApi;
-import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.paper.commands.support.DurationParser;
-import net.knightsandkings.knk.paper.commands.support.PromotionEffects;
-import net.knightsandkings.knk.paper.commands.support.RankHierarchy;
-import net.knightsandkings.knk.paper.modes.ModeService;
+import net.knightsandkings.knk.paper.user.UserAdminService;
 
 /**
  * /knk user &lt;player&gt; info | coins|gems|xp set|add|remove &lt;amount&gt; [reason...]
@@ -49,6 +37,9 @@ import net.knightsandkings.knk.paper.modes.ModeService;
  * "90m", "3d", permanent if omitted), and are hierarchy-checked (RankHierarchy) - the acting
  * player's highest active PermissionGroup weight must exceed the target's, so staff can only
  * manage players ranked below themselves.
+ * <p>
+ * All of that logic lives in {@link UserAdminService} (InventoryMenu content port CP8) - the same
+ * methods the in-game Player manager calls; this class only parses arguments.
  */
 public class UserManagementCommand implements CommandExecutor {
     private static final List<String> PROPERTIES = List.of("info", "coins", "gems", "xp", "group", "perm");
@@ -56,27 +47,10 @@ public class UserManagementCommand implements CommandExecutor {
     private static final List<String> GROUP_ACTIONS = List.of("add", "remove");
     private static final List<String> PERM_ACTIONS = List.of("grant", "revoke");
 
-    private final Plugin plugin;
-    private final UsersDataAccess usersDataAccess;
-    private final UsersCommandApi usersCommandApi;
-    private final PermissionGroupsQueryApi permissionGroupsQueryApi;
-    private final RankHierarchy rankHierarchy;
-    private final ModeService modeService;
+    private final UserAdminService userAdminService;
 
-    public UserManagementCommand(
-        Plugin plugin,
-        UsersDataAccess usersDataAccess,
-        UsersCommandApi usersCommandApi,
-        PermissionGroupsQueryApi permissionGroupsQueryApi,
-        RankHierarchy rankHierarchy,
-        ModeService modeService
-    ) {
-        this.plugin = plugin;
-        this.usersDataAccess = usersDataAccess;
-        this.usersCommandApi = usersCommandApi;
-        this.permissionGroupsQueryApi = permissionGroupsQueryApi;
-        this.rankHierarchy = rankHierarchy;
-        this.modeService = modeService;
+    public UserManagementCommand(UserAdminService userAdminService) {
+        this.userAdminService = userAdminService;
     }
 
     @Override
@@ -99,13 +73,11 @@ public class UserManagementCommand implements CommandExecutor {
                 sender.sendMessage(ChatColor.RED + "You don't have permission to view player info.");
                 return true;
             }
-            resolveTarget(sender, targetName, target -> sendInfo(sender, target));
+            userAdminService.resolveTarget(sender, targetName, target -> sendInfo(sender, target));
             return true;
         }
 
-        String permission = "knk.admin.user." + property;
-        if (!sender.hasPermission(permission)) {
-            sender.sendMessage(ChatColor.RED + "You don't have permission to manage this player's " + property + ".");
+        if (!userAdminService.requireProperty(sender, property)) {
             return true;
         }
 
@@ -149,47 +121,8 @@ public class UserManagementCommand implements CommandExecutor {
             ? String.join(" ", java.util.Arrays.copyOfRange(args, 4, args.length))
             : "/knk user command by " + sender.getName();
 
-        int finalAmount = amount;
-        resolveTarget(sender, targetName, target -> {
-            int current = switch (property) {
-                case "coins" -> target.coins();
-                case "gems" -> target.gems();
-                default -> target.experiencePoints();
-            };
-            int delta = switch (action) {
-                case "set" -> finalAmount - current;
-                case "remove" -> -finalAmount;
-                default -> finalAmount;
-            };
-            if (delta == 0) {
-                sender.sendMessage(ChatColor.YELLOW + target.username() + "'s " + property + " is already " + finalAmount + ".");
-                return;
-            }
-
-            int coinsDelta = property.equals("coins") ? delta : 0;
-            int gemsDelta = property.equals("gems") ? delta : 0;
-            int experienceDelta = property.equals("xp") ? delta : 0;
-
-            // Online target: show any title change right here from the response, and tell the API
-            // not to also queue it for PlayerNotificationPoller (which would show it twice).
-            // Offline target: let the API queue it so it shows when they next join.
-            boolean targetOnline = Bukkit.getPlayerExact(target.username()) != null;
-
-            actorApi(sender).thenCompose(api -> api.adjustBalancesById(target.id(), coinsDelta, gemsDelta, experienceDelta, reason, !targetOnline))
-                .thenAccept(result -> Bukkit.getScheduler().runTask(plugin, () -> {
-                    String verb = delta > 0 ? "Increased" : "Decreased";
-                    sender.sendMessage(ChatColor.GREEN + verb + " " + target.username() + "'s " + property
-                        + " by " + Math.abs(delta) + " (now " + (current + delta) + ").");
-                    Player targetPlayer = Bukkit.getPlayerExact(target.username());
-                    if (targetOnline && targetPlayer != null && result.titleChange() != null) {
-                        PromotionEffects.show(targetPlayer, result.titleChange());
-                    }
-                }))
-                .exceptionally(ex -> {
-                    Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(ChatColor.RED + "Failed: " + describeError(ex)));
-                    return null;
-                });
-        });
+        userAdminService.resolveTarget(sender, targetName,
+            target -> userAdminService.changeBalance(sender, target, property, action, amount, reason));
     }
 
     private void handleGroup(CommandSender sender, String targetName, String[] args) {
@@ -212,36 +145,8 @@ public class UserManagementCommand implements CommandExecutor {
             return;
         }
 
-        resolveTarget(sender, targetName, target -> withRankCheck(sender, target, api ->
-            permissionGroupsQueryApi.list().thenAccept(groups -> {
-                PermissionGroupSummary group = groups.stream()
-                    .filter(g -> g.name().equalsIgnoreCase(groupName))
-                    .findFirst()
-                    .orElse(null);
-                if (group == null) {
-                    Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(ChatColor.RED + "No PermissionGroup named '" + groupName + "'."));
-                    return;
-                }
-                CompletableFuture<Void> action_ = action.equals("add")
-                    ? api.addGroupMembership(target.id(), group.id(), expiresAt)
-                    : api.removeGroupMembership(target.id(), group.id());
-                boolean adding = action.equals("add");
-                action_.thenAccept(v -> Bukkit.getScheduler().runTask(plugin, () -> {
-                    String verb = adding ? "Added" : "Removed";
-                    String durationSuffix = adding ? (expiresAt != null ? " (expires " + expiresAt + ")" : " (permanent)") : "";
-                    sender.sendMessage(ChatColor.GREEN + verb + " " + target.username() + "'s membership in "
-                        + group.name() + durationSuffix + ".");
-                    notifyGroupChange(target, group, adding);
-                    refreshTargetVisibility(target);
-                })).exceptionally(ex -> {
-                    Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(ChatColor.RED + "Failed: " + describeError(ex)));
-                    return null;
-                });
-            }).exceptionally(ex -> {
-                Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(ChatColor.RED + "Failed to list groups: " + describeError(ex)));
-                return null;
-            })
-        ));
+        userAdminService.resolveTarget(sender, targetName,
+            target -> userAdminService.changeGroupByName(sender, target, groupName, action.equals("add"), expiresAt));
     }
 
     private void handlePerm(CommandSender sender, String targetName, String[] args) {
@@ -263,94 +168,9 @@ public class UserManagementCommand implements CommandExecutor {
             sender.sendMessage(ChatColor.RED + ex.getMessage());
             return;
         }
-        java.time.OffsetDateTime finalExpiresAt = expiresAt;
 
-        resolveTarget(sender, targetName, target -> withRankCheck(sender, target, api -> {
-            CompletableFuture<Void> action_ = action.equals("grant")
-                ? api.grantPermission(target.id(), node, finalExpiresAt)
-                : api.revokePermission(target.id(), node);
-            action_.thenAccept(v -> Bukkit.getScheduler().runTask(plugin, () -> {
-                String verb = action.equals("grant") ? "Granted" : "Revoked";
-                String prep = action.equals("grant") ? " to " : " from ";
-                sender.sendMessage(ChatColor.GREEN + verb + " '" + node + "'" + prep + target.username() + ".");
-                refreshTargetVisibility(target);
-            })).exceptionally(ex -> {
-                Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(ChatColor.RED + "Failed: " + describeError(ex)));
-                return null;
-            });
-        }));
-    }
-
-    /**
-     * Resolves the sender's own account (Bukkit.getPlayer only, console senders are already
-     * assumed to outrank everyone by convention elsewhere in /knk), checks RankHierarchy, and
-     * only runs onAllowed if the actor's highest group weight exceeds the target's. onAllowed gets
-     * the command API attributed to that actor (content port CP7); console gets the plain one.
-     */
-    private void withRankCheck(CommandSender sender, UserSummary target, Consumer<UsersCommandApi> onAllowed) {
-        if (!(sender instanceof Player senderPlayer)) {
-            onAllowed.accept(usersCommandApi); // Console always allowed - matches /knk gate admin's console-safe precedent.
-            return;
-        }
-        resolveTarget(sender, senderPlayer.getName(), actor ->
-            rankHierarchy.actorOutranks(actor.id(), target.id()).thenAccept(outranks -> Bukkit.getScheduler().runTask(plugin, () -> {
-                if (!outranks) {
-                    sender.sendMessage(ChatColor.RED + "You cannot act on a player of equal or higher rank.");
-                    return;
-                }
-                onAllowed.accept(usersCommandApi.withActor(actor.id()));
-            })).exceptionally(ex -> {
-                Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(ChatColor.RED + "Failed to check rank: " + describeError(ex)));
-                return null;
-            })
-        );
-    }
-
-    /**
-     * Content port CP7: the command API attributed to the acting player (their knk user id, via
-     * the cache-first user lookup), or the plain API for the console / an unresolvable account -
-     * a missing actor never blocks the action, it only leaves the audit actor empty as before.
-     */
-    CompletableFuture<UsersCommandApi> actorApi(CommandSender sender) {
-        if (!(sender instanceof Player player)) {
-            return CompletableFuture.completedFuture(usersCommandApi);
-        }
-        return usersDataAccess.getByUuidAsync(player.getUniqueId())
-            .thenApply(result -> result != null && result.isSuccess() && result.value().isPresent()
-                ? usersCommandApi.withActor(result.value().get().id())
-                : usersCommandApi)
-            .exceptionally(ex -> usersCommandApi);
-    }
-
-    /**
-     * A group/perm change can affect what an online target may now see (e.g. granting
-     * knk.mode.staff should let them immediately see already-vanished players, not just after
-     * their next relog). Fixes the gap docs/specs/user-features/IMPLEMENTATION_PLAN.md §3's
-     * "Gaps/bugs carried forward" item 3 flagged in advance: "Fine until §6.2's in-game grant
-     * commands exist; those should call ModeService.refreshVisibilityFor(player) after changing
-     * a player's grants." No-op if the target is offline or modeService wasn't wired.
-     */
-    private void refreshTargetVisibility(UserSummary target) {
-        if (modeService == null) {
-            return;
-        }
-        Player targetPlayer = Bukkit.getPlayerExact(target.username());
-        if (targetPlayer != null) {
-            modeService.refreshVisibilityFor(targetPlayer);
-        }
-    }
-
-    private void notifyGroupChange(UserSummary target, PermissionGroupSummary group, boolean added) {
-        Player targetPlayer = Bukkit.getPlayerExact(target.username());
-        if (targetPlayer == null) {
-            return; // Offline - nothing to notify.
-        }
-        targetPlayer.playSound(targetPlayer.getLocation(), org.bukkit.Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.0f);
-        if (added) {
-            targetPlayer.sendMessage(ChatColor.GOLD + "" + ChatColor.BOLD + "✦ " + ChatColor.YELLOW + "You have been added to " + group.name() + "!");
-        } else {
-            targetPlayer.sendMessage(ChatColor.RED + "Your " + group.name() + " membership was removed.");
-        }
+        userAdminService.resolveTarget(sender, targetName,
+            target -> userAdminService.changePermission(sender, target, node, action.equals("grant"), expiresAt));
     }
 
     /** resolveTarget already delivers onFound on the main thread, so this sends directly. */
@@ -369,40 +189,6 @@ public class UserManagementCommand implements CommandExecutor {
             || sender.hasPermission("knk.admin.user.xp")
             || sender.hasPermission("knk.admin.user.group")
             || sender.hasPermission("knk.admin.user.perm");
-    }
-
-    /**
-     * Resolves targetName to a live UserSummary via the API directly (not FetchPolicy.CACHE_FIRST)
-     * so an offline player's current balances are still accurate, and reports a clear "not found"
-     * message on the calling sender rather than a raw 404. onFound always runs on the main thread.
-     */
-    private void resolveTarget(CommandSender sender, String targetName, Consumer<UserSummary> onFound) {
-        usersDataAccess.getByUsernameAsync(targetName).thenAccept(result ->
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                if (!result.isSuccess() || result.value().isEmpty()) {
-                    sender.sendMessage(ChatColor.RED + "No player found named '" + targetName + "'.");
-                    return;
-                }
-                onFound.accept(result.value().get());
-            })
-        ).exceptionally(ex -> {
-            Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(ChatColor.RED + "Failed to look up '" + targetName + "': " + describeError(ex)));
-            return null;
-        });
-    }
-
-    private String describeError(Throwable ex) {
-        Throwable cause = ex;
-        while (cause != null) {
-            if (cause instanceof ApiException apiEx) {
-                if (apiEx.getResponseBody() != null && !apiEx.getResponseBody().isEmpty()) {
-                    return apiEx.getResponseBody();
-                }
-                return apiEx.getMessage();
-            }
-            cause = cause.getCause();
-        }
-        return ex.getMessage();
     }
 
     private void sendUsage(CommandSender sender) {

@@ -55,6 +55,11 @@ final class ContentFeatures {
         features.add(new PremiumMenuFeature(mock(net.knightsandkings.knk.core.dataaccess.PermissionGroupsDataAccess.class),
                 mock(net.knightsandkings.knk.core.ports.api.UsersQueryApi.class),
                 new net.knightsandkings.knk.core.cache.UserCache(java.time.Duration.ofMinutes(5))));
+        features.add(new UserManagerMenuFeature(mock(net.knightsandkings.knk.paper.user.UserAdminService.class),
+                mock(net.knightsandkings.knk.core.ports.api.UsersQueryApi.class),
+                new net.knightsandkings.knk.core.cache.UserCache(java.time.Duration.ofMinutes(5)),
+                mock(net.knightsandkings.knk.core.dataaccess.TitleBracketsDataAccess.class),
+                mock(net.knightsandkings.knk.core.dataaccess.PermissionGroupsDataAccess.class), List::of));
         return features;
     }
 

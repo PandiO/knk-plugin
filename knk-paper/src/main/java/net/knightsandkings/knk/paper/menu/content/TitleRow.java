@@ -87,6 +87,14 @@ public final class TitleRow implements MenuRowKey {
         return displayMode;
     }
 
+    /**
+     * For the Player manager's title picker (CP8): the current bracket HIGHLIGHTed, every other one
+     * NORMAL - {@link #getDisplayMode()}'s DISABLED would make brackets above the target unclickable.
+     */
+    public String getPickerDisplayMode() {
+        return "HIGHLIGHT".equals(displayMode) ? "HIGHLIGHT" : "NORMAL";
+    }
+
     @Override
     public Object menuRowKey() {
         return List.of(bracketId, name, loreLines, displayMode);

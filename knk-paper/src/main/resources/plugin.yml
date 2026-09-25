@@ -114,6 +114,8 @@ permissions:
       knk.admin.user.group: true
       knk.admin.user.perm: true
       knk.admin.user.manage: true
+      knk.admin.user.mode: true
+      knk.admin.user.salary: true
       knk.admin.tp: true
 
   knk.admin.health:
@@ -172,6 +174,16 @@ permissions:
     description: >-
       Open the in-game Player manager (InventoryMenu users.manager, content port CP8) and see its
       hub tile. Every edit inside it is still gated by its own knk.admin.user.<property> node.
+    default: false
+
+  knk.admin.user.mode:
+    description: >-
+      Switch another player's staff mode from the in-game Player manager (content port CP8).
+      Only to a mode the target holds the node for; owner mode is only set by its holder.
+    default: false
+
+  knk.admin.user.salary:
+    description: Pay out another player's outstanding salary from the in-game Player manager (content port CP8).
     default: false
 
   knk.admin.user.info:

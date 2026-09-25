@@ -96,7 +96,8 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
             DistrictGateLoader districtGateLoader,
             GateDoorRegionCaptureHandler gateDoorRegionCaptureHandler,
             String serverId,
-            MenuService menuService
+            MenuService menuService,
+            net.knightsandkings.knk.paper.user.UserAdminService userAdminService
     ) {
                 this.plugin = plugin;
                 this.enchantmentDefinitionsDataAccess = enchantmentDefinitionsDataAccess;
@@ -350,7 +351,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         // 2026-09-25 same day) - null top-level permission, same as gate, since it gates
         // coins/gems/xp/group/perm on their own separate nodes internally rather than one
         // umbrella (see UserManagementCommand's own javadoc).
-        UserManagementCommand userManagementCommand = new UserManagementCommand(plugin, usersDataAccess, usersCommandApi, permissionGroupsQueryApi, rankHierarchy, modeService);
+        UserManagementCommand userManagementCommand = new UserManagementCommand(userAdminService);
         registry.register(
                 new CommandMetadata("user", "View or edit a player's coins/gems/XP/rank/permissions",
                         "/knk user <player> info | coins|gems|xp set|add|remove <amount> [reason] | group add|remove <groupName> [duration] | perm grant|revoke <node> [duration]", null,

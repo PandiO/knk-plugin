@@ -2031,5 +2031,2374 @@
         "variableBindings": []
       }
     ]
+  },
+  {
+    "id": 15,
+    "key": "users.manager",
+    "name": "&8Player manager",
+    "description": "Online players the viewer outranks (users.online) -> the editor. Content port CP8.",
+    "height": 6,
+    "growth": "Static",
+    "backgroundMaterialRefId": null,
+    "autoRefreshTicks": null,
+    "sections": [
+      {
+        "id": 27,
+        "name": "Header",
+        "kind": "StaticButtons",
+        "sortOrder": 0,
+        "displaySlot": 0,
+        "width": 9,
+        "height": 1,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": "knk.admin.user.manage",
+        "searchable": false,
+        "contentSourceId": null,
+        "contentSourceParamsJson": "{}",
+        "items": [
+          {
+            "id": 98,
+            "sortOrder": 0,
+            "slotOverride": 4,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 266,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "PLAYER_HEAD",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 267,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&cOnline players",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 268,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Online now: &f$usersManager.getOnlineCount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 269,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "&7Only players ranked below you are listed",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 99,
+            "sortOrder": 1,
+            "slotOverride": 8,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 270,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BARRIER",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 271,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&c$menu.getBackLabel$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 272,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7$menu.getBackHint$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 46,
+                "actionTypeId": "menu.back",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      },
+      {
+        "id": 28,
+        "name": "Players",
+        "kind": "ContentGrid",
+        "sortOrder": 1,
+        "displaySlot": 9,
+        "width": 9,
+        "height": 4,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Scroll",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": "knk.admin.user.manage",
+        "searchable": false,
+        "contentSourceId": "users.online",
+        "contentSourceParamsJson": "{}",
+        "items": [
+          {
+            "id": 102,
+            "sortOrder": 0,
+            "slotOverride": null,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": true,
+            "variableBindings": [
+              {
+                "id": 279,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "$row.getMaterial$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 280,
+                "targetProperty": "SkullOwner",
+                "sortOrder": 0,
+                "expression": "$row.getUuid$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 281,
+                "targetProperty": "DisplayMode",
+                "sortOrder": 0,
+                "expression": "$row.getDisplayMode$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 282,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&f$row.getName$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 283,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$row.getLoreLines$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 49,
+                "actionTypeId": "menu.open",
+                "paramsJson": "{\"key\":\"users.manager.edit\",\"ctx.userId\":\"$row.getUserId$\",\"ctx.name\":\"$row.getName$\",\"state.pm.coinStep\":\"100\",\"state.pm.gemStep\":\"10\",\"state.pm.xpStep\":\"100\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 100,
+            "sortOrder": 145,
+            "slotOverride": 45,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 273,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "ARROW",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 274,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aPrevious page",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 275,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 47,
+                "actionTypeId": "menu.page.prev",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 101,
+            "sortOrder": 153,
+            "slotOverride": 53,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 276,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "ARROW",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 277,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aNext page",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 278,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 48,
+                "actionTypeId": "menu.page.next",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      }
+    ]
+  },
+  {
+    "id": 16,
+    "key": "users.manager.edit",
+    "name": "&8Edit player",
+    "description": "Steppers for coins/gems/XP, title, groups, mode, salary, freeze, kick, ban for the player in ctx.userId/ctx.name. Content port CP8.",
+    "height": 6,
+    "growth": "Static",
+    "backgroundMaterialRefId": null,
+    "autoRefreshTicks": null,
+    "sections": [
+      {
+        "id": 29,
+        "name": "Target",
+        "kind": "ContentGrid",
+        "sortOrder": 0,
+        "displaySlot": 0,
+        "width": 1,
+        "height": 1,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": "knk.admin.user.manage",
+        "searchable": false,
+        "contentSourceId": "users.target",
+        "contentSourceParamsJson": "{\"userId\":\"$ctx.userId$\",\"name\":\"$ctx.name$\"}",
+        "items": [
+          {
+            "id": 103,
+            "sortOrder": 0,
+            "slotOverride": null,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": true,
+            "variableBindings": [
+              {
+                "id": 284,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "PLAYER_HEAD",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 285,
+                "targetProperty": "SkullOwner",
+                "sortOrder": 0,
+                "expression": "$row.getName$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 286,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&f$row.getName$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 287,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$row.getSummaryLines$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      },
+      {
+        "id": 30,
+        "name": "Header",
+        "kind": "StaticButtons",
+        "sortOrder": 1,
+        "displaySlot": 1,
+        "width": 8,
+        "height": 1,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": "knk.admin.user.manage",
+        "searchable": false,
+        "contentSourceId": null,
+        "contentSourceParamsJson": "{}",
+        "items": [
+          {
+            "id": 104,
+            "sortOrder": 0,
+            "slotOverride": 8,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 288,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BARRIER",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 289,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&c$menu.getBackLabel$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 290,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7$menu.getBackHint$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 50,
+                "actionTypeId": "menu.back",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      },
+      {
+        "id": 31,
+        "name": "Controls",
+        "kind": "StaticButtons",
+        "sortOrder": 2,
+        "displaySlot": 9,
+        "width": 9,
+        "height": 5,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": "knk.admin.user.manage",
+        "searchable": false,
+        "contentSourceId": null,
+        "contentSourceParamsJson": "{}",
+        "items": [
+          {
+            "id": 105,
+            "sortOrder": 110,
+            "slotOverride": 10,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": "knk.admin.user.coins",
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 291,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "RED_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 292,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&c-$state.pm.coinStep$ coins",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 51,
+                "actionTypeId": "users.adjust",
+                "paramsJson": "{\"userId\":\"$ctx.userId$\",\"field\":\"coins\",\"delta\":\"-$state.pm.coinStep$\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 20,
+                "conditionTypeId": "users.outranks-target",
+                "paramsJson": "{\"userId\":\"$ctx.userId$\"}",
+                "sortOrder": 0,
+                "phase": "Click"
+              }
+            ]
+          },
+          {
+            "id": 114,
+            "sortOrder": 110,
+            "slotOverride": 14,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": "knk.admin.user.xp",
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 315,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "IRON_HELMET",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 316,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&bTitle: &f$target.getTitleName$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 317,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&8Click to set a title",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 60,
+                "actionTypeId": "menu.open",
+                "paramsJson": "{\"key\":\"users.manager.titles\",\"ctx.userId\":\"$ctx.userId$\",\"ctx.name\":\"$ctx.name$\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 106,
+            "sortOrder": 111,
+            "slotOverride": 11,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 293,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "GOLD_INGOT",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 294,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&6Coins: &f$target.getCoins$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 295,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Step: &f$state.pm.coinStep$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 296,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "&8Click to change the step (1/10/100/1000/10000)",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 52,
+                "actionTypeId": "menu.state.cycle",
+                "paramsJson": "{\"key\":\"pm.coinStep\",\"values\":\"1,10,100,1000,10000\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 115,
+            "sortOrder": 111,
+            "slotOverride": 15,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": "knk.admin.user.group",
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 318,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BOOK",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 319,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&eGroups",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 320,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Premium tier: &f$target.getPremiumTierName$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 321,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "&8Click to add or remove groups",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 61,
+                "actionTypeId": "menu.open",
+                "paramsJson": "{\"key\":\"users.manager.groups\",\"ctx.userId\":\"$ctx.userId$\",\"ctx.name\":\"$ctx.name$\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 107,
+            "sortOrder": 112,
+            "slotOverride": 12,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": "knk.admin.user.coins",
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 297,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "LIME_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 298,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&a+$state.pm.coinStep$ coins",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 53,
+                "actionTypeId": "users.adjust",
+                "paramsJson": "{\"userId\":\"$ctx.userId$\",\"field\":\"coins\",\"delta\":\"$state.pm.coinStep$\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 21,
+                "conditionTypeId": "users.outranks-target",
+                "paramsJson": "{\"userId\":\"$ctx.userId$\"}",
+                "sortOrder": 0,
+                "phase": "Click"
+              }
+            ]
+          },
+          {
+            "id": 116,
+            "sortOrder": 112,
+            "slotOverride": 16,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": "knk.admin.user.mode",
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 322,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "ENDER_EYE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 323,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&dMode: &f$target.getMode$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 324,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&8Click to switch to $target.getNextModeName$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 62,
+                "actionTypeId": "users.mode",
+                "paramsJson": "{\"userId\":\"$ctx.userId$\",\"mode\":\"$target.getNextMode$\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 26,
+                "conditionTypeId": "users.outranks-target",
+                "paramsJson": "{\"userId\":\"$ctx.userId$\"}",
+                "sortOrder": 0,
+                "phase": "Click"
+              }
+            ]
+          },
+          {
+            "id": 117,
+            "sortOrder": 113,
+            "slotOverride": 23,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": "knk.admin.user.salary",
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 325,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "CLOCK",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 326,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&6Pay out salary",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 327,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Pays the salary owed since the last payout",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 63,
+                "actionTypeId": "users.salary-payout",
+                "paramsJson": "{\"userId\":\"$ctx.userId$\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 27,
+                "conditionTypeId": "users.outranks-target",
+                "paramsJson": "{\"userId\":\"$ctx.userId$\"}",
+                "sortOrder": 0,
+                "phase": "Click"
+              }
+            ]
+          },
+          {
+            "id": 118,
+            "sortOrder": 114,
+            "slotOverride": 24,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 328,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "$target.getFreezeMaterial$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 329,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "$target.getFreezeName$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 330,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Frozen players can't move, chat or use commands",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 64,
+                "actionTypeId": "users.freeze",
+                "paramsJson": "{\"userId\":\"$ctx.userId$\",\"op\":\"freeze\"}",
+                "sortOrder": 0,
+                "conditions": [
+                  {
+                    "id": 28,
+                    "conditionTypeId": "value-equals",
+                    "paramsJson": "{\"value\":\"$target.getIsFrozen$\",\"expected\":\"false\"}",
+                    "sortOrder": 0,
+                    "phase": "Render"
+                  },
+                  {
+                    "id": 29,
+                    "conditionTypeId": "permission-node",
+                    "paramsJson": "{\"node\":\"knk.freeze\"}",
+                    "sortOrder": 1,
+                    "phase": "Click"
+                  }
+                ]
+              },
+              {
+                "id": 65,
+                "actionTypeId": "users.freeze",
+                "paramsJson": "{\"userId\":\"$ctx.userId$\",\"op\":\"unfreeze\"}",
+                "sortOrder": 1,
+                "conditions": [
+                  {
+                    "id": 30,
+                    "conditionTypeId": "value-equals",
+                    "paramsJson": "{\"value\":\"$target.getIsFrozen$\",\"expected\":\"true\"}",
+                    "sortOrder": 0,
+                    "phase": "Render"
+                  },
+                  {
+                    "id": 31,
+                    "conditionTypeId": "permission-node",
+                    "paramsJson": "{\"node\":\"knk.unfreeze\"}",
+                    "sortOrder": 1,
+                    "phase": "Click"
+                  }
+                ]
+              }
+            ],
+            "conditions": [
+              {
+                "id": 32,
+                "conditionTypeId": "users.outranks-target",
+                "paramsJson": "{\"userId\":\"$ctx.userId$\"}",
+                "sortOrder": 0,
+                "phase": "Click"
+              }
+            ]
+          },
+          {
+            "id": 119,
+            "sortOrder": 115,
+            "slotOverride": 32,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 331,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "IRON_HORSE_ARMOR",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 332,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&cKick",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 333,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Runs /kick as you (vanilla permission)",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 66,
+                "actionTypeId": "menu.confirm.request",
+                "paramsJson": "{\"actionTypeId\":\"users.kick\",\"actionParamsJson\":\"{\\\"userId\\\":\\\"$ctx.userId$\\\"}\",\"prompt\":\"Kick $target.getName$? Click Confirm or Cancel.\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 33,
+                "conditionTypeId": "users.outranks-target",
+                "paramsJson": "{\"userId\":\"$ctx.userId$\"}",
+                "sortOrder": 0,
+                "phase": "Click"
+              }
+            ]
+          },
+          {
+            "id": 120,
+            "sortOrder": 116,
+            "slotOverride": 33,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 334,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "NETHERITE_AXE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 335,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&4Ban",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 336,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Runs /ban as you (vanilla permission)",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 67,
+                "actionTypeId": "menu.confirm.request",
+                "paramsJson": "{\"actionTypeId\":\"users.ban\",\"actionParamsJson\":\"{\\\"userId\\\":\\\"$ctx.userId$\\\"}\",\"prompt\":\"Ban $target.getName$? Click Confirm or Cancel.\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 34,
+                "conditionTypeId": "users.outranks-target",
+                "paramsJson": "{\"userId\":\"$ctx.userId$\"}",
+                "sortOrder": 0,
+                "phase": "Click"
+              }
+            ]
+          },
+          {
+            "id": 108,
+            "sortOrder": 119,
+            "slotOverride": 19,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": "knk.admin.user.gems",
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 299,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "RED_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 300,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&c-$state.pm.gemStep$ gems",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 54,
+                "actionTypeId": "users.adjust",
+                "paramsJson": "{\"userId\":\"$ctx.userId$\",\"field\":\"gems\",\"delta\":\"-$state.pm.gemStep$\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 22,
+                "conditionTypeId": "users.outranks-target",
+                "paramsJson": "{\"userId\":\"$ctx.userId$\"}",
+                "sortOrder": 0,
+                "phase": "Click"
+              }
+            ]
+          },
+          {
+            "id": 109,
+            "sortOrder": 120,
+            "slotOverride": 20,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 301,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "EMERALD",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 302,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aGems: &f$target.getGems$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 303,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Step: &f$state.pm.gemStep$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 304,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "&8Click to change the step (1/10/100/1000)",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 55,
+                "actionTypeId": "menu.state.cycle",
+                "paramsJson": "{\"key\":\"pm.gemStep\",\"values\":\"1,10,100,1000\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 110,
+            "sortOrder": 121,
+            "slotOverride": 21,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": "knk.admin.user.gems",
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 305,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "LIME_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 306,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&a+$state.pm.gemStep$ gems",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 56,
+                "actionTypeId": "users.adjust",
+                "paramsJson": "{\"userId\":\"$ctx.userId$\",\"field\":\"gems\",\"delta\":\"$state.pm.gemStep$\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 23,
+                "conditionTypeId": "users.outranks-target",
+                "paramsJson": "{\"userId\":\"$ctx.userId$\"}",
+                "sortOrder": 0,
+                "phase": "Click"
+              }
+            ]
+          },
+          {
+            "id": 111,
+            "sortOrder": 128,
+            "slotOverride": 28,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": "knk.admin.user.xp",
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 307,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "RED_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 308,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&c-$state.pm.xpStep$ XP",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 57,
+                "actionTypeId": "users.adjust",
+                "paramsJson": "{\"userId\":\"$ctx.userId$\",\"field\":\"xp\",\"delta\":\"-$state.pm.xpStep$\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 24,
+                "conditionTypeId": "users.outranks-target",
+                "paramsJson": "{\"userId\":\"$ctx.userId$\"}",
+                "sortOrder": 0,
+                "phase": "Click"
+              }
+            ]
+          },
+          {
+            "id": 112,
+            "sortOrder": 129,
+            "slotOverride": 29,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 309,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "EXPERIENCE_BOTTLE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 310,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&bExperience: &f$target.getExperience$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 311,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Step: &f$state.pm.xpStep$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 312,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "&8Click to change the step (10/100/1000/10000)",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 58,
+                "actionTypeId": "menu.state.cycle",
+                "paramsJson": "{\"key\":\"pm.xpStep\",\"values\":\"10,100,1000,10000\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 113,
+            "sortOrder": 130,
+            "slotOverride": 30,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": "knk.admin.user.xp",
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 313,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "LIME_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 314,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&a+$state.pm.xpStep$ XP",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 59,
+                "actionTypeId": "users.adjust",
+                "paramsJson": "{\"userId\":\"$ctx.userId$\",\"field\":\"xp\",\"delta\":\"$state.pm.xpStep$\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 25,
+                "conditionTypeId": "users.outranks-target",
+                "paramsJson": "{\"userId\":\"$ctx.userId$\"}",
+                "sortOrder": 0,
+                "phase": "Click"
+              }
+            ]
+          },
+          {
+            "id": 121,
+            "sortOrder": 148,
+            "slotOverride": 48,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 337,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "LIME_CONCRETE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 338,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aConfirm",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 339,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Confirm the action you picked (see chat)",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 68,
+                "actionTypeId": "menu.confirm.accept",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 35,
+                "conditionTypeId": "users.pending",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "phase": "Render"
+              }
+            ]
+          },
+          {
+            "id": 122,
+            "sortOrder": 150,
+            "slotOverride": 50,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 340,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "RED_CONCRETE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 341,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&cCancel",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 69,
+                "actionTypeId": "menu.confirm.cancel",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 36,
+                "conditionTypeId": "users.pending",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "phase": "Render"
+              }
+            ]
+          }
+        ],
+        "variableBindings": []
+      }
+    ]
+  },
+  {
+    "id": 17,
+    "key": "users.manager.titles",
+    "name": "&8Set title",
+    "description": "Pick a title bracket for the player in ctx.userId (users.titles); sets their XP to its minimum. Content port CP8.",
+    "height": 4,
+    "growth": "Static",
+    "backgroundMaterialRefId": null,
+    "autoRefreshTicks": null,
+    "sections": [
+      {
+        "id": 32,
+        "name": "Header",
+        "kind": "StaticButtons",
+        "sortOrder": 0,
+        "displaySlot": 0,
+        "width": 9,
+        "height": 1,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": "knk.admin.user.manage",
+        "searchable": false,
+        "contentSourceId": null,
+        "contentSourceParamsJson": "{}",
+        "items": [
+          {
+            "id": 123,
+            "sortOrder": 0,
+            "slotOverride": 4,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 342,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "IRON_HELMET",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 343,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&bTitle for &f$target.getName$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 344,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Current: &f$target.getTitleName$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 345,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "&7Experience: &f$target.getExperience$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 124,
+            "sortOrder": 1,
+            "slotOverride": 8,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 346,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BARRIER",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 347,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&c$menu.getBackLabel$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 348,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7$menu.getBackHint$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 70,
+                "actionTypeId": "menu.back",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      },
+      {
+        "id": 33,
+        "name": "Titles",
+        "kind": "ContentGrid",
+        "sortOrder": 1,
+        "displaySlot": 9,
+        "width": 9,
+        "height": 2,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Scroll",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": "knk.admin.user.manage",
+        "searchable": false,
+        "contentSourceId": "users.titles",
+        "contentSourceParamsJson": "{\"userId\":\"$ctx.userId$\",\"name\":\"$ctx.name$\"}",
+        "items": [
+          {
+            "id": 129,
+            "sortOrder": 0,
+            "slotOverride": null,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": "knk.admin.user.xp",
+            "isRowTemplate": true,
+            "variableBindings": [
+              {
+                "id": 360,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "IRON_HELMET",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 361,
+                "targetProperty": "DisplayMode",
+                "sortOrder": 0,
+                "expression": "$row.getPickerDisplayMode$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 362,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&f$row.getName$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 363,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$row.getLoreLines$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 364,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "&8Click to set this title",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 75,
+                "actionTypeId": "menu.confirm.request",
+                "paramsJson": "{\"actionTypeId\":\"users.set-title\",\"actionParamsJson\":\"{\\\"userId\\\":\\\"$ctx.userId$\\\",\\\"bracketId\\\":\\\"$row.getBracketId$\\\"}\",\"prompt\":\"Set $ctx.name$'s title to $row.getName$ (XP becomes $row.getMinExperience$)? Click Confirm or Cancel.\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 39,
+                "conditionTypeId": "users.outranks-target",
+                "paramsJson": "{\"userId\":\"$ctx.userId$\"}",
+                "sortOrder": 0,
+                "phase": "Click"
+              }
+            ]
+          },
+          {
+            "id": 125,
+            "sortOrder": 127,
+            "slotOverride": 27,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 349,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "ARROW",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 350,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aPrevious page",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 351,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 71,
+                "actionTypeId": "menu.page.prev",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 127,
+            "sortOrder": 130,
+            "slotOverride": 30,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 355,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "LIME_CONCRETE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 356,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aConfirm",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 357,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Set the title you picked (see chat)",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 73,
+                "actionTypeId": "menu.confirm.accept",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 37,
+                "conditionTypeId": "users.pending",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "phase": "Render"
+              }
+            ]
+          },
+          {
+            "id": 128,
+            "sortOrder": 132,
+            "slotOverride": 32,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 358,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "RED_CONCRETE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 359,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&cCancel",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 74,
+                "actionTypeId": "menu.confirm.cancel",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 38,
+                "conditionTypeId": "users.pending",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "phase": "Render"
+              }
+            ]
+          },
+          {
+            "id": 126,
+            "sortOrder": 135,
+            "slotOverride": 35,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 352,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "ARROW",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 353,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aNext page",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 354,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 72,
+                "actionTypeId": "menu.page.next",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      }
+    ]
+  },
+  {
+    "id": 18,
+    "key": "users.manager.groups",
+    "name": "&8Groups",
+    "description": "Every permission group; click to add the player in ctx.userId or (confirmed) remove them (users.groups). Content port CP8.",
+    "height": 6,
+    "growth": "Static",
+    "backgroundMaterialRefId": null,
+    "autoRefreshTicks": null,
+    "sections": [
+      {
+        "id": 34,
+        "name": "Header",
+        "kind": "StaticButtons",
+        "sortOrder": 0,
+        "displaySlot": 0,
+        "width": 9,
+        "height": 1,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": "knk.admin.user.manage",
+        "searchable": false,
+        "contentSourceId": null,
+        "contentSourceParamsJson": "{}",
+        "items": [
+          {
+            "id": 130,
+            "sortOrder": 0,
+            "slotOverride": 4,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 365,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BOOK",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 366,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&eGroups of &f$target.getName$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 367,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Highlighted: current memberships",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 368,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "&7Removing a group asks for confirmation",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 131,
+            "sortOrder": 1,
+            "slotOverride": 8,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 369,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BARRIER",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 370,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&c$menu.getBackLabel$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 371,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7$menu.getBackHint$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 76,
+                "actionTypeId": "menu.back",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      },
+      {
+        "id": 35,
+        "name": "Groups",
+        "kind": "ContentGrid",
+        "sortOrder": 1,
+        "displaySlot": 9,
+        "width": 9,
+        "height": 4,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Scroll",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": "knk.admin.user.manage",
+        "searchable": false,
+        "contentSourceId": "users.groups",
+        "contentSourceParamsJson": "{\"userId\":\"$ctx.userId$\",\"name\":\"$ctx.name$\"}",
+        "items": [
+          {
+            "id": 136,
+            "sortOrder": 0,
+            "slotOverride": null,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": "knk.admin.user.group",
+            "isRowTemplate": true,
+            "variableBindings": [
+              {
+                "id": 383,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "$row.getMaterial$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 384,
+                "targetProperty": "DisplayMode",
+                "sortOrder": 0,
+                "expression": "$row.getDisplayMode$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 385,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&f$row.getName$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 386,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$row.getLoreLines$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 81,
+                "actionTypeId": "users.group",
+                "paramsJson": "{\"userId\":\"$ctx.userId$\",\"groupId\":\"$row.getGroupId$\",\"op\":\"add\"}",
+                "sortOrder": 0,
+                "conditions": [
+                  {
+                    "id": 42,
+                    "conditionTypeId": "value-equals",
+                    "paramsJson": "{\"value\":\"$row.getIsMember$\",\"expected\":\"false\"}",
+                    "sortOrder": 0,
+                    "phase": "Render"
+                  }
+                ]
+              },
+              {
+                "id": 82,
+                "actionTypeId": "menu.confirm.request",
+                "paramsJson": "{\"actionTypeId\":\"users.group\",\"actionParamsJson\":\"{\\\"userId\\\":\\\"$ctx.userId$\\\",\\\"groupId\\\":\\\"$row.getGroupId$\\\",\\\"op\\\":\\\"remove\\\"}\",\"prompt\":\"Remove $ctx.name$ from $row.getName$? Click Confirm or Cancel.\"}",
+                "sortOrder": 1,
+                "conditions": [
+                  {
+                    "id": 43,
+                    "conditionTypeId": "value-equals",
+                    "paramsJson": "{\"value\":\"$row.getIsMember$\",\"expected\":\"true\"}",
+                    "sortOrder": 0,
+                    "phase": "Render"
+                  }
+                ]
+              }
+            ],
+            "conditions": [
+              {
+                "id": 44,
+                "conditionTypeId": "users.outranks-target",
+                "paramsJson": "{\"userId\":\"$ctx.userId$\"}",
+                "sortOrder": 0,
+                "phase": "Click"
+              }
+            ]
+          },
+          {
+            "id": 132,
+            "sortOrder": 145,
+            "slotOverride": 45,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 372,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "ARROW",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 373,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aPrevious page",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 374,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 77,
+                "actionTypeId": "menu.page.prev",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 134,
+            "sortOrder": 148,
+            "slotOverride": 48,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 378,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "LIME_CONCRETE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 379,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aConfirm",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 380,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Confirm the removal you picked (see chat)",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 79,
+                "actionTypeId": "menu.confirm.accept",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 40,
+                "conditionTypeId": "users.pending",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "phase": "Render"
+              }
+            ]
+          },
+          {
+            "id": 135,
+            "sortOrder": 150,
+            "slotOverride": 50,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 381,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "RED_CONCRETE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 382,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&cCancel",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 80,
+                "actionTypeId": "menu.confirm.cancel",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 41,
+                "conditionTypeId": "users.pending",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "phase": "Render"
+              }
+            ]
+          },
+          {
+            "id": 133,
+            "sortOrder": 153,
+            "slotOverride": 53,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 375,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "ARROW",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 376,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aNext page",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 377,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 78,
+                "actionTypeId": "menu.page.next",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      }
+    ]
   }
 ]
