@@ -118,8 +118,9 @@ public final class SiegeEnchantBooks implements SiegeMatchObserver {
         meta.addStoredEnchant(enchantment, level, true);
         meta.displayName(Component.text("Siege Enchantment", NamedTextColor.LIGHT_PURPLE).decoration(TextDecoration.ITALIC, false));
         meta.lore(List.of(
-                Component.text("Pick it up and click it onto an item", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
-                Component.text("in your inventory. Removed after the siege.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false)));
+                Component.text("Right-click to choose an item to enchant,", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
+                Component.text("or click it onto an item in your inventory.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
+                Component.text("Removed again after the siege.", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)));
         meta.getPersistentDataContainer().set(bookKey, PersistentDataType.STRING, matchToken);
         book.setItemMeta(meta);
         return book;
@@ -159,10 +160,10 @@ public final class SiegeEnchantBooks implements SiegeMatchObserver {
     public enum ApplyResult { APPLIED, NOT_IN_MATCH, WRONG_MATCH, NOT_ENCHANTABLE, CONFLICT, NO_IMPROVEMENT, UNKNOWN }
 
     /**
-     * Applies the siege book on the player's cursor to {@code target}; returns the updated target in
-     * {@code result[0]} when applied. The caller cancels the click and writes the item back.
+     * Would {@code book} go on {@code target} for this player right now? {@link ApplyResult#APPLIED}
+     * means yes; nothing is changed. Used by {@link #apply} and to list the menu's eligible items.
      */
-    public ApplyResult apply(Player player, ItemStack book, ItemStack target, ItemStack[] result) {
+    public ApplyResult evaluate(Player player, ItemStack book, ItemStack target) {
         String token = bookToken(book);
         String running = runningTokenOf(player);
         if (running == null) return ApplyResult.NOT_IN_MATCH;
@@ -183,6 +184,30 @@ public final class SiegeEnchantBooks implements SiegeMatchObserver {
         int existingLevel = target.getEnchantmentLevel(enchantment);
         int newLevel = SiegeEnchantMarkers.appliedLevel(existingLevel, stored.getValue());
         if (newLevel <= existingLevel) return ApplyResult.NO_IMPROVEMENT;
+        return ApplyResult.APPLIED;
+    }
+
+    /** The enchantment and level a siege book carries, or null. */
+    public Map.Entry<Enchantment, Integer> storedEnchant(ItemStack book) {
+        if (bookToken(book) == null || !(book.getItemMeta() instanceof EnchantmentStorageMeta meta)
+                || meta.getStoredEnchants().isEmpty()) {
+            return null;
+        }
+        return meta.getStoredEnchants().entrySet().iterator().next();
+    }
+
+    /**
+     * Applies the siege {@code book} to {@code target}; returns the updated target in {@code result[0]}
+     * when applied. The caller consumes the book and writes the item back.
+     */
+    public ApplyResult apply(Player player, ItemStack book, ItemStack target, ItemStack[] result) {
+        ApplyResult check = evaluate(player, book, target);
+        if (check != ApplyResult.APPLIED) return check;
+        String token = bookToken(book);
+        Map.Entry<Enchantment, Integer> stored = storedEnchant(book);
+        Enchantment enchantment = stored.getKey();
+        int existingLevel = target.getEnchantmentLevel(enchantment);
+        int newLevel = SiegeEnchantMarkers.appliedLevel(existingLevel, stored.getValue());
 
         ItemStack updated = target.clone();
         String key = enchantment.getKey().toString();

@@ -90,14 +90,19 @@ public final class SiegeMessages {
         };
     }
 
-    public static Component skipResult(SkipResult result, String lobbyName, SiegePhase phase, boolean admin) {
+    /**
+     * @param phase       the phase before the skip
+     * @param secondsLeft seconds until the match starts after the skip (for MATCHMAKING_SHORTENED / TOO_LATE)
+     */
+    public static Component skipResult(SkipResult result, String lobbyName, SiegePhase phase, boolean admin, int secondsLeft) {
         return switch (result) {
             case COOLDOWN_SKIPPED -> good("Skipped the cooldown of " + lobbyName + ": matchmaking has started.");
-            case MATCHMAKING_SHORTENED -> good("Shortened matchmaking of " + lobbyName + ": voting closes in 1 second.");
-            case TOO_LATE -> bad("Too late to skip in " + lobbyName + ": voting has already closed.");
+            case MATCHMAKING_SHORTENED -> good("Shortened matchmaking of " + lobbyName + ": the siege begins in "
+                    + duration(secondsLeft) + ".");
+            case TOO_LATE -> bad("Too late to skip in " + lobbyName + ": it already begins in " + duration(secondsLeft) + ".");
             case NOT_SKIPPABLE -> bad(admin
                     ? "Nothing to skip in " + lobbyName + " while it is " + phaseLabel(phase).toLowerCase() + "."
-                    : "You can only skip a cooldown; " + lobbyName + " is " + phaseLabel(phase).toLowerCase() + ".");
+                    : "You can only skip a cooldown or matchmaking; " + lobbyName + " is " + phaseLabel(phase).toLowerCase() + ".");
         };
     }
 

@@ -259,13 +259,26 @@ class SiegeLobbyStateMachineTest {
     }
 
     @Test
+    void aPlayerSkipLeavesOneMinuteOfMatchmakingAndIsTooLateAfterThat() {
+        SiegeLobbyStateMachine m = defaultMachine();
+        m.start();
+        SkipOutcome skipped = m.skip(SkipRequester.PLAYER);
+        assertEquals(SkipResult.MATCHMAKING_SHORTENED, skipped.result());
+        assertTrue(skipped.effects().isEmpty());
+        assertEquals(SiegeLobbyStateMachine.PLAYER_SKIP_MATCHMAKING_SECONDS, m.secondsRemaining());
+        assertTrue(m.isVotingOpen(), "voting stays open for the last 30 s before it closes");
+
+        assertEquals(SkipResult.TOO_LATE, m.skip(SkipRequester.PLAYER).result(), "already at one minute");
+        assertEquals(SkipResult.MATCHMAKING_SHORTENED, m.skip(SkipRequester.ADMIN).result(), "an admin can still go to T-31");
+        assertEquals(31, m.secondsRemaining());
+        assertEquals(SkipResult.TOO_LATE, m.skip(SkipRequester.PLAYER).result());
+    }
+
+    @Test
     void n9SkipNeverThrowsAndSaysWhy() {
         SiegeLobbyStateMachine m = defaultMachine();
         assertEquals(SkipResult.NOT_SKIPPABLE, m.skip(SkipRequester.ADMIN).result(), "disabled");
         m.start();
-
-        // Players may skip the cooldown only.
-        assertEquals(SkipResult.NOT_SKIPPABLE, m.skip(SkipRequester.PLAYER).result());
 
         // Admin: matchmaking jumps to T-31, so the next second closes voting.
         ticks(m, 100, 4);

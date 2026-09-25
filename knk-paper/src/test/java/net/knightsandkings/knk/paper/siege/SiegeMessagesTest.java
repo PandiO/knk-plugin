@@ -40,13 +40,15 @@ class SiegeMessagesTest {
         for (SkipResult r : SkipResult.values()) {
             for (SiegePhase phase : SiegePhase.values()) {
                 for (boolean admin : new boolean[]{false, true}) {
-                    String text = plain(SiegeMessages.skipResult(r, "Cinix", phase, admin));
+                    String text = plain(SiegeMessages.skipResult(r, "Cinix", phase, admin, 60));
                     assertTrue(text.contains("Cinix"), r + "/" + phase + ": " + text);
                 }
             }
         }
-        String playerInMatch = plain(SiegeMessages.skipResult(SkipResult.NOT_SKIPPABLE, "Cinix", SiegePhase.IN_PROGRESS, false));
-        assertTrue(playerInMatch.contains("only skip a cooldown"), playerInMatch);
+        String playerInMatch = plain(SiegeMessages.skipResult(SkipResult.NOT_SKIPPABLE, "Cinix", SiegePhase.IN_PROGRESS, false, 0));
+        assertTrue(playerInMatch.contains("only skip a cooldown or matchmaking"), playerInMatch);
+        assertTrue(plain(SiegeMessages.skipResult(SkipResult.MATCHMAKING_SHORTENED, "Cinix", SiegePhase.MATCHMAKING, false, 60))
+                .contains("begins in 1 minute"));
         assertTrue(playerInMatch.contains("in progress"), playerInMatch);
     }
 

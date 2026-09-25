@@ -9,6 +9,7 @@ import net.knightsandkings.knk.core.siege.CaptureProgressGradient;
 import net.knightsandkings.knk.core.siege.ObjectiveState;
 import net.knightsandkings.knk.core.siege.ObjectiveState.Presence;
 import net.knightsandkings.knk.core.siege.SiegeDisplayText;
+import net.knightsandkings.knk.core.siege.SiegeObjectiveLabels;
 import net.knightsandkings.knk.core.siege.SiegeObjectiveBoard.BoardStep;
 import net.knightsandkings.knk.paper.clan.BannerDesignBukkitMapper;
 import net.kyori.adventure.text.Component;
@@ -44,10 +45,13 @@ import java.util.logging.Logger;
 
 /**
  * The match in the world (DESIGN §6.5, §7.1): per objective a banner block showing the 8-stage capture
- * gradient in the holder's and the leading attacker's banner colours, a floating percentage
- * {@link TextDisplay} (not the legacy invisible ArmorStand), a flame capture ring, and happy-villager
- * rings around every spawnpoint's safe zone. Particles are sent with {@link Player#spawnParticle} to
- * <b>members only</b>.
+ * gradient in the holder's and the leading attacker's banner colours, floating {@link TextDisplay} labels
+ * (not the legacy invisible ArmorStand), a flame capture ring, and happy-villager rings around every
+ * spawnpoint's safe zone. Particles are sent with {@link Player#spawnParticle} to <b>members only</b>.
+ * <p>
+ * Labels are viewer-relative ({@link SiegeObjectiveLabels}): one display per alliance, hidden by default
+ * and shown only to that alliance's members ("Your side holds this - defend it" vs "Held by X - capture
+ * it"), plus a neutral display for everyone outside the match, hidden from members.
  * <p>
  * Crash safety: displays are non-persistent (never saved to disk). A banner is placed only where the
  * capture point is air, and every placed block is written to {@code siege-vault/world-blocks.yml}
@@ -59,6 +63,7 @@ public final class SiegeWorldPresenter implements SiegeMatchObserver {
     private static final double PARTICLE_RANGE = 64.0;
     private static final double DISPLAY_HEIGHT = 2.3;
 
+    private final Plugin plugin;
     private final Logger logger;
     private final File blockLog;
     private final NamespacedKey displayKey;
@@ -68,14 +73,20 @@ public final class SiegeWorldPresenter implements SiegeMatchObserver {
     private static final class ObjectiveVisual {
         Location center;
         Block placedBanner;
-        TextDisplay display;
+        /** Seen by everyone outside the match. */
+        TextDisplay neutral;
+        /** Per alliance group, seen only by that alliance's members. */
+        final Map<Integer, TextDisplay> byAlliance = new HashMap<>();
+        /** Last label per audience (alliance group; {@code null} key = neutral), to skip unchanged updates. */
+        final Map<Integer, SiegeObjectiveLabels.Label> lastLabels = new HashMap<>();
+        int lastHolder = -1;
         int lastIndex = -1;
         String lastHolderColor;
         String lastAttackerColor;
-        String lastText;
     }
 
     public SiegeWorldPresenter(Plugin plugin, File vaultDirectory) {
+        this.plugin = plugin;
         this.logger = plugin.getLogger();
         this.blockLog = new File(vaultDirectory, "world-blocks.yml");
         this.displayKey = new NamespacedKey(plugin, "siege_display");
@@ -102,15 +113,24 @@ public final class SiegeWorldPresenter implements SiegeMatchObserver {
                 logger.info("[Siege] Objective " + objective.id() + " capture point isn't air (" + block.getType()
                         + "); no banner block placed there");
             }
-            v.display = v.center.getWorld().spawn(v.center.clone().add(0, DISPLAY_HEIGHT, 0), TextDisplay.class, d -> {
-                d.setBillboard(Display.Billboard.CENTER);
-                d.setPersistent(false);
-                d.setShadowed(true);
-                d.getPersistentDataContainer().set(displayKey, PersistentDataType.STRING, match.matchToken());
-            });
+            v.neutral = spawnLabel(v.center, match.matchToken(), true);
+            for (Integer alliance : match.alliances().alliances()) {
+                v.byAlliance.put(alliance, spawnLabel(v.center, match.matchToken(), false));
+            }
             visuals.put(objective.id(), v);
         }
         visualsByMatch.put(match.matchToken(), visuals);
+        for (UUID id : match.roster().playerIds()) {
+            Player p = Bukkit.getPlayer(id);
+            int teamId = match.roster().teamOf(id).orElse(-1);
+            if (p == null || !match.alliances().knows(teamId)) continue;
+            int alliance = match.alliances().allianceOf(teamId);
+            for (ObjectiveVisual v : visuals.values()) {
+                p.hideEntity(plugin, v.neutral);
+                TextDisplay own = v.byAlliance.get(alliance);
+                if (own != null) p.showEntity(plugin, own);
+            }
+        }
         writeBlockLog();
         paint(match, Map.of());
     }
@@ -119,6 +139,17 @@ public final class SiegeWorldPresenter implements SiegeMatchObserver {
     public void secondTicked(SiegeLobbyRuntime lobby, SiegeMatch match, BoardStep step, Map<Integer, List<Presence>> presence) {
         paint(match, presence);
         rings(match);
+    }
+
+    /** A member who leaves sees the neutral labels again, like everyone outside the match. */
+    @Override
+    public void memberRemoved(SiegeLobbyRuntime lobby, SiegeMatch match, Player player) {
+        Map<Integer, ObjectiveVisual> visuals = visualsByMatch.get(match.matchToken());
+        if (visuals == null) return;
+        for (ObjectiveVisual v : visuals.values()) {
+            v.byAlliance.values().forEach(d -> player.hideEntity(plugin, d));
+            if (v.neutral != null) player.showEntity(plugin, v.neutral);
+        }
     }
 
     @Override
@@ -163,20 +194,68 @@ public final class SiegeWorldPresenter implements SiegeMatchObserver {
                 v.lastAttackerColor = attackerColor;
             }
 
-            String name = SiegeDisplayText.clean(state.objective().name(), "#" + state.objectiveId());
-            String text = name + "|" + state.capturePercent() + "|" + state.holderTeamId() + "|" + state.isContested();
-            if (v.display != null && v.display.isValid() && !text.equals(v.lastText)) {
-                Component label = Component.text(name + (state.objective().instantVictory() ? " (main)" : ""), NamedTextColor.GOLD)
-                        .append(Component.newline())
-                        .append(SiegeBukkit.teamComponent(holder))
-                        .append(Component.text(" - captured " + state.capturePercent() + "%", NamedTextColor.WHITE));
-                if (state.isContested()) {
-                    label = label.append(Component.newline()).append(Component.text("Under attack!", NamedTextColor.RED));
-                }
-                v.display.text(label);
-                v.lastText = text;
+            String name = SiegeDisplayText.clean(state.objective().name(), "#" + state.objectiveId())
+                    + (state.objective().instantVictory() ? " (main)" : "");
+            boolean holderChanged = v.lastHolder != state.holderTeamId();
+            v.lastHolder = state.holderTeamId();
+            updateLabel(v, null, v.neutral, SiegeObjectiveLabels.forViewer(state, null, match.alliances()), name, holder, holderChanged);
+            for (Map.Entry<Integer, TextDisplay> e : v.byAlliance.entrySet()) {
+                updateLabel(v, e.getKey(), e.getValue(), SiegeObjectiveLabels.forViewer(state, e.getKey(), match.alliances()),
+                        name, holder, holderChanged);
             }
         }
+    }
+
+    private static void updateLabel(ObjectiveVisual v, Integer audience, TextDisplay display, SiegeObjectiveLabels.Label label,
+                                    String name, KnkSiegeTeam holder, boolean holderChanged) {
+        if (display == null || !display.isValid()) return;
+        if (!holderChanged && label.equals(v.lastLabels.get(audience))) return;
+        v.lastLabels.put(audience, label);
+        display.text(labelText(label, name, holder));
+    }
+
+    /** The label text for one audience (developer request: the holders must see it's theirs). */
+    static Component labelText(SiegeObjectiveLabels.Label label, String name, KnkSiegeTeam holder) {
+        int pct = label.capturePercent();
+        Component title = Component.text(name, NamedTextColor.GOLD);
+        Component who;
+        Component state;
+        switch (label.relation()) {
+            case OURS -> {
+                who = Component.text("\u2714 Your side holds this", NamedTextColor.GREEN);
+                state = switch (label.status()) {
+                    case SECURE -> Component.text("Secure - defend it", NamedTextColor.GREEN);
+                    case WEAKENED -> Component.text("Enemy progress " + pct + "% - stand here to restore it", NamedTextColor.YELLOW);
+                    case UNDER_ATTACK -> Component.text("Under attack! Enemy progress " + pct + "%", NamedTextColor.RED);
+                    case FINAL -> Component.text("Captured - yours for this match", NamedTextColor.GREEN);
+                };
+            }
+            case ENEMY -> {
+                who = Component.text("\u2716 Held by ", NamedTextColor.RED).append(SiegeBukkit.teamComponent(holder));
+                state = switch (label.status()) {
+                    case SECURE -> Component.text("Stand in the ring to capture it", NamedTextColor.YELLOW);
+                    case WEAKENED -> Component.text("Captured " + pct + "% - keep pushing", NamedTextColor.GOLD);
+                    case UNDER_ATTACK -> Component.text("Being captured: " + pct + "%", NamedTextColor.GOLD);
+                    case FINAL -> Component.text("Lost for this match", NamedTextColor.RED);
+                };
+            }
+            default -> {
+                who = Component.text("Held by ", NamedTextColor.GRAY).append(SiegeBukkit.teamComponent(holder));
+                state = Component.text(label.status() == SiegeObjectiveLabels.Status.FINAL ? "Captured"
+                        : pct + "% captured", NamedTextColor.WHITE);
+            }
+        }
+        return title.append(Component.newline()).append(who).append(Component.newline()).append(state);
+    }
+
+    private TextDisplay spawnLabel(Location center, String matchToken, boolean visibleByDefault) {
+        return center.getWorld().spawn(center.clone().add(0, DISPLAY_HEIGHT, 0), TextDisplay.class, d -> {
+            d.setBillboard(Display.Billboard.CENTER);
+            d.setPersistent(false);
+            d.setShadowed(true);
+            d.setVisibleByDefault(visibleByDefault);
+            d.getPersistentDataContainer().set(displayKey, PersistentDataType.STRING, matchToken);
+        });
     }
 
     /** The team's banner base colour for the gradient; its chat colour as a dye when it has no banner. */
@@ -259,7 +338,10 @@ public final class SiegeWorldPresenter implements SiegeMatchObserver {
     // ==================== Cleanup and crash safety ====================
 
     private void clear(ObjectiveVisual v) {
-        if (v.display != null && v.display.isValid()) v.display.remove();
+        if (v.neutral != null && v.neutral.isValid()) v.neutral.remove();
+        v.byAlliance.values().forEach(d -> {
+            if (d.isValid()) d.remove();
+        });
         if (v.placedBanner != null && Tag.BANNERS.isTagged(v.placedBanner.getType())) {
             v.placedBanner.setType(Material.AIR, false);
         }

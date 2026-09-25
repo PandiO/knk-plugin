@@ -36,6 +36,7 @@ import org.bukkit.inventory.InventoryHolder;
 
 import java.util.EnumSet;
 import java.util.Set;
+import java.util.function.Predicate;
 
 /**
  * Duplication guards (DESIGN §9.3), required by own-gear + restore (D2): while a member is away in a
@@ -54,6 +55,9 @@ import java.util.Set;
  *       except siege enchantment books of the member's own match, which the 5c book listener
  *       un-cancels at {@code HIGHEST}.</li>
  * </ul>
+ * Players in owner or staff mode are exempt from all of these (developer request 2026-09-26). That
+ * reopens the duplication path for them: whatever they move out of their inventory during the match is
+ * still given back by the restore.
  */
 public class SiegeInventoryGuardListener implements Listener {
 
@@ -62,13 +66,17 @@ public class SiegeInventoryGuardListener implements Listener {
             Material.CAMPFIRE, Material.SOUL_CAMPFIRE, Material.COMPOSTER, Material.ENDER_CHEST);
 
     private final SiegeService service;
+    private final Predicate<Player> exempt;
 
-    public SiegeInventoryGuardListener(SiegeService service) {
+    /** @param exempt players the guards don't apply to (owner/staff mode) */
+    public SiegeInventoryGuardListener(SiegeService service, Predicate<Player> exempt) {
         this.service = service;
+        this.exempt = exempt == null ? p -> false : exempt;
     }
 
     private boolean guarded(HumanEntity entity) {
-        return entity instanceof Player player && service.activeLobbyOf(player.getUniqueId()).isPresent();
+        return entity instanceof Player player && service.activeLobbyOf(player.getUniqueId()).isPresent()
+                && !exempt.test(player);
     }
 
     private static void tell(HumanEntity entity, String message) {

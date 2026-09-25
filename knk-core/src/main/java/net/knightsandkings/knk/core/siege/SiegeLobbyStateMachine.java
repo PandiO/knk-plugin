@@ -57,8 +57,14 @@ public final class SiegeLobbyStateMachine {
     /** Seconds after the start at which the teams' start messages show (legacy: progressExpire − 2). */
     public static final int START_MESSAGE_DELAY_SECONDS = 2;
 
+    /**
+     * A player's {@code /siege skip} during matchmaking leaves this many seconds (never less than
+     * {@code voteClose + 1}, so voting still gets its last second). Developer request 2026-09-26.
+     */
+    public static final int PLAYER_SKIP_MATCHMAKING_SECONDS = 60;
+
     public enum SkipRequester {
-        /** {@code /siege skip} ({@code knk.siege.skip}): cooldown only. */
+        /** {@code /siege skip} ({@code knk.siege.skip}): cooldown → matchmaking; matchmaking → 1 minute left. */
         PLAYER,
         /** {@code /siege admin skip}: cooldown → matchmaking; matchmaking → T-(voteClose+1). */
         ADMIN
@@ -66,7 +72,10 @@ public final class SiegeLobbyStateMachine {
 
     public enum SkipResult {
         COOLDOWN_SKIPPED,
-        /** Matchmaking jumped to one second before voting closes (legacy T-31). */
+        /**
+         * Matchmaking was shortened: an admin to one second before voting closes (legacy T-31), a player
+         * to {@link #PLAYER_SKIP_MATCHMAKING_SECONDS}; {@link #secondsRemaining()} tells how long is left.
+         */
         MATCHMAKING_SHORTENED,
         /** Matchmaking is already at or past that point; nothing changed. */
         TOO_LATE,
@@ -218,8 +227,9 @@ public final class SiegeLobbyStateMachine {
                 return new SkipOutcome(SkipResult.COOLDOWN_SKIPPED, List.copyOf(effects));
             }
             case MATCHMAKING -> {
-                if (requester != SkipRequester.ADMIN) return new SkipOutcome(SkipResult.NOT_SKIPPABLE, List.of());
-                int target = timeline.voteClose() + 1;
+                int target = requester == SkipRequester.ADMIN
+                        ? timeline.voteClose() + 1
+                        : Math.max(PLAYER_SKIP_MATCHMAKING_SECONDS, timeline.voteClose() + 1);
                 if (secondsRemaining <= target) return new SkipOutcome(SkipResult.TOO_LATE, List.of());
                 secondsRemaining = target;
                 return new SkipOutcome(SkipResult.MATCHMAKING_SHORTENED, List.of());

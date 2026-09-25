@@ -977,7 +977,8 @@ public class KnKPlugin extends JavaPlugin {
             uuid -> adminFreezeManager.isFrozen(uuid) || joinLoadingGuard.isLoading(uuid)), this);
         pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeDeathRespawnListener(siegeService), this);
         pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeCommandFilterListener(siegeService), this);
-        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeInventoryGuardListener(siegeService), this);
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeInventoryGuardListener(siegeService,
+            player -> modeService.getActiveMode(player) != ActiveMode.NONE), this);
 
         siegeService.start();
         getLogger().info("Siege runtime initialized (Phase 5)");

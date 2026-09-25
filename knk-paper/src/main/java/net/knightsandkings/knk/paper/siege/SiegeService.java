@@ -44,6 +44,7 @@ import net.knightsandkings.knk.core.siege.SiegeEffect.StartMessageEffect;
 import net.knightsandkings.knk.core.siege.SiegeLobbyStateMachine;
 import net.knightsandkings.knk.core.siege.SiegeLobbyStateMachine.SkipOutcome;
 import net.knightsandkings.knk.core.siege.SiegeLobbyStateMachine.SkipRequester;
+import net.knightsandkings.knk.core.siege.SiegeLobbyStateMachine.SkipResult;
 import net.knightsandkings.knk.core.siege.SiegeMatchRoster.MemberView;
 import net.knightsandkings.knk.core.siege.SiegeMatchRoster.SpawnKind;
 import net.knightsandkings.knk.core.siege.SiegeObjectiveBoard.BoardStep;
@@ -980,11 +981,16 @@ public final class SiegeService {
         SiegePhase before = rt.phase();
         SkipOutcome outcome = rt.machine().skip(admin ? SkipRequester.ADMIN : SkipRequester.PLAYER);
         apply(rt, outcome.effects());
+        int left = rt.machine().secondsRemaining();
         if (outcome.skipped()) {
             logger.info("[Siege] " + sender.getName() + " skipped " + rt.key() + ": " + outcome.result());
+            if (outcome.result() == SkipResult.MATCHMAKING_SHORTENED) {
+                sendToMembers(rt, SiegeMessages.info(sender.getName() + " shortened matchmaking: the siege begins in "
+                        + SiegeMessages.duration(left) + "."));
+            }
             notifyChanged(rt);
         }
-        return new Reply(outcome.skipped(), SiegeMessages.skipResult(outcome.result(), rt.displayName(), before, admin));
+        return new Reply(outcome.skipped(), SiegeMessages.skipResult(outcome.result(), rt.displayName(), before, admin, left));
     }
 
     // ==================== Listener support (5b) ====================

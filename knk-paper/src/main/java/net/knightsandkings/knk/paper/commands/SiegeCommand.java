@@ -290,7 +290,7 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
 
     private void help(CommandSender sender) {
         sender.sendMessage(SiegeMessages.info("/siege - lobbies | join [lobby] | leave | info [lobby] | vote [n|name|random] | "
-                + "spawn [option] | skip [lobby] (cooldown only)" + (!(sender instanceof Player p) || service.hasPermission(p, SiegeService.PERMISSION_ADMIN_LIST)
+                + "spawn [option] | skip [lobby] (cooldown, or matchmaking to 1 minute)" + (!(sender instanceof Player p) || service.hasPermission(p, SiegeService.PERMISSION_ADMIN_LIST)
                 ? " | admin ..." : "")));
     }
 
