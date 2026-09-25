@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.menu;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -25,5 +26,10 @@ public final class OpenMenuContextRegistry {
 
     public void close(UUID playerId) {
         contexts.remove(playerId);
+    }
+
+    /** InventoryMenu Phase 9 (E4): snapshot of every currently-open menu, for {@code MenuService.refreshOpenMenus}. */
+    public List<OpenMenuContext> all() {
+        return List.copyOf(contexts.values());
     }
 }

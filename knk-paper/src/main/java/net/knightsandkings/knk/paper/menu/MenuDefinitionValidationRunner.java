@@ -9,6 +9,7 @@ import net.knightsandkings.knk.core.menu.MenuTemplateAssembler;
 import net.knightsandkings.knk.core.menu.RuntimeMenu;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -35,9 +36,25 @@ public final class MenuDefinitionValidationRunner {
     private MenuDefinitionValidationRunner() {
     }
 
+    /**
+     * InventoryMenu Phase 9 (E2): locks every menu registry <em>first</em> - from
+     * here on a registration throws, so nothing can be registered after the
+     * menus were validated without it - then validates every menu against the
+     * registries' declared variable types and content-source row types.
+     */
     public static void runAtStartup(MenuTemplatesDataAccess menuTemplatesDataAccess, MenuService menuService, Logger logger,
+                                     MenuFeatureRegistries registries) {
+        registries.lockAll();
+        runAtStartup(menuTemplatesDataAccess, menuService, logger,
+                registries.actions().registeredIds(), registries.conditions().registeredIds(),
+                registries.contentSources().registeredIds(), registries.variables().declaredTypes(),
+                registries.contentSources().rowTypes());
+    }
+
+    private static void runAtStartup(MenuTemplatesDataAccess menuTemplatesDataAccess, MenuService menuService, Logger logger,
                                      Set<String> registeredActionTypeIds, Set<String> registeredConditionTypeIds,
-                                     Set<String> registeredContentSourceIds) {
+                                     Set<String> registeredContentSourceIds, Map<String, Class<?>> declaredTypes,
+                                     Map<String, Class<?>> rowTypes) {
         List<KnkMenuTemplateSummary> summaries;
         try {
             summaries = menuTemplatesDataAccess.listAllAsync().join();
@@ -55,7 +72,7 @@ public final class MenuDefinitionValidationRunner {
             }
             checked++;
             if (!validateOne(summary.key(), menuTemplatesDataAccess, menuService, logger,
-                    registeredActionTypeIds, registeredConditionTypeIds, registeredContentSourceIds)) {
+                    registeredActionTypeIds, registeredConditionTypeIds, registeredContentSourceIds, declaredTypes, rowTypes)) {
                 blocked++;
             }
         }
@@ -66,7 +83,8 @@ public final class MenuDefinitionValidationRunner {
     private static boolean validateOne(String key, MenuTemplatesDataAccess menuTemplatesDataAccess,
                                         MenuService menuService, Logger logger,
                                         Set<String> registeredActionTypeIds, Set<String> registeredConditionTypeIds,
-                                        Set<String> registeredContentSourceIds) {
+                                        Set<String> registeredContentSourceIds, Map<String, Class<?>> declaredTypes,
+                                        Map<String, Class<?>> rowTypes) {
         try {
             KnkMenuTemplate template = menuTemplatesDataAccess.getByKeyAsync(key).join().value().orElse(null);
             if (template == null) {
@@ -76,7 +94,7 @@ public final class MenuDefinitionValidationRunner {
             }
 
             RuntimeMenu menu = MenuTemplateAssembler.assemble(template);
-            MenuDefinitionValidator.validate(menu, MenuVariableContext.DECLARED_TYPES);
+            MenuDefinitionValidator.validate(menu, declaredTypes, rowTypes);
             // IMPLEMENTATION_PLAN.md Phase 6 "Load-time validation": the other
             // half of "confirms every ActionBinding/ConditionBinding
             // references a registered ID" - unbuilt until now since the

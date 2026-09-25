@@ -2,6 +2,7 @@ package net.knightsandkings.knk.paper.menu;
 
 import net.knightsandkings.knk.core.menu.ActionRegistry;
 import net.knightsandkings.knk.core.menu.MenuActionException;
+import net.knightsandkings.knk.core.menu.MenuContextParams;
 import net.knightsandkings.knk.core.menu.MenuParams;
 import net.knightsandkings.knk.core.menu.MenuSession;
 import net.knightsandkings.knk.core.menu.RuntimeMenuSection;
@@ -29,6 +30,8 @@ public final class MenuActionHandlers {
 
     public static final String CLOSE = "menu.close";
     public static final String OPEN = "menu.open";
+    /** InventoryMenu Phase 9 (E9): pop the nav stack (key + ctx), or close when there is nothing to go back to. */
+    public static final String BACK = "menu.back";
     public static final String PAGE_NEXT = "menu.page.next";
     public static final String PAGE_PREV = "menu.page.prev";
     public static final String PAGE_FIRST = "menu.page.first";
@@ -49,6 +52,7 @@ public final class MenuActionHandlers {
     public static void registerDefaults(ActionRegistry<MenuActionContext> registry) {
         registry.register(CLOSE, MenuActionHandlers::close);
         registry.register(OPEN, MenuActionHandlers::open);
+        registry.register(BACK, (context, params) -> context.menuService().goBack(context.player()));
         registry.register(PAGE_NEXT, (context, params) ->
                 context.menuService().nextPage(context.player(), requireSection(context, PAGE_NEXT).name()));
         registry.register(PAGE_PREV, (context, params) ->
@@ -81,10 +85,16 @@ public final class MenuActionHandlers {
         context.player().closeInventory();
     }
 
-    /** Requires a {@code key} param naming the {@code MenuTemplate.Key} to navigate to. */
+    /**
+     * Requires a {@code key} param naming the {@code MenuTemplate.Key} to navigate
+     * to. InventoryMenu Phase 9 (E1): every {@code ctx.}-prefixed param becomes a
+     * context parameter of the opened menu ({@code "ctx.lobbyId": "$row.getLobbyId$"}
+     * arrives here already interpolated). Opened from inside a menu, so the
+     * current menu is pushed onto the back stack.
+     */
     private static void open(MenuActionContext context, Map<String, String> params) {
         String key = requireParam(params, "key", OPEN);
-        context.menuService().openMenu(context.player(), key);
+        context.menuService().openMenu(context.player(), key, MenuContextParams.fromPrefixedParams(params));
     }
 
     private static void filterPrompt(MenuActionContext context, Map<String, String> params) {

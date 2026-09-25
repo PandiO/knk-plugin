@@ -4,6 +4,8 @@ import net.knightsandkings.knk.core.dataaccess.MenuTemplatesDataAccess;
 import net.knightsandkings.knk.core.domain.menu.KnkMenuTemplate;
 import net.knightsandkings.knk.core.menu.MenuAssemblyException;
 import net.knightsandkings.knk.core.menu.MenuContentQuery;
+import net.knightsandkings.knk.core.menu.MenuContextParams;
+import net.knightsandkings.knk.core.menu.MenuRefreshSchedule;
 import net.knightsandkings.knk.core.menu.MenuSession;
 import net.knightsandkings.knk.core.menu.MenuSessionRegistry;
 import net.knightsandkings.knk.core.menu.MenuTemplateAssembler;
@@ -20,6 +22,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
+import java.util.function.Predicate;
 import java.util.function.UnaryOperator;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -30,13 +34,24 @@ import java.util.stream.Collectors;
  * assembly/layout/pagination engine, and the live Bukkit Inventory - the
  * entry point commands and the click listener actually call.
  * <p>
- * {@link #openMenu} implements IMPLEMENTATION_PLAN.md Phase 2's async
- * rendering requirement directly: the whole fetch-assemble-compute pipeline
- * runs inside {@code runTaskAsynchronously}, and only the final Inventory
- * creation/population/open hops back to the main thread via {@code runTask} -
- * this is the fix for bug #6 (v1's {@code MenuItemBlink} mutating Inventory
- * off-thread); the fix is "don't touch Inventory off-thread", not "don't do
- * background work".
+ * <b>Threading.</b> Template fetch + assembly + template material-ref lookups
+ * run inside {@code runTaskAsynchronously} (IMPLEMENTATION_PLAN.md Phase 2's
+ * async-rendering requirement, the fix for bug #6); everything that touches
+ * live game state - variable providers, content sources, conditions, the
+ * {@code Inventory} - runs on the main thread (InventoryMenu Phase 9 §9.0; see
+ * {@link MenuRenderer}).
+ * <p>
+ * <b>InventoryMenu Phase 9</b> additions:
+ * <ul>
+ *   <li>{@link #openMenu(Player, String, MenuContextParams)} (E1) - ctx params;
+ *       pushes onto the nav stack when opened from inside a KnK menu, starts a
+ *       fresh stack (Back = "Exit") otherwise;</li>
+ *   <li>{@link #goBack} (E9) - backs {@code menu.back};</li>
+ *   <li>{@link #refreshOpenMenus} (E4) - event-driven refresh, and
+ *       {@link #processDueRefreshes} - the per-tick auto-refresh step, both
+ *       batched through one {@link MenuRefreshSchedule} and re-rendering from
+ *       the open menu's cached template (no re-fetch).</li>
+ * </ul>
  */
 public final class MenuService {
 
@@ -47,6 +62,8 @@ public final class MenuService {
     private final OpenMenuContextRegistry openMenuContextRegistry;
     private final MenuRenderer renderer;
     private final AnvilCaptureManager anvilCaptureManager;
+    private final MenuRefreshSchedule refreshSchedule;
+    private final Executor mainThread;
     private final Map<String, String> blockedMenus = new ConcurrentHashMap<>();
 
     public MenuService(
@@ -55,7 +72,8 @@ public final class MenuService {
             MenuSessionRegistry sessionRegistry,
             OpenMenuContextRegistry openMenuContextRegistry,
             MenuRenderer renderer,
-            AnvilCaptureManager anvilCaptureManager
+            AnvilCaptureManager anvilCaptureManager,
+            MenuRefreshSchedule refreshSchedule
     ) {
         this.plugin = plugin;
         this.logger = plugin.getLogger();
@@ -64,33 +82,165 @@ public final class MenuService {
         this.openMenuContextRegistry = openMenuContextRegistry;
         this.renderer = renderer;
         this.anvilCaptureManager = anvilCaptureManager;
+        this.refreshSchedule = refreshSchedule;
+        this.mainThread = mainThreadExecutor(plugin);
+    }
+
+    /**
+     * Runs a task on the server main thread - inline when the caller already is
+     * on it (so a render whose content sources answer synchronously completes
+     * within the same tick), otherwise via {@code runTask}.
+     */
+    public static Executor mainThreadExecutor(Plugin plugin) {
+        return task -> {
+            if (Bukkit.isPrimaryThread()) {
+                task.run();
+            } else {
+                Bukkit.getScheduler().runTask(plugin, task);
+            }
+        };
     }
 
     public void openMenu(Player player, String templateKey) {
+        openMenu(player, templateKey, MenuContextParams.EMPTY);
+    }
+
+    /**
+     * InventoryMenu Phase 9 (E1): opens {@code templateKey} with context
+     * parameters - the entry point for commands ({@code /siege info 3}) and for
+     * {@code menu.open}. If the player is currently looking at a KnK menu the
+     * current entry is pushed onto the back stack; otherwise (a command, a
+     * respawn hook) navigation starts fresh, so the Back button reads "Exit".
+     */
+    public void openMenu(Player player, String templateKey, MenuContextParams context) {
+        MenuContextParams ctx = context != null ? context : MenuContextParams.EMPTY;
+        boolean fromOpenMenu = isViewingKnkMenu(player);
+
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             RuntimeMenu menu = loadAndAssemble(player, templateKey);
             if (menu == null) {
                 return;
             }
+            Map<Integer, String> materialKeys = renderer.resolveTemplateMaterialKeys(menu).join();
 
-            MenuSession session = sessionRegistry.open(player.getUniqueId());
-            session.navigateTo(menu.key());
-
-            renderAndOpen(player, menu, session);
+            mainThread.execute(() -> {
+                MenuSession session = sessionRegistry.open(player.getUniqueId());
+                if (fromOpenMenu) {
+                    session.navigateTo(menu.key(), ctx, menu.title());
+                } else {
+                    session.openAsRoot(menu.key(), ctx, menu.title());
+                }
+                renderAndShow(player, menu, session, materialKeys);
+            });
         });
+    }
+
+    /**
+     * InventoryMenu Phase 9 (E9): {@code menu.back}. Re-opens the previous nav
+     * entry (key and ctx, no push); with nothing to go back to, closes the menu
+     * and resets navigation.
+     */
+    public void goBack(Player player) {
+        Optional<MenuSession> sessionOpt = sessionRegistry.get(player.getUniqueId());
+        Optional<MenuSession.NavigationEntry> previous = sessionOpt.flatMap(MenuSession::goBackEntry);
+        if (previous.isEmpty()) {
+            sessionOpt.ifPresent(MenuSession::resetNavigation);
+            player.closeInventory();
+            return;
+        }
+
+        MenuSession session = sessionOpt.get();
+        String key = previous.get().key();
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            RuntimeMenu menu = loadAndAssemble(player, key);
+            if (menu == null) {
+                return;
+            }
+            Map<Integer, String> materialKeys = renderer.resolveTemplateMaterialKeys(menu).join();
+            mainThread.execute(() -> renderAndShow(player, menu, session, materialKeys));
+        });
+    }
+
+    /**
+     * InventoryMenu Phase 9 (E4): event-driven refresh - marks every matching
+     * open menu's session dirty (so {@code OnDirty} bindings re-resolve) and
+     * schedules it for a re-render on the next tick, batched with any
+     * auto-refresh due that tick. Call from any thread; e.g. Siege on
+     * join/leave/vote/phase change:
+     * {@code refreshOpenMenus(ctx -> ctx.menuKey().startsWith("siege."))}.
+     *
+     * @return how many open menus matched
+     */
+    public int refreshOpenMenus(Predicate<OpenMenuContext> filter) {
+        int matched = 0;
+        for (OpenMenuContext context : openMenuContextRegistry.all()) {
+            if (!filter.test(context)) {
+                continue;
+            }
+            UUID playerId = context.player().getUniqueId();
+            sessionRegistry.get(playerId).ifPresent(MenuSession::markDirty);
+            refreshSchedule.markStale(playerId);
+            matched++;
+        }
+        return matched;
+    }
+
+    /** Convenience for {@link #refreshOpenMenus} limited to one player. */
+    public void refreshOpenMenu(Player player) {
+        refreshOpenMenus(context -> context.player().getUniqueId().equals(player.getUniqueId()));
+    }
+
+    /**
+     * InventoryMenu Phase 9 (E4): one tick of live repaint - re-renders every
+     * open menu whose {@code AutoRefreshTicks} elapsed or that was marked stale,
+     * all in this tick. Called by {@link MenuAutoRefreshTask} on the main thread.
+     */
+    public void processDueRefreshes() {
+        long now = MenuRenderer.currentTick();
+        for (UUID playerId : refreshSchedule.due(now)) {
+            Optional<OpenMenuContext> context = openMenuContextRegistry.get(playerId);
+            Optional<MenuSession> session = sessionRegistry.get(playerId);
+            if (context.isEmpty() || session.isEmpty()
+                    || !context.get().player().isOnline()
+                    || !context.get().player().getOpenInventory().getTopInventory().equals(context.get().inventory())) {
+                refreshSchedule.untrack(playerId);
+                continue;
+            }
+            refresh(context.get(), session.get());
+        }
+    }
+
+    /** Re-renders an open menu in place from its cached template and material keys (no re-fetch). */
+    private void refresh(OpenMenuContext context, MenuSession session) {
+        Player player = context.player();
+        UUID playerId = player.getUniqueId();
+        RuntimeMenu menu = context.menu();
+        safeRender(menu, session, player, context.materialNamespaceKeys())
+                .whenCompleteAsync((result, error) -> {
+                    refreshSchedule.completed(playerId, MenuRenderer.currentTick());
+                    if (error != null) {
+                        logger.log(Level.WARNING, "Refreshing menu '" + menu.key() + "' for " + player.getName() + " failed", error);
+                        return;
+                    }
+                    Optional<OpenMenuContext> current = openMenuContextRegistry.get(playerId);
+                    if (current.isPresent() && current.get() == context
+                            && player.getOpenInventory().getTopInventory().equals(context.inventory())) {
+                        renderer.applyToInventory(context.inventory(), result, player.isSneaking());
+                        context.update(menu, result);
+                    }
+                }, mainThread);
     }
 
     /**
      * Advances {@code sectionName}'s page. Re-renders into the already-open
      * Inventory when the player still has the menu open; otherwise re-fetches
      * and reopens it fresh with the new page. The fallback isn't an edge case
-     * - it's the common case for this command specifically: vanilla Minecraft
-     * doesn't let a player type a chat command while a custom Inventory
-     * screen has focus, so by the time {@code /knk menu page next <section>}
-     * actually runs, {@link MenuLifecycleListener}'s {@code InventoryCloseEvent}
-     * handler has already cleared the {@link OpenMenuContext}. The
-     * {@code MenuSession} (current menu key, per-section page) survives that
-     * close regardless, which is exactly what makes the fallback possible.
+     * - it's the common case for the {@code /knk menu page} command: vanilla
+     * Minecraft doesn't let a player type a chat command while a custom
+     * Inventory screen has focus, so by the time it runs the
+     * {@link OpenMenuContext} is gone; the {@code MenuSession} (current menu
+     * key + ctx, per-section page) survives that close, which is what makes
+     * the fallback possible.
      */
     public void nextPage(Player player, String sectionName) {
         changePage(player, sectionName, true);
@@ -101,10 +251,8 @@ public final class MenuService {
     }
 
     /**
-     * Post-Phase-8 QOL follow-up: shift-click-on-pagination-button shortcut
-     * (the developer's ask, mirroring the existing shift-click-clears-search
-     * pattern) - jumps straight to page 0 regardless of section kind, since
-     * page 0 needs no {@code totalPages} lookup to be valid either way.
+     * Post-Phase-8 QOL follow-up: shift-click-on-pagination-button shortcut -
+     * jumps straight to page 0 regardless of section kind.
      */
     public void firstPage(Player player, String sectionName) {
         mutateSectionPage(player, sectionName, (menu, section, session) -> session.firstPage(section.id()));
@@ -114,15 +262,8 @@ public final class MenuService {
         mutateSectionPage(player, sectionName, (menu, section, session) -> {
             int sectionId = section.id();
             if (section.hasContentSource()) {
-                // IMPLEMENTATION_PLAN.md Phase 8 / post-Phase-8 QOL follow-up:
-                // resolveSlots always reports 0 totalPages for a content-
-                // source-backed section (its auto content never comes from
-                // items()), so a resolveSlots-based totalPages is never
-                // available here. Advance/retreat unclamped in either
-                // direction - including past 0 into negative territory -
-                // and let MenuRenderer.resolveContentSourceAssignment wrap it
-                // back in-bounds (persisting the wrap via session.setPage)
-                // once the real paged fetch reveals the true page count.
+                // Advance/retreat unclamped - MenuRenderer wraps it once the real
+                // paged fetch reveals the true page count (Phase 8 QOL follow-up).
                 session.stepPage(sectionId, forward ? 1 : -1);
             } else {
                 int currentTotalPages = section
@@ -138,12 +279,9 @@ public final class MenuService {
     }
 
     /**
-     * Shared plumbing for every section-page mutation ({@link #nextPage},
-     * {@link #previousPage}, {@link #firstPage}): resolves the currently
-     * open menu and named section (see {@link #changePage}'s own doc comment
-     * for why this re-fetches rather than trusting a possibly-already-closed
-     * {@link OpenMenuContext}), lets {@code mutation} update the session's
-     * page state for that section however it needs to, then re-renders.
+     * Shared plumbing for every section-page mutation: re-fetches the current
+     * menu (see {@link #nextPage}), resolves the named section, applies
+     * {@code mutation} on the main thread, then re-renders.
      */
     private void mutateSectionPage(Player player, String sectionName, SectionPageMutation mutation) {
         Optional<MenuSession> sessionOpt = sessionRegistry.get(player.getUniqueId());
@@ -164,13 +302,16 @@ public final class MenuService {
             if (section.isEmpty()) {
                 String available = menu.sections().stream().map(RuntimeMenuSection::name)
                         .collect(Collectors.joining(", "));
-                Bukkit.getScheduler().runTask(plugin, () -> player.sendMessage(
+                mainThread.execute(() -> player.sendMessage(
                         ChatColor.YELLOW + "No section named '" + sectionName + "' in this menu. Available: " + available));
                 return;
             }
 
-            mutation.apply(menu, section.get(), session);
-            renderAndOpen(player, menu, session);
+            Map<Integer, String> materialKeys = renderer.resolveTemplateMaterialKeys(menu).join();
+            mainThread.execute(() -> {
+                mutation.apply(menu, section.get(), session);
+                renderAndShow(player, menu, session, materialKeys);
+            });
         });
     }
 
@@ -181,16 +322,9 @@ public final class MenuService {
 
     /**
      * IMPLEMENTATION_PLAN.md Phase 7 / DESIGN_REVIEW.md §2.1 §2.5: prompts via
-     * the in-house {@link AnvilCaptureManager} - superseding Phase 5's
-     * {@code ChatCaptureManager}-based capture for this specific call site
-     * (see DESIGN_REVIEW.md §2.1's updated text and ACTIVE_SESSIONS.md's
-     * Phase 5 entry for why that original choice is now superseded, not kept
-     * as an option). Vanilla Minecraft closes any open custom Inventory the
-     * instant another one opens (the same behavior {@link #nextPage}/
-     * {@link #previousPage}'s fallback already works around, now true of the
-     * anvil capture too), so - exactly like those - this re-fetches and
-     * reopens the menu fresh once the query is captured rather than assuming
-     * the Inventory the player had open is still there.
+     * the in-house {@link AnvilCaptureManager}. Opening the anvil closes the
+     * menu Inventory, so - like {@link #nextPage} - this re-fetches and reopens
+     * the menu once the query is captured.
      */
     public void promptSearch(Player player, String sectionName) {
         anvilCaptureManager.startTextCapture(
@@ -230,81 +364,83 @@ public final class MenuService {
     }
 
     /**
-     * Shared plumbing for every search/filter mutation: re-fetches the
-     * current menu (the {@link MenuSession} survives an Inventory close, per
-     * {@link #changePage}'s doc comment), resolves {@code sectionName},
-     * rejects non-searchable sections, updates the session's
-     * {@link MenuContentQuery} for that section, resets its page to 0 (a new
-     * query invalidates whatever page the player was previously on), and
-     * re-renders.
+     * Shared plumbing for every search/filter mutation: re-fetches the current
+     * menu, resolves {@code sectionName}, rejects non-searchable sections,
+     * updates the session's {@link MenuContentQuery} for that section, resets
+     * its page to 0, and re-renders.
      */
     private void applyContentQueryUpdate(Player player, String sectionName, UnaryOperator<MenuContentQuery> update) {
-        Optional<MenuSession> sessionOpt = sessionRegistry.get(player.getUniqueId());
-        Optional<String> currentMenuKey = sessionOpt.flatMap(MenuSession::currentMenuKey);
-        if (sessionOpt.isEmpty() || currentMenuKey.isEmpty()) {
-            player.sendMessage(ChatColor.YELLOW + "You don't have a menu open.");
-            return;
-        }
-        MenuSession session = sessionOpt.get();
-
-        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            RuntimeMenu menu = loadAndAssemble(player, currentMenuKey.get());
-            if (menu == null) {
-                return;
-            }
-
-            Optional<RuntimeMenuSection> sectionOpt = menu.findSection(sectionName);
-            if (sectionOpt.isEmpty()) {
-                String available = menu.sections().stream().map(RuntimeMenuSection::name)
-                        .collect(Collectors.joining(", "));
-                Bukkit.getScheduler().runTask(plugin, () -> player.sendMessage(
-                        ChatColor.YELLOW + "No section named '" + sectionName + "' in this menu. Available: " + available));
-                return;
-            }
-
-            RuntimeMenuSection section = sectionOpt.get();
+        mutateSectionPage(player, sectionName, (menu, section, session) -> {
             if (!section.searchable()) {
-                Bukkit.getScheduler().runTask(plugin, () -> player.sendMessage(
-                        ChatColor.YELLOW + "Section '" + sectionName + "' doesn't support search/filter."));
+                player.sendMessage(ChatColor.YELLOW + "Section '" + sectionName + "' doesn't support search/filter.");
                 return;
             }
-
             MenuContentQuery updated = update.apply(session.getContentQuery(section.id()));
             session.setContentQuery(section.id(), updated);
             session.setPage(section.id(), 0);
-
-            renderAndOpen(player, menu, session);
         });
     }
 
-    /** Must be called off the main thread - blocks on {@link MenuRenderer#computeState}. */
-    private void renderAndOpen(Player player, RuntimeMenu menu, MenuSession session) {
-        MenuRenderResult result = renderer.computeState(menu, session, player);
+    /** Main thread. Renders and shows (in place when the same menu is already open, else a new Inventory). */
+    private void renderAndShow(Player player, RuntimeMenu menu, MenuSession session, Map<Integer, String> materialKeys) {
+        safeRender(menu, session, player, materialKeys)
+                .whenCompleteAsync((result, error) -> {
+                    if (error != null) {
+                        failToOpen(player, menu.key(), error.getMessage(), error instanceof Exception e ? e : null);
+                        return;
+                    }
+                    show(player, menu, result);
+                }, mainThread);
+    }
 
-        Bukkit.getScheduler().runTask(plugin, () -> {
-            // Post-Phase-8 QOL follow-up: a render that happens to land while
-            // the player is already sneaking (e.g. a page turn triggered
-            // mid-sneak) shows control hints immediately rather than waiting
-            // for the next sneak toggle - see MenuRenderer.applyToInventory's
-            // own doc comment.
-            boolean revealControls = player.isSneaking();
+    /** {@link MenuRenderer#render}, with a synchronous failure (e.g. a throwing content source) turned into a failed future. */
+    private java.util.concurrent.CompletableFuture<MenuRenderResult> safeRender(RuntimeMenu menu, MenuSession session,
+                                                                               Player player, Map<Integer, String> materialKeys) {
+        try {
+            return renderer.render(menu, session, player, materialKeys, this);
+        } catch (RuntimeException e) {
+            return java.util.concurrent.CompletableFuture.failedFuture(e);
+        }
+    }
 
-            Optional<OpenMenuContext> existing = openMenuContextRegistry.get(player.getUniqueId());
-            if (existing.isPresent() && player.getOpenInventory().getTopInventory().equals(existing.get().inventory())) {
-                // Still looking at it (e.g. a click-driven page turn) - refresh in place.
-                renderer.applyToInventory(existing.get().inventory(), result, revealControls);
-                existing.get().update(menu, result.itemsBySlot(), result.sectionsBySlot(), result.controlHintLoreBySlot());
-                return;
-            }
+    /** Main thread. */
+    private void show(Player player, RuntimeMenu menu, MenuRenderResult result) {
+        if (!player.isOnline()) {
+            return;
+        }
+        // A render that lands while the player is already sneaking shows
+        // control hints immediately (post-Phase-8 QOL follow-up).
+        boolean revealControls = player.isSneaking();
 
-            Inventory inventory = Bukkit.createInventory(null, menu.totalSlots(),
-                    DisplayTextFormatter.toComponent(menu.title()));
-            renderer.applyToInventory(inventory, result, revealControls);
-            player.openInventory(inventory);
-            openMenuContextRegistry.register(player.getUniqueId(),
-                    new OpenMenuContext(player, inventory, menu, result.itemsBySlot(), result.sectionsBySlot(),
-                            result.controlHintLoreBySlot()));
-        });
+        Optional<OpenMenuContext> existing = openMenuContextRegistry.get(player.getUniqueId());
+        // Phase 9 fix: refresh in place only when it is the *same* menu. Before,
+        // any open KnK Inventory was reused - so menu.open from menu A to menu B
+        // rendered B into A's Inventory (A's title and size).
+        if (existing.isPresent()
+                && existing.get().menuKey().equals(menu.key())
+                && existing.get().inventory().getSize() == menu.totalSlots()
+                && player.getOpenInventory().getTopInventory().equals(existing.get().inventory())) {
+            renderer.applyToInventory(existing.get().inventory(), result, revealControls);
+            existing.get().update(menu, result);
+            refreshSchedule.track(player.getUniqueId(), menu.autoRefreshTicks(), MenuRenderer.currentTick());
+            return;
+        }
+
+        Inventory inventory = Bukkit.createInventory(null, menu.totalSlots(), DisplayTextFormatter.toComponent(menu.title()));
+        renderer.applyToInventory(inventory, result, revealControls);
+        player.openInventory(inventory);
+        openMenuContextRegistry.register(player.getUniqueId(), new OpenMenuContext(player, inventory, menu, result));
+        refreshSchedule.track(player.getUniqueId(), menu.autoRefreshTicks(), MenuRenderer.currentTick());
+    }
+
+    /** Whether the player is looking at a KnK menu right now (main thread: checks the actual top inventory). */
+    private boolean isViewingKnkMenu(Player player) {
+        Optional<OpenMenuContext> context = openMenuContextRegistry.get(player.getUniqueId());
+        if (context.isEmpty()) {
+            return false;
+        }
+        return !Bukkit.isPrimaryThread()
+                || player.getOpenInventory().getTopInventory().equals(context.get().inventory());
     }
 
     /** Must be called off the main thread. Returns null (having already messaged the player) on failure. */
@@ -328,29 +464,31 @@ public final class MenuService {
         }
     }
 
-    private void failToOpen(Player player, String templateKey, String reason, Exception cause) {
+    private void failToOpen(Player player, String templateKey, String reason, Throwable cause) {
         if (cause != null) {
             logger.log(Level.WARNING, "Unexpected error loading menu '" + templateKey + "' for " + player.getName(), cause);
         } else {
             logger.warning("Refusing to open menu '" + templateKey + "' for " + player.getName() + ": " + reason);
         }
-        Bukkit.getScheduler().runTask(plugin, () ->
-                player.sendMessage(ChatColor.RED + "That menu is unavailable right now."));
+        mainThread.execute(() -> player.sendMessage(ChatColor.RED + "That menu is unavailable right now."));
     }
 
     /** Called from {@code PlayerQuitEvent} - closes gap #4 (v1's static per-player maps never cleared). */
     public void closeSession(UUID playerId) {
         openMenuContextRegistry.close(playerId);
         sessionRegistry.close(playerId);
+        refreshSchedule.untrack(playerId);
+    }
+
+    /** Called when a KnK menu Inventory is closed: stop auto-refreshing it (the session itself survives). */
+    public void onMenuInventoryClosed(UUID playerId) {
+        refreshSchedule.untrack(playerId);
     }
 
     /**
      * Marks a menu key as broken (IMPLEMENTATION_PLAN.md Phase 3,
      * {@link MenuDefinitionValidationRunner}, run once at plugin enable) so
-     * every subsequent open attempt refuses immediately with a clear reason,
-     * rather than re-discovering (and re-paying the reflection cost of) the
-     * same failure on every player's click - DESIGN_REVIEW.md §1's "a menu
-     * with unresolved bindings refuses to register" per-menu failure policy.
+     * every subsequent open attempt refuses immediately with a clear reason.
      */
     public void blockMenu(String templateKey, String reason) {
         blockedMenus.put(templateKey, reason != null ? reason : "failed startup validation");

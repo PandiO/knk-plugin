@@ -46,6 +46,8 @@ public final class MenuLifecycleListener implements Listener {
         openMenuContextRegistry.get(player.getUniqueId()).ifPresent(context -> {
             if (context.inventory().equals(event.getInventory())) {
                 openMenuContextRegistry.close(player.getUniqueId());
+                // InventoryMenu Phase 9 (E4): a closed menu is no longer repainted.
+                menuService.onMenuInventoryClosed(player.getUniqueId());
             }
         });
     }
