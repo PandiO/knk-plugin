@@ -64,6 +64,12 @@ world-tasks:
   # removing the pickup-latency/idle-load trade-off these two settings exist to balance
   headless-poll-max-interval-seconds: 60
 
+# In-game moments queued by the web API for writes made outside a plugin command - e.g. the
+# promotion sound/particles/message when an admin grants XP from the web app's player profile
+player-notifications:
+  # How often the plugin polls the API for them (skipped while no players are online)
+  poll-interval-seconds: 2
+
 # Gate structure state synchronization
 gates:
   # How often (seconds) the plugin pushes the current open/closed/destroyed state of every

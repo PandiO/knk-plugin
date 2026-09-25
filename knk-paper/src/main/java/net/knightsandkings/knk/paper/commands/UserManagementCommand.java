@@ -170,13 +170,18 @@ public class UserManagementCommand implements CommandExecutor {
             int gemsDelta = property.equals("gems") ? delta : 0;
             int experienceDelta = property.equals("xp") ? delta : 0;
 
-            usersCommandApi.adjustBalancesById(target.id(), coinsDelta, gemsDelta, experienceDelta, reason)
+            // Online target: show any title change right here from the response, and tell the API
+            // not to also queue it for PlayerNotificationPoller (which would show it twice).
+            // Offline target: let the API queue it so it shows when they next join.
+            boolean targetOnline = Bukkit.getPlayerExact(target.username()) != null;
+
+            usersCommandApi.adjustBalancesById(target.id(), coinsDelta, gemsDelta, experienceDelta, reason, !targetOnline)
                 .thenAccept(result -> Bukkit.getScheduler().runTask(plugin, () -> {
                     String verb = delta > 0 ? "Increased" : "Decreased";
                     sender.sendMessage(ChatColor.GREEN + verb + " " + target.username() + "'s " + property
                         + " by " + Math.abs(delta) + " (now " + (current + delta) + ").");
                     Player targetPlayer = Bukkit.getPlayerExact(target.username());
-                    if (targetPlayer != null && result.titleChange() != null) {
+                    if (targetOnline && targetPlayer != null && result.titleChange() != null) {
                         PromotionEffects.show(targetPlayer, result.titleChange());
                     }
                 }))
