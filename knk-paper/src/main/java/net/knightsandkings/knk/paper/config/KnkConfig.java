@@ -132,7 +132,8 @@ public record KnkConfig(
         EntitySettings permissions,
         EntitySettings grades,
         EntitySettings tags,
-        EntitySettings domainCatalog
+        EntitySettings domainCatalog,
+        EntitySettings kits
     ) {
         public static EntityCacheSettings defaults() {
             return new EntityCacheSettings(
@@ -154,7 +155,8 @@ public record KnkConfig(
                 new EntitySettings(null, 30, null, 120, "CACHE_FIRST", true, 3, 100),
                 EntitySettings.defaults(), // grades
                 EntitySettings.defaults(), // tags
-                EntitySettings.defaults()  // domainCatalog
+                EntitySettings.defaults(), // domainCatalog
+                EntitySettings.defaults()  // kits
             );
         }
     }
