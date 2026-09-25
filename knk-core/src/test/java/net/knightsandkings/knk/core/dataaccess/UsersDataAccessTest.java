@@ -278,7 +278,7 @@ public class UsersDataAccessTest {
         }
 
         @Override
-        public CompletableFuture<net.knightsandkings.knk.core.domain.users.BalanceAdjustmentResult> adjustBalancesById(int id, int coinsDelta, int gemsDelta, int experienceDelta, String reason) {
+        public CompletableFuture<net.knightsandkings.knk.core.domain.users.BalanceAdjustmentResult> adjustBalancesById(int id, int coinsDelta, int gemsDelta, int experienceDelta, String reason, boolean notifyPlayer) {
             return CompletableFuture.completedFuture(
                 new net.knightsandkings.knk.core.domain.users.BalanceAdjustmentResult(coinsDelta, gemsDelta, experienceDelta, null));
         }

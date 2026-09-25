@@ -139,11 +139,11 @@ public class UsersCommandApiImpl extends BaseApiImpl implements UsersCommandApi 
     }
 
     @Override
-    public CompletableFuture<BalanceAdjustmentResult> adjustBalancesById(int id, int coinsDelta, int gemsDelta, int experienceDelta, String reason) {
+    public CompletableFuture<BalanceAdjustmentResult> adjustBalancesById(int id, int coinsDelta, int gemsDelta, int experienceDelta, String reason, boolean notifyPlayer) {
         return CompletableFuture.supplyAsync(() -> {
             String url = baseUrl + USERS_ENDPOINT + "/" + id + "/balances";
             try {
-                String bodyJson = objectMapper.writeValueAsString(new AdjustBalancesDto(coinsDelta, gemsDelta, experienceDelta, reason));
+                String bodyJson = objectMapper.writeValueAsString(new AdjustBalancesDto(coinsDelta, gemsDelta, experienceDelta, reason, notifyPlayer));
                 String responseJson = putJson(url, bodyJson);
                 BalanceAdjustmentResultDto dto = objectMapper.readValue(responseJson, BalanceAdjustmentResultDto.class);
                 return UsersMapper.mapBalanceAdjustmentResult(dto);

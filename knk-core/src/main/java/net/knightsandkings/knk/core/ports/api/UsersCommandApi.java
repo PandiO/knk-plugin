@@ -52,8 +52,12 @@ public interface UsersCommandApi {
      * experienceDelta - automatically resolves and audit-logs a title change if the new XP total
      * crosses a bracket boundary (same PUT /api/users/{id}/balances endpoint the web admin's
      * quick actions already use, so this gets that behavior for free).
+     *
+     * @param notifyPlayer whether the API should queue a resulting title change for
+     *     PlayerNotificationPoller to show in-game. Pass false when the caller shows
+     *     {@link BalanceAdjustmentResult#titleChange()} to the online target itself.
      */
-    CompletableFuture<BalanceAdjustmentResult> adjustBalancesById(int id, int coinsDelta, int gemsDelta, int experienceDelta, String reason);
+    CompletableFuture<BalanceAdjustmentResult> adjustBalancesById(int id, int coinsDelta, int gemsDelta, int experienceDelta, String reason, boolean notifyPlayer);
 
     /**
      * Adds/updates this user's membership in the given PermissionGroup (backs
