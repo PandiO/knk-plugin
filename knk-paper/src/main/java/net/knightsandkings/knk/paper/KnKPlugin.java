@@ -94,6 +94,7 @@ import net.knightsandkings.knk.paper.listeners.ChatCaptureListener;
 import net.knightsandkings.knk.paper.listeners.GateDamageConsequenceListener;
 import net.knightsandkings.knk.paper.listeners.GateEventListener;
 import net.knightsandkings.knk.paper.listeners.GatePassThroughConsequenceListener;
+import net.knightsandkings.knk.paper.listeners.JoinLoadingRestrictionListener;
 import net.knightsandkings.knk.paper.listeners.ModeListener;
 import net.knightsandkings.knk.paper.listeners.PlayerListener;
 import net.knightsandkings.knk.paper.listeners.RegionTaskEventListener;
@@ -113,6 +114,7 @@ import net.knightsandkings.knk.paper.tasks.HeadlessWorldTaskPoller;
 import net.knightsandkings.knk.paper.tasks.GateBlockScanTaskHandler;
 import net.knightsandkings.knk.paper.tasks.GateDoorRegionCaptureHandler;
 import net.knightsandkings.knk.paper.tasks.ItemScanTaskHandler;
+import net.knightsandkings.knk.paper.user.JoinLoadingGuard;
 import net.knightsandkings.knk.paper.user.UserManager;
 import net.knightsandkings.knk.paper.utils.CommandCooldownManager;
 
@@ -147,6 +149,7 @@ public class KnKPlugin extends JavaPlugin {
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private PermissionsDataAccess permissionsDataAccess;
     private KnkPermissible knkPermissible;
+    private JoinLoadingGuard joinLoadingGuard;
     private ModeService modeService;
     private GradesDataAccess gradesDataAccess;
     private TagsDataAccess tagsDataAccess;
@@ -414,6 +417,7 @@ public class KnKPlugin extends JavaPlugin {
             );
             this.permissionsDataAccess = dataAccessFactory.createPermissionsDataAccess(permissionsApi);
             this.knkPermissible = new KnkPermissible(cacheManager.getUserCache(), permissionsDataAccess);
+            this.joinLoadingGuard = new JoinLoadingGuard(this, knkPermissible);
             this.modeService = new ModeService(this, knkPermissible, cacheManager.getUserCache(), usersCommandApi);
             this.minecraftMaterialRefsDataAccess = dataAccessFactory.createMinecraftMaterialRefsDataAccess(
                 config.cache().ttl(),
@@ -680,8 +684,9 @@ public class KnKPlugin extends JavaPlugin {
 
         pluginManager.registerEvents(new WorldGuardRegionListener(regionTracker), this);
         pluginManager.registerEvents(new PlayerListener(usersDataAccess, townsDataAccess, this.getCacheManager(), knkPermissible, usersCommandApi), this);
-        pluginManager.registerEvents(new UserAccountListener(userManager, config.messages(), getLogger()), this);
+        pluginManager.registerEvents(new UserAccountListener(this, userManager, joinLoadingGuard, config.messages(), getLogger()), this);
         getLogger().info("Registered UserAccountListener for account management");
+        pluginManager.registerEvents(new JoinLoadingRestrictionListener(joinLoadingGuard), this);
         pluginManager.registerEvents(new ModeListener(modeService), this);
         getLogger().info("Registered ModeListener for owner/staff mode restore");
     }
