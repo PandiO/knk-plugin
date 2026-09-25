@@ -3,6 +3,7 @@ package net.knightsandkings.knk.core.menu;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -37,5 +38,26 @@ public final class MenuParams {
             LOGGER.log(Level.WARNING, "Malformed paramsJson '" + paramsJson + "' - treating as empty params", e);
             return Map.of();
         }
+    }
+
+    /**
+     * InventoryMenu Phase 9 (E3): resolves every {@code $...$} placeholder in the
+     * <em>values</em> of {@code params} (keys are left alone) against
+     * {@code variableScope}, uncached and in text form (see
+     * {@link VariableResolver#interpolate}). Params without placeholders come
+     * back unchanged. Order is preserved.
+     */
+    public static Map<String, String> interpolate(Map<String, String> params, Map<String, Object> variableScope) {
+        if (params == null || params.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, String> resolved = new LinkedHashMap<>();
+        params.forEach((key, value) -> resolved.put(key, VariableResolver.interpolate(value, variableScope)));
+        return resolved;
+    }
+
+    /** {@link #parse} then {@link #interpolate} - the one call action/condition/content-source params go through. */
+    public static Map<String, String> resolve(String paramsJson, Map<String, Object> variableScope) {
+        return interpolate(parse(paramsJson), variableScope);
     }
 }

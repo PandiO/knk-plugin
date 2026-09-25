@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.menu;
 
+import net.knightsandkings.knk.core.menu.MenuContextParams;
 import net.knightsandkings.knk.core.menu.MenuSession;
 import org.bukkit.entity.Player;
 
@@ -15,6 +16,11 @@ import org.bukkit.entity.Player;
  * {@code ItemBlueprintsDataAccess}) doesn't use it - kept for the same
  * reason {@code MenuActionContext} carries a full {@code Player} rather than
  * just a player id.
+ * <p>
+ * {@code menuContext} (InventoryMenu Phase 9, E1): the ctx params the menu was
+ * opened with. Row sources additionally receive the section's interpolated
+ * {@code ContentSourceParamsJson} as their own argument (see
+ * {@code MenuRowSource}). Content sources are called on the main thread.
  */
-public record MenuContentSourceContext(Player player, MenuSession session) {
+public record MenuContentSourceContext(Player player, MenuSession session, MenuContextParams menuContext) {
 }

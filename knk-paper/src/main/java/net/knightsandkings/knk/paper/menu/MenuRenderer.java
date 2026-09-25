@@ -5,16 +5,25 @@ import net.knightsandkings.knk.core.domain.common.Page;
 import net.knightsandkings.knk.core.domain.common.PagedQuery;
 import net.knightsandkings.knk.core.domain.material.KnkMinecraftMaterialRef;
 import net.knightsandkings.knk.core.domain.menu.KnkActionBinding;
+import net.knightsandkings.knk.core.domain.menu.KnkVariableBinding;
+import net.knightsandkings.knk.core.menu.ConditionRegistry;
 import net.knightsandkings.knk.core.menu.MenuContentQuery;
 import net.knightsandkings.knk.core.menu.MenuContentSourceRegistry;
+import net.knightsandkings.knk.core.menu.MenuContentSourceRegistry.MenuContentPage;
+import net.knightsandkings.knk.core.menu.MenuContextParams;
 import net.knightsandkings.knk.core.menu.MenuParams;
 import net.knightsandkings.knk.core.menu.MenuRenderPriority;
+import net.knightsandkings.knk.core.menu.MenuSectionRenderer;
 import net.knightsandkings.knk.core.menu.MenuSession;
 import net.knightsandkings.knk.core.menu.MenuSlotCalculator;
+import net.knightsandkings.knk.core.menu.MenuVariableProviderRegistry;
+import net.knightsandkings.knk.core.menu.MenuVariableScope;
+import net.knightsandkings.knk.core.menu.MenuView;
 import net.knightsandkings.knk.core.menu.RuntimeMenu;
 import net.knightsandkings.knk.core.menu.RuntimeMenuItem;
 import net.knightsandkings.knk.core.menu.RuntimeMenuSection;
 import net.knightsandkings.knk.core.menu.SectionSlotAssignment;
+import net.knightsandkings.knk.core.menu.SectionView;
 import net.knightsandkings.knk.core.menu.VariableResolver;
 import net.knightsandkings.knk.paper.mapper.MaterialNamespaceResolver;
 import net.knightsandkings.knk.paper.utils.DisplayTextFormatter;
@@ -29,11 +38,14 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -42,52 +54,202 @@ import java.util.logging.Logger;
  * Computes and applies a {@link RuntimeMenu}'s Inventory contents for one
  * player's current {@link MenuSession} state (current page per section).
  * <p>
- * {@link #computeState} does the "expensive work" (material-ref resolution,
- * per-section layout/pagination, ItemStack construction) - IMPLEMENTATION_PLAN.md
- * Phase 2's async-rendering requirement (fixes bug #6). It's written to block
- * on its own async data-access calls with {@code join()}, which is only safe
- * because every caller in this codebase runs it from inside
- * {@code Bukkit.getScheduler().runTaskAsynchronously} - never call it from the
- * main thread. {@link #applyToInventory} is the cheap, synchronous remainder
- * that actually mutates the {@code Inventory}, and must only ever be called
- * from the main thread (via {@code Bukkit.getScheduler().runTask}).
+ * <b>Threading (InventoryMenu Phase 9 §9.0, replacing Phase 2's
+ * "compute everything off-thread").</b> A render is a future chain:
+ * <ol>
+ *   <li>{@link #resolveTemplateMaterialKeys} - material-ref lookups for the
+ *       template's own items (data-access futures; the caller may skip this
+ *       and pass the keys of a previous render, which is what auto-refresh
+ *       does);</li>
+ *   <li>{@link #render} - <b>must be called on the main thread</b>: builds the
+ *       variable scope (feature providers run here), interpolates content-source
+ *       params and <em>calls</em> every content source;</li>
+ *   <li>waits for any content fetch that is still in flight (plus material
+ *       refs of Java-mapped fetched items) off the main thread;</li>
+ *   <li>composes the result back on the main thread: bindings, Render
+ *       conditions, {@code ItemStack}s.</li>
+ * </ol>
+ * The returned future completes on the main thread, so the caller can apply
+ * it directly ({@link #applyToInventory}). When every content source answers
+ * with an already-completed future (in-memory sources such as Siege's), steps
+ * 2-4 run synchronously inside the calling tick.
  */
 public final class MenuRenderer {
 
     private static final Logger LOGGER = Logger.getLogger(MenuRenderer.class.getName());
+    private static final Set<String> WARNED = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     private final MinecraftMaterialRefsDataAccess materialRefsDataAccess;
     private final MenuContentSourceRegistry<MenuContentSourceContext> contentSourceRegistry;
+    private final ConditionRegistry<MenuActionContext> conditionRegistry;
+    private final MenuVariableProviderRegistry<Player> variableRegistry;
+    private final Executor mainThread;
 
+    /**
+     * @param mainThread runs a task on the server main thread - inline when
+     *                   already on it (see {@code MenuService#mainThreadExecutor})
+     */
     public MenuRenderer(
             MinecraftMaterialRefsDataAccess materialRefsDataAccess,
-            MenuContentSourceRegistry<MenuContentSourceContext> contentSourceRegistry
+            MenuContentSourceRegistry<MenuContentSourceContext> contentSourceRegistry,
+            ConditionRegistry<MenuActionContext> conditionRegistry,
+            MenuVariableProviderRegistry<Player> variableRegistry,
+            Executor mainThread
     ) {
         this.materialRefsDataAccess = materialRefsDataAccess;
         this.contentSourceRegistry = contentSourceRegistry;
+        this.conditionRegistry = conditionRegistry;
+        this.variableRegistry = variableRegistry;
+        this.mainThread = mainThread;
     }
 
     /**
-     * Blocks (on already-off-main-thread async data-access calls) while
-     * resolving material refs and building the desired slot contents. Do not
-     * call this from the main thread.
-     * <p>
-     * {@code session.clearDirty()} is called once, after every item in this
-     * pass has had a chance to observe {@code ON_DIRTY} variables as stale
-     * (IMPLEMENTATION_PLAN.md Phase 3, DESIGN_REVIEW.md §1) - a single dirty
-     * flag must stay true for every binding in the pass that triggered it,
-     * not be consumed by whichever binding happens to resolve first.
+     * Step 1: namespace keys for every material ref the template itself
+     * references (item {@code materialRefId}s + background). Safe on any
+     * thread; the future completes on a data-access thread.
      */
-    public MenuRenderResult computeState(RuntimeMenu menu, MenuSession session, Player player) {
-        Map<Integer, String> namespaceKeysByMaterialRefId = resolveMaterialNamespaceKeys(menu);
-        Map<String, Object> variableContext = MenuVariableContext.liveValues(player);
-        Predicate<String> permissionChecker = player::hasPermission;
+    public CompletableFuture<Map<Integer, String>> resolveTemplateMaterialKeys(RuntimeMenu menu) {
+        Set<Integer> materialRefIds = new HashSet<>();
+        if (menu.backgroundMaterialRefId() != null) {
+            materialRefIds.add(menu.backgroundMaterialRefId());
+        }
+        for (RuntimeMenuSection section : menu.sections()) {
+            for (RuntimeMenuItem item : section.items()) {
+                if (item.materialRefId() != null) {
+                    materialRefIds.add(item.materialRefId());
+                }
+            }
+        }
+        return resolveMaterialKeys(materialRefIds, new java.util.concurrent.ConcurrentHashMap<>());
+    }
+
+    /**
+     * Steps 2-4. <b>Call on the main thread.</b> {@code materialKeys} is the
+     * result of {@link #resolveTemplateMaterialKeys} (or a previous render's
+     * keys); it is copied, never mutated. The returned future completes on the
+     * main thread.
+     */
+    public CompletableFuture<MenuRenderResult> render(RuntimeMenu menu, MenuSession session, Player player,
+                                                      Map<Integer, String> materialKeys, MenuService menuService) {
+        Map<Integer, String> keys = new java.util.concurrent.ConcurrentHashMap<>(materialKeys);
+        MenuContextParams menuContext = session.currentContext();
         long currentTick = currentTick();
+        MenuVariableScope rootScope = variableRegistry.scope(player, menuContext,
+                Map.of(MenuVariableProviderRegistry.ROOT_MENU, MenuView.of(menu.key(), menu.title(), session)));
+        Predicate<String> permissionChecker = player::hasPermission;
+
+        // Step 2 (main thread): start every content-source fetch.
+        Map<Integer, CompletableFuture<ContentFetch>> fetches = new LinkedHashMap<>();
+        for (RuntimeMenuSection section : menu.sections()) {
+            if (section.hasContentSource() && section.isVisibleTo(permissionChecker)) {
+                fetches.put(section.id(), startContentFetch(section, menu, session, player, menuContext, rootScope, keys));
+            }
+        }
+
+        // Step 3: wait (off-thread only if something is actually in flight).
+        CompletableFuture<Void> allFetched = CompletableFuture.allOf(fetches.values().toArray(new CompletableFuture[0]));
+
+        // Step 4 (main thread): compose.
+        return allFetched.thenApplyAsync(ignored -> {
+            Map<Integer, ContentFetch> fetched = new HashMap<>();
+            fetches.forEach((sectionId, future) -> fetched.put(sectionId, future.join()));
+            return compose(menu, session, player, menuContext, rootScope, keys, fetched, currentTick, menuService);
+        }, mainThread);
+    }
+
+    /** One content-source section's fetched page (already wrapped to a valid page) plus its slot pool. */
+    private record ContentFetch(RuntimeMenuSection.SlotPool pool, MenuContentPage content, int page, int totalPages) {
+    }
+
+    /**
+     * IMPLEMENTATION_PLAN.md Phase 8 content-source path, now split so the
+     * source is <em>called</em> on the main thread (Phase 9 §9.0). The session's
+     * active {@link MenuContentQuery} is threaded into the {@link PagedQuery}
+     * ({@code searchTerm}/{@code filters}); the section's
+     * {@code ContentSourceParamsJson} values are interpolated against the render
+     * scope (E3) and handed to row sources. {@code MenuSession} pages are
+     * 0-based, {@link PagedQuery#pageNumber()} is 1-based (web-api/EF
+     * convention) - the {@code +1} below is that boundary. A page request past
+     * either end (from {@code MenuService.changePage}'s unclamped stepping) is
+     * wrapped once the first fetch reveals the real total, then re-fetched -
+     * the re-fetch is issued back on the main thread too.
+     */
+    private CompletableFuture<ContentFetch> startContentFetch(RuntimeMenuSection section, RuntimeMenu menu,
+                                                             MenuSession session, Player player,
+                                                             MenuContextParams menuContext, MenuVariableScope rootScope,
+                                                             Map<Integer, String> keys) {
+        RuntimeMenuSection.SlotPool pool = section.computeSlotPool(menu.totalSlots());
+        int pageSize = pool.availablePool().size();
+        if (pageSize == 0) {
+            return CompletableFuture.completedFuture(new ContentFetch(pool, null, 0, 0));
+        }
+
+        MenuContentQuery contentQuery = section.searchable() ? session.getContentQuery(section.id()) : MenuContentQuery.EMPTY;
+        MenuContentSourceContext context = new MenuContentSourceContext(player, session, menuContext);
+        int requestedPage = session.getPage(section.id());
+        MenuVariableScope paramsScope = rootScope.with(MenuVariableProviderRegistry.ROOT_SECTION,
+                new SectionView(section.name(), Math.max(requestedPage, 0), 0));
+        Map<String, String> params = MenuParams.interpolate(section.contentSourceParams(), paramsScope);
+
+        int firstFetchPage = Math.max(requestedPage, 0);
+        return fetchContentPage(section, context, params, firstFetchPage, pageSize, contentQuery)
+                .thenComposeAsync(first -> {
+                    int totalPages = (int) Math.ceil(first.page().totalCount() / (double) pageSize);
+                    int wrapped = totalPages > 0 ? Math.floorMod(requestedPage, totalPages) : 0;
+                    if (wrapped == firstFetchPage) {
+                        return CompletableFuture.completedFuture(new ContentFetch(pool, first, wrapped, totalPages));
+                    }
+                    session.setPage(section.id(), wrapped);
+                    return fetchContentPage(section, context, params, wrapped, pageSize, contentQuery)
+                            .thenApply(second -> new ContentFetch(pool, second, wrapped, totalPages));
+                }, mainThread)
+                .thenCompose(fetch -> {
+                    if (fetch.content() == null || fetch.content().rows()) {
+                        return CompletableFuture.completedFuture(fetch);
+                    }
+                    // Java-mapped items (e.g. catalog.itemblueprints) carry
+                    // materialRefIds the template didn't know about.
+                    Set<Integer> missing = new HashSet<>();
+                    for (Object element : fetch.content().page().items()) {
+                        if (element instanceof RuntimeMenuItem item && item.materialRefId() != null
+                                && !keys.containsKey(item.materialRefId())) {
+                            missing.add(item.materialRefId());
+                        }
+                    }
+                    return resolveMaterialKeys(missing, keys).thenApply(ignored -> fetch);
+                });
+    }
+
+    /** @param page0 0-based (MenuSession convention) - converted to the 1-based PagedQuery/web-api convention here. */
+    private CompletableFuture<MenuContentPage> fetchContentPage(RuntimeMenuSection section, MenuContentSourceContext context,
+                                                                Map<String, String> params, int page0, int pageSize,
+                                                                MenuContentQuery contentQuery) {
+        PagedQuery query = new PagedQuery(page0 + 1, pageSize, contentQuery.searchText(), null, false, contentQuery.filterValues());
+        CompletableFuture<MenuContentPage> future;
+        try {
+            future = contentSourceRegistry.fetch(section.contentSourceId(), context, params, query);
+        } catch (RuntimeException e) {
+            future = CompletableFuture.failedFuture(e);
+        }
+        return future.exceptionally(e -> {
+            LOGGER.log(Level.WARNING, "MenuContentSource '" + section.contentSourceId() + "' for section '"
+                    + section.name() + "' failed to fetch page " + page0 + " - rendering it empty this pass", e);
+            return new MenuContentPage(new Page<>(List.of(), 0, page0 + 1, pageSize), false);
+        });
+    }
+
+    /** Step 4 - main thread. */
+    private MenuRenderResult compose(RuntimeMenu menu, MenuSession session, Player player, MenuContextParams menuContext,
+                                     MenuVariableScope rootScope, Map<Integer, String> keys,
+                                     Map<Integer, ContentFetch> fetched, long currentTick, MenuService menuService) {
+        Predicate<String> permissionChecker = player::hasPermission;
 
         Map<Integer, ItemStack> itemStacksBySlot = new HashMap<>();
         Map<Integer, RuntimeMenuItem> itemsBySlot = new HashMap<>();
         Map<Integer, RuntimeMenuSection> sectionsBySlot = new HashMap<>();
         Map<Integer, List<String>> controlHintLoreBySlot = new HashMap<>();
+        Map<Integer, Object> rowsBySlot = new HashMap<>();
+        Map<Integer, SectionView> sectionViews = new HashMap<>();
 
         List<RuntimeMenuSection> sectionsByRenderOrder = menu.sections().stream()
                 .sorted(Comparator.comparingInt(section -> priorityRank(section.priority())))
@@ -95,8 +257,7 @@ public final class MenuRenderer {
 
         for (RuntimeMenuSection section : sectionsByRenderOrder) {
             // IMPLEMENTATION_PLAN.md Phase 4 - a section the player lacks
-            // visibilityPermission for is skipped entirely, hiding every item in
-            // it rather than gating each item individually (DESIGN_REVIEW.md §2.4).
+            // visibilityPermission for is skipped entirely (DESIGN_REVIEW.md §2.4).
             if (!section.isVisibleTo(permissionChecker)) {
                 continue;
             }
@@ -104,92 +265,104 @@ public final class MenuRenderer {
             boolean queryActive = section.searchable() && !session.getContentQuery(section.id()).isEmpty();
 
             SectionSlotAssignment assignment;
+            List<?> rows = List.of();
+            List<Integer> rowSlots = List.of();
             if (section.hasContentSource()) {
-                // IMPLEMENTATION_PLAN.md Phase 8: a real paged/cursor query
-                // against the registered MenuContentSource replaces the
-                // legacy in-memory items() pagination entirely for this
-                // section - see #resolveContentSourceAssignment.
-                assignment = resolveContentSourceAssignment(section, menu, session, player, namespaceKeysByMaterialRefId);
+                ContentFetch fetch = fetched.get(section.id());
+                assignment = toAssignment(fetch);
+                if (fetch != null && fetch.content() != null && fetch.content().rows()) {
+                    rows = fetch.content().page().items();
+                    rowSlots = fetch.pool().availablePool();
+                }
             } else {
-                // IMPLEMENTATION_PLAN.md Phase 5 / DESIGN_REVIEW.md §2.1 §2.3: a
-                // searchable section's active MenuContentQuery narrows its auto-
-                // placed content BEFORE resolveSlots paginates it - the predicate
-                // itself has to be built here, not in knk-core, since matching
-                // requires resolved display text (VariableResolver + the live
-                // Player context knk-core deliberately doesn't have).
+                // IMPLEMENTATION_PLAN.md Phase 5: a searchable section's active
+                // query narrows its auto content BEFORE resolveSlots paginates it.
                 Predicate<RuntimeMenuItem> contentFilter = queryActive
-                        ? buildContentFilter(session.getContentQuery(section.id()), session, variableContext, currentTick)
+                        ? buildContentFilter(session.getContentQuery(section.id()), session, rootScope, currentTick)
                         : item -> true;
                 assignment = section.resolveSlots(menu.totalSlots(), session.getPage(section.id()), contentFilter);
             }
 
-            applyAssignment(assignment, namespaceKeysByMaterialRefId, session, variableContext, currentTick,
-                    permissionChecker, itemStacksBySlot, itemsBySlot, sectionsBySlot, controlHintLoreBySlot, section);
+            SectionView sectionView = SectionView.of(section, assignment);
+            if (section.id() != null) {
+                sectionViews.put(section.id(), sectionView);
+            }
+            MenuVariableScope sectionScope = rootScope.with(MenuVariableProviderRegistry.ROOT_SECTION, sectionView);
 
-            // Post-Phase-8 QOL follow-up: pagination/filter/search/confirm
-            // preset buttons show their own live state in their lore
-            // (current page, active filter value, active search phrase,
-            // double-click-armed countdown) - appended directly onto the
-            // already-built ItemStack rather than through a new variable-
-            // binding placeholder syntax, since none of this is per-template
-            // author-supplied text, it's render-pass state.
-            appendPresetStateLore(section, assignment, session, currentTick, itemStacksBySlot);
+            MenuSectionRenderer.Pass<MenuActionContext> pass = new MenuSectionRenderer.Pass<>(
+                    session, currentTick, permissionChecker, conditionRegistry,
+                    (item, scope) -> new MenuActionContext(player, session, scope, menuService, menu, section, item,
+                            scope.get(MenuVariableProviderRegistry.ROOT_ROW)));
 
-            if (queryActive && matchedNoAutoContent(assignment)) {
-                placeEmptyResultsMarker(section, menu, assignment, itemStacksBySlot);
+            List<MenuSectionRenderer.RenderedSlot> rendered = new ArrayList<>(
+                    MenuSectionRenderer.renderItems(assignment.itemsBySlot(), sectionScope, pass));
+            if (!rows.isEmpty()) {
+                RuntimeMenuItem rowTemplate = section.rowTemplate().orElse(null);
+                if (rowTemplate != null) {
+                    rendered.addAll(MenuSectionRenderer.renderRows(section, rowTemplate, rowSlots, rows, sectionScope, pass));
+                } else {
+                    warnOnce("no-row-template|" + section.id(), "Section '" + section.name() + "' in menu '" + menu.key()
+                            + "' got rows from content source '" + section.contentSourceId()
+                            + "' but has no row template - rows not rendered (startup validation should have blocked this menu)");
+                }
+            }
+
+            for (MenuSectionRenderer.RenderedSlot slot : rendered) {
+                RuntimeMenuItem item = slot.item();
+                String refKey = item.materialRefId() != null ? keys.get(item.materialRefId()) : null;
+                ItemStack itemStack = MenuItemBukkitMapper.toItemStack(item, slot.presentation(), refKey, permissionChecker);
+                itemStacksBySlot.put(slot.slot(), itemStack);
+                itemsBySlot.put(slot.slot(), item);
+                sectionsBySlot.put(slot.slot(), section);
+                if (slot.row() != null) {
+                    rowsBySlot.put(slot.slot(), slot.row());
+                }
+                List<String> hints = resolveControlHints(item);
+                if (!hints.isEmpty()) {
+                    controlHintLoreBySlot.put(slot.slot(), hints);
+                }
+                appendPresetStateLore(item, itemStack, assignment, section, session, currentTick);
+            }
+
+            boolean noAutoContent = rows.isEmpty() && matchedNoAutoContent(assignment);
+            if (queryActive && noAutoContent) {
+                placeEmptyResultsMarker(section, menu, itemStacksBySlot);
             }
         }
 
-        fillBackground(menu, namespaceKeysByMaterialRefId, itemStacksBySlot);
+        fillBackground(menu, keys, itemStacksBySlot);
         session.clearDirty();
 
         return new MenuRenderResult(Map.copyOf(itemStacksBySlot), Map.copyOf(itemsBySlot), Map.copyOf(sectionsBySlot),
-                Map.copyOf(controlHintLoreBySlot));
+                Map.copyOf(controlHintLoreBySlot), Map.copyOf(rowsBySlot), Map.copyOf(sectionViews), Map.copyOf(keys),
+                menuContext);
     }
 
-    /**
-     * Shared per-slot placement step both the legacy in-memory-list path and
-     * the Phase 8 content-source path funnel through, so a catalog-fetched
-     * item renders via the exact same {@code MenuItemBukkitMapper.toItemStack}
-     * call (material resolution, variable resolution, permission-aware
-     * display mode) every hand-authored template item already does - no
-     * second rendering code path.
-     */
-    private void applyAssignment(SectionSlotAssignment assignment, Map<Integer, String> namespaceKeysByMaterialRefId,
-                                  MenuSession session, Map<String, Object> variableContext, long currentTick,
-                                  Predicate<String> permissionChecker, Map<Integer, ItemStack> itemStacksBySlot,
-                                  Map<Integer, RuntimeMenuItem> itemsBySlot, Map<Integer, RuntimeMenuSection> sectionsBySlot,
-                                  Map<Integer, List<String>> controlHintLoreBySlot, RuntimeMenuSection section) {
-        for (Map.Entry<Integer, RuntimeMenuItem> entry : assignment.itemsBySlot().entrySet()) {
-            RuntimeMenuItem item = entry.getValue();
-            String namespaceKey = item.materialRefId() != null
-                    ? namespaceKeysByMaterialRefId.get(item.materialRefId())
-                    : null;
-
-            ItemStack itemStack = MenuItemBukkitMapper.toItemStack(
-                    item, namespaceKey, session, variableContext, currentTick, permissionChecker);
-            if (itemStack != null) {
-                itemStacksBySlot.put(entry.getKey(), itemStack);
-                itemsBySlot.put(entry.getKey(), item);
-                sectionsBySlot.put(entry.getKey(), section);
-
-                List<String> hints = resolveControlHints(item);
-                if (!hints.isEmpty()) {
-                    controlHintLoreBySlot.put(entry.getKey(), hints);
+    /** Pinned items + (for Java-mapped item sources) the fetched items, as one slot assignment. */
+    private static SectionSlotAssignment toAssignment(ContentFetch fetch) {
+        if (fetch == null) {
+            return new SectionSlotAssignment(Map.of(), 0, 0, false, false);
+        }
+        Map<Integer, RuntimeMenuItem> slotAssignments = new HashMap<>(fetch.pool().pinnedBySlot());
+        if (fetch.content() != null && !fetch.content().rows()) {
+            List<?> fetchedItems = fetch.content().page().items();
+            List<Integer> availablePool = fetch.pool().availablePool();
+            for (int i = 0; i < fetchedItems.size() && i < availablePool.size(); i++) {
+                if (fetchedItems.get(i) instanceof RuntimeMenuItem item) {
+                    slotAssignments.put(availablePool.get(i), item);
                 }
             }
         }
+        int totalPages = fetch.totalPages();
+        boolean hasNext = totalPages > 0 && fetch.page() < totalPages - 1;
+        boolean hasPrev = totalPages > 0 && fetch.page() > 0;
+        return new SectionSlotAssignment(Map.copyOf(slotAssignments), fetch.page(), totalPages, hasNext, hasPrev);
     }
 
     /**
      * Post-Phase-8 QOL follow-up: the "what does this button do" hint lines
      * for one item, shown only while the viewing player holds shift (see
-     * {@link MenuControlHintListener}) rather than as always-on lore clutter
-     * - the developer's explicit ask ("make all function buttons reveal the
-     * controls in the lore when hovering with shift"). Static per {@code
-     * actionTypeId} - unlike {@link #appendPresetStateLore}'s lines, these
-     * never depend on session/query state, so they're computed once here and
-     * replayed live by the sneak-toggle listener without a full re-render.
+     * {@link MenuControlHintListener}). Static per {@code actionTypeId}.
      */
     private static List<String> resolveControlHints(RuntimeMenuItem item) {
         List<String> hints = new ArrayList<>();
@@ -199,6 +372,8 @@ public final class MenuRenderer {
                 hints.add(ChatColor.DARK_GRAY + "Click: close menu");
             } else if (MenuActionHandlers.OPEN.equals(actionTypeId)) {
                 hints.add(ChatColor.DARK_GRAY + "Click: open menu");
+            } else if (MenuActionHandlers.BACK.equals(actionTypeId)) {
+                hints.add(ChatColor.DARK_GRAY + "Click: back");
             } else if (MenuActionHandlers.PAGE_NEXT.equals(actionTypeId)) {
                 hints.add(ChatColor.DARK_GRAY + "Click: next page");
                 hints.add(ChatColor.DARK_GRAY + "Shift-click: first page");
@@ -228,61 +403,50 @@ public final class MenuRenderer {
     }
 
     /**
-     * Post-Phase-8 QOL follow-up: appends live render-state lore lines onto
-     * the already-built {@link ItemStack}s for this section's preset control
+     * Post-Phase-8 QOL follow-up: live render-state lore on preset control
      * buttons - "Page X/Y" on pagination arrows, the active value on a
      * filter-cycle button, the active phrase on a search button, and a
-     * "click again to confirm" countdown on an armed
-     * {@code menu.confirm.doubleclick} button. Matched by
-     * {@link KnkActionBinding#actionTypeId()} on the item's own actions list,
-     * not by section kind or item name, so this works for any button wired
-     * to these action ids regardless of which menu/section it lives in.
+     * "click again to confirm" line on an armed double-click button. Matched
+     * by action id. Phase 9 (E9): the automatic "Page X/Y" line is skipped
+     * when the item's own bindings already read {@code $section.…$} (a
+     * template that renders its own pager text must not get a second line).
      */
-    private void appendPresetStateLore(RuntimeMenuSection section, SectionSlotAssignment assignment,
-                                        MenuSession session, long currentTick, Map<Integer, ItemStack> itemStacksBySlot) {
+    private void appendPresetStateLore(RuntimeMenuItem item, ItemStack itemStack, SectionSlotAssignment assignment,
+                                       RuntimeMenuSection section, MenuSession session, long currentTick) {
         MenuContentQuery contentQuery = session.getContentQuery(section.id());
-
-        for (Map.Entry<Integer, RuntimeMenuItem> entry : assignment.itemsBySlot().entrySet()) {
-            RuntimeMenuItem item = entry.getValue();
-            ItemStack itemStack = itemStacksBySlot.get(entry.getKey());
-            if (itemStack == null) {
-                continue;
-            }
-
-            for (KnkActionBinding action : item.actions()) {
-                String actionTypeId = action.actionTypeId();
-                if (MenuActionHandlers.PAGE_NEXT.equals(actionTypeId) || MenuActionHandlers.PAGE_PREV.equals(actionTypeId)) {
+        for (KnkActionBinding action : item.actions()) {
+            String actionTypeId = action.actionTypeId();
+            if (MenuActionHandlers.PAGE_NEXT.equals(actionTypeId) || MenuActionHandlers.PAGE_PREV.equals(actionTypeId)) {
+                if (!referencesSectionRoot(item.variableBindings())) {
                     int totalPages = Math.max(assignment.totalPages(), 1);
                     appendLoreLine(itemStack, ChatColor.GRAY + "Page " + (assignment.page() + 1) + "/" + totalPages);
-                } else if (MenuActionHandlers.FILTER_CYCLE.equals(actionTypeId)) {
-                    String facetKey = MenuParams.parse(action.paramsJson()).get("facetKey");
-                    String currentValue = facetKey != null ? contentQuery.filterValues().get(facetKey) : null;
-                    appendLoreLine(itemStack, ChatColor.GRAY + "Current: "
-                            + (currentValue != null ? currentValue : ChatColor.DARK_GRAY + "(none)" + ChatColor.GRAY));
-                } else if (MenuActionHandlers.SEARCH_PROMPT.equals(actionTypeId)) {
-                    String searchText = contentQuery.searchText();
-                    appendLoreLine(itemStack, ChatColor.GRAY + "Search: "
-                            + (searchText != null && !searchText.isBlank() ? searchText : ChatColor.DARK_GRAY + "(none)" + ChatColor.GRAY));
-                } else if (MenuActionHandlers.DOUBLECLICK_CONFIRM.equals(actionTypeId) && item.id() != null) {
-                    int windowTicks = parsePositiveIntOrDefault(
-                            MenuParams.parse(action.paramsJson()).get("windowTicks"), DEFAULT_DOUBLECLICK_WINDOW_TICKS);
-                    if (session.isDoubleClickArmed(item.id(), currentTick, windowTicks)) {
-                        appendLoreLine(itemStack, ChatColor.YELLOW + "Click again to confirm!");
-                    }
+                }
+            } else if (MenuActionHandlers.FILTER_CYCLE.equals(actionTypeId)) {
+                String facetKey = MenuParams.parse(action.paramsJson()).get("facetKey");
+                String currentValue = facetKey != null ? contentQuery.filterValues().get(facetKey) : null;
+                appendLoreLine(itemStack, ChatColor.GRAY + "Current: "
+                        + (currentValue != null ? currentValue : ChatColor.DARK_GRAY + "(none)" + ChatColor.GRAY));
+            } else if (MenuActionHandlers.SEARCH_PROMPT.equals(actionTypeId)) {
+                String searchText = contentQuery.searchText();
+                appendLoreLine(itemStack, ChatColor.GRAY + "Search: "
+                        + (searchText != null && !searchText.isBlank() ? searchText : ChatColor.DARK_GRAY + "(none)" + ChatColor.GRAY));
+            } else if (MenuActionHandlers.DOUBLECLICK_CONFIRM.equals(actionTypeId) && item.id() != null) {
+                int windowTicks = parsePositiveIntOrDefault(
+                        MenuParams.parse(action.paramsJson()).get("windowTicks"), DEFAULT_DOUBLECLICK_WINDOW_TICKS);
+                if (session.isDoubleClickArmed(item.id(), currentTick, windowTicks)) {
+                    appendLoreLine(itemStack, ChatColor.YELLOW + "Click again to confirm!");
                 }
             }
         }
     }
 
+    private static boolean referencesSectionRoot(List<KnkVariableBinding> bindings) {
+        return bindings.stream().anyMatch(binding -> binding.expression() != null
+                && binding.expression().contains("$" + MenuVariableProviderRegistry.ROOT_SECTION + "."));
+    }
+
     private static void appendLoreLine(ItemStack itemStack, String line) {
-        ItemMeta meta = itemStack.getItemMeta();
-        if (meta == null) {
-            return;
-        }
-        List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
-        lore.add(line);
-        meta.setLore(lore);
-        itemStack.setItemMeta(meta);
+        appendLoreLines(itemStack, List.of(line));
     }
 
     private static void appendLoreLines(ItemStack itemStack, List<String> lines) {
@@ -311,134 +475,11 @@ public final class MenuRenderer {
     }
 
     /**
-     * IMPLEMENTATION_PLAN.md Phase 8: resolves a {@code contentSourceId}-bound
-     * section's current page via a real paged/cursor query against the
-     * registered {@link net.knightsandkings.knk.core.menu.MenuContentSource}
-     * (e.g. {@code catalog.itemblueprints}, backed by
-     * {@code ItemBlueprintsDataAccess.searchAsync}) rather than pagination
-     * over an in-memory {@code items()} list - the section's own
-     * {@link RuntimeMenuSection#items()} is expected to hold only pinned
-     * control buttons (see {@link RuntimeMenuSection#computeSlotPool}), which
-     * are placed here exactly like the legacy path places them.
-     * <p>
-     * The session's active {@link MenuContentQuery} (open question 3 - see
-     * IMPLEMENTATION_PLAN.md Phase 8's task text) is threaded into the
-     * {@link PagedQuery} itself as {@code searchTerm}/{@code filters} - the
-     * backing store narrows its full result set before paging, unlike the
-     * legacy path's {@link #buildContentFilter}, which can only narrow
-     * whatever the in-memory list already holds. {@code MenuSession} pages
-     * are 0-based (see {@link MenuSession#getPage}); the web-api's
-     * {@code PagedQuery.pageNumber}/EF Core pagination convention is 1-based
-     * (confirmed against {@code ItemBlueprintRepository.SearchAsync}'s
-     * {@code Skip((PageNumber - 1) * PageSize)}) - the {@code +1}/{@code -1}
-     * conversions below are that boundary, not an off-by-one bug.
-     * <p>
-     * A page request that overshoots the real last page (from
-     * {@code MenuService.changePage}'s unclamped advance) or goes negative
-     * (from wrapping backward past page 0) comes back with zero items but a
-     * correct {@code totalCount}; this re-fetches once at the wrapped page
-     * ({@link RuntimeMenuSection#resolveSlots}'s in-memory pagination wraps
-     * the same way - see its own javadoc), the same "safe, harmless, one
-     * extra round-trip" cost accepted there, for the same reason: the true
-     * page count - and so where wrapping actually lands - can only be known
-     * after the first fetch reveals {@code totalCount}.
-     */
-    private SectionSlotAssignment resolveContentSourceAssignment(RuntimeMenuSection section, RuntimeMenu menu,
-                                                                   MenuSession session, Player player,
-                                                                   Map<Integer, String> namespaceKeysByMaterialRefId) {
-        RuntimeMenuSection.SlotPool pool = section.computeSlotPool(menu.totalSlots());
-        int pageSize = pool.availablePool().size();
-
-        if (pageSize == 0) {
-            return new SectionSlotAssignment(pool.pinnedBySlot(), 0, 0, false, false);
-        }
-
-        MenuContentQuery contentQuery = section.searchable() ? session.getContentQuery(section.id()) : MenuContentQuery.EMPTY;
-        MenuContentSourceContext context = new MenuContentSourceContext(player, session);
-        int requestedPage = session.getPage(section.id());
-
-        // Post-Phase-8 QOL follow-up: MenuService.changePage now advances a
-        // content-source section's page unconditionally in either direction
-        // (page + 1 past the last page, or page - 1 below 0 from
-        // MenuSession.previousPage's own wraparound) rather than clamping -
-        // the real totalPages count (and therefore where "wrap around" lands)
-        // is only known once the fetch below reveals totalCount. A negative
-        // requestedPage can't be sent to the 1-based PagedQuery API at all,
-        // so the first fetch always uses page 0 in that case; the wrap below
-        // then resolves the real target page and re-fetches it.
-        int firstFetchPage = Math.max(requestedPage, 0);
-        Page<RuntimeMenuItem> page = fetchContentPage(section, context, firstFetchPage, pageSize, contentQuery);
-        int totalPages = (int) Math.ceil(page.totalCount() / (double) pageSize);
-        int clampedPage = totalPages > 0 ? Math.floorMod(requestedPage, totalPages) : 0;
-
-        if (clampedPage != firstFetchPage) {
-            session.setPage(section.id(), clampedPage);
-            page = fetchContentPage(section, context, clampedPage, pageSize, contentQuery);
-        }
-
-        resolveAdditionalMaterialNamespaceKeys(page.items(), namespaceKeysByMaterialRefId);
-
-        Map<Integer, RuntimeMenuItem> slotAssignments = new HashMap<>(pool.pinnedBySlot());
-        List<Integer> availablePool = pool.availablePool();
-        List<RuntimeMenuItem> fetchedItems = page.items();
-        for (int i = 0; i < fetchedItems.size() && i < availablePool.size(); i++) {
-            slotAssignments.put(availablePool.get(i), fetchedItems.get(i));
-        }
-
-        boolean hasNext = totalPages > 0 && clampedPage < totalPages - 1;
-        boolean hasPrev = totalPages > 0 && clampedPage > 0;
-
-        return new SectionSlotAssignment(Map.copyOf(slotAssignments), clampedPage, totalPages, hasNext, hasPrev);
-    }
-
-    /** @param page0 0-based (MenuSession convention) - converted to the 1-based PagedQuery/web-api convention here. */
-    private Page<RuntimeMenuItem> fetchContentPage(RuntimeMenuSection section, MenuContentSourceContext context,
-                                                     int page0, int pageSize, MenuContentQuery contentQuery) {
-        PagedQuery query = new PagedQuery(page0 + 1, pageSize, contentQuery.searchText(), null, false, contentQuery.filterValues());
-        try {
-            return contentSourceRegistry.fetchPage(section.contentSourceId(), context, query).join();
-        } catch (RuntimeException e) {
-            LOGGER.log(Level.WARNING, "MenuContentSource '" + section.contentSourceId() + "' for section '"
-                    + section.name() + "' failed to fetch page " + page0 + " - rendering it empty this pass", e);
-            return new Page<>(List.of(), 0, page0 + 1, pageSize);
-        }
-    }
-
-    /**
-     * On-demand counterpart to {@link #resolveMaterialNamespaceKeys(RuntimeMenu)}:
-     * that method only knows about material refs referenced by persisted
-     * {@code MenuItemTemplate} rows at assembly time, so a content-source-
-     * fetched item's {@code materialRefId} (e.g. an {@code ItemBlueprint}'s
-     * real icon) needs its own resolution pass once the fetch reveals it.
-     */
-    private void resolveAdditionalMaterialNamespaceKeys(List<RuntimeMenuItem> items,
-                                                          Map<Integer, String> namespaceKeysByMaterialRefId) {
-        Set<Integer> missingIds = new HashSet<>();
-        for (RuntimeMenuItem item : items) {
-            if (item.materialRefId() != null && !namespaceKeysByMaterialRefId.containsKey(item.materialRefId())) {
-                missingIds.add(item.materialRefId());
-            }
-        }
-        if (missingIds.isEmpty()) {
-            return;
-        }
-
-        List<CompletableFuture<Void>> fetches = missingIds.stream()
-                .map(id -> materialRefsDataAccess.getByIdAsync(id, null)
-                        .thenAccept(result -> result.value().ifPresent(ref -> putIfKeyed(namespaceKeysByMaterialRefId, id, ref)))
-                        .exceptionally(ignored -> null))
-                .toList();
-        CompletableFuture.allOf(fetches.toArray(new CompletableFuture[0])).join();
-    }
-
-    /**
-     * IMPLEMENTATION_PLAN.md Phase 5: builds the actual matching predicate
-     * from a session's raw {@link MenuContentQuery} - search text matches
+     * IMPLEMENTATION_PLAN.md Phase 5: builds the matching predicate from a
+     * session's raw {@link MenuContentQuery} - search text matches
      * (case-insensitively, substring) against the item's resolved "Name"
      * binding, and every filter facet must match the resolved binding for
-     * that {@code targetProperty} exactly (case-insensitively). Both must
-     * pass when both are set (DESIGN_REVIEW.md §2.3: search and filters
-     * compose, they don't override each other).
+     * that {@code targetProperty} exactly (case-insensitively).
      */
     private static Predicate<RuntimeMenuItem> buildContentFilter(MenuContentQuery query, MenuSession session,
                                                                    Map<String, Object> variableContext, long currentTick) {
@@ -472,19 +513,17 @@ public final class MenuRenderer {
 
     /**
      * IMPLEMENTATION_PLAN.md Phase 5 / DESIGN_REVIEW.md §2.1: an explicit
-     * empty-results state - neither legacy system had one. Placed into the
-     * first of the section's own layout slots not already occupied by a
-     * pinned item (e.g. a persistent search/clear button); silently skipped
-     * if none is free (a fully pinned section has nowhere to put it).
+     * empty-results state, placed into the first of the section's own layout
+     * slots not already occupied; silently skipped if none is free.
      */
     private static void placeEmptyResultsMarker(RuntimeMenuSection section, RuntimeMenu menu,
-                                                  SectionSlotAssignment assignment, Map<Integer, ItemStack> itemStacksBySlot) {
+                                                  Map<Integer, ItemStack> itemStacksBySlot) {
         List<Integer> sectionSlots = MenuSlotCalculator.calculateSlots(
                 section.displaySlot(), menu.totalSlots(), section.width(), section.height(),
                 section.alignVertical(), section.alignHorizontal());
 
         Integer targetSlot = sectionSlots.stream()
-                .filter(slot -> !assignment.itemsBySlot().containsKey(slot))
+                .filter(slot -> !itemStacksBySlot.containsKey(slot))
                 .findFirst()
                 .orElse(null);
         if (targetSlot == null) {
@@ -502,45 +541,52 @@ public final class MenuRenderer {
     }
 
     /**
-     * Approximate game ticks (1 tick = 50ms), used only as a monotonic clock
-     * for TTL-policy variables - {@code System.currentTimeMillis()}-based
-     * rather than {@code Bukkit.getCurrentTick()} so this doesn't depend on a
-     * specific Paper API version being present.
+     * Approximate game ticks (1 tick = 50ms), used as a monotonic clock for
+     * TTL-policy variables and the auto-refresh schedule -
+     * {@code System.currentTimeMillis()}-based rather than
+     * {@code Bukkit.getCurrentTick()} so this doesn't depend on a specific
+     * Paper API version being present.
      */
-    private static long currentTick() {
+    static long currentTick() {
         return System.currentTimeMillis() / 50L;
     }
 
     /**
-     * Must only be called from the main thread. {@code revealControls}
-     * (post-Phase-8 QOL follow-up) is the render-time equivalent of
-     * {@link MenuControlHintListener}'s live sneak-toggle: a render that
-     * happens to occur while the player is already sneaking (e.g. a page
-     * turn) should come out of the gate showing control hints too, not wait
-     * for the next sneak toggle to add them.
+     * Must only be called from the main thread. InventoryMenu Phase 9 (E4):
+     * writes only slots whose {@code ItemStack} actually changed and clears
+     * slots that became empty, instead of {@code clear()} + rewrite - a
+     * once-a-second repaint must not flicker the tooltip the player is
+     * reading. {@code revealControls}: a render that happens while the player
+     * is already sneaking shows control hints immediately.
      */
     public void applyToInventory(Inventory inventory, MenuRenderResult result, boolean revealControls) {
-        inventory.clear();
-        for (Map.Entry<Integer, ItemStack> entry : result.itemStacksBySlot().entrySet()) {
-            ItemStack itemStack = entry.getValue();
-            if (revealControls) {
-                List<String> hints = result.controlHintLoreBySlot().get(entry.getKey());
+        int size = inventory.getSize();
+        for (int slot = 0; slot < size; slot++) {
+            ItemStack desired = result.itemStacksBySlot().get(slot);
+            if (desired != null && revealControls) {
+                List<String> hints = result.controlHintLoreBySlot().get(slot);
                 if (hints != null && !hints.isEmpty()) {
-                    appendLoreLines(itemStack, hints);
+                    desired = desired.clone();
+                    appendLoreLines(desired, hints);
                 }
             }
-            inventory.setItem(entry.getKey(), itemStack);
+            ItemStack current = inventory.getItem(slot);
+            if (!Objects.equals(isEmpty(current) ? null : current, desired)) {
+                inventory.setItem(slot, desired);
+            }
         }
     }
 
-    private void fillBackground(RuntimeMenu menu, Map<Integer, String> namespaceKeysByMaterialRefId,
-                                 Map<Integer, ItemStack> itemStacksBySlot) {
+    private static boolean isEmpty(ItemStack itemStack) {
+        return itemStack == null || itemStack.getType() == Material.AIR;
+    }
+
+    private void fillBackground(RuntimeMenu menu, Map<Integer, String> keys, Map<Integer, ItemStack> itemStacksBySlot) {
         if (menu.backgroundMaterialRefId() == null) {
             return;
         }
 
-        String namespaceKey = namespaceKeysByMaterialRefId.get(menu.backgroundMaterialRefId());
-        Material background = MaterialNamespaceResolver.resolve(namespaceKey);
+        Material background = MaterialNamespaceResolver.resolve(keys.get(menu.backgroundMaterialRefId()));
         if (background == null) {
             return;
         }
@@ -550,29 +596,17 @@ public final class MenuRenderer {
         }
     }
 
-    private Map<Integer, String> resolveMaterialNamespaceKeys(RuntimeMenu menu) {
-        Set<Integer> materialRefIds = new HashSet<>();
-        if (menu.backgroundMaterialRefId() != null) {
-            materialRefIds.add(menu.backgroundMaterialRefId());
+    private CompletableFuture<Map<Integer, String>> resolveMaterialKeys(Set<Integer> materialRefIds,
+                                                                        Map<Integer, String> target) {
+        if (materialRefIds.isEmpty()) {
+            return CompletableFuture.completedFuture(target);
         }
-        for (RuntimeMenuSection section : menu.sections()) {
-            for (RuntimeMenuItem item : section.items()) {
-                if (item.materialRefId() != null) {
-                    materialRefIds.add(item.materialRefId());
-                }
-            }
-        }
-
-        Map<Integer, String> namespaceKeysByMaterialRefId = new HashMap<>();
-        List<CompletableFuture<Void>> fetches = materialRefIds.stream()
+        List<CompletableFuture<Void>> lookups = materialRefIds.stream()
                 .map(id -> materialRefsDataAccess.getByIdAsync(id, null)
-                        .thenAccept(result -> result.value().ifPresent(ref -> putIfKeyed(namespaceKeysByMaterialRefId, id, ref)))
+                        .thenAccept(result -> result.value().ifPresent(ref -> putIfKeyed(target, id, ref)))
                         .exceptionally(ignored -> null))
                 .toList();
-
-        CompletableFuture.allOf(fetches.toArray(new CompletableFuture[0])).join();
-
-        return namespaceKeysByMaterialRefId;
+        return CompletableFuture.allOf(lookups.toArray(new CompletableFuture[0])).thenApply(ignored -> target);
     }
 
     private static void putIfKeyed(Map<Integer, String> target, Integer id, KnkMinecraftMaterialRef ref) {
@@ -587,5 +621,12 @@ public final class MenuRenderer {
             case MEDIUM -> 1;
             case HIGH -> 2;
         };
+    }
+
+    /** Logs a data problem once per key for the lifetime of the server (not once per render tick). */
+    static void warnOnce(String key, String message) {
+        if (WARNED.add(key)) {
+            LOGGER.warning(message);
+        }
     }
 }

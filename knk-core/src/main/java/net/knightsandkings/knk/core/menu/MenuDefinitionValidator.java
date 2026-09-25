@@ -6,9 +6,11 @@ import net.knightsandkings.knk.core.domain.menu.KnkVariableBinding;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.regex.Matcher;
 
 /**
@@ -51,15 +53,69 @@ public final class MenuDefinitionValidator {
      *                                the whole startup walk.
      */
     public static void validate(RuntimeMenu menu, Map<String, Class<?>> declaredContextTypes) {
+        validate(menu, declaredContextTypes, Map.of());
+    }
+
+    /**
+     * InventoryMenu Phase 9: {@link #validate(RuntimeMenu, Map)} plus
+     * <ul>
+     *   <li>engine roots - {@code ctx} ({@link MenuContextParams}: any hop is a
+     *       key, typed {@code String}), {@code menu} ({@link MenuView}) and
+     *       {@code section} ({@link SectionView}) - are always declared (E1/E9);</li>
+     *   <li>{@code $row$} on a row template is checked against the declared row
+     *       type of the section's content source ({@code rowTypesBySourceId},
+     *       from {@link MenuContentSourceRegistry#rowTypes()}), and is an error
+     *       anywhere else; a row source without a row template, a row template
+     *       without a row source, and two row templates in one section are
+     *       errors (E3);</li>
+     *   <li>placeholders inside the values of action/condition params and of the
+     *       section's content-source params are validated like binding
+     *       expressions (E3).</li>
+     * </ul>
+     */
+    public static void validate(RuntimeMenu menu, Map<String, Class<?>> declaredContextTypes,
+                                Map<String, Class<?>> rowTypesBySourceId) {
         List<String> errors = new ArrayList<>();
+        Map<String, Class<?>> baseTypes = withEngineRoots(declaredContextTypes);
+        Map<String, Class<?>> rowTypes = rowTypesBySourceId != null ? rowTypesBySourceId : Map.of();
 
         for (RuntimeMenuSection section : menu.sections()) {
             String sectionContext = "section '" + section.name() + "' (id " + section.id() + ") in menu '" + menu.key() + "'";
-            validateBindings(section.variableBindings(), declaredContextTypes, sectionContext, errors);
+            validateBindings(section.variableBindings(), baseTypes, sectionContext, errors);
+            section.contentSourceParams().forEach((key, value) -> validateText(value, baseTypes,
+                    "content-source param '" + key + "' of " + sectionContext, errors));
+
+            Class<?> rowType = section.hasContentSource() ? rowTypes.get(section.contentSourceId()) : null;
+            long rowTemplateCount = section.items().stream().filter(RuntimeMenuItem::rowTemplate).count();
+            if (rowTemplateCount > 1) {
+                errors.add(sectionContext + " has " + rowTemplateCount + " row templates; at most one is allowed");
+            }
+            if (rowTemplateCount > 0 && !section.hasContentSource()) {
+                errors.add(sectionContext + " has a row template but no content source to supply rows");
+            } else if (rowTemplateCount > 0 && rowType == null) {
+                errors.add(sectionContext + " has a row template but content source '" + section.contentSourceId()
+                        + "' doesn't declare a row type (it isn't registered with registerRows)");
+            } else if (rowTemplateCount == 0 && rowType != null) {
+                errors.add(sectionContext + ": content source '" + section.contentSourceId() + "' yields "
+                        + rowType.getSimpleName() + " rows, so the section needs a row template (IsRowTemplate)");
+            }
 
             for (RuntimeMenuItem item : section.items()) {
                 String itemContext = "item (id " + item.id() + ") in section '" + section.name() + "' in menu '" + menu.key() + "'";
-                validateBindings(item.variableBindings(), declaredContextTypes, itemContext, errors);
+                Map<String, Class<?>> itemTypes = baseTypes;
+                if (item.rowTemplate() && rowType != null) {
+                    itemTypes = new HashMap<>(baseTypes);
+                    itemTypes.put(MenuVariableProviderRegistry.ROOT_ROW, rowType);
+                }
+                Map<String, Class<?>> types = itemTypes;
+                validateBindings(item.variableBindings(), types, itemContext, errors);
+                validateConditionParams(item.conditions(), types, itemContext, errors);
+                for (KnkActionBinding action : item.actions()) {
+                    String actionContext = "action (id " + action.id() + ", '" + action.actionTypeId() + "') in " + itemContext;
+                    MenuParams.parse(action.paramsJson()).forEach((key, value) -> validateText(value, types,
+                            "param '" + key + "' of " + actionContext, errors));
+                    validateConditionParams(action.conditions(), types, actionContext, errors);
+                }
             }
         }
 
@@ -69,38 +125,79 @@ public final class MenuDefinitionValidator {
         }
     }
 
+    private static Map<String, Class<?>> withEngineRoots(Map<String, Class<?>> declaredContextTypes) {
+        Map<String, Class<?>> types = new HashMap<>();
+        types.put(MenuVariableProviderRegistry.ROOT_CTX, MenuContextParams.class);
+        types.put(MenuVariableProviderRegistry.ROOT_MENU, MenuView.class);
+        types.put(MenuVariableProviderRegistry.ROOT_SECTION, SectionView.class);
+        if (declaredContextTypes != null) {
+            types.putAll(declaredContextTypes);
+        }
+        return types;
+    }
+
+    private static void validateConditionParams(List<KnkConditionBinding> conditions, Map<String, Class<?>> types,
+                                                String context, List<String> errors) {
+        if (conditions == null) {
+            return;
+        }
+        for (KnkConditionBinding condition : conditions) {
+            String conditionContext = "condition (id " + condition.id() + ", '" + condition.conditionTypeId() + "') in " + context;
+            MenuParams.parse(condition.paramsJson()).forEach((key, value) -> validateText(value, types,
+                    "param '" + key + "' of " + conditionContext, errors));
+        }
+    }
+
     private static void validateBindings(List<KnkVariableBinding> bindings, Map<String, Class<?>> declaredContextTypes,
                                           String context, List<String> errors) {
         if (bindings == null) {
             return;
         }
         for (KnkVariableBinding binding : bindings) {
-            String expression = binding.expression();
-            if (expression == null) {
-                continue;
-            }
-            Matcher matcher = MenuVariablePlaceholders.PATTERN.matcher(expression);
-            while (matcher.find()) {
-                validateChain(matcher.group(1), declaredContextTypes, binding, context, errors);
-            }
+            validateText(binding.expression(), declaredContextTypes, "binding (id " + binding.id() + ") in " + context, errors);
+        }
+    }
+
+    private static void validateText(String text, Map<String, Class<?>> declaredContextTypes, String where,
+                                     List<String> errors) {
+        if (text == null) {
+            return;
+        }
+        Matcher matcher = MenuVariablePlaceholders.PATTERN.matcher(text);
+        while (matcher.find()) {
+            validateChain(matcher.group(1), declaredContextTypes, where, errors);
         }
     }
 
     private static void validateChain(String path, Map<String, Class<?>> declaredContextTypes,
-                                       KnkVariableBinding binding, String context, List<String> errors) {
+                                       String where, List<String> errors) {
         String[] hops = path.split("\\.");
         Class<?> currentType = declaredContextTypes.get(hops[0]);
         if (currentType == null) {
-            errors.add("binding (id " + binding.id() + ") in " + context + ": chain '$" + path
-                    + "$' references unknown root variable '" + hops[0] + "' (declared: " + declaredContextTypes.keySet() + ")");
+            if (MenuVariableProviderRegistry.ROOT_ROW.equals(hops[0])) {
+                errors.add(where + ": chain '$" + path + "$' uses $row$, which only exists on a row template"
+                        + " (IsRowTemplate) whose content source declares a row type");
+            } else {
+                errors.add(where + ": chain '$" + path + "$' references unknown root variable '" + hops[0]
+                        + "' (declared: " + new TreeSet<>(declaredContextTypes.keySet()) + ")");
+            }
             return;
         }
 
         for (int i = 1; i < hops.length; i++) {
+            if (MenuContextParams.class.equals(currentType)) {
+                // E1: $ctx.<name>$ is a key lookup, always a String.
+                currentType = String.class;
+                continue;
+            }
+            if (Map.class.isAssignableFrom(currentType)) {
+                // A Map-typed hop is a key lookup at runtime; the value type is unknowable here.
+                currentType = Object.class;
+                continue;
+            }
             Method method = findMethod(currentType, hops[i]);
             if (method == null) {
-                errors.add("binding (id " + binding.id() + ") in " + context + ": chain '$" + path
-                        + "$' - hop '" + hops[i] + "' doesn't resolve on " + currentType.getName());
+                errors.add(where + ": chain '$" + path + "$' - hop '" + hops[i] + "' doesn't resolve on " + currentType.getName());
                 return;
             }
             currentType = method.getReturnType();
