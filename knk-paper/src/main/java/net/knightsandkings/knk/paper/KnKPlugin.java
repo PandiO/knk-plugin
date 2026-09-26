@@ -1057,6 +1057,10 @@ public class KnKPlugin extends JavaPlugin {
                 (player, node) -> knkPermissible.hasPermission(player, node);
             java.util.function.Function<org.bukkit.entity.Player, Integer> userIdOf = player -> cacheManager.getUserCache()
                 .getStale(player.getUniqueId()).map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null);
+            // Siege (hub or match): the player's inventory is the siege one and is replaced afterwards, so no claims,
+            // token opens or token hand-overs then. siegeService is created later (initializeSiege), so it's read per call.
+            java.util.function.Predicate<java.util.UUID> inSiege =
+                uuid -> siegeService != null && siegeService.activeLobbyOf(uuid).isPresent();
 
             var runtime = new net.knightsandkings.knk.paper.lootbox.LootboxRuntime(
                 this, queryApi, () -> getConfig().getConfigurationSection("lootboxes"), clock);
@@ -1070,12 +1074,13 @@ public class KnKPlugin extends JavaPlugin {
             var scheduler = new net.knightsandkings.knk.paper.lootbox.LootboxSpawnScheduler(
                 this, runtime, regions, commandApi, announcer,
                 new net.knightsandkings.knk.core.lootbox.LootboxSpawnPlanner(
-                    () -> java.util.concurrent.ThreadLocalRandom.current().nextDouble()));
+                    () -> java.util.concurrent.ThreadLocalRandom.current().nextDouble()),
+                this::siegeArenaRegionIds);
 
             var pluginManager = getServer().getPluginManager();
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxInteractListener(
                 runtime, new net.knightsandkings.knk.core.lootbox.ClaimGuard(), commandApi, delivery, announcer,
-                permission, modeService::getActiveMode, userIdOf, mainThread), this);
+                permission, modeService::getActiveMode, inSiege, userIdOf, mainThread), this);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxChunkListener(runtime), this);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxJoinListener(
                 this, queryApi, delivery, userIdOf, mainThread), this);
@@ -1084,9 +1089,14 @@ public class KnKPlugin extends JavaPlugin {
                 mainThread, queryApi, commandApi, runtime::settings, userIdOf);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxTokenListener(
                 this, runtime, new net.knightsandkings.knk.core.lootbox.TokenOpenGuard(), commandApi, delivery, tokenDelivery,
-                announcer, permission, modeService::getActiveMode, userIdOf, mainThread), this);
+                announcer, permission, modeService::getActiveMode, inSiege, userIdOf, mainThread), this);
             if (playerNotificationPoller != null) {
-                playerNotificationPoller.setLootboxTokensHandler(tokenDelivery::deliverUndelivered);
+                // Held back during a siege; the next join or LootboxTokensIssued notification hands them over.
+                playerNotificationPoller.setLootboxTokensHandler(player -> {
+                    if (!inSiege.test(player.getUniqueId())) {
+                        tokenDelivery.deliverUndelivered(player);
+                    }
+                });
             }
 
             var areaCommand = new net.knightsandkings.knk.paper.commands.LootboxAreaCommand(
@@ -1113,6 +1123,21 @@ public class KnKPlugin extends JavaPlugin {
         } catch (Exception e) {
             getLogger().log(java.util.logging.Level.SEVERE, "Lootboxes failed to initialize; they stay off", e);
         }
+    }
+
+    /**
+     * The WorldGuard regions of every siege being fought now (hub or match): the drawn scenario's districts, or its
+     * town. The lootbox spawn scheduler keeps boxes out of them. Main thread.
+     */
+    private java.util.Set<String> siegeArenaRegionIds() {
+        if (siegeService == null) {
+            return java.util.Set.of();
+        }
+        return net.knightsandkings.knk.core.lootbox.LootboxSiegeRules.arenaRegionIds(siegeService.lobbies().stream()
+            .filter(lobby -> lobby.phase().isMatchActive())
+            .map(lobby -> lobby.drawnScenario().orElse(null))
+            .filter(java.util.Objects::nonNull)
+            .toList());
     }
 
     private void registerTabCommand(String name, org.bukkit.command.TabExecutor executor) {

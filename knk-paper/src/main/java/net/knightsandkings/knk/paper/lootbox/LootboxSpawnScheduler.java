@@ -3,6 +3,7 @@ package net.knightsandkings.knk.paper.lootbox;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxArea;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxRuntimeConfig;
 import net.knightsandkings.knk.core.lootbox.LootboxRejectedException;
+import net.knightsandkings.knk.core.lootbox.LootboxSiegeRules;
 import net.knightsandkings.knk.core.lootbox.LootboxSpawnPlanner;
 import net.knightsandkings.knk.core.ports.api.LootboxesCommandApi;
 import org.bukkit.Bukkit;
@@ -20,6 +21,7 @@ import org.bukkit.scheduler.BukkitTask;
 import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -28,7 +30,8 @@ import java.util.logging.Logger;
  * {@link LootboxSpawnPlanner} says to try: up to {@code surface.max-attempts-per-tick} random columns in the area's
  * region bounds, each loaded with {@code getChunkAtAsync(x, z, false)}, which <b>never generates terrain</b> (an
  * ungenerated chunk is skipped). A column qualifies when its surface is solid, not a liquid, leaves or a forbidden
- * block, has two air blocks above it, lies inside the area's region and outside its excluded regions, and is at least
+ * block, has two air blocks above it, lies inside the area's region and outside its excluded regions and the area of any
+ * siege being fought ({@link LootboxSiegeRules}), and is at least
  * {@code MinDistanceFromPlayers} from every player. The first one that does is sent to the API, which checks the caps
  * again and rolls the type and box grade; the new box is cached, shown and (when grand enough) announced.
  */
@@ -42,17 +45,19 @@ public final class LootboxSpawnScheduler {
     private final LootboxesCommandApi commandApi;
     private final LootboxAnnouncer announcer;
     private final LootboxSpawnPlanner planner;
+    private final Supplier<Set<String>> siegeArenaRegionIds;
     private final Set<Integer> inProgress = new HashSet<>();
     private BukkitTask task;
 
     public LootboxSpawnScheduler(Plugin plugin, LootboxRuntime runtime, LootboxRegions regions, LootboxesCommandApi commandApi,
-                                 LootboxAnnouncer announcer, LootboxSpawnPlanner planner) {
+                                 LootboxAnnouncer announcer, LootboxSpawnPlanner planner, Supplier<Set<String>> siegeArenaRegionIds) {
         this.plugin = plugin;
         this.runtime = runtime;
         this.regions = regions;
         this.commandApi = commandApi;
         this.announcer = announcer;
         this.planner = planner;
+        this.siegeArenaRegionIds = siegeArenaRegionIds != null ? siegeArenaRegionIds : Set::of;
     }
 
     public void start() {
@@ -134,16 +139,8 @@ public final class LootboxSpawnScheduler {
             return null;
         }
         int y = feet.getY();
-        if (!regions.contains(world, area.wgRegionId(), x, y, z)) {
+        if (!regionsAllow(world, area, x, y, z)) {
             return null;
-        }
-        if (!area.excludedRegionIds().isEmpty()) {
-            Set<String> here = regions.regionIdsAt(world, x, y, z);
-            for (String excluded : area.excludedRegionIds()) {
-                if (here.contains(excluded)) {
-                    return null;
-                }
-            }
         }
         Location spot = new Location(world, x + 0.5, y, z + 0.5);
         for (Player player : world.getPlayers()) {
@@ -154,6 +151,28 @@ public final class LootboxSpawnScheduler {
             }
         }
         return y;
+    }
+
+    /**
+     * Whether (x, y, z) is inside the area's region, outside its excluded regions and outside the area of every siege
+     * being fought right now (members couldn't claim a box there, and it would sit in the middle of the fight).
+     */
+    boolean regionsAllow(World world, KnkLootboxArea area, int x, int y, int z) {
+        if (!regions.contains(world, area.wgRegionId(), x, y, z)) {
+            return false;
+        }
+        Set<String> arenas = siegeArenaRegionIds.get();
+        boolean anyArena = arenas != null && !arenas.isEmpty();
+        if (area.excludedRegionIds().isEmpty() && !anyArena) {
+            return true;
+        }
+        Set<String> here = regions.regionIdsAt(world, x, y, z);
+        for (String excluded : area.excludedRegionIds()) {
+            if (here.contains(excluded)) {
+                return false;
+            }
+        }
+        return !LootboxSiegeRules.insideAny(here, arenas);
     }
 
     static boolean isGoodGround(Block ground, LootboxSettings settings) {

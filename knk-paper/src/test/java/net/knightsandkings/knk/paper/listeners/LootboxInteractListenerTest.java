@@ -62,6 +62,7 @@ class LootboxInteractListenerTest {
 
     private boolean allowed = true;
     private ActiveMode mode = ActiveMode.NONE;
+    private boolean inSiege;
     private Integer userId = 9;
     private LootboxInteractListener listener;
 
@@ -89,7 +90,7 @@ class LootboxInteractListenerTest {
         when(player.hasLineOfSight(hitbox)).thenReturn(true);
 
         listener = new LootboxInteractListener(runtime, new ClaimGuard(), api, delivery, mock(LootboxAnnouncer.class),
-                (p, node) -> allowed, p -> mode, p -> userId, Runnable::run);
+                (p, node) -> allowed, p -> mode, id -> inSiege, p -> userId, Runnable::run);
     }
 
     private void standAt(double x, double y, double z) {
@@ -120,6 +121,15 @@ class LootboxInteractListenerTest {
         mode = ActiveMode.STAFF;
 
         assertEquals(LootboxInteractListener.Attempt.STAFF_MODE, listener.attemptOpen(player, hitbox));
+        verify(api, never()).claim(anyInt(), any(), anyInt(), anyString());
+    }
+
+    @Test
+    void inASiege_isRefusedBeforeAnyApiCall() {
+        inSiege = true;
+
+        assertEquals(LootboxInteractListener.Attempt.IN_SIEGE, listener.attemptOpen(player, hitbox));
+        verify(player).sendMessage(contains("during a siege"));
         verify(api, never()).claim(anyInt(), any(), anyInt(), anyString());
     }
 

@@ -16,6 +16,7 @@ public final class LootboxMessages {
     public static final String NO_LINE_OF_SIGHT = ChatColor.RED + "You can't reach this lootbox from there.";
     public static final String NO_PERMISSION = ChatColor.RED + "You can't open lootboxes.";
     public static final String STAFF_MODE = ChatColor.RED + "You can't open lootboxes in staff or owner mode.";
+    public static final String IN_SIEGE = ChatColor.RED + "You can't open lootboxes during a siege - open it once the siege is over.";
     public static final String NO_ACCOUNT = ChatColor.RED + "Your account isn't loaded yet - try again in a moment.";
     // Token items (Phase 5).
     public static final String TOKEN_ALREADY_OPENED = ChatColor.RED + "This lootbox was already opened - it crumbles away.";

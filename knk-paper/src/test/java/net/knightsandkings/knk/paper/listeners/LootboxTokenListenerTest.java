@@ -56,6 +56,7 @@ class LootboxTokenListenerTest {
 
     private boolean allowed = true;
     private ActiveMode mode = ActiveMode.NONE;
+    private boolean inSiege;
     private Integer userId = 9;
     private ItemStack held;
     private LootboxTokenListener listener;
@@ -74,7 +75,7 @@ class LootboxTokenListenerTest {
 
         listener = new LootboxTokenListener(mock(Plugin.class), runtime, new TokenOpenGuard(), api, delivery,
                 mock(LootboxTokenDelivery.class), mock(LootboxAnnouncer.class),
-                (p, node) -> allowed, p -> mode, p -> userId, Runnable::run);
+                (p, node) -> allowed, p -> mode, id -> inSiege, p -> userId, Runnable::run);
     }
 
     private static KnkLootboxClaimResult claim(boolean delivered) {
@@ -140,6 +141,17 @@ class LootboxTokenListenerTest {
         userId = null;
         assertEquals(LootboxTokenListener.Attempt.NO_ACCOUNT, listener.attemptOpen(player, TOKEN, held));
         verifyNoInteractions(api);
+    }
+
+    @Test
+    void inASiege_isRefusedBeforeAnyApiCall_andTheTokenIsKept() {
+        inSiege = true;
+
+        assertEquals(LootboxTokenListener.Attempt.IN_SIEGE, listener.attemptOpen(player, TOKEN, held));
+
+        verify(player).sendMessage(contains("during a siege"));
+        verifyNoInteractions(api);
+        verify(inventory, never()).setItem(anyInt(), any());
     }
 
     @Test

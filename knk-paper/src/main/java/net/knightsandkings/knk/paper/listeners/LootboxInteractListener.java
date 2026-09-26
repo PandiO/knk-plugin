@@ -27,12 +27,13 @@ import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
  * Opening a box (docs/specs/lootboxes/DESIGN.md §3.4): a right- or left-click on a box's hitbox. In order: the
- * {@code knk.lootbox.open} node, not in staff/owner mode (unless {@code staff-mode-can-claim}), within
+ * {@code knk.lootbox.open} node, not in staff/owner mode (unless {@code staff-mode-can-claim}), not in an active siege, within
  * {@code claim-max-distance} and in line of sight (no clicks through walls), a loaded account, a free slot
  * ({@code full-inventory: refuse}; no API call without one) and the {@link ClaimGuard}. Then the claim goes to the API asynchronously and the item is delivered on the main
  * thread. The API decides everything that matters (who wins, what it is, the daily cap).
@@ -42,7 +43,7 @@ public final class LootboxInteractListener implements Listener {
     private static final Logger LOGGER = Logger.getLogger(LootboxInteractListener.class.getName());
 
     /** Why a click did or didn't start a claim (for tests). */
-    public enum Attempt { NOT_A_BOX, ORPHAN, NO_PERMISSION, STAFF_MODE, TOO_FAR, NO_LINE_OF_SIGHT, NO_ACCOUNT, INVENTORY_FULL, IN_FLIGHT, CLAIMING }
+    public enum Attempt { NOT_A_BOX, ORPHAN, NO_PERMISSION, STAFF_MODE, IN_SIEGE, TOO_FAR, NO_LINE_OF_SIGHT, NO_ACCOUNT, INVENTORY_FULL, IN_FLIGHT, CLAIMING }
 
     private final LootboxRuntime runtime;
     private final ClaimGuard guard;
@@ -51,6 +52,7 @@ public final class LootboxInteractListener implements Listener {
     private final LootboxAnnouncer announcer;
     private final BiPredicate<Player, String> permission;
     private final Function<Player, ActiveMode> modeOf;
+    private final Predicate<UUID> inSiege;
     private final Function<Player, Integer> userIdOf;
     private final Executor mainThread;
 
@@ -62,6 +64,7 @@ public final class LootboxInteractListener implements Listener {
             LootboxAnnouncer announcer,
             BiPredicate<Player, String> permission,
             Function<Player, ActiveMode> modeOf,
+            Predicate<UUID> inSiege,
             Function<Player, Integer> userIdOf,
             Executor mainThread
     ) {
@@ -72,6 +75,7 @@ public final class LootboxInteractListener implements Listener {
         this.announcer = announcer;
         this.permission = permission;
         this.modeOf = modeOf;
+        this.inSiege = inSiege;
         this.userIdOf = userIdOf;
         this.mainThread = mainThread;
     }
@@ -119,6 +123,11 @@ public final class LootboxInteractListener implements Listener {
         if (!settings.staffModeCanClaim() && mode != null && mode != ActiveMode.NONE) {
             player.sendMessage(LootboxMessages.STAFF_MODE);
             return Attempt.STAFF_MODE;
+        }
+        // In a siege (hub or match) the inventory is the siege one and is replaced afterwards: the item would be lost.
+        if (inSiege.test(player.getUniqueId())) {
+            player.sendMessage(LootboxMessages.IN_SIEGE);
+            return Attempt.IN_SIEGE;
         }
         if (!withinReach(player, spawn, settings.claimMaxDistance())) {
             player.sendMessage(LootboxMessages.TOO_FAR);

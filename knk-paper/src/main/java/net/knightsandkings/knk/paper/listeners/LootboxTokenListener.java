@@ -31,13 +31,14 @@ import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
  * Opening a lootbox token item (docs/specs/lootboxes/IMPLEMENTATION_PLAN.md Phase 5): a right-click with an item
  * carrying {@code knightsandkings:knk_lootbox_token}. Nothing else makes an item a token (v1 matched the display name,
- * so an anvil rename made a free box). Same checks as a world box: {@code knk.lootbox.open}, not in staff/owner mode,
+ * so an anvil rename made a free box). Same checks as a world box: {@code knk.lootbox.open}, not in staff/owner mode or a siege,
  * a loaded account, room for the item (the token's own slot counts when it is the last one), and one open in flight per
  * token and player. The API consumes the token in the claim transaction; only after its 200 is one copy taken from the
  * inventory and the item delivered. A token the API reports as opened or revoked is dead: every copy is removed.
@@ -50,7 +51,7 @@ public final class LootboxTokenListener implements Listener {
     private static final long JOIN_DELAY_TICKS = 80L; // after LootboxJoinListener's pending claims
 
     /** Why a click did or didn't start an open (for tests). */
-    public enum Attempt { NOT_A_TOKEN, NO_PERMISSION, STAFF_MODE, NO_ACCOUNT, INVENTORY_FULL, IN_FLIGHT, OPENING }
+    public enum Attempt { NOT_A_TOKEN, NO_PERMISSION, STAFF_MODE, IN_SIEGE, NO_ACCOUNT, INVENTORY_FULL, IN_FLIGHT, OPENING }
 
     private final Plugin plugin;
     private final LootboxRuntime runtime;
@@ -61,6 +62,7 @@ public final class LootboxTokenListener implements Listener {
     private final LootboxAnnouncer announcer;
     private final BiPredicate<Player, String> permission;
     private final Function<Player, ActiveMode> modeOf;
+    private final Predicate<UUID> inSiege;
     private final Function<Player, Integer> userIdOf;
     private final Executor mainThread;
 
@@ -74,6 +76,7 @@ public final class LootboxTokenListener implements Listener {
             LootboxAnnouncer announcer,
             BiPredicate<Player, String> permission,
             Function<Player, ActiveMode> modeOf,
+            Predicate<UUID> inSiege,
             Function<Player, Integer> userIdOf,
             Executor mainThread
     ) {
@@ -86,6 +89,7 @@ public final class LootboxTokenListener implements Listener {
         this.announcer = announcer;
         this.permission = permission;
         this.modeOf = modeOf;
+        this.inSiege = inSiege;
         this.userIdOf = userIdOf;
         this.mainThread = mainThread;
     }
@@ -150,6 +154,11 @@ public final class LootboxTokenListener implements Listener {
         if (!settings.staffModeCanClaim() && mode != null && mode != ActiveMode.NONE) {
             player.sendMessage(LootboxMessages.STAFF_MODE);
             return Attempt.STAFF_MODE;
+        }
+        // In a siege (hub or match) the inventory is the siege one and is replaced afterwards: the item would be lost.
+        if (inSiege.test(player.getUniqueId())) {
+            player.sendMessage(LootboxMessages.IN_SIEGE);
+            return Attempt.IN_SIEGE;
         }
         Integer userId = userIdOf.apply(player);
         if (userId == null) {
