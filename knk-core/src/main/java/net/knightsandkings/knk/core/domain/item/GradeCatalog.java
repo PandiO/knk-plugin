@@ -95,9 +95,16 @@ public final class GradeCatalog {
                 : byId(grade.id()).map(KnkGrade::stars).filter(s -> s != null && s > 0);
     }
 
+    /** Two grades with the same stars: the lowest id wins (as knk-web-api's ItemBlueprintV1Seed picks). */
     private static Map<Integer, KnkGrade> indexByStars(Collection<KnkGrade> grades) {
         return grades.stream()
                 .filter(g -> g != null && g.stars() != null)
-                .collect(Collectors.toUnmodifiableMap(KnkGrade::stars, Function.identity(), (a, b) -> a));
+                .collect(Collectors.toUnmodifiableMap(KnkGrade::stars, Function.identity(), GradeCatalog::lowerId));
+    }
+
+    private static KnkGrade lowerId(KnkGrade a, KnkGrade b) {
+        if (a.id() == null) return b.id() == null ? a : b;
+        if (b.id() == null) return a;
+        return a.id() <= b.id() ? a : b;
     }
 }

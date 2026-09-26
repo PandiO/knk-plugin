@@ -50,8 +50,8 @@ class GradeCatalogTest {
         GradeCatalog catalog = new GradeCatalog();
         java.util.ArrayList<KnkGrade> grades = new java.util.ArrayList<>();
         grades.add(null);
-        grades.add(new KnkGrade(1, "A", 1, null, 2));
         grades.add(new KnkGrade(2, "B", 1, null, 3));
+        grades.add(new KnkGrade(1, "A", 1, null, 2)); // lowest id wins, whatever the order
         grades.add(new KnkGrade(null, "No id", 4, null, 9));
         catalog.replace(grades);
         assertEquals(2, catalog.byStars(1).orElseThrow().enchantLevelCapDivisor());
