@@ -232,18 +232,10 @@ public final class MenuActionHandlers {
         context.session().setPendingConfirmation(
                 new MenuSession.PendingConfirmation(actionTypeId, MenuParams.parse(actionParamsJson), prompt));
         context.player().sendMessage(ChatColor.YELLOW + prompt);
+        // Confirm/Cancel buttons render only while a confirmation is pending, so requesting,
+        // accepting or cancelling one repaints - otherwise they only showed up (or went away)
+        // when the menu was re-opened.
         repaint(context);
-    }
-
-    /**
-     * Confirm/Cancel buttons render only while a confirmation is pending, so requesting,
-     * accepting or cancelling one repaints the open menu - otherwise the buttons only showed up
-     * (or went away) on the next full re-open.
-     */
-    private static void repaint(MenuActionContext context) {
-        if (context.menuService() != null) {
-            context.menuService().refreshOpenMenu(context.player());
-        }
     }
 
     /**
