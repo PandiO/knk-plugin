@@ -20,4 +20,9 @@ public record PlayerNotification(
      * their chat/tab-list rank.
      */
     public static final String TYPE_RANK_CHANGED = "RankChanged";
+    /**
+     * The API issued lootbox token items to the player itself (a premium tier or kit grant rule,
+     * docs/specs/lootboxes/IMPLEMENTATION_PLAN.md Phase 5). No payload: fetch and hand over their undelivered tokens.
+     */
+    public static final String TYPE_LOOTBOX_TOKENS_ISSUED = "LootboxTokensIssued";
 }

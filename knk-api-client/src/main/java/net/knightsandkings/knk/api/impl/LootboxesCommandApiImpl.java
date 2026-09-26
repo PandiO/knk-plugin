@@ -9,6 +9,7 @@ import net.knightsandkings.knk.core.lootbox.KnkLootboxArea;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxAreaDeleteResult;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxClaimResult;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxSpawn;
+import net.knightsandkings.knk.core.lootbox.KnkLootboxToken;
 import net.knightsandkings.knk.core.lootbox.LootboxDeliveryMethod;
 import net.knightsandkings.knk.core.lootbox.LootboxRejectedException;
 import net.knightsandkings.knk.core.ports.api.LootboxesCommandApi;
@@ -18,6 +19,7 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -92,6 +94,37 @@ public class LootboxesCommandApiImpl extends BaseApiImpl implements LootboxesCom
             String url = baseUrl + "/LootboxClaims/admin-give";
             LootboxDtos.AdminGiveRequestDto body = new LootboxDtos.AdminGiveRequestDto(userId, typeId, boxStars, idempotencyKey);
             return LootboxMapper.toCore(post(url, body, actorUserId, LootboxDtos.ClaimResultDto.class, "give a lootbox of type " + typeId));
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<List<KnkLootboxToken>> issueTokens(Integer actorUserId, int userId, int typeId, Integer boxStars, int quantity,
+                                                                String reason, String idempotencyKey) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + "/LootboxTokens/issue";
+            LootboxDtos.TokenIssueRequestDto body = new LootboxDtos.TokenIssueRequestDto(userId, typeId, boxStars, quantity, reason, idempotencyKey);
+            LootboxDtos.TokenIssueResultDto result = post(url, body, actorUserId, LootboxDtos.TokenIssueResultDto.class,
+                    "issue lootbox tokens of type " + typeId);
+            return result == null ? List.<KnkLootboxToken>of() : LootboxMapper.toTokens(result.tokens());
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<KnkLootboxClaimResult> redeemToken(UUID token, int userId, String idempotencyKey) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + "/LootboxTokens/" + token + "/redeem";
+            LootboxDtos.TokenRedeemRequestDto body = new LootboxDtos.TokenRedeemRequestDto(userId, idempotencyKey);
+            return LootboxMapper.toCore(post(url, body, null, LootboxDtos.ClaimResultDto.class, "open lootbox token " + token));
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<Void> markTokensDelivered(int userId, List<UUID> tokens) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + "/LootboxTokens/delivered";
+            post(url, new LootboxDtos.TokensDeliveredRequestDto(userId, List.copyOf(tokens)), null, null,
+                    "confirm delivery of " + tokens.size() + " lootbox token(s)");
+            return null;
         }, executor);
     }
 

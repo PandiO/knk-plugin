@@ -10,6 +10,8 @@ import net.knightsandkings.knk.core.lootbox.KnkLootboxClaimEnchantment;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxClaimResult;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxRuntimeConfig;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxSpawn;
+import net.knightsandkings.knk.core.lootbox.KnkLootboxToken;
+import com.fasterxml.jackson.core.type.TypeReference;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -137,5 +139,24 @@ public class LootboxMapperTest {
     @Test
     void nullConfig_isTheEmptyConfig() {
         assertFalse(LootboxMapper.toCore((LootboxDtos.RuntimeConfigDto) null).enabled());
+    }
+
+    @Test
+    void undeliveredTokens_andAClaimFromAToken() throws Exception {
+        String json = """
+                [{"id":7,"token":"00000000-0000-0000-0000-0000000000a1","lootboxTypeId":3,"lootboxTypeName":"Weapons Lootbox",
+                  "categoryName":"Weapons","boxGradeId":5,"boxStars":5,"boxLabel":"Legendary Weapons Lootbox","status":"Issued",
+                  "reason":"PremiumTier","issuedToUserId":9,"issuedAt":"2026-09-26T12:00:00"},
+                 {"id":8,"token":null}]
+                """;
+
+        List<KnkLootboxToken> tokens = LootboxMapper.toTokens(mapper.readValue(json, new TypeReference<List<LootboxDtos.TokenDto>>() {}));
+
+        assertEquals(1, tokens.size(), "a row without a token id is dropped");
+        KnkLootboxToken token = tokens.get(0);
+        assertEquals(UUID.fromString("00000000-0000-0000-0000-0000000000a1"), token.token());
+        assertEquals("PremiumTier", token.reason());
+        assertEquals(9, token.issuedToUserId());
+        assertEquals("Legendary Weapons Lootbox", token.boxLabel());
     }
 }

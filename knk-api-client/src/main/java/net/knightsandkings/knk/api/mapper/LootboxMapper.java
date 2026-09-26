@@ -9,6 +9,7 @@ import net.knightsandkings.knk.core.lootbox.KnkLootboxGrade;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxOdds;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxRuntimeConfig;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxSpawn;
+import net.knightsandkings.knk.core.lootbox.KnkLootboxToken;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxType;
 
 import java.time.Instant;
@@ -88,6 +89,18 @@ public final class LootboxMapper {
     }
 
     public static List<KnkLootboxClaimResult> toClaims(List<LootboxDtos.ClaimResultDto> dtos) {
+        return map(dtos, LootboxMapper::toCore);
+    }
+
+    public static KnkLootboxToken toCore(LootboxDtos.TokenDto dto) {
+        if (dto == null || dto.token() == null) {
+            return null;
+        }
+        return new KnkLootboxToken(dto.id(), dto.token(), dto.lootboxTypeId(), dto.lootboxTypeName(), dto.categoryName(),
+                dto.boxStars(), dto.boxLabel(), dto.status(), dto.reason(), dto.issuedToUserId());
+    }
+
+    public static List<KnkLootboxToken> toTokens(List<LootboxDtos.TokenDto> dtos) {
         return map(dtos, LootboxMapper::toCore);
     }
 

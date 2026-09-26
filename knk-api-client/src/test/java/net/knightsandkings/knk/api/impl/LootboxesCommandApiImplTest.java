@@ -149,4 +149,54 @@ class LootboxesCommandApiImplTest {
         assertEquals(List.of(3, 4), result.removedSpawnIds());
         assertEquals("42", seen.get(0).header(UsersCommandApiImpl.ACTING_USER_HEADER));
     }
+
+    // ===== Token items (Phase 5) =====
+
+    @Test
+    void issueTokens_namesTheStaffMember_andParsesTheTokens() {
+        response = "{\"replay\":false,\"tokens\":[{\"id\":7,\"token\":\"00000000-0000-0000-0000-0000000000a1\","
+                + "\"lootboxTypeId\":3,\"lootboxTypeName\":\"Weapons Lootbox\",\"categoryName\":\"Weapons\",\"boxStars\":5,"
+                + "\"boxLabel\":\"Legendary Weapons Lootbox\",\"status\":\"Issued\",\"reason\":\"Admin\",\"issuedToUserId\":9}]}";
+
+        var tokens = api.issueTokens(42, 9, 3, 5, 1, "Admin", "give:1").join();
+
+        assertEquals("http://api.test/api/LootboxTokens/issue", seen.get(0).url().toString());
+        assertEquals("42", seen.get(0).header(UsersCommandApiImpl.ACTING_USER_HEADER));
+        assertTrue(bodies.get(0).contains("\"quantity\":1"));
+        assertTrue(bodies.get(0).contains("\"idempotencyKey\":\"give:1\""));
+        assertEquals(1, tokens.size());
+        assertEquals(UUID.fromString("00000000-0000-0000-0000-0000000000a1"), tokens.get(0).token());
+        assertEquals("Legendary Weapons Lootbox", tokens.get(0).boxLabel());
+        assertEquals(5, tokens.get(0).boxStars());
+    }
+
+    @Test
+    void redeemToken_postsToTheTokensRoute_andAnOpenedTokenIsARejection() {
+        UUID token = UUID.fromString("00000000-0000-0000-0000-0000000000a1");
+
+        KnkLootboxClaimResult result = api.redeemToken(token, 9, "token-open:x").join();
+
+        assertEquals(41, result.claimId());
+        assertEquals("http://api.test/api/LootboxTokens/" + token + "/redeem", seen.get(0).url().toString());
+        assertEquals("secret", seen.get(0).header("X-API-Key"));
+        assertTrue(bodies.get(0).contains("\"idempotencyKey\":\"token-open:x\""));
+
+        status = 409;
+        response = "{\"code\":\"AlreadyRedeemed\",\"message\":\"opened\"}";
+        LootboxRejectedException rejected = LootboxRejectedException.find(assertThrows(CompletionException.class,
+                () -> api.redeemToken(token, 9, "token-open:y").join()));
+        assertNotNull(rejected);
+        assertTrue(rejected.is(LootboxRejectedException.ALREADY_REDEEMED));
+    }
+
+    @Test
+    void markTokensDelivered_sendsTheTokenIds() {
+        response = "{\"updated\":1}";
+        UUID token = UUID.fromString("00000000-0000-0000-0000-0000000000a1");
+
+        api.markTokensDelivered(9, List.of(token)).join();
+
+        assertEquals("http://api.test/api/LootboxTokens/delivered", seen.get(0).url().toString());
+        assertTrue(bodies.get(0).contains("\"tokens\":[\"" + token + "\"]"));
+    }
 }

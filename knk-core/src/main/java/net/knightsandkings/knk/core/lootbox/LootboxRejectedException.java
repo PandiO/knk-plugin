@@ -23,6 +23,10 @@ public class LootboxRejectedException extends RuntimeException {
     public static final String IDEMPOTENCY_KEY_REUSED = "IdempotencyKeyReused";
     public static final String NAME_TAKEN = "NameTaken";
     public static final String REGION_IN_USE = "RegionInUse";
+    // Token items (Phase 5).
+    public static final String INVALID_TOKEN = "InvalidToken";
+    public static final String ALREADY_REDEEMED = "AlreadyRedeemed";
+    public static final String REVOKED = "Revoked";
     // 429
     public static final String DAILY_LIMIT = "DailyLimit";
     public static final String SCOPE_TYPE = "Type";

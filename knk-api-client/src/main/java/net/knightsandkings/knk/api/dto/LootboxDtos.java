@@ -171,6 +171,50 @@ public final class LootboxDtos {
     ) {
     }
 
+    // ===== Token items (Phase 5) =====
+
+    public record TokenIssueRequestDto(
+            @JsonProperty("userId") int userId,
+            @JsonProperty("typeId") int typeId,
+            @JsonProperty("boxStars") Integer boxStars,
+            @JsonProperty("quantity") int quantity,
+            @JsonProperty("reason") String reason,
+            @JsonProperty("idempotencyKey") String idempotencyKey
+    ) {
+    }
+
+    public record TokenIssueResultDto(
+            @JsonProperty("replay") boolean replay,
+            @JsonProperty("tokens") List<TokenDto> tokens
+    ) {
+    }
+
+    public record TokenDto(
+            @JsonProperty("id") int id,
+            @JsonProperty("token") UUID token,
+            @JsonProperty("lootboxTypeId") int lootboxTypeId,
+            @JsonProperty("lootboxTypeName") String lootboxTypeName,
+            @JsonProperty("categoryName") String categoryName,
+            @JsonProperty("boxStars") int boxStars,
+            @JsonProperty("boxLabel") String boxLabel,
+            @JsonProperty("status") String status,
+            @JsonProperty("reason") String reason,
+            @JsonProperty("issuedToUserId") Integer issuedToUserId
+    ) {
+    }
+
+    public record TokenRedeemRequestDto(
+            @JsonProperty("userId") int userId,
+            @JsonProperty("idempotencyKey") String idempotencyKey
+    ) {
+    }
+
+    public record TokensDeliveredRequestDto(
+            @JsonProperty("userId") int userId,
+            @JsonProperty("tokens") List<UUID> tokens
+    ) {
+    }
+
     // ===== In-game areas =====
 
     public record InGameAreaCreateDto(

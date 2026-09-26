@@ -10,6 +10,7 @@ import net.knightsandkings.knk.core.lootbox.KnkLootboxClaimResult;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxOdds;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxRuntimeConfig;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxSpawn;
+import net.knightsandkings.knk.core.lootbox.KnkLootboxToken;
 import net.knightsandkings.knk.core.ports.api.LootboxesQueryApi;
 import okhttp3.OkHttpClient;
 
@@ -64,6 +65,18 @@ public class LootboxesQueryApiImpl extends BaseApiImpl implements LootboxesQuery
                 return LootboxMapper.toClaims(parse(get(url), new TypeReference<List<LootboxDtos.ClaimResultDto>>() {}, url));
             } catch (ApiException | IOException e) {
                 throw new RuntimeException("Failed to read pending lootbox claims for user " + userId, e);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<List<KnkLootboxToken>> getUndeliveredTokens(int userId) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + "/LootboxTokens/undelivered?userId=" + userId;
+            try {
+                return LootboxMapper.toTokens(parse(get(url), new TypeReference<List<LootboxDtos.TokenDto>>() {}, url));
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to read undelivered lootbox tokens for user " + userId, e);
             }
         }, executor);
     }

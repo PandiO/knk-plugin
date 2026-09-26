@@ -4,6 +4,7 @@ import net.knightsandkings.knk.core.lootbox.KnkLootboxClaimResult;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxOdds;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxRuntimeConfig;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxSpawn;
+import net.knightsandkings.knk.core.lootbox.KnkLootboxToken;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -21,6 +22,9 @@ public interface LootboxesQueryApi {
 
     /** {@code GET api/LootboxClaims/pending?userId=}: the user's undelivered claims older than 30 s. */
     CompletableFuture<List<KnkLootboxClaimResult>> getPending(int userId);
+
+    /** {@code GET api/LootboxTokens/undelivered?userId=}: the user's issued token items not handed over yet. */
+    CompletableFuture<List<KnkLootboxToken>> getUndeliveredTokens(int userId);
 
     /** {@code GET api/LootboxTypes/{id}/odds?boxStars=}; null stars = the type's highest box grade. */
     CompletableFuture<KnkLootboxOdds> getOdds(int lootboxTypeId, Integer boxStars);
