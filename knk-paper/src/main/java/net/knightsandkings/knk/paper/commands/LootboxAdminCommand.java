@@ -277,7 +277,10 @@ public final class LootboxAdminCommand {
             return;
         }
         Integer actor = sender instanceof Player player ? userIdOf.apply(player) : null;
-        commandApi.adminGive(actor, targetUserId, parsed.type().id(), parsed.stars(), null)
+        // One key per command: a request the HTTP client resends (a dropped connection) replays this give instead of
+        // rolling a second item.
+        String key = "admin-give:" + UUID.randomUUID().toString().replace("-", "");
+        commandApi.adminGive(actor, targetUserId, parsed.type().id(), parsed.stars(), key)
                 .whenComplete((claim, ex) -> mainThread.execute(() -> {
                     if (ex != null || claim == null) {
                         sender.sendMessage(ChatColor.RED + "Could not give: " + describe(ex));

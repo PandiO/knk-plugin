@@ -85,11 +85,16 @@ class LootboxAdminCommandTest {
     @Test
     void give_parsesPlayerCategoryAndStars_andNamesTheStaffMember() {
         granted.add("knk.lootbox.admin.give");
-        when(api.adminGive(42, 9, 3, 4, null)).thenReturn(new CompletableFuture<KnkLootboxClaimResult>());
+        when(api.adminGive(eq(42), eq(9), eq(3), eq(4), anyString())).thenReturn(new CompletableFuture<KnkLootboxClaimResult>());
 
         command.execute(admin, new String[]{"give", "steve", "Weapons", "4"});
+        command.execute(admin, new String[]{"give", "steve", "Weapons", "4"});
 
-        verify(api).adminGive(42, 9, 3, 4, null);
+        // Each command carries its own idempotency key: a resent request replays that give, a second command gives again.
+        org.mockito.ArgumentCaptor<String> keys = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(api, org.mockito.Mockito.times(2)).adminGive(eq(42), eq(9), eq(3), eq(4), keys.capture());
+        assertTrue(keys.getAllValues().get(0).startsWith("admin-give:"));
+        assertFalse(keys.getAllValues().get(0).equals(keys.getAllValues().get(1)));
     }
 
     @Test
