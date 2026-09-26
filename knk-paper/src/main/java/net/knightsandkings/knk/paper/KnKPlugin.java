@@ -876,8 +876,10 @@ public class KnKPlugin extends JavaPlugin {
             true, joinLoadingGuard::isLoading, modeService::getActiveMode, adminFreezeManager::isFrozen,
             discoveryConfig.excludedGameModes(), discoveryConfig.excludeSiegeParticipants()
         );
-        // Siege isn't on trunk: when it lands, plug SiegeService.isParticipant in with
-        // getDiscoveryEligibility().setSiegeParticipantCheck(...).
+        // Siege members discover nothing (discovery.exclude-siege-participants). siegeService is
+        // created later (initializeSiege), so the check reads it on every call.
+        discoveryEligibility.setSiegeParticipantCheck(
+            net.knightsandkings.knk.paper.discovery.DiscoveryEligibility.siegeParticipants(() -> siegeService));
         this.discoveryTracker =
             new net.knightsandkings.knk.core.discovery.DiscoveryTracker(discoveryConfig.maxRequestsPerMinute());
         this.discoverySpool = new net.knightsandkings.knk.core.discovery.DiscoverySpool(
@@ -906,7 +908,7 @@ public class KnKPlugin extends JavaPlugin {
         getLogger().info("Domain discovery started (spool: " + discoverySpool.directory() + ")");
     }
 
-    /** Domain discovery's exclusions; null when discovery is disabled. The siege hook goes here. */
+    /** Domain discovery's exclusions; null when discovery is disabled. */
     public net.knightsandkings.knk.paper.discovery.DiscoveryEligibility getDiscoveryEligibility() {
         return discoveryEligibility;
     }

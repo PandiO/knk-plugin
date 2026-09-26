@@ -96,6 +96,7 @@ discovery:
   # At most this many discovery requests per player per minute; the rest waits
   max-requests-per-minute: 12
   excluded-game-modes: [CREATIVE, SPECTATOR]
+  # Members of a siege lobby (queued, at the hub, in the match) discover nothing until they leave
   exclude-siege-participants: true
   # Under the plugin folder: discoveries made while the API was unreachable, one file per
   # player, replayed every replay-interval-seconds and on the player's next join

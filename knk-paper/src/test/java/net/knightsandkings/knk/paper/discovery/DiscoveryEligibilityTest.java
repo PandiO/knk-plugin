@@ -11,6 +11,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.bukkit.GameMode;
 import org.bukkit.entity.Player;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.Test;
 
 import net.knightsandkings.knk.core.domain.users.ActiveMode;
 import net.knightsandkings.knk.paper.discovery.DiscoveryEligibility.Exclusion;
+import net.knightsandkings.knk.paper.siege.SiegeService;
 
 class DiscoveryEligibilityTest {
     private final UUID uuid = UUID.randomUUID();
@@ -89,5 +91,32 @@ class DiscoveryEligibilityTest {
         DiscoveryEligibility notExcluding = eligibility(true, false);
         notExcluding.setSiegeParticipantCheck(uuid::equals);
         assertFalse(notExcluding.exclusion(player) == Exclusion.SIEGE);
+    }
+
+    @Test
+    void theSiegeHookAsksTheSiegeServiceOnceItExists() {
+        AtomicReference<SiegeService> siege = new AtomicReference<>();
+        DiscoveryEligibility eligibility = eligibility(true, true);
+        eligibility.setSiegeParticipantCheck(DiscoveryEligibility.siegeParticipants(siege::get));
+        assertTrue(eligibility.isEligible(player), "no siege runtime yet: nobody participates");
+
+        SiegeService service = mock(SiegeService.class);
+        siege.set(service);
+        assertTrue(eligibility.isEligible(player), "not a lobby member");
+
+        when(service.isParticipant(uuid)).thenReturn(true);
+        assertEquals(Exclusion.SIEGE, eligibility.exclusion(player));
+
+        when(service.isParticipant(uuid)).thenReturn(false);
+        assertTrue(eligibility.isEligible(player), "left the lobby: discovers again");
+    }
+
+    @Test
+    void siegeMembershipIsIgnoredWhenNotExcludingSiegeParticipants() {
+        SiegeService service = mock(SiegeService.class);
+        when(service.isParticipant(uuid)).thenReturn(true);
+        DiscoveryEligibility eligibility = eligibility(true, false);
+        eligibility.setSiegeParticipantCheck(DiscoveryEligibility.siegeParticipants(() -> service));
+        assertTrue(eligibility.isEligible(player));
     }
 }
