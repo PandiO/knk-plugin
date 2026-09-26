@@ -6,12 +6,15 @@ import net.knightsandkings.knk.core.domain.gates.CachedGateStructure;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeGateRecords.DoorState;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeGateRecords.LockdownEntry;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeScenario;
+import net.knightsandkings.knk.core.domain.siege.SiegeNonMemberGateView;
+import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.core.ports.api.SiegeGatesCommandApi;
 import net.knightsandkings.knk.core.siege.AllianceResolver;
 import net.knightsandkings.knk.core.siege.ObjectiveState.CaptureEvent;
 import net.knightsandkings.knk.core.siege.SiegeGatePlan;
 import net.knightsandkings.knk.core.siege.SiegeGatePlan.Control;
+import net.knightsandkings.knk.paper.gates.GatePassThroughService;
 import net.knightsandkings.knk.paper.gates.HealthSystem;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -56,6 +59,7 @@ public final class SiegeGateController implements SiegeMatchObserver {
         final AllianceResolver alliances;
         final Map<Integer, StructureSnapshot> snapshots = new LinkedHashMap<>();
         Long matchId;
+        boolean applied;
 
         Lockdown(SiegeLobbyRuntime runtime, KnkSiegeScenario scenario) {
             this.runtime = runtime;
@@ -72,6 +76,15 @@ public final class SiegeGateController implements SiegeMatchObserver {
     private final SiegeGatesCommandApi api;
     private final Map<Integer, Lockdown> byLobby = new HashMap<>();
     private final Map<Integer, Lockdown> byGate = new HashMap<>();
+    private GatePassThroughService passThrough;
+    private SiegeAreaLockdown areaLockdown;
+
+    /**
+     * Phase 7b: one door of an applied lockdown with its pre-lockdown state - what the non-member view
+     * renders and where virtual collision / the temporary pass-through apply.
+     */
+    public record LockedDoor(SiegeLobbyRuntime lobby, SiegeNonMemberGateView viewMode, int gateStructureId, int doorId,
+                             boolean preOpened, boolean preDestroyed) {}
 
     public SiegeGateController(Plugin plugin, GateManager gateManager, HealthSystem healthSystem, SiegeGatesCommandApi api) {
         this.plugin = plugin;
@@ -79,6 +92,16 @@ public final class SiegeGateController implements SiegeMatchObserver {
         this.gateManager = gateManager;
         this.healthSystem = healthSystem;
         this.api = api;
+    }
+
+    /** Phase 7b: the temporary TELEPORT pass-through for non-members (DESIGN §8.5). */
+    public void setPassThrough(GatePassThroughService passThrough) {
+        this.passThrough = passThrough;
+    }
+
+    /** Phase 7b: the pass-through never carries a non-member into a locked-down scenario area. */
+    public void setAreaLockdown(SiegeAreaLockdown areaLockdown) {
+        this.areaLockdown = areaLockdown;
     }
 
     // ==================== Startup recovery (DESIGN §8.4) ====================
@@ -229,6 +252,42 @@ public final class SiegeGateController implements SiegeMatchObserver {
         return lockdown.plan.canDamage(gateStructureId, team, lockdown.alliances);
     }
 
+    /** Phase 7b: every door of every applied lockdown (main thread). */
+    public List<LockedDoor> lockedDoors() {
+        List<LockedDoor> doors = new ArrayList<>();
+        for (Lockdown lockdown : byLobby.values()) {
+            if (!lockdown.applied) continue;
+            SiegeNonMemberGateView mode = lockdown.runtime.machine().configuration().nonMemberGateView();
+            lockdown.snapshots.forEach((structureId, snapshot) -> snapshot.doors().forEach(door ->
+                    doors.add(new LockedDoor(lockdown.runtime, mode, structureId, door.gateDoorId(), door.opened(), door.destroyed()))));
+        }
+        return doors;
+    }
+
+    /**
+     * Phase 7b (DESIGN §8.5 "temporary pass-through"): a non-member right-clicked a locked door that
+     * is closed now but was open before the lockdown - carry them across with the gate's TELEPORT
+     * pass-through (never DEFAULT/INSTANT_OPEN, which would open the real door for the siege). Refused
+     * while the scenario area is locked down, because the far side is the siege area.
+     *
+     * @return true when this handled the click (carried across or refused with a message)
+     */
+    public boolean tryNonMemberPassThrough(Player player, CachedGateDoor door) {
+        Lockdown lockdown = byGate.get(door.getGateStructureId());
+        if (lockdown == null || passThrough == null || lockdown.runtime.isMember(player.getUniqueId())) return false;
+        StructureSnapshot snapshot = lockdown.snapshots.get(door.getGateStructureId());
+        if (snapshot == null) return false;
+        boolean wasOpen = snapshot.doors().stream().anyMatch(d -> d.gateDoorId() == door.getId() && d.opened() && !d.destroyed());
+        if (!wasOpen || door.getCurrentState() != AnimationState.CLOSED) return false;
+        if (areaLockdown != null && areaLockdown.isLocked(lockdown.runtime.id())) {
+            player.sendActionBar(SiegeMessages.bad("The siege " + lockdown.runtime.displayName()
+                    + " is on; this area is closed until it ends."));
+            return true;
+        }
+        passThrough.dispatch(door, player, GatePassThroughMethod.TELEPORT);
+        return true;
+    }
+
     /** The lobby display name holding a locked gate, for messages. */
     public Optional<String> lobbyNameOf(int gateStructureId) {
         Lockdown lockdown = byGate.get(gateStructureId);
@@ -240,6 +299,7 @@ public final class SiegeGateController implements SiegeMatchObserver {
     private void apply(Lockdown lockdown, Long matchId) {
         if (byLobby.get(lockdown.runtime.id()) != lockdown) return; // released meanwhile
         lockdown.matchId = matchId;
+        lockdown.applied = true;
         for (SiegeGatePlan.Entry entry : lockdown.plan.entries()) {
             if (!lockdown.snapshots.containsKey(entry.gateStructureId())) continue;
             CachedGateStructure structure = gateManager.getStructure(entry.gateStructureId());

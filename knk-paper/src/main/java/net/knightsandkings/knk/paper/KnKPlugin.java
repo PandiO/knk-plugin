@@ -211,6 +211,8 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.core.siege.SiegeMatchRecorder siegeMatchRecorder;
     /** Kept for the siege gate controller (Phase 7a), which respawns doors a match destroyed. */
     private HealthSystem gateHealthSystem;
+    /** Kept for the siege non-member pass-through (Phase 7b, TELEPORT mode only). */
+    private net.knightsandkings.knk.paper.gates.GatePassThroughService gatePassThroughService;
     
     @Override
     public void onEnable() {
@@ -695,6 +697,7 @@ public class KnKPlugin extends JavaPlugin {
             GatePassThroughService gatePassThroughService = new GatePassThroughService(
                 gateManager, this,
                 passThroughInstantOpenRadius, passThroughInstantOpenTimeoutSeconds);
+            this.gatePassThroughService = gatePassThroughService;
             getServer().getPluginManager().registerEvents(
                 new GatePassThroughConsequenceListener(gatePassThroughService, userManager), this);
 
@@ -1047,20 +1050,27 @@ public class KnKPlugin extends JavaPlugin {
             siegeService.setMenuHooks(siegeMenus);
         }
 
-        // Phase 7a: gates of the scenario area (lockdown, owner control, damage rules, restore, crash
-        // recovery) and the area entry lockdown for non-members.
+        // Phase 7a: the area entry lockdown for non-members, and the gates of the scenario area
+        // (lockdown, owner control, damage rules, restore, crash recovery).
+        var siegeArea = new net.knightsandkings.knk.paper.siege.SiegeAreaLockdown(siegeService);
+        siegeService.addObserver(siegeArea);
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeAreaLockdownListener(siegeArea), this);
         if (gateManager != null && gateHealthSystem != null) {
             var siegeGates = new net.knightsandkings.knk.paper.siege.SiegeGateController(
                 this, gateManager, gateHealthSystem, apiClient.getSiegeGatesCommandApi());
             siegeService.addObserver(siegeGates);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeGateListener(siegeGates, gateManager), this);
             siegeGates.recoverOnStartup();
+            // Phase 7b: non-members see the pre-lockdown gates (degrade switch: NonMemberGateView).
+            siegeGates.setAreaLockdown(siegeArea);
+            if (gatePassThroughService != null) siegeGates.setPassThrough(gatePassThroughService);
+            var siegeGateView = new net.knightsandkings.knk.paper.siege.SiegeGateViewService(this, siegeGates, gateManager,
+                getConfig().getBoolean("gates.rotationGapFill.rasterization-enabled", true));
+            pluginManager.registerEvents(siegeGateView, this);
+            siegeGateView.start();
         } else {
             getLogger().warning("Siege gate integration disabled: the gate system isn't initialized");
         }
-        var siegeArea = new net.knightsandkings.knk.paper.siege.SiegeAreaLockdown(siegeService);
-        siegeService.addObserver(siegeArea);
-        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeAreaLockdownListener(siegeArea), this);
 
         siegeService.start();
         getLogger().info("Siege runtime initialized (Phase 5-7a)");

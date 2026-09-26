@@ -77,6 +77,11 @@ public final class SiegeAreaLockdown implements SiegeMatchObserver {
         return !byLobby.isEmpty();
     }
 
+    /** Phase 7b: is this lobby's scenario area locked down right now? */
+    public boolean isLocked(int lobbyId) {
+        return byLobby.containsKey(lobbyId);
+    }
+
     /**
      * The locked area a player may not step into with this move: {@code to} is inside it, {@code from}
      * isn't (someone already inside can always walk out), and they are neither a member of that round

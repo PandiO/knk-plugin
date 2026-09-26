@@ -43,6 +43,8 @@ public final class SiegeGateListener implements Listener {
         int structureId = event.getGate().getGateStructureId();
         if (!gates.isLocked(structureId)) return;
         event.setCancelled(true);
+        // Phase 7b: a non-member at a gate that was open before the lockdown is carried across.
+        if (gates.tryNonMemberPassThrough(event.getPlayer(), event.getGate())) return;
         respond(event.getPlayer(), structureId, gates.control(event.getPlayer(), structureId, true));
     }
 
