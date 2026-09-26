@@ -14,4 +14,10 @@ public record PlayerNotification(
     TitleChangeResult titleChange // set when type is TYPE_TITLE_CHANGED
 ) {
     public static final String TYPE_TITLE_CHANGED = "TitleChanged";
+    /**
+     * The player's group memberships changed outside the plugin (web app, API, or a temporary rank
+     * expiring - knk-web-api's RankExpirySweepService). No payload: re-read the player and redraw
+     * their chat/tab-list rank.
+     */
+    public static final String TYPE_RANK_CHANGED = "RankChanged";
 }

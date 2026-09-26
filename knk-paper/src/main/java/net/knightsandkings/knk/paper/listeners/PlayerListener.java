@@ -183,9 +183,8 @@ public class PlayerListener implements Listener {
 		}
 		ScoreboardUtil.setScoreboard(Arrays.asList(player), knkPermissible, user);
 
+		// Salary is paid by SalaryPayoutScheduler (its own join handler plus an hourly check).
 		if (user != null) {
-			triggerBackgroundSalaryPayout(player, user.id());
-
 			// docs/specs/kits/DESIGN.md §4.4: unifies starter-kit granting into the general Kit
 			// system - a brand-new account, not a real "if (user.isNewUser())" branch that
 			// predates this (none existed here; UserAccountListener's welcome message doesn't
@@ -199,9 +198,7 @@ public class PlayerListener implements Listener {
 	/**
 	 * Grants every GrantOnFirstJoin kit the account is gated to receive (docs/specs/kits/
 	 * DESIGN.md §4.4). Runs off the main thread and never blocks or delays the join; a failure
-	 * here is logged and otherwise invisible to the player - mirrors
-	 * {@link #triggerBackgroundSalaryPayout(Player, int)}'s exact fire-and-forget/logged-failure
-	 * pattern immediately above.
+	 * here is logged and otherwise invisible to the player.
 	 */
 	private void triggerBackgroundFirstJoinKits(Player player, int userId) {
 		if (kitsCommandApi == null) {
@@ -236,34 +233,6 @@ public class PlayerListener implements Listener {
 			})
 			.exceptionally(ex -> {
 				LOGGER.log(Level.WARNING, "Failed to grant first-join kits for user " + userId, ex);
-				return null;
-			});
-	}
-
-	/**
-	 * Pays out the offline-gap-covering salary on join (docs/specs/user-features/
-	 * IMPLEMENTATION_PLAN.md §6's intended trigger). Runs off the main thread and never blocks
-	 * or delays the join; a failure here is logged and otherwise invisible to the player.
-	 */
-	private void triggerBackgroundSalaryPayout(Player player, int userId) {
-		if (usersCommandApi == null) {
-			return;
-		}
-		usersCommandApi.payOutSalaryById(userId)
-			.thenAccept(result -> {
-				if (!result.paid()) {
-					return;
-				}
-				LOGGER.fine("Paid out " + result.amountPaid() + " salary coins to user " + userId);
-				Bukkit.getScheduler().runTask(KnKPlugin.getPlugin(KnKPlugin.class), () -> {
-					if (player.isOnline()) {
-						player.sendMessage(Component.text("You earned " + result.amountPaid()
-							+ " coins in salary while you were away.").color(ColorOptions.messageachievement));
-					}
-				});
-			})
-			.exceptionally(ex -> {
-				LOGGER.log(Level.WARNING, "Failed to pay out salary for user " + userId, ex);
 				return null;
 			});
 	}

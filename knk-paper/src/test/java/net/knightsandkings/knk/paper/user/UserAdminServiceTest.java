@@ -96,6 +96,32 @@ class UserAdminServiceTest {
     }
 
     @Test
+    void anOnlineTargetIsToldWhoChangedTheirBalanceAndWhy() {
+        Player steve = mock(Player.class);
+        bukkit.when(() -> Bukkit.getPlayerExact("Steve")).thenReturn(steve);
+
+        assertTrue(service.changeBalance(staff, target, "coins", "add", 500, "event prize").join());
+
+        verify(acting).adjustBalancesById(7, 500, 0, 0, "event prize", false);
+        verify(steve).sendMessage(org.mockito.ArgumentMatchers.<net.kyori.adventure.text.Component>argThat(message ->
+                "Granted by Admin: +500 coins – event prize".equals(
+                        net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(message))));
+    }
+
+    @Test
+    void withoutATypedReasonTheAuditGetsADefaultAndThePlayerNoNote() {
+        Player steve = mock(Player.class);
+        bukkit.when(() -> Bukkit.getPlayerExact("Steve")).thenReturn(steve);
+
+        assertTrue(service.changeBalance(staff, target, "gems", "remove", 3, null).join());
+
+        verify(acting).adjustBalancesById(7, 0, -3, 0, "/knk user command by Admin", false);
+        verify(steve).sendMessage(org.mockito.ArgumentMatchers.<net.kyori.adventure.text.Component>argThat(message ->
+                "Removed by Admin: -3 gems".equals(
+                        net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(message))));
+    }
+
+    @Test
     void unchangedValueIsReportedWithoutACall() {
         assertFalse(service.changeBalance(staff, target, "coins", "set", 250, "r").join());
 
@@ -272,45 +298,54 @@ class UserAdminServiceTest {
     // ===== rank switch (Player manager) =====
 
     @Test
-    void setRankAddsTheNewRankThenRemovesTheOldOnes() {
+    void setRankOnlyAddsTheNewRank_theApiReplacesTheOldOne() {
         PermissionGroupSummary royal = new PermissionGroupSummary(5, "Royal", 30, true, 1.2);
         PermissionGroupSummary noble = new PermissionGroupSummary(4, "Noble", 10, true);
         when(ranks.actorOutranks(42, 7)).thenReturn(CompletableFuture.completedFuture(true));
         when(acting.addGroupMembership(7, 5, null)).thenReturn(CompletableFuture.completedFuture(null));
-        when(acting.removeGroupMembership(7, 4)).thenReturn(CompletableFuture.completedFuture(null));
 
         assertTrue(service.setRank(staff, target, royal, List.of(noble)).join());
 
         org.mockito.InOrder order = org.mockito.Mockito.inOrder(acting, users);
         order.verify(acting).addGroupMembership(7, 5, null);
-        order.verify(acting).removeGroupMembership(7, 4);
         order.verify(users).refreshAsync(target.uuid());
+        verify(acting, never()).removeGroupMembership(anyInt(), anyInt());
         verify(staff).sendMessage("§aSet Steve's rank to Royal (was Noble).");
     }
 
     @Test
-    void setRankNeverRemovesTheRankItAdds() {
+    void setRankWithNothingReplacedSaysSo() {
         PermissionGroupSummary royal = new PermissionGroupSummary(5, "Royal", 30, true, 1.2);
         when(ranks.actorOutranks(42, 7)).thenReturn(CompletableFuture.completedFuture(true));
         when(acting.addGroupMembership(7, 5, null)).thenReturn(CompletableFuture.completedFuture(null));
 
         assertTrue(service.setRank(staff, target, royal, List.of(royal)).join());
 
-        verify(acting, never()).removeGroupMembership(anyInt(), anyInt());
         verify(staff).sendMessage("§aSet Steve's rank to Royal.");
     }
 
     @Test
-    void setRankReportsAFailedRemovalAndStillRefreshes() {
+    void setRankReportsAFailureAndStillRefreshes() {
         PermissionGroupSummary royal = new PermissionGroupSummary(5, "Royal", 30, true, 1.2);
-        PermissionGroupSummary noble = new PermissionGroupSummary(4, "Noble", 10, true);
         when(ranks.actorOutranks(42, 7)).thenReturn(CompletableFuture.completedFuture(true));
-        when(acting.addGroupMembership(7, 5, null)).thenReturn(CompletableFuture.completedFuture(null));
-        when(acting.removeGroupMembership(7, 4)).thenReturn(CompletableFuture.failedFuture(new RuntimeException("boom")));
+        when(acting.addGroupMembership(7, 5, null)).thenReturn(CompletableFuture.failedFuture(new RuntimeException("boom")));
 
-        assertFalse(service.setRank(staff, target, royal, List.of(noble)).join());
+        assertFalse(service.setRank(staff, target, royal, List.of()).join());
 
         verify(users).refreshAsync(target.uuid());
         verify(staff).sendMessage(org.mockito.ArgumentMatchers.startsWith("§cFailed: "));
+    }
+
+    @Test
+    void resyncDisplayReReadsTheOnlinePlayerAndRedrawsThem() {
+        Player online = mock(Player.class);
+        when(online.getUniqueId()).thenReturn(target.uuid());
+        bukkit.when(() -> Bukkit.getPlayer(target.uuid())).thenReturn(online);
+
+        service.resyncDisplay(online);
+
+        verify(users).refreshAsync(target.uuid());
+        assertEquals(1, redrawn.size());
+        assertSame(online, redrawn.get(0)[0]);
     }
 }

@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 import java.util.logging.Logger;
 
 import org.bukkit.Bukkit;
@@ -18,8 +19,9 @@ import net.knightsandkings.knk.paper.commands.support.PromotionEffects;
 
 /**
  * Delivers in-game moments the web API queued for writes the plugin didn't make itself -
- * currently a promotion/demotion from an XP change made through the web admin's player profile
- * page. Without this, that path only ever showed a banner in the browser: the API returned the
+ * a promotion/demotion from an XP change made through the web admin's player profile page, and a
+ * rank change made outside the plugin (web app, or a temporary rank expiring), which re-reads the
+ * player so chat and the tab list show the new rank within one poll. Without this, that path only ever showed a banner in the browser: the API returned the
  * TitleChangeResult to the web app and the server never heard about it, so the online player got
  * the rewards but none of PromotionEffects' sound/particles/message. (/knk user ... xp worked
  * because the plugin was the caller and showed the effects straight from the response.)
@@ -45,6 +47,8 @@ public class PlayerNotificationPoller {
 
     private volatile boolean running;
     private BukkitTask task;
+    // Set once UserAdminService exists (it's built after this poller in KnKPlugin).
+    private volatile Consumer<Player> rankChangedHandler;
 
     public PlayerNotificationPoller(PlayerNotificationsApi notificationsApi, Plugin plugin) {
         this(notificationsApi, plugin,
@@ -55,6 +59,11 @@ public class PlayerNotificationPoller {
         this.notificationsApi = notificationsApi;
         this.plugin = plugin;
         this.intervalTicks = Math.max(1L, intervalSeconds) * 20L;
+    }
+
+    /** What to do for a {@link PlayerNotification#TYPE_RANK_CHANGED} whose player is online. */
+    public void setRankChangedHandler(Consumer<Player> handler) {
+        this.rankChangedHandler = handler;
     }
 
     public void start() {
@@ -112,6 +121,8 @@ public class PlayerNotificationPoller {
             try {
                 if (PlayerNotification.TYPE_TITLE_CHANGED.equals(notification.type())) {
                     PromotionEffects.show(player, notification.titleChange());
+                } else if (PlayerNotification.TYPE_RANK_CHANGED.equals(notification.type()) && rankChangedHandler != null) {
+                    rankChangedHandler.accept(player);
                 }
             } catch (RuntimeException e) {
                 // Acknowledged anyway: retrying a notification that throws would only repeat
