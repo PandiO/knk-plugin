@@ -8,6 +8,7 @@ import net.knightsandkings.knk.core.domain.siege.KnkSiegeMatchRecords.Completion
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeMatchRecords.ObjectiveResult;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeMatchRecords.Participant;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeMatchRecords.ParticipantResult;
+import net.knightsandkings.knk.core.domain.siege.KnkSiegeMatchRecords.ParticipantReward;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeMatchRecords.RewardSummary;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeObjective;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeRuntimeConfig;
@@ -25,7 +26,6 @@ import net.knightsandkings.knk.core.siege.SiegeCombatRules;
 import net.knightsandkings.knk.core.siege.SiegeCommandFilter;
 import net.knightsandkings.knk.core.siege.ObjectiveState.CaptureEvent;
 import net.knightsandkings.knk.core.siege.ObjectiveState.Presence;
-import net.knightsandkings.knk.core.siege.ProvisionalRewardCalculator;
 import net.knightsandkings.knk.core.siege.SiegeDisplayText;
 import net.knightsandkings.knk.core.siege.SiegeEffect;
 import net.knightsandkings.knk.core.siege.SiegeEffect.AnnounceEffect;
@@ -516,10 +516,14 @@ public final class SiegeService {
         announceResult(rt, match, result);
 
         if (!result.isAborted()) {
+            // The rewards themselves come from the server's complete answer (printRewardSummary).
+            boolean unrecorded = isUnrecorded(rt);
             for (MemberView member : match.roster().members()) {
-                ProvisionalRewardCalculator.Breakdown breakdown = ProvisionalRewardCalculator.forParticipant(
-                        match.scenario().rewards(), result, match.alliances(), match.board(), member.playerId(), member.teamId());
-                tell(member.playerId(), rewardLine(breakdown, member));
+                tell(member.playerId(), statsLine(member));
+                if (unrecorded) {
+                    tell(member.playerId(), SiegeMessages.bad("This match couldn't be recorded (the server couldn't reach "
+                            + "the API when it was drawn), so no rewards are granted this round."));
+                }
             }
         }
 
@@ -587,34 +591,53 @@ public final class SiegeService {
         Bukkit.getOnlinePlayers().forEach(p -> p.sendMessage(message));
     }
 
-    private Component rewardLine(ProvisionalRewardCalculator.Breakdown b, MemberView member) {
-        String stats = "Your match: " + member.kills() + " kills, " + member.deaths() + " deaths, best streak "
-                + member.highestKillStreak() + ", " + member.captures() + " captures. ";
-        if (b.isEmpty()) {
-            return SiegeMessages.info(stats + "No rewards this time.");
-        }
-        StringBuilder parts = new StringBuilder();
-        if (b.coins() > 0) parts.append("+").append(b.coins()).append(" coins ");
-        if (b.experience() > 0) parts.append("+").append(b.experience()).append(" XP ");
-        if (b.gems() > 0) parts.append("+").append(b.gems()).append(" gems ");
-        String detail = (b.won() ? "win" : "") + (b.holdingCount() > 0 ? (b.won() ? ", " : "") + b.holdingCount() + " objective(s) gained" : "")
-                + (b.captureCount() > 0 ? ((b.won() || b.holdingCount() > 0) ? ", " : "") + b.captureCount() + " capture(s)" : "");
-        return SiegeMessages.prefixed(Component.text(stats, SiegeMessages.INFO)
-                .append(Component.text("Rewards: " + parts.toString().trim(), SiegeMessages.GOOD))
-                .append(Component.text(" (" + detail + ") - provisional: rewards are not paid out until match results "
-                        + "are recorded server-side (siege Phase 6).", NamedTextColor.DARK_GRAY)));
+    private static Component statsLine(MemberView member) {
+        return SiegeMessages.info("Your match: " + member.kills() + " kills, " + member.deaths() + " deaths, best streak "
+                + member.highestKillStreak() + ", " + member.captures() + " captures.");
     }
 
-    /** Phase 6: the server's real breakdown replaces the provisional one. The no-op API returns none. */
+    /** The server's breakdown for one player (DESIGN §7.6: win, objectives gained, captures). */
+    private static Component rewardLine(ParticipantReward r) {
+        if (!r.hasRewards()) {
+            return SiegeMessages.info("No rewards this time.");
+        }
+        StringBuilder parts = new StringBuilder();
+        if (r.coins() > 0) parts.append("+").append(r.coins()).append(" coins ");
+        if (r.experience() > 0) parts.append("+").append(r.experience()).append(" XP ");
+        if (r.gems() > 0) parts.append("+").append(r.gems()).append(" gems ");
+        List<String> why = new ArrayList<>();
+        if (r.won()) why.add("win");
+        if (r.holdingCount() > 0) why.add(r.holdingCount() + " objective(s) gained");
+        if (r.captureCount() > 0) why.add(r.captureCount() + " capture(s)");
+        return SiegeMessages.prefixed(Component.text("Rewards granted: " + parts.toString().trim(), SiegeMessages.GOOD)
+                .append(Component.text(why.isEmpty() ? "" : " (" + String.join(", ", why) + ")", SiegeMessages.INFO)));
+    }
+
+    /**
+     * Phase 6: prints the server's reward breakdown (the API grants the rewards). A null summary means
+     * the complete call failed and was spooled by SiegeMatchRecorder (or refused - then it's logged).
+     */
     private void printRewardSummary(RewardSummary summary, Map<Integer, UUID> playerByUserId) {
-        if (summary == null || summary.rewards().isEmpty()) return;
-        Bukkit.getScheduler().runTask(plugin, () -> summary.rewards().forEach(r -> {
-            UUID id = playerByUserId.get(r.userId());
-            if (id != null) {
-                tell(id, SiegeMessages.good("Rewards granted: +" + r.coins() + " coins, +" + r.experience() + " XP, +"
-                        + r.gems() + " gems."));
+        if (!plugin.isEnabled()) return;
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (summary == null) {
+                playerByUserId.values().forEach(id -> tell(id, SiegeMessages.bad("Your rewards couldn't be confirmed yet: "
+                        + "the server couldn't reach the API. The result is kept and recorded automatically later.")));
+                return;
             }
-        }));
+            for (ParticipantReward r : summary.rewards()) {
+                UUID id = playerByUserId.get(r.userId());
+                if (id == null || !r.presentAtEnd()) continue;
+                tell(id, rewardLine(r));
+            }
+        });
+    }
+
+    /** True when the round's match row could not be created (the round runs unrecorded, no rewards). */
+    private static boolean isUnrecorded(SiegeLobbyRuntime rt) {
+        CompletableFuture<Long> matchId = rt.matchIdFuture();
+        if (matchId == null || !matchId.isDone()) return false;
+        return matchId.isCompletedExceptionally() || matchId.getNow(null) == null;
     }
 
     // ---------- Cancel ----------

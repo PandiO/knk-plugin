@@ -130,7 +130,6 @@ import net.knightsandkings.knk.paper.tasks.ItemScanTaskHandler;
 import net.knightsandkings.knk.paper.tasks.KitScanTaskHandler;
 import net.knightsandkings.knk.paper.user.JoinLoadingGuard;
 import net.knightsandkings.knk.paper.user.UserManager;
-import net.knightsandkings.knk.paper.siege.LoggingSiegeMatchesCommandApi;
 import net.knightsandkings.knk.paper.siege.SiegePlayerVault;
 import net.knightsandkings.knk.paper.siege.SiegeService;
 import net.knightsandkings.knk.paper.commands.SiegeCommand;
@@ -209,6 +208,7 @@ public class KnKPlugin extends JavaPlugin {
     private ExecutorService regionLookupExecutor;
     private TempRegionRetentionTask tempRegionRetentionTask;
     private SiegeService siegeService;
+    private net.knightsandkings.knk.core.siege.SiegeMatchRecorder siegeMatchRecorder;
     
     @Override
     public void onEnable() {
@@ -762,6 +762,15 @@ public class KnKPlugin extends JavaPlugin {
                 getLogger().log(java.util.logging.Level.SEVERE, "Siege shutdown failed", e);
             }
         }
+        // Phase 6: match results still being sent (incl. the shutdown aborts above) go to the spool,
+        // replayed on the next enable.
+        if (siegeMatchRecorder != null) {
+            try {
+                siegeMatchRecorder.spoolInFlight();
+            } catch (RuntimeException e) {
+                getLogger().log(java.util.logging.Level.SEVERE, "Spooling in-flight siege results failed", e);
+            }
+        }
         if (gateStateSyncTask != null) {
             gateStateSyncTask.stop();
             getLogger().info("Persisting final gate states before shutdown...");
@@ -965,8 +974,10 @@ public class KnKPlugin extends JavaPlugin {
     /**
      * Siege minigame runtime (docs/specs/siege-minigame/IMPLEMENTATION_PLAN.md Phase 5): the
      * runtime-config gateway, one SiegeService (one shared SiegeRuntimeLocks and one long-lived
-     * RandomGenerator inside), the /siege command and the siege listeners. The match API is the
-     * Phase 6 placeholder that only logs (LoggingSiegeMatchesCommandApi) until the real endpoints exist.
+     * RandomGenerator inside), the /siege command and the siege listeners. Match results (Phase 6)
+     * go to knk-web-api's /api/siege-matches through SiegeMatchRecorder (retry, a pending-results
+     * spool in siege-vault/pending-results/, startup recovery: replay the spool, then abort matches
+     * the last run left open).
      */
     private void initializeSiege() {
         var siegeDataAccess = dataAccessFactory.createSiegeDataAccess(
@@ -977,11 +988,20 @@ public class KnKPlugin extends JavaPlugin {
         SiegePlayerVault siegeVault = new SiegePlayerVault(siegeVaultDirectory, getLogger());
         // One long-lived generator for draws, splits and book drops (a new Random per draw correlates draws).
         java.util.random.RandomGenerator siegeRandom = new java.util.SplittableRandom();
+        var siegeResultSpool = new net.knightsandkings.knk.core.siege.SiegeResultSpool(
+            new java.io.File(siegeVaultDirectory, "pending-results").toPath(), getLogger());
+        this.siegeMatchRecorder = new net.knightsandkings.knk.core.siege.SiegeMatchRecorder(
+            apiClient.getSiegeMatchesCommandApi(),
+            net.knightsandkings.knk.core.dataaccess.RetryPolicy.defaultPolicy(),
+            siegeResultSpool,
+            getLogger());
+        // Before the runtime can draw: createMatch waits for this recovery.
+        siegeMatchRecorder.recoverOnStartup();
         this.siegeService = new SiegeService(
             this,
             siegeDataAccess,
             apiClient.getTitleBracketsQueryApi(),
-            new LoggingSiegeMatchesCommandApi(getLogger()),
+            siegeMatchRecorder,
             siegeVault,
             knkPermissible,
             cacheManager.getUserCache(),

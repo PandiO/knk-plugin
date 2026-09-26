@@ -13,16 +13,11 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Logger;
 
 /**
- * <b>PHASE 6 PLACEHOLDER - replace with the real {@code SiegeMatchesCommandApiImpl}.</b>
- * <p>
- * The {@code /api/siege-matches} endpoints don't exist yet (siege IMPLEMENTATION_PLAN Phase 6), so
- * this logs every checkpoint and records nothing. {@link #createMatch} hands out provisional
- * <b>negative</b> ids so a log line can never be mistaken for a real match row.
- * {@link #completeMatch} returns an empty {@link RewardSummary}: the runtime then prints its own
- * provisional breakdown instead ({@code ProvisionalRewardCalculator}).
- * <p>
- * Phase 6: build the HTTP implementation in knk-api-client and pass it to {@code SiegeService}
- * in {@code KnKPlugin} instead of this class; the call sites don't change.
+ * A no-op match API that only logs (siege Phase 5's placeholder). Since Phase 6 the plugin uses
+ * knk-api-client's {@code SiegeMatchesCommandApiImpl} wrapped in {@code SiegeMatchRecorder}; this
+ * class is kept for running the runtime without recording matches (e.g. a test server without the
+ * API). {@link #createMatch} hands out <b>negative</b> ids so a log line can never be mistaken for a
+ * real match row; {@link #completeMatch} returns an empty {@link RewardSummary} (no rewards shown).
  */
 public final class LoggingSiegeMatchesCommandApi implements SiegeMatchesCommandApi {
 
@@ -63,5 +58,11 @@ public final class LoggingSiegeMatchesCommandApi implements SiegeMatchesCommandA
     public CompletableFuture<Void> abortMatch(long matchId, SiegeEndReason reason) {
         logger.info("[Siege][match-api:no-op] abortMatch " + matchId + " reason=" + reason);
         return CompletableFuture.completedFuture(null);
+    }
+
+    @Override
+    public CompletableFuture<List<Long>> abortUnfinished(SiegeEndReason reason) {
+        logger.info("[Siege][match-api:no-op] abortUnfinished reason=" + reason);
+        return CompletableFuture.completedFuture(List.of());
     }
 }
