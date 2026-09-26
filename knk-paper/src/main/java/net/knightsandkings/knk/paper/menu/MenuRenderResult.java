@@ -45,6 +45,9 @@ public record MenuRenderResult(
         Map<Integer, Object> rowsBySlot,
         Map<Integer, SectionView> sectionViewsBySectionId,
         Map<Integer, String> materialNamespaceKeys,
-        MenuContextParams menuContext
+        MenuContextParams menuContext,
+        // Menu follow-up 2026-09-26: the Inventory size this render needs (a DYNAMIC menu can be
+        // shorter than its template height).
+        int totalSlots
 ) {
 }

@@ -48,8 +48,10 @@ public final class MenuTemplateAssembler {
         // InventoryMenu Phase 9 (E4): null/0/negative all mean "no auto-refresh".
         int autoRefreshTicks = template.autoRefreshTicks() != null ? Math.max(0, template.autoRefreshTicks()) : 0;
 
+        int minHeight = template.minHeight() != null ? template.minHeight() : 1;
         RuntimeMenu menu = new RuntimeMenu(template.key(), template.name(), height, growth,
-                template.backgroundMaterialRefId(), List.copyOf(sections), autoRefreshTicks);
+                template.backgroundMaterialRefId(), List.copyOf(sections), autoRefreshTicks, minHeight,
+                template.backgroundMaterial());
 
         MenuLayoutValidator.validate(menu);
 
@@ -100,7 +102,8 @@ public final class MenuTemplateAssembler {
                 positionMode, alignVertical, alignHorizontal, overflow, listMode, priority,
                 sectionTemplate.visibilityPermission(), searchable, List.copyOf(items),
                 sectionTemplate.variableBindings() != null ? sectionTemplate.variableBindings() : List.of(),
-                sectionTemplate.contentSourceId(), contentSourceParams
+                sectionTemplate.contentSourceId(), contentSourceParams,
+                sectionTemplate.minHeight() != null ? sectionTemplate.minHeight() : 0
         );
     }
 

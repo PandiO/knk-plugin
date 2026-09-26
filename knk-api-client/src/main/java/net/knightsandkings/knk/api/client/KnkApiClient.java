@@ -105,6 +105,7 @@ public class KnkApiClient {
     private final PermissionGroupsQueryApi permissionGroupsQueryApi;
     private final KitsQueryApi kitsQueryApi;
     private final TitleBracketsQueryApi titleBracketsQueryApi;
+    private final net.knightsandkings.knk.core.ports.api.CategoriesQueryApi categoriesQueryApi;
     private final KitsCommandApi kitsCommandApi;
 
     private KnkApiClient(
@@ -148,6 +149,7 @@ public class KnkApiClient {
         this.kitsQueryApi = new KitsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.kitsCommandApi = new KitsCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.titleBracketsQueryApi = new TitleBracketsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.categoriesQueryApi = new net.knightsandkings.knk.api.impl.CategoriesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
     }
     
     public HealthApi getHealthApi() {
@@ -176,6 +178,11 @@ public class KnkApiClient {
 
     public KitsCommandApi getKitsCommandApi() {
         return kitsCommandApi;
+    }
+
+    /** Menu follow-up 2026-09-26: {@code GET /api/Categories} (catalogue category filter). */
+    public net.knightsandkings.knk.core.ports.api.CategoriesQueryApi getCategoriesQueryApi() {
+        return categoriesQueryApi;
     }
 
     /** InventoryMenu content port CP3: {@code GET /api/title-brackets}. */

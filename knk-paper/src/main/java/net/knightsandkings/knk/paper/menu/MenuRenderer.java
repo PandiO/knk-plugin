@@ -18,6 +18,7 @@ import net.knightsandkings.knk.core.menu.MenuSession;
 import net.knightsandkings.knk.core.menu.MenuSlotCalculator;
 import net.knightsandkings.knk.core.menu.MenuVariableProviderRegistry;
 import net.knightsandkings.knk.core.menu.MenuVariableScope;
+import net.knightsandkings.knk.core.menu.MenuRowCompactor;
 import net.knightsandkings.knk.core.menu.MenuStateView;
 import net.knightsandkings.knk.core.menu.MenuView;
 import net.knightsandkings.knk.core.menu.RuntimeMenu;
@@ -296,8 +297,9 @@ public final class MenuRenderer {
                     (item, scope) -> new MenuActionContext(player, session, scope, menuService, menu, section, item,
                             scope.get(MenuVariableProviderRegistry.ROOT_ROW)));
 
+            // Menu follow-up 2026-09-26: pager arrows only show when there is another page.
             List<MenuSectionRenderer.RenderedSlot> rendered = new ArrayList<>(
-                    MenuSectionRenderer.renderItems(assignment.itemsBySlot(), sectionScope, pass));
+                    MenuSectionRenderer.renderItems(withoutIdlePagers(assignment), sectionScope, pass));
             if (!rows.isEmpty()) {
                 RuntimeMenuItem rowTemplate = section.rowTemplate().orElse(null);
                 if (rowTemplate != null) {
@@ -313,6 +315,9 @@ public final class MenuRenderer {
                 RuntimeMenuItem item = slot.item();
                 String refKey = item.materialRefId() != null ? keys.get(item.materialRefId()) : null;
                 ItemStack itemStack = MenuItemBukkitMapper.toItemStack(item, slot.presentation(), refKey, permissionChecker);
+                if (slot.row() instanceof MenuItemStackRow provided) {
+                    itemStack = withProvidedStack(provided, itemStack);
+                }
                 itemStacksBySlot.put(slot.slot(), itemStack);
                 itemsBySlot.put(slot.slot(), item);
                 sectionsBySlot.put(slot.slot(), section);
@@ -332,12 +337,83 @@ public final class MenuRenderer {
             }
         }
 
-        fillBackground(menu, keys, itemStacksBySlot);
+        // Menu follow-up 2026-09-26: a DYNAMIC menu drops rows left empty (down to MinHeight).
+        List<RuntimeMenuSection> visibleSections = menu.sections().stream()
+                .filter(section -> section.isVisibleTo(permissionChecker))
+                .toList();
+        MenuRowCompactor.Layout layout = MenuRowCompactor.compact(menu, itemStacksBySlot.keySet(), visibleSections);
+        if (layout.changed()) {
+            itemStacksBySlot = remapped(layout, itemStacksBySlot);
+            itemsBySlot = remapped(layout, itemsBySlot);
+            sectionsBySlot = remapped(layout, sectionsBySlot);
+            controlHintLoreBySlot = remapped(layout, controlHintLoreBySlot);
+            rowsBySlot = remapped(layout, rowsBySlot);
+        }
+
+        fillBackground(menu, keys, itemStacksBySlot, layout.totalSlots());
         session.clearDirty();
 
         return new MenuRenderResult(Map.copyOf(itemStacksBySlot), Map.copyOf(itemsBySlot), Map.copyOf(sectionsBySlot),
                 Map.copyOf(controlHintLoreBySlot), Map.copyOf(rowsBySlot), Map.copyOf(sectionViews), Map.copyOf(keys),
-                menuContext);
+                menuContext, layout.totalSlots());
+    }
+
+    /** Menu follow-up 2026-09-26: see {@link MenuItemStackRow}. */
+    static ItemStack withProvidedStack(MenuItemStackRow row, ItemStack fromTemplate) {
+        ItemStack provided;
+        try {
+            provided = row.menuItemStack();
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Row " + row + " failed to build its ItemStack - using the row template", e);
+            return fromTemplate;
+        }
+        if (provided == null || provided.getType().isAir()) {
+            return fromTemplate;
+        }
+        ItemStack result = provided.clone();
+        ItemMeta templateMeta = fromTemplate.getItemMeta();
+        List<String> extra = templateMeta != null && templateMeta.hasLore() ? templateMeta.getLore() : null;
+        if (extra != null && !extra.isEmpty()) {
+            appendLoreLines(result, extra);
+        }
+        return result;
+    }
+
+    private static <V> Map<Integer, V> remapped(MenuRowCompactor.Layout layout, Map<Integer, V> source) {
+        Map<Integer, V> target = new HashMap<>();
+        layout.remap(source, target::put);
+        return target;
+    }
+
+    /**
+     * Menu follow-up 2026-09-26: a pinned item whose every action is {@code menu.page.next}/
+     * {@code menu.page.prev} is left out while its section has at most one page - the whole list
+     * fits, so there is nothing to page through.
+     */
+    static Map<Integer, RuntimeMenuItem> withoutIdlePagers(SectionSlotAssignment assignment) {
+        if (assignment.totalPages() > 1) {
+            return assignment.itemsBySlot();
+        }
+        Map<Integer, RuntimeMenuItem> kept = new HashMap<>();
+        assignment.itemsBySlot().forEach((slot, item) -> {
+            if (!isPagerOnly(item)) {
+                kept.put(slot, item);
+            }
+        });
+        return kept;
+    }
+
+    private static boolean isPagerOnly(RuntimeMenuItem item) {
+        if (item.slotOverride() == null || item.actions().isEmpty()) {
+            return false;
+        }
+        for (KnkActionBinding action : item.actions()) {
+            if (!MenuActionHandlers.PAGE_NEXT.equals(action.actionTypeId())
+                    && !MenuActionHandlers.PAGE_PREV.equals(action.actionTypeId())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** Pinned items + (for Java-mapped item sources) the fetched items, as one slot assignment. */
@@ -583,19 +659,49 @@ public final class MenuRenderer {
         return itemStack == null || itemStack.getType() == Material.AIR;
     }
 
-    private void fillBackground(RuntimeMenu menu, Map<Integer, String> keys, Map<Integer, ItemStack> itemStacksBySlot) {
-        if (menu.backgroundMaterialRefId() == null) {
-            return;
+    /** Menu follow-up 2026-09-26: the background every menu gets unless its template names another one. */
+    static final Material DEFAULT_BACKGROUND = Material.LIGHT_GRAY_STAINED_GLASS_PANE;
+
+    /**
+     * Fills every slot nothing was rendered into (menu follow-up 2026-09-26: every menu has a
+     * background). Material: the template's {@code BackgroundMaterialRefId}, else its
+     * {@code BackgroundMaterial} name, else {@link #DEFAULT_BACKGROUND}. The filler has no name, no
+     * lore and a hidden tooltip; it is not in {@code itemsBySlot}, so clicks on it do nothing.
+     */
+    private void fillBackground(RuntimeMenu menu, Map<Integer, String> keys, Map<Integer, ItemStack> itemStacksBySlot,
+                                int totalSlots) {
+        Material background = null;
+        if (menu.backgroundMaterialRefId() != null) {
+            background = MaterialNamespaceResolver.resolve(keys.get(menu.backgroundMaterialRefId()));
+        }
+        if (background == null && menu.backgroundMaterial() != null && !menu.backgroundMaterial().isBlank()) {
+            background = MaterialNamespaceResolver.resolve(menu.backgroundMaterial());
+            if (background == null) {
+                warnOnce("background|" + menu.key() + "|" + menu.backgroundMaterial(), "Menu '" + menu.key()
+                        + "' has unknown BackgroundMaterial '" + menu.backgroundMaterial() + "' - using the default");
+            }
+        }
+        if (background == null || background.isAir()) {
+            background = DEFAULT_BACKGROUND;
         }
 
-        Material background = MaterialNamespaceResolver.resolve(keys.get(menu.backgroundMaterialRefId()));
-        if (background == null) {
-            return;
+        ItemStack filler = backgroundFiller(background);
+        for (int slot = 0; slot < totalSlots; slot++) {
+            if (!itemStacksBySlot.containsKey(slot)) {
+                itemStacksBySlot.put(slot, filler.clone());
+            }
         }
+    }
 
-        for (int slot = 0; slot < menu.totalSlots(); slot++) {
-            itemStacksBySlot.computeIfAbsent(slot, ignored -> new ItemStack(background));
+    static ItemStack backgroundFiller(Material material) {
+        ItemStack filler = new ItemStack(material);
+        ItemMeta meta = filler.getItemMeta();
+        if (meta != null) {
+            meta.displayName(net.kyori.adventure.text.Component.empty());
+            meta.setHideTooltip(true);
+            filler.setItemMeta(meta);
         }
+        return filler;
     }
 
     private CompletableFuture<Map<Integer, String>> resolveMaterialKeys(Set<Integer> materialRefIds,

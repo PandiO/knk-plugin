@@ -181,7 +181,8 @@ public final class KitGrantPlacer {
         return new ResolvedItem(slot.kind(), slot.contentSlotIndex(), itemStack, maxStackSize);
     }
 
-    private static CompletableFuture<String> resolveMaterialNamespaceKey(
+    /** The blueprint's icon material key (its material ref's namespace key, else its own) - shared with the menus. */
+    public static CompletableFuture<String> resolveMaterialNamespaceKey(
             KnkItemBlueprint blueprint,
             MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess
     ) {

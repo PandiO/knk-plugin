@@ -39,11 +39,26 @@ public record RuntimeMenuSection(
         List<RuntimeMenuItem> items,
         List<KnkVariableBinding> variableBindings,
         String contentSourceId,
-        Map<String, String> contentSourceParams
+        Map<String, String> contentSourceParams,
+        // Menu follow-up 2026-09-26: rows at the top of this section a DYNAMIC menu always keeps.
+        int minHeight
 ) {
 
     public RuntimeMenuSection {
         contentSourceParams = contentSourceParams == null ? Map.of() : Map.copyOf(contentSourceParams);
+        minHeight = Math.max(0, Math.min(minHeight, height));
+    }
+
+    /** Shape before minHeight (0 = no protected rows). */
+    public RuntimeMenuSection(Integer id, String name, MenuSectionKind kind, int sortOrder, int displaySlot, int width,
+                              int height, MenuPositionMode positionMode, MenuAlignVertical alignVertical,
+                              MenuAlignHorizontal alignHorizontal, MenuOverflowMode overflow, MenuListMode listMode,
+                              MenuRenderPriority priority, String visibilityPermission, boolean searchable,
+                              List<RuntimeMenuItem> items, List<KnkVariableBinding> variableBindings,
+                              String contentSourceId, Map<String, String> contentSourceParams) {
+        this(id, name, kind, sortOrder, displaySlot, width, height, positionMode, alignVertical, alignHorizontal, overflow,
+                listMode, priority, visibilityPermission, searchable, items, variableBindings, contentSourceId,
+                contentSourceParams, 0);
     }
 
     /**

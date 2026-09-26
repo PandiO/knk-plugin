@@ -228,6 +228,11 @@ public final class MenuService {
                     Optional<OpenMenuContext> current = openMenuContextRegistry.get(playerId);
                     if (current.isPresent() && current.get() == context
                             && player.getOpenInventory().getTopInventory().equals(context.inventory())) {
+                        if (context.inventory().getSize() != result.totalSlots()) {
+                            // Menu follow-up 2026-09-26: a DYNAMIC menu changed height - reopen at the new size.
+                            show(player, menu, result);
+                            return;
+                        }
                         renderer.applyToInventory(context.inventory(), result, player.isSneaking());
                         context.update(menu, result);
                     }
@@ -421,7 +426,7 @@ public final class MenuService {
         // rendered B into A's Inventory (A's title and size).
         if (existing.isPresent()
                 && existing.get().menuKey().equals(menu.key())
-                && existing.get().inventory().getSize() == menu.totalSlots()
+                && existing.get().inventory().getSize() == result.totalSlots()
                 && player.getOpenInventory().getTopInventory().equals(existing.get().inventory())) {
             renderer.applyToInventory(existing.get().inventory(), result, revealControls);
             existing.get().update(menu, result);
@@ -429,7 +434,7 @@ public final class MenuService {
             return;
         }
 
-        Inventory inventory = Bukkit.createInventory(null, menu.totalSlots(), DisplayTextFormatter.toComponent(menu.title()));
+        Inventory inventory = Bukkit.createInventory(null, result.totalSlots(), DisplayTextFormatter.toComponent(menu.title()));
         renderer.applyToInventory(inventory, result, revealControls);
         player.openInventory(inventory);
         openMenuContextRegistry.register(player.getUniqueId(), new OpenMenuContext(player, inventory, menu, result));

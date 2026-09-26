@@ -206,10 +206,12 @@ public final class MenuActionHandlers {
         int currentIndex = current == null ? -1 : values.indexOf(current);
         int nextIndex = currentIndex + 1;
 
-        if (nextIndex >= values.size()) {
+        if (nextIndex >= values.size() || values.get(nextIndex).isBlank()) {
             context.menuService().clearFilter(context.player(), section.name(), facetKey);
+            context.player().sendMessage(ChatColor.GRAY + facetKey + ": " + ChatColor.WHITE + "all");
         } else {
             context.menuService().filter(context.player(), section.name(), facetKey, values.get(nextIndex));
+            context.player().sendMessage(ChatColor.GRAY + facetKey + ": " + ChatColor.WHITE + values.get(nextIndex));
         }
     }
 

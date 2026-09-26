@@ -558,7 +558,8 @@ public class KnKPlugin extends JavaPlugin {
                 new net.knightsandkings.knk.paper.menu.content.ProfileMenuFeature(
                     usersQueryApi, cacheManager.getUserCache(), titleBracketsDataAccess),
                 new net.knightsandkings.knk.paper.menu.content.ItemsCatalogMenuFeature(
-                    itemBlueprintsDataAccess, java.time.Clock.systemUTC()),
+                    itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, apiClient.getCategoriesQueryApi(),
+                    java.time.Clock.systemUTC()),
                 new net.knightsandkings.knk.paper.menu.content.PremiumMenuFeature(
                     permissionGroupsDataAccess, usersQueryApi, cacheManager.getUserCache()),
                 new net.knightsandkings.knk.paper.menu.content.UserManagerMenuFeature(

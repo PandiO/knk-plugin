@@ -25,8 +25,17 @@ public record KnkMenuTemplate(
         String growth,
         Integer backgroundMaterialRefId,
         List<KnkMenuSectionTemplate> sections,
-        Integer autoRefreshTicks
+        Integer autoRefreshTicks,
+        // Menu follow-up 2026-09-26: Dynamic menus' minimum rows; background filler by material name.
+        Integer minHeight,
+        String backgroundMaterial
 ) {
+
+    /** Phase 9 shape (no minHeight/backgroundMaterial). */
+    public KnkMenuTemplate(Integer id, String key, String name, String description, Integer height, String growth,
+                           Integer backgroundMaterialRefId, List<KnkMenuSectionTemplate> sections, Integer autoRefreshTicks) {
+        this(id, key, name, description, height, growth, backgroundMaterialRefId, sections, autoRefreshTicks, null, null);
+    }
 
     /**
      * Pre-Phase-9 shape (no {@code autoRefreshTicks}) - kept so existing

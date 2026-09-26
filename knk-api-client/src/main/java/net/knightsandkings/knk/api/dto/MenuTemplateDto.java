@@ -14,5 +14,8 @@ public record MenuTemplateDto(
         @JsonProperty("backgroundMaterialRefId") Integer backgroundMaterialRefId,
         @JsonProperty("sections") List<MenuSectionTemplateDto> sections,
         // InventoryMenu Phase 9 (E4): re-render open instances every N ticks; null = off.
-        @JsonProperty("autoRefreshTicks") Integer autoRefreshTicks
+        @JsonProperty("autoRefreshTicks") Integer autoRefreshTicks,
+        // Menu follow-up 2026-09-26: Dynamic menus shrink to at least this many rows; background by name.
+        @JsonProperty("minHeight") Integer minHeight,
+        @JsonProperty("backgroundMaterial") String backgroundMaterial
 ) {}

@@ -51,7 +51,9 @@ final class ContentFeatures {
         ItemBlueprintsDataAccess catalog = mock(ItemBlueprintsDataAccess.class);
         org.mockito.Mockito.when(catalog.searchAsync(org.mockito.ArgumentMatchers.any()))
                 .thenReturn(new java.util.concurrent.CompletableFuture<>());
-        features.add(new ItemsCatalogMenuFeature(catalog, Clock.systemUTC()));
+        net.knightsandkings.knk.core.ports.api.CategoriesQueryApi categories =
+                () -> java.util.concurrent.CompletableFuture.completedFuture(List.of());
+        features.add(new ItemsCatalogMenuFeature(catalog, mock(MinecraftMaterialRefsDataAccess.class), categories, Clock.systemUTC()));
         features.add(new PremiumMenuFeature(mock(net.knightsandkings.knk.core.dataaccess.PermissionGroupsDataAccess.class),
                 mock(net.knightsandkings.knk.core.ports.api.UsersQueryApi.class),
                 new net.knightsandkings.knk.core.cache.UserCache(java.time.Duration.ofMinutes(5))));
