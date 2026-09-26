@@ -1,11 +1,13 @@
 package net.knightsandkings.knk.paper.enchantbook;
 
+import net.knightsandkings.knk.core.domain.item.KnkGrade;
 import net.knightsandkings.knk.core.enchantbook.EnchantBookRules.ApplyResult;
 import net.knightsandkings.knk.core.enchantbook.EnchantBookText;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Bukkit;
+import org.bukkit.Material;
 import org.bukkit.Sound;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.EquipmentSlot;
@@ -14,17 +16,24 @@ import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.plugin.Plugin;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * The permanent-book item chooser (KNG-5; ported from {@code SiegeEnchantMenu} on
  * {@code claude/siege-minigame}, itself v2's {@code PlayerEnchantMenu}): right-click a book in hand to see
- * every item in your inventory it can go on, click one to apply it. A plain Bukkit inventory with its own
- * holder. Clicking the book on the cursor onto an item keeps working alongside it.
+ * every item in your inventory it can go on, click one to apply it. This is the only way to apply a book:
+ * clicking a book from the cursor onto an item was removed after the 2026-09-26 manual test (too easy to do by
+ * accident). A plain Bukkit inventory with its own holder.
+ * <p>
+ * When the item's grade cap (KNG-6) would give less than the book teaches, the click opens a confirmation
+ * screen ({@link ConfirmHolder}) that explains the cap first, so nobody spends a Sharpness III book on a
+ * Common sword expecting Sharpness III.
  */
 public final class EnchantBookMenu {
 
@@ -32,20 +41,62 @@ public final class EnchantBookMenu {
     private static final int OFF_HAND_INDEX = 40;
     private static final int MAX_ITEMS = 54;
 
-    private final EnchantBooks books;
+    private static final int CONFIRM_SIZE = 27;
+    private static final int CONFIRM_APPLY_SLOT = 11;
+    private static final int CONFIRM_ITEM_SLOT = 13;
+    private static final int CONFIRM_CANCEL_SLOT = 15;
 
-    public EnchantBookMenu(EnchantBooks books) {
+    private final EnchantBooks books;
+    private final Plugin plugin;
+
+    public EnchantBookMenu(EnchantBooks books, Plugin plugin) {
         this.books = books;
+        this.plugin = plugin;
+    }
+
+    /** Any inventory this menu opened (chooser or confirmation); every click in it is cancelled. */
+    public static boolean isMenu(InventoryHolder holder) {
+        return holder instanceof Holder || holder instanceof ConfirmHolder;
     }
 
     /** The open chooser: which player-inventory index holds the book, and which each shown slot stands for. */
     public static final class Holder implements InventoryHolder {
         private final int bookIndex;
+        private final EquipmentSlot hand;
         private final Map<Integer, Integer> inventoryIndexBySlot = new HashMap<>();
         private Inventory inventory;
 
-        Holder(int bookIndex) {
+        Holder(int bookIndex, EquipmentSlot hand) {
             this.bookIndex = bookIndex;
+            this.hand = hand;
+        }
+
+        @Override
+        public Inventory getInventory() {
+            return inventory;
+        }
+    }
+
+    /**
+     * The open "grade limit" confirmation: the book and target as they were when it opened, and the level the
+     * player is agreeing to. Confirming re-checks all three, so nothing that changed meanwhile gets applied.
+     */
+    public static final class ConfirmHolder implements InventoryHolder {
+        private final int bookIndex;
+        private final EquipmentSlot hand;
+        private final int targetIndex;
+        private final ItemStack bookSnapshot;
+        private final ItemStack targetSnapshot;
+        private final int level;
+        private Inventory inventory;
+
+        ConfirmHolder(int bookIndex, EquipmentSlot hand, int targetIndex, ItemStack bookSnapshot, ItemStack targetSnapshot, int level) {
+            this.bookIndex = bookIndex;
+            this.hand = hand;
+            this.targetIndex = targetIndex;
+            this.bookSnapshot = bookSnapshot;
+            this.targetSnapshot = targetSnapshot;
+            this.level = level;
         }
 
         @Override
@@ -84,7 +135,7 @@ public final class EnchantBookMenu {
             return Component.text("Nothing in your inventory can take " + enchantName + ".", NamedTextColor.RED);
         }
 
-        Holder holder = new Holder(bookIndex);
+        Holder holder = new Holder(bookIndex, hand);
         int size = Math.min(MAX_ITEMS, ((eligible.size() + 8) / 9) * 9);
         Inventory gui = Bukkit.createInventory(holder, size, Component.text("Apply " + enchantName, NamedTextColor.DARK_PURPLE));
         holder.inventory = gui;
@@ -94,12 +145,13 @@ public final class EnchantBookMenu {
             ItemMeta meta = shown.getItemMeta();
             List<Component> lore = meta.hasLore() && meta.lore() != null ? new ArrayList<>(meta.lore()) : new ArrayList<>();
             lore.add(Component.empty());
-            lore.add(Component.text("Click to apply " + enchantName, NamedTextColor.GREEN).decoration(TextDecoration.ITALIC, false));
             EnchantBooks.Decision decision = decisions.get(index);
             if (decision != null && decision.capped()) {
-                // KNG-6: the grade cap lowers what this item gets.
-                lore.add(Component.text("Grade limit: only up to " + EnchantBookText.roman(decision.level()), NamedTextColor.GOLD)
-                        .decoration(TextDecoration.ITALIC, false));
+                // KNG-6: the grade cap lowers what this item gets; the click asks first.
+                lore.add(line("Grade limit: only up to " + EnchantBookText.roman(decision.level()), NamedTextColor.GOLD));
+                lore.add(line("Click to review", NamedTextColor.YELLOW));
+            } else {
+                lore.add(line("Click to apply " + enchantName, NamedTextColor.GREEN));
             }
             meta.lore(lore);
             shown.setItemMeta(meta);
@@ -110,27 +162,145 @@ public final class EnchantBookMenu {
         return null;
     }
 
-    /** A click in the chooser's own slots: re-checks and applies. The caller has cancelled the click. */
-    public void click(Player player, Holder holder, int slot) {
+    /** A click in one of this menu's own slots. The caller has cancelled the click. */
+    public void click(Player player, InventoryHolder holder, int slot) {
+        if (holder instanceof Holder chooser) {
+            clickChooser(player, chooser, slot);
+        } else if (holder instanceof ConfirmHolder confirm) {
+            clickConfirm(player, confirm, slot);
+        }
+    }
+
+    /** Re-checks the clicked item; applies it straight away, or asks first when the grade cap lowers the level. */
+    private void clickChooser(Player player, Holder holder, int slot) {
         Integer index = holder.inventoryIndexBySlot.get(slot);
         if (index == null) return;
         PlayerInventory inv = player.getInventory();
         ItemStack book = inv.getItem(holder.bookIndex);
         ItemStack target = inv.getItem(index);
+        EnchantBooks.Decision decision = books.decide(book, target);
+        if (decision.result() == ApplyResult.APPLIED && decision.capped()) {
+            // Opening another inventory from inside a click event is only safe on the next tick.
+            ItemStack bookSnapshot = book.clone();
+            ItemStack targetSnapshot = target.clone();
+            nextTick(player, () -> openConfirm(player, holder.bookIndex, holder.hand, index, bookSnapshot, targetSnapshot, decision));
+            return;
+        }
+        applyAndClose(player, holder.bookIndex, index);
+    }
+
+    private void openConfirm(Player player, int bookIndex, EquipmentSlot hand, int targetIndex,
+                             ItemStack book, ItemStack target, EnchantBooks.Decision decision) {
+        ConfirmHolder holder = new ConfirmHolder(bookIndex, hand, targetIndex, book, target, decision.level());
+        Inventory gui = Bukkit.createInventory(holder, CONFIRM_SIZE, Component.text("Grade limit - apply anyway?", NamedTextColor.DARK_RED));
+        holder.inventory = gui;
+
+        String bookName = books.describeBook(book);                    // "Sharpness III"
+        String enchantment = books.describeEnchantment(book);          // "Sharpness"
+        String result = enchantment + " " + EnchantBookText.roman(decision.level()); // "Sharpness I"
+        List<Component> explanation = explanation(target, bookName, enchantment, result, decision);
+
+        ItemStack shown = target.clone();
+        ItemMeta shownMeta = shown.getItemMeta();
+        List<Component> shownLore = shownMeta.hasLore() && shownMeta.lore() != null ? new ArrayList<>(shownMeta.lore()) : new ArrayList<>();
+        shownLore.add(Component.empty());
+        shownLore.addAll(explanation);
+        shownMeta.lore(shownLore);
+        shown.setItemMeta(shownMeta);
+        gui.setItem(CONFIRM_ITEM_SLOT, shown);
+
+        List<Component> applyLore = new ArrayList<>(explanation);
+        applyLore.add(Component.empty());
+        applyLore.add(line("The book is used up.", NamedTextColor.GRAY));
+        gui.setItem(CONFIRM_APPLY_SLOT, button(Material.LIME_CONCRETE, "Apply " + result, NamedTextColor.GREEN, applyLore));
+        gui.setItem(CONFIRM_CANCEL_SLOT, button(Material.RED_CONCRETE, "Cancel", NamedTextColor.RED,
+                List.of(line("Keep the book and go back.", NamedTextColor.GRAY))));
+
+        player.openInventory(gui);
+    }
+
+    /** "This item's grade (Common, 1★) allows Sharpness up to I. Your Sharpness III book will give Sharpness I." */
+    private List<Component> explanation(ItemStack target, String bookName, String enchantment, String result,
+                                        EnchantBooks.Decision decision) {
+        Optional<KnkGrade> grade = books.capGrade(target);
+        String gradeLabel = grade.map(g -> g.name() + ", " + "★".repeat(Math.max(0, g.stars() == null ? 0 : g.stars())))
+                .orElse("?");
+        String whose = EnchantBooks.ungraded(target)
+                ? "This item has no grade, so it counts as " + gradeLabel + "."
+                : "This item's grade is " + gradeLabel + ".";
+        List<Component> lines = new ArrayList<>();
+        lines.add(line(whose, NamedTextColor.GOLD));
+        lines.add(line("It allows " + enchantment + " up to " + EnchantBookText.roman(decision.level()) + ".", NamedTextColor.GOLD));
+        lines.add(line("Your " + bookName + " book will only give " + result + ".", NamedTextColor.YELLOW));
+        return lines;
+    }
+
+    /** Confirm: re-check that nothing changed, then apply. Cancel: back to the chooser. */
+    private void clickConfirm(Player player, ConfirmHolder holder, int slot) {
+        if (slot == CONFIRM_CANCEL_SLOT) {
+            nextTick(player, () -> {
+                Component problem = open(player, holder.hand);
+                if (problem != null) {
+                    player.closeInventory();
+                    player.sendActionBar(problem);
+                }
+            });
+            return;
+        }
+        if (slot != CONFIRM_APPLY_SLOT) return;
+
+        PlayerInventory inv = player.getInventory();
+        ItemStack book = inv.getItem(holder.bookIndex);
+        ItemStack target = inv.getItem(holder.targetIndex);
+        EnchantBooks.Decision decision = books.decide(book, target);
+        boolean unchanged = book != null && holder.bookSnapshot.isSimilar(book)
+                && holder.targetSnapshot.equals(target)
+                && decision.result() == ApplyResult.APPLIED && decision.level() == holder.level;
+        if (!unchanged) {
+            player.closeInventory();
+            player.sendActionBar(Component.text("Something changed - nothing was applied. Try again.", NamedTextColor.RED));
+            return;
+        }
+        applyAndClose(player, holder.bookIndex, holder.targetIndex);
+    }
+
+    private void applyAndClose(Player player, int bookIndex, int targetIndex) {
+        PlayerInventory inv = player.getInventory();
+        ItemStack book = inv.getItem(bookIndex);
+        ItemStack target = inv.getItem(targetIndex);
         EnchantBooks.Outcome outcome = books.apply(book, target);
         if (outcome.result() == ApplyResult.APPLIED) {
-            inv.setItem(index, outcome.updated());
+            inv.setItem(targetIndex, outcome.updated());
             if (book.getAmount() > 1) {
                 ItemStack rest = book.clone();
                 rest.setAmount(book.getAmount() - 1);
-                inv.setItem(holder.bookIndex, rest);
+                inv.setItem(bookIndex, rest);
             } else {
-                inv.setItem(holder.bookIndex, null);
+                inv.setItem(bookIndex, null);
             }
             player.playSound(player.getLocation(), Sound.BLOCK_ENCHANTMENT_TABLE_USE, 1f, 1f);
         }
         player.closeInventory();
         player.sendActionBar(message(outcome));
+    }
+
+    private void nextTick(Player player, Runnable task) {
+        plugin.getServer().getScheduler().runTask(plugin, () -> {
+            if (player.isOnline()) task.run();
+        });
+    }
+
+    private static ItemStack button(Material material, String name, NamedTextColor color, List<Component> lore) {
+        ItemStack item = new ItemStack(material);
+        ItemMeta meta = item.getItemMeta();
+        meta.displayName(Component.text(name, color).decoration(TextDecoration.ITALIC, false));
+        meta.lore(lore);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    private static Component line(String text, NamedTextColor color) {
+        return Component.text(text, color).decoration(TextDecoration.ITALIC, false);
     }
 
     public static Component message(ApplyResult result) {

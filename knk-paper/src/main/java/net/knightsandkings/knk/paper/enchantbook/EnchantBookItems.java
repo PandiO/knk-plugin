@@ -87,8 +87,7 @@ public final class EnchantBookItems {
 
         List<String> lore = meta.hasLore() && meta.getLore() != null ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
         lore.add(0, ChatColor.GRAY + EnchantBookText.teaches(ChatColor.LIGHT_PURPLE + resolved.get().displayName(), payload.level()));
-        lore.add(ChatColor.DARK_GRAY + "Right-click to choose an item to enchant,");
-        lore.add(ChatColor.DARK_GRAY + "or click it onto an item in your inventory.");
+        lore.add(ChatColor.DARK_GRAY + "Right-click to choose an item to enchant.");
         meta.setLore(lore);
         book.setItemMeta(meta);
     }

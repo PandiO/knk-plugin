@@ -3,6 +3,7 @@ package net.knightsandkings.knk.paper.enchantbook;
 import net.knightsandkings.knk.core.domain.enchantment.CustomEnchantmentLore;
 import net.knightsandkings.knk.core.domain.enchantment.EnchantmentRegistry;
 import net.knightsandkings.knk.core.domain.item.GradeCatalog;
+import net.knightsandkings.knk.core.domain.item.KnkGrade;
 import net.knightsandkings.knk.core.enchantbook.EnchantBookCapSettings;
 import net.knightsandkings.knk.core.enchantbook.EnchantBookPayload;
 import net.knightsandkings.knk.core.enchantbook.EnchantBookRules;
@@ -19,6 +20,7 @@ import org.bukkit.inventory.meta.ItemMeta;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.DoubleSupplier;
 
@@ -126,6 +128,28 @@ public final class EnchantBooks {
         }
         updated.setItemMeta(meta);
         return new Outcome(ApplyResult.APPLIED, updated, level, decision.capped(), bonus);
+    }
+
+    /**
+     * The grade the cap uses for {@code target}: its own (tag or lore), else the configured grade for ungraded
+     * items; empty when that is "uncapped" (0) or unknown. For the confirmation text only.
+     */
+    public Optional<KnkGrade> capGrade(ItemStack target) {
+        Integer stars = ItemGradeTag.stars(target).orElse(null);
+        int effective = stars != null ? stars : capSettings.ungradedStars();
+        return effective > 0 ? grades.byStars(effective) : Optional.empty();
+    }
+
+    /** True when {@code target} has no grade of its own (the cap then uses {@code ungraded-stars}). */
+    public static boolean ungraded(ItemStack target) {
+        return ItemGradeTag.stars(target).isEmpty();
+    }
+
+    /** "Sharpness" (no level) for the confirmation text. */
+    public String describeEnchantment(ItemStack book) {
+        String full = describeBook(book);
+        int space = full.lastIndexOf(' ');
+        return space > 0 ? full.substring(0, space) : full;
     }
 
     /** "Sharpness III" for the chooser title and messages. */
