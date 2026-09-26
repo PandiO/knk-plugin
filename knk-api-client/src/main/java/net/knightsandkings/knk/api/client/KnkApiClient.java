@@ -58,6 +58,7 @@ import net.knightsandkings.knk.core.ports.api.PermissionGroupsQueryApi;
 import net.knightsandkings.knk.core.ports.api.KitsQueryApi;
 import net.knightsandkings.knk.core.ports.api.TitleBracketsQueryApi;
 import net.knightsandkings.knk.core.ports.api.KitsCommandApi;
+import net.knightsandkings.knk.core.ports.api.CurrencyApi;
 import net.knightsandkings.knk.core.ports.api.RegionsCommandApi;
 import okhttp3.OkHttpClient;
 
@@ -107,6 +108,7 @@ public class KnkApiClient {
     private final TitleBracketsQueryApi titleBracketsQueryApi;
     private final net.knightsandkings.knk.core.ports.api.CategoriesQueryApi categoriesQueryApi;
     private final KitsCommandApi kitsCommandApi;
+    private final CurrencyApi currencyApi;
 
     private KnkApiClient(
         String baseUrl,
@@ -148,6 +150,7 @@ public class KnkApiClient {
         this.permissionGroupsQueryApi = new PermissionGroupsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.kitsQueryApi = new KitsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.kitsCommandApi = new KitsCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.currencyApi = new net.knightsandkings.knk.api.impl.CurrencyApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.titleBracketsQueryApi = new TitleBracketsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.categoriesQueryApi = new net.knightsandkings.knk.api.impl.CategoriesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
     }
@@ -174,6 +177,11 @@ public class KnkApiClient {
 
     public KitsQueryApi getKitsQueryApi() {
         return kitsQueryApi;
+    }
+
+    /** Player currency routes: balances, /baltop, /pay and history (currency ledger, KNG-21 Phase 3). */
+    public CurrencyApi getCurrencyApi() {
+        return currencyApi;
     }
 
     public KitsCommandApi getKitsCommandApi() {

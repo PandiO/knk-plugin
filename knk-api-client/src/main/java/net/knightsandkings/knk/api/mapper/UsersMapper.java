@@ -165,7 +165,8 @@ public class UsersMapper {
         net.knightsandkings.knk.api.dto.PlayerNotificationDto dto
     ) {
         return new net.knightsandkings.knk.core.domain.users.PlayerNotification(
-            dto.id(), dto.userId(), dto.uuid(), dto.username(), dto.type(), mapTitleChange(dto.titleChange())
+            dto.id(), dto.userId(), dto.uuid(), dto.username(), dto.type(), mapTitleChange(dto.titleChange()),
+            CurrencyMapper.mapPaymentNotice(dto.payment())
         );
     }
 
