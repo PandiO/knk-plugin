@@ -117,6 +117,18 @@ commands:
     usage: "/inventory open <player> | /inventory clear <player> confirm"
     aliases: [inv, invsee]
 
+  # Teleport commands (docs/specs/teleport/DESIGN.md §3.2, KNG-17). Declaring tp here makes the bare
+  # /tp label resolve to this plugin (developer decision 2026-09-26); vanilla stays reachable as
+  # /minecraft:tp. No permission: entries - the knk.teleport.* nodes are checked through
+  # KnkPermissible inside StaffTeleportCommand (same reasoning as /kit and /fly).
+  tp:
+    description: "Staff teleport: to a player, a player to a player, or to coordinates"
+    usage: "/tp <player> [-s] | /tp <player> <target> [-s] | /tp <x> <y> <z> [world] [yaw pitch]"
+
+  tphere:
+    description: "Staff teleport: bring a player to you"
+    usage: "/tphere <player> [-s]"
+
 permissions:
   knk.admin:
     description: >-
@@ -259,7 +271,9 @@ permissions:
     default: false
 
   knk.admin.tp:
-    description: Teleport to an online player via /knk tp <player>. Hierarchy-checked (RankHierarchy).
+    description: >-
+      Teleport to an online player via /knk tp <player> [-s] (alias of /tp <player>, which also
+      accepts this node next to knk.teleport.staff). Hierarchy-checked (RankHierarchy).
     default: false
 
   knk.tasks:
@@ -471,6 +485,45 @@ permissions:
 
   customenchantments.command.reload:
     description: Allows reloading custom enchantment config with /ce reload
+    default: op
+
+  # Teleports (docs/specs/teleport/DESIGN.md §3.3, KNG-17). Resolved through KnkPermissible, same
+  # caveat as knk.kit.list (ops pass via the op bypass; non-ops need a real grant or group membership).
+  knk.teleport.staff:
+    description: >-
+      /tp <player> and /tp <x> <y> <z> - instant, rank-checked staff teleports (no warmup, cost,
+      cooldown or safe-spot check; freeze/region/siege guards still apply). knk.admin.tp is still
+      accepted for /tp <player> and /knk tp.
+    default: op
+
+  knk.teleport.staff.others:
+    description: Move other players - /tp <player> <target> and /tphere <player>. You must outrank everyone involved.
+    default: op
+
+  knk.teleport.staff.silent:
+    description: The -s flag on staff teleports - no message to the moved or visited player. Vanished staff are always silent.
+    default: op
+
+  knk.teleport.warmup.short:
+    description: Player teleports wait teleport.warmup-short-seconds (3 s) instead of warmup-seconds (5 s). Meant for the Noble premium tier and up.
+    default: op
+
+  knk.teleport.bypass.warmup:
+    description: Player teleports happen without a warmup.
+    default: op
+
+  knk.teleport.bypass.cooldown:
+    description: No cooldown after player teleports.
+    default: op
+
+  knk.teleport.bypass.combat:
+    description: Player teleports are allowed while combat-tagged.
+    default: op
+
+  knk.region.bypass:
+    description: >-
+      Walk and teleport into domains with AllowEntry off and out of domains with AllowExit off. A
+      staff teleport of another player carries the staff member's bypass (e.g. putting someone in a jail).
     default: op
 
   knk.menu:

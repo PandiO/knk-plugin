@@ -5,6 +5,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -68,6 +69,33 @@ public final class PlayerCommandSupport {
                         sender.sendMessage(ChatColor.RED + "You don't have permission to do that.");
                     }
                 }));
+    }
+
+    /**
+     * Like {@link #whenAllowed}, but holding any one of {@code nodes} is enough (e.g. a new node and
+     * the legacy node it replaces).
+     */
+    public void whenAnyAllowed(CommandSender sender, List<String> nodes, Runnable onAllowed) {
+        if (!(sender instanceof Player player)) {
+            onAllowed.run();
+            return;
+        }
+        CompletableFuture<Boolean> any = CompletableFuture.completedFuture(false);
+        for (String node : nodes) {
+            CompletableFuture<Boolean> check = knkPermissible.hasPermissionAsync(player, node)
+                    .exceptionally(ex -> {
+                        LOGGER.log(Level.WARNING, "Permission check failed for " + player.getName() + ", node " + node, ex);
+                        return false;
+                    });
+            any = any.thenCombine(check, (a, b) -> Boolean.TRUE.equals(a) || Boolean.TRUE.equals(b));
+        }
+        any.thenAccept(allowed -> mainThread.execute(() -> {
+            if (Boolean.TRUE.equals(allowed)) {
+                onAllowed.run();
+            } else {
+                sender.sendMessage(ChatColor.RED + "You don't have permission to do that.");
+            }
+        }));
     }
 
     /** The sender as a player, or null after telling a non-player sender the command is player-only. */

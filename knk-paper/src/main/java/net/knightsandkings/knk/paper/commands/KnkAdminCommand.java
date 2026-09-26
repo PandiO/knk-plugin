@@ -16,7 +16,6 @@ import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
 import net.knightsandkings.knk.core.ports.api.PermissionGroupsQueryApi;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
-import net.knightsandkings.knk.paper.commands.support.RankHierarchy;
 import net.knightsandkings.knk.paper.modes.ModeService;
 import net.knightsandkings.knk.api.GateStructuresApi;
 import net.knightsandkings.knk.api.GateDoorsApi;
@@ -91,7 +90,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
             UsersCommandApi usersCommandApi,
             UsersDataAccess usersDataAccess,
             PermissionGroupsQueryApi permissionGroupsQueryApi,
-            RankHierarchy rankHierarchy,
+            StaffTeleportCommand staffTeleportCommand,
             ModeService modeService,
             DistrictGateLoader districtGateLoader,
             GateDoorRegionCaptureHandler gateDoorRegionCaptureHandler,
@@ -361,14 +360,16 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                 (sender, args) -> userManagementCommand.onCommand(sender, null, "knk", args)
         );
 
-        // Register teleport-to-player (developer request, same round as group/perm/freeze/
-        // staffchat/msg - rebuild of the one real, working part of v1's PlayerTeleportCommand).
-        TeleportToPlayerCommand teleportToPlayerCommand = new TeleportToPlayerCommand(plugin, usersDataAccess, rankHierarchy);
-        registry.register(
-                new CommandMetadata("tp", "Teleport to an online player", "/knk tp <player>", "knk.admin.tp",
-                        List.of("/knk tp Steve")),
-                (sender, args) -> teleportToPlayerCommand.onCommand(sender, args)
-        );
+        // /knk tp <player> [-s]: alias of /tp <player> (docs/specs/teleport/DESIGN.md §4 D1), kept
+        // on its original knk.admin.tp node. Not registered when the teleport engine didn't start.
+        if (staffTeleportCommand != null) {
+            TeleportToPlayerCommand teleportToPlayerCommand = new TeleportToPlayerCommand(staffTeleportCommand);
+            registry.register(
+                    new CommandMetadata("tp", "Teleport to an online player (same as /tp <player>)", "/knk tp <player> [-s]", "knk.admin.tp",
+                            List.of("/knk tp Steve", "/knk tp Steve -s")),
+                    (sender, args) -> teleportToPlayerCommand.onCommand(sender, args)
+            );
+        }
 
         // Register help
         registry.register(

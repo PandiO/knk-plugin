@@ -206,6 +206,8 @@ public class KnKPlugin extends JavaPlugin {
     private EnchantmentBootstrap.EnchantmentRuntime enchantmentRuntime;
     private ExecutorService regionLookupExecutor;
     private TempRegionRetentionTask tempRegionRetentionTask;
+    private net.knightsandkings.knk.paper.teleport.TeleportService teleportService;
+    private net.knightsandkings.knk.paper.commands.StaffTeleportCommand staffTeleportCommand;
     
     @Override
     public void onEnable() {
@@ -636,6 +638,10 @@ public class KnKPlugin extends JavaPlugin {
             initializeEnchantmentRuntime(new WorldGuardCombatSafezones(regionDomainResolver, (attacker, victim) -> false));
             getLogger().info("Registered custom enchantment runtime listeners and /ce command");
 
+            // Teleport engine + staff teleports (docs/specs/teleport, Phase 1) - before the commands,
+            // /knk tp delegates to /tp.
+            initializeTeleports();
+
             // Register commands
             registerCommands();
 
@@ -682,6 +688,7 @@ public class KnKPlugin extends JavaPlugin {
                 true  // Enable console logging; set to false to disable
             );
             registerEvents(regionTracker);
+            wireTeleportRegionGuards(regionTracker);
 
             HealthSystem healthSystem = new HealthSystem(gateDoorsApi, this, gateDisplayManager, gateManager);
             GateDoorHitService gateDoorHitService = new GateDoorHitService(gateManager);
@@ -777,6 +784,9 @@ public class KnKPlugin extends JavaPlugin {
         if (tempRegionRetentionTask != null) {
             tempRegionRetentionTask.stop();
         }
+        if (teleportService != null) {
+            teleportService.cancelAll(net.knightsandkings.knk.core.teleport.WarmupCancelReason.SHUTDOWN);
+        }
         if (cacheManager != null) {
             getLogger().info("Logging final cache metrics...");
             cacheManager.logMetrics();
@@ -863,7 +873,7 @@ public class KnKPlugin extends JavaPlugin {
                 usersCommandApi,
                 usersDataAccess,
                 apiClient.getPermissionGroupsQueryApi(),
-                rankHierarchy,
+                staffTeleportCommand,
                 modeService,
                 districtGateLoader,
                 gateDoorRegionCaptureHandler,
@@ -912,6 +922,85 @@ public class KnKPlugin extends JavaPlugin {
         registerSimpleCommand("menu", new net.knightsandkings.knk.paper.commands.MenuCommand(() -> menuService));
 
         registerPlayerCommands();
+
+        if (staffTeleportCommand != null) {
+            registerTabCommand("tp", staffTeleportCommand);
+            registerTabCommand("tphere", staffTeleportCommand.withForm(
+                net.knightsandkings.knk.paper.commands.StaffTeleportCommand.Form.TPHERE));
+        } else {
+            getLogger().warning("/tp and /tphere not registered - the teleport engine failed to initialize");
+        }
+    }
+
+    /**
+     * Teleport engine (docs/specs/teleport/DESIGN.md §3.4) and the staff teleport commands (Phase 1).
+     * Siege guards plug in later through {@link #registerTeleportRestriction}.
+     */
+    private void initializeTeleports() {
+        if (knkPermissible == null || userAdminService == null || modeService == null || adminFreezeManager == null) {
+            getLogger().warning("Teleport engine not started - permissions/user services failed to initialize");
+            return;
+        }
+        java.util.concurrent.Executor mainThread = MenuService.mainThreadExecutor(this);
+        this.teleportService = new net.knightsandkings.knk.paper.teleport.TeleportService(
+            mainThread, knkPermissible::hasPermissionAsync, config.teleport(), System::currentTimeMillis,
+            net.knightsandkings.knk.paper.teleport.BukkitBlockProbe::new
+        );
+        teleportService.registerRestriction(
+            new net.knightsandkings.knk.paper.teleport.FreezeTeleportRestriction(adminFreezeManager::isFrozen));
+        getServer().getScheduler().runTaskTimer(this, () -> teleportService.tick(adminFreezeManager::isFrozen), 5L, 5L);
+
+        var pluginManager = getServer().getPluginManager();
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.TeleportWarmupListener(teleportService), this);
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.CombatTagListener(teleportService), this);
+
+        var support = new net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport(
+            knkPermissible, mainThread, org.bukkit.Bukkit::getPlayerExact, org.bukkit.Bukkit::getOnlinePlayers
+        );
+        // Same rank check as /freeze, /inventory and /knk user (console and knk.admin.user.manage.all pass).
+        net.knightsandkings.knk.paper.commands.support.TargetRankCheck rankCheck = (sender, targetName, onAllowed) ->
+            userAdminService.resolveTarget(sender, targetName, summary ->
+                userAdminService.withRankCheck(sender, summary, api -> onAllowed.accept(summary), () -> { }));
+        var targets = new net.knightsandkings.knk.paper.teleport.VisibleTargetResolver(
+            org.bukkit.Bukkit::getPlayerExact, org.bukkit.Bukkit::getOnlinePlayers, modeService::isVanished);
+        this.staffTeleportCommand = new net.knightsandkings.knk.paper.commands.StaffTeleportCommand(
+            net.knightsandkings.knk.paper.commands.StaffTeleportCommand.Form.TP, support, rankCheck, targets, teleportService,
+            modeService::isVanished, org.bukkit.Bukkit::getWorld,
+            () -> org.bukkit.Bukkit.getWorlds().stream().map(org.bukkit.World::getName).toList()
+        );
+        getLogger().info("Teleport engine initialized (warmup " + config.teleport().warmupSeconds() + "s / "
+            + config.teleport().warmupShortSeconds() + "s, cooldown " + config.teleport().cooldownSeconds() + "s)");
+    }
+
+    /**
+     * AllowEntry/AllowExit on teleports: the engine refuses up front (same verdict as the region
+     * listener), and holders of knk.region.bypass - or a player moved by a staff member who holds it -
+     * pass the listener (docs/specs/teleport/DESIGN.md §4 D11).
+     */
+    private void wireTeleportRegionGuards(WorldGuardRegionTracker regionTracker) {
+        String bypassNode = net.knightsandkings.knk.paper.teleport.TeleportNodes.REGION_BYPASS;
+        regionTracker.setDenialBypass(player ->
+            (knkPermissible != null && knkPermissible.hasPermission(player, bypassNode))
+                || (teleportService != null && teleportService.hasInFlightBypass(player.getUniqueId(), bypassNode)));
+        if (teleportService != null) {
+            teleportService.registerRestriction(
+                new net.knightsandkings.knk.paper.teleport.RegionTeleportRestriction(regionTracker::previewAccess));
+        }
+    }
+
+    /**
+     * Add a teleport guard (docs/specs/teleport/DESIGN.md §4 D9) - how the siege minigame blocks
+     * teleports of match members and into locked siege areas without the teleport engine depending
+     * on the siege code. No-op when the teleport engine didn't start.
+     */
+    public void registerTeleportRestriction(net.knightsandkings.knk.paper.teleport.TeleportRestriction restriction) {
+        if (teleportService != null) {
+            teleportService.registerRestriction(restriction);
+        }
+    }
+
+    public net.knightsandkings.knk.paper.teleport.TeleportService getTeleportService() {
+        return teleportService;
     }
 
     /**
