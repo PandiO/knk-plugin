@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.paper.enchantbook;
 
 import net.knightsandkings.knk.core.enchantbook.EnchantBookRules.ApplyResult;
+import net.knightsandkings.knk.core.enchantbook.EnchantBookText;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
@@ -68,10 +69,15 @@ public final class EnchantBookMenu {
         }
 
         List<Integer> eligible = new ArrayList<>();
+        Map<Integer, EnchantBooks.Decision> decisions = new HashMap<>();
         ItemStack[] contents = inv.getContents();
         for (int i = 0; i < contents.length && eligible.size() < MAX_ITEMS; i++) {
             if (i == bookIndex || contents[i] == null || contents[i].getType().isAir()) continue;
-            if (books.evaluate(book, contents[i]) == ApplyResult.APPLIED) eligible.add(i);
+            EnchantBooks.Decision decision = books.decide(book, contents[i]);
+            if (decision.result() == ApplyResult.APPLIED) {
+                eligible.add(i);
+                decisions.put(i, decision);
+            }
         }
         String enchantName = books.describeBook(book);
         if (eligible.isEmpty()) {
@@ -89,6 +95,12 @@ public final class EnchantBookMenu {
             List<Component> lore = meta.hasLore() && meta.lore() != null ? new ArrayList<>(meta.lore()) : new ArrayList<>();
             lore.add(Component.empty());
             lore.add(Component.text("Click to apply " + enchantName, NamedTextColor.GREEN).decoration(TextDecoration.ITALIC, false));
+            EnchantBooks.Decision decision = decisions.get(index);
+            if (decision != null && decision.capped()) {
+                // KNG-6: the grade cap lowers what this item gets.
+                lore.add(Component.text("Grade limit: only up to " + EnchantBookText.roman(decision.level()), NamedTextColor.GOLD)
+                        .decoration(TextDecoration.ITALIC, false));
+            }
             meta.lore(lore);
             shown.setItemMeta(meta);
             gui.setItem(slot, shown);
@@ -118,10 +130,14 @@ public final class EnchantBookMenu {
             player.playSound(player.getLocation(), Sound.BLOCK_ENCHANTMENT_TABLE_USE, 1f, 1f);
         }
         player.closeInventory();
-        player.sendActionBar(message(outcome.result()));
+        player.sendActionBar(message(outcome));
     }
 
     public static Component message(ApplyResult result) {
         return Component.text(EnchantBooks.describe(result), result == ApplyResult.APPLIED ? NamedTextColor.GREEN : NamedTextColor.RED);
+    }
+
+    public static Component message(EnchantBooks.Outcome outcome) {
+        return Component.text(EnchantBooks.describe(outcome), outcome.result() == ApplyResult.APPLIED ? NamedTextColor.GREEN : NamedTextColor.RED);
     }
 }

@@ -53,6 +53,9 @@ public final class ItemBlueprintBukkitMapper {
                 meta.setLore(lore);
             }
 
+            // Machine-readable grade for the enchant-book level cap (KNG-6); the star lore above is display only.
+            ItemGradeTag.stamp(meta, blueprint);
+
             itemStack.setItemMeta(meta);
         }
 

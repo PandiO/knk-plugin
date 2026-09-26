@@ -37,6 +37,13 @@ public final class EnchantBookItems {
     /** Same namespace {@code new NamespacedKey(plugin, ...)} gives this plugin ("KnightsAndKings"). */
     public static final NamespacedKey BOOK_KEY = Objects.requireNonNull(NamespacedKey.fromString("knightsandkings:knk_enchant_book"));
 
+    /**
+     * The enchantment definition's max level, copied from the blueprint when the book is built (KNG-6): the
+     * grade cap divides it, as v1 divided its own {@code Enchantments.MaxLevel}. Books built before KNG-6
+     * don't have it; {@link EnchantBooks} then falls back to the vanilla / registry max level.
+     */
+    public static final NamespacedKey MAX_LEVEL_KEY = Objects.requireNonNull(NamespacedKey.fromString("knightsandkings:knk_enchant_book_max"));
+
     private EnchantBookItems() {
     }
 
@@ -72,6 +79,10 @@ public final class EnchantBookItems {
         }
         EnchantBookPayload payload = resolved.get().payload();
         meta.getPersistentDataContainer().set(BOOK_KEY, PersistentDataType.STRING, payload.encode());
+        Integer definitionMax = enchantments.get(0).enchantmentMaxLevel();
+        if (definitionMax != null && definitionMax > 0) {
+            meta.getPersistentDataContainer().set(MAX_LEVEL_KEY, PersistentDataType.INTEGER, definitionMax);
+        }
         meta.setEnchantmentGlintOverride(true);
 
         List<String> lore = meta.hasLore() && meta.getLore() != null ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
@@ -126,6 +137,15 @@ public final class EnchantBookItems {
             return Optional.empty();
         }
         return EnchantBookPayload.decode(item.getItemMeta().getPersistentDataContainer().get(BOOK_KEY, PersistentDataType.STRING));
+    }
+
+    /** The definition max level stamped on the book ({@link #MAX_LEVEL_KEY}), or empty for older books. */
+    public static Optional<Integer> definitionMaxLevel(ItemStack book) {
+        if (book == null || !book.hasItemMeta()) {
+            return Optional.empty();
+        }
+        Integer max = book.getItemMeta().getPersistentDataContainer().get(MAX_LEVEL_KEY, PersistentDataType.INTEGER);
+        return max != null && max > 0 ? Optional.of(max) : Optional.empty();
     }
 
     public static boolean isBook(ItemStack item) {

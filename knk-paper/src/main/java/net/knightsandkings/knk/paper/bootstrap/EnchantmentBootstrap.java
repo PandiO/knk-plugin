@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.paper.bootstrap;
 
 import net.knightsandkings.knk.api.impl.enchantment.LocalEnchantmentRepositoryImpl;
+import net.knightsandkings.knk.core.domain.item.GradeCatalog;
 import net.knightsandkings.knk.core.ports.enchantment.CooldownManager;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentExecutor;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentRepository;
@@ -17,6 +18,8 @@ import net.knightsandkings.knk.paper.listeners.EnchantmentInteractListener;
 import net.knightsandkings.knk.paper.listeners.FreezeMovementListener;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.Plugin;
+
+import java.util.concurrent.ThreadLocalRandom;
 
 public class EnchantmentBootstrap {
         private final Plugin plugin;
@@ -59,8 +62,14 @@ public class EnchantmentBootstrap {
         );
         pluginManager.registerEvents(new EnchantmentEnchantTableListener(enchantmentRepository), plugin);
         pluginManager.registerEvents(new FreezeMovementListener(frozenPlayerTracker), plugin);
-        // Permanent enchantment books (KNG-5).
-        pluginManager.registerEvents(new EnchantBookListener(new EnchantBooks(enchantmentRepository)), plugin);
+        // Permanent enchantment books (KNG-5), capped by the target's grade (KNG-6).
+        EnchantBooks enchantBooks = new EnchantBooks(
+                enchantmentRepository,
+                configManager.enchantBookCapSettings(),
+                GradeCatalog.getInstance(),
+                () -> ThreadLocalRandom.current().nextDouble()
+        );
+        pluginManager.registerEvents(new EnchantBookListener(enchantBooks), plugin);
 
                 PluginCommand enchantmentCommand = plugin.getServer().getPluginCommand("ce");
         if (enchantmentCommand == null) {

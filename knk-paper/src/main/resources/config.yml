@@ -142,6 +142,26 @@ messages:
   # Merge complete
   merge-complete: "&aAccount merge complete. Your account now has {coins} coins, {gems} gems, and {exp} XP."
 
+# Permanent enchantment books (Linear KNG-5) - the v1 grade level cap (Linear KNG-6,
+# knk-workspace docs/specs/items/GRADE_DROPCHANCE.md). An item of grade G may take an enchantment
+# only up to definitionMaxLevel / divisor(G) (integer division, as v1). The divisors themselves are
+# per-grade fields in the web app (Grade.EnchantLevelCapDivisor: 5,4,3,2,1 for 1-5 stars, empty =
+# uncapped for 6-10 stars); the plugin re-reads them from the API every grade-refresh-minutes.
+enchant-books:
+  grade-cap:
+    # false = no grade cap at all (books behave as before KNG-6)
+    enabled: true
+    # v1 never capped custom enchantments (Poison, Chaos, ...); true caps them like vanilla ones
+    apply-to-custom: false
+    # Grade assumed for items without one (vanilla-crafted, not from a graded blueprint).
+    # 1 = most capped, so vanilla gear is no way around the cap; 0 = uncapped
+    ungraded-stars: 1
+    # Chance (0.0-1.0) that a book gives one bonus level, still within the cap. v1 rolled
+    # nextInt(100) <= 20, which is really 21%; set 0.21 for the exact v1 odds, 0 to disable
+    bonus-level-chance: 0.20
+    # How often the grade table (divisors) is re-read from the API
+    grade-refresh-minutes: 10
+
 # Custom enchantments runtime settings
 custom-enchantments:
   disable-for-creative: false

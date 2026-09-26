@@ -81,6 +81,6 @@ public class EnchantBookListener implements Listener {
             event.getView().setCursor(rest.getAmount() > 0 ? rest : null);
             player.playSound(player.getLocation(), Sound.BLOCK_ENCHANTMENT_TABLE_USE, 1f, 1f);
         }
-        player.sendActionBar(EnchantBookMenu.message(outcome.result()));
+        player.sendActionBar(EnchantBookMenu.message(outcome));
     }
 }
