@@ -378,6 +378,63 @@ public class TeleportRequestService {
         }
     }
 
+    /**
+     * A pending request as one of its two players sees it (the teleport menu, Phase 6).
+     *
+     * @param otherName   the other player's name
+     * @param incoming    true when the viewer is the one asked (they can accept it)
+     * @param direction   {@link Direction#TO_TARGET} ({@code /tpa}) or {@link Direction#TO_REQUESTER} ({@code /tpahere})
+     * @param secondsLeft seconds until it expires
+     */
+    public record Pending(String otherName, boolean incoming, Direction direction, int secondsLeft) {
+    }
+
+    /**
+     * {@code player}'s incoming requests (newest first; from players they can see) and then their
+     * outgoing one. Main thread; in-memory only.
+     */
+    public List<Pending> pending(Player player) {
+        long now = engine.now();
+        List<Pending> out = new ArrayList<>();
+        for (Request request : book.incoming(player.getUniqueId(), now)) {
+            Player requester = onlineById.apply(request.requester());
+            if (requester != null && targets.canSee(player, requester)) {
+                out.add(new Pending(requester.getName(), true, request.direction(), request.secondsLeft(now)));
+            }
+        }
+        book.outgoing(player.getUniqueId(), now).ifPresent(request -> {
+            Player target = onlineById.apply(request.target());
+            if (target != null) {
+                out.add(new Pending(target.getName(), false, request.direction(), request.secondsLeft(now)));
+            }
+        });
+        return out;
+    }
+
+    /**
+     * The teleport menu's requests tile: show {@code player} their pending requests again in chat -
+     * each incoming one with its clickable {@code [Accept] [Deny]}, the outgoing one with the
+     * {@code /tpcancel} hint. Nothing is accepted from the menu itself.
+     */
+    public void remind(Player player) {
+        List<Pending> pending = pending(player);
+        if (pending.isEmpty()) {
+            player.sendMessage(ChatColor.YELLOW + "You have no pending teleport requests.");
+            return;
+        }
+        for (Pending request : pending) {
+            if (request.incoming()) {
+                Player requester = targets.find(player, request.otherName());
+                if (requester != null) {
+                    player.sendMessage(requestNotice(requester, request.direction(), request.secondsLeft()));
+                }
+            } else {
+                player.sendMessage(ChatColor.GRAY + "Your teleport request to " + request.otherName() + " expires in "
+                    + request.secondsLeft() + " s. /tpcancel to withdraw.");
+            }
+        }
+    }
+
     /** Names of players with a pending request to {@code target} that {@code target} can see (tab completion). */
     public List<String> pendingRequesterNames(Player target) {
         List<String> names = new ArrayList<>();

@@ -167,8 +167,8 @@ commands:
   # Domain teleports (DESIGN.md §3.7, Phase 5) - Towns/Districts/Structures enabled as destinations
   # in the web app. Nodes checked in WarpCommand; the web API checks requirements and the price.
   warp:
-    description: "Teleport to a town, district or structure, or send a player there"
-    usage: "/warp <destination> | /warp list | /warp <destination> <player> [-s]"
+    description: "Open the teleport menu, teleport to a town, district or structure, or send a player there"
+    usage: "/warp | /warp <destination> | /warp list | /warp <destination> <player> [-s]"
     aliases: [point]
 
   warps:

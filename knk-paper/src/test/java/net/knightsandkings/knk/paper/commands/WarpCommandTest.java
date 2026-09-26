@@ -249,6 +249,36 @@ class WarpCommandTest {
     }
 
     @Test
+    void bareWarpOpensTheTeleportMenuAndFallsBackToTheChatList() {
+        List<Player> opened = new ArrayList<>();
+        boolean[] available = {true};
+        command.setMenuOpener(player -> {
+            if (available[0]) {
+                opened.add(player);
+            }
+            return available[0];
+        });
+
+        run(alice);
+        assertTrue(opened.isEmpty(), "needs knk.teleport.warp");
+
+        granted.add(TeleportNodes.WARP);
+        run(alice);
+        assertEquals(List.of(alice), opened);
+        verify(alice, never()).sendMessage(any(Component.class));
+
+        available[0] = false;
+        run(alice);
+        verify(alice, atLeastOnce()).sendMessage(any(Component.class));
+
+        // /warp list and /warps stay the chat list.
+        command.withForm(WarpCommand.Form.LIST).onCommand(alice, mock(Command.class), "warps", new String[0]);
+        run(alice, "list");
+        assertEquals(List.of(alice), opened);
+        verify(teleportService, never()).start(any());
+    }
+
+    @Test
     void listLinesShowPriceAndLock() {
         String open = net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText()
             .serialize(WarpCommand.listLine(kardenna, false, false));

@@ -10,6 +10,7 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -53,13 +54,15 @@ import net.kyori.adventure.text.format.NamedTextColor;
  *       then fails). {@value TeleportNodes#BYPASS_REQUIREMENTS} / {@value TeleportNodes#BYPASS_COST}
  *       skip the requirements / the price. Names are case-insensitive; a name several places share
  *       takes the {@code type:name} form ({@code town:Kardenna}).</li>
- *   <li>{@code /warps}, {@code /warp}, {@code /warp list} - the destinations with price and lock
- *       state (the teleport menu replaces the bare {@code /warp} in Phase 6).</li>
+ *   <li>{@code /warp} - opens the teleport menu ({@code teleport.destinations}, Phase 6); the chat
+ *       list when the menu isn't available.</li>
+ *   <li>{@code /warps}, {@code /warp list} - the destinations with price and lock state in chat.</li>
  *   <li>{@code /warp <destination> <player> [-s]} - send someone ({@value TeleportNodes#STAFF_OTHERS},
  *       you must outrank them): a staff teleport - instant, free, audited. Console allowed.</li>
  * </ul>
  * The list comes from {@link TeleportDestinationsDataAccess} (cached per player); it is only used to
- * resolve names and show locks - the server decides at the charge.
+ * resolve names and show locks - the server decides at the charge. The teleport menu's destination
+ * tiles run the player form through {@link #warpTo(Player, int)}.
  */
 public class WarpCommand implements TabExecutor {
 
@@ -99,24 +102,43 @@ public class WarpCommand implements TabExecutor {
     private final Deps deps;
     /** Players' knk user ids, remembered for tab completion (which can't wait for a lookup). */
     private final Map<UUID, Integer> knownUserIds;
+    /** Opens the teleport menu for a player; false when it isn't available (shared by every form). */
+    private final AtomicReference<Predicate<Player>> menuOpener;
 
     public WarpCommand(Form form, Deps deps) {
-        this(form, deps, new ConcurrentHashMap<>());
+        this(form, deps, new ConcurrentHashMap<>(), new AtomicReference<>(player -> false));
     }
 
-    private WarpCommand(Form form, Deps deps, Map<UUID, Integer> knownUserIds) {
+    private WarpCommand(Form form, Deps deps, Map<UUID, Integer> knownUserIds, AtomicReference<Predicate<Player>> menuOpener) {
         this.form = Objects.requireNonNull(form, "form must not be null");
         this.deps = Objects.requireNonNull(deps, "deps must not be null");
         this.knownUserIds = knownUserIds;
+        this.menuOpener = menuOpener;
     }
 
     /** The same command in another form, sharing everything else. */
     public WarpCommand withForm(Form other) {
-        return new WarpCommand(other, deps, knownUserIds);
+        return new WarpCommand(other, deps, knownUserIds, menuOpener);
+    }
+
+    /**
+     * How a bare {@code /warp} opens the teleport menu (Phase 6): returns false when the menu isn't
+     * available, and the chat list is shown instead. Null turns the menu off.
+     */
+    public void setMenuOpener(Predicate<Player> opener) {
+        menuOpener.set(opener != null ? opener : player -> false);
     }
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (form == Form.WARP && args.length == 0 && sender instanceof Player player) {
+            deps.support().whenAllowed(player, TeleportNodes.WARP, () -> {
+                if (!menuOpener.get().test(player)) {
+                    listTo(player);
+                }
+            });
+            return true;
+        }
         if (form == Form.LIST || args.length == 0 || (args.length == 1 && args[0].equalsIgnoreCase("list"))) {
             list(sender);
             return true;
@@ -157,8 +179,31 @@ public class WarpCommand implements TabExecutor {
         if (player == null) {
             return;
         }
+        warpSelf(player, list -> resolve(player, list, name));
+    }
+
+    /**
+     * The teleport menu's destination tiles (Phase 6): {@code player} warps to the destination with
+     * this domain id exactly as {@code /warp <name>} would - node, locks, warmup, every engine guard,
+     * then the server-side charge. The id is looked up in the player's own list again, so a stale or
+     * forged click can't reach a place the list doesn't offer. Main thread.
+     */
+    public void warpTo(Player player, int domainId) {
+        warpSelf(player, list -> {
+            for (KnkTeleportDestination destination : list) {
+                if (destination.domainId() == domainId) {
+                    return destination;
+                }
+            }
+            player.sendMessage(ChatColor.RED + "That teleport destination isn't available any more. /warps lists them.");
+            return null;
+        });
+    }
+
+    /** {@code player}'s own warp to whatever {@code pick} chooses from their list (null: it already said why not). */
+    private void warpSelf(Player player, Function<List<KnkTeleportDestination>, KnkTeleportDestination> pick) {
         deps.support().whenAllowed(player, TeleportNodes.WARP, () -> withDestinations(player, player, list -> {
-            KnkTeleportDestination destination = resolve(player, list, name);
+            KnkTeleportDestination destination = pick.apply(list);
             if (destination == null) {
                 return;
             }
@@ -217,7 +262,12 @@ public class WarpCommand implements TabExecutor {
             sender.sendMessage(ChatColor.YELLOW + "Usage from the console: /warp <destination> <player> [-s]");
             return;
         }
-        deps.support().whenAllowed(player, TeleportNodes.WARP, () -> withDestinations(player, player, list ->
+        deps.support().whenAllowed(player, TeleportNodes.WARP, () -> listTo(player));
+    }
+
+    /** The chat list, after the node check. */
+    private void listTo(Player player) {
+        withDestinations(player, player, list ->
             withBypass(player, (bypassRequirements, bypassCost) -> {
                 if (list.isEmpty()) {
                     player.sendMessage(ChatColor.YELLOW + "There are no teleport destinations yet.");
@@ -227,7 +277,7 @@ public class WarpCommand implements TabExecutor {
                 for (KnkTeleportDestination destination : list) {
                     player.sendMessage(listLine(destination, bypassRequirements, bypassCost));
                 }
-            })));
+            }));
     }
 
     /** "Kardenna (Town) - 10 gems - Available" (click to warp) or "... - Locked: Reach title X to unlock". */

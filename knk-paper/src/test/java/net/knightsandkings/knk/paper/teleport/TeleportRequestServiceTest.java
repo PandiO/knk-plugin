@@ -526,4 +526,38 @@ class TeleportRequestServiceTest {
         verify(alice).sendMessage(contains("Bob denied your teleport request."));
         assertEquals(List.of("Carol"), requests.pendingRequesterNames(bob));
     }
+
+    // ===== teleport menu (Phase 6) =====
+
+    @Test
+    void pendingListsIncomingFromVisiblePlayersThenTheOutgoingOne() {
+        requests.send(alice, bob, Direction.TO_TARGET);
+        requests.send(carol, bob, Direction.TO_REQUESTER);
+        requests.send(bob, staff, Direction.TO_TARGET);
+        vanished.add(carol);
+
+        List<TeleportRequestService.Pending> pending = requests.pending(bob);
+
+        assertEquals(List.of(
+            new TeleportRequestService.Pending("Alice", true, Direction.TO_TARGET, 30),
+            new TeleportRequestService.Pending("Staff", false, Direction.TO_TARGET, 30)), pending,
+            "Carol is vanished - her request isn't shown");
+    }
+
+    @Test
+    void remindResendsClickableNoticesAndAcceptsNothing() {
+        requests.send(alice, bob, Direction.TO_TARGET);
+        advance(10_000);
+
+        requests.remind(bob);
+
+        ArgumentCaptor<Component> notices = ArgumentCaptor.forClass(Component.class);
+        verify(bob, times(2)).sendMessage(notices.capture());
+        assertEquals(List.of("/tpaccept Alice", "/tpdeny Alice"), clickCommands(notices.getValue()));
+        assertEquals(List.of("Alice"), requests.pendingRequesterNames(bob), "still pending");
+        assertFalse(engine.isWarmingUp(alice.getUniqueId()));
+
+        requests.remind(carol);
+        verify(carol).sendMessage(contains("You have no pending teleport requests."));
+    }
 }

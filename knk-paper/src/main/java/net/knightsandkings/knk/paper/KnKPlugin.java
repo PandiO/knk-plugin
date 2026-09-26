@@ -220,6 +220,8 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.commands.SpawnCommand spawnCommand;
     private net.knightsandkings.knk.core.dataaccess.TeleportDestinationsDataAccess teleportDestinationsDataAccess;
     private net.knightsandkings.knk.paper.commands.WarpCommand warpCommand;
+    /** What the teleport menu uses; set once the teleport engine started (after the menu registries lock). */
+    private volatile net.knightsandkings.knk.paper.menu.content.TeleportMenuFeature.Teleports teleportMenuParts;
     
     @Override
     public void onEnable() {
@@ -603,7 +605,9 @@ public class KnKPlugin extends JavaPlugin {
                 new net.knightsandkings.knk.paper.menu.content.UserManagerMenuFeature(
                     userAdminService, usersQueryApi, cacheManager.getUserCache(), titleBracketsDataAccess,
                     permissionGroupsDataAccess, org.bukkit.Bukkit::getOnlinePlayers),
-                discoveriesMenuFeature
+                discoveriesMenuFeature,
+                // Teleport menu (KNG-17 Phase 6): the engine starts later in onEnable, hence the supplier.
+                new net.knightsandkings.knk.paper.menu.content.TeleportMenuFeature(() -> teleportMenuParts)
             );
             menuFeatures.forEach(feature -> feature.registerMenuHandlers(menuRegistries));
 
@@ -1126,6 +1130,22 @@ public class KnKPlugin extends JavaPlugin {
         this.spawnCommand = createSpawnCommand(support, rankCheck, targets);
         // Phase 5: /warp, /warps (DESIGN.md §3.7).
         this.warpCommand = createWarpCommand(support, rankCheck, targets, charges);
+        // Phase 6: the teleport menu (teleport.destinations) runs the same /warp, /spawn and request paths,
+        // and a bare /warp opens it (the chat list while the menu isn't available).
+        this.teleportMenuParts = new net.knightsandkings.knk.paper.menu.content.TeleportMenuFeature.Teleports(
+            teleportService, teleportDestinationsDataAccess, usersDataAccess != null ? teleportUserIdLookup() : null,
+            knkPermissible::hasPermissionAsync, warpCommand, spawnCommand, teleportRequestService);
+        if (warpCommand != null) {
+            warpCommand.setMenuOpener(player -> {
+                MenuService menus = menuService;
+                String key = net.knightsandkings.knk.paper.menu.content.TeleportMenuFeature.MENU_KEY;
+                if (menus == null || !menus.isMenuAvailable(key)) {
+                    return false;
+                }
+                menus.openMenu(player, key);
+                return true;
+            });
+        }
         getLogger().info("Teleport engine initialized (warmup " + config.teleport().warmupSeconds() + "s / "
             + config.teleport().warmupShortSeconds() + "s, cooldown " + config.teleport().cooldownSeconds() + "s)");
     }

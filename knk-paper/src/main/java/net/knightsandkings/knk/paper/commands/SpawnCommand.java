@@ -76,6 +76,14 @@ public class SpawnCommand implements TabExecutor {
         return true;
     }
 
+    /**
+     * {@code player} to spawn exactly as {@code /spawn} does it (node, warmup, every engine guard) -
+     * the teleport menu's Spawn tile (Phase 6). Main thread.
+     */
+    public void teleportSelf(Player player) {
+        self(player);
+    }
+
     private void self(CommandSender sender) {
         Player player = support.requirePlayer(sender);
         if (player == null) {
