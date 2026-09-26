@@ -71,7 +71,8 @@ public final class WarpTargets {
 
     /**
      * Tab completions for {@code prefix}: each name, or its {@code type:name} form when the name is
-     * shared, starting with {@code prefix} (ignoring case). Names with spaces are left out - a
+     * shared, when it or the bare name starts with {@code prefix} (ignoring case) - so "mar" offers
+     * {@code town:Market} and {@code district:Market}. Names with spaces are left out - a
      * command argument can't hold them.
      */
     public static List<String> complete(List<KnkTeleportDestination> destinations, String prefix) {
@@ -87,7 +88,9 @@ public final class WarpTargets {
         for (KnkTeleportDestination destination : destinations) {
             String candidate = shared.contains(destination.name().toLowerCase(Locale.ROOT))
                 ? destination.qualifiedName() : destination.name();
-            if (!candidate.contains(" ") && candidate.toLowerCase(Locale.ROOT).startsWith(lower) && !out.contains(candidate)) {
+            boolean matches = candidate.toLowerCase(Locale.ROOT).startsWith(lower)
+                || destination.name().toLowerCase(Locale.ROOT).startsWith(lower);
+            if (!candidate.contains(" ") && matches && !out.contains(candidate)) {
                 out.add(candidate);
             }
         }

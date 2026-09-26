@@ -58,5 +58,6 @@ class WarpTargetsTest {
         assertEquals(List.of("Kardenna", "town:Market", "district:Market"), WarpTargets.complete(all, ""));
         assertEquals(List.of("Kardenna"), WarpTargets.complete(all, "ka"));
         assertEquals(List.of("district:Market"), WarpTargets.complete(all, "dis"));
+        assertEquals(List.of("town:Market", "district:Market"), WarpTargets.complete(all, "MAR"));
     }
 }
