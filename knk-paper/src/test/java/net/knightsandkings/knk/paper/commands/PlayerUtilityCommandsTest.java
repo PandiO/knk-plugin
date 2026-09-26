@@ -170,27 +170,48 @@ class PlayerUtilityCommandsTest {
     }
 
     @Test
-    void feedAnotherPlayerFillsHungerAndSaturation() {
+    void feedAnotherPlayerFillsHungerAndTellsBothSidesHowMuch() {
         grant("knk.feed.others");
+        when(bob.getFoodLevel()).thenReturn(14);
 
         run(new RestoreCommand(support, RestoreCommand.Kind.FEED), alice, "Bob");
 
         verify(bob).setFoodLevel(20);
         verify(bob).setSaturation(20f);
         verify(bob).setExhaustion(0f);
-        verify(bob).sendMessage(contains("fed by"));
+        verify(alice).sendMessage(contains("Replenished §fBob§a with §f6§a hunger."));
+        verify(bob).sendMessage(contains("You were replenished with §f6§a hunger by §fAlice"));
     }
 
     @Test
-    void feedAllSkipsDeadPlayersAndReportsTheCount() {
+    void feedYourselfReportsTheAmount() {
+        grant("knk.feed");
+        when(alice.getFoodLevel()).thenReturn(3);
+
+        run(new RestoreCommand(support, RestoreCommand.Kind.FEED), alice);
+
+        verify(alice).sendMessage(contains("Replenished §f17§a hunger."));
+    }
+
+    @Test
+    void feedAllSkipsDeadPlayersAndReportsTheCountAndTotal() {
         grant("knk.feed.all");
+        when(alice.getFoodLevel()).thenReturn(15);
         when(bob.isDead()).thenReturn(true);
 
         run(new RestoreCommand(support, RestoreCommand.Kind.FEED), alice, "all");
 
         verify(alice).setFoodLevel(20);
         verify(bob, never()).setFoodLevel(anyInt());
-        verify(alice).sendMessage(contains("Fed 1 online player."));
+        verify(alice).sendMessage(contains("Replenished §f1§a online player with §f5§a hunger in total."));
+    }
+
+    @Test
+    void amountsShowHalfPointsOnly() {
+        assertEquals("7", RestoreCommand.amount(7.0));
+        assertEquals("7.5", RestoreCommand.amount(7.5));
+        assertEquals("0", RestoreCommand.amount(0.0));
+        assertEquals("3.3", RestoreCommand.amount(3.3333));
     }
 
     @Test

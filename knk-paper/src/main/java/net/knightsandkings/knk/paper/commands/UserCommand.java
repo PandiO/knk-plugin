@@ -27,14 +27,15 @@ import net.knightsandkings.knk.core.ports.api.UsersQueryApi;
 import net.knightsandkings.knk.paper.menu.content.ProfileView;
 
 /**
- * {@code /user statistics|stats [player]} - port of v2's {@code /user statistics}
- * (docs/specs/legacy/commands-v2.md §1, KNG-9). Open to everyone, no permission node.
+ * {@code /user statistics|stats [player]}, and the shortcut {@code /stats [player]} - port of v2's
+ * {@code /user statistics} (docs/specs/legacy/commands-v2.md §1, KNG-9). Open to everyone, no
+ * permission node.
  * <ul>
  *   <li>Your own statistics (or anyone's, from the console): title, place on the title ladder and
  *       progress to the next title, coins, gems, XP, prestige XP, premium tier, account type and
  *       staff/owner mode.</li>
- *   <li>Another player's: only the public part - title, ladder place, XP, prestige XP and premium
- *       tier. Balances and account details stay private; staff use {@code /knk user <player> info}.</li>
+ *   <li>Another player's: the same minus account type and staff/owner mode (the mode would give
+ *       away a vanished staff member).</li>
  * </ul>
  * The numbers come from {@link ProfileView}, the same view the Profile menu renders, over a fresh
  * API read (cache fallback) - so command and menu never disagree.
@@ -145,7 +146,7 @@ public class UserCommand implements TabExecutor {
 
     /**
      * The lines {@code /user statistics} prints, with {@code &} colour codes. {@code full} adds the
-     * private part: balances, account type and staff/owner mode.
+     * private part: title progress, account type and staff/owner mode.
      */
     static List<String> statisticsLines(UserSummary user, List<TitleBracket> brackets, boolean full) {
         ProfileView view = ProfileView.of(user, brackets);
@@ -161,6 +162,8 @@ public class UserCommand implements TabExecutor {
         }
         lines.add(view.getTitleLine());
         addIfPresent(lines, view.getTitleRankLine());
+        lines.add("&7Coins: &6" + user.coins());
+        lines.add("&7Gems: &b" + user.gems());
         lines.add("&7Experience: &f" + user.experiencePoints());
         addIfPresent(lines, view.getPrestigeLine());
         addIfPresent(lines, view.getPremiumLine());
@@ -171,6 +174,32 @@ public class UserCommand implements TabExecutor {
         if (line != null) {
             lines.add(line);
         }
+    }
+
+    /** {@code /stats [player]}: the same as {@code /user statistics [player]}. */
+    public TabExecutor statsShortcut() {
+        return new TabExecutor() {
+            @Override
+            public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+                if (args.length > 1) {
+                    sender.sendMessage(ChatColor.YELLOW + "Usage: /stats [player]");
+                    return true;
+                }
+                return UserCommand.this.onCommand(sender, command, label, withStatistics(args));
+            }
+
+            @Override
+            public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+                return args.length == 1 ? UserCommand.this.onTabComplete(sender, command, alias, withStatistics(args)) : Collections.emptyList();
+            }
+        };
+    }
+
+    private static String[] withStatistics(String[] args) {
+        String[] full = new String[args.length + 1];
+        full[0] = "statistics";
+        System.arraycopy(args, 0, full, 1, args.length);
+        return full;
     }
 
     @Override

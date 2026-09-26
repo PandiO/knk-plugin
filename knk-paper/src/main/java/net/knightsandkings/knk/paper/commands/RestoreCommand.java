@@ -29,36 +29,40 @@ import net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport;
 public class RestoreCommand implements TabExecutor {
 
     public enum Kind {
-        HEAL("heal", "healed", "Healed") {
+        HEAL("heal", "health") {
             @Override
-            void restore(Player player) {
-                AttributeInstance maxHealth = player.getAttribute(Attribute.MAX_HEALTH);
-                player.setHealth(maxHealth != null ? maxHealth.getValue() : 20.0);
+            double restore(Player player) {
+                AttributeInstance maxHealthAttribute = player.getAttribute(Attribute.MAX_HEALTH);
+                double maxHealth = maxHealthAttribute != null ? maxHealthAttribute.getValue() : 20.0;
+                double before = player.getHealth();
+                player.setHealth(maxHealth);
                 player.setFireTicks(0);
+                return Math.max(0, maxHealth - before);
             }
         },
-        FEED("feed", "fed", "Fed") {
+        FEED("feed", "hunger") {
             @Override
-            void restore(Player player) {
+            double restore(Player player) {
+                int before = player.getFoodLevel();
                 player.setFoodLevel(MAX_FOOD);
                 player.setSaturation(MAX_FOOD);
                 player.setExhaustion(0f);
+                return Math.max(0, MAX_FOOD - before);
             }
         };
 
         private static final int MAX_FOOD = 20;
 
         private final String label;
-        private final String pastTense;
-        private final String pastTenseCapitalized;
+        private final String resource;
 
-        Kind(String label, String pastTense, String pastTenseCapitalized) {
+        Kind(String label, String resource) {
             this.label = label;
-            this.pastTense = pastTense;
-            this.pastTenseCapitalized = pastTenseCapitalized;
+            this.resource = resource;
         }
 
-        abstract void restore(Player player);
+        /** Refills the player and returns how much was added (health points, or food points). */
+        abstract double restore(Player player);
 
         public String node() {
             return "knk." + label;
@@ -116,32 +120,47 @@ public class RestoreCommand implements TabExecutor {
 
     private void restoreOne(CommandSender sender, Player target, boolean self) {
         if (!target.isOnline() || target.isDead()) {
-            sender.sendMessage(ChatColor.RED + target.getName() + " can't be " + kind.pastTense + " right now.");
+            sender.sendMessage(ChatColor.RED + target.getName() + " can't be replenished right now.");
             return;
         }
-        kind.restore(target);
+        String amount = amount(kind.restore(target));
         if (self) {
-            target.sendMessage(ChatColor.GREEN + "You have been " + kind.pastTense + ".");
+            target.sendMessage(ChatColor.GREEN + "Replenished " + ChatColor.WHITE + amount + ChatColor.GREEN + " " + kind.resource + ".");
             return;
         }
-        sender.sendMessage(ChatColor.GREEN + kind.pastTenseCapitalized + " " + ChatColor.WHITE + target.getName() + ChatColor.GREEN + ".");
-        target.sendMessage(ChatColor.GREEN + "You have been " + kind.pastTense + " by " + ChatColor.WHITE + sender.getName() + ChatColor.GREEN + ".");
+        sender.sendMessage(ChatColor.GREEN + "Replenished " + ChatColor.WHITE + target.getName() + ChatColor.GREEN + " with "
+                + ChatColor.WHITE + amount + ChatColor.GREEN + " " + kind.resource + ".");
+        notifyTarget(sender, target, amount);
     }
 
     private void restoreAll(CommandSender sender) {
         int[] count = {0};
+        double[] total = {0};
         Consumer<Player> restore = player -> {
             if (player.isDead()) {
                 return;
             }
-            kind.restore(player);
+            double restored = kind.restore(player);
             count[0]++;
+            total[0] += restored;
             if (!PlayerCommandSupport.isSelf(sender, player)) {
-                player.sendMessage(ChatColor.GREEN + "You have been " + kind.pastTense + " by " + ChatColor.WHITE + sender.getName() + ChatColor.GREEN + ".");
+                notifyTarget(sender, player, amount(restored));
             }
         };
         support.onlinePlayers().forEach(restore);
-        sender.sendMessage(ChatColor.GREEN + kind.pastTenseCapitalized + " " + count[0] + " online player" + (count[0] == 1 ? "" : "s") + ".");
+        sender.sendMessage(ChatColor.GREEN + "Replenished " + ChatColor.WHITE + count[0] + ChatColor.GREEN + " online player"
+                + (count[0] == 1 ? "" : "s") + " with " + ChatColor.WHITE + amount(total[0]) + ChatColor.GREEN + " " + kind.resource + " in total.");
+    }
+
+    private void notifyTarget(CommandSender sender, Player target, String amount) {
+        target.sendMessage(ChatColor.GREEN + "You were replenished with " + ChatColor.WHITE + amount + ChatColor.GREEN + " "
+                + kind.resource + " by " + ChatColor.WHITE + sender.getName() + ChatColor.GREEN + ".");
+    }
+
+    /** "7", "7.5" - health comes in half points. */
+    static String amount(double value) {
+        double rounded = Math.round(value * 10) / 10.0;
+        return rounded == Math.rint(rounded) ? String.valueOf((long) rounded) : String.valueOf(rounded);
     }
 
     @Override

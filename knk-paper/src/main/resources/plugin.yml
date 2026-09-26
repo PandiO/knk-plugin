@@ -87,9 +87,13 @@ commands:
   # permission: entry - /user statistics is open to everyone, and the others check their knk.<cmd>
   # nodes through KnkPermissible inside the executor (same reasoning as /kit and /ownermode).
   user:
-    description: "Show your statistics, or another player's public statistics"
+    description: "Show your statistics, or another player's"
     usage: "/user statistics [player]"
     aliases: [u]
+
+  stats:
+    description: "Show your statistics, or another player's (same as /user statistics)"
+    usage: "/stats [player]"
 
   fly:
     description: "Toggle or set flight for yourself or an online player"

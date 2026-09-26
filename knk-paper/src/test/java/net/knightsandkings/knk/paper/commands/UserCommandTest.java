@@ -100,7 +100,7 @@ class UserCommandTest {
     }
 
     @Test
-    void anotherPlayersStatisticsLeaveOutBalancesAndAccount() {
+    void anotherPlayersStatisticsShowBalancesButNotAccountOrMode() {
         Player alice = player("Alice");
         when(usersDataAccess.getByUsernameAsync("Bob"))
                 .thenReturn(CompletableFuture.completedFuture(FetchResult.hit(user("Bob", 999, 320, 3, ActiveMode.OWNER, true))));
@@ -111,8 +111,8 @@ class UserCommandTest {
         assertTrue(out.contains("Statistics: §fBob"), out);
         assertTrue(out.contains("Title: §fKnight"), out);
         assertTrue(out.contains("Experience: §f320"), out);
-        assertFalse(out.contains("Coins"), out);
-        assertFalse(out.contains("Gems"), out);
+        assertTrue(out.contains("Coins: §6999"), out);
+        assertTrue(out.contains("Gems: §b7"), out);
         assertFalse(out.contains("Account"), out);
         assertFalse(out.contains("Mode"), out); // would reveal an owner/staff in vanish
     }
@@ -159,6 +159,23 @@ class UserCommandTest {
         command.onCommand(alice, mock(Command.class), "user", new String[]{"list"});
 
         verify(alice, atLeastOnce()).sendMessage(contains("Usage: /user statistics [player]"));
+    }
+
+    @Test
+    void statsShortcutIsUserStatistics() {
+        Player alice = player("Alice");
+        when(usersDataAccess.getByUsernameAsync("Bob"))
+                .thenReturn(CompletableFuture.completedFuture(FetchResult.hit(user("Bob", 5, 0, 1, ActiveMode.NONE, true))));
+        when(usersQueryApi.getByUuid(alice.getUniqueId()))
+                .thenReturn(CompletableFuture.completedFuture(user("Alice", 42, 0, 1, ActiveMode.NONE, true)));
+
+        command.statsShortcut().onCommand(alice, mock(Command.class), "stats", new String[]{"Bob"});
+        command.statsShortcut().onCommand(alice, mock(Command.class), "stats", new String[0]);
+
+        String out = joined(alice);
+        assertTrue(out.contains("Statistics: §fBob"), out);
+        assertTrue(out.contains("Statistics: §fAlice"), out);
+        assertEquals(List.of("Bob"), command.statsShortcut().onTabComplete(alice, mock(Command.class), "stats", new String[]{"b"}));
     }
 
     @Test

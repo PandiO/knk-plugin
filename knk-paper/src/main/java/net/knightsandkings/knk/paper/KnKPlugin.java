@@ -907,12 +907,14 @@ public class KnKPlugin extends JavaPlugin {
         java.util.concurrent.Executor mainThread = MenuService.mainThreadExecutor(this);
 
         if (usersQueryApi != null && usersDataAccess != null && titleBracketsDataAccess != null) {
-            registerTabCommand("user", new net.knightsandkings.knk.paper.commands.UserCommand(
+            var userCommand = new net.knightsandkings.knk.paper.commands.UserCommand(
                 mainThread, usersQueryApi, usersDataAccess, cacheManager.getUserCache(), titleBracketsDataAccess,
                 () -> org.bukkit.Bukkit.getOnlinePlayers().stream().map(org.bukkit.entity.Player::getName).toList()
-            ));
+            );
+            registerTabCommand("user", userCommand);
+            registerTabCommand("stats", userCommand.statsShortcut());
         } else {
-            getLogger().warning("/user not registered - user data access failed to initialize");
+            getLogger().warning("/user and /stats not registered - user data access failed to initialize");
         }
 
         if (knkPermissible == null || userAdminService == null) {
