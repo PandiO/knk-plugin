@@ -934,17 +934,26 @@ public class KnKPlugin extends JavaPlugin {
             knkPermissible, mainThread, org.bukkit.Bukkit::getPlayerExact, org.bukkit.Bukkit::getOnlinePlayers
         );
         // Same rank check as /knk tp, /freeze and /knk user (console and knk.admin.user.manage.all pass).
-        net.knightsandkings.knk.paper.commands.support.TargetRankCheck rankCheck = (sender, target, onAllowed) ->
-            userAdminService.resolveTarget(sender, target.getName(), summary ->
-                userAdminService.withRankCheck(sender, summary, api -> onAllowed.run(), () -> { }));
+        net.knightsandkings.knk.paper.commands.support.TargetRankCheck rankCheck = (sender, targetName, onAllowed) ->
+            userAdminService.resolveTarget(sender, targetName, summary ->
+                userAdminService.withRankCheck(sender, summary, api -> onAllowed.accept(summary), () -> { }));
+        // KNG-13: offline players' saved inventory/ender chest, read from and written to <main world>/playerdata.
+        @SuppressWarnings("deprecation") // Bukkit.getUnsafe().getDataVersion() has no replacement
+        var offlineStorage = new net.knightsandkings.knk.paper.inventory.OfflineStorageViews(
+            new net.knightsandkings.knk.paper.inventory.OfflinePlayerStorage(
+                () -> org.bukkit.Bukkit.getWorlds().get(0).getWorldFolder().toPath().resolve("playerdata"),
+                () -> org.bukkit.Bukkit.getUnsafe().getDataVersion()
+            )
+        );
+        getServer().getPluginManager().registerEvents(offlineStorage, this);
 
         registerTabCommand("fly", new net.knightsandkings.knk.paper.commands.FlyCommand(support));
         registerTabCommand("heal", new net.knightsandkings.knk.paper.commands.RestoreCommand(
             support, net.knightsandkings.knk.paper.commands.RestoreCommand.Kind.HEAL));
         registerTabCommand("feed", new net.knightsandkings.knk.paper.commands.RestoreCommand(
             support, net.knightsandkings.knk.paper.commands.RestoreCommand.Kind.FEED));
-        registerTabCommand("enderchest", new net.knightsandkings.knk.paper.commands.EnderchestCommand(support, rankCheck));
-        registerTabCommand("inventory", new net.knightsandkings.knk.paper.commands.InventoryCommand(support, rankCheck));
+        registerTabCommand("enderchest", new net.knightsandkings.knk.paper.commands.EnderchestCommand(support, rankCheck, offlineStorage));
+        registerTabCommand("inventory", new net.knightsandkings.knk.paper.commands.InventoryCommand(support, rankCheck, offlineStorage));
     }
 
     private void registerTabCommand(String name, org.bukkit.command.TabExecutor executor) {

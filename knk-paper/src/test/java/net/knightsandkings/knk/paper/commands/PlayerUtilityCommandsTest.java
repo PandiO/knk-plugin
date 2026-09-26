@@ -1,7 +1,9 @@
 package net.knightsandkings.knk.paper.commands;
 
+import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport;
 import net.knightsandkings.knk.paper.commands.support.TargetRankCheck;
+import net.knightsandkings.knk.paper.inventory.OfflineStorageAccess;
 import net.knightsandkings.knk.paper.permissions.KnkPermissible;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
@@ -47,12 +49,36 @@ class PlayerUtilityCommandsTest {
     private final PlayerCommandSupport support = new PlayerCommandSupport(permissible, Runnable::run,
             name -> online.get(name.toLowerCase()), () -> List.of(alice, bob));
 
+    private static final UUID CAROL_ID = UUID.nameUUIDFromBytes("Carol".getBytes());
+
     private boolean rankAllows = true;
-    private final List<Player> rankChecked = new ArrayList<>();
-    private final TargetRankCheck rankCheck = (sender, target, onAllowed) -> {
-        rankChecked.add(target);
-        if (rankAllows) {
-            onAllowed.run();
+    private final List<String> rankChecked = new ArrayList<>();
+    /** Knows Alice, Bob and the offline Carol, like the knk user API would. */
+    private final TargetRankCheck rankCheck = (sender, targetName, onAllowed) -> {
+        rankChecked.add(targetName);
+        if (!rankAllows) {
+            return;
+        }
+        String name = switch (targetName.toLowerCase()) {
+            case "alice" -> "Alice";
+            case "bob" -> "Bob";
+            case "carol" -> "Carol";
+            default -> null;
+        };
+        if (name != null) {
+            onAllowed.accept(new UserSummary(1, name, UUID.nameUUIDFromBytes(name.getBytes()), 0));
+        }
+    };
+    private final List<String> offlineCalls = new ArrayList<>();
+    private final OfflineStorageAccess offlineStorage = new OfflineStorageAccess() {
+        @Override
+        public void open(Player viewer, UUID target, String targetName, Kind kind) {
+            offlineCalls.add("open " + kind + " " + targetName + " " + target);
+        }
+
+        @Override
+        public void clearInventory(CommandSender sender, UUID target, String targetName) {
+            offlineCalls.add("clear " + targetName + " " + target);
         }
     };
 
@@ -234,7 +260,7 @@ class PlayerUtilityCommandsTest {
         Inventory own = mock(Inventory.class);
         when(alice.getEnderChest()).thenReturn(own);
 
-        run(new EnderchestCommand(support, rankCheck), alice);
+        run(new EnderchestCommand(support, rankCheck, offlineStorage), alice);
 
         verify(alice).openInventory(own);
         assertTrue(rankChecked.isEmpty());
@@ -246,10 +272,10 @@ class PlayerUtilityCommandsTest {
         Inventory bobs = mock(Inventory.class);
         when(bob.getEnderChest()).thenReturn(bobs);
 
-        run(new EnderchestCommand(support, rankCheck), alice, "open", "Bob");
+        run(new EnderchestCommand(support, rankCheck, offlineStorage), alice, "open", "Bob");
 
         assertEquals(List.of("knk.enderchest.open"), checkedNodes);
-        assertEquals(List.of(bob), rankChecked);
+        assertEquals(List.of("Bob"), rankChecked);
         verify(alice).openInventory(bobs);
     }
 
@@ -258,16 +284,29 @@ class PlayerUtilityCommandsTest {
         grant(EnderchestCommand.NODE_OPEN);
         rankAllows = false;
 
-        run(new EnderchestCommand(support, rankCheck), alice, "Bob");
+        run(new EnderchestCommand(support, rankCheck, offlineStorage), alice, "Bob");
 
         verify(alice, never()).openInventory(any(Inventory.class));
     }
 
     @Test
-    void enderchestCheckOnAnOfflinePlayerExplainsItIsNotSupported() {
-        run(new EnderchestCommand(support, rankCheck), alice, "check", "Carol");
+    void enderchestOfAnOfflinePlayerOpensTheirSavedOne() {
+        grant(EnderchestCommand.NODE_OPEN);
 
-        verify(alice).sendMessage(contains("Offline ender chests can't be viewed yet"));
+        run(new EnderchestCommand(support, rankCheck, offlineStorage), alice, "check", "carol");
+
+        assertEquals(List.of("carol"), rankChecked);
+        assertEquals(List.of("open ENDER_CHEST Carol " + CAROL_ID), offlineCalls);
+    }
+
+    @Test
+    void enderchestOfAnOfflineHigherRankedPlayerStaysClosed() {
+        grant(EnderchestCommand.NODE_OPEN);
+        rankAllows = false;
+
+        run(new EnderchestCommand(support, rankCheck, offlineStorage), alice, "Carol");
+
+        assertTrue(offlineCalls.isEmpty());
     }
 
     // ===== /inventory =====
@@ -278,10 +317,10 @@ class PlayerUtilityCommandsTest {
         PlayerInventory bobs = mock(PlayerInventory.class);
         when(bob.getInventory()).thenReturn(bobs);
 
-        run(new InventoryCommand(support, rankCheck), alice, "see", "Bob");
+        run(new InventoryCommand(support, rankCheck, offlineStorage), alice, "see", "Bob");
 
         assertEquals(List.of("knk.inventory.open"), checkedNodes);
-        assertEquals(List.of(bob), rankChecked);
+        assertEquals(List.of("Bob"), rankChecked);
         verify(alice).openInventory(bobs);
     }
 
@@ -291,7 +330,7 @@ class PlayerUtilityCommandsTest {
         PlayerInventory bobs = mock(PlayerInventory.class);
         when(bob.getInventory()).thenReturn(bobs);
 
-        run(new InventoryCommand(support, rankCheck), alice, "clear", "Bob");
+        run(new InventoryCommand(support, rankCheck, offlineStorage), alice, "clear", "Bob");
 
         verify(bobs, never()).clear();
         verify(alice).sendMessage(contains("can't be undone"));
@@ -303,9 +342,9 @@ class PlayerUtilityCommandsTest {
         PlayerInventory bobs = mock(PlayerInventory.class);
         when(bob.getInventory()).thenReturn(bobs);
 
-        run(new InventoryCommand(support, rankCheck), alice, "clear", "Bob", "confirm");
+        run(new InventoryCommand(support, rankCheck, offlineStorage), alice, "clear", "Bob", "confirm");
 
-        assertEquals(List.of(bob), rankChecked);
+        assertEquals(List.of("Bob"), rankChecked);
         verify(bobs).clear();
         verify(bob).sendMessage(contains("cleared by"));
     }
@@ -315,18 +354,48 @@ class PlayerUtilityCommandsTest {
         PlayerInventory bobs = mock(PlayerInventory.class);
         when(bob.getInventory()).thenReturn(bobs);
 
-        run(new InventoryCommand(support, rankCheck), alice, "clear", "Bob", "confirm");
+        run(new InventoryCommand(support, rankCheck, offlineStorage), alice, "clear", "Bob", "confirm");
 
         verify(bobs, never()).clear();
         assertTrue(rankChecked.isEmpty());
     }
 
     @Test
-    void inventoryOnAnOfflinePlayerExplainsItIsNotSupported() {
-        run(new InventoryCommand(support, rankCheck), alice, "open", "Carol");
+    void inventoryOfAnOfflinePlayerOpensTheirSavedOne() {
+        grant(InventoryCommand.NODE_OPEN);
 
-        verify(alice).sendMessage(contains("Offline inventories can't be viewed or cleared yet"));
-        assertTrue(checkedNodes.isEmpty());
+        run(new InventoryCommand(support, rankCheck, offlineStorage), alice, "open", "Carol");
+
+        assertEquals(List.of("knk.inventory.open"), checkedNodes);
+        assertEquals(List.of("open INVENTORY Carol " + CAROL_ID), offlineCalls);
+    }
+
+    @Test
+    void inventoryClearOfAnOfflinePlayerClearsTheirSavedOne() {
+        grant(InventoryCommand.NODE_CLEAR);
+
+        run(new InventoryCommand(support, rankCheck, offlineStorage), alice, "clear", "Carol", "confirm");
+
+        assertEquals(List.of("clear Carol " + CAROL_ID), offlineCalls);
+    }
+
+    @Test
+    void anUnknownPlayerOpensNothing() {
+        grant(InventoryCommand.NODE_OPEN, EnderchestCommand.NODE_OPEN);
+
+        run(new InventoryCommand(support, rankCheck, offlineStorage), alice, "open", "Nobody");
+        run(new EnderchestCommand(support, rankCheck, offlineStorage), alice, "Nobody");
+
+        assertTrue(offlineCalls.isEmpty()); // the real rank check reports "No player found"
+    }
+
+    @Test
+    void offlineAccessNeedsTheSameNodes() {
+        run(new InventoryCommand(support, rankCheck, offlineStorage), alice, "open", "Carol");
+        run(new EnderchestCommand(support, rankCheck, offlineStorage), alice, "Carol");
+
+        assertTrue(rankChecked.isEmpty());
+        assertTrue(offlineCalls.isEmpty());
     }
 
     // ===== tab completion =====
@@ -338,8 +407,8 @@ class PlayerUtilityCommandsTest {
         assertEquals(List.of("Bob"),
                 new FlyCommand(support).onTabComplete(alice, mock(Command.class), "fly", new String[]{"on", "b"}));
         assertEquals(List.of("confirm"),
-                new InventoryCommand(support, rankCheck).onTabComplete(alice, mock(Command.class), "inventory", new String[]{"clear", "Bob", "c"}));
-        assertFalse(new EnderchestCommand(support, rankCheck)
+                new InventoryCommand(support, rankCheck, offlineStorage).onTabComplete(alice, mock(Command.class), "inventory", new String[]{"clear", "Bob", "c"}));
+        assertFalse(new EnderchestCommand(support, rankCheck, offlineStorage)
                 .onTabComplete(alice, mock(Command.class), "ec", new String[]{""}).isEmpty());
     }
 }

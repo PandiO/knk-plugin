@@ -12,16 +12,18 @@ import org.bukkit.entity.Player;
 
 import net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport;
 import net.knightsandkings.knk.paper.commands.support.TargetRankCheck;
+import net.knightsandkings.knk.paper.inventory.OfflineStorageAccess;
 
 /**
  * {@code /enderchest [player]} (alias {@code /ec}) - port of v2's {@code Enderchest}
  * (docs/specs/legacy/commands-v2.md §1, KNG-9).
  * <ul>
  *   <li>{@code /ec} opens your own ender chest ({@value #NODE}).</li>
- *   <li>{@code /ec <player>} or {@code /ec open <player>} opens an online player's live ender chest
- *       ({@value #NODE_OPEN}); rank-checked, since the viewer can take items out.</li>
- *   <li>{@code /ec check <player>} (v2's offline lookup, disabled there since the 1.16→1.21 update)
- *       works for online players only; offline players are a separate issue (KNG-13).</li>
+ *   <li>{@code /ec <player>}, {@code /ec open <player>} or {@code /ec check <player>} opens another
+ *       player's ender chest ({@value #NODE_OPEN}); rank-checked, since the viewer can take items out.
+ *       An online player's is the live one; an offline player's is their saved one, written back when
+ *       the view closes (KNG-13, {@link OfflineStorageAccess} - v2's {@code check} was disabled since
+ *       the 1.16→1.21 update).</li>
  * </ul>
  */
 public class EnderchestCommand implements TabExecutor {
@@ -29,16 +31,16 @@ public class EnderchestCommand implements TabExecutor {
     public static final String NODE = "knk.enderchest";
     public static final String NODE_OPEN = "knk.enderchest.open";
 
-    // Offline support is KNG-13 (persistence approach still to be decided).
-    static final String OFFLINE_HINT = "Offline ender chests can't be viewed yet.";
     private static final List<String> SUBCOMMANDS = List.of("open", "check");
 
     private final PlayerCommandSupport support;
     private final TargetRankCheck rankCheck;
+    private final OfflineStorageAccess offlineStorage;
 
-    public EnderchestCommand(PlayerCommandSupport support, TargetRankCheck rankCheck) {
+    public EnderchestCommand(PlayerCommandSupport support, TargetRankCheck rankCheck, OfflineStorageAccess offlineStorage) {
         this.support = support;
         this.rankCheck = rankCheck;
+        this.offlineStorage = offlineStorage;
     }
 
     @Override
@@ -60,26 +62,21 @@ public class EnderchestCommand implements TabExecutor {
             return true;
         }
 
-        if (targetName == null) {
+        if (targetName == null || targetName.equalsIgnoreCase(viewer.getName())) {
             support.whenAllowed(viewer, NODE, () -> viewer.openInventory(viewer.getEnderChest()));
             return true;
         }
 
-        Player target = support.requireOnlinePlayer(sender, targetName, OFFLINE_HINT);
-        if (target == null) {
-            return true;
-        }
-        if (PlayerCommandSupport.isSelf(viewer, target)) {
-            support.whenAllowed(viewer, NODE, () -> viewer.openInventory(viewer.getEnderChest()));
-            return true;
-        }
-        support.whenAllowed(viewer, NODE_OPEN, () -> rankCheck.whenOutranks(viewer, target, () -> {
-            if (!target.isOnline()) {
-                viewer.sendMessage(ChatColor.RED + target.getName() + " went offline.");
-                return;
+        support.whenAllowed(viewer, NODE_OPEN, () -> rankCheck.whenOutranks(viewer, targetName, target -> {
+            Player online = support.onlinePlayer(target.username());
+            if (online != null) {
+                viewer.openInventory(online.getEnderChest());
+                viewer.sendMessage(ChatColor.GRAY + "Opened " + ChatColor.WHITE + online.getName() + ChatColor.GRAY + "'s ender chest.");
+            } else if (target.uuid() == null) {
+                viewer.sendMessage(ChatColor.RED + "No player found named '" + targetName + "'.");
+            } else {
+                offlineStorage.open(viewer, target.uuid(), target.username(), OfflineStorageAccess.Kind.ENDER_CHEST);
             }
-            viewer.openInventory(target.getEnderChest());
-            viewer.sendMessage(ChatColor.GRAY + "Opened " + ChatColor.WHITE + target.getName() + ChatColor.GRAY + "'s ender chest.");
         }));
         return true;
     }
