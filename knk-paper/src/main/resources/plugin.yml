@@ -342,7 +342,10 @@ permissions:
     default: false
 
   knk.admin.currency.alerts:
-    description: See currency anomaly alerts (Phase 5).
+    description: >-
+      Currency anomaly alerts (Phase 5): /knk currency alerts [all] [page] and alerts ack <id>, and
+      an in-game notice when the API raises a new alert (funnel, velocity, large staff grant,
+      reconciliation mismatch...). On the web, the alerts page and the reconciliation run.
     default: false
 
   knk.admin.currency.unlimited:

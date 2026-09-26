@@ -18,7 +18,7 @@ import net.knightsandkings.knk.core.domain.users.BalanceCurrency;
 import net.knightsandkings.knk.paper.currency.CurrencySettings;
 import net.knightsandkings.knk.paper.currency.PlayerCurrencyService;
 
-/** KNG-21 Phase 4: /knk currency argument parsing (the service does the checks and calls). */
+/** KNG-21 Phases 4-5: /knk currency argument parsing (the service does the checks and calls). */
 class CurrencyAdminCommandTest {
 
     private final PlayerCurrencyService service = mock(PlayerCurrencyService.class);
@@ -61,5 +61,34 @@ class CurrencyAdminCommandTest {
     void completesTheActions() {
         assertEquals(List.of("history"), command.complete(sender, new String[] {"hi"}));
         assertEquals(List.of("--partial"), command.complete(sender, new String[] {"reverse", "01M3", "--"}));
+    }
+
+    // ===== Phase 5: alerts =====
+
+    @Test
+    void alerts_openByDefault_allAndPageInAnyOrder_andAck() {
+        command.execute(sender, new String[] {"alerts"});
+        command.execute(sender, new String[] {"alerts", "2", "all"});
+        command.execute(sender, new String[] {"alerts", "ack", "12"});
+
+        verify(service).staffAlerts(sender, false, 1);
+        verify(service).staffAlerts(sender, true, 2);
+        verify(service).staffAcknowledgeAlert(sender, "12");
+    }
+
+    @Test
+    void alerts_badArguments_showTheUsage() {
+        command.execute(sender, new String[] {"alerts", "ack"});
+        command.execute(sender, new String[] {"alerts", "open-ones"});
+
+        verify(service, never()).staffAcknowledgeAlert(any(), anyString());
+        verify(service, never()).staffAlerts(any(), anyBoolean(), org.mockito.ArgumentMatchers.anyInt());
+        verify(sender, org.mockito.Mockito.times(2)).sendMessage(CurrencySettings.defaults().message("currency-admin-usage"));
+    }
+
+    @Test
+    void completesTheAlertsOptions() {
+        assertEquals(List.of("alerts"), command.complete(sender, new String[] {"al"}));
+        assertEquals(List.of("all", "ack"), command.complete(sender, new String[] {"alerts", "a"}));
     }
 }

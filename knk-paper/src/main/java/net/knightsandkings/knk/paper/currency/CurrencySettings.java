@@ -61,7 +61,18 @@ public final class CurrencySettings {
         Map.entry("reverse-note-short", "&cSay why in at least {min} characters."),
         Map.entry("lock-done", "&aLocked &e{player}&a's payments: &f{reason}"),
         Map.entry("unlock-done", "&a&e{player}&a can send and receive payments again."),
-        Map.entry("currency-admin-usage", "&eUsage: /knk currency reverse <txId> [--partial] <reason...> &7| &ehistory <player> [coins|gems|xp] [page] &7| &elock <player> <reason...> &7| &eunlock <player>")
+        Map.entry("currency-admin-usage", "&eUsage: /knk currency reverse <txId> [--partial] <reason...> &7| &ehistory <player> [coins|gems|xp] [page] &7| &elock <player> <reason...> &7| &eunlock <player> &7| &ealerts [all] [page] &7| &ealerts ack <id>"),
+        // Staff: currency alerts (Phase 5)
+        Map.entry("alert-notice", "&c[Currency alert] &6{severity} &e{rule} {name}&7: &f{summary}"),
+        Map.entry("alert-notice-transfers-off", "&c  {currencies} transfers were switched off - turn them back on in the web app's currency policy."),
+        Map.entry("alerts-header", "&6--- Currency alerts ({status}) - page {page}/{pages}, {open} open ---"),
+        Map.entry("alerts-line", "&8#{id} {time} &6{severity} &e{rule} &7{player}&f{summary}"),
+        Map.entry("alerts-acked-suffix", " &8(acked by {by})"),
+        Map.entry("alerts-empty", "&aNo open currency alerts."),
+        Map.entry("alert-acked", "&aAlert &e#{id}&a ({rule}) acknowledged."),
+        Map.entry("alert-not-found", "&cNo currency alert &e#{id}&c."),
+        Map.entry("alert-invalid-id", "&cThe alert id is a number, e.g. /knk currency alerts ack 12."),
+        Map.entry("alert-ack-console", "&cAcknowledge alerts in-game or on the web - the API records who handled each one.")
     );
 
     private final Map<String, String> messages;

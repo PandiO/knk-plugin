@@ -26,6 +26,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import net.knightsandkings.knk.api.auth.NoAuthProvider;
 import net.knightsandkings.knk.api.dto.PlayerNotificationDto;
 import net.knightsandkings.knk.api.mapper.UsersMapper;
+import net.knightsandkings.knk.core.domain.currency.CurrencyAlert;
+import net.knightsandkings.knk.core.domain.currency.CurrencyAlertPage;
 import net.knightsandkings.knk.core.domain.currency.CurrencyError;
 import net.knightsandkings.knk.core.domain.currency.CurrencyException;
 import net.knightsandkings.knk.core.domain.currency.LedgerPage;
@@ -285,5 +287,58 @@ class CurrencyApiImplTest {
         assertTrue(lock.locked());
         assertEquals(Instant.parse("2026-09-26T20:00:00Z"), lock.lockedAt());
         assertFalse(open.locked());
+    }
+
+    // ===== Currency alerts (Phase 5) =====
+
+    @Test
+    void alerts_readTheOpenPage() {
+        CurrencyAlertPage page = api(n -> json(200, """
+            {"openCount":3,"openBySeverity":{"Critical":1,"High":2},"totalCount":3,"pageNumber":1,"pageSize":5,
+             "items":[{"id":7,"rule":"R3","ruleName":"Funnel","severity":"High","summary":"Received transfers from 5 new accounts",
+                       "userId":6,"username":"bob","transactionId":null,"transactionPublicId":null,"details":{"transfers":5},
+                       "createdAt":"2026-09-26T20:00:00.123456","ackedAt":null,"ackedByUserId":null,"ackedByUsername":null}]}
+            """)).getAlerts(false, 1, 5).join();
+
+        assertEquals("GET", seen.get(0).method());
+        assertEquals("http://api.test/api/currency/admin/alerts?status=open&page=1&pageSize=5", seen.get(0).url().toString());
+        assertEquals(3, page.openCount());
+        CurrencyAlert alert = page.items().get(0);
+        assertEquals("R3", alert.rule());
+        assertEquals("bob", alert.username());
+        assertEquals(Instant.parse("2026-09-26T20:00:00.123456Z"), alert.createdAt());
+        assertFalse(alert.acknowledged());
+    }
+
+    @Test
+    void acknowledge_postsAsTheStaffMember() {
+        CurrencyAlert alert = api(n -> json(200, """
+            {"id":7,"rule":"R3","ruleName":"Funnel","severity":"High","summary":"s","userId":6,"username":"bob",
+             "createdAt":"2026-09-26T20:00:00","ackedAt":"2026-09-26T20:05:00","ackedByUserId":42,"ackedByUsername":"mod"}
+            """)).acknowledgeAlert(42, 7).join();
+
+        assertEquals("POST", seen.get(0).method());
+        assertEquals("http://api.test/api/currency/admin/alerts/7/ack", seen.get(0).url().toString());
+        assertEquals("42", seen.get(0).header(CurrencyApiImpl.ACTING_USER_HEADER));
+        assertTrue(alert.acknowledged());
+        assertEquals("mod", alert.ackedByUsername());
+    }
+
+    @Test
+    void currencyAlertNotifications_mapTheAlert() throws Exception {
+        PlayerNotificationDto dto = new ObjectMapper().readValue("""
+            {"id":9,"userId":0,"uuid":null,"username":"","type":"CurrencyAlert","titleChange":null,"payment":null,
+             "currencyAlert":{"alertId":12,"rule":"R1","ruleName":"Reconciliation mismatch","severity":"Critical",
+                              "summary":"Reconciliation found 1 balance mismatch","userId":6,"username":"bob","transfersDisabled":["Coins"]},
+             "createdAt":"2026-09-26T19:08:00Z"}
+            """, PlayerNotificationDto.class);
+
+        PlayerNotification notification = UsersMapper.mapPlayerNotification(dto);
+
+        assertEquals(PlayerNotification.TYPE_CURRENCY_ALERT, notification.type());
+        assertEquals(12, notification.currencyAlert().alertId());
+        assertEquals("Critical", notification.currencyAlert().severity());
+        assertEquals(List.of("Coins"), notification.currencyAlert().transfersDisabled());
+        assertEquals(null, notification.payment());
     }
 }

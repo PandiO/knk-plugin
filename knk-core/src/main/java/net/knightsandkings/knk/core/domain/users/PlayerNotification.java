@@ -12,11 +12,18 @@ public record PlayerNotification(
     String username,
     String type, // see TYPE_TITLE_CHANGED
     TitleChangeResult titleChange, // set when type is TYPE_TITLE_CHANGED
-    net.knightsandkings.knk.core.domain.currency.PaymentNotice payment // set when type is TYPE_PAYMENT_RECEIVED
+    net.knightsandkings.knk.core.domain.currency.PaymentNotice payment, // set when type is TYPE_PAYMENT_RECEIVED
+    net.knightsandkings.knk.core.domain.currency.CurrencyAlertNotice currencyAlert // set when type is TYPE_CURRENCY_ALERT
 ) {
     /** Without a payment - every type before TYPE_PAYMENT_RECEIVED. */
     public PlayerNotification(long id, int userId, String uuid, String username, String type, TitleChangeResult titleChange) {
-        this(id, userId, uuid, username, type, titleChange, null);
+        this(id, userId, uuid, username, type, titleChange, null, null);
+    }
+
+    /** Without a currency alert - every type before TYPE_CURRENCY_ALERT. */
+    public PlayerNotification(long id, int userId, String uuid, String username, String type, TitleChangeResult titleChange,
+                              net.knightsandkings.knk.core.domain.currency.PaymentNotice payment) {
+        this(id, userId, uuid, username, type, titleChange, payment, null);
     }
 
     public static final String TYPE_TITLE_CHANGED = "TitleChanged";
@@ -32,4 +39,10 @@ public record PlayerNotification(
      * about it on their next join.
      */
     public static final String TYPE_PAYMENT_RECEIVED = "PaymentReceived";
+    /**
+     * A currency anomaly alert (currency ledger Phase 5) for online staff holding
+     * knk.admin.currency.alerts - not addressed to one player (userId 0, no uuid). Payload in
+     * {@link #currencyAlert()}.
+     */
+    public static final String TYPE_CURRENCY_ALERT = "CurrencyAlert";
 }

@@ -17,6 +17,8 @@ import net.knightsandkings.knk.api.auth.AuthProvider;
 import net.knightsandkings.knk.api.dto.currency.CurrencyDtos;
 import net.knightsandkings.knk.api.mapper.CurrencyMapper;
 import net.knightsandkings.knk.core.domain.currency.Balances;
+import net.knightsandkings.knk.core.domain.currency.CurrencyAlert;
+import net.knightsandkings.knk.core.domain.currency.CurrencyAlertPage;
 import net.knightsandkings.knk.core.domain.currency.CurrencyError;
 import net.knightsandkings.knk.core.domain.currency.CurrencyException;
 import net.knightsandkings.knk.core.domain.currency.LeaderboardPage;
@@ -36,7 +38,7 @@ import okhttp3.RequestBody;
 
 /**
  * {@link CurrencyApi} over knk-web-api's {@code api/currency} routes (currency DESIGN.md §3.6,
- * IMPLEMENTATION_PLAN.md Phase 3) and the staff {@code api/currency/admin} routes (Phase 4).
+ * IMPLEMENTATION_PLAN.md Phase 3) and the staff {@code api/currency/admin} routes (Phases 4-5).
  * <p>
  * Writes carry {@code X-Acting-User-Id} = the sending player or staff member (the API refuses a
  * payment for anyone else) and
@@ -197,6 +199,30 @@ public class CurrencyApiImpl extends BaseApiImpl implements CurrencyApi {
                 return CurrencyMapper.mapLock(objectMapper.readValue(json, CurrencyDtos.TransferLockDto.class));
             } catch (IOException e) {
                 throw new RuntimeException("Failed to read the transfer lock", e);
+            }
+        }, executor);
+    }
+
+    // ===== Currency alerts (Phase 5) =====
+
+    @Override
+    public CompletableFuture<CurrencyAlertPage> getAlerts(boolean includeAcknowledged, int page, int pageSize) {
+        String url = baseUrl + ENDPOINT + "/admin/alerts?status=" + (includeAcknowledged ? "all" : "open")
+            + "&page=" + Math.max(1, page) + "&pageSize=" + Math.max(1, pageSize);
+        return read(url, json -> CurrencyMapper.mapAlertPage(objectMapper.readValue(json, CurrencyDtos.CurrencyAlertPageDto.class)));
+    }
+
+    @Override
+    public CompletableFuture<CurrencyAlert> acknowledgeAlert(int actingUserId, long alertId) {
+        // Acknowledging is repeatable (an acknowledged alert is returned unchanged), so a retry is safe.
+        String idempotencyKey = UUID.randomUUID().toString();
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                String json = sendWithRetries("POST", baseUrl + ENDPOINT + "/admin/alerts/" + alertId + "/ack", "{}",
+                    actingUserId, idempotencyKey);
+                return CurrencyMapper.mapAlert(objectMapper.readValue(json, CurrencyDtos.CurrencyAlertDto.class));
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to read the acknowledged alert", e);
             }
         }, executor);
     }

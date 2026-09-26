@@ -197,4 +197,44 @@ public final class CurrencyDtos {
         @JsonProperty("reason") String reason,
         @JsonProperty("lockedAt") String lockedAt
     ) {}
+
+    // ===== Currency alerts (Phase 5) =====
+
+    /** GET /api/currency/admin/alerts item. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record CurrencyAlertDto(
+        @JsonProperty("id") long id,
+        @JsonProperty("rule") String rule,
+        @JsonProperty("ruleName") String ruleName,
+        @JsonProperty("severity") String severity,
+        @JsonProperty("summary") String summary,
+        @JsonProperty("userId") Integer userId,
+        @JsonProperty("username") String username,
+        @JsonProperty("transactionPublicId") String transactionPublicId,
+        @JsonProperty("createdAt") String createdAt,
+        @JsonProperty("ackedAt") String ackedAt,
+        @JsonProperty("ackedByUsername") String ackedByUsername
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record CurrencyAlertPageDto(
+        @JsonProperty("items") java.util.List<CurrencyAlertDto> items,
+        @JsonProperty("totalCount") int totalCount,
+        @JsonProperty("pageNumber") int pageNumber,
+        @JsonProperty("pageSize") int pageSize,
+        @JsonProperty("openCount") int openCount
+    ) {}
+
+    /** Payload of a CurrencyAlert player notification. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record CurrencyAlertNotificationDto(
+        @JsonProperty("alertId") long alertId,
+        @JsonProperty("rule") String rule,
+        @JsonProperty("ruleName") String ruleName,
+        @JsonProperty("severity") String severity,
+        @JsonProperty("summary") String summary,
+        @JsonProperty("userId") Integer userId,
+        @JsonProperty("username") String username,
+        @JsonProperty("transfersDisabled") java.util.List<String> transfersDisabled
+    ) {}
 }

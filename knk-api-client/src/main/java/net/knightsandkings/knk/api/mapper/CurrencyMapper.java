@@ -11,6 +11,9 @@ import java.util.Map;
 
 import net.knightsandkings.knk.api.dto.currency.CurrencyDtos;
 import net.knightsandkings.knk.core.domain.currency.Balances;
+import net.knightsandkings.knk.core.domain.currency.CurrencyAlert;
+import net.knightsandkings.knk.core.domain.currency.CurrencyAlertNotice;
+import net.knightsandkings.knk.core.domain.currency.CurrencyAlertPage;
 import net.knightsandkings.knk.core.domain.currency.LeaderboardEntry;
 import net.knightsandkings.knk.core.domain.currency.LeaderboardPage;
 import net.knightsandkings.knk.core.domain.currency.LedgerLine;
@@ -114,6 +117,30 @@ public final class CurrencyMapper {
 
     public static TransferLock mapLock(CurrencyDtos.TransferLockDto dto) {
         return dto == null ? null : new TransferLock(dto.userId(), dto.username(), dto.locked(), dto.reason(), instant(dto.lockedAt()));
+    }
+
+    public static CurrencyAlert mapAlert(CurrencyDtos.CurrencyAlertDto dto) {
+        if (dto == null) {
+            return null;
+        }
+        return new CurrencyAlert(dto.id(), dto.rule(), dto.ruleName(), dto.severity(), dto.summary(), dto.userId(), dto.username(),
+            dto.transactionPublicId(), instant(dto.createdAt()), instant(dto.ackedAt()), dto.ackedByUsername());
+    }
+
+    public static CurrencyAlertPage mapAlertPage(CurrencyDtos.CurrencyAlertPageDto dto) {
+        if (dto == null) {
+            return new CurrencyAlertPage(List.of(), 0, 1, 1, 0);
+        }
+        List<CurrencyAlert> items = dto.items() == null ? List.of() : dto.items().stream().map(CurrencyMapper::mapAlert).toList();
+        return new CurrencyAlertPage(items, dto.totalCount(), dto.pageNumber(), dto.pageSize(), dto.openCount());
+    }
+
+    public static CurrencyAlertNotice mapAlertNotice(CurrencyDtos.CurrencyAlertNotificationDto dto) {
+        if (dto == null) {
+            return null;
+        }
+        return new CurrencyAlertNotice(dto.alertId(), dto.rule(), dto.ruleName(), dto.severity(), dto.summary(), dto.userId(),
+            dto.username(), dto.transfersDisabled());
     }
 
     /** "Coins"/"Gems"/"Experience" → enum; unknown → COINS (the API only sends these three). */

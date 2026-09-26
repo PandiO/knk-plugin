@@ -23,6 +23,8 @@ import net.knightsandkings.knk.core.cache.UserCache;
 import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
 import net.knightsandkings.knk.core.domain.currency.AmountParser;
 import net.knightsandkings.knk.core.domain.currency.Balances;
+import net.knightsandkings.knk.core.domain.currency.CurrencyAlert;
+import net.knightsandkings.knk.core.domain.currency.CurrencyAlertPage;
 import net.knightsandkings.knk.core.domain.currency.CurrencyError;
 import net.knightsandkings.knk.core.domain.currency.CurrencyException;
 import net.knightsandkings.knk.core.domain.currency.CurrencyFormat;
@@ -68,6 +70,8 @@ public class PlayerCurrencyService {
     public static final String CURRENCY_HISTORY_NODE = "knk.admin.currency.history";
     public static final String CURRENCY_REVERSE_NODE = "knk.admin.currency.reverse";
     public static final String CURRENCY_LOCK_NODE = "knk.admin.currency.lock";
+    /** Currency anomaly alerts: /knk currency alerts and the in-game alert notices (Phase 5). */
+    public static final String CURRENCY_ALERTS_NODE = "knk.admin.currency.alerts";
     /** A staff note (reversal) must say more than "fix" - the API requires 10 characters too. */
     public static final int MIN_STAFF_NOTE_LENGTH = 10;
 
@@ -524,6 +528,87 @@ public class PlayerCurrencyService {
                     send(viewer, "unlock-done", "player", name);
                 }
             }));
+    }
+
+    // ===== Staff: currency alerts (Phase 5) =====
+
+    /** {@code /knk currency alerts [all] [page]}: open alerts (or all), newest first; open ones offer a clickable ack. Main thread. */
+    public void staffAlerts(CommandSender viewer, boolean includeAcknowledged, int page) {
+        requireAll(viewer, CURRENCY_ALERTS_NODE, null)
+            .thenCompose(ignored -> currencyApi.getAlerts(includeAcknowledged, page, settings.transactionsPageSize()))
+            .whenComplete((alerts, ex) -> mainThread.execute(() -> renderAlerts(viewer, alerts, ex, includeAcknowledged)));
+    }
+
+    /** {@code /knk currency alerts ack <id>}: marks the alert handled by this staff member (in-game only). Main thread. */
+    public void staffAcknowledgeAlert(CommandSender viewer, String idText) {
+        long id;
+        try {
+            id = Long.parseLong(idText == null ? "" : idText.trim().replaceFirst("^#", ""));
+        } catch (NumberFormatException ex) {
+            send(viewer, "alert-invalid-id");
+            return;
+        }
+        Integer actor = staffUserId(viewer);
+        if (actor == null) {
+            send(viewer, "account-not-loaded");
+            return;
+        }
+        if (actor == 0) {
+            // The API records who acknowledged an alert; the console has no account to name.
+            send(viewer, "alert-ack-console");
+            return;
+        }
+        requireAll(viewer, CURRENCY_ALERTS_NODE, null)
+            .thenCompose(ignored -> currencyApi.acknowledgeAlert(actor, id))
+            .whenComplete((alert, ex) -> mainThread.execute(() -> {
+                if (ex != null) {
+                    CurrencyException error = CurrencyException.find(ex);
+                    if (error != null && error.httpStatus() == 404) {
+                        send(viewer, "alert-not-found", "id", String.valueOf(id));
+                    } else {
+                        renderError(viewer, ex, BalanceCurrency.COINS, null);
+                    }
+                    return;
+                }
+                send(viewer, "alert-acked", "id", String.valueOf(id), "rule", alert != null ? alert.rule() : "");
+            }));
+    }
+
+    private void renderAlerts(CommandSender viewer, CurrencyAlertPage alerts, Throwable ex, boolean includeAcknowledged) {
+        if (ex != null) {
+            renderError(viewer, ex, BalanceCurrency.COINS, null);
+            return;
+        }
+        if (alerts == null || alerts.items().isEmpty()) {
+            send(viewer, "alerts-empty");
+            return;
+        }
+        send(viewer, "alerts-header", "status", includeAcknowledged ? "all" : "open", "page", String.valueOf(alerts.page()),
+            "pages", String.valueOf(alerts.totalPages()), "open", String.valueOf(alerts.openCount()));
+        for (CurrencyAlert alert : alerts.items()) {
+            String line = alertLine(alert);
+            if (alert.acknowledged()) {
+                viewer.sendMessage(line + settings.message("alerts-acked-suffix", "by",
+                    alert.ackedByUsername() != null ? alert.ackedByUsername() : "staff"));
+            } else if (viewer instanceof Player) {
+                viewer.sendMessage(LEGACY.deserialize(line + " ")
+                    .append(LEGACY.deserialize("§a[ack]")
+                        .clickEvent(ClickEvent.suggestCommand("/knk currency alerts ack " + alert.id()))
+                        .hoverEvent(HoverEvent.showText(Component.text("Mark alert #" + alert.id() + " as handled")))));
+            } else {
+                viewer.sendMessage(line);
+            }
+        }
+    }
+
+    String alertLine(CurrencyAlert alert) {
+        return settings.message("alerts-line",
+            "id", String.valueOf(alert.id()),
+            "time", alert.createdAt() != null ? TIME.format(alert.createdAt()) : "",
+            "severity", alert.severity(),
+            "rule", alert.rule(),
+            "player", alert.username() != null ? alert.username() + ": " : "",
+            "summary", alert.summary());
     }
 
     /** The staff member's user id for X-Acting-User-Id; 0 for the console (the API records the game server). Null: not loaded. */

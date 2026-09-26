@@ -21,7 +21,7 @@ import net.knightsandkings.knk.paper.commands.support.PromotionEffects;
 /**
  * Delivers in-game moments the web API queued for writes the plugin didn't make itself -
  * (currency Phase 3: also "you received N coins from X" after a /pay, on the recipient's next
- * join when they were offline) -
+ * join when they were offline; Phase 5: currency anomaly alerts for online staff) -
  * a promotion/demotion from an XP change made through the web admin's player profile page, and a
  * rank change made outside the plugin (web app, or a temporary rank expiring), which re-reads the
  * player so chat and the tab list show the new rank within one poll. Without this, that path only ever showed a banner in the browser: the API returned the
@@ -54,6 +54,8 @@ public class PlayerNotificationPoller {
     private volatile Consumer<Player> rankChangedHandler;
     // Set once the currency commands exist (currency Phase 3).
     private volatile BiConsumer<Player, PlayerNotification> paymentReceivedHandler;
+    // Currency anomaly alerts for online staff (currency Phase 5); not addressed to one player.
+    private volatile Consumer<PlayerNotification> currencyAlertHandler;
 
     public PlayerNotificationPoller(PlayerNotificationsApi notificationsApi, Plugin plugin) {
         this(notificationsApi, plugin,
@@ -74,6 +76,15 @@ public class PlayerNotificationPoller {
     /** What to do for a {@link PlayerNotification#TYPE_PAYMENT_RECEIVED} whose player is online. */
     public void setPaymentReceivedHandler(BiConsumer<Player, PlayerNotification> handler) {
         this.paymentReceivedHandler = handler;
+    }
+
+    /**
+     * What to do for a {@link PlayerNotification#TYPE_CURRENCY_ALERT}: it is for every online staff
+     * member with the alerts node, not one player, so it is handed over as soon as anyone is online.
+     * Without a handler it stays queued (the API expires it after 24h).
+     */
+    public void setCurrencyAlertHandler(Consumer<PlayerNotification> handler) {
+        this.currencyAlertHandler = handler;
     }
 
     public void start() {
@@ -121,6 +132,20 @@ public class PlayerNotificationPoller {
         List<Long> toAcknowledge = new ArrayList<>();
         for (PlayerNotification notification : pending) {
             if (shownIds.contains(notification.id())) {
+                toAcknowledge.add(notification.id());
+                continue;
+            }
+            if (PlayerNotification.TYPE_CURRENCY_ALERT.equals(notification.type())) {
+                Consumer<PlayerNotification> handler = currencyAlertHandler;
+                if (handler == null) {
+                    continue;
+                }
+                try {
+                    handler.accept(notification);
+                } catch (RuntimeException e) {
+                    LOGGER.warning("Failed to show currency alert notification " + notification.id() + ": " + e.getMessage());
+                }
+                shownIds.add(notification.id());
                 toAcknowledge.add(notification.id());
                 continue;
             }

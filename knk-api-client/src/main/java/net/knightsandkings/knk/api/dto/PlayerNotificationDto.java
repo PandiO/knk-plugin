@@ -12,5 +12,6 @@ public record PlayerNotificationDto(
     @JsonProperty("username") String username,
     @JsonProperty("type") String type,
     @JsonProperty("titleChange") TitleChangeResultDto titleChange,
-    @JsonProperty("payment") net.knightsandkings.knk.api.dto.currency.CurrencyDtos.PaymentNotificationDto payment
+    @JsonProperty("payment") net.knightsandkings.knk.api.dto.currency.CurrencyDtos.PaymentNotificationDto payment,
+    @JsonProperty("currencyAlert") net.knightsandkings.knk.api.dto.currency.CurrencyDtos.CurrencyAlertNotificationDto currencyAlert
 ) {}

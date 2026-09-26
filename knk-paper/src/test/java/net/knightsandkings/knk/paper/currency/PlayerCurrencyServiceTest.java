@@ -33,6 +33,8 @@ import net.knightsandkings.knk.core.cache.UserCache;
 import net.knightsandkings.knk.core.dataaccess.FetchResult;
 import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
 import net.knightsandkings.knk.core.domain.currency.Balances;
+import net.knightsandkings.knk.core.domain.currency.CurrencyAlert;
+import net.knightsandkings.knk.core.domain.currency.CurrencyAlertPage;
 import net.knightsandkings.knk.core.domain.currency.CurrencyError;
 import net.knightsandkings.knk.core.domain.currency.CurrencyException;
 import net.knightsandkings.knk.core.domain.currency.LedgerLine;
@@ -287,4 +289,61 @@ class PlayerCurrencyServiceTest {
 
         assertTrue(aliceSees.get(1).endsWith("#01M3ABC"), aliceSees.get(1));
     }
+
+    // ===== Phase 5: currency alerts =====
+
+    private static CurrencyAlert alert(long id, boolean acked) {
+        return new CurrencyAlert(id, "R3", "Funnel", "High", "Received transfers from 5 new accounts", 2, "bob", null,
+            Instant.parse("2026-09-26T11:30:00Z"), acked ? Instant.parse("2026-09-26T11:45:00Z") : null, acked ? "mod" : null);
+    }
+
+    @Test
+    void staffAlerts_listsTheOpenAlertsWithAnAckButton_andNeedsTheNode() {
+        when(api.getAlerts(false, 1, 8)).thenReturn(CompletableFuture.completedFuture(
+            new CurrencyAlertPage(List.of(alert(7, false)), 1, 1, 8, 1)));
+        when(api.getAlerts(true, 2, 8)).thenReturn(CompletableFuture.completedFuture(
+            new CurrencyAlertPage(List.of(alert(6, true)), 9, 2, 8, 1)));
+
+        service.staffAlerts(alice, false, 1);
+        service.staffAlerts(alice, true, 2);
+        nodes.put(PlayerCurrencyService.CURRENCY_ALERTS_NODE, false);
+        service.staffAlerts(alice, false, 1);
+
+        assertEquals("§6--- Currency alerts (open) - page 1/1, 1 open ---", aliceSees.get(0));
+        assertEquals("#7 09-26 11:30 High R3 bob: Received transfers from 5 new accounts [ack]", strip(aliceSees.get(1)));
+        assertEquals("§6--- Currency alerts (all) - page 2/2, 1 open ---", aliceSees.get(2));
+        assertTrue(strip(aliceSees.get(3)).endsWith("(acked by mod)"), aliceSees.get(3));
+        assertEquals("§cYou don't have permission to do that.", aliceSees.get(4));
+        verify(api, org.mockito.Mockito.times(2)).getAlerts(anyBoolean(), anyInt(), anyInt());
+    }
+
+    @Test
+    void staffAcknowledgeAlert_sendsTheStaffMember_andExplainsAMissingAlert() {
+        when(api.acknowledgeAlert(1, 7)).thenReturn(CompletableFuture.completedFuture(alert(7, true)));
+        when(api.acknowledgeAlert(1, 8)).thenReturn(CompletableFuture.failedFuture(
+            new CurrencyException(new CurrencyError("AlertNotFound", "Currency alert 8 doesn't exist.", Map.of()), 404, null)));
+
+        service.staffAcknowledgeAlert(alice, "#7");
+        service.staffAcknowledgeAlert(alice, "8");
+        service.staffAcknowledgeAlert(alice, "seven");
+
+        assertEquals("§aAlert §e#7§a (R3) acknowledged.", aliceSees.get(0));
+        assertEquals("§cNo currency alert §e#8§c.", aliceSees.get(1));
+        assertEquals("§cThe alert id is a number, e.g. /knk currency alerts ack 12.", aliceSees.get(2));
+    }
+
+    @Test
+    void staffAcknowledgeAlert_fromTheConsole_isRefusedWithoutCallingTheApi() {
+        org.bukkit.command.CommandSender console = mock(org.bukkit.command.ConsoleCommandSender.class);
+
+        service.staffAcknowledgeAlert(console, "7");
+
+        verify(api, never()).acknowledgeAlert(anyInt(), anyLong());
+        verify(console).sendMessage(CurrencySettings.defaults().message("alert-ack-console"));
+    }
+
+    private static String strip(String text) {
+        return text.replaceAll("§.", "");
+    }
 }
+

@@ -374,15 +374,16 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                 (sender, args) -> userManagementCommand.onCommand(sender, null, "knk", args)
         );
 
-        // Currency ledger Phase 4: /knk currency reverse|history|lock|unlock. Null top-level
+        // Currency ledger Phase 4/5: /knk currency reverse|history|lock|unlock|alerts. Null top-level
         // permission like /knk user: each action checks its own knk.admin.currency.* node.
         if (playerCurrencyService != null) {
             currencyAdminCommand = new CurrencyAdminCommand(playerCurrencyService);
             registry.register(
-                    new CommandMetadata("currency", "Reverse ledger transactions, read a player's history, lock payments",
-                            "/knk currency reverse <txId> [--partial] <reason> | history <player> [coins|gems|xp] [page] | lock <player> <reason> | unlock <player>", null,
+                    new CommandMetadata("currency", "Reverse ledger transactions, read a player's history, lock payments, see anomaly alerts",
+                            "/knk currency reverse <txId> [--partial] <reason> | history <player> [coins|gems|xp] [page] | lock <player> <reason> | unlock <player> | alerts [all] [page] | alerts ack <id>", null,
                             List.of("/knk currency history Steve coins", "/knk currency reverse 01J9ZX3K4Q7T8V2B5N6M1C0D9E granted twice by a bug",
-                                    "/knk currency lock Steve suspected alt funnel", "/knk currency unlock Steve")),
+                                    "/knk currency lock Steve suspected alt funnel", "/knk currency unlock Steve", "/knk currency alerts",
+                                    "/knk currency alerts ack 12")),
                     (sender, args) -> currencyAdminCommand.execute(sender, args)
             );
         }
