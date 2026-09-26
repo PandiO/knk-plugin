@@ -39,6 +39,7 @@ import net.knightsandkings.knk.core.dataaccess.PermissionsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MenuTemplatesDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.GradesDataAccess;
+import net.knightsandkings.knk.core.domain.item.GradeCatalog;
 import net.knightsandkings.knk.core.dataaccess.TagsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.DomainCatalogDataAccess;
 import net.knightsandkings.knk.core.menu.ActionRegistry;
@@ -479,6 +480,8 @@ public class KnKPlugin extends JavaPlugin {
                 config.cache().ttl(),
                 gradesQueryApi
             );
+            // KNG-6: the grade table (enchant-book level-cap divisors), readable synchronously from click handlers.
+            startGradeCatalogRefresh();
             this.tagsDataAccess = dataAccessFactory.createTagsDataAccess(
                 config.cache().ttl(),
                 tagsQueryApi
@@ -948,6 +951,32 @@ public class KnKPlugin extends JavaPlugin {
 
     public WorldTasksApi getWorldTasksApi() {
         return worldTasksApi;
+    }
+
+    /**
+     * Loads the grade table into {@link GradeCatalog} now and every {@code enchant-books.grade-cap.grade-refresh-minutes}
+     * (KNG-6, docs/specs/items/GRADE_DROPCHANCE.md §4). Until the first load succeeds the catalog answers with
+     * the seeded defaults, so the enchant-book cap never waits on the API.
+     */
+    private void startGradeCatalogRefresh() {
+        int minutes = Math.max(1, getConfig().getInt("enchant-books.grade-cap.grade-refresh-minutes", 10));
+        long ticks = minutes * 60L * 20L;
+        getServer().getScheduler().runTaskTimerAsynchronously(this, this::refreshGradeCatalog, 0L, ticks);
+    }
+
+    private void refreshGradeCatalog() {
+        gradesDataAccess.listAsync(1, 100).whenComplete((page, error) -> {
+            if (error != null || page == null || page.items() == null) {
+                getLogger().warning("Grade table refresh failed; keeping the previous/default enchant-book caps"
+                        + (error != null ? ": " + error.getMessage() : ""));
+                return;
+            }
+            boolean first = !GradeCatalog.getInstance().isLoaded();
+            GradeCatalog.getInstance().replace(page.items());
+            if (first) {
+                getLogger().info("Grade table loaded (" + page.items().size() + " grades) for the enchant-book level cap");
+            }
+        });
     }
 
     private void initializeEnchantmentRuntime(CombatSafezoneCheck safezones) {
