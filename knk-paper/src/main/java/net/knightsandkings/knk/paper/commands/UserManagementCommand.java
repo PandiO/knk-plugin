@@ -8,14 +8,17 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 
+import net.knightsandkings.knk.core.domain.users.BalanceCurrency;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.paper.commands.support.DurationParser;
+import net.knightsandkings.knk.paper.currency.PlayerCurrencyService;
 import net.knightsandkings.knk.paper.user.UserAdminService;
 
 /**
  * /knk user &lt;player&gt; info | coins|gems set|add|remove &lt;amount&gt; &lt;reason...&gt;
  *          | xp set|add|remove &lt;amount&gt; [reason...]
  *          | group add|remove &lt;groupName&gt; [duration] | perm grant|revoke &lt;node&gt; [duration]
+ *          | history [coins|gems|xp] [page]
  * (developer request, 2026-09-25 - no in-game way to edit a player's rank/XP/coins/gems existed
  * before this; group/perm added in the same-day follow-up round closing the v1 rank-assignment
  * gap, see docs/specs/legacy/commands-v1.md's /user default|staff|builder|co-owner|owner).
@@ -39,20 +42,30 @@ import net.knightsandkings.knk.paper.user.UserAdminService;
  * player's highest active PermissionGroup weight must exceed the target's, so staff can only
  * manage players ranked below themselves.
  * <p>
+ * {@code history} (currency ledger Phase 3, KNG-23) lists the player's ledger lines - every change
+ * to their coins, gems or XP with before/after balance, reason and initiator - on node
+ * knk.admin.user.history; read-only, so no rank check.
+ * <p>
  * All of that logic lives in {@link UserAdminService} (InventoryMenu content port CP8) - the same
  * methods the in-game Player manager calls; this class only parses arguments.
  */
 public class UserManagementCommand implements CommandExecutor {
-    private static final List<String> PROPERTIES = List.of("info", "coins", "gems", "xp", "group", "perm");
+    private static final List<String> PROPERTIES = List.of("info", "coins", "gems", "xp", "group", "perm", "history");
     private static final List<String> BALANCE_ACTIONS = List.of("set", "add", "remove");
     private static final List<String> REASON_REQUIRED = List.of("coins", "gems");
     private static final List<String> GROUP_ACTIONS = List.of("add", "remove");
     private static final List<String> PERM_ACTIONS = List.of("grant", "revoke");
 
     private final UserAdminService userAdminService;
+    private final PlayerCurrencyService currencyService;
 
     public UserManagementCommand(UserAdminService userAdminService) {
+        this(userAdminService, null);
+    }
+
+    public UserManagementCommand(UserAdminService userAdminService, PlayerCurrencyService currencyService) {
         this.userAdminService = userAdminService;
+        this.currencyService = currencyService;
     }
 
     @Override
@@ -89,6 +102,10 @@ public class UserManagementCommand implements CommandExecutor {
         }
         if (property.equals("perm")) {
             handlePerm(sender, targetName, args);
+            return true;
+        }
+        if (property.equals("history")) {
+            handleHistory(sender, targetName, args);
             return true;
         }
         handleBalance(sender, targetName, property, args);
@@ -183,6 +200,31 @@ public class UserManagementCommand implements CommandExecutor {
             target -> userAdminService.changePermission(sender, target, node, action.equals("grant"), expiresAt));
     }
 
+    /** /knk user &lt;player&gt; history [coins|gems|xp] [page] - arguments in any order. */
+    private void handleHistory(CommandSender sender, String targetName, String[] args) {
+        if (currencyService == null) {
+            sender.sendMessage(ChatColor.RED + "Currency history isn't available right now.");
+            return;
+        }
+        BalanceCurrency filter = null;
+        int page = 1;
+        for (int i = 2; i < args.length; i++) {
+            BalanceCurrency parsed = TransactionsCommand.parseFilter(args[i]);
+            if (parsed != null) {
+                filter = parsed;
+                continue;
+            }
+            page = BaltopCommand.parsePage(args[i]);
+            if (page < 1) {
+                sender.sendMessage(ChatColor.YELLOW + "Usage: /knk user <player> history [coins|gems|xp] [page]");
+                return;
+            }
+        }
+        BalanceCurrency currency = filter;
+        int pageNumber = page;
+        userAdminService.resolveTarget(sender, targetName, target -> currencyService.staffHistory(sender, target, currency, pageNumber));
+    }
+
     /** resolveTarget already delivers onFound on the main thread, so this sends directly. */
     private void sendInfo(CommandSender sender, UserSummary target) {
         sender.sendMessage(ChatColor.GOLD + "--- " + target.username() + " ---");
@@ -198,7 +240,8 @@ public class UserManagementCommand implements CommandExecutor {
             || sender.hasPermission("knk.admin.user.gems")
             || sender.hasPermission("knk.admin.user.xp")
             || sender.hasPermission("knk.admin.user.group")
-            || sender.hasPermission("knk.admin.user.perm");
+            || sender.hasPermission("knk.admin.user.perm")
+            || sender.hasPermission("knk.admin.user.history");
     }
 
     private void sendUsage(CommandSender sender) {
@@ -208,6 +251,7 @@ public class UserManagementCommand implements CommandExecutor {
         sender.sendMessage(ChatColor.YELLOW + "  /knk user <player> xp set|add|remove <amount> [reason...]");
         sender.sendMessage(ChatColor.YELLOW + "  /knk user <player> group add|remove <groupName> [duration]");
         sender.sendMessage(ChatColor.YELLOW + "  /knk user <player> perm grant|revoke <node> [duration]");
+        sender.sendMessage(ChatColor.YELLOW + "  /knk user <player> history [coins|gems|xp] [page]");
         sender.sendMessage(ChatColor.GRAY + "  duration examples: 2h, 90m, 3d (omit for permanent)");
     }
 }

@@ -97,7 +97,8 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
             GateDoorRegionCaptureHandler gateDoorRegionCaptureHandler,
             String serverId,
             MenuService menuService,
-            net.knightsandkings.knk.paper.user.UserAdminService userAdminService
+            net.knightsandkings.knk.paper.user.UserAdminService userAdminService,
+            net.knightsandkings.knk.paper.currency.PlayerCurrencyService playerCurrencyService
     ) {
                 this.plugin = plugin;
                 this.enchantmentDefinitionsDataAccess = enchantmentDefinitionsDataAccess;
@@ -352,12 +353,12 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         // 2026-09-25 same day) - null top-level permission, same as gate, since it gates
         // coins/gems/xp/group/perm on their own separate nodes internally rather than one
         // umbrella (see UserManagementCommand's own javadoc).
-        UserManagementCommand userManagementCommand = new UserManagementCommand(userAdminService);
+        UserManagementCommand userManagementCommand = new UserManagementCommand(userAdminService, playerCurrencyService);
         registry.register(
                 new CommandMetadata("user", "View or edit a player's coins/gems/XP/rank/permissions",
-                        "/knk user <player> info | coins|gems set|add|remove <amount> <reason> | xp set|add|remove <amount> [reason] | group add|remove <groupName> [duration] | perm grant|revoke <node> [duration]", null,
+                        "/knk user <player> info | coins|gems set|add|remove <amount> <reason> | xp set|add|remove <amount> [reason] | group add|remove <groupName> [duration] | perm grant|revoke <node> [duration] | history [coins|gems|xp] [page]", null,
                         List.of("/knk user Steve info", "/knk user Steve coins add 100 event prize", "/knk user Steve xp set 50 promoted for good behavior", "/knk user Steve gems remove 10 refund reversed",
-                                "/knk user Steve group add Royal 2h", "/knk user Steve perm grant knk.mode.staff")),
+                                "/knk user Steve group add Royal 2h", "/knk user Steve perm grant knk.mode.staff", "/knk user Steve history coins")),
                 (sender, args) -> userManagementCommand.onCommand(sender, null, "knk", args)
         );
 
@@ -683,7 +684,10 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                         return filterByPrefix(onlineNames, userArgs[0]);
                 }
                 if (userArgs.length == 2) {
-                        return filterByPrefix(List.of("info", "coins", "gems", "xp"), userArgs[1]);
+                        return filterByPrefix(List.of("info", "coins", "gems", "xp", "history"), userArgs[1]);
+                }
+                if (userArgs.length == 3 && "history".equalsIgnoreCase(userArgs[1])) {
+                        return filterByPrefix(List.of("coins", "gems", "xp"), userArgs[2]);
                 }
                 if (userArgs.length == 3 && !"info".equalsIgnoreCase(userArgs[1])) {
                         return filterByPrefix(List.of("set", "add", "remove"), userArgs[2]);

@@ -170,6 +170,8 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.core.dataaccess.TitleBracketsDataAccess titleBracketsDataAccess;
     private net.knightsandkings.knk.core.dataaccess.PermissionGroupsDataAccess permissionGroupsDataAccess;
     private net.knightsandkings.knk.paper.user.UserAdminService userAdminService;
+    // Currency ledger Phase 3: /pay, /balance, /baltop, /transactions and /knk user <player> history.
+    private net.knightsandkings.knk.paper.currency.PlayerCurrencyService playerCurrencyService;
     private net.knightsandkings.knk.paper.user.SalaryPayoutScheduler salaryPayoutScheduler;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private PermissionsDataAccess permissionsDataAccess;
@@ -562,6 +564,20 @@ public class KnKPlugin extends JavaPlugin {
             if (playerNotificationPoller != null) {
                 playerNotificationPoller.setRankChangedHandler(userAdminService::resyncDisplay);
             }
+            // Currency ledger Phase 3: player payments. Name lookups are vanish-safe (VisiblePlayers).
+            var currencySettings = net.knightsandkings.knk.paper.currency.CurrencySettings.from(getConfig());
+            this.playerCurrencyService = new net.knightsandkings.knk.paper.currency.PlayerCurrencyService(
+                MenuService.mainThreadExecutor(this), apiClient.getCurrencyApi(), usersDataAccess, cacheManager.getUserCache(),
+                knkPermissible::hasPermissionAsync,
+                new net.knightsandkings.knk.paper.currency.VisiblePlayers(org.bukkit.Bukkit::getPlayerExact, org.bukkit.Bukkit::getOnlinePlayers),
+                currencySettings, java.time.Clock.systemUTC()
+            );
+            if (playerNotificationPoller != null) {
+                // "You received N coins from X" - right away when online, else on the next join.
+                var paymentHandler = new net.knightsandkings.knk.paper.currency.PaymentNotificationHandler(
+                    currencySettings, uuid -> usersDataAccess.refreshAsync(uuid));
+                playerNotificationPoller.setPaymentReceivedHandler(paymentHandler::handle);
+            }
             List<MenuFeature> menuFeatures = List.of(
                 registries -> {
                     MenuVariableContext.registerDefaults(registries.variables());
@@ -880,7 +896,8 @@ public class KnKPlugin extends JavaPlugin {
                 gateDoorRegionCaptureHandler,
                 serverId,
                 menuService,
-                userAdminService
+                userAdminService,
+                playerCurrencyService
             );
             knkCommand.setExecutor(knkAdminCommand);
             knkCommand.setTabCompleter(knkAdminCommand);
@@ -921,6 +938,16 @@ public class KnKPlugin extends JavaPlugin {
 
         // Content port CP1: /menu opens the InventoryMenu hub (docs/specs/inventory-menu/CONTENT_PORT_PLAN.md §3).
         registerSimpleCommand("menu", new net.knightsandkings.knk.paper.commands.MenuCommand(() -> menuService));
+
+        // Currency ledger Phase 3 (docs/specs/currency-payments/DESIGN.md §3.6).
+        if (playerCurrencyService != null) {
+            registerTabCommand("pay", new net.knightsandkings.knk.paper.commands.PayCommand(playerCurrencyService));
+            registerTabCommand("balance", new net.knightsandkings.knk.paper.commands.BalanceCommand(playerCurrencyService));
+            registerTabCommand("baltop", new net.knightsandkings.knk.paper.commands.BaltopCommand(playerCurrencyService));
+            registerTabCommand("transactions", new net.knightsandkings.knk.paper.commands.TransactionsCommand(playerCurrencyService));
+        } else {
+            getLogger().warning("/pay, /balance, /baltop and /transactions not registered - currency service failed to initialize");
+        }
 
         registerPlayerCommands();
     }

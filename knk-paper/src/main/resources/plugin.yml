@@ -78,6 +78,27 @@ commands:
     # node through KnkPermissible inside KitCommand, same reasoning /knk and /ownermode|/staffmode
     # have none (Bukkit would check its own permission tree before this executor ever ran).
 
+  # Currency ledger Phase 3 (docs/specs/currency-payments/DESIGN.md §3.6). No permission: entry -
+  # each checks its knk.pay / knk.balance / knk.baltop / knk.transactions node through
+  # KnkPermissible inside the executor (same reasoning as /kit); the API decides everything else.
+  pay:
+    description: "Pay another player coins (large amounts ask for confirmation)"
+    usage: "/pay <player> <amount> [coins|gems] | /pay confirm|cancel [id]"
+
+  balance:
+    description: "Show your coins and gems, or another player's"
+    usage: "/balance [player]"
+    aliases: [bal, money]
+
+  baltop:
+    description: "Show the richest players"
+    usage: "/baltop [coins|gems] [page]"
+
+  transactions:
+    description: "Show your coin, gem and XP history, or another player's"
+    usage: "/transactions [player] [coins|gems|xp] [page]"
+    aliases: [tx]
+
   menu:
     description: "Open the Knights and Kings menu (InventoryMenu hub, docs/specs/inventory-menu/CONTENT_PORT_PLAN.md §3)"
     usage: "/menu"
@@ -262,6 +283,12 @@ permissions:
     description: Teleport to an online player via /knk tp <player>. Hierarchy-checked (RankHierarchy).
     default: false
 
+  knk.admin.user.history:
+    description: >-
+      View a player's coin, gem and XP ledger history via /knk user <player> history
+      [coins|gems|xp] [page] (currency ledger, KNG-23). Read-only, so no rank check.
+    default: false
+
   knk.tasks:
     description: Access to /knk tasks, /knk task-claim, /knk task-status (world task management)
     default: op
@@ -380,6 +407,51 @@ permissions:
   knk.inventory.clear:
     description: Clear an online player's inventory with /inventory clear <player> confirm (KNG-9). Rank-checked (RankHierarchy) unless it's your own.
     default: op
+
+  # Currency ledger Phase 3 (docs/specs/currency-payments/DESIGN.md §3.8). Resolved through
+  # KnkPermissible, same caveat as knk.kit.list. The player nodes are granted to the Default group
+  # by knk-web-api migration SeedCurrencyPlayerNodes, so every account has them.
+  knk.pay:
+    description: Pay coins to another player with /pay <player> <amount> (confirm/cancel large payments).
+    default: op
+
+  knk.pay.gems:
+    description: >-
+      Also pay gems with /pay <player> <amount> gems. Gems are premium and not transferable by the
+      API's policy (DESIGN.md §5 Q2) - this node alone doesn't make them transferable.
+    default: false
+
+  knk.pay.bypass:
+    description: >-
+      Staff paying out events: skip the per-payment maximum, daily caps, cooldown and the
+      account-age/title rule for sending (never the balance, the recipient's cap or locks).
+    default: false
+
+  knk.balance:
+    description: See your own coins and gems with /balance.
+    default: op
+
+  knk.balance.others:
+    description: See another player's coins and gems with /balance <player>.
+    default: op
+
+  knk.baltop:
+    description: See the richest players with /baltop.
+    default: op
+
+  knk.baltop.exempt:
+    description: >-
+      Staff: left off /baltop (checked by the API from an exact grant of this node, directly or
+      through a group - a wildcard grant doesn't count).
+    default: false
+
+  knk.transactions:
+    description: See your own coin, gem and XP history with /transactions.
+    default: op
+
+  knk.transactions.others:
+    description: See another player's history with /transactions <player>.
+    default: false
 
   knk.freeze:
     description: >-

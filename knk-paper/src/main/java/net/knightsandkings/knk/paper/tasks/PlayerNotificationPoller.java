@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.logging.Logger;
 
@@ -19,6 +20,8 @@ import net.knightsandkings.knk.paper.commands.support.PromotionEffects;
 
 /**
  * Delivers in-game moments the web API queued for writes the plugin didn't make itself -
+ * (currency Phase 3: also "you received N coins from X" after a /pay, on the recipient's next
+ * join when they were offline) -
  * a promotion/demotion from an XP change made through the web admin's player profile page, and a
  * rank change made outside the plugin (web app, or a temporary rank expiring), which re-reads the
  * player so chat and the tab list show the new rank within one poll. Without this, that path only ever showed a banner in the browser: the API returned the
@@ -49,6 +52,8 @@ public class PlayerNotificationPoller {
     private BukkitTask task;
     // Set once UserAdminService exists (it's built after this poller in KnKPlugin).
     private volatile Consumer<Player> rankChangedHandler;
+    // Set once the currency commands exist (currency Phase 3).
+    private volatile BiConsumer<Player, PlayerNotification> paymentReceivedHandler;
 
     public PlayerNotificationPoller(PlayerNotificationsApi notificationsApi, Plugin plugin) {
         this(notificationsApi, plugin,
@@ -64,6 +69,11 @@ public class PlayerNotificationPoller {
     /** What to do for a {@link PlayerNotification#TYPE_RANK_CHANGED} whose player is online. */
     public void setRankChangedHandler(Consumer<Player> handler) {
         this.rankChangedHandler = handler;
+    }
+
+    /** What to do for a {@link PlayerNotification#TYPE_PAYMENT_RECEIVED} whose player is online. */
+    public void setPaymentReceivedHandler(BiConsumer<Player, PlayerNotification> handler) {
+        this.paymentReceivedHandler = handler;
     }
 
     public void start() {
@@ -123,6 +133,8 @@ public class PlayerNotificationPoller {
                     PromotionEffects.show(player, notification.titleChange());
                 } else if (PlayerNotification.TYPE_RANK_CHANGED.equals(notification.type()) && rankChangedHandler != null) {
                     rankChangedHandler.accept(player);
+                } else if (PlayerNotification.TYPE_PAYMENT_RECEIVED.equals(notification.type()) && paymentReceivedHandler != null) {
+                    paymentReceivedHandler.accept(player, notification);
                 }
             } catch (RuntimeException e) {
                 // Acknowledged anyway: retrying a notification that throws would only repeat

@@ -83,6 +83,17 @@ player-notifications:
   # How often the plugin polls the API for them (skipped while no players are online)
   poll-interval-seconds: 2
 
+# Player payments (currency ledger Phase 3, docs/specs/currency-payments/DESIGN.md §3.6). Every
+# limit that matters (min/max, daily caps, cooldown, confirmation threshold, who may send) lives in
+# the API's currency policy; these only shape the in-game experience.
+currency:
+  # Pause between two /pay of one player, before even asking the API (the API has its own cooldown)
+  client-cooldown-seconds: 3
+  # Lines per /baltop page (max 50)
+  baltop-page-size: 10
+  # Lines per /transactions and /knk user <player> history page (max 50)
+  transactions-page-size: 8
+
 # Gate structure state synchronization
 gates:
   # How often (seconds) the plugin pushes the current open/closed/destroyed state of every
@@ -154,6 +165,20 @@ messages:
   
   # Merge complete
   merge-complete: "&aAccount merge complete. Your account now has {coins} coins, {gems} gems, and {exp} XP."
+
+  # /pay, /balance, /baltop, /transactions (currency ledger Phase 3). Any key left out uses the
+  # built-in default (CurrencySettings.DEFAULT_MESSAGES); the most visible ones are listed here.
+  currency:
+    pay-sent: "&aSent &6{amount} {currency} &ato &e{player}&a. Balance: &6{balance}"
+    pay-received: "&aYou received &6{amount} {currency} &afrom &e{player}&a."
+    pay-confirm: "&eSend &6{amount} {currency} &eto &e{player}&e? {confirm} {cancel} &7(expires in {seconds}s)"
+    pay-insufficient: "&cYou only have &6{balance} {currency}&c."
+    pay-cap: "&cDaily limit reached - you can send &6{remaining} &cmore {currency} (resets in {when})."
+    pay-new-account: "&cYour account must be {hours}h old and reach {title} before sending {currency}."
+    pay-not-transferable: "&c{Currency} can't be transferred."
+    pay-self: "&cYou can't pay yourself."
+    pay-unknown: "&cWe couldn't confirm the payment. Check &e/transactions &cbefore trying again."
+    balance-self: "&7Balance: &6{coins} coins &7| &b{gems} gems"
 
 # Permanent enchantment books (Linear KNG-5) - the v1 grade level cap (Linear KNG-6,
 # knk-workspace docs/specs/items/GRADE_DROPCHANCE.md). An item of grade G may take an enchantment
