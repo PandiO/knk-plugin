@@ -37,9 +37,9 @@ import java.util.UUID;
  *   <li>Defence begins (the holder pushing the points back): the holder's alliance hears a second horn
  *       and sees happy-villager sparks, with a chat line naming the defenders; the other side hears a low
  *       bass note and sees smoke.</li>
- *   <li>Every second of it: the attackers in the ring hear a pling rising in pitch with the capture
- *       progress (enchanted-hit sparks around them); defenders in the ring hear a chime rising as the
- *       points recover (happy-villager sparks). Members nearby see the actors' particles too.</li>
+ *   <li>While it lasts: the players in the ring hear a chime every 5 s, rising in pitch with the capture
+ *       progress (attackers) or the recovery (defenders); every second enchanted-hit (attackers) or
+ *       happy-villager (defenders) sparks around them, which members nearby see too.</li>
  *   <li>Capture: a totem burst at the capture point for members nearby.</li>
  * </ul>
  */
@@ -58,10 +58,14 @@ public final class SiegeCaptureFeedback implements SiegeMatchObserver {
     static final Particle DEFEND_START_ENEMIES_PARTICLE = Particle.SMOKE;
 
     // ---- Every second, for the players doing it ----
-    static final Sound CAPTURING_SOUND = Sound.BLOCK_NOTE_BLOCK_PLING;
+    // Smoke test 2026-09-26: the chime for both sides (the pling was too much), every 5 s, not every second.
+    static final Sound CAPTURING_SOUND = Sound.BLOCK_NOTE_BLOCK_CHIME;
     static final Particle CAPTURING_PARTICLE = Particle.ENCHANTED_HIT;
     static final Sound DEFENDING_SOUND = Sound.BLOCK_NOTE_BLOCK_CHIME;
     static final Particle DEFENDING_PARTICLE = Particle.HAPPY_VILLAGER;
+
+    /** The continuous sound plays at most this often per player; the particles every second. */
+    static final long CONTINUOUS_SOUND_INTERVAL_MS = 5000L;
 
     // ---- Capture ----
     static final Particle CAPTURED_PARTICLE = Particle.TOTEM_OF_UNDYING;
@@ -70,6 +74,8 @@ public final class SiegeCaptureFeedback implements SiegeMatchObserver {
     private static final double PARTICLE_RANGE = 48;
 
     private final Map<String, CaptureActivityTracker> trackers = new HashMap<>();
+    /** player → when they last heard the continuous capture/defend sound. */
+    private final Map<UUID, Long> lastContinuousSound = new HashMap<>();
 
     @Override
     public void matchStarted(SiegeLobbyRuntime lobby, SiegeMatch match) {
@@ -106,11 +112,13 @@ public final class SiegeCaptureFeedback implements SiegeMatchObserver {
     @Override
     public void matchEnded(SiegeLobbyRuntime lobby, SiegeMatch match) {
         trackers.remove(match.matchToken());
+        match.roster().playerIds().forEach(lastContinuousSound::remove);
     }
 
     @Override
     public void shutdown() {
         trackers.clear();
+        lastContinuousSound.clear();
     }
 
     // ==================== Begin cues ====================
@@ -166,7 +174,12 @@ public final class SiegeCaptureFeedback implements SiegeMatchObserver {
         for (UUID id : o.actors()) {
             Player actor = Bukkit.getPlayer(id);
             if (actor == null) continue;
-            actor.playSound(actor.getLocation(), sound, 0.6f, pitch);
+            long now = System.currentTimeMillis();
+            Long last = lastContinuousSound.get(id);
+            if (last == null || now - last >= CONTINUOUS_SOUND_INTERVAL_MS) {
+                actor.playSound(actor.getLocation(), sound, 0.6f, pitch);
+                lastContinuousSound.put(id, now);
+            }
             Location at = actor.getLocation().add(0, 1, 0);
             for (Player viewer : viewers) {
                 if (near(viewer, at)) viewer.spawnParticle(particle, at, 8, 0.4, 0.6, 0.4, 0.05);

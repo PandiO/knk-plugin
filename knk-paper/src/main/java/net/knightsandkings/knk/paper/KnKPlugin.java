@@ -1121,7 +1121,9 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().warning("Failed to register /siege command - not defined in plugin.yml?");
         }
 
-        siegeService.addObserver(new net.knightsandkings.knk.paper.siege.SiegeWorldPresenter(this, siegeVaultDirectory));
+        var siegeWorld = new net.knightsandkings.knk.paper.siege.SiegeWorldPresenter(this, siegeVaultDirectory);
+        siegeService.addObserver(siegeWorld);
+        getServer().getPluginManager().registerEvents(siegeWorld, this); // objective banner protection
         siegeService.addObserver(new net.knightsandkings.knk.paper.siege.SiegeScoreboardPresenter());
         // Smoke test 2026-09-26: sounds, particles and chat when objectives start being attacked/defended.
         siegeService.addObserver(new net.knightsandkings.knk.paper.siege.SiegeCaptureFeedback());
@@ -1146,19 +1148,17 @@ public class KnKPlugin extends JavaPlugin {
             siegeService.setMenuHooks(siegeMenus);
         }
 
-        // Phase 7a: the area entry lockdown for non-members, and the gates of the scenario area
-        // (lockdown, owner control, damage rules, restore, crash recovery).
-        var siegeArea = new net.knightsandkings.knk.paper.siege.SiegeAreaLockdown(siegeService);
-        siegeService.addObserver(siegeArea);
-        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeAreaLockdownListener(siegeArea), this);
+        // Phase 7a: the gates of the scenario area (lockdown, owner control, damage rules, restore,
+        // crash recovery). The area itself stays open to non-members (smoke test 2026-09-26): they can't
+        // fight members, capture or touch siege gates, and walk through the locked gates.
         if (gateManager != null && gateHealthSystem != null) {
             var siegeGates = new net.knightsandkings.knk.paper.siege.SiegeGateController(
                 this, gateManager, gateHealthSystem, apiClient.getSiegeGatesCommandApi());
             siegeService.addObserver(siegeGates);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeGateListener(siegeGates, gateManager), this);
             siegeGates.recoverOnStartup();
-            // Phase 7b: non-members see the pre-lockdown gates (degrade switch: NonMemberGateView).
-            siegeGates.setAreaLockdown(siegeArea);
+            // Phase 7b: non-members see the locked gates removed and walk through them (degrade
+            // switch: NonMemberGateView = PassThroughOnly).
             if (gatePassThroughService != null) siegeGates.setPassThrough(gatePassThroughService);
             var siegeGateView = new net.knightsandkings.knk.paper.siege.SiegeGateViewService(this, siegeGates, gateManager,
                 getConfig().getBoolean("gates.rotationGapFill.rasterization-enabled", true));

@@ -65,7 +65,8 @@ class SiegeMenuSeedContractTest {
         var conditions = new ConditionRegistry<Object>();
         for (String id : List.of(SiegeMenuIds.CONDITION_PHASE, SiegeMenuIds.CONDITION_PARTICIPATING,
                 SiegeMenuIds.CONDITION_JOIN_ELIGIBLE, SiegeMenuIds.CONDITION_VOTE_OPEN,
-                SiegeMenuIds.CONDITION_SPAWN_AVAILABLE, SiegeMenuIds.CONDITION_LOBBIES_EMPTY, "value-equals")) {
+                SiegeMenuIds.CONDITION_SPAWN_AVAILABLE, SiegeMenuIds.CONDITION_LOBBIES_EMPTY,
+                SiegeMenuIds.CONDITION_LOBBY_OPEN, "value-equals")) {
             conditions.register(id, (context, params) -> ConditionOutcome.allow());
         }
         var sources = new MenuContentSourceRegistry<Object>();

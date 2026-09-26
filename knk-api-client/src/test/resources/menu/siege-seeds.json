@@ -5,10 +5,10 @@
     "name": "&8Siege",
     "description": "Every siege lobby (siege.lobbies), matchmaking first. Siege Phase 8b, MENU_TEMPLATES.md C.2.",
     "height": 5,
-    "growth": "Static",
+    "growth": "Dynamic",
     "backgroundMaterialRefId": null,
     "autoRefreshTicks": 20,
-    "minHeight": null,
+    "minHeight": 2,
     "backgroundMaterial": null,
     "sections": [
       {
@@ -45,7 +45,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 406,
+                "id": 407,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "WHITE_BANNER",
@@ -53,7 +53,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 407,
+                "id": 408,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "&aSiege",
@@ -61,7 +61,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 408,
+                "id": 409,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "&7Check the status of",
@@ -69,7 +69,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 409,
+                "id": 410,
                 "targetProperty": "Lore",
                 "sortOrder": 1,
                 "expression": "&7active sieges or join",
@@ -77,7 +77,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 410,
+                "id": 411,
                 "targetProperty": "Lore",
                 "sortOrder": 2,
                 "expression": "&7a siege",
@@ -85,7 +85,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 411,
+                "id": 412,
                 "targetProperty": "Lore",
                 "sortOrder": 3,
                 "expression": "",
@@ -93,7 +93,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 412,
+                "id": 413,
                 "targetProperty": "Lore",
                 "sortOrder": 4,
                 "expression": "&7Active sieges: &a$siegeServer.getLobbyCount$",
@@ -101,7 +101,7 @@
                 "ttlTicks": 20
               },
               {
-                "id": 413,
+                "id": 414,
                 "targetProperty": "Lore",
                 "sortOrder": 5,
                 "expression": "&7Players playing Siege: &a$siegeServer.getPlayingCount$",
@@ -109,7 +109,7 @@
                 "ttlTicks": 20
               },
               {
-                "id": 414,
+                "id": 415,
                 "targetProperty": "Lore",
                 "sortOrder": 6,
                 "expression": "$siegeServer.getEntryHintLine$",
@@ -134,7 +134,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 415,
+                "id": 416,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "BARRIER",
@@ -142,7 +142,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 416,
+                "id": 417,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "&c$menu.getBackLabel$",
@@ -150,7 +150,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 417,
+                "id": 418,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "&7$menu.getBackHint$",
@@ -206,7 +206,7 @@
             "isRowTemplate": true,
             "variableBindings": [
               {
-                "id": 428,
+                "id": 429,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "$row.getBannerMaterial$",
@@ -214,7 +214,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 429,
+                "id": 430,
                 "targetProperty": "Amount",
                 "sortOrder": 0,
                 "expression": "$row.getMemberCountOrOne$",
@@ -222,7 +222,7 @@
                 "ttlTicks": 20
               },
               {
-                "id": 430,
+                "id": 431,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "&7$row.getName$",
@@ -230,7 +230,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 431,
+                "id": 432,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "&7Scenario: $row.getScenarioLabel$",
@@ -238,7 +238,7 @@
                 "ttlTicks": 20
               },
               {
-                "id": 432,
+                "id": 433,
                 "targetProperty": "Lore",
                 "sortOrder": 1,
                 "expression": "&7Joined players: $row.getMemberCountLabel$",
@@ -246,7 +246,7 @@
                 "ttlTicks": 20
               },
               {
-                "id": 433,
+                "id": 434,
                 "targetProperty": "Lore",
                 "sortOrder": 2,
                 "expression": "&7Current stage: &a$row.getPhaseLabel$",
@@ -254,7 +254,7 @@
                 "ttlTicks": 20
               },
               {
-                "id": 434,
+                "id": 435,
                 "targetProperty": "Lore",
                 "sortOrder": 3,
                 "expression": "$row.getEntryRequirementLine$",
@@ -262,7 +262,7 @@
                 "ttlTicks": 20
               },
               {
-                "id": 435,
+                "id": 436,
                 "targetProperty": "Lore",
                 "sortOrder": 4,
                 "expression": "",
@@ -270,7 +270,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 436,
+                "id": 437,
                 "targetProperty": "Lore",
                 "sortOrder": 5,
                 "expression": "&7$row.getTimerLabel$",
@@ -278,7 +278,7 @@
                 "ttlTicks": 20
               },
               {
-                "id": 437,
+                "id": 438,
                 "targetProperty": "Lore",
                 "sortOrder": 6,
                 "expression": "&a$row.getTimeRemaining$",
@@ -286,7 +286,7 @@
                 "ttlTicks": 20
               },
               {
-                "id": 438,
+                "id": 439,
                 "targetProperty": "Lore",
                 "sortOrder": 7,
                 "expression": "",
@@ -294,7 +294,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 439,
+                "id": 440,
                 "targetProperty": "Lore",
                 "sortOrder": 8,
                 "expression": "$row.getJoinHintLines$",
@@ -311,7 +311,15 @@
                 "conditions": []
               }
             ],
-            "conditions": []
+            "conditions": [
+              {
+                "id": 46,
+                "conditionTypeId": "siege.lobby-open",
+                "paramsJson": "{\"lobbyId\":\"$row.getLobbyId$\"}",
+                "sortOrder": 0,
+                "phase": "Click"
+              }
+            ]
           },
           {
             "id": 145,
@@ -327,7 +335,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 424,
+                "id": 425,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "BARRIER",
@@ -335,7 +343,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 425,
+                "id": 426,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "&cNo Sieges",
@@ -343,7 +351,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 426,
+                "id": 427,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "&7There are currently no active Sieges.",
@@ -351,7 +359,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 427,
+                "id": 428,
                 "targetProperty": "Lore",
                 "sortOrder": 1,
                 "expression": "&7Sieges start automatically - check back soon.",
@@ -384,7 +392,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 418,
+                "id": 419,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "ARROW",
@@ -392,7 +400,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 419,
+                "id": 420,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "&aPrevious page",
@@ -400,7 +408,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 420,
+                "id": 421,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
@@ -433,7 +441,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 421,
+                "id": 422,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "ARROW",
@@ -441,7 +449,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 422,
+                "id": 423,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "&aNext page",
@@ -449,7 +457,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 423,
+                "id": 424,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
@@ -479,10 +487,10 @@
     "name": "&8Siege information",
     "description": "One siege lobby (ctx.lobbyId), per phase. Siege Phase 8b, MENU_TEMPLATES.md C.3.",
     "height": 6,
-    "growth": "Static",
+    "growth": "Dynamic",
     "backgroundMaterialRefId": null,
     "autoRefreshTicks": 20,
-    "minHeight": null,
+    "minHeight": 3,
     "backgroundMaterial": null,
     "sections": [
       {
@@ -519,7 +527,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 440,
+                "id": 441,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "COMPASS",
@@ -527,7 +535,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 441,
+                "id": 442,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "&aChange spawnpoint",
@@ -535,7 +543,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 442,
+                "id": 443,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "&7Click to choose where you",
@@ -543,7 +551,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 443,
+                "id": 444,
                 "targetProperty": "Lore",
                 "sortOrder": 1,
                 "expression": "&7respawn when killed",
@@ -551,7 +559,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 444,
+                "id": 445,
                 "targetProperty": "Lore",
                 "sortOrder": 2,
                 "expression": "",
@@ -559,7 +567,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 445,
+                "id": 446,
                 "targetProperty": "Lore",
                 "sortOrder": 3,
                 "expression": "&7Current: &a$siegeViewer.getCurrentSpawnName$",
@@ -578,14 +586,14 @@
             ],
             "conditions": [
               {
-                "id": 46,
+                "id": 47,
                 "conditionTypeId": "siege.phase",
                 "paramsJson": "{\"lobbyId\":\"$ctx.lobbyId$\",\"phases\":\"IN_PROGRESS\"}",
                 "sortOrder": 0,
                 "phase": "Render"
               },
               {
-                "id": 47,
+                "id": 48,
                 "conditionTypeId": "siege.participating",
                 "paramsJson": "{\"lobbyId\":\"$ctx.lobbyId$\",\"expected\":\"true\"}",
                 "sortOrder": 0,
@@ -607,7 +615,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 446,
+                "id": 447,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "$siege.getBannerMaterial$",
@@ -615,7 +623,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 447,
+                "id": 448,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "&7$siege.getName$",
@@ -623,7 +631,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 448,
+                "id": 449,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "&7Scenario: $siege.getScenarioLabel$",
@@ -631,7 +639,7 @@
                 "ttlTicks": 20
               },
               {
-                "id": 449,
+                "id": 450,
                 "targetProperty": "Lore",
                 "sortOrder": 1,
                 "expression": "&7Joined players: $siege.getMemberCountLabel$",
@@ -639,7 +647,7 @@
                 "ttlTicks": 20
               },
               {
-                "id": 450,
+                "id": 451,
                 "targetProperty": "Lore",
                 "sortOrder": 2,
                 "expression": "&7Current stage: &a$siege.getPhaseLabel$",
@@ -647,7 +655,7 @@
                 "ttlTicks": 20
               },
               {
-                "id": 451,
+                "id": 452,
                 "targetProperty": "Lore",
                 "sortOrder": 3,
                 "expression": "$siege.getEntryRequirementLine$",
@@ -655,7 +663,7 @@
                 "ttlTicks": 20
               },
               {
-                "id": 452,
+                "id": 453,
                 "targetProperty": "Lore",
                 "sortOrder": 4,
                 "expression": "",
@@ -663,7 +671,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 453,
+                "id": 454,
                 "targetProperty": "Lore",
                 "sortOrder": 5,
                 "expression": "&7$siege.getTimerLabel$",
@@ -671,7 +679,7 @@
                 "ttlTicks": 20
               },
               {
-                "id": 454,
+                "id": 455,
                 "targetProperty": "Lore",
                 "sortOrder": 6,
                 "expression": "&a$siege.getTimeRemaining$",
@@ -679,7 +687,7 @@
                 "ttlTicks": 20
               },
               {
-                "id": 455,
+                "id": 456,
                 "targetProperty": "Lore",
                 "sortOrder": 7,
                 "expression": "$siegeViewer.getTeamLine$",
@@ -704,7 +712,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 456,
+                "id": 457,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "COMPASS",
@@ -712,7 +720,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 457,
+                "id": 458,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "&7Objective information",
@@ -720,7 +728,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 458,
+                "id": 459,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "&6How to play",
@@ -728,7 +736,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 459,
+                "id": 460,
                 "targetProperty": "Lore",
                 "sortOrder": 1,
                 "expression": "&7Objectives are marked by a banner.",
@@ -736,7 +744,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 460,
+                "id": 461,
                 "targetProperty": "Lore",
                 "sortOrder": 2,
                 "expression": "&7Stand inside an objective's circle",
@@ -744,7 +752,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 461,
+                "id": 462,
                 "targetProperty": "Lore",
                 "sortOrder": 3,
                 "expression": "&7to capture (attackers) or defend it.",
@@ -752,7 +760,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 462,
+                "id": 463,
                 "targetProperty": "Lore",
                 "sortOrder": 4,
                 "expression": "&7Capturing a \"&aWin&7\" objective ends the game.",
@@ -760,7 +768,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 463,
+                "id": 464,
                 "targetProperty": "Lore",
                 "sortOrder": 5,
                 "expression": "&7Held objectives are extra spawnpoints.",
@@ -768,7 +776,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 464,
+                "id": 465,
                 "targetProperty": "Lore",
                 "sortOrder": 6,
                 "expression": "&7Selected gates can be opened and closed",
@@ -776,7 +784,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 465,
+                "id": 466,
                 "targetProperty": "Lore",
                 "sortOrder": 7,
                 "expression": "&7by the team that owns them.",
@@ -784,7 +792,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 466,
+                "id": 467,
                 "targetProperty": "Lore",
                 "sortOrder": 8,
                 "expression": "$siege.getRecaptureLine$",
@@ -792,7 +800,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 467,
+                "id": 468,
                 "targetProperty": "Lore",
                 "sortOrder": 9,
                 "expression": "&7Enchantment books appear near objectives;",
@@ -800,7 +808,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 468,
+                "id": 469,
                 "targetProperty": "Lore",
                 "sortOrder": 10,
                 "expression": "&7click one onto an item to apply it.",
@@ -808,7 +816,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 469,
+                "id": 470,
                 "targetProperty": "Lore",
                 "sortOrder": 11,
                 "expression": "&8Siege enchantments are removed afterwards.",
@@ -816,7 +824,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 470,
+                "id": 471,
                 "targetProperty": "Lore",
                 "sortOrder": 12,
                 "expression": "",
@@ -824,7 +832,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 471,
+                "id": 472,
                 "targetProperty": "Lore",
                 "sortOrder": 13,
                 "expression": "&7Objectives: &a$siege.getObjectiveCount$",
@@ -832,7 +840,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 472,
+                "id": 473,
                 "targetProperty": "Lore",
                 "sortOrder": 14,
                 "expression": "&7Objectives with a gate: &a$siege.getGateObjectiveCount$",
@@ -843,7 +851,7 @@
             "actions": [],
             "conditions": [
               {
-                "id": 48,
+                "id": 49,
                 "conditionTypeId": "value-equals",
                 "paramsJson": "{\"value\":\"$siege.getScenarioKnown$\",\"expected\":\"true\"}",
                 "sortOrder": 0,
@@ -865,7 +873,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 473,
+                "id": 474,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "BARRIER",
@@ -873,7 +881,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 474,
+                "id": 475,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "&c$menu.getBackLabel$",
@@ -881,7 +889,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 475,
+                "id": 476,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "&7$menu.getBackHint$",
@@ -937,7 +945,7 @@
             "isRowTemplate": true,
             "variableBindings": [
               {
-                "id": 476,
+                "id": 477,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "$row.getMaterial$",
@@ -945,7 +953,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 477,
+                "id": 478,
                 "targetProperty": "Amount",
                 "sortOrder": 0,
                 "expression": "$row.getVoteCountOrOne$",
@@ -953,7 +961,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 478,
+                "id": 479,
                 "targetProperty": "DisplayMode",
                 "sortOrder": 0,
                 "expression": "$row.getDisplayMode$",
@@ -961,7 +969,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 479,
+                "id": 480,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "$row.getTitle$",
@@ -969,7 +977,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 480,
+                "id": 481,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "$row.getLines$",
@@ -988,14 +996,14 @@
             ],
             "conditions": [
               {
-                "id": 49,
+                "id": 50,
                 "conditionTypeId": "siege.participating",
                 "paramsJson": "{\"lobbyId\":\"$ctx.lobbyId$\",\"expected\":\"true\"}",
                 "sortOrder": 0,
                 "phase": "Click"
               },
               {
-                "id": 50,
+                "id": 51,
                 "conditionTypeId": "siege.vote-open",
                 "paramsJson": "{\"lobbyId\":\"$ctx.lobbyId$\"}",
                 "sortOrder": 1,
@@ -1040,7 +1048,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 481,
+                "id": 482,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "$siegeViewer.getJoinLeaveMaterial$",
@@ -1048,7 +1056,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 482,
+                "id": 483,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "$siegeViewer.getJoinLeaveName$",
@@ -1056,7 +1064,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 483,
+                "id": 484,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "$siegeViewer.getParticipationLine$",
@@ -1064,7 +1072,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 484,
+                "id": 485,
                 "targetProperty": "Lore",
                 "sortOrder": 1,
                 "expression": "$siegeViewer.getJoinDenialLine$",
@@ -1080,14 +1088,14 @@
                 "sortOrder": 0,
                 "conditions": [
                   {
-                    "id": 51,
+                    "id": 52,
                     "conditionTypeId": "value-equals",
                     "paramsJson": "{\"value\":\"$siegeViewer.getIsMember$\",\"expected\":\"false\"}",
                     "sortOrder": 0,
                     "phase": "Render"
                   },
                   {
-                    "id": 52,
+                    "id": 53,
                     "conditionTypeId": "siege.join-eligible",
                     "paramsJson": "{\"lobbyId\":\"$ctx.lobbyId$\"}",
                     "sortOrder": 1,
@@ -1102,7 +1110,7 @@
                 "sortOrder": 1,
                 "conditions": [
                   {
-                    "id": 53,
+                    "id": 54,
                     "conditionTypeId": "value-equals",
                     "paramsJson": "{\"value\":\"$siegeViewer.getIsMember$\",\"expected\":\"true\"}",
                     "sortOrder": 0,
@@ -1113,7 +1121,7 @@
             ],
             "conditions": [
               {
-                "id": 54,
+                "id": 55,
                 "conditionTypeId": "siege.phase",
                 "paramsJson": "{\"lobbyId\":\"$ctx.lobbyId$\",\"phases\":\"MATCHMAKING\"}",
                 "sortOrder": 0,
@@ -1158,7 +1166,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 501,
+                "id": 502,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "SKELETON_SKULL",
@@ -1166,7 +1174,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 502,
+                "id": 503,
                 "targetProperty": "Amount",
                 "sortOrder": 0,
                 "expression": "$siege.getMemberCountOrOne$",
@@ -1174,7 +1182,7 @@
                 "ttlTicks": 20
               },
               {
-                "id": 503,
+                "id": 504,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "&aJoined players",
@@ -1182,7 +1190,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 504,
+                "id": 505,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "&7Joined players: $siege.getMemberCountLabel$",
@@ -1190,7 +1198,7 @@
                 "ttlTicks": 20
               },
               {
-                "id": 505,
+                "id": 506,
                 "targetProperty": "Lore",
                 "sortOrder": 1,
                 "expression": "$siege.getPlayersMinLine$",
@@ -1198,7 +1206,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 506,
+                "id": 507,
                 "targetProperty": "Lore",
                 "sortOrder": 2,
                 "expression": "$siege.getPlayersMaxLine$",
@@ -1206,7 +1214,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 507,
+                "id": 508,
                 "targetProperty": "Lore",
                 "sortOrder": 3,
                 "expression": "$siege.getTeamSummaryLines$",
@@ -1231,7 +1239,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 485,
+                "id": 486,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "BLACK_STAINED_GLASS_PANE",
@@ -1239,7 +1247,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 486,
+                "id": 487,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": " ",
@@ -1264,7 +1272,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 487,
+                "id": 488,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "BLACK_STAINED_GLASS_PANE",
@@ -1272,7 +1280,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 488,
+                "id": 489,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": " ",
@@ -1297,7 +1305,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 489,
+                "id": 490,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "BLACK_STAINED_GLASS_PANE",
@@ -1305,7 +1313,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 490,
+                "id": 491,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": " ",
@@ -1330,7 +1338,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 491,
+                "id": 492,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "BLACK_STAINED_GLASS_PANE",
@@ -1338,7 +1346,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 492,
+                "id": 493,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": " ",
@@ -1363,7 +1371,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 493,
+                "id": 494,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "BLACK_STAINED_GLASS_PANE",
@@ -1371,7 +1379,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 494,
+                "id": 495,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": " ",
@@ -1396,7 +1404,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 495,
+                "id": 496,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "BLACK_STAINED_GLASS_PANE",
@@ -1404,7 +1412,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 496,
+                "id": 497,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": " ",
@@ -1429,7 +1437,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 497,
+                "id": 498,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "BLACK_STAINED_GLASS_PANE",
@@ -1437,7 +1445,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 498,
+                "id": 499,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": " ",
@@ -1462,7 +1470,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 499,
+                "id": 500,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "BLACK_STAINED_GLASS_PANE",
@@ -1470,7 +1478,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 500,
+                "id": 501,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": " ",
@@ -1518,7 +1526,7 @@
             "isRowTemplate": true,
             "variableBindings": [
               {
-                "id": 514,
+                "id": 515,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "$row.getMaterial$",
@@ -1526,7 +1534,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 515,
+                "id": 516,
                 "targetProperty": "SkullOwner",
                 "sortOrder": 0,
                 "expression": "$row.getSkullOwner$",
@@ -1534,7 +1542,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 516,
+                "id": 517,
                 "targetProperty": "BannerPatterns",
                 "sortOrder": 0,
                 "expression": "$row.getBannerPatterns$",
@@ -1542,7 +1550,7 @@
                 "ttlTicks": 20
               },
               {
-                "id": 517,
+                "id": 518,
                 "targetProperty": "DisplayMode",
                 "sortOrder": 0,
                 "expression": "$row.getDisplayMode$",
@@ -1550,7 +1558,7 @@
                 "ttlTicks": 20
               },
               {
-                "id": 518,
+                "id": 519,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "$row.getTitle$",
@@ -1558,7 +1566,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 519,
+                "id": 520,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "$row.getLines$",
@@ -1583,7 +1591,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 508,
+                "id": 509,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "ARROW",
@@ -1591,7 +1599,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 509,
+                "id": 510,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "&aPrevious page",
@@ -1599,7 +1607,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 510,
+                "id": 511,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
@@ -1632,7 +1640,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 511,
+                "id": 512,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "ARROW",
@@ -1640,7 +1648,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 512,
+                "id": 513,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "&aNext page",
@@ -1648,7 +1656,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 513,
+                "id": 514,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
@@ -1718,7 +1726,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 520,
+                "id": 521,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "COMPASS",
@@ -1726,7 +1734,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 521,
+                "id": 522,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "&aChoose a place to spawn",
@@ -1734,7 +1742,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 522,
+                "id": 523,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "&7Current: &a$siegeViewer.getCurrentSpawnName$",
@@ -1742,7 +1750,7 @@
                 "ttlTicks": 20
               },
               {
-                "id": 523,
+                "id": 524,
                 "targetProperty": "Lore",
                 "sortOrder": 1,
                 "expression": "&7Close this menu to keep it.",
@@ -1767,7 +1775,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 524,
+                "id": 525,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "BARRIER",
@@ -1775,7 +1783,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 525,
+                "id": 526,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "&cClose",
@@ -1831,7 +1839,7 @@
             "isRowTemplate": true,
             "variableBindings": [
               {
-                "id": 532,
+                "id": 533,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "$row.getMaterial$",
@@ -1839,7 +1847,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 533,
+                "id": 534,
                 "targetProperty": "BannerPatterns",
                 "sortOrder": 0,
                 "expression": "$row.getBannerPatterns$",
@@ -1847,7 +1855,7 @@
                 "ttlTicks": 20
               },
               {
-                "id": 534,
+                "id": 535,
                 "targetProperty": "DisplayMode",
                 "sortOrder": 0,
                 "expression": "$row.getDisplayMode$",
@@ -1855,7 +1863,7 @@
                 "ttlTicks": 20
               },
               {
-                "id": 535,
+                "id": 536,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "$row.getName$",
@@ -1863,7 +1871,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 536,
+                "id": 537,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "$row.getStatusLines$",
@@ -1889,7 +1897,7 @@
             ],
             "conditions": [
               {
-                "id": 55,
+                "id": 56,
                 "conditionTypeId": "siege.spawn-available",
                 "paramsJson": "{\"option\":\"$row.getOption$\"}",
                 "sortOrder": 0,
@@ -1911,7 +1919,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 526,
+                "id": 527,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "ARROW",
@@ -1919,7 +1927,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 527,
+                "id": 528,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "&aPrevious page",
@@ -1927,7 +1935,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 528,
+                "id": 529,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
@@ -1960,7 +1968,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 529,
+                "id": 530,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "ARROW",
@@ -1968,7 +1976,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 530,
+                "id": 531,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "&aNext page",
@@ -1976,7 +1984,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 531,
+                "id": 532,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",

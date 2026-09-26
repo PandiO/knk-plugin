@@ -77,7 +77,6 @@ public final class SiegeGateController implements SiegeMatchObserver {
     private final Map<Integer, Lockdown> byLobby = new HashMap<>();
     private final Map<Integer, Lockdown> byGate = new HashMap<>();
     private GatePassThroughService passThrough;
-    private SiegeAreaLockdown areaLockdown;
 
     /**
      * Phase 7b: one door of an applied lockdown with its pre-lockdown state - what the non-member view
@@ -97,11 +96,6 @@ public final class SiegeGateController implements SiegeMatchObserver {
     /** Phase 7b: the temporary TELEPORT pass-through for non-members (DESIGN §8.5). */
     public void setPassThrough(GatePassThroughService passThrough) {
         this.passThrough = passThrough;
-    }
-
-    /** Phase 7b: the pass-through never carries a non-member into a locked-down scenario area. */
-    public void setAreaLockdown(SiegeAreaLockdown areaLockdown) {
-        this.areaLockdown = areaLockdown;
     }
 
     // ==================== Startup recovery (DESIGN §8.4) ====================
@@ -267,10 +261,10 @@ public final class SiegeGateController implements SiegeMatchObserver {
     /**
      * Phase 7b (DESIGN §8.5 "temporary pass-through"): a non-member right-clicked a locked door that
      * is closed now but was open before the lockdown - carry them across with the gate's TELEPORT
-     * pass-through (never DEFAULT/INSTANT_OPEN, which would open the real door for the siege). Refused
-     * while the scenario area is locked down, because the far side is the siege area.
+     * pass-through (never DEFAULT/INSTANT_OPEN, which would open the real door for the siege).
+     * (Smoke test 2026-09-26: the scenario area is no longer closed to non-members.)
      *
-     * @return true when this handled the click (carried across or refused with a message)
+     * @return true when this handled the click
      */
     public boolean tryNonMemberPassThrough(Player player, CachedGateDoor door) {
         Lockdown lockdown = byGate.get(door.getGateStructureId());
@@ -279,13 +273,19 @@ public final class SiegeGateController implements SiegeMatchObserver {
         if (snapshot == null) return false;
         boolean wasOpen = snapshot.doors().stream().anyMatch(d -> d.gateDoorId() == door.getId() && d.opened() && !d.destroyed());
         if (!wasOpen || door.getCurrentState() != AnimationState.CLOSED) return false;
-        if (areaLockdown != null && areaLockdown.isLocked(lockdown.runtime.id())) {
-            player.sendActionBar(SiegeMessages.bad("The siege " + lockdown.runtime.displayName()
-                    + " is on; this area is closed until it ends."));
-            return true;
-        }
         passThrough.dispatch(door, player, GatePassThroughMethod.TELEPORT);
         return true;
+    }
+
+    /**
+     * Smoke test 2026-09-26: a non-member walked into a locked door that is really solid but removed
+     * in their view ({@code SiegeGateViewService}) - carry them across with the gate's TELEPORT
+     * pass-through. The real door and the siege are untouched.
+     */
+    public void carryNonMemberThrough(Player player, CachedGateDoor door) {
+        Lockdown lockdown = byGate.get(door.getGateStructureId());
+        if (lockdown == null || passThrough == null || lockdown.runtime.isMember(player.getUniqueId())) return;
+        passThrough.dispatch(door, player, GatePassThroughMethod.TELEPORT);
     }
 
     /** The lobby display name holding a locked gate, for messages. */

@@ -522,10 +522,6 @@ permissions:
     description: Run any command while in a siege match (bypasses SiegeConfiguration.AllowedCommands, DESIGN §6.9)
     default: false
 
-  knk.siege.bypass.lockdown:
-    description: Enter a scenario area that is locked down for a running siege (DESIGN §8.5)
-    default: false
-
   knk.menu:
     description: Open the InventoryMenu hub with /menu (content port CP1).
     default: true

@@ -28,6 +28,12 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Display;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.TextDisplay;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockExplodeEvent;
+import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
 
@@ -57,7 +63,7 @@ import java.util.logging.Logger;
  * capture point is air, and every placed block is written to {@code siege-vault/world-blocks.yml}
  * until the match ends; on enable, leftovers that are still banners are set back to air.
  */
-public final class SiegeWorldPresenter implements SiegeMatchObserver {
+public final class SiegeWorldPresenter implements SiegeMatchObserver, Listener {
 
     /** Members further away than this don't get the rings. */
     private static final double PARTICLE_RANGE = 64.0;
@@ -337,6 +343,38 @@ public final class SiegeWorldPresenter implements SiegeMatchObserver {
                         center.getZ() + radius * Math.sin(angle), 1, 0, 0, 0, 0);
             }
         }
+    }
+
+    // ==================== Banner protection ====================
+
+    /**
+     * Smoke test 2026-09-26 (the scenario area is open to non-members): nobody breaks or blows up an
+     * objective banner, or the block it stands on, while its match runs.
+     */
+    private boolean isProtected(Block block) {
+        for (Map<Integer, ObjectiveVisual> visuals : visualsByMatch.values()) {
+            for (ObjectiveVisual v : visuals.values()) {
+                Block banner = v.placedBanner;
+                if (banner == null || !banner.getWorld().equals(block.getWorld())) continue;
+                if (banner.equals(block) || banner.getRelative(org.bukkit.block.BlockFace.DOWN).equals(block)) return true;
+            }
+        }
+        return false;
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onBannerBreak(BlockBreakEvent event) {
+        if (!visualsByMatch.isEmpty() && isProtected(event.getBlock())) event.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onEntityExplode(EntityExplodeEvent event) {
+        if (!visualsByMatch.isEmpty()) event.blockList().removeIf(this::isProtected);
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onBlockExplode(BlockExplodeEvent event) {
+        if (!visualsByMatch.isEmpty()) event.blockList().removeIf(this::isProtected);
     }
 
     // ==================== Cleanup and crash safety ====================

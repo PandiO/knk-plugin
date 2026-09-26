@@ -202,7 +202,7 @@ public final class SiegeService {
      */
     public boolean openMenu(Player player) {
         if (menuHooks == null) return false;
-        Optional<SiegeLobbyRuntime> own = lobbyOf(player.getUniqueId());
+        Optional<SiegeLobbyRuntime> own = lobbyOf(player.getUniqueId()).filter(rt -> informationDenial(rt).isEmpty());
         if (own.isPresent() && menuHooks.openInformation(player, own.get().id())) return true;
         return menuHooks.openOverview(player);
     }
@@ -213,9 +213,23 @@ public final class SiegeService {
      * available (the caller falls back to the chat info).
      */
     public Optional<Boolean> openGameMenu(Player player) {
-        Optional<SiegeLobbyRuntime> own = lobbyOf(player.getUniqueId());
+        Optional<SiegeLobbyRuntime> own = lobbyOf(player.getUniqueId()).filter(rt -> informationDenial(rt).isEmpty());
         if (own.isEmpty()) return Optional.empty();
         return Optional.of(menuHooks != null && menuHooks.openInformation(player, own.get().id()));
+    }
+
+    /**
+     * Smoke test 2026-09-26: a lobby's Information menu opens only while a round is on (matchmaking to
+     * the end of the match); in cooldown or disabled the lobby is only listed in the overview.
+     * The reason to tell the player, or empty when it may open.
+     */
+    public Optional<String> informationDenial(SiegeLobbyRuntime rt) {
+        return switch (rt.phase()) {
+            case COOLDOWN -> Optional.of("The siege " + rt.displayName() + " is in cooldown; the next round starts in "
+                    + SiegeMessages.duration(rt.machine().secondsRemaining()) + ".");
+            case DISABLED -> Optional.of("The siege " + rt.displayName() + " isn't running right now.");
+            default -> Optional.empty();
+        };
     }
 
     public void addObserver(SiegeMatchObserver observer) {

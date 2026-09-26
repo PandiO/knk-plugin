@@ -44,6 +44,8 @@ public final class SiegeMenuIds {
     public static final String CONDITION_VOTE_OPEN = "siege.vote-open";
     public static final String CONDITION_SPAWN_AVAILABLE = "siege.spawn-available";
     public static final String CONDITION_LOBBIES_EMPTY = "siege.lobbies-empty";
+    /** Click: a lobby's Information opens only while a round is on (not in cooldown/disabled). */
+    public static final String CONDITION_LOBBY_OPEN = "siege.lobby-open";
 
     /** The {@code scenarioId} param value of {@link #ACTION_VOTE} for the Random option. */
     public static final String VOTE_RANDOM = "random";

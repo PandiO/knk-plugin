@@ -118,6 +118,13 @@ public final class SiegeMenuFeature implements MenuFeature {
             if (rt.isEmpty()) return ConditionOutcome.deny("That siege no longer exists.");
             return s.joinDenial(context.player(), rt.get()).map(ConditionOutcome::deny).orElse(ConditionOutcome.allow());
         });
+        conditions.register(SiegeMenuIds.CONDITION_LOBBY_OPEN, (context, params) -> {
+            SiegeService s = service.get();
+            if (s == null) return ConditionOutcome.deny("Sieges aren't running right now.");
+            Optional<SiegeLobbyRuntime> rt = SiegeMenuSnapshots.lobby(s, params.get("lobbyId"));
+            if (rt.isEmpty()) return ConditionOutcome.deny("That siege no longer exists.");
+            return s.informationDenial(rt.get()).map(ConditionOutcome::deny).orElse(ConditionOutcome.allow());
+        });
         conditions.register(SiegeMenuIds.CONDITION_VOTE_OPEN, (context, params) -> {
             boolean open = test(s -> SiegeMenuSnapshots.lobby(s, params.get("lobbyId")).map(rt -> rt.machine().isVotingOpen()).orElse(false)).allowed();
             return open ? ConditionOutcome.allow() : ConditionOutcome.deny("Voting is closed.");
