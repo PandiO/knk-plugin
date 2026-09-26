@@ -382,6 +382,14 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         scheduleKnkIdRefresh();
     }
 
+    /**
+     * Adds a subcommand built outside this class (e.g. {@code /knk discovery}, which needs services
+     * wired after this command). Same registry, permission check and help listing as the rest.
+     */
+    public void registerSubcommand(CommandMetadata metadata, SubcommandExecutor executor) {
+        registry.register(metadata, executor);
+    }
+
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length == 0) {
