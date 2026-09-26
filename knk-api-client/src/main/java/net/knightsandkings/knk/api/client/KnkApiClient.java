@@ -107,6 +107,7 @@ public class KnkApiClient {
     private final TitleBracketsQueryApi titleBracketsQueryApi;
     private final net.knightsandkings.knk.core.ports.api.CategoriesQueryApi categoriesQueryApi;
     private final KitsCommandApi kitsCommandApi;
+    private final net.knightsandkings.knk.core.ports.api.GameSettingsQueryApi gameSettingsQueryApi;
 
     private KnkApiClient(
         String baseUrl,
@@ -150,6 +151,7 @@ public class KnkApiClient {
         this.kitsCommandApi = new KitsCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.titleBracketsQueryApi = new TitleBracketsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.categoriesQueryApi = new net.knightsandkings.knk.api.impl.CategoriesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.gameSettingsQueryApi = new net.knightsandkings.knk.api.impl.GameSettingsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
     }
     
     public HealthApi getHealthApi() {
@@ -183,6 +185,11 @@ public class KnkApiClient {
     /** Menu follow-up 2026-09-26: {@code GET /api/Categories} (catalogue category filter). */
     public net.knightsandkings.knk.core.ports.api.CategoriesQueryApi getCategoriesQueryApi() {
         return categoriesQueryApi;
+    }
+
+    /** Teleport Phase 4 ({@code /spawn}): {@code GET /api/GameSettings}. */
+    public net.knightsandkings.knk.core.ports.api.GameSettingsQueryApi getGameSettingsQueryApi() {
+        return gameSettingsQueryApi;
     }
 
     /** InventoryMenu content port CP3: {@code GET /api/title-brackets}. */
