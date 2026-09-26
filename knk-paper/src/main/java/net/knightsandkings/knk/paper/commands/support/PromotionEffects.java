@@ -8,6 +8,7 @@ import org.bukkit.entity.Player;
 
 import net.knightsandkings.knk.core.domain.users.TitleChangeResult;
 import net.knightsandkings.knk.core.domain.users.TitleCrossing;
+import net.knightsandkings.knk.paper.chat.RewardMessageFormat;
 
 /**
  * One consolidated promotion/demotion moment for a title-bracket change - a sound, particle
@@ -55,13 +56,8 @@ public final class PromotionEffects {
             player.sendMessage(ChatColor.YELLOW + titleChange.fromTitleName() + ChatColor.GRAY + " -> " + ChatColor.YELLOW + titleChange.toTitleName());
         }
 
-        StringBuilder rewards = new StringBuilder();
-        if (titleChange.coinBonusGranted() > 0) rewards.append(ChatColor.GOLD).append("+").append(titleChange.coinBonusGranted()).append(" coins  ");
-        if (titleChange.gemBonusGranted() > 0) rewards.append(ChatColor.AQUA).append("+").append(titleChange.gemBonusGranted()).append(" gems  ");
-        if (titleChange.expBonusGranted() > 0) rewards.append(ChatColor.LIGHT_PURPLE).append("+").append(titleChange.expBonusGranted()).append(" bonus XP");
-        if (rewards.length() > 0) {
-            player.sendMessage(rewards.toString().trim());
-        }
+        // One line per bonus: base, the multipliers applied and why, and the total (KNG-16).
+        RewardMessageFormat.titleBonuses(titleChange).forEach(player::sendMessage);
     }
 
     private static void showDemotion(Player player, TitleChangeResult titleChange) {

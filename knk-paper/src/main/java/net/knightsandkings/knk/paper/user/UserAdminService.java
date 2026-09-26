@@ -8,6 +8,7 @@ import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.PermissionGroupsQueryApi;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
+import net.knightsandkings.knk.paper.chat.RewardMessageFormat;
 import net.knightsandkings.knk.paper.commands.support.PromotionEffects;
 import net.knightsandkings.knk.paper.commands.support.RankHierarchy;
 import net.knightsandkings.knk.paper.modes.ModeService;
@@ -456,7 +457,7 @@ public final class UserAdminService {
                 sender.sendMessage(ChatColor.GREEN + "Paid " + target.username() + " " + result.amountPaid() + " coins of salary.");
                 Player targetPlayer = Bukkit.getPlayerExact(target.username());
                 if (targetPlayer != null) {
-                    targetPlayer.sendMessage(ChatColor.GREEN + "You received " + result.amountPaid() + " coins in salary.");
+                    RewardMessageFormat.salary(result, target.titleName()).forEach(targetPlayer::sendMessage);
                 }
                 done.complete(true);
             } else {

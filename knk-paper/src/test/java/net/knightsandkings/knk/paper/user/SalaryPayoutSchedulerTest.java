@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -15,7 +16,7 @@ class SalaryPayoutSchedulerTest {
     private static final Instant NOW = Instant.parse("2026-09-26T12:00:00Z");
 
     private static SalaryPayoutResult paid(int amount, double hours, OffsetDateTime nextEligibleAt) {
-        return new SalaryPayoutResult(true, amount, hours, 1.0, 1.0, 1.0, amount, null, nextEligibleAt, 0, 650);
+        return new SalaryPayoutResult(true, amount, hours, 1.0, 1.0, 1.0, amount, null, nextEligibleAt, 0, 650, hours, 650 * hours, List.of());
     }
 
     @Test
@@ -41,16 +42,5 @@ class SalaryPayoutSchedulerTest {
     @Test
     void nextCheckWithoutNextEligibleTimeWaitsAnHour() {
         assertEquals(NOW.plus(SalaryPayoutScheduler.PAYOUT_INTERVAL), SalaryPayoutScheduler.nextCheck(paid(650, 1.0, null), NOW));
-    }
-
-    @Test
-    void hourlyPayoutMessageShowsJustTheAmount() {
-        assertEquals("You received 650 coins in salary.", SalaryPayoutScheduler.payoutMessage(paid(650, 1.01, null)));
-    }
-
-    @Test
-    void gapPayoutMessageShowsTheHoursCovered() {
-        assertEquals("You received 3250 coins in salary for the past 5.0 hours.",
-                SalaryPayoutScheduler.payoutMessage(paid(3250, 5.0, null)));
     }
 }

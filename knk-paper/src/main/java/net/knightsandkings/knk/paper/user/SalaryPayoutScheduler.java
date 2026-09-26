@@ -3,7 +3,6 @@ package net.knightsandkings.knk.paper.user;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -27,8 +26,7 @@ import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
 import net.knightsandkings.knk.core.domain.users.SalaryPayoutResult;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
-import net.knightsandkings.knk.paper.utils.ColorOptions;
-import net.kyori.adventure.text.Component;
+import net.knightsandkings.knk.paper.chat.RewardMessageFormat;
 
 /**
  * Pays salary (vision §5.4, docs/specs/user-features/DESIGN.md §5) on join and then every hour
@@ -167,7 +165,8 @@ public class SalaryPayoutScheduler implements Listener {
             return;
         }
         LOGGER.fine("Paid out " + result.amountPaid() + " salary coins to user " + userId);
-        player.sendMessage(Component.text(payoutMessage(result)).color(ColorOptions.messageachievement));
+        String titleName = userCache.getByUuid(uuid).map(UserSummary::titleName).orElse(null);
+        RewardMessageFormat.salary(result, titleName).forEach(player::sendMessage);
         refreshDisplay(uuid);
     }
 
@@ -179,15 +178,6 @@ public class SalaryPayoutScheduler implements Listener {
             return result.nextEligibleAt().toInstant();
         }
         return now.plus(PAYOUT_INTERVAL);
-    }
-
-    static String payoutMessage(SalaryPayoutResult result) {
-        String message = "You received " + result.amountPaid() + " coins in salary";
-        // Anything noticeably over an hour is a gap payout (offline time, or a server restart).
-        if (result.hoursCovered() >= 1.5) {
-            message += " for the past " + String.format(Locale.ROOT, "%.1f", result.hoursCovered()) + " hours";
-        }
-        return message + ".";
     }
 
     /** Re-reads the balance into the user cache and redraws the scoreboard with it. */
