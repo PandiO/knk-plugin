@@ -12,6 +12,7 @@ import net.knightsandkings.knk.core.domain.siege.KnkSiegeMatchRecords.Participan
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeMatchRecords.ParticipantReward;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeMatchRecords.RewardSummary;
 import net.knightsandkings.knk.core.domain.siege.SiegeEndReason;
+import net.knightsandkings.knk.core.domain.users.RewardMultiplier;
 import net.knightsandkings.knk.core.exception.ApiException;
 import okhttp3.OkHttpClient;
 import org.junit.jupiter.api.AfterEach;
@@ -128,7 +129,9 @@ class SiegeMatchesCommandApiImplTest {
         responseByPath.put("/api/siege-matches/42/complete", """
                 {"matchId":42,"status":"Completed","alreadyCompleted":false,"rewards":[
                   {"userId":7,"siegeTeamId":202,"presentAtEnd":true,"won":true,"holdingCount":2,"captureCount":1,
-                   "coins":375,"baseCoins":250,"coinMultiplier":1.5,"experience":25,"gems":1,"titleChange":{"direction":"promotion"}},
+                   "coins":375,"baseCoins":250,"coinMultiplier":1.5,
+                   "coinMultipliers":[{"source":"personal","value":1.5},{"source":"rank","value":1.0,"permissionGroupId":3,"name":"Default"}],
+                   "experience":25,"gems":1,"titleChange":{"direction":"promotion"}},
                   {"userId":8,"presentAtEnd":false,"won":false,"coins":0,"experience":0,"gems":0}]}""");
         Completion completion = new Completion(SiegeEndReason.INSTANT_VICTORY, 2,
                 List.of(new ParticipantResult(7, 202, 3, 1, 2, 1)),
@@ -138,8 +141,10 @@ class SiegeMatchesCommandApiImplTest {
         RewardSummary summary = await(api.completeMatch(42, completion));
 
         assertEquals(42, summary.matchId());
-        // coinMultiplier is carried; a reward without it maps to 1.0.
-        assertEquals(List.of(new ParticipantReward(7, true, true, 2, 1, 375, 25, 1, 1.5),
+        // The KNG-16 breakdown is carried; a reward without it maps to base = granted, no multipliers.
+        assertEquals(List.of(new ParticipantReward(7, true, true, 2, 1, 375, 25, 1, 250, List.of(
+                        new RewardMultiplier("personal", 1.5, null, null, false, null, null),
+                        new RewardMultiplier("rank", 1.0, 3, "Default", false, null, null))),
                 new ParticipantReward(8, false, false, 0, 0, 0, 0, 0)), summary.rewards());
         JsonNode body = json.readTree(bodies.get("/api/siege-matches/42/complete"));
         assertEquals("InstantVictory", body.get("endReason").asText());

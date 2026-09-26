@@ -56,9 +56,10 @@ public final class KnkSiegeMatchRecords {
      * @param presentAtEnd  false for participants who left before the end (they get nothing)
      * @param holdingCount  objectives their team holds at the end and did not hold at the start
      * @param captureCount  distinct objectives they captured
-     * @param coins          granted coins, after {@code coinMultiplier}
-     * @param coinMultiplier personal salary multiplier x rank (premium) multiplier the server applied
-     *                       to the coins (1.0 = none; smoke test 2026-09-26)
+     * @param coins           granted coins, after {@code coinMultipliers}
+     * @param baseCoins       the coins before the multipliers (DESIGN §7.6 amounts)
+     * @param coinMultipliers the personal and rank (premium) multipliers the server applied, KNG-16
+     *                        style (smoke test 2026-09-26); empty when none or on a repeat call
      */
     public record ParticipantReward(
             int userId,
@@ -69,11 +70,17 @@ public final class KnkSiegeMatchRecords {
             int coins,
             int experience,
             int gems,
-            double coinMultiplier
+            int baseCoins,
+            List<net.knightsandkings.knk.core.domain.users.RewardMultiplier> coinMultipliers
     ) {
+        public ParticipantReward {
+            coinMultipliers = coinMultipliers == null ? List.of() : List.copyOf(coinMultipliers);
+        }
+
+        /** Without a multiplier breakdown: the base is the granted amount. */
         public ParticipantReward(int userId, boolean presentAtEnd, boolean won, int holdingCount, int captureCount,
                                  int coins, int experience, int gems) {
-            this(userId, presentAtEnd, won, holdingCount, captureCount, coins, experience, gems, 1.0);
+            this(userId, presentAtEnd, won, holdingCount, captureCount, coins, experience, gems, coins, List.of());
         }
 
         /** True when this player got anything. */

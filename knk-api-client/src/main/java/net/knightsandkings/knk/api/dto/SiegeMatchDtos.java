@@ -71,7 +71,8 @@ public final class SiegeMatchDtos {
             @JsonProperty("coins") Integer coins,
             @JsonProperty("experience") Integer experience,
             @JsonProperty("gems") Integer gems,
-            @JsonProperty("coinMultiplier") Double coinMultiplier
+            @JsonProperty("baseCoins") Integer baseCoins,
+            @JsonProperty("coinMultipliers") List<RewardMultiplierDto> coinMultipliers
     ) {}
 
     public record ResultResponse(

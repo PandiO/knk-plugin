@@ -59,6 +59,7 @@ import net.knightsandkings.knk.core.siege.VoteTally.VoteChoice;
 import net.knightsandkings.knk.core.siege.VoteTally.VoteResult;
 import net.knightsandkings.knk.core.siege.WinResolver;
 import net.knightsandkings.knk.paper.permissions.KnkPermissible;
+import net.knightsandkings.knk.paper.chat.RewardMessageFormat;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.title.Title;
@@ -660,28 +661,36 @@ public final class SiegeService {
                 + member.highestKillStreak() + ", " + member.captures() + " captures.");
     }
 
-    /** The server's breakdown for one player (DESIGN §7.6: win, objectives gained, captures). */
-    private static Component rewardLine(ParticipantReward r) {
+    /**
+     * The server's breakdown for one player (DESIGN §7.6: win, objectives gained, captures), in the
+     * shared KNG-16 reward format: one line per currency, coins with their base and the personal/rank
+     * multipliers the API applied ({@code Siege reward: 250 ×2 Personal ×1.2 Royal = +600 coins}), then
+     * a detail line with what earned it. A title promotion from the XP arrives separately, through the
+     * TitleChanged notification.
+     */
+    static List<Component> rewardLines(ParticipantReward r) {
         if (!r.hasRewards()) {
-            return SiegeMessages.info("No rewards this time.");
+            return List.of(SiegeMessages.info("No rewards this time."));
         }
-        StringBuilder parts = new StringBuilder();
+        String reason = "Siege reward";
+        List<Component> lines = new ArrayList<>();
         if (r.coins() > 0) {
-            parts.append("+").append(r.coins()).append(" coins ");
-            // Smoke test 2026-09-26: the server applies the personal salary x rank (premium) multiplier.
-            if (Math.abs(r.coinMultiplier() - 1.0) > 0.001) {
-                parts.append("(x").append(new java.text.DecimalFormat("0.##",
-                        java.text.DecimalFormatSymbols.getInstance(Locale.ROOT)).format(r.coinMultiplier())).append(" bonus) ");
-            }
+            boolean hasBreakdown = r.baseCoins() > 0 && !r.coinMultipliers().isEmpty();
+            lines.add(RewardMessageFormat.line(reason, RewardMessageFormat.Currency.COINS,
+                    hasBreakdown ? r.baseCoins() : r.coins(), hasBreakdown ? r.coinMultipliers() : List.of(), r.coins()));
         }
-        if (r.experience() > 0) parts.append("+").append(r.experience()).append(" XP ");
-        if (r.gems() > 0) parts.append("+").append(r.gems()).append(" gems ");
+        if (r.gems() > 0) {
+            lines.add(RewardMessageFormat.line(reason, RewardMessageFormat.Currency.GEMS, r.gems(), List.of(), r.gems()));
+        }
+        if (r.experience() > 0) {
+            lines.add(RewardMessageFormat.line(reason, RewardMessageFormat.Currency.XP, r.experience(), List.of(), r.experience()));
+        }
         List<String> why = new ArrayList<>();
         if (r.won()) why.add("win");
-        if (r.holdingCount() > 0) why.add(r.holdingCount() + " objective(s) gained");
-        if (r.captureCount() > 0) why.add(r.captureCount() + " capture(s)");
-        return SiegeMessages.prefixed(Component.text("Rewards granted: " + parts.toString().trim(), SiegeMessages.GOOD)
-                .append(Component.text(why.isEmpty() ? "" : " (" + String.join(", ", why) + ")", SiegeMessages.INFO)));
+        if (r.holdingCount() > 0) why.add(r.holdingCount() + (r.holdingCount() == 1 ? " objective gained" : " objectives gained"));
+        if (r.captureCount() > 0) why.add(r.captureCount() + (r.captureCount() == 1 ? " capture" : " captures"));
+        if (!why.isEmpty()) lines.add(Component.text("  " + String.join(" · ", why), NamedTextColor.GRAY));
+        return lines;
     }
 
     /**
@@ -699,7 +708,7 @@ public final class SiegeService {
             for (ParticipantReward r : summary.rewards()) {
                 UUID id = playerByUserId.get(r.userId());
                 if (id == null || !r.presentAtEnd()) continue;
-                tell(id, rewardLine(r));
+                rewardLines(r).forEach(line -> tell(id, line));
             }
         });
     }
