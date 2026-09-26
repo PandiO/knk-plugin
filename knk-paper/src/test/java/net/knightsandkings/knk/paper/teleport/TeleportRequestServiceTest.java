@@ -560,4 +560,26 @@ class TeleportRequestServiceTest {
         requests.remind(carol);
         verify(carol).sendMessage(contains("You have no pending teleport requests."));
     }
+
+    @Test
+    void anExpiryDoesNotRevealAPlayerWhoVanishedSince() {
+        requests.send(alice, bob, Direction.TO_TARGET);
+        vanished.add(alice);
+
+        advance(31_000);
+
+        verify(alice).sendMessage(contains("Your teleport request to Bob expired."));
+        verify(bob, never()).sendMessage(contains("expired"));
+    }
+
+    @Test
+    void aWithdrawalByAPlayerWhoVanishedSinceIsNotAnnounced() {
+        requests.send(alice, bob, Direction.TO_TARGET);
+        vanished.add(alice);
+
+        requests.cancel(alice);
+
+        verify(alice).sendMessage(contains("was withdrawn"));
+        verify(bob, never()).sendMessage(contains("withdrew"));
+    }
 }

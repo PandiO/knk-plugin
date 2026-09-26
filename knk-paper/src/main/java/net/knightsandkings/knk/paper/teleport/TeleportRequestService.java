@@ -339,7 +339,7 @@ public class TeleportRequestService {
             Player target = onlineById.apply(withdrawn.get().target());
             String name = target != null ? target.getName() : "that player";
             player.sendMessage(ChatColor.YELLOW + "Your teleport request to " + name + " was withdrawn.");
-            if (target != null) {
+            if (target != null && targets.canSee(target, player)) {
                 target.sendMessage(ChatColor.GRAY + player.getName() + " withdrew their teleport request.");
             }
             return;
@@ -360,9 +360,15 @@ public class TeleportRequestService {
         for (Request expired : book.sweepExpired(now)) {
             Player requester = onlineById.apply(expired.requester());
             Player target = onlineById.apply(expired.target());
+            // Only to a player who can still see the other one: a notice about a player who vanished
+            // since would tell them that player is still online.
             if (requester != null && target != null) {
-                requester.sendMessage(ChatColor.GRAY + "Your teleport request to " + target.getName() + " expired.");
-                target.sendMessage(ChatColor.GRAY + "The teleport request from " + requester.getName() + " expired.");
+                if (targets.canSee(requester, target)) {
+                    requester.sendMessage(ChatColor.GRAY + "Your teleport request to " + target.getName() + " expired.");
+                }
+                if (targets.canSee(target, requester)) {
+                    target.sendMessage(ChatColor.GRAY + "The teleport request from " + requester.getName() + " expired.");
+                }
             }
         }
         sendCooldowns.purgeExpired(now);
@@ -372,9 +378,12 @@ public class TeleportRequestService {
     public void forget(Player player) {
         UUID id = player.getUniqueId();
         for (Request request : book.clear(id, engine.now())) {
-            UUID other = request.requester().equals(id) ? request.target() : request.requester();
-            tell(other, "Teleport request " + (request.requester().equals(id) ? "from " : "to ")
-                + player.getName() + " cancelled.");
+            Player other = onlineById.apply(request.requester().equals(id) ? request.target() : request.requester());
+            // Not about a vanished player the other one can't see (a death would reveal them).
+            if (other != null && targets.canSee(other, player)) {
+                other.sendMessage(ChatColor.GRAY + "Teleport request " + (request.requester().equals(id) ? "from " : "to ")
+                    + player.getName() + " cancelled.");
+            }
         }
     }
 
