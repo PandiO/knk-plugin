@@ -38,8 +38,9 @@ public interface UsersCommandApi {
     CompletableFuture<Void> setActiveModeById(int id, ActiveMode mode);
 
     /**
-     * Pays out the salary gap since this user's last payout, if at least an hour has passed
-     * (docs/specs/user-features/IMPLEMENTATION_PLAN.md §6's intended join-time trigger). Always
+     * Pays out the salary gap since this user's last payout, if at least an hour has passed:
+     * the title's hourly Salary x global x personal x rank multipliers x hours elapsed. Called on
+     * join (covers an offline gap) and hourly while online by the plugin's SalaryPayoutScheduler. Always
      * completes with a result - check SalaryPayoutResult#paid() to distinguish an actual payout
      * from "not yet eligible" rather than relying on the future failing.
      */

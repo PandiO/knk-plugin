@@ -14,5 +14,10 @@ public record SalaryPayoutResultDto(
     @JsonProperty("rankMultiplier") double rankMultiplier,
     @JsonProperty("newCoinsBalance") int newCoinsBalance,
     @JsonProperty("lastSalaryPayoutAt") java.time.OffsetDateTime lastSalaryPayoutAt,
-    @JsonProperty("nextEligibleAt") java.time.OffsetDateTime nextEligibleAt
+    @JsonProperty("nextEligibleAt") java.time.OffsetDateTime nextEligibleAt,
+    @JsonProperty("titleBracketId") Integer titleBracketId,
+    @JsonProperty("titleSalary") int titleSalary,
+    @JsonProperty("paidHours") double paidHours,
+    @JsonProperty("baseAmount") double baseAmount,
+    @JsonProperty("multipliers") java.util.List<RewardMultiplierDto> multipliers
 ) {}
