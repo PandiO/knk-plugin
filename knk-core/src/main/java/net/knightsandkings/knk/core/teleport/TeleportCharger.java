@@ -5,6 +5,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -21,6 +22,9 @@ import net.knightsandkings.knk.core.ports.api.TeleportDestinationsCommandApi;
  *       key - the server charges a key at most once - up to {@code attempts} times;</li>
  *   <li>when it never gets an answer, the teleport doesn't happen and a refund is sent for the key:
  *       it gives back a charge that did go through, or voids the key so a late one can't;</li>
+ *   <li>the same when a retry is <em>refused</em>: the unanswered attempt before it may have been
+ *       charged, and a refusal (a 4xx from a proxy, a destination closed in between) doesn't
+ *       replay that charge - so the key is refunded too;</li>
  *   <li>refunds are retried with the same key until answered (up to {@value #REFUND_ATTEMPTS}
  *       times) and never fail the caller; a refund that can't be delivered is logged as a WARNING
  *       with the user and key so staff can reverse it by hand.</li>
@@ -83,8 +87,14 @@ public class TeleportCharger {
     /** Never completes exceptionally: no answer after every attempt becomes a refusal, after a refund of the key. */
     private CompletableFuture<TeleportChargeResult> charge(int userId, String key,
                                                           Supplier<CompletableFuture<TeleportChargeResult>> call) {
-        return chargeAttempt(call, 1).handle((result, ex) -> {
+        AtomicBoolean unanswered = new AtomicBoolean();
+        return chargeAttempt(call, 1, unanswered).handle((result, ex) -> {
             if (ex == null && result != null) {
+                if (!result.allowed() && unanswered.get()) {
+                    LOGGER.warning("[KnK Teleport] Charge " + key + " for user " + userId + " was refused ("
+                        + result.refusalCode() + ") after an unanswered attempt - refunding the key");
+                    refund(userId, key, "the charge was refused after a retry");
+                }
                 return CompletableFuture.completedFuture(result);
             }
             LOGGER.log(Level.WARNING, "[KnK Teleport] Charge " + key + " for user " + userId + " got no answer after "
@@ -94,7 +104,8 @@ public class TeleportCharger {
         }).thenCompose(future -> future);
     }
 
-    private CompletableFuture<TeleportChargeResult> chargeAttempt(Supplier<CompletableFuture<TeleportChargeResult>> call, int attempt) {
+    private CompletableFuture<TeleportChargeResult> chargeAttempt(Supplier<CompletableFuture<TeleportChargeResult>> call, int attempt,
+                                                                 AtomicBoolean unanswered) {
         CompletableFuture<TeleportChargeResult> future;
         try {
             future = call.get();
@@ -106,7 +117,8 @@ public class TeleportCharger {
         }
         return future.exceptionallyComposeAsync(ex -> {
             LOGGER.log(Level.FINE, "Teleport charge attempt " + attempt + " failed, retrying with the same key", ex);
-            return chargeAttempt(call, attempt + 1);
+            unanswered.set(true);
+            return chargeAttempt(call, attempt + 1, unanswered);
         }, chargeRetryExecutor);
     }
 

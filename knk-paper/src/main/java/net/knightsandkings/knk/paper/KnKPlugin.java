@@ -818,6 +818,17 @@ public class KnKPlugin extends JavaPlugin {
         }
         if (teleportService != null) {
             teleportService.cancelAll(net.knightsandkings.knk.core.teleport.WarmupCancelReason.SHUTDOWN);
+            // Paid teleports caught between their charge and the teleport: refund them (or void their
+            // keys) while the API client still runs - bounded, so a dead API can't hang the shutdown.
+            try {
+                teleportService.abandonOpenCharges("the server shut down").get(5, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (java.util.concurrent.TimeoutException e) {
+                getLogger().warning("Teleport charges still being refunded at shutdown - see the [KnK Teleport] refund warnings");
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (java.util.concurrent.ExecutionException e) {
+                getLogger().log(java.util.logging.Level.WARNING, "Refunding open teleport charges at shutdown failed", e);
+            }
         }
         if (salaryPayoutScheduler != null) {
             salaryPayoutScheduler.stop();

@@ -91,6 +91,21 @@ class TeleportChargerTest {
     }
 
     @Test
+    void aRefusalAfterAnUnansweredAttempt_RefundsTheKey() {
+        // The first attempt may have been charged server-side (only its answer was lost); a refused
+        // retry doesn't replay that charge, so the key is refunded (reversed, or voided if nothing).
+        api.chargeOutcomes.add(null);
+        api.chargeOutcomes.add(TeleportChargeResult.refused("Http429", "Slow down"));
+
+        TeleportChargeResult result = charger.chargeWarp(1, 7, "warp:k", false, false).join();
+
+        assertFalse(result.allowed());
+        assertEquals("Http429", result.refusalCode());
+        assertEquals(List.of("warp:k", "warp:k"), api.chargeKeys);
+        assertEquals(List.of("warp:k"), api.refundKeys);
+    }
+
+    @Test
     void noAnswerAfterEveryAttempt_RefundsTheKeyAndRefuses() {
         TeleportChargeResult result = charger.chargeRequestFee(7, 100, "tpa:k", 8).join();
 

@@ -116,6 +116,7 @@ public class TeleportCharges {
         private volatile Integer userId;
         private volatile TeleportChargeResult paid;
         private volatile boolean refunded;
+        private boolean abandoned;
 
         Charge(UUID payer, String key, String currencyWord, ChargeCall call) {
             this.payer = payer;
@@ -131,7 +132,14 @@ public class TeleportCharges {
                     return CompletableFuture.completedFuture(Authorization.denied(TeleportDenial.of(NO_ACCOUNT,
                         "Your account couldn't be loaded - try again in a moment.")));
                 }
-                userId = id;
+                synchronized (this) {
+                    if (abandoned) {
+                        // Shutting down: never send a charge after abandon() - it couldn't be refunded.
+                        return CompletableFuture.completedFuture(Authorization.denied(TeleportDenial.of(
+                            TeleportCharger.UNAVAILABLE, "Teleporting isn't available right now. Try again.")));
+                    }
+                    userId = id;
+                }
                 return call.charge(id).thenApply(result -> {
                     if (!result.allowed()) {
                         return Authorization.denied(denialOf(result));
@@ -140,7 +148,8 @@ public class TeleportCharges {
                     if (result.charged() > 0) {
                         onCharged.accept(id);
                     }
-                    return Authorization.allowed(destinationOf(result));
+                    // Turned into a Bukkit Location on the main thread (Authorization.destination()).
+                    return Authorization.allowed(() -> destinationOf(result));
                 });
             }).exceptionally(ex -> Authorization.denied(TeleportDenial.of(TeleportCharger.UNAVAILABLE,
                 "Teleporting isn't available right now. Try again.")));
@@ -163,6 +172,31 @@ public class TeleportCharges {
             }
             refunded = true;
             charger.refund(id, key, why).thenAccept(refund -> {
+                if (refund != null && refund.refunded()) {
+                    onCharged.accept(id);
+                }
+            });
+        }
+
+        /**
+         * Plugin shutdown: refund the key whether or not the answer is in yet - the server reverses a
+         * charge that went through, or voids the key so one still on its way is refused (both under
+         * the player's row lock, so either order is safe) - and never send the charge afterwards.
+         */
+        @Override
+        public CompletableFuture<Void> abandon(String why) {
+            Integer id;
+            synchronized (this) {
+                abandoned = true;
+                TeleportChargeResult result = paid;
+                if (refunded || userId == null || (result != null && result.charged() <= 0)) {
+                    // Refunded already, the charge was never sent (and now never will be), or it was free.
+                    return CompletableFuture.completedFuture(null);
+                }
+                refunded = true;
+                id = userId;
+            }
+            return charger.refund(id, key, why).thenAccept(refund -> {
                 if (refund != null && refund.refunded()) {
                     onCharged.accept(id);
                 }

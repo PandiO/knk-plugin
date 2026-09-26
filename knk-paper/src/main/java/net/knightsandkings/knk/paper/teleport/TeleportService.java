@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.teleport;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -90,6 +91,8 @@ public class TeleportService {
     private final List<TeleportRestriction> restrictions = new CopyOnWriteArrayList<>();
     /** Authority of teleports whose {@code teleportAsync} is in flight, for the region listener's bypass. */
     private final Map<UUID, Authority> inFlight = new ConcurrentHashMap<>();
+    /** Charges asked for (or answered) whose teleport hasn't been handed to Bukkit yet - refunded on shutdown. */
+    private final Set<TeleportCharge> openCharges = ConcurrentHashMap.newKeySet();
     private volatile TeleportSettings settings;
     private volatile WarmupPolicy warmupPolicy;
     /** Null when the API client isn't available - staff teleports are then only logged locally. */
@@ -201,6 +204,32 @@ public class TeleportService {
         }
     }
 
+    /**
+     * Plugin disable: every paid teleport whose charge is in flight, or answered but not yet turned
+     * into a teleport, is abandoned - refunded, or its key voided so a charge still on its way is
+     * refused. Their continuations would need the main thread, which a disabled plugin no longer
+     * gets, so without this the player would pay for a teleport that never happens. The future
+     * completes (never exceptionally) when every refund was answered or given up on; the caller
+     * should wait for it (bounded) before the API client shuts down.
+     */
+    public CompletableFuture<Void> abandonOpenCharges(String why) {
+        List<CompletableFuture<Void>> refunds = new ArrayList<>();
+        for (TeleportCharge charge : List.copyOf(openCharges)) {
+            openCharges.remove(charge);
+            try {
+                refunds.add(charge.abandon(why).exceptionally(ex -> null));
+            } catch (RuntimeException ex) {
+                LOGGER.log(Level.WARNING, "[KnK Teleport] Could not refund an open teleport charge on shutdown", ex);
+            }
+        }
+        return CompletableFuture.allOf(refunds.toArray(CompletableFuture[]::new));
+    }
+
+    /** Charges {@link #abandonOpenCharges} would refund right now (tests). */
+    int openChargeCount() {
+        return openCharges.size();
+    }
+
     /** Called when a player leaves: their warmup ends; cooldowns and combat tags outlive a relog. */
     public void forget(UUID player) {
         cancelWarmup(player, WarmupCancelReason.QUIT);
@@ -308,6 +337,15 @@ public class TeleportService {
      */
     private void chargeThenPlace(TeleportPlan plan, Authority authority, TeleportCharge charge,
                                  CompletableFuture<TeleportOutcome> result) {
+        // Whatever was paid, anything but arriving gives it back (a no-op when nothing was charged -
+        // registered before asking, so no ending can skip it).
+        openCharges.add(charge);
+        result.whenComplete((outcome, failure) -> {
+            openCharges.remove(charge);
+            if (failure != null || outcome == null || !outcome.isTeleported()) {
+                charge.refund(outcome != null && outcome.message() != null ? outcome.message() : "the teleport didn't happen");
+            }
+        });
         CompletableFuture<TeleportCharge.Authorization> authorization;
         try {
             authorization = charge.authorize();
@@ -317,7 +355,6 @@ public class TeleportService {
         authorization.whenComplete((answer, ex) -> mainThread.execute(() -> guarded(plan, result, () -> {
             if (ex != null || answer == null) {
                 LOGGER.log(Level.WARNING, "[KnK Teleport] Charge for " + plan.subject().getName() + " failed", ex);
-                charge.refund("the charge failed");
                 result.complete(TeleportOutcome.failed("Teleporting isn't available right now. Try again."));
                 return;
             }
@@ -325,12 +362,6 @@ public class TeleportService {
                 result.complete(TeleportOutcome.denied(answer.denial()));
                 return;
             }
-            // Paid from here on: anything but arriving gives it back.
-            result.whenComplete((outcome, failure) -> {
-                if (failure != null || outcome == null || !outcome.isTeleported()) {
-                    charge.refund(outcome != null && outcome.message() != null ? outcome.message() : "the teleport didn't happen");
-                }
-            });
             Player subject = plan.subject();
             if (!subject.isOnline()) {
                 result.complete(TeleportOutcome.failed(subject.getName() + " went offline."));
@@ -378,6 +409,11 @@ public class TeleportService {
         Player subject = plan.subject();
         UUID id = subject.getUniqueId();
         Location from = subject.getLocation();
+        if (plan.charge() != null) {
+            // Handed to Bukkit now: from here the teleport's own ending decides (refund unless it arrives),
+            // not a shutdown - the player most likely arrives even if the plugin is going away.
+            openCharges.remove(plan.charge());
+        }
         inFlight.put(id, authority);
         CompletableFuture<Boolean> teleported;
         try {

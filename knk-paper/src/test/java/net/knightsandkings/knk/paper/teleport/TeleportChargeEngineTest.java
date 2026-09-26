@@ -52,12 +52,14 @@ class TeleportChargeEngineTest {
         final List<String> feeCalls = new ArrayList<>();
         final List<String> refundKeys = new ArrayList<>();
         TeleportChargeResult next = TeleportChargeResult.allowed("Gems", 10, 40, false, null);
+        /** When set, warp charges stay unanswered until the test completes it. */
+        CompletableFuture<TeleportChargeResult> pending;
 
         @Override
         public CompletableFuture<TeleportChargeResult> chargeWarp(int domainId, int userId, String key,
                                                                  boolean bypassRequirements, boolean bypassCost) {
             warpKeys.add(key);
-            return CompletableFuture.completedFuture(next);
+            return pending != null ? pending : CompletableFuture.completedFuture(next);
         }
 
         @Override
@@ -219,6 +221,76 @@ class TeleportChargeEngineTest {
 
         assertEquals(TeleportOutcome.Status.DENIED, outcome.join().status());
         assertTrue(api.warpKeys.isEmpty());
+    }
+
+    // ===== plugin shutdown =====
+
+    @Test
+    void aChargeInFlightAtShutdown_IsRefundedUnderItsKey() {
+        api.pending = new CompletableFuture<>();
+        CompletableFuture<TeleportOutcome> outcome = warp(alice);
+        advance(5_000);
+        assertEquals(1, api.warpKeys.size(), "the charge is on its way");
+        assertEquals(1, engine.openChargeCount());
+
+        engine.abandonOpenCharges("the server shut down").join();
+
+        // Reverses the charge if it went through, voids the key if it's still on its way.
+        assertEquals(api.warpKeys, api.refundKeys);
+        assertEquals(0, engine.openChargeCount());
+        assertFalse(outcome.isDone(), "a disabled plugin gets no main-thread continuation");
+    }
+
+    @Test
+    void aChargeAnsweredButNotYetTeleportedAtShutdown_IsRefunded() {
+        when(world.getChunkAtAsync(any(Location.class))).thenReturn(new CompletableFuture<>());
+        warp(alice);
+        advance(5_000);
+        assertEquals(1, api.warpKeys.size());
+
+        engine.abandonOpenCharges("the server shut down").join();
+
+        assertEquals(api.warpKeys, api.refundKeys);
+    }
+
+    @Test
+    void aChargeAbandonedBeforeItIsSent_IsNeverSent() {
+        CompletableFuture<Integer> idLookup = new CompletableFuture<>();
+        TeleportCharges slowIds = new TeleportCharges(new TeleportCharger(api, 3, Runnable::run, Runnable::run),
+            uuid -> idLookup, name -> world, this::byId);
+        Location location = TeleportCharges.toLocation(kardenna, name -> world);
+        engine.start(TeleportPlan.warp(alice, location, "Kardenna", slowIds.warp(alice, kardenna, false, false)));
+        advance(5_000);
+
+        engine.abandonOpenCharges("the server shut down").join();
+        idLookup.complete(7);
+
+        assertTrue(api.warpKeys.isEmpty(), "no charge after abandon - it couldn't be refunded any more");
+        assertTrue(api.refundKeys.isEmpty(), "nothing was sent, nothing to refund");
+    }
+
+    @Test
+    void aTeleportAlreadyHandedToBukkit_IsNotRefundedOnShutdown() {
+        CompletableFuture<Boolean> teleporting = new CompletableFuture<>();
+        when(alice.teleportAsync(any(Location.class), any(TeleportCause.class))).thenReturn(teleporting);
+        warp(alice);
+        advance(5_000);
+
+        engine.abandonOpenCharges("the server shut down").join();
+
+        assertTrue(api.refundKeys.isEmpty(), "the player is on the way - they get what they paid for");
+        teleporting.complete(false);
+        assertEquals(api.warpKeys, api.refundKeys, "a teleport that then fails is still refunded");
+    }
+
+    @Test
+    void aFinishedWarpLeavesNoOpenCharge() {
+        warp(alice);
+        advance(5_000);
+
+        assertEquals(0, engine.openChargeCount());
+        engine.abandonOpenCharges("the server shut down").join();
+        assertTrue(api.refundKeys.isEmpty());
     }
 
     // ===== paid /tpa, /tpahere =====
