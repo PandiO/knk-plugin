@@ -209,6 +209,8 @@ public class KnKPlugin extends JavaPlugin {
     private TempRegionRetentionTask tempRegionRetentionTask;
     private net.knightsandkings.knk.paper.teleport.TeleportService teleportService;
     private net.knightsandkings.knk.paper.commands.StaffTeleportCommand staffTeleportCommand;
+    private net.knightsandkings.knk.paper.teleport.TeleportRequestService teleportRequestService;
+    private net.knightsandkings.knk.paper.commands.TeleportRequestCommand teleportRequestCommand;
     
     @Override
     public void onEnable() {
@@ -941,11 +943,24 @@ public class KnKPlugin extends JavaPlugin {
         } else {
             getLogger().warning("/tp and /tphere not registered - the teleport engine failed to initialize");
         }
+        if (teleportRequestCommand != null) {
+            registerTabCommand("tpa", teleportRequestCommand);
+            registerTabCommand("tpahere", teleportRequestCommand.withForm(
+                net.knightsandkings.knk.paper.commands.TeleportRequestCommand.Form.TPAHERE));
+            registerTabCommand("tpaccept", teleportRequestCommand.withForm(
+                net.knightsandkings.knk.paper.commands.TeleportRequestCommand.Form.ACCEPT));
+            registerTabCommand("tpdeny", teleportRequestCommand.withForm(
+                net.knightsandkings.knk.paper.commands.TeleportRequestCommand.Form.DENY));
+            registerTabCommand("tpcancel", teleportRequestCommand.withForm(
+                net.knightsandkings.knk.paper.commands.TeleportRequestCommand.Form.CANCEL));
+        } else {
+            getLogger().warning("/tpa, /tpahere, /tpaccept, /tpdeny, /tpcancel not registered - the teleport engine failed to initialize");
+        }
     }
 
     /**
-     * Teleport engine (docs/specs/teleport/DESIGN.md §3.4) and the staff teleport commands (Phase 1).
-     * Siege guards plug in later through {@link #registerTeleportRestriction}.
+     * Teleport engine (docs/specs/teleport/DESIGN.md §3.4), the staff teleport commands (Phase 1) and
+     * player teleport requests (Phase 3). Siege guards plug in later through {@link #registerTeleportRestriction}.
      */
     private void initializeTeleports() {
         if (knkPermissible == null || userAdminService == null || modeService == null || adminFreezeManager == null) {
@@ -967,10 +982,23 @@ public class KnKPlugin extends JavaPlugin {
         } else {
             getLogger().warning("Staff teleports won't be audited - the users API isn't available");
         }
-        getServer().getScheduler().runTaskTimer(this, () -> teleportService.tick(adminFreezeManager::isFrozen), 5L, 5L);
+        var targets = new net.knightsandkings.knk.paper.teleport.VisibleTargetResolver(
+            org.bukkit.Bukkit::getPlayerExact, org.bukkit.Bukkit::getOnlinePlayers, modeService::isVanished);
+        // Phase 3: /tpa, /tpahere and their answers (DESIGN.md §3.5).
+        this.teleportRequestService = new net.knightsandkings.knk.paper.teleport.TeleportRequestService(
+            teleportService, mainThread, knkPermissible::hasPermissionAsync, targets, org.bukkit.Bukkit::getPlayer);
+        if (config.teleport().request().isPaid()) {
+            getLogger().warning("teleport.request.price-coins is " + config.teleport().request().priceCoins()
+                + " - paid teleport requests aren't supported yet, so /tpa and /tpahere will be refused. Set it to 0.");
+        }
+        getServer().getScheduler().runTaskTimer(this, () -> {
+            teleportService.tick(adminFreezeManager::isFrozen);
+            teleportRequestService.tick();
+        }, 5L, 5L);
 
         var pluginManager = getServer().getPluginManager();
-        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.TeleportWarmupListener(teleportService), this);
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.TeleportWarmupListener(
+            teleportService, teleportRequestService), this);
         pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.CombatTagListener(teleportService), this);
 
         var support = new net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport(
@@ -980,8 +1008,8 @@ public class KnKPlugin extends JavaPlugin {
         net.knightsandkings.knk.paper.commands.support.TargetRankCheck rankCheck = (sender, targetName, onAllowed) ->
             userAdminService.resolveTarget(sender, targetName, summary ->
                 userAdminService.withRankCheck(sender, summary, api -> onAllowed.accept(summary), () -> { }));
-        var targets = new net.knightsandkings.knk.paper.teleport.VisibleTargetResolver(
-            org.bukkit.Bukkit::getPlayerExact, org.bukkit.Bukkit::getOnlinePlayers, modeService::isVanished);
+        this.teleportRequestCommand = new net.knightsandkings.knk.paper.commands.TeleportRequestCommand(
+            net.knightsandkings.knk.paper.commands.TeleportRequestCommand.Form.TPA, support, targets, teleportRequestService);
         this.staffTeleportCommand = new net.knightsandkings.knk.paper.commands.StaffTeleportCommand(
             net.knightsandkings.knk.paper.commands.StaffTeleportCommand.Form.TP, support, rankCheck, targets, teleportService,
             modeService::isVanished, org.bukkit.Bukkit::getWorld,

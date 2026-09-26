@@ -15,6 +15,7 @@ import org.bukkit.event.player.PlayerTeleportEvent;
 
 import net.knightsandkings.knk.core.teleport.WarmupBook;
 import net.knightsandkings.knk.core.teleport.WarmupCancelReason;
+import net.knightsandkings.knk.paper.teleport.TeleportRequestService;
 import net.knightsandkings.knk.paper.teleport.TeleportService;
 
 /**
@@ -23,13 +24,23 @@ import net.knightsandkings.knk.paper.teleport.TeleportService;
  * damage (v1's damage cancel was never live), is teleported by anything else, dies or quits.
  * Being frozen is caught by {@link TeleportService#tick}. MONITOR + ignoreCancelled: only moves and
  * damage that really happened count.
+ * <p>
+ * Also drops a player's pending teleport requests (sent and received) when they quit or die
+ * (DESIGN §3.5, Phase 3).
  */
 public class TeleportWarmupListener implements Listener {
 
     private final TeleportService teleportService;
+    /** Null when teleport requests aren't wired (tests of the engine alone). */
+    private final TeleportRequestService requestService;
 
     public TeleportWarmupListener(TeleportService teleportService) {
+        this(teleportService, null);
+    }
+
+    public TeleportWarmupListener(TeleportService teleportService, TeleportRequestService requestService) {
         this.teleportService = Objects.requireNonNull(teleportService, "teleportService must not be null");
+        this.requestService = requestService;
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -61,10 +72,16 @@ public class TeleportWarmupListener implements Listener {
     @EventHandler(priority = EventPriority.MONITOR)
     public void onDeath(PlayerDeathEvent event) {
         teleportService.cancelWarmup(event.getEntity().getUniqueId(), WarmupCancelReason.DIED);
+        if (requestService != null) {
+            requestService.forget(event.getEntity());
+        }
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onQuit(PlayerQuitEvent event) {
+        if (requestService != null) {
+            requestService.forget(event.getPlayer());
+        }
         teleportService.forget(event.getPlayer().getUniqueId());
     }
 }

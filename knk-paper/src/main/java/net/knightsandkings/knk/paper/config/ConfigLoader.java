@@ -3,6 +3,7 @@ package net.knightsandkings.knk.paper.config;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 
+import net.knightsandkings.knk.core.teleport.TeleportRequestSettings;
 import net.knightsandkings.knk.core.teleport.TeleportSettings;
 
 /**
@@ -121,7 +122,22 @@ public class ConfigLoader {
             section.getInt("warmup-short-seconds", defaults.warmupShortSeconds()),
             section.getInt("cooldown-seconds", defaults.cooldownSeconds()),
             section.getInt("combat-tag-seconds", defaults.combatTagSeconds()),
-            section.getInt("safe-search-radius", defaults.safeSearchRadius())
+            section.getInt("safe-search-radius", defaults.safeSearchRadius()),
+            loadTeleportRequestSettings(section.getConfigurationSection("request"))
+        );
+    }
+
+    /** teleport.request (DESIGN §3.5/§3.11, Phase 3); missing keys fall back to the defaults. */
+    static TeleportRequestSettings loadTeleportRequestSettings(ConfigurationSection section) {
+        TeleportRequestSettings defaults = TeleportRequestSettings.defaults();
+        if (section == null) {
+            return defaults;
+        }
+        return new TeleportRequestSettings(
+            section.getInt("expire-seconds", defaults.expireSeconds()),
+            section.getInt("cooldown-seconds", defaults.cooldownSeconds()),
+            section.getInt("max-incoming", defaults.maxIncoming()),
+            section.getInt("price-coins", defaults.priceCoins())
         );
     }
 

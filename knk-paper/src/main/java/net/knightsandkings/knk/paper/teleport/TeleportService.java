@@ -67,6 +67,7 @@ public class TeleportService {
 
     private static final Logger LOGGER = Logger.getLogger(TeleportService.class.getName());
     private static final long PURGE_INTERVAL_MILLIS = 60_000L;
+    private static final String UNAVAILABLE = "unavailable";
     /** Guard nodes the engine itself reads for player teleports. */
     private static final Set<String> PLAYER_KIND_NODES = Set.of(
         TeleportNodes.WARMUP_SHORT, TeleportNodes.BYPASS_WARMUP, TeleportNodes.BYPASS_COOLDOWN, TeleportNodes.BYPASS_COMBAT);
@@ -157,6 +158,31 @@ public class TeleportService {
             }
             Authority resolved = ex != null || authority == null ? Authority.NONE : authority;
             guarded(plan, result, () -> begin(plan, resolved, result));
+        }));
+        return result;
+    }
+
+    /**
+     * Run the guards {@link #start} would run first, without starting anything - so a command can
+     * refuse up front (a {@code /tpa} while in combat, frozen or on cooldown) instead of only after
+     * the other player said yes. Main thread only; completes on the main thread, empty when allowed.
+     */
+    public CompletableFuture<Optional<TeleportDenial>> check(TeleportPlan plan) {
+        Objects.requireNonNull(plan, "plan must not be null");
+        CompletableFuture<Optional<TeleportDenial>> result = new CompletableFuture<>();
+        resolveAuthority(plan).whenComplete((authority, ex) -> mainThread.execute(() -> {
+            try {
+                Authority resolved = ex != null || authority == null ? Authority.NONE : authority;
+                Location to = plan.destination().get();
+                if (!plan.subject().isOnline() || to == null || to.getWorld() == null) {
+                    result.complete(Optional.of(TeleportDenial.of(UNAVAILABLE, "The destination is no longer available.")));
+                    return;
+                }
+                result.complete(checkGuards(plan, resolved, to));
+            } catch (RuntimeException failure) {
+                LOGGER.log(Level.SEVERE, "Teleport check for " + plan.subject().getName() + " failed", failure);
+                result.complete(Optional.of(TeleportDenial.of("error", "Teleporting isn't available right now.")));
+            }
         }));
         return result;
     }

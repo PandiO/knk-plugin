@@ -16,6 +16,11 @@ public final class TeleportNodes {
     /** The pre-teleport-feature node for {@code /knk tp}, still accepted for {@code /tp <player>}. */
     public static final String LEGACY_ADMIN_TP = "knk.admin.tp";
 
+    /** {@code /tpa <player>} - ask to go to a player (granted to the Default group). */
+    public static final String REQUEST = "knk.teleport.request";
+    /** {@code /tpahere <player>} - ask a player to come to you (Dragon Blood, developer decision Q2). */
+    public static final String REQUEST_HERE = "knk.teleport.request.here";
+
     /** 3 s instead of 5 s warmup (v1: any donator rank). */
     public static final String WARMUP_SHORT = "knk.teleport.warmup.short";
     public static final String BYPASS_WARMUP = "knk.teleport.bypass.warmup";

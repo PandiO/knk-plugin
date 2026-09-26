@@ -129,6 +129,29 @@ commands:
     description: "Staff teleport: bring a player to you"
     usage: "/tphere <player> [-s]"
 
+  # Player teleport requests (DESIGN.md §3.5, Phase 3). Nodes checked in TeleportRequestCommand.
+  tpa:
+    description: "Ask to teleport to a player (or /tpa accept|deny [player])"
+    usage: "/tpa <player> | /tpa accept|deny [player]"
+
+  tpahere:
+    description: "Ask a player to teleport to you"
+    usage: "/tpahere <player>"
+
+  tpaccept:
+    description: "Accept a teleport request (the newest, or the named player's)"
+    usage: "/tpaccept [player]"
+    aliases: [tpyes]
+
+  tpdeny:
+    description: "Deny a teleport request (the newest, or the named player's)"
+    usage: "/tpdeny [player]"
+    aliases: [tpno]
+
+  tpcancel:
+    description: "Withdraw your teleport request, or stop your running teleport"
+    usage: "/tpcancel"
+
 permissions:
   knk.admin:
     description: >-
@@ -504,6 +527,16 @@ permissions:
     description: The -s flag on staff teleports - no message to the moved or visited player. Vanished staff are always silent.
     default: op
 
+  knk.teleport.request:
+    description: >-
+      /tpa <player> - ask to teleport to a player; they accept or deny, then you warm up and go.
+      Meant for the Default group. Answering (/tpaccept, /tpdeny) needs no node.
+    default: op
+
+  knk.teleport.request.here:
+    description: /tpahere <player> - ask a player to teleport to you. Meant for the Dragon Blood premium tier.
+    default: op
+
   knk.teleport.warmup.short:
     description: Player teleports wait teleport.warmup-short-seconds (3 s) instead of warmup-seconds (5 s). Meant for the Noble premium tier and up.
     default: op
@@ -513,7 +546,7 @@ permissions:
     default: op
 
   knk.teleport.bypass.cooldown:
-    description: No cooldown after player teleports.
+    description: No cooldown after player teleports, and none between teleport requests.
     default: op
 
   knk.teleport.bypass.combat:
