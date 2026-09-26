@@ -6,6 +6,7 @@ import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
 import net.knightsandkings.knk.core.domain.common.Page;
 import net.knightsandkings.knk.core.domain.enchantment.EnchantmentRegistry;
 import net.knightsandkings.knk.core.domain.enchantments.KnkEnchantmentDefinition;
+import net.knightsandkings.knk.core.ports.api.ClansQueryApi;
 import net.knightsandkings.knk.core.ports.api.HealthApi;
 import net.knightsandkings.knk.core.ports.api.LocationsQueryApi;
 import net.knightsandkings.knk.core.ports.api.TownsQueryApi;
@@ -97,6 +98,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
             GateDoorRegionCaptureHandler gateDoorRegionCaptureHandler,
             String serverId,
             MenuService menuService,
+            ClansQueryApi clansQueryApi,
             net.knightsandkings.knk.paper.user.UserAdminService userAdminService
     ) {
                 this.plugin = plugin;
@@ -123,6 +125,14 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
             );
         }
         
+        // Siege Phase 1 verification: fetch a clan/banner and hand over the built banner item.
+        ClansDebugCommand clansCommand = new ClansDebugCommand(plugin, clansQueryApi);
+        registry.register(
+                new CommandMetadata("clans", "Inspect clans and get their banner item", "/knk clans <list|info|banner|design> [id]", "knk.admin.clans",
+                        List.of("/knk clans list", "/knk clans info 1", "/knk clans banner 1", "/knk clans design 1")),
+                clansCommand::execute
+        );
+
         // Register towns
         TownsDebugCommand townsCommand = new TownsDebugCommand(plugin, townsApi);
         registry.register(
