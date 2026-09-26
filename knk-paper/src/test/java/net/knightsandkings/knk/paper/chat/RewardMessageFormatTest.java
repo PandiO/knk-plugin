@@ -106,6 +106,26 @@ class RewardMessageFormatTest {
     }
 
     @Test
+    void adminGrantNamesTheStaffMemberAndTheTypedReason() {
+        assertEquals("Granted by Pandi: +500 coins – event prize",
+                plain(RewardMessageFormat.adminChange("Pandi", Currency.COINS, 500, "event prize")));
+    }
+
+    @Test
+    void adminRemovalIsNegativeAndLeavesOutAMissingReason() {
+        assertEquals("Removed by Pandi: -1,200 XP",
+                plain(RewardMessageFormat.adminChange("Pandi", Currency.XP, -1200, null)));
+    }
+
+    @Test
+    void propertyNamesMapToCurrencies() {
+        assertEquals(Currency.COINS, Currency.forProperty("coins"));
+        assertEquals(Currency.GEMS, Currency.forProperty("gems"));
+        assertEquals(Currency.XP, Currency.forProperty("xp"));
+        assertEquals(null, Currency.forProperty("group"));
+    }
+
+    @Test
     void multipliersDropTrailingZeros() {
         assertEquals("2", RewardMessageFormat.formatMultiplier(2.0));
         assertEquals("1.2", RewardMessageFormat.formatMultiplier(1.2));

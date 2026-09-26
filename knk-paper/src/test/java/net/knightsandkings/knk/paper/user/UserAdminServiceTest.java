@@ -96,6 +96,32 @@ class UserAdminServiceTest {
     }
 
     @Test
+    void anOnlineTargetIsToldWhoChangedTheirBalanceAndWhy() {
+        Player steve = mock(Player.class);
+        bukkit.when(() -> Bukkit.getPlayerExact("Steve")).thenReturn(steve);
+
+        assertTrue(service.changeBalance(staff, target, "coins", "add", 500, "event prize").join());
+
+        verify(acting).adjustBalancesById(7, 500, 0, 0, "event prize", false);
+        verify(steve).sendMessage(org.mockito.ArgumentMatchers.<net.kyori.adventure.text.Component>argThat(message ->
+                "Granted by Admin: +500 coins – event prize".equals(
+                        net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(message))));
+    }
+
+    @Test
+    void withoutATypedReasonTheAuditGetsADefaultAndThePlayerNoNote() {
+        Player steve = mock(Player.class);
+        bukkit.when(() -> Bukkit.getPlayerExact("Steve")).thenReturn(steve);
+
+        assertTrue(service.changeBalance(staff, target, "gems", "remove", 3, null).join());
+
+        verify(acting).adjustBalancesById(7, 0, -3, 0, "/knk user command by Admin", false);
+        verify(steve).sendMessage(org.mockito.ArgumentMatchers.<net.kyori.adventure.text.Component>argThat(message ->
+                "Removed by Admin: -3 gems".equals(
+                        net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(message))));
+    }
+
+    @Test
     void unchangedValueIsReportedWithoutACall() {
         assertFalse(service.changeBalance(staff, target, "coins", "set", 250, "r").join());
 

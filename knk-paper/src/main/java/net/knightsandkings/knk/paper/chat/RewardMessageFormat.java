@@ -21,6 +21,7 @@ import net.kyori.adventure.text.format.TextColor;
  *   Salary (Knight): 975 ×2 Personal ×1.2 Royal = +2,340 coins
  *     4,800 coins/h × 1.5h paid for 2.0h away
  *   Title bonus: 13,500 ×2 Personal ×1.2 Royal = +32,400 coins
+ *   Granted by Pandi: +500 coins – event prize
  * </pre>
  * The base amount comes first, then each multiplier with its reason - "Server" (global),
  * "Personal", or the rank's name in that rank's chat color, as chat shows it (KNG-7) - and the
@@ -45,6 +46,16 @@ public final class RewardMessageFormat {
             this.label = label;
             this.color = color;
         }
+
+        /** The {@code /knk user} property name: "coins", "gems" or "xp"; null for anything else. */
+        public static Currency forProperty(String property) {
+            return switch (property == null ? "" : property) {
+                case "coins" -> COINS;
+                case "gems" -> GEMS;
+                case "xp" -> XP;
+                default -> null;
+            };
+        }
     }
 
     private static final Style REASON = Style.style(NamedTextColor.YELLOW);
@@ -58,7 +69,8 @@ public final class RewardMessageFormat {
 
     /**
      * One reward line: {@code <reason>: <base> ×<m> <why> … = +<total> <currency>}, or
-     * {@code <reason>: +<total> <currency>} when no multiplier other than 1 applies.
+     * {@code <reason>: +<total> <currency>} when no multiplier other than 1 applies. A negative
+     * total (a removal) shows as {@code -<amount>}.
      */
     public static Component line(String reason, Currency currency, double base, List<RewardMultiplier> multipliers, int total) {
         List<RewardMultiplier> shown = multipliers == null ? List.of()
@@ -74,8 +86,23 @@ public final class RewardMessageFormat {
             }
             line.append(Component.text(" = ", DETAIL));
         }
-        line.append(Component.text("+" + formatAmount(total) + " " + currency.label, Style.style(currency.color)));
+        line.append(Component.text((total < 0 ? "-" : "+") + formatAmount(Math.abs(total)) + " " + currency.label,
+                Style.style(currency.color)));
         return line.build();
+    }
+
+    /**
+     * A balance change made by staff ({@code /knk user}, the Player manager, set title): no
+     * multipliers apply, so it's {@code Granted by <actor>: +500 coins – <note>}, or "Removed by"
+     * for a negative change. The note is left out when null or blank.
+     */
+    public static Component adminChange(String actorName, Currency currency, int delta, String note) {
+        String reason = (delta < 0 ? "Removed by " : "Granted by ") + actorName;
+        Component line = line(reason, currency, Math.abs(delta), List.of(), delta);
+        if (note == null || note.isBlank()) {
+            return line;
+        }
+        return line.append(Component.text(" – " + note.trim(), DETAIL));
     }
 
     /**
