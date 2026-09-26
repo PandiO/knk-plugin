@@ -245,16 +245,6 @@ public class UsersDataAccessTest {
         }
 
         @Override
-        public CompletableFuture<Void> setCoinsById(int id, int coins) {
-            return CompletableFuture.completedFuture(null);
-        }
-        
-        @Override
-        public CompletableFuture<Void> setCoinsByUuid(UUID uuid, int coins) {
-            return CompletableFuture.completedFuture(null);
-        }
-        
-        @Override
         public CompletableFuture<UserDetail> create(UserDetail user) {
             // Return the user that was passed in (simulating creation)
             return CompletableFuture.completedFuture(user);
