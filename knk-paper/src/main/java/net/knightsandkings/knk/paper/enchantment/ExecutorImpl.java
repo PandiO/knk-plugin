@@ -17,6 +17,7 @@ import net.knightsandkings.knk.paper.enchantment.effects.impl.PoisonEffect;
 import net.knightsandkings.knk.paper.enchantment.effects.impl.ResistanceEffect;
 import net.knightsandkings.knk.paper.enchantment.effects.impl.StrengthEffect;
 import net.knightsandkings.knk.paper.enchantment.effects.impl.WitherEffect;
+import net.knightsandkings.knk.paper.regions.CombatSafezoneCheck;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
@@ -36,10 +37,20 @@ public class ExecutorImpl implements EnchantmentExecutor {
     private final Map<String, SupportEnchantmentEffect> supportEffects;
 
     public ExecutorImpl(Plugin plugin, CooldownManager cooldownManager, FrozenPlayerTracker frozenPlayerTracker) {
+        this(plugin, cooldownManager, frozenPlayerTracker, CombatSafezoneCheck.NONE);
+    }
+
+    /**
+     * @param safezones handed to the area abilities (chaos, flash_chaos) that hit nearby entities
+     *                  themselves; attack enchantments are gated before they get here, in
+     *                  {@code EnchantmentCombatListener} (KNG-11)
+     */
+    public ExecutorImpl(Plugin plugin, CooldownManager cooldownManager, FrozenPlayerTracker frozenPlayerTracker,
+                        CombatSafezoneCheck safezones) {
         this.plugin = plugin;
         this.cooldownManager = cooldownManager;
         this.attackEffects = buildAttackEffects(plugin, frozenPlayerTracker);
-        this.supportEffects = buildSupportEffects(plugin);
+        this.supportEffects = buildSupportEffects(plugin, safezones);
     }
 
     @Override
@@ -169,14 +180,14 @@ public class ExecutorImpl implements EnchantmentExecutor {
         return map;
     }
 
-    private static Map<String, SupportEnchantmentEffect> buildSupportEffects(Plugin plugin) {
+    private static Map<String, SupportEnchantmentEffect> buildSupportEffects(Plugin plugin, CombatSafezoneCheck safezones) {
         Map<String, SupportEnchantmentEffect> map = new LinkedHashMap<>();
         map.put("health_boost", new HealthBoostEffect(plugin));
         map.put("armor_repair", new ArmorRepairEffect(plugin));
         map.put("resistance", new ResistanceEffect(plugin));
         map.put("invisibility", new InvisibilityEffect(plugin));
-        map.put("chaos", new ChaosEffect(plugin));
-        map.put("flash_chaos", new FlashChaosEffect(plugin));
+        map.put("chaos", new ChaosEffect(plugin, safezones));
+        map.put("flash_chaos", new FlashChaosEffect(plugin, safezones));
         return map;
     }
 }

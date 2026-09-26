@@ -13,7 +13,7 @@ public final class GradeMapper {
 
     public static KnkGrade toCore(GradeDto dto) {
         if (dto == null) return null;
-        return new KnkGrade(dto.id(), dto.name(), dto.stars());
+        return new KnkGrade(dto.id(), dto.name(), dto.stars(), dto.dropChance(), dto.enchantLevelCapDivisor());
     }
 
     public static Page<KnkGrade> mapPagedList(PagedResultDto<GradeDto> result) {
