@@ -140,6 +140,19 @@ public final class EnchantBooks {
         return effective > 0 ? grades.byStars(effective) : Optional.empty();
     }
 
+    /** The name of the enchantment on {@code target} that the (vanilla) book conflicts with, for the chooser text. */
+    public Optional<String> conflictsWith(ItemStack book, ItemStack target) {
+        EnchantBookPayload payload = book(book);
+        if (payload == null || payload.kind() != EnchantBookPayload.Kind.VANILLA || target == null) return Optional.empty();
+        Enchantment enchantment = vanilla(payload);
+        for (Enchantment existing : target.getEnchantments().keySet()) {
+            if (!existing.equals(enchantment) && enchantment.conflictsWith(existing)) {
+                return Optional.of(EnchantBookText.displayNameFromKey(existing.getKey().toString()));
+            }
+        }
+        return Optional.empty();
+    }
+
     /** True when {@code target} has no grade of its own (the cap then uses {@code ungraded-stars}). */
     public static boolean ungraded(ItemStack target) {
         return ItemGradeTag.stars(target).isEmpty();

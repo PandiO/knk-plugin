@@ -27,7 +27,9 @@ import java.util.Optional;
 /**
  * The permanent-book item chooser (KNG-5; ported from {@code SiegeEnchantMenu} on
  * {@code claude/siege-minigame}, itself v2's {@code PlayerEnchantMenu}): right-click a book in hand to see
- * every item in your inventory it can go on, click one to apply it. This is the only way to apply a book:
+ * every item in your inventory the enchantment could go on by type. Items it can go on now say "Click to apply";
+ * the others stay listed with the reason (grade cap, conflict, already as high), so nothing silently goes
+ * missing. This is the only way to apply a book:
  * clicking a book from the cursor onto an item was removed after the 2026-09-26 manual test (too easy to do by
  * accident). A plain Bukkit inventory with its own holder.
  * <p>
@@ -119,40 +121,40 @@ public final class EnchantBookMenu {
             return Component.text(EnchantBooks.describe(ApplyResult.INVALID_BOOK), NamedTextColor.RED);
         }
 
-        List<Integer> eligible = new ArrayList<>();
+        // Every item the enchantment could go on by type (the developer's request after the 2026-09-26 manual
+        // test), not only those it can go on right now: each says whether it can, and if not, why - so an item
+        // that is missing (e.g. held back by the grade cap) no longer looks like a bug. Usable items first.
+        List<Integer> usable = new ArrayList<>();
+        List<Integer> blocked = new ArrayList<>();
         Map<Integer, EnchantBooks.Decision> decisions = new HashMap<>();
         ItemStack[] contents = inv.getContents();
-        for (int i = 0; i < contents.length && eligible.size() < MAX_ITEMS; i++) {
+        for (int i = 0; i < contents.length; i++) {
             if (i == bookIndex || contents[i] == null || contents[i].getType().isAir()) continue;
             EnchantBooks.Decision decision = books.decide(book, contents[i]);
-            if (decision.result() == ApplyResult.APPLIED) {
-                eligible.add(i);
-                decisions.put(i, decision);
-            }
+            if (decision.facts() == null || !decision.facts().usable() || !decision.facts().compatible()) continue;
+            decisions.put(i, decision);
+            (decision.result() == ApplyResult.APPLIED ? usable : blocked).add(i);
         }
         String enchantName = books.describeBook(book);
-        if (eligible.isEmpty()) {
-            return Component.text("Nothing in your inventory can take " + enchantName + ".", NamedTextColor.RED);
+        if (decisions.isEmpty()) {
+            return Component.text("Nothing in your inventory can hold " + books.describeEnchantment(book) + ".", NamedTextColor.RED);
         }
+        List<Integer> shownIndexes = new ArrayList<>(usable);
+        shownIndexes.addAll(blocked);
+        if (shownIndexes.size() > MAX_ITEMS) shownIndexes = shownIndexes.subList(0, MAX_ITEMS);
 
         Holder holder = new Holder(bookIndex, hand);
-        int size = Math.min(MAX_ITEMS, ((eligible.size() + 8) / 9) * 9);
+        int size = Math.min(MAX_ITEMS, ((shownIndexes.size() + 8) / 9) * 9);
         Inventory gui = Bukkit.createInventory(holder, size, Component.text("Apply " + enchantName, NamedTextColor.DARK_PURPLE));
         holder.inventory = gui;
-        for (int slot = 0; slot < eligible.size(); slot++) {
-            int index = eligible.get(slot);
+        for (int slot = 0; slot < shownIndexes.size(); slot++) {
+            int index = shownIndexes.get(slot);
+            EnchantBooks.Decision decision = decisions.get(index);
             ItemStack shown = contents[index].clone();
             ItemMeta meta = shown.getItemMeta();
             List<Component> lore = meta.hasLore() && meta.lore() != null ? new ArrayList<>(meta.lore()) : new ArrayList<>();
             lore.add(Component.empty());
-            EnchantBooks.Decision decision = decisions.get(index);
-            if (decision != null && decision.capped()) {
-                // KNG-6: the grade cap lowers what this item gets; the click asks first.
-                lore.add(line("Grade limit: only up to " + EnchantBookText.roman(decision.level()), NamedTextColor.GOLD));
-                lore.add(line("Click to review", NamedTextColor.YELLOW));
-            } else {
-                lore.add(line("Click to apply " + enchantName, NamedTextColor.GREEN));
-            }
+            lore.addAll(status(book, contents[index], decision, enchantName));
             meta.lore(lore);
             shown.setItemMeta(meta);
             gui.setItem(slot, shown);
@@ -160,6 +162,38 @@ public final class EnchantBookMenu {
         }
         player.openInventory(gui);
         return null;
+    }
+
+    /** The chooser lines under an item: "Click to apply", "Grade limit ... / Click to review", or why not. */
+    private List<Component> status(ItemStack book, ItemStack target, EnchantBooks.Decision decision, String enchantName) {
+        List<Component> lines = new ArrayList<>();
+        if (decision.result() == ApplyResult.APPLIED && decision.capped()) {
+            // KNG-6: the grade cap lowers what this item gets; the click asks first.
+            lines.add(line("Grade limit: only up to " + EnchantBookText.roman(decision.level()), NamedTextColor.GOLD));
+            lines.add(line("Click to review", NamedTextColor.YELLOW));
+        } else if (decision.result() == ApplyResult.APPLIED) {
+            lines.add(line("Click to apply " + enchantName, NamedTextColor.GREEN));
+        } else {
+            lines.add(line("✘ Can't apply " + enchantName, NamedTextColor.RED));
+            for (String reason : reasons(book, target, decision)) {
+                lines.add(line(reason, NamedTextColor.GRAY));
+            }
+        }
+        return lines;
+    }
+
+    private List<String> reasons(ItemStack book, ItemStack target, EnchantBooks.Decision decision) {
+        Optional<KnkGrade> grade = books.capGrade(target);
+        String gradeLabel = grade.map(g -> EnchantBookText.gradeLabel(g.name(), g.stars())).orElse("?");
+        return EnchantBookText.cannotApply(
+                decision.result(),
+                books.describeEnchantment(book),
+                decision.payload() != null ? decision.payload().level() : 0,
+                decision.facts() != null ? decision.facts().existingLevel() : 0,
+                decision.facts() != null ? decision.facts().levelCap() : null,
+                gradeLabel,
+                EnchantBooks.ungraded(target),
+                books.conflictsWith(book, target).orElse(null));
     }
 
     /** A click in one of this menu's own slots. The caller has cancelled the click. */
@@ -179,7 +213,15 @@ public final class EnchantBookMenu {
         ItemStack book = inv.getItem(holder.bookIndex);
         ItemStack target = inv.getItem(index);
         EnchantBooks.Decision decision = books.decide(book, target);
-        if (decision.result() == ApplyResult.APPLIED && decision.capped()) {
+        if (decision.result() != ApplyResult.APPLIED) {
+            // A listed item that can't take the book: say why (it's also in its lore) and keep the chooser open.
+            List<String> why = reasons(book, target, decision);
+            player.sendActionBar(Component.text(why.isEmpty() ? EnchantBooks.describe(decision.result()) : String.join(" ", why),
+                    NamedTextColor.RED));
+            player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1f, 1f);
+            return;
+        }
+        if (decision.capped()) {
             // Opening another inventory from inside a click event is only safe on the next tick.
             ItemStack bookSnapshot = book.clone();
             ItemStack targetSnapshot = target.clone();
@@ -223,8 +265,7 @@ public final class EnchantBookMenu {
     private List<Component> explanation(ItemStack target, String bookName, String enchantment, String result,
                                         EnchantBooks.Decision decision) {
         Optional<KnkGrade> grade = books.capGrade(target);
-        String gradeLabel = grade.map(g -> g.name() + ", " + "★".repeat(Math.max(0, g.stars() == null ? 0 : g.stars())))
-                .orElse("?");
+        String gradeLabel = grade.map(g -> EnchantBookText.gradeLabel(g.name(), g.stars())).orElse("?");
         String whose = EnchantBooks.ungraded(target)
                 ? "This item has no grade, so it counts as " + gradeLabel + "."
                 : "This item's grade is " + gradeLabel + ".";
