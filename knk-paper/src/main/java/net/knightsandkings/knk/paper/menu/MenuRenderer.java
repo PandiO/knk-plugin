@@ -660,7 +660,7 @@ public final class MenuRenderer {
     }
 
     /** Menu follow-up 2026-09-26: the background every menu gets unless its template names another one. */
-    static final Material DEFAULT_BACKGROUND = Material.LIGHT_GRAY_STAINED_GLASS_PANE;
+    static final Material DEFAULT_BACKGROUND = Material.GRAY_STAINED_GLASS_PANE;
 
     /**
      * Fills every slot nothing was rendered into (menu follow-up 2026-09-26: every menu has a
