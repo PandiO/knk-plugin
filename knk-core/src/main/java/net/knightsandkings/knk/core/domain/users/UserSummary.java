@@ -26,12 +26,24 @@ public record UserSummary(
     String frozenReason,
     // "Male", "Female" or null (unset - title names fall back to the male name). Added for the
     // InventoryMenu Profile menu (docs/specs/inventory-menu/CONTENT_PORT_PLAN.md CP3).
-    String gender
+    String gender,
+    // Chat and tab-list colors (KNG-7) as Minecraft color names ("YELLOW", "DARK_RED", ...):
+    // the premium tier's, else the Default PermissionGroup's, resolved server-side. Primary =
+    // title + username, secondary = the "-{ }-" brackets, name = scoreboard team color. Null =
+    // the plugin's built-in default.
+    String chatPrimaryColor,
+    String chatSecondaryColor,
+    String nameColor
 ) {
     public UserSummary {
         if (activeMode == null) {
             activeMode = ActiveMode.NONE;
         }
+    }
+
+    // Constructor without the KNG-7 display colors - null (plugin defaults).
+    public UserSummary(Integer id, String username, UUID uuid, String email, int coins, int gems, int experiencePoints, boolean isFullAccount, boolean isNewUser, GatePassThroughMethod gatePassThroughMethodDefault, ActiveMode activeMode, Integer titleBracketId, String titleName, int prestigeExperience, Integer premiumTierGroupId, String premiumTierName, OffsetDateTime premiumTierExpiresAt, boolean isFrozen, String frozenReason, String gender) {
+        this(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience, premiumTierGroupId, premiumTierName, premiumTierExpiresAt, isFrozen, frozenReason, gender, null, null, null);
     }
 
     // Constructor without gender - null (unset). Kept so the existing call sites stay as they were.
@@ -78,7 +90,7 @@ public record UserSummary(
      * Copy with an updated owner/staff mode (after /ownermode or /staffmode).
      */
     public UserSummary withActiveMode(ActiveMode activeMode) {
-        return new UserSummary(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience, premiumTierGroupId, premiumTierName, premiumTierExpiresAt, isFrozen, frozenReason, gender);
+        return new UserSummary(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience, premiumTierGroupId, premiumTierName, premiumTierExpiresAt, isFrozen, frozenReason, gender, chatPrimaryColor, chatSecondaryColor, nameColor);
     }
 
     /**
@@ -86,6 +98,6 @@ public record UserSummary(
      * AdminFreezeManager to keep the cached UserSummary consistent with the join-time restore.
      */
     public UserSummary withFrozen(boolean isFrozen, String frozenReason) {
-        return new UserSummary(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience, premiumTierGroupId, premiumTierName, premiumTierExpiresAt, isFrozen, frozenReason, gender);
+        return new UserSummary(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience, premiumTierGroupId, premiumTierName, premiumTierExpiresAt, isFrozen, frozenReason, gender, chatPrimaryColor, chatSecondaryColor, nameColor);
     }
 }

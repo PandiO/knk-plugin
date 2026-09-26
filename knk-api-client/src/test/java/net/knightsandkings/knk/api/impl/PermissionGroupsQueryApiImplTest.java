@@ -24,4 +24,15 @@ class PermissionGroupsQueryApiImplTest {
         assertEquals(new PermissionGroupSummary(5, "Royal", 30, true, 1.2), PermissionGroupsQueryApiImpl.toSummary(royal));
         assertEquals(1.0, PermissionGroupsQueryApiImpl.toSummary(old).salaryMultiplier());
     }
+
+    @Test
+    void mapsDisplayColors() throws Exception {
+        PermissionGroupListItemDto noble = mapper.readValue(
+                "{\"id\":4,\"name\":\"Noble\",\"weight\":10,\"isPremiumTier\":true,\"salaryMultiplier\":1.1,"
+                        + "\"chatPrimaryColor\":\"YELLOW\",\"chatSecondaryColor\":\"GOLD\",\"nameColor\":\"YELLOW\"}",
+                PermissionGroupListItemDto.class);
+
+        assertEquals(new PermissionGroupSummary(4, "Noble", 10, true, 1.1, "YELLOW", "GOLD", "YELLOW"),
+                PermissionGroupsQueryApiImpl.toSummary(noble));
+    }
 }

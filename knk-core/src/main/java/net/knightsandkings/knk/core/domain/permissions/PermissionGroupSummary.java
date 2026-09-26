@@ -12,8 +12,17 @@ public record PermissionGroupSummary(
     boolean isPremiumTier,
     // PermissionGroup.SalaryMultiplier (1.0 = none) - shown by the InventoryMenu premium-tier
     // screen (docs/specs/inventory-menu/CONTENT_PORT_PLAN.md CP5).
-    double salaryMultiplier
+    double salaryMultiplier,
+    // KNG-7 chat/tab-list colors as Minecraft color names (PermissionGroup.ChatPrimaryColor etc.),
+    // null when unset.
+    String chatPrimaryColor,
+    String chatSecondaryColor,
+    String nameColor
 ) {
+    public PermissionGroupSummary(int id, String name, int weight, boolean isPremiumTier, double salaryMultiplier) {
+        this(id, name, weight, isPremiumTier, salaryMultiplier, null, null, null);
+    }
+
     public PermissionGroupSummary(int id, String name, int weight, boolean isPremiumTier) {
         this(id, name, weight, isPremiumTier, 1.0);
     }
