@@ -1,7 +1,6 @@
 package net.knightsandkings.knk.core.ports.api;
 
 import java.time.OffsetDateTime;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 import net.knightsandkings.knk.core.domain.users.ActiveMode;
@@ -16,8 +15,6 @@ import net.knightsandkings.knk.core.teleport.TeleportAudit;
  * TODO: Enable only when migration mode allows writes.
  */
 public interface UsersCommandApi {
-    CompletableFuture<Void> setCoinsById(int id, int coins);
-    CompletableFuture<Void> setCoinsByUuid(UUID uuid, int coins);
     CompletableFuture<UserDetail> create(UserDetail user);
 
     /**

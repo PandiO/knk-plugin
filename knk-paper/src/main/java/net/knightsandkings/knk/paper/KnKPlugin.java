@@ -1199,7 +1199,12 @@ public class KnKPlugin extends JavaPlugin {
                 yield new ApiKeyAuthProvider(authConfig.apiKey(), authConfig.apiKeyHeader());
             }
             default -> {
-                getLogger().info("Using no authentication");
+                // KNG-22: the API refuses unauthenticated game-server calls to its protected
+                // routes (balances, salary, kits, presence...) unless it runs in Development
+                // with Security:AllowUnauthenticatedPluginCalls on.
+                getLogger().warning("api.auth.type is '" + authConfig.type() + "': knk-web-api will refuse this server's "
+                    + "balance, salary, kit, presence and staff calls (401). Set api.auth.type: apikey and api.auth.api-key "
+                    + "to the API's Security:PluginApiKey.");
                 yield new NoAuthProvider();
             }
         };

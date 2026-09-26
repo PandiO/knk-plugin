@@ -2,7 +2,6 @@ package net.knightsandkings.knk.api.impl;
 
 import java.io.IOException;
 import java.time.OffsetDateTime;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.logging.Logger;
@@ -12,7 +11,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import net.knightsandkings.knk.api.auth.AuthProvider;
 import net.knightsandkings.knk.api.dto.AdjustBalancesDto;
 import net.knightsandkings.knk.api.dto.BalanceAdjustmentResultDto;
-import net.knightsandkings.knk.api.dto.CoinsUpdateDto;
 import net.knightsandkings.knk.api.dto.ActiveModeUpdateDto;
 import net.knightsandkings.knk.api.dto.FreezePlayerDto;
 import net.knightsandkings.knk.api.dto.GatePassThroughMethodUpdateDto;
@@ -87,34 +85,6 @@ public class UsersCommandApiImpl extends BaseApiImpl implements UsersCommandApi 
             builder.header(ACTING_USER_HEADER, String.valueOf(actingUserId));
         }
         return builder;
-    }
-
-    @Override
-    public CompletableFuture<Void> setCoinsById(int id, int coins) {
-        return CompletableFuture.supplyAsync(() -> {
-            String url = baseUrl + USERS_ENDPOINT + "/" + id + "/coins";
-            try {
-                String bodyJson = objectMapper.writeValueAsString(new CoinsUpdateDto(coins));
-                putJson(url, bodyJson);
-                return null;
-            } catch (ApiException | IOException e) {
-                throw new RuntimeException("Failed to set coins by ID", e);
-            }
-        }, executor);
-    }
-
-    @Override
-    public CompletableFuture<Void> setCoinsByUuid(UUID uuid, int coins) {
-        return CompletableFuture.supplyAsync(() -> {
-            String url = baseUrl + USERS_ENDPOINT + "/" + uuid + "/coins";
-            try {
-                String bodyJson = objectMapper.writeValueAsString(new CoinsUpdateDto(coins));
-                putJson(url, bodyJson);
-                return null;
-            } catch (ApiException | IOException e) {
-                throw new RuntimeException("Failed to set coins by UUID", e);
-            }
-        }, executor);
     }
 
     @Override

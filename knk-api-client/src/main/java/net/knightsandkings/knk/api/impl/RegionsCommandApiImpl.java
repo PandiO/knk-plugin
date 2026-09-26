@@ -36,8 +36,7 @@ public class RegionsCommandApiImpl extends BaseApiImpl implements RegionsCommand
                 String url = baseUrl + REGIONS_ENDPOINT + "/rename?oldRegionId=" + 
                     urlEncode(oldRegionId) + "&newRegionId=" + urlEncode(newRegionId);
                 
-                Request request = new Request.Builder()
-                    .url(url)
+                Request request = newRequest(url)
                     .post(okhttp3.RequestBody.create("", null))
                     .build();
 

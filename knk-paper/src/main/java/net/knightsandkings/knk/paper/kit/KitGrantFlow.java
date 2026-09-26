@@ -103,7 +103,10 @@ public final class KitGrantFlow {
         if (!requirePermission(sender, GIVE_NODE)) {
             return CompletableFuture.completedFuture(false);
         }
-        return grantAndPlace(kitsCommandApi.giveAsync(recipientUserId, kitId), sender, recipient, kitName, "given");
+        // The sender's id makes the API's audit entry name them; null (not cached yet) is
+        // recorded as a system grant rather than blocking the give.
+        Integer actorUserId = resolveUserId(sender);
+        return grantAndPlace(kitsCommandApi.giveAsync(actorUserId, recipientUserId, kitId), sender, recipient, kitName, "given");
     }
 
     /** {@code /kit purchase <name>} and the menu's {@code kits.purchase}: one-time premium purchase (gems). */
