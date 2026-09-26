@@ -12,7 +12,7 @@ import java.util.Locale;
  *   <li>A namespace is ignored on both sides ({@code /knightsandkings:siege} = {@code /siege}), so the
  *       namespaced form can't be used to get around the list.</li>
  *   <li>{@code /siege} is always allowed, even if the list forgets it: a member must be able to
- *       leave, vote and pick a spawn.</li>
+ *       leave, vote and pick a spawn. So are its menu shortcuts {@code /siegemenu} and {@code /sgm}.</li>
  * </ul>
  * Aliases aren't resolved: list every spelling you want to allow (e.g. {@code /r} and {@code /reply}).
  */
@@ -21,11 +21,14 @@ public final class SiegeCommandFilter {
 
     public static final String ALWAYS_ALLOWED = "siege";
 
+    /** {@link #ALWAYS_ALLOWED} plus the {@code /siege menu} shortcuts (playtest 2026-09-26). */
+    public static final java.util.Set<String> ALWAYS_ALLOWED_LABELS = java.util.Set.of(ALWAYS_ALLOWED, "siegemenu", "sgm");
+
     /** @param message the raw command message, e.g. {@code "/msg Bob hi"} */
     public static boolean isAllowed(String message, List<String> allowedCommands) {
         String label = label(message);
         if (label.isEmpty()) return true;
-        if (label.equals(ALWAYS_ALLOWED)) return true;
+        if (ALWAYS_ALLOWED_LABELS.contains(label)) return true;
         if (allowedCommands == null) return false;
         for (String allowed : allowedCommands) {
             if (label.equals(label(allowed))) return true;

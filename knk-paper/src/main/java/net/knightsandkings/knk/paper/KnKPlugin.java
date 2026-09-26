@@ -1094,6 +1094,12 @@ public class KnKPlugin extends JavaPlugin {
             siegeCommand.setExecutor(executor);
             siegeCommand.setTabCompleter(executor);
             getLogger().info("Registered /siege command");
+            // /siegemenu (/sgm): shortcut for /siege menu.
+            PluginCommand siegeMenuCommand = getCommand("siegemenu");
+            if (siegeMenuCommand != null) {
+                siegeMenuCommand.setExecutor((sender, command, label, args) ->
+                        executor.onCommand(sender, command, label, new String[] {"menu"}));
+            }
         } else {
             getLogger().warning("Failed to register /siege command - not defined in plugin.yml?");
         }

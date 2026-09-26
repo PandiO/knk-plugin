@@ -206,6 +206,17 @@ public final class SiegeService {
         return menuHooks.openOverview(player);
     }
 
+    /**
+     * {@code /siege menu} (playtest 2026-09-26): the member's own siege Information menu, from matchmaking
+     * to the end of the match. Empty when the player isn't in a siege; false when the menus aren't
+     * available (the caller falls back to the chat info).
+     */
+    public Optional<Boolean> openGameMenu(Player player) {
+        Optional<SiegeLobbyRuntime> own = lobbyOf(player.getUniqueId());
+        if (own.isEmpty()) return Optional.empty();
+        return Optional.of(menuHooks != null && menuHooks.openInformation(player, own.get().id()));
+    }
+
     public void addObserver(SiegeMatchObserver observer) {
         observers.add(Objects.requireNonNull(observer, "observer"));
     }
@@ -266,11 +277,31 @@ public final class SiegeService {
             match.roster().recordCapture(capture.capturerId());
             match.recordCaptureTime(capture.objectiveId(), capture.captureNumber(), now);
             announceCapture(rt, match, capture);
+            resetLostObjectiveChoices(match, capture);
             observers.forEach(o -> safely("objectiveCaptured", () -> o.objectiveCaptured(rt, match, capture)));
         }
         observers.forEach(o -> safely("secondTicked", () -> o.secondTicked(rt, match, step, presence)));
         if (step.instantVictoryCapture().isPresent()) {
             apply(rt, rt.machine().endMatch(SiegeEndReason.INSTANT_VICTORY));
+        }
+    }
+
+    /**
+     * Playtest 2026-09-26: members who chose the objective that was just lost get their team's default
+     * spawnpoint as their remembered choice (not an empty one, so they aren't asked again). They can pick
+     * another option from the siege menu.
+     */
+    private void resetLostObjectiveChoices(SiegeMatch match, CaptureEvent capture) {
+        List<UUID> reset = match.roster().resetObjectiveChoice(capture.objectiveId(), capture.newHolderTeamId(),
+                teamId -> match.scenario().team(teamId).flatMap(SiegeSpawnOptions::defaultChoice).orElse(null));
+        if (reset.isEmpty()) return;
+        String name = match.scenario().objective(capture.objectiveId())
+                .map(o -> SiegeDisplayText.clean(o.name(), "#" + o.id())).orElse("#" + capture.objectiveId());
+        Component msg = SiegeMessages.info("Your team lost " + name + ": you respawn at your team's spawnpoint again. Change it in ")
+                .append(SiegeMessages.command("/siege menu"));
+        for (UUID id : reset) {
+            Player p = Bukkit.getPlayer(id);
+            if (p != null) p.sendMessage(msg);
         }
     }
 
@@ -283,7 +314,8 @@ public final class SiegeService {
             if (p != null && !p.isDead() && p.getGameMode() != GameMode.SPECTATOR) living.add(p);
         }
         for (KnkSiegeObjective objective : match.scenario().objectives()) {
-            Optional<Location> center = SiegeBukkit.toLocation(objective.captureLocation());
+            // Measured from the floor under the capture point, like the ring is drawn (playtest 2026-09-26).
+            Optional<Location> center = SiegeBukkit.toLocation(objective.captureLocation()).map(SiegeBukkit::floorOf);
             if (center.isEmpty()) continue;
             List<Presence> present = new ArrayList<>();
             double radius = objective.captureRadius();
@@ -1017,6 +1049,11 @@ public final class SiegeService {
     }
 
     private void offerSpawnPicker(Player player, SiegeMatch match, KnkSiegeTeam team) {
+        // Playtest 2026-09-26: the choice is remembered; ignoring the picker keeps the team default, so
+        // afterRespawn doesn't ask again.
+        if (match.roster().spawnChoice(player.getUniqueId()).isEmpty()) {
+            SiegeSpawnOptions.defaultChoice(team).ifPresent(c -> match.roster().setSpawnChoice(player.getUniqueId(), c));
+        }
         match.openSpawnPick(player.getUniqueId(), SPAWN_PICK_WINDOW.toNanos());
         // Phase 8b: the siege.spawnpoint menu when it's available, else the clickable chat list.
         if (menuHooks != null && menuHooks.openSpawnPicker(player)) return;
@@ -1217,7 +1254,11 @@ public final class SiegeService {
                 .flatMap(o -> SiegeBukkit.toLocation(o.location()));
     }
 
-    /** After a member respawned: open the spawn picker after the configured delay when the team has 2+ options. */
+    /**
+     * After a member respawned: open the spawn picker after the configured delay, only when the member
+     * has no remembered choice yet and the team has 2+ options (playtest 2026-09-26: not on every death;
+     * the choice is changed from the siege menu).
+     */
     public void afterRespawn(Player player) {
         Optional<SiegeMatch> found = runningMatchOf(player.getUniqueId());
         if (found.isEmpty()) return;
@@ -1225,7 +1266,10 @@ public final class SiegeService {
         later(delay, () -> {
             if (!player.isOnline() || player.isDead()) return;
             runningMatchOf(player.getUniqueId()).ifPresent(match -> match.teamOf(player.getUniqueId()).ifPresent(team -> {
-                if (SiegeSpawnOptions.pickerWorthOpening(team, match.board())) offerSpawnPicker(player, match, team);
+                if (match.roster().spawnChoice(player.getUniqueId()).isEmpty()
+                        && SiegeSpawnOptions.pickerWorthOpening(team, match.board())) {
+                    offerSpawnPicker(player, match, team);
+                }
             }));
         });
     }

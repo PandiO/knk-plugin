@@ -40,6 +40,8 @@ class SiegeCommandFilterTest {
     void siegeIsAlwaysAllowedSoMembersCanLeave() {
         assertTrue(SiegeCommandFilter.isAllowed("/siege leave", List.of()));
         assertTrue(SiegeCommandFilter.isAllowed("/knightsandkings:siege vote 1", null));
+        assertTrue(SiegeCommandFilter.isAllowed("/siegemenu", List.of()));
+        assertTrue(SiegeCommandFilter.isAllowed("/SGM", null));
         assertFalse(SiegeCommandFilter.isAllowed("/msg x", null));
     }
 

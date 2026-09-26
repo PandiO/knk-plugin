@@ -137,4 +137,28 @@ class SiegeMatchRosterTest {
         assertTrue(roster.spawnChoice(player(2)).isEmpty());
         assertTrue(roster.spawnChoice(player(99)).isEmpty());
     }
+
+    @Test
+    void aLostObjectiveResetsItsChoosersToTheirTeamDefaultAndLeavesOthersAlone() {
+        SiegeMatchRoster roster = roster();
+        roster.setSpawnChoice(player(1), SpawnChoice.objective(7));
+        roster.setSpawnChoice(player(2), SpawnChoice.objective(8));
+        roster.setSpawnChoice(player(11), SpawnChoice.objective(7)); // team 2: the new holder
+
+        List<java.util.UUID> reset = roster.resetObjectiveChoice(7, 2, teamId -> SpawnChoice.spawnpoint(100 + teamId));
+
+        assertEquals(List.of(player(1)), reset);
+        assertEquals(Optional.of(SpawnChoice.spawnpoint(101)), roster.spawnChoice(player(1)));
+        assertEquals(Optional.of(SpawnChoice.objective(8)), roster.spawnChoice(player(2)));
+        assertEquals(Optional.of(SpawnChoice.objective(7)), roster.spawnChoice(player(11)));
+    }
+
+    @Test
+    void aLostObjectiveWithoutATeamDefaultClearsTheChoice() {
+        SiegeMatchRoster roster = roster();
+        roster.setSpawnChoice(player(1), SpawnChoice.objective(7));
+
+        assertEquals(List.of(player(1)), roster.resetObjectiveChoice(7, 2, teamId -> null));
+        assertTrue(roster.spawnChoice(player(1)).isEmpty());
+    }
 }

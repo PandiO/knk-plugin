@@ -80,9 +80,15 @@ commands:
 
   siege:
     description: "Siege minigame: lobbies, join/leave, vote, spawn choice, admin controls (docs/specs/siege-minigame/DESIGN.md §11.1)"
-    usage: "/siege [join|leave|info|vote|spawn|skip|admin] ..."
+    usage: "/siege [join|leave|menu|info|vote|spawn|skip|admin] ..."
     # No permission: here - each subcommand is gated on its own knk.siege.* node through
     # KnkPermissible inside SiegeCommand, same reasoning as /kit and /knk.
+
+  siegemenu:
+    description: "Open your siege menu while you are in a siege (same as /siege menu)"
+    usage: "/siegemenu"
+    aliases: [sgm]
+    # /sm is /staffmode's alias. Gated on knk.siege.play inside SiegeCommand.
 
   menu:
     description: "Open the Knights and Kings menu (InventoryMenu hub, docs/specs/inventory-menu/CONTENT_PORT_PLAN.md §3)"

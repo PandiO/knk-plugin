@@ -309,7 +309,7 @@ public final class SiegeWorldPresenter implements SiegeMatchObserver {
         }
         if (viewers.isEmpty()) return;
         for (KnkSiegeObjective objective : match.scenario().objectives()) {
-            SiegeBukkit.toLocation(objective.captureLocation())
+            SiegeBukkit.toLocation(objective.captureLocation()).map(SiegeBukkit::floorOf)
                     .ifPresent(center -> ring(viewers, center, objective.captureRadius(), Particle.FLAME));
         }
         for (KnkSiegeTeam team : match.scenario().teams()) {

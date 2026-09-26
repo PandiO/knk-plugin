@@ -11,6 +11,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.UUID;
+import java.util.function.IntFunction;
 
 /**
  * The members of one running match with their team and match stats (DESIGN §6.6, §6.8, §3.10
@@ -185,6 +186,23 @@ public final class SiegeMatchRoster {
     public void setSpawnChoice(UUID playerId, SpawnChoice choice) {
         Member m = members.get(playerId);
         if (m != null) m.spawnChoice = choice;
+    }
+
+    /**
+     * An objective changed hands (playtest 2026-09-26): every member outside {@code newHolderTeamId}
+     * whose choice is that objective gets their team's default choice stored instead ({@code null}
+     * from {@code defaultForTeam} clears it), so their respawn choice stays remembered and they aren't
+     * asked again. Returns the members that were reset, in roster order.
+     */
+    public List<UUID> resetObjectiveChoice(int objectiveId, int newHolderTeamId, IntFunction<SpawnChoice> defaultForTeam) {
+        SpawnChoice lost = SpawnChoice.objective(objectiveId);
+        List<UUID> reset = new ArrayList<>();
+        for (Member m : members.values()) {
+            if (m.teamId == newHolderTeamId || !lost.equals(m.spawnChoice)) continue;
+            m.spawnChoice = defaultForTeam.apply(m.teamId);
+            reset.add(m.playerId);
+        }
+        return reset;
     }
 
     /** Players in team order, for iteration that must not see concurrent removal. */

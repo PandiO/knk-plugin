@@ -62,6 +62,7 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
             case "join" -> playerOnly(sender, p -> service.join(p, arg(rest, 0)));
             case "leave" -> playerOnly(sender, service::leave);
             case "info" -> info(sender, arg(rest, 0));
+            case "menu" -> gameMenu(sender);
             case "vote" -> playerOnly(sender, p -> service.vote(p, joined(rest)));
             case "spawn" -> playerOnly(sender, p -> service.spawn(p, joined(rest)));
             case "skip" -> {
@@ -106,6 +107,24 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
             }
         }
         sender.sendMessage(msg);
+    }
+
+    /**
+     * {@code /siege menu} (also {@code /siegemenu}, {@code /sgm}; playtest 2026-09-26): the player's own
+     * siege menu while they are in a siege (matchmaking to match end). Refused for everyone else.
+     */
+    private void gameMenu(CommandSender sender) {
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage(SiegeMessages.bad("Only players can use this."));
+            return;
+        }
+        if (!allowed(sender, SiegeService.PERMISSION_PLAY)) return;
+        Optional<Boolean> opened = service.openGameMenu(player);
+        if (opened.isEmpty()) {
+            player.sendMessage(SiegeMessages.bad("You aren't in a siege. Join one with /siege join <lobby>."));
+            return;
+        }
+        if (!opened.get()) info(sender, null); // menus unavailable: the chat info instead
     }
 
     private Component lobbyLine(SiegeLobbyRuntime rt) {
@@ -292,7 +311,7 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
     }
 
     private void help(CommandSender sender) {
-        sender.sendMessage(SiegeMessages.info("/siege - lobbies | join [lobby] | leave | info [lobby] | vote [n|name|random] | "
+        sender.sendMessage(SiegeMessages.info("/siege - lobbies | join [lobby] | leave | menu | info [lobby] | vote [n|name|random] | "
                 + "spawn [option] | skip [lobby] (cooldown, or matchmaking to 1 minute)" + (!(sender instanceof Player p) || service.hasPermission(p, SiegeService.PERMISSION_ADMIN_LIST)
                 ? " | admin ..." : "")));
     }
@@ -302,7 +321,7 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
-            return filter(Stream.of("join", "leave", "info", "vote", "spawn", "skip", "help", "admin"), args[0]);
+            return filter(Stream.of("join", "leave", "menu", "info", "vote", "spawn", "skip", "help", "admin"), args[0]);
         }
         String sub = args[0].toLowerCase(Locale.ROOT);
         if (args.length == 2) {
