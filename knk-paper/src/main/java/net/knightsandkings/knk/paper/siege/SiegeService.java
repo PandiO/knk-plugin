@@ -404,6 +404,8 @@ public final class SiegeService {
             player.sendMessage(SiegeMessages.info("You are at the hub of " + scenarioName(scenario)
                     + ". Your inventory and position are saved and will be restored after the siege."));
         }
+        // Phase 7a: gates and area entry lock down now, before the start (DESIGN §6.5 "lock scenario" first).
+        observers.forEach(o -> safely("areaLockdownStarted", () -> o.areaLockdownStarted(rt, scenario)));
         notifyChanged(rt);
     }
 
@@ -667,6 +669,8 @@ public final class SiegeService {
         }
         locks.releasePlayers(rt.id());
         rt.userIds().clear();
+        // Phase 7a: gates and area entry are restored while the round (match id, scenario) is still known.
+        observers.forEach(o -> safely("roundReleased", () -> o.roundReleased(rt)));
         rt.clearRound();
         notifyChanged(rt);
     }

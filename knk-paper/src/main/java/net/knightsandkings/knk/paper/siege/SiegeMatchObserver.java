@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.siege;
 
+import net.knightsandkings.knk.core.domain.siege.KnkSiegeScenario;
 import net.knightsandkings.knk.core.siege.ObjectiveState.CaptureEvent;
 import net.knightsandkings.knk.core.siege.ObjectiveState.Presence;
 import net.knightsandkings.knk.core.siege.SiegeObjectiveBoard.BoardStep;
@@ -19,6 +20,12 @@ public interface SiegeMatchObserver {
     /** Any phase change, member join/leave or vote (menus, scoreboards). */
     default void lobbyChanged(SiegeLobbyRuntime lobby) { }
 
+    /**
+     * Phase 7a: the round reached the hub (T-15, DESIGN §6.4) - the scenario area locks down
+     * (gates, §8.2; entry, §8.5) before anyone can fight. Members are already at the hub.
+     */
+    default void areaLockdownStarted(SiegeLobbyRuntime lobby, KnkSiegeScenario scenario) { }
+
     /** The match started; members are at their spawnpoints. */
     default void matchStarted(SiegeLobbyRuntime lobby, SiegeMatch match) { }
 
@@ -34,6 +41,12 @@ public interface SiegeMatchObserver {
 
     /** The match ended (any reason), before members are restored. */
     default void matchEnded(SiegeLobbyRuntime lobby, SiegeMatch match) { }
+
+    /**
+     * Phase 7a: the round is over (match ended, matchmaking cancelled, admin stop, shutdown), after
+     * every member was released and before the round state is cleared - the lockdown's restore point.
+     */
+    default void roundReleased(SiegeLobbyRuntime lobby) { }
 
     /** Plugin disable, after every lobby was stopped. */
     default void shutdown() { }

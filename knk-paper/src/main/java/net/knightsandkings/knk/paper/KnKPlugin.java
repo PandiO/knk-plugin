@@ -209,6 +209,8 @@ public class KnKPlugin extends JavaPlugin {
     private TempRegionRetentionTask tempRegionRetentionTask;
     private SiegeService siegeService;
     private net.knightsandkings.knk.core.siege.SiegeMatchRecorder siegeMatchRecorder;
+    /** Kept for the siege gate controller (Phase 7a), which respawns doors a match destroyed. */
+    private HealthSystem gateHealthSystem;
     
     @Override
     public void onEnable() {
@@ -675,6 +677,7 @@ public class KnKPlugin extends JavaPlugin {
             registerEvents(regionTracker);
 
             HealthSystem healthSystem = new HealthSystem(gateDoorsApi, this, gateDisplayManager, gateManager);
+            this.gateHealthSystem = healthSystem;
             GateDoorHitService gateDoorHitService = new GateDoorHitService(gateManager);
 
             long fireDurationMillis = getConfig().getLong("gates.fire-duration-seconds", 8) * 1000L;
@@ -1034,8 +1037,23 @@ public class KnKPlugin extends JavaPlugin {
         pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeInventoryGuardListener(siegeService,
             player -> modeService.getActiveMode(player) != ActiveMode.NONE), this);
 
+        // Phase 7a: gates of the scenario area (lockdown, owner control, damage rules, restore, crash
+        // recovery) and the area entry lockdown for non-members.
+        if (gateManager != null && gateHealthSystem != null) {
+            var siegeGates = new net.knightsandkings.knk.paper.siege.SiegeGateController(
+                this, gateManager, gateHealthSystem, apiClient.getSiegeGatesCommandApi());
+            siegeService.addObserver(siegeGates);
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeGateListener(siegeGates, gateManager), this);
+            siegeGates.recoverOnStartup();
+        } else {
+            getLogger().warning("Siege gate integration disabled: the gate system isn't initialized");
+        }
+        var siegeArea = new net.knightsandkings.knk.paper.siege.SiegeAreaLockdown(siegeService);
+        siegeService.addObserver(siegeArea);
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeAreaLockdownListener(siegeArea), this);
+
         siegeService.start();
-        getLogger().info("Siege runtime initialized (Phase 5)");
+        getLogger().info("Siege runtime initialized (Phase 5-7a)");
     }
 
     public SiegeService getSiegeService() {
