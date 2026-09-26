@@ -6,9 +6,11 @@ import net.knightsandkings.knk.core.ports.enchantment.EnchantmentExecutor;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentRepository;
 import net.knightsandkings.knk.paper.commands.enchantment.EnchantmentCommandHandler;
 import net.knightsandkings.knk.paper.config.EnchantmentConfigManager;
+import net.knightsandkings.knk.paper.enchantbook.EnchantBooks;
 import net.knightsandkings.knk.paper.enchantment.ExecutorImpl;
 import net.knightsandkings.knk.paper.enchantment.FrozenPlayerTracker;
 import net.knightsandkings.knk.paper.enchantment.InMemoryCooldownManager;
+import net.knightsandkings.knk.paper.listeners.EnchantBookListener;
 import net.knightsandkings.knk.paper.listeners.EnchantmentCombatListener;
 import net.knightsandkings.knk.paper.listeners.EnchantmentEnchantTableListener;
 import net.knightsandkings.knk.paper.listeners.EnchantmentInteractListener;
@@ -57,6 +59,8 @@ public class EnchantmentBootstrap {
         );
         pluginManager.registerEvents(new EnchantmentEnchantTableListener(enchantmentRepository), plugin);
         pluginManager.registerEvents(new FreezeMovementListener(frozenPlayerTracker), plugin);
+        // Permanent enchantment books (KNG-5).
+        pluginManager.registerEvents(new EnchantBookListener(new EnchantBooks(enchantmentRepository)), plugin);
 
                 PluginCommand enchantmentCommand = plugin.getServer().getPluginCommand("ce");
         if (enchantmentCommand == null) {

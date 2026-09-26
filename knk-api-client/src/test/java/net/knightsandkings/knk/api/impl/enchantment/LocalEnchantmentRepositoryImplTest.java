@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.api.impl.enchantment;
 
+import net.knightsandkings.knk.core.enchantbook.EnchantBookText;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -49,5 +50,14 @@ class LocalEnchantmentRepositoryImplTest {
         assertTrue(repository.hasAnyEnchantment(lore).join());
         assertTrue(repository.hasEnchantment(lore, "health_boost").join());
         assertFalse(repository.hasEnchantment(lore, "poison").join());
+    }
+
+    @Test
+    void enchantBookTeachesLineIsNotParsedAsAnEnchantment() {
+        // A permanent enchantment book must not carry its enchantment's effect itself (KNG-5).
+        List<String> lore = List.of("§7" + EnchantBookText.teaches("Poison", 2), "§7Teaches: §dFlash Chaos I");
+
+        assertTrue(repository.getEnchantments(lore).join().isEmpty());
+        assertFalse(repository.hasAnyEnchantment(lore).join());
     }
 }

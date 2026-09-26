@@ -13,6 +13,7 @@ import net.knightsandkings.knk.core.domain.item.KnkItemBlueprintDefaultEnchantme
 import net.knightsandkings.knk.core.domain.material.KnkMinecraftMaterialRef;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentRepository;
+import net.knightsandkings.knk.paper.enchantbook.EnchantBookItems;
 import net.knightsandkings.knk.paper.mapper.EnchantmentDefinitionBukkitMapper;
 import net.knightsandkings.knk.paper.mapper.ItemBlueprintBukkitMapper;
 import net.knightsandkings.knk.paper.utils.DisplayTextFormatter;
@@ -231,14 +232,20 @@ public class ItemBlueprintsDebugCommand implements CommandExecutor {
         int applied = 0;
         List<String> skipped = new ArrayList<>();
 
-        for (KnkItemBlueprintDefaultEnchantment relation : safeEnchantments(payload.blueprint())) {
+        // A permanent enchantment book (KNG-5) teaches its default enchantment; it must never carry it itself,
+        // not even when the book couldn't be resolved.
+        List<KnkItemBlueprintDefaultEnchantment> defaultEnchantments = EnchantBookItems.isBookBlueprint(payload.blueprint(), itemStack.getType())
+                ? Collections.emptyList()
+                : safeEnchantments(payload.blueprint());
+
+        for (KnkItemBlueprintDefaultEnchantment relation : defaultEnchantments) {
             if (relation == null || relation.enchantmentDefinitionId() == null) {
                 continue;
             }
 
             KnkEnchantmentDefinition definition = payload.enchantmentDefinitions().get(relation.enchantmentDefinitionId());
             if (definition == null) {
-                definition = mapFallbackDefinition(relation);
+                definition = EnchantmentDefinitionBukkitMapper.fromDefaultEnchantment(relation);
             }
 
             if (Boolean.TRUE.equals(definition.isCustom())) {
@@ -421,22 +428,6 @@ public class ItemBlueprintsDebugCommand implements CommandExecutor {
         return blueprint != null && blueprint.defaultEnchantments() != null
                 ? blueprint.defaultEnchantments()
                 : Collections.emptyList();
-    }
-
-    private KnkEnchantmentDefinition mapFallbackDefinition(KnkItemBlueprintDefaultEnchantment relation) {
-        String key = relation.enchantmentKey();
-        String baseNamespace = key != null && key.startsWith("minecraft:") ? key : null;
-
-        return new KnkEnchantmentDefinition(
-                relation.enchantmentDefinitionId(),
-                key,
-                relation.enchantmentDisplayName(),
-                null,
-                relation.enchantmentIsCustom(),
-                relation.enchantmentMaxLevel(),
-                null,
-                baseNamespace
-        );
     }
 
     private Map<String, String> buildSearchFilters(String fieldInput, String valueInput) {

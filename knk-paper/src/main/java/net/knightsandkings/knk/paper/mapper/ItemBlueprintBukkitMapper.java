@@ -2,6 +2,7 @@ package net.knightsandkings.knk.paper.mapper;
 
 import net.knightsandkings.knk.core.domain.item.KnkItemBlueprint;
 import net.knightsandkings.knk.core.domain.item.KnkItemBlueprintOrigin;
+import net.knightsandkings.knk.paper.enchantbook.EnchantBookItems;
 import net.knightsandkings.knk.paper.utils.DisplayTextFormatter;
 import org.bukkit.Material;
 import org.bukkit.inventory.ItemStack;
@@ -53,6 +54,11 @@ public final class ItemBlueprintBukkitMapper {
             }
 
             itemStack.setItemMeta(meta);
+        }
+
+        // Permanent enchantment books (KNG-5): an enchanted_book blueprint with a default enchantment.
+        if (EnchantBookItems.isBookBlueprint(blueprint, material)) {
+            EnchantBookItems.decorate(itemStack, blueprint);
         }
 
         return itemStack;
