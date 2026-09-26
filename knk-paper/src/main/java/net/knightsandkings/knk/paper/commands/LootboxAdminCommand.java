@@ -2,12 +2,14 @@ package net.knightsandkings.knk.paper.commands;
 
 import net.knightsandkings.knk.core.lootbox.KnkLootboxClaimResult;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxSpawn;
+import net.knightsandkings.knk.core.lootbox.KnkLootboxToken;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxType;
 import net.knightsandkings.knk.core.lootbox.LootboxRejectedException;
 import net.knightsandkings.knk.core.ports.api.LootboxesCommandApi;
 import net.knightsandkings.knk.paper.lootbox.LootboxAnnouncer;
 import net.knightsandkings.knk.paper.lootbox.LootboxDelivery;
 import net.knightsandkings.knk.paper.lootbox.LootboxRuntime;
+import net.knightsandkings.knk.paper.lootbox.LootboxTokenDelivery;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -21,6 +23,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
@@ -28,8 +31,8 @@ import java.util.function.Function;
 /**
  * {@code /knk lootbox} (docs/specs/lootboxes/DESIGN.md §3.4, D18): the admin side, registered in
  * {@link KnkAdminCommand}. {@code spawn <category> [stars]}, {@code despawn [id|nearest]}, {@code list [area]},
- * {@code tp <id>}, {@code give <player> <category> [stars]}, {@code reload} and {@code area ...}
- * ({@link LootboxAreaCommand}). Each is gated on its own {@code knk.lootbox.admin.<action>} node through the in-house
+ * {@code tp <id>}, {@code give <player> <category> [stars]}, {@code token <player> <category> [stars|any] [amount]}
+ * (lootbox token items, Phase 5), {@code reload} and {@code area ...} ({@link LootboxAreaCommand}). Each is gated on its own {@code knk.lootbox.admin.<action>} node through the in-house
  * permission model (the console passes). Spawns and gives are audited by the API with the staff member as actor.
  */
 public final class LootboxAdminCommand {
@@ -37,7 +40,9 @@ public final class LootboxAdminCommand {
     public static final String NODE_PREFIX = "knk.lootbox.admin.";
     static final double NEAREST_RADIUS = 16;
 
-    private static final List<String> SUBCOMMANDS = List.of("spawn", "despawn", "list", "tp", "give", "reload", "area");
+    static final int MAX_TOKENS = 64;
+
+    private static final List<String> SUBCOMMANDS = List.of("spawn", "despawn", "list", "tp", "give", "token", "reload", "area");
 
     private final LootboxRuntime runtime;
     private final LootboxesCommandApi commandApi;
@@ -49,6 +54,7 @@ public final class LootboxAdminCommand {
     private final Function<String, Player> onlinePlayer;
     private final Runnable reload;
     private final Executor mainThread;
+    private final LootboxTokenDelivery tokens;
 
     public LootboxAdminCommand(
             LootboxRuntime runtime,
@@ -62,6 +68,23 @@ public final class LootboxAdminCommand {
             Runnable reload,
             Executor mainThread
     ) {
+        this(runtime, commandApi, delivery, announcer, areaCommand, permission, userIdOf, onlinePlayer, reload, mainThread, null);
+    }
+
+    public LootboxAdminCommand(
+            LootboxRuntime runtime,
+            LootboxesCommandApi commandApi,
+            LootboxDelivery delivery,
+            LootboxAnnouncer announcer,
+            LootboxAreaCommand areaCommand,
+            BiPredicate<Player, String> permission,
+            Function<Player, Integer> userIdOf,
+            Function<String, Player> onlinePlayer,
+            Runnable reload,
+            Executor mainThread,
+            LootboxTokenDelivery tokens
+    ) {
+        this.tokens = tokens;
         this.runtime = runtime;
         this.commandApi = commandApi;
         this.delivery = delivery;
@@ -76,7 +99,8 @@ public final class LootboxAdminCommand {
 
     public static String usage() {
         return "/knk lootbox spawn <category> [stars] | despawn [id|nearest] | list [area] | tp <id> | "
-                + "give <player> <category> [stars] | reload | area create|list|info|delete";
+                + "give <player> <category> [stars] | token <player> <category> [stars|any] [amount] | reload | "
+                + "area create|list|info|delete";
     }
 
     public boolean execute(CommandSender sender, String[] args) {
@@ -96,6 +120,7 @@ public final class LootboxAdminCommand {
             case "list" -> list(sender, rest);
             case "tp" -> tp(sender, rest);
             case "give" -> give(sender, rest);
+            case "token" -> token(sender, rest);
             case "reload" -> {
                 reload.run();
                 sender.sendMessage(ChatColor.GREEN + "Lootbox settings reloaded; refreshing boxes and areas from the API.");
@@ -281,6 +306,88 @@ public final class LootboxAdminCommand {
         });
     }
 
+    // ===== token (Phase 5) =====
+
+    /**
+     * {@code token <player> <category> [stars|any] [amount]}: the API issues {@code amount} token items (audited
+     * LootboxGranted), then they go into the player's inventory (leftovers dropped owner-locked) and are confirmed.
+     */
+    private void token(CommandSender sender, String[] args) {
+        String usage = "/knk lootbox token <player> <category> [stars|any] [amount]";
+        if (tokens == null) {
+            sender.sendMessage(ChatColor.RED + "Lootbox tokens aren't available on this server.");
+            return;
+        }
+        if (args.length < 2) {
+            sender.sendMessage(ChatColor.YELLOW + "Usage: " + usage);
+            return;
+        }
+        Player target = onlinePlayer.apply(args[0]);
+        if (target == null) {
+            sender.sendMessage(ChatColor.RED + "Player not found or not online: " + args[0]);
+            return;
+        }
+        Integer targetUserId = userIdOf.apply(target);
+        if (targetUserId == null) {
+            sender.sendMessage(ChatColor.RED + "That player's account isn't loaded yet - try again in a moment.");
+            return;
+        }
+        TokenArgs parsed = parseTokenArgs(sender, Arrays.copyOfRange(args, 1, args.length), usage);
+        if (parsed == null) {
+            return;
+        }
+        Integer actor = sender instanceof Player player ? userIdOf.apply(player) : null;
+        // One key per command: a retried request returns the same tokens instead of issuing more.
+        String key = "admin-token:" + UUID.randomUUID().toString().replace("-", "");
+        commandApi.issueTokens(actor, targetUserId, parsed.type().type().id(), parsed.type().stars(), parsed.amount(),
+                        KnkLootboxToken.REASON_ADMIN, key)
+                .whenComplete((issued, ex) -> mainThread.execute(() -> {
+                    if (ex != null || issued == null || issued.isEmpty()) {
+                        sender.sendMessage(ChatColor.RED + "Could not issue: " + describe(ex));
+                        return;
+                    }
+                    if (!target.isOnline()) {
+                        sender.sendMessage(ChatColor.YELLOW + "Issued " + issued.size() + " token(s); " + target.getName()
+                                + " left - they get them on their next join.");
+                        return;
+                    }
+                    int given = tokens.give(target, targetUserId, issued);
+                    KnkLootboxToken first = issued.get(0);
+                    target.sendMessage(ChatColor.GREEN + "You received " + issued.size() + "x "
+                            + ChatColor.translateAlternateColorCodes('&', runtime.settings().coloredLabel(first.boxLabel(), first.boxStars()))
+                            + ChatColor.GREEN + " - right-click to open.");
+                    sender.sendMessage(ChatColor.GREEN + "Gave " + target.getName() + " " + given + " lootbox token(s) (ids "
+                            + issued.stream().map(t -> String.valueOf(t.id())).reduce((a, b) -> a + ", " + b).orElse("") + ").");
+                }));
+    }
+
+    record TokenArgs(TypeAndStars type, int amount) {
+    }
+
+    /** {@code <category words...> [stars|any] [amount]}: one trailing number is the stars, two are stars and amount. */
+    TokenArgs parseTokenArgs(CommandSender sender, String[] args, String usage) {
+        String[] rest = args;
+        int amount = 1;
+        if (rest.length >= 2 && isInt(rest[rest.length - 1])
+                && (isInt(rest[rest.length - 2]) || "any".equalsIgnoreCase(rest[rest.length - 2]))) {
+            amount = Integer.parseInt(rest[rest.length - 1]);
+            rest = Arrays.copyOf(rest, rest.length - 1);
+        }
+        if (rest.length >= 1 && "any".equalsIgnoreCase(rest[rest.length - 1])) {
+            rest = Arrays.copyOf(rest, rest.length - 1);
+        }
+        if (amount < 1 || amount > MAX_TOKENS) {
+            sender.sendMessage(ChatColor.RED + "Amount is 1-" + MAX_TOKENS + ".");
+            return null;
+        }
+        TypeAndStars type = parseTypeAndStars(sender, rest, usage);
+        return type == null ? null : new TokenArgs(type, amount);
+    }
+
+    private static boolean isInt(String raw) {
+        return raw != null && raw.matches("\\d{1,4}");
+    }
+
     // ===== helpers =====
 
     record TypeAndStars(KnkLootboxType type, Integer stars) {
@@ -348,7 +455,7 @@ public final class LootboxAdminCommand {
         if ("spawn".equals(sub) && args.length == 2) {
             return LootboxCommand.filter(categories, args[1]);
         }
-        if ("give".equals(sub) && args.length == 3) {
+        if (("give".equals(sub) || "token".equals(sub)) && args.length == 3) {
             return LootboxCommand.filter(categories, args[2]);
         }
         if (("despawn".equals(sub) || "tp".equals(sub)) && args.length == 2) {

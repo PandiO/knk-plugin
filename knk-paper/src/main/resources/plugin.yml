@@ -339,7 +339,7 @@ permissions:
   # Lootboxes (docs/specs/lootboxes/DESIGN.md §3.4). Resolved through KnkPermissible, like knk.kit.*; the two player
   # nodes are granted to the Default permission group by knk-web-api's LootboxSeed, the admin nodes never are.
   knk.lootbox.open:
-    description: Open (claim) a lootbox in the world by clicking it.
+    description: Open (claim) a lootbox in the world by clicking it, or a lootbox token item by right-clicking it.
     default: true
   knk.lootbox.odds:
     description: See what a lootbox can give via /lootbox odds <category> [stars].
@@ -353,7 +353,13 @@ permissions:
       knk.lootbox.admin.list: true
       knk.lootbox.admin.tp: true
       knk.lootbox.admin.give: true
-      knk.lootbox.admin.reload: true
+      knk.lootbox.admin.token: true
+      knk.lootbox.admin.token:
+    description: >-
+      /knk lootbox token <player> <category> [stars|any] [amount] - issue lootbox token items (right-click to open;
+      identified by their knk_lootbox_token tag only), audited.
+    default: op
+  knk.lootbox.admin.reload: true
       knk.lootbox.admin.area: true
   knk.lootbox.admin.spawn:
     description: /knk lootbox spawn <category> [stars] - a box where you stand, ignoring caps (audited).

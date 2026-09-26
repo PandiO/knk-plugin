@@ -16,6 +16,10 @@ public final class LootboxMessages {
     public static final String NO_PERMISSION = ChatColor.RED + "You can't open lootboxes.";
     public static final String STAFF_MODE = ChatColor.RED + "You can't open lootboxes in staff or owner mode.";
     public static final String NO_ACCOUNT = ChatColor.RED + "Your account isn't loaded yet - try again in a moment.";
+    // Token items (Phase 5).
+    public static final String TOKEN_ALREADY_OPENED = ChatColor.RED + "This lootbox was already opened - it crumbles away.";
+    public static final String TOKEN_REVOKED = ChatColor.RED + "This lootbox was revoked by staff - it crumbles away.";
+    public static final String TOKEN_INVALID = ChatColor.RED + "This lootbox isn't recognised - please tell a staff member.";
 
     private LootboxMessages() {
     }
@@ -36,6 +40,9 @@ public final class LootboxMessages {
             case LootboxRejectedException.DISABLED -> ChatColor.RED + "Lootboxes are switched off right now.";
             case LootboxRejectedException.FROZEN -> ChatColor.RED + "You can't open lootboxes while frozen.";
             case LootboxRejectedException.USER_INACTIVE -> ChatColor.RED + "Your account can't open lootboxes.";
+            case LootboxRejectedException.ALREADY_REDEEMED -> TOKEN_ALREADY_OPENED;
+            case LootboxRejectedException.REVOKED -> TOKEN_REVOKED;
+            case LootboxRejectedException.INVALID_TOKEN -> TOKEN_INVALID;
             case LootboxRejectedException.EMPTY_POOL -> ChatColor.RED + "This lootbox is empty - please tell a staff member.";
             default -> STUCK;
         };
@@ -47,6 +54,11 @@ public final class LootboxMessages {
                 || rejected.is(LootboxRejectedException.EXPIRED)
                 || rejected.is(LootboxRejectedException.REMOVED)
                 || rejected.is(LootboxRejectedException.TOKEN_MISMATCH);
+    }
+
+    /** Whether a token refusal means every copy of that token is dead (opened already, or revoked): remove them. */
+    public static boolean tokenIsSpent(LootboxRejectedException rejected) {
+        return rejected.is(LootboxRejectedException.ALREADY_REDEEMED) || rejected.is(LootboxRejectedException.REVOKED);
     }
 
     /** The category a type's per-type limit names, from the runtime config. */

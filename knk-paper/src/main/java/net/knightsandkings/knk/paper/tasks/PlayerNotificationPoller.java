@@ -49,6 +49,8 @@ public class PlayerNotificationPoller {
     private BukkitTask task;
     // Set once UserAdminService exists (it's built after this poller in KnKPlugin).
     private volatile Consumer<Player> rankChangedHandler;
+    // Set once lootboxes are initialized (Phase 5 token items the API issued itself).
+    private volatile Consumer<Player> lootboxTokensHandler;
 
     public PlayerNotificationPoller(PlayerNotificationsApi notificationsApi, Plugin plugin) {
         this(notificationsApi, plugin,
@@ -64,6 +66,11 @@ public class PlayerNotificationPoller {
     /** What to do for a {@link PlayerNotification#TYPE_RANK_CHANGED} whose player is online. */
     public void setRankChangedHandler(Consumer<Player> handler) {
         this.rankChangedHandler = handler;
+    }
+
+    /** What to do for a {@link PlayerNotification#TYPE_LOOTBOX_TOKENS_ISSUED} whose player is online. */
+    public void setLootboxTokensHandler(Consumer<Player> handler) {
+        this.lootboxTokensHandler = handler;
     }
 
     public void start() {
@@ -123,6 +130,8 @@ public class PlayerNotificationPoller {
                     PromotionEffects.show(player, notification.titleChange());
                 } else if (PlayerNotification.TYPE_RANK_CHANGED.equals(notification.type()) && rankChangedHandler != null) {
                     rankChangedHandler.accept(player);
+                } else if (PlayerNotification.TYPE_LOOTBOX_TOKENS_ISSUED.equals(notification.type()) && lootboxTokensHandler != null) {
+                    lootboxTokensHandler.accept(player);
                 }
             } catch (RuntimeException e) {
                 // Acknowledged anyway: retrying a notification that throws would only repeat

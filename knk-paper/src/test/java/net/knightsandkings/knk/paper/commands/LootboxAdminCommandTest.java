@@ -7,6 +7,8 @@ import net.knightsandkings.knk.paper.lootbox.LootboxAnnouncer;
 import net.knightsandkings.knk.paper.lootbox.LootboxDelivery;
 import net.knightsandkings.knk.paper.lootbox.LootboxRuntime;
 import net.knightsandkings.knk.paper.lootbox.LootboxSettings;
+import net.knightsandkings.knk.paper.lootbox.LootboxTokenDelivery;
+import net.knightsandkings.knk.core.lootbox.KnkLootboxToken;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.junit.jupiter.api.BeforeEach;
@@ -137,5 +139,45 @@ class LootboxAdminCommandTest {
         assertEquals(List.of("list"), command.tabComplete(admin, new String[]{""}));
         assertEquals(List.of("weapons"), command.tabComplete(admin, new String[]{"spawn", "w"}));
         verify(api, never()).despawn(isNull(), anyInt());
+    }
+
+    // ===== token (Phase 5) =====
+
+    private LootboxAdminCommand withTokens(LootboxTokenDelivery tokens) {
+        return new LootboxAdminCommand(runtime, api, delivery, mock(LootboxAnnouncer.class), area,
+                (player, node) -> granted.contains(node), p -> p == steve ? 9 : 42,
+                name -> "Steve".equalsIgnoreCase(name) ? steve : null, () -> reloads++, Runnable::run, tokens);
+    }
+
+    @Test
+    void token_parsesStarsAndAmount_issuesAsTheStaffMember_andGivesTheItems() {
+        granted.add("knk.lootbox.admin.token");
+        LootboxTokenDelivery tokens = mock(LootboxTokenDelivery.class);
+        KnkLootboxToken issued = new KnkLootboxToken(7, java.util.UUID.randomUUID(), 3, "Weapons Lootbox", "Weapons", 5,
+                "Legendary Weapons Lootbox", "Issued", "Admin", 9);
+        when(api.issueTokens(eq(42), eq(9), eq(3), eq(5), eq(2), eq("Admin"), anyString()))
+                .thenReturn(CompletableFuture.completedFuture(List.of(issued, issued)));
+        when(api.issueTokens(eq(42), eq(9), eq(3), isNull(), eq(3), eq("Admin"), anyString()))
+                .thenReturn(new CompletableFuture<>());
+        when(steve.isOnline()).thenReturn(true);
+
+        withTokens(tokens).execute(admin, new String[]{"token", "Steve", "weapons", "5", "2"});
+        withTokens(tokens).execute(admin, new String[]{"token", "Steve", "weapons", "any", "3"});
+
+        verify(tokens).give(steve, 9, List.of(issued, issued));
+        verify(api).issueTokens(eq(42), eq(9), eq(3), isNull(), eq(3), eq("Admin"), anyString());
+    }
+
+    @Test
+    void token_needsItsNode_andABoundedAmount() {
+        LootboxTokenDelivery tokens = mock(LootboxTokenDelivery.class);
+        LootboxAdminCommand command = withTokens(tokens);
+
+        command.execute(admin, new String[]{"token", "Steve", "weapons"});
+        granted.add("knk.lootbox.admin.token");
+        command.execute(admin, new String[]{"token", "Steve", "weapons", "5", "65"});
+
+        verify(api, never()).issueTokens(any(), anyInt(), anyInt(), any(), anyInt(), any(), any());
+        verify(admin).sendMessage(contains("Amount is 1-64"));
     }
 }

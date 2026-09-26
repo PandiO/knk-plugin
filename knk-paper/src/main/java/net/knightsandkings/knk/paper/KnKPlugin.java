@@ -901,10 +901,11 @@ public class KnKPlugin extends JavaPlugin {
                 knkAdminCommand.registerSubcommand(
                     new net.knightsandkings.knk.paper.commands.CommandMetadata(
                         "lootbox",
-                        "Spawn, list, give and despawn lootboxes; manage lootbox spawn areas",
+                        "Spawn, list, give and despawn lootboxes; issue lootbox token items; manage lootbox spawn areas",
                         net.knightsandkings.knk.paper.commands.LootboxAdminCommand.usage(),
                         null, // each action checks its own knk.lootbox.admin.<action> node
                         List.of("/knk lootbox spawn weapons 5", "/knk lootbox list", "/knk lootbox give Steve armor",
+                            "/knk lootbox token Steve weapons 5 2",
                             "/knk lootbox area create spawn", "/knk lootbox area delete spawn")),
                     lootboxAdmin::execute,
                     lootboxAdmin::tabComplete);
@@ -1041,6 +1042,15 @@ public class KnKPlugin extends JavaPlugin {
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxChunkListener(runtime), this);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxJoinListener(
                 this, queryApi, delivery, userIdOf, mainThread), this);
+            // Phase 5: lootbox token items (open, hand over, keep out of placing/crafting).
+            var tokenDelivery = new net.knightsandkings.knk.paper.lootbox.LootboxTokenDelivery(
+                mainThread, queryApi, commandApi, runtime::settings, userIdOf);
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxTokenListener(
+                this, runtime, new net.knightsandkings.knk.core.lootbox.TokenOpenGuard(), commandApi, delivery, tokenDelivery,
+                announcer, permission, modeService::getActiveMode, userIdOf, mainThread), this);
+            if (playerNotificationPoller != null) {
+                playerNotificationPoller.setLootboxTokensHandler(tokenDelivery::deliverUndelivered);
+            }
 
             var areaCommand = new net.knightsandkings.knk.paper.commands.LootboxAreaCommand(
                 runtime::config, runtime.cache(), regions, commandApi, userIdOf, name -> org.bukkit.Bukkit.getWorld(name),
@@ -1053,7 +1063,8 @@ public class KnKPlugin extends JavaPlugin {
                     runtime.reloadSettings();
                     scheduler.start();
                 },
-                mainThread);
+                mainThread,
+                tokenDelivery);
             this.lootboxCommand = new net.knightsandkings.knk.paper.commands.LootboxCommand(
                 runtime::config, queryApi, permission, mainThread);
 

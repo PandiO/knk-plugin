@@ -19,6 +19,8 @@ import java.util.stream.Collectors;
  * @param refuseWhenFull      {@code full-inventory: refuse} (no API call with a full inventory) vs {@code drop-owned}
  * @param forbiddenGround     material names a box may not stand on (liquids and leaves are always refused)
  * @param gradeColors         box stars → legacy colour code for the label
+ * @param tokenMaterial       material name of lootbox token items (Phase 5); not a fuel, a crafting ingredient or
+ *                            anything usable, and its identity is the PDC token, never the material or name
  */
 public record LootboxSettings(
         boolean enabled,
@@ -33,8 +35,10 @@ public record LootboxSettings(
         boolean label,
         boolean rotate,
         int particlesRadius,
-        Map<Integer, String> gradeColors
+        Map<Integer, String> gradeColors,
+        String tokenMaterial
 ) {
+    public static final String DEFAULT_TOKEN_MATERIAL = "ENDER_CHEST";
     static final List<String> DEFAULT_FORBIDDEN_GROUND = List.of("WATER", "LAVA", "MAGMA_BLOCK", "CACTUS", "POWDER_SNOW");
 
     private static final Map<Integer, String> DEFAULT_GRADE_COLORS = Map.of(
@@ -43,6 +47,7 @@ public record LootboxSettings(
     public LootboxSettings {
         forbiddenGround = forbiddenGround == null ? Set.of() : Set.copyOf(forbiddenGround);
         gradeColors = gradeColors == null ? Map.of() : Map.copyOf(gradeColors);
+        tokenMaterial = tokenMaterial == null || tokenMaterial.isBlank() ? DEFAULT_TOKEN_MATERIAL : tokenMaterial.trim().toUpperCase(Locale.ROOT);
     }
 
     public static LootboxSettings defaults() {
@@ -53,7 +58,7 @@ public record LootboxSettings(
     public static LootboxSettings from(ConfigurationSection section) {
         if (section == null) {
             return new LootboxSettings(true, "default", 60, 20, 5, true, false, 4,
-                    Set.copyOf(DEFAULT_FORBIDDEN_GROUND), true, true, 15, DEFAULT_GRADE_COLORS);
+                    Set.copyOf(DEFAULT_FORBIDDEN_GROUND), true, true, 15, DEFAULT_GRADE_COLORS, DEFAULT_TOKEN_MATERIAL);
         }
 
         List<String> ground = section.isList("surface.forbidden-ground")
@@ -87,7 +92,8 @@ public record LootboxSettings(
                 section.getBoolean("display.label", true),
                 section.getBoolean("display.rotate", true),
                 Math.max(0, section.getInt("display.particles-radius", 15)),
-                colors);
+                colors,
+                section.getString("token.material", DEFAULT_TOKEN_MATERIAL));
     }
 
     /** The label colour for a box of {@code stars} (white when unconfigured). */

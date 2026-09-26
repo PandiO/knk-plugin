@@ -224,6 +224,11 @@ lootboxes:
     rotate: true
     particles-radius: 15           # gold particles + a quiet chime every 4 s to players this close (0 = off)
     grade-colors: { "1": "&9", "2": "&9", "3": "&b", "4": "&b", "5": "&d", "6": "&6", "7": "&6", "8": "&c", "9": "&c", "10": "&4" }
+  # Lootbox token items (right-click to open; issued by /knk lootbox token, premium tiers and kits). An item is a token
+  # only by its knightsandkings:knk_lootbox_token tag, never by material or name. Pick something that isn't a fuel,
+  # a crafting ingredient or otherwise usable; placing and crafting with a token are blocked anyway.
+  token:
+    material: ENDER_CHEST
 cache:
   # Global time-to-live for cached API responses (in seconds)
   # After this duration, cached data is considered stale and will be refetched
