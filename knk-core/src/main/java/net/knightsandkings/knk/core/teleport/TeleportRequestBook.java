@@ -22,6 +22,9 @@ import java.util.UUID;
  *   <li>At most {@code maxIncoming} pending requests per target; the oldest is dropped.</li>
  *   <li>Answering (accept or deny) or withdrawing removes the request, so a second
  *       {@code /tpaccept} finds nothing and a request can't be both accepted and denied.</li>
+ *   <li>Every request gets a new {@link Request#id()}. The clickable answer buttons carry it
+ *       ({@link #take(UUID, UUID, long, long)}), so a button from a request that was replaced since
+ *       - e.g. {@code /tpa} then {@code /tpahere} to the same player - can't answer the new one.</li>
  * </ul>
  * In memory only; a restart drops pending requests (fine for a 30 s window, DESIGN §4 D12).
  * Meant for the main thread; the methods are synchronized anyway so a stray call from another
@@ -102,6 +105,29 @@ public final class TeleportRequestBook {
         }
     }
 
+    public enum TakeStatus {
+        /** It was the pending request; it's removed ({@link TakeResult#request()} is it). */
+        TAKEN,
+        /** Nothing pending from that requester (expired, answered, withdrawn, or never sent). */
+        NONE,
+        /**
+         * That requester's pending request is a newer one than the id given - the old one was
+         * replaced. Nothing is removed; {@link TakeResult#request()} is the newer one.
+         */
+        REPLACED
+    }
+
+    /** @param request the taken request (TAKEN), the newer pending one (REPLACED), or null (NONE) */
+    public record TakeResult(TakeStatus status, Request request) {
+        public TakeResult {
+            Objects.requireNonNull(status, "status must not be null");
+        }
+
+        public Optional<Request> taken() {
+            return status == TakeStatus.TAKEN ? Optional.of(request) : Optional.empty();
+        }
+    }
+
     /** Newest first; the id breaks ties between requests sent in the same millisecond. */
     private static final Comparator<Request> NEWEST_FIRST =
         Comparator.comparingLong(Request::createdAtMillis).thenComparingLong(Request::id).reversed();
@@ -175,6 +201,25 @@ public final class TeleportRequestBook {
             }
         }
         return Optional.empty();
+    }
+
+    /**
+     * Take (remove) {@code requester}'s pending request to {@code target}, but only if it is still
+     * request {@code requestId} - the one a clickable {@code [Accept]}/{@code [Deny]} was made for.
+     * A newer request from the same player is left pending and reported as
+     * {@link TakeStatus#REPLACED}.
+     */
+    public synchronized TakeResult take(UUID target, UUID requester, long requestId, long nowMillis) {
+        Objects.requireNonNull(requester, "requester must not be null");
+        Request pending = live(byRequester.get(requester), nowMillis);
+        if (pending == null || !pending.target().equals(target)) {
+            return new TakeResult(TakeStatus.NONE, null);
+        }
+        if (pending.id() != requestId) {
+            return new TakeResult(TakeStatus.REPLACED, pending);
+        }
+        byRequester.remove(requester, pending);
+        return new TakeResult(TakeStatus.TAKEN, pending);
     }
 
     /** Withdraw {@code requester}'s outgoing request, if one is pending. */

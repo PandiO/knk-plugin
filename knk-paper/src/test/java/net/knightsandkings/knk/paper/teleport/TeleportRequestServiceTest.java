@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -141,7 +142,7 @@ class TeleportRequestServiceTest {
 
         ArgumentCaptor<Component> notice = ArgumentCaptor.forClass(Component.class);
         verify(bob).sendMessage(notice.capture());
-        assertEquals(List.of("/tpaccept Alice", "/tpdeny Alice"), clickCommands(notice.getValue()));
+        assertEquals(List.of("/tpaccept Alice 1", "/tpdeny Alice 1"), clickCommands(notice.getValue()));
         verify(alice).sendMessage(contains("Request sent to Bob. It expires in 30 s."));
         neverTeleported(alice);
     }
@@ -527,6 +528,89 @@ class TeleportRequestServiceTest {
         assertEquals(List.of("Carol"), requests.pendingRequesterNames(bob));
     }
 
+    // ===== stale buttons (a replaced request) =====
+
+    /** Alice /tpa's Bob, waits out the send cooldown, then /tpahere's him; returns both notices. */
+    private List<Component> tpaThenTpahere() {
+        requests.send(alice, bob, Direction.TO_TARGET);
+        advance(10_000);
+        requests.send(alice, bob, Direction.TO_REQUESTER);
+        ArgumentCaptor<Component> notices = ArgumentCaptor.forClass(Component.class);
+        verify(bob, times(2)).sendMessage(notices.capture());
+        return notices.getAllValues();
+    }
+
+    /** Run a click event's command (e.g. "/tpaccept Alice 1") as {@code player}. */
+    private void click(Player player, String clickCommand) {
+        String[] words = clickCommand.substring(1).split(" ");
+        TeleportRequestCommand.Form form = words[0].equals("tpaccept")
+            ? TeleportRequestCommand.Form.ACCEPT : TeleportRequestCommand.Form.DENY;
+        run(tpa.withForm(form), player, Arrays.copyOfRange(words, 1, words.length));
+    }
+
+    @Test
+    void oldAcceptButtonOfAReplacedRequestIsRefused() {
+        List<Component> notices = tpaThenTpahere();
+        String oldAccept = clickCommands(notices.get(0)).get(0);
+        String newAccept = clickCommands(notices.get(1)).get(0);
+        assertEquals("/tpaccept Alice 1", oldAccept);
+        assertEquals("/tpaccept Alice 2", newAccept);
+
+        click(bob, oldAccept);
+
+        verify(bob).sendMessage(contains("That request was replaced - check the latest one."));
+        assertFalse(engine.isWarmingUp(bob.getUniqueId()), "the /tpahere wasn't accepted");
+        assertFalse(engine.isWarmingUp(alice.getUniqueId()));
+        verify(alice, never()).sendMessage(contains("accepted"));
+        assertEquals(List.of("Alice"), requests.pendingRequesterNames(bob), "the new request is still pending");
+
+        click(bob, newAccept);
+
+        assertTrue(engine.isWarmingUp(bob.getUniqueId()), "the latest button accepts the /tpahere");
+    }
+
+    @Test
+    void oldDenyButtonOfAReplacedRequestIsRefused() {
+        List<Component> notices = tpaThenTpahere();
+
+        click(bob, clickCommands(notices.get(0)).get(1));
+
+        verify(bob).sendMessage(contains("That request was replaced - check the latest one."));
+        verify(alice, never()).sendMessage(contains("denied"));
+        assertEquals(List.of("Alice"), requests.pendingRequesterNames(bob));
+    }
+
+    @Test
+    void typedAcceptWithoutAnIdActsOnTheCurrentRequest() {
+        tpaThenTpahere();
+
+        run(tpa.withForm(TeleportRequestCommand.Form.ACCEPT), bob, "Alice");
+
+        assertTrue(engine.isWarmingUp(bob.getUniqueId()), "the current request is the /tpahere");
+        verify(bob, never()).sendMessage(contains("was replaced"));
+    }
+
+    @Test
+    void buttonOfAnAnsweredRequestFindsNothing() {
+        requests.send(alice, bob, Direction.TO_TARGET);
+        requests.deny(bob, null);
+
+        click(bob, "/tpaccept Alice 1");
+
+        verify(bob).sendMessage(contains("No pending teleport request from Alice."));
+        assertFalse(engine.isWarmingUp(alice.getUniqueId()));
+    }
+
+    @Test
+    void anIdThatIsNotANumberShowsTheUsage() {
+        requests.send(alice, bob, Direction.TO_TARGET);
+
+        run(tpa.withForm(TeleportRequestCommand.Form.ACCEPT), bob, "Alice", "latest");
+
+        verify(bob).sendMessage(contains("Usage: /tpaccept [player]"));
+        assertFalse(engine.isWarmingUp(alice.getUniqueId()));
+    }
+
     // ===== teleport menu (Phase 6) =====
 
     @Test
@@ -553,7 +637,8 @@ class TeleportRequestServiceTest {
 
         ArgumentCaptor<Component> notices = ArgumentCaptor.forClass(Component.class);
         verify(bob, times(2)).sendMessage(notices.capture());
-        assertEquals(List.of("/tpaccept Alice", "/tpdeny Alice"), clickCommands(notices.getValue()));
+        assertEquals(List.of("/tpaccept Alice 1", "/tpdeny Alice 1"), clickCommands(notices.getValue()),
+            "the same request id as the original notice");
         assertEquals(List.of("Alice"), requests.pendingRequesterNames(bob), "still pending");
         assertFalse(engine.isWarmingUp(alice.getUniqueId()));
 

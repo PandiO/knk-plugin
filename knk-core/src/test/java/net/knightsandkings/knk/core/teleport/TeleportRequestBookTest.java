@@ -4,6 +4,8 @@ import net.knightsandkings.knk.core.teleport.TeleportRequestBook.Direction;
 import net.knightsandkings.knk.core.teleport.TeleportRequestBook.Request;
 import net.knightsandkings.knk.core.teleport.TeleportRequestBook.SendResult;
 import net.knightsandkings.knk.core.teleport.TeleportRequestBook.SendStatus;
+import net.knightsandkings.knk.core.teleport.TeleportRequestBook.TakeResult;
+import net.knightsandkings.knk.core.teleport.TeleportRequestBook.TakeStatus;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -11,6 +13,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -213,6 +216,79 @@ class TeleportRequestBookTest {
         assertTrue(book.take(ALICE, null, 1_000).isEmpty());
         assertTrue(book.take(CAROL, ALICE, 1_000).isEmpty());
         assertEquals(1, book.incoming(BOB, 1_000).size());
+    }
+
+    // ===== answer by id (the clickable buttons) =====
+
+    @Test
+    void everyRequestGetsANewId() {
+        Request first = book.send(ALICE, BOB, Direction.TO_TARGET, 0).request();
+        Request second = book.send(ALICE, BOB, Direction.TO_REQUESTER, 1_000).request();
+
+        assertNotEquals(first.id(), second.id());
+    }
+
+    @Test
+    void takeByIdTakesTheRequestItWasMadeFor() {
+        Request request = book.send(ALICE, BOB, Direction.TO_TARGET, 0).request();
+
+        TakeResult result = book.take(BOB, ALICE, request.id(), 1_000);
+
+        assertEquals(TakeStatus.TAKEN, result.status());
+        assertEquals(request, result.taken().orElseThrow());
+        assertEquals(0, book.size());
+    }
+
+    @Test
+    void staleIdOfAReplacedRequestIsRefusedAndTheNewOneStaysPending() {
+        // The bait-and-switch: /tpa, then /tpahere to the same player; the old [Accept] must not
+        // accept the new direction.
+        Request tpa = book.send(ALICE, BOB, Direction.TO_TARGET, 0).request();
+        Request tpahere = book.send(ALICE, BOB, Direction.TO_REQUESTER, 11_000).request();
+
+        TakeResult stale = book.take(BOB, ALICE, tpa.id(), 12_000);
+
+        assertEquals(TakeStatus.REPLACED, stale.status());
+        assertEquals(tpahere, stale.request());
+        assertTrue(stale.taken().isEmpty());
+        assertEquals(List.of(tpahere), book.incoming(BOB, 12_000), "the new request is untouched");
+        assertEquals(tpahere, book.take(BOB, ALICE, tpahere.id(), 12_000).taken().orElseThrow());
+    }
+
+    @Test
+    void staleIdOfARequestReplacedByTheSameKindIsStillRefused() {
+        Request first = book.send(ALICE, BOB, Direction.TO_TARGET, 0).request();
+        book.send(ALICE, CAROL, Direction.TO_TARGET, 1_000);
+        Request again = book.send(ALICE, BOB, Direction.TO_TARGET, 2_000).request();
+
+        TakeResult stale = book.take(BOB, ALICE, first.id(), 3_000);
+
+        assertEquals(TakeStatus.REPLACED, stale.status());
+        assertEquals(again, stale.request());
+    }
+
+    @Test
+    void idWithNothingPendingFromThatPlayerFindsNothing() {
+        Request answered = book.send(ALICE, BOB, Direction.TO_TARGET, 0).request();
+        book.take(BOB, ALICE, 1_000);
+        Request expired = book.send(CAROL, BOB, Direction.TO_TARGET, 0).request();
+        Request toSomeoneElse = book.send(DAVE, ALICE, Direction.TO_TARGET, 0).request();
+
+        assertEquals(TakeStatus.NONE, book.take(BOB, ALICE, answered.id(), 2_000).status());
+        assertEquals(TakeStatus.NONE, book.take(BOB, CAROL, expired.id(), 30_000).status());
+        assertEquals(TakeStatus.NONE, book.take(BOB, DAVE, toSomeoneElse.id(), 2_000).status(),
+            "only the target can answer it");
+        assertNull(book.take(BOB, DAVE, toSomeoneElse.id(), 2_000).request());
+        assertTrue(book.outgoing(DAVE, 2_000).isPresent());
+    }
+
+    @Test
+    void staleIdAfterTheRequesterMovedOnToSomeoneElseFindsNothing() {
+        Request toBob = book.send(ALICE, BOB, Direction.TO_TARGET, 0).request();
+        book.send(ALICE, CAROL, Direction.TO_REQUESTER, 1_000);
+
+        assertEquals(TakeStatus.NONE, book.take(BOB, ALICE, toBob.id(), 2_000).status());
+        assertTrue(book.outgoing(ALICE, 2_000).isPresent(), "Carol's request is untouched");
     }
 
     @Test

@@ -25,7 +25,9 @@ import net.knightsandkings.knk.paper.teleport.VisibleTargetResolver;
  *       Dragon Blood).</li>
  *   <li>{@code /tpaccept [player]} ({@code /tpyes}), {@code /tpdeny [player]} ({@code /tpno}), and v1's
  *       {@code /tpa accept|deny [player]} - answer the newest (or the named player's) request. No
- *       node: answering is always allowed.</li>
+ *       node: answering is always allowed. The clickable {@code [Accept] [Deny]} buttons run
+ *       {@code /tpaccept|tpdeny <player> <id>}: they only answer that exact request, never one
+ *       that replaced it since.</li>
  *   <li>{@code /tpcancel} - withdraw your request, or stop your own running teleport warmup.</li>
  * </ul>
  * Players only. Names resolve vanish-aware ({@link VisibleTargetResolver}); the rules live in
@@ -63,7 +65,7 @@ public class TeleportRequestCommand implements TabExecutor {
         switch (form) {
             case TPA -> {
                 if (args.length >= 1 && args.length <= 2 && isAnswer(args[0])) {
-                    answer(player, args[0].equalsIgnoreCase("accept"), args.length == 2 ? args[1] : null);
+                    answer(player, args[0].equalsIgnoreCase("accept"), args.length == 2 ? args[1] : null, null);
                 } else if (args.length == 1) {
                     request(player, args[0], TeleportNodes.REQUEST, Direction.TO_TARGET);
                 } else {
@@ -78,8 +80,9 @@ public class TeleportRequestCommand implements TabExecutor {
                 }
             }
             case ACCEPT, DENY -> {
-                if (args.length <= 1) {
-                    answer(player, form == Form.ACCEPT, args.length == 1 ? args[0] : null);
+                Long requestId = args.length == 2 ? parseId(args[1]) : null;
+                if (args.length <= 1 || requestId != null) {
+                    answer(player, form == Form.ACCEPT, args.length >= 1 ? args[0] : null, requestId);
                 } else {
                     player.sendMessage(ChatColor.YELLOW + "Usage: /" + (form == Form.ACCEPT ? "tpaccept" : "tpdeny") + " [player]");
                 }
@@ -103,11 +106,20 @@ public class TeleportRequestCommand implements TabExecutor {
         });
     }
 
-    private void answer(Player player, boolean accept, String requesterName) {
+    private void answer(Player player, boolean accept, String requesterName, Long requestId) {
         if (accept) {
-            requests.accept(player, requesterName);
+            requests.accept(player, requesterName, requestId);
         } else {
-            requests.deny(player, requesterName);
+            requests.deny(player, requesterName, requestId);
+        }
+    }
+
+    /** The request id a clickable answer button appends; null when it isn't one. */
+    private static Long parseId(String arg) {
+        try {
+            return Long.parseLong(arg);
+        } catch (NumberFormatException notAnId) {
+            return null;
         }
     }
 

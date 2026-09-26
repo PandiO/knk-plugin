@@ -39,7 +39,9 @@ import net.kyori.adventure.text.format.TextDecoration;
  *       reveal them - DESIGN §3.4.4), during the send cooldown ({@code teleport.request.cooldown-seconds},
  *       bypass {@value TeleportNodes#BYPASS_COOLDOWN}), and when the engine's guards already refuse
  *       the teleport (combat tag, cooldown, frozen, closed domain, siege...). The target gets a
- *       clickable {@code [Accept] [Deny]}.</li>
+ *       clickable {@code [Accept] [Deny]} carrying the request's id, so a click on the button of a
+ *       request that was replaced since (say {@code /tpa} then {@code /tpahere}) is refused instead
+ *       of answering the new one. Typed answers without an id act on the current request.</li>
  *   <li><b>Accept</b>: takes the request (so a second accept finds nothing), then starts the
  *       teleport: the engine re-runs every guard for the moving player and, through
  *       {@link TeleportPlan#visited()}, the other one; the warmup is on the moving player (the
@@ -63,6 +65,7 @@ public class TeleportRequestService {
 
     private static final Logger LOGGER = Logger.getLogger(TeleportRequestService.class.getName());
     static final String PAID_NOT_AVAILABLE = "Paid teleport requests aren't available right now.";
+    static final String REQUEST_REPLACED = "That request was replaced - check the latest one.";
 
     private final TeleportService engine;
     private final Executor mainThread;
@@ -200,7 +203,7 @@ public class TeleportRequestService {
                     requester.sendMessage(ChatColor.GRAY + "It costs you " + settings.priceCoins()
                         + " coins if the teleport happens.");
                 }
-                target.sendMessage(requestNotice(requester, direction, book.expireSeconds()));
+                target.sendMessage(requestNotice(requester, result.request(), book.expireSeconds()));
             }
         }
     }
@@ -216,20 +219,24 @@ public class TeleportRequestService {
             + " s. " + ChatColor.GRAY + "/tpcancel to withdraw.";
     }
 
-    /** "X wants to teleport to you." + clickable [Accept] [Deny] (running /tpaccept X, /tpdeny X). */
-    static Component requestNotice(Player requester, Direction direction, int expireSeconds) {
+    /**
+     * "X wants to teleport to you." + clickable [Accept] [Deny] (running /tpaccept X id, /tpdeny X id -
+     * with the request's id, so they only ever answer this request).
+     */
+    static Component requestNotice(Player requester, Request request, int expireSeconds) {
         String name = requester.getName();
-        String what = direction == Direction.TO_TARGET ? " wants to teleport to you." : " asks you to teleport to them.";
+        String what = request.direction() == Direction.TO_TARGET
+            ? " wants to teleport to you." : " asks you to teleport to them.";
         return Component.text()
             .append(Component.text(name, ColorOptions.names))
             .append(Component.text(what, ColorOptions.message))
             .append(Component.newline())
             .append(Component.text("[Accept]", NamedTextColor.GREEN, TextDecoration.BOLD)
-                .clickEvent(ClickEvent.runCommand("/tpaccept " + name))
+                .clickEvent(ClickEvent.runCommand("/tpaccept " + name + " " + request.id()))
                 .hoverEvent(HoverEvent.showText(Component.text("Accept " + name + "'s request", NamedTextColor.GREEN))))
             .append(Component.space())
             .append(Component.text("[Deny]", NamedTextColor.RED, TextDecoration.BOLD)
-                .clickEvent(ClickEvent.runCommand("/tpdeny " + name))
+                .clickEvent(ClickEvent.runCommand("/tpdeny " + name + " " + request.id()))
                 .hoverEvent(HoverEvent.showText(Component.text("Deny " + name + "'s request", NamedTextColor.RED))))
             .append(Component.text(" Expires in " + expireSeconds + " s.", ColorOptions.message))
             .build();
@@ -239,11 +246,19 @@ public class TeleportRequestService {
 
     /** {@code target} accepts the newest request, or {@code requesterName}'s. */
     public void accept(Player target, String requesterName) {
+        accept(target, requesterName, null);
+    }
+
+    /**
+     * {@code target} accepts the newest request, or {@code requesterName}'s; with a
+     * {@code requestId} (the clickable button) only if that is still the pending request.
+     */
+    public void accept(Player target, String requesterName, Long requestId) {
         syncSettings();
         if (refusedForPrice(target)) {
             return;
         }
-        Optional<Request> taken = take(target, requesterName);
+        Optional<Request> taken = take(target, requesterName, requestId);
         if (taken.isEmpty()) {
             return;
         }
@@ -272,7 +287,15 @@ public class TeleportRequestService {
 
     /** {@code target} denies the newest request, or {@code requesterName}'s. */
     public void deny(Player target, String requesterName) {
-        Optional<Request> taken = take(target, requesterName);
+        deny(target, requesterName, null);
+    }
+
+    /**
+     * {@code target} denies the newest request, or {@code requesterName}'s; with a
+     * {@code requestId} (the clickable button) only if that is still the pending request.
+     */
+    public void deny(Player target, String requesterName, Long requestId) {
+        Optional<Request> taken = take(target, requesterName, requestId);
         if (taken.isEmpty()) {
             return;
         }
@@ -286,15 +309,27 @@ public class TeleportRequestService {
 
     /**
      * The request {@code target} is answering, removed from the book - or empty after telling them
-     * there's none. Requests from players who left or whom the target can't see are skipped.
+     * there's none, or (with a {@code requestId}) that it was replaced by a newer one. Requests from
+     * players who left or whom the target can't see are skipped.
      */
-    private Optional<Request> take(Player target, String requesterName) {
+    private Optional<Request> take(Player target, String requesterName, Long requestId) {
         UUID targetId = target.getUniqueId();
         long now = engine.now();
         if (requesterName != null && !requesterName.isBlank()) {
             Player requester = targets.find(target, requesterName);
-            Optional<Request> taken = requester == null ? Optional.empty()
-                : book.take(targetId, requester.getUniqueId(), now);
+            Optional<Request> taken;
+            if (requester == null) {
+                taken = Optional.empty();
+            } else if (requestId == null) {
+                taken = book.take(targetId, requester.getUniqueId(), now);
+            } else {
+                TeleportRequestBook.TakeResult result = book.take(targetId, requester.getUniqueId(), requestId, now);
+                if (result.status() == TeleportRequestBook.TakeStatus.REPLACED) {
+                    target.sendMessage(ChatColor.RED + REQUEST_REPLACED);
+                    return Optional.empty();
+                }
+                taken = result.taken();
+            }
             if (taken.isEmpty()) {
                 target.sendMessage(ChatColor.RED + "No pending teleport request from " + requesterName + ".");
             }
@@ -431,13 +466,15 @@ public class TeleportRequestService {
             player.sendMessage(ChatColor.YELLOW + "You have no pending teleport requests.");
             return;
         }
+        long now = engine.now();
+        for (Request incoming : book.incoming(player.getUniqueId(), now)) {
+            Player requester = onlineById.apply(incoming.requester());
+            if (requester != null && targets.canSee(player, requester)) {
+                player.sendMessage(requestNotice(requester, incoming, incoming.secondsLeft(now)));
+            }
+        }
         for (Pending request : pending) {
-            if (request.incoming()) {
-                Player requester = targets.find(player, request.otherName());
-                if (requester != null) {
-                    player.sendMessage(requestNotice(requester, request.direction(), request.secondsLeft()));
-                }
-            } else {
+            if (!request.incoming()) {
                 player.sendMessage(ChatColor.GRAY + "Your teleport request to " + request.otherName() + " expires in "
                     + request.secondsLeft() + " s. /tpcancel to withdraw.");
             }
