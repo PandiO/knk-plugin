@@ -171,6 +171,11 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.core.dataaccess.PermissionGroupsDataAccess permissionGroupsDataAccess;
     private net.knightsandkings.knk.paper.user.UserAdminService userAdminService;
     private net.knightsandkings.knk.paper.user.SalaryPayoutScheduler salaryPayoutScheduler;
+    // Lootboxes Phase 3 (docs/specs/lootboxes/IMPLEMENTATION_PLAN.md)
+    private net.knightsandkings.knk.paper.lootbox.LootboxRuntime lootboxRuntime;
+    private net.knightsandkings.knk.paper.lootbox.LootboxSpawnScheduler lootboxSpawnScheduler;
+    private net.knightsandkings.knk.paper.commands.LootboxAdminCommand lootboxAdminCommand;
+    private net.knightsandkings.knk.paper.commands.LootboxCommand lootboxCommand;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private PermissionsDataAccess permissionsDataAccess;
     private KnkPermissible knkPermissible;
@@ -644,6 +649,9 @@ public class KnKPlugin extends JavaPlugin {
             initializeEnchantmentRuntime(new WorldGuardCombatSafezones(regionDomainResolver, (attacker, victim) -> false));
             getLogger().info("Registered custom enchantment runtime listeners and /ce command");
 
+            // Lootboxes Phase 3: world boxes, claims and delivery; commands registered in registerCommands().
+            initializeLootboxes();
+
             // Register commands
             registerCommands();
 
@@ -788,6 +796,12 @@ public class KnKPlugin extends JavaPlugin {
         if (salaryPayoutScheduler != null) {
             salaryPayoutScheduler.stop();
         }
+        if (lootboxSpawnScheduler != null) {
+            lootboxSpawnScheduler.stop();
+        }
+        if (lootboxRuntime != null) {
+            lootboxRuntime.stop(); // removes the (non-persistent) box entities
+        }
         if (cacheManager != null) {
             getLogger().info("Logging final cache metrics...");
             cacheManager.logMetrics();
@@ -882,6 +896,19 @@ public class KnKPlugin extends JavaPlugin {
                 menuService,
                 userAdminService
             );
+            if (lootboxAdminCommand != null) {
+                var lootboxAdmin = lootboxAdminCommand;
+                knkAdminCommand.registerSubcommand(
+                    new net.knightsandkings.knk.paper.commands.CommandMetadata(
+                        "lootbox",
+                        "Spawn, list, give and despawn lootboxes; manage lootbox spawn areas",
+                        net.knightsandkings.knk.paper.commands.LootboxAdminCommand.usage(),
+                        null, // each action checks its own knk.lootbox.admin.<action> node
+                        List.of("/knk lootbox spawn weapons 5", "/knk lootbox list", "/knk lootbox give Steve armor",
+                            "/knk lootbox area create spawn", "/knk lootbox area delete spawn")),
+                    lootboxAdmin::execute,
+                    lootboxAdmin::tabComplete);
+            }
             knkCommand.setExecutor(knkAdminCommand);
             knkCommand.setTabCompleter(knkAdminCommand);
             getLogger().info("Registered /knk admin command");
@@ -918,6 +945,10 @@ public class KnKPlugin extends JavaPlugin {
             kitsDataAccess,
             kitGrantFlow
         ));
+
+        if (lootboxCommand != null) {
+            registerTabCommand("lootbox", lootboxCommand);
+        }
 
         // Content port CP1: /menu opens the InventoryMenu hub (docs/specs/inventory-menu/CONTENT_PORT_PLAN.md §3).
         registerSimpleCommand("menu", new net.knightsandkings.knk.paper.commands.MenuCommand(() -> menuService));
@@ -971,6 +1002,69 @@ public class KnKPlugin extends JavaPlugin {
             support, net.knightsandkings.knk.paper.commands.RestoreCommand.Kind.FEED));
         registerTabCommand("enderchest", new net.knightsandkings.knk.paper.commands.EnderchestCommand(support, rankCheck, offlineStorage));
         registerTabCommand("inventory", new net.knightsandkings.knk.paper.commands.InventoryCommand(support, rankCheck, offlineStorage));
+    }
+
+    /**
+     * Lootboxes Phase 3 (docs/specs/lootboxes/DESIGN.md §3.4): the runtime (cache + presenter, refreshed from the API),
+     * the spawn scheduler, the interact/chunk/join listeners and the two commands. A failure here disables lootboxes
+     * only, not the plugin.
+     */
+    private void initializeLootboxes() {
+        try {
+            var queryApi = apiClient.getLootboxesQueryApi();
+            var commandApi = apiClient.getLootboxesCommandApi();
+            java.util.concurrent.Executor mainThread = MenuService.mainThreadExecutor(this);
+            java.time.Clock clock = java.time.Clock.systemUTC();
+            java.util.function.BiPredicate<org.bukkit.entity.Player, String> permission =
+                (player, node) -> knkPermissible.hasPermission(player, node);
+            java.util.function.Function<org.bukkit.entity.Player, Integer> userIdOf = player -> cacheManager.getUserCache()
+                .getStale(player.getUniqueId()).map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null);
+
+            var runtime = new net.knightsandkings.knk.paper.lootbox.LootboxRuntime(
+                this, queryApi, () -> getConfig().getConfigurationSection("lootboxes"), clock);
+            var regions = new net.knightsandkings.knk.paper.lootbox.WorldGuardLootboxRegions(new WorldGuardIntegration(this));
+            var announcer = new net.knightsandkings.knk.paper.lootbox.LootboxAnnouncer(
+                message -> org.bukkit.Bukkit.broadcast(message));
+            var delivery = new net.knightsandkings.knk.paper.lootbox.LootboxDelivery(
+                mainThread, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, enchantmentDefinitionsDataAccess, commandApi,
+                new net.knightsandkings.knk.paper.item.BlueprintItemAssembler(
+                    new net.knightsandkings.knk.api.impl.enchantment.LocalEnchantmentRepositoryImpl()));
+            var scheduler = new net.knightsandkings.knk.paper.lootbox.LootboxSpawnScheduler(
+                this, runtime, regions, commandApi, announcer,
+                new net.knightsandkings.knk.core.lootbox.LootboxSpawnPlanner(
+                    () -> java.util.concurrent.ThreadLocalRandom.current().nextDouble()));
+
+            var pluginManager = getServer().getPluginManager();
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxInteractListener(
+                runtime, new net.knightsandkings.knk.core.lootbox.ClaimGuard(), commandApi, delivery, announcer,
+                permission, modeService::getActiveMode, userIdOf, mainThread), this);
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxChunkListener(runtime), this);
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxJoinListener(
+                this, queryApi, delivery, userIdOf, mainThread), this);
+
+            var areaCommand = new net.knightsandkings.knk.paper.commands.LootboxAreaCommand(
+                runtime::config, runtime.cache(), regions, commandApi, userIdOf, name -> org.bukkit.Bukkit.getWorld(name),
+                () -> runtime.refresh(), runtime::gone, mainThread, clock);
+            this.lootboxAdminCommand = new net.knightsandkings.knk.paper.commands.LootboxAdminCommand(
+                runtime, commandApi, delivery, announcer, areaCommand, permission, userIdOf,
+                name -> org.bukkit.Bukkit.getPlayerExact(name),
+                () -> {
+                    reloadConfig();
+                    runtime.reloadSettings();
+                    scheduler.start();
+                },
+                mainThread);
+            this.lootboxCommand = new net.knightsandkings.knk.paper.commands.LootboxCommand(
+                runtime::config, queryApi, permission, mainThread);
+
+            runtime.start();
+            scheduler.start();
+            this.lootboxRuntime = runtime;
+            this.lootboxSpawnScheduler = scheduler;
+            getLogger().info("Lootboxes initialized (enabled=" + runtime.settings().enabled() + ")");
+        } catch (Exception e) {
+            getLogger().log(java.util.logging.Level.SEVERE, "Lootboxes failed to initialize; they stay off", e);
+        }
     }
 
     private void registerTabCommand(String name, org.bukkit.command.TabExecutor executor) {

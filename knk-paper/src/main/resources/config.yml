@@ -203,6 +203,27 @@ custom-enchantments:
     ench-use: "&cYou cannot use %enchantment%."
 
 # Cache configuration
+
+# Lootboxes (docs/specs/lootboxes/DESIGN.md §3.4). Everything the API decides - areas, limits, odds, the daily cap,
+# announcement templates - is set in the web app (/admin/lootboxes); this section is only how this server places,
+# shows and opens boxes. /knk lootbox reload re-reads it.
+lootboxes:
+  enabled: true
+  # Sent with every spawn so the drop log shows which server made the box.
+  server-id: "default"
+  runtime-refresh-seconds: 60      # runtime config + active boxes re-read from the API
+  scheduler-tick-seconds: 20       # how often each area is considered (its own interval still applies)
+  claim-max-distance: 5            # blocks between the player and the box
+  full-inventory: refuse           # refuse (no claim with a full inventory) | drop-owned (claim, drop leftovers owner-locked)
+  staff-mode-can-claim: false      # players in /staffmode or /ownermode can't open boxes
+  surface:
+    max-attempts-per-tick: 4       # random columns tried per area per try; ungenerated chunks are skipped
+    forbidden-ground: [WATER, LAVA, MAGMA_BLOCK, CACTUS, POWDER_SNOW]
+  display:
+    label: true                    # floating "<colour><Grade> <Category> Lootbox ★★★" label
+    rotate: true
+    particles-radius: 15           # gold particles + a quiet chime every 4 s to players this close (0 = off)
+    grade-colors: { "1": "&9", "2": "&9", "3": "&b", "4": "&b", "5": "&d", "6": "&6", "7": "&6", "8": "&c", "9": "&c", "10": "&4" }
 cache:
   # Global time-to-live for cached API responses (in seconds)
   # After this duration, cached data is considered stale and will be refetched

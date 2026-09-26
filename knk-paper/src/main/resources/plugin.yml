@@ -117,6 +117,13 @@ commands:
     usage: "/inventory open <player> | /inventory clear <player> confirm"
     aliases: [inv, invsee]
 
+  lootbox:
+    description: "Lootboxes: help, and what a box can give (docs/specs/lootboxes/DESIGN.md §3.4)"
+    usage: "/lootbox | /lootbox odds <category> [stars]"
+    aliases: [lb]
+    # Player-only; odds is gated on knk.lootbox.odds through KnkPermissible inside LootboxCommand. Every admin
+    # action is under /knk lootbox (knk.lootbox.admin.*), not here.
+
 permissions:
   knk.admin:
     description: >-
@@ -327,6 +334,49 @@ permissions:
       Gates /kit manage's FormWizard-pointer subcommands (docs/specs/kits/DESIGN.md §0c/§4.5) -
       no in-game Kit CRUD exists, this only guards advertising the FormWizard route to players
       with no reason to see it. Same KnkPermissible/op-bypass caveat as knk.kit.list.
+    default: op
+
+  # Lootboxes (docs/specs/lootboxes/DESIGN.md §3.4). Resolved through KnkPermissible, like knk.kit.*; the two player
+  # nodes are granted to the Default permission group by knk-web-api's LootboxSeed, the admin nodes never are.
+  knk.lootbox.open:
+    description: Open (claim) a lootbox in the world by clicking it.
+    default: true
+  knk.lootbox.odds:
+    description: See what a lootbox can give via /lootbox odds <category> [stars].
+    default: true
+  knk.lootbox.admin.*:
+    description: Every /knk lootbox admin action.
+    default: op
+    children:
+      knk.lootbox.admin.spawn: true
+      knk.lootbox.admin.despawn: true
+      knk.lootbox.admin.list: true
+      knk.lootbox.admin.tp: true
+      knk.lootbox.admin.give: true
+      knk.lootbox.admin.reload: true
+      knk.lootbox.admin.area: true
+  knk.lootbox.admin.spawn:
+    description: /knk lootbox spawn <category> [stars] - a box where you stand, ignoring caps (audited).
+    default: op
+  knk.lootbox.admin.despawn:
+    description: /knk lootbox despawn [id|nearest] - remove an active box.
+    default: op
+  knk.lootbox.admin.list:
+    description: /knk lootbox list [area] - the active boxes.
+    default: op
+  knk.lootbox.admin.tp:
+    description: /knk lootbox tp <id> - teleport to an active box.
+    default: op
+  knk.lootbox.admin.give:
+    description: /knk lootbox give <player> <category> [stars] - roll and deliver without a world box (audited).
+    default: op
+  knk.lootbox.admin.reload:
+    description: /knk lootbox reload - re-read config.yml's lootboxes section and the API's runtime config.
+    default: op
+  knk.lootbox.admin.area:
+    description: >-
+      /knk lootbox area create|list|info|delete - spawn areas from a WorldEdit selection (region lootbox_<name>,
+      full height); delete only removes lootbox_ regions.
     default: op
 
   # KNG-9 player commands. Resolved through KnkPermissible (the REST-backed permission model), not

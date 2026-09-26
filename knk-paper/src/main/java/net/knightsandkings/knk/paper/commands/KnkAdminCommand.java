@@ -54,6 +54,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public class KnkAdminCommand implements CommandExecutor, TabCompleter {
     private final CommandRegistry registry = new CommandRegistry();
+    private final java.util.Map<String, java.util.function.BiFunction<CommandSender, String[], List<String>>> extraTabCompleters =
+            new java.util.HashMap<>();
     private final HelpSubcommand helpSubcommand;
         private final Plugin plugin;
         private final EnchantmentDefinitionsDataAccess enchantmentDefinitionsDataAccess;
@@ -382,6 +384,18 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         scheduleKnkIdRefresh();
     }
 
+    /**
+     * Registers a subcommand built after this command (lootboxes Phase 3: {@code /knk lootbox}, whose runtime is wired
+     * later in {@code KnKPlugin}). {@code tabCompleter} gets the arguments after the subcommand name; may be null.
+     */
+    public void registerSubcommand(CommandMetadata metadata, SubcommandExecutor executor,
+                                   java.util.function.BiFunction<CommandSender, String[], List<String>> tabCompleter) {
+        registry.register(metadata, executor);
+        if (tabCompleter != null) {
+            extraTabCompleters.put(metadata.name().toLowerCase(Locale.ROOT), tabCompleter);
+        }
+    }
+
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length == 0) {
@@ -427,6 +441,10 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                 }
 
                 String root = args[0].toLowerCase(Locale.ROOT);
+                var extra = extraTabCompleters.get(root);
+                if (extra != null) {
+                        return extra.apply(sender, Arrays.copyOfRange(args, 1, args.length));
+                }
                 if ("user".equals(root)) {
                         return completeUserSubcommand(Arrays.copyOfRange(args, 1, args.length));
                 }
