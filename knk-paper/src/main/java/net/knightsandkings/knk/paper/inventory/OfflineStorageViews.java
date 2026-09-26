@@ -14,13 +14,13 @@ import java.util.logging.Logger;
 
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
-import org.bukkit.Material;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.HumanEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
@@ -28,7 +28,6 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
 
 import net.knightsandkings.knk.core.nbt.NbtTag.CompoundTag;
 import net.knightsandkings.knk.core.nbt.PlayerStorageNbt;
@@ -42,8 +41,11 @@ import net.kyori.adventure.text.Component;
  * ender chest in a chest view, written back to their data file when the viewer closes it.
  * <ul>
  *   <li>Inventory view (5 rows) laid out like the player's own screen: rows 1-3 the main inventory
- *       (slots 9-35), row 4 the hotbar (0-8), row 5 helmet, chestplate, leggings, boots, off-hand and
- *       four locked filler panes.</li>
+ *       (slots 9-35), row 4 the hotbar (0-8), row 5 helmet, chestplate, leggings, boots and off-hand.
+ *       The last four slots of row 5 stay empty and take no items (a chest view comes in rows of nine;
+ *       the player file has nowhere to keep a 42nd item): clicks and drags there are refused,
+ *       shift-clicks from the viewer's inventory only fill the real slots, and anything that still
+ *       ends up there is handed back to the viewer on close.</li>
  *   <li>Ender chest view: the 27 slots as they are.</li>
  *   <li><b>Read-only</b> when the file is from an older Minecraft version (the player hasn't joined
  *       since the update - rewriting it would skip the upgrade of everything else in it), or when an
@@ -61,7 +63,7 @@ public class OfflineStorageViews implements Listener, OfflineStorageAccess {
     private static final int EQUIPMENT_ROW = 36;
     private static final List<Equipment> EQUIPMENT_ORDER =
             List.of(Equipment.HEAD, Equipment.CHEST, Equipment.LEGS, Equipment.FEET, Equipment.OFFHAND);
-    private static final int FIRST_FILLER = EQUIPMENT_ROW + EQUIPMENT_ORDER.size();
+    private static final int FIRST_LOCKED = EQUIPMENT_ROW + EQUIPMENT_ORDER.size();
 
     private final OfflinePlayerStorage storage;
     private final Function<UUID, Player> onlinePlayer;
@@ -135,11 +137,6 @@ public class OfflineStorageViews implements Listener, OfflineStorageAccess {
         String title = targetName + "'s " + kind.label() + (writable ? " (offline)" : " (offline, read-only)");
         Inventory inventory = Bukkit.createInventory(view, size, Component.text(title));
         view.inventory = inventory;
-        if (kind == Kind.INVENTORY) {
-            for (int slot = FIRST_FILLER; slot < INVENTORY_VIEW_SIZE; slot++) {
-                contents[slot] = filler();
-            }
-        }
         inventory.setContents(contents);
         openViews.add(view);
         viewer.openInventory(inventory);
@@ -182,8 +179,31 @@ public class OfflineStorageViews implements Listener, OfflineStorageAccess {
             event.setCancelled(true);
             return;
         }
-        if (view.kind == Kind.INVENTORY && event.getClickedInventory() == view.inventory && isFiller(event.getSlot())) {
+        if (view.kind != Kind.INVENTORY) {
+            return;
+        }
+        if (event.getClickedInventory() == view.inventory && isLocked(event.getSlot())) {
             event.setCancelled(true);
+            return;
+        }
+        // Shift-click from the viewer's own inventory: vanilla would drop it into the first free slot,
+        // which can be a locked one - place it ourselves, real slots only.
+        if (event.getAction() == InventoryAction.MOVE_TO_OTHER_INVENTORY && event.getClickedInventory() != view.inventory) {
+            event.setCancelled(true);
+            ItemStack moving = event.getCurrentItem();
+            if (moving == null || moving.isEmpty()) {
+                return;
+            }
+            ItemStack[] contents = view.inventory.getContents();
+            int left = moveInto(contents, FIRST_LOCKED, moving);
+            view.inventory.setContents(contents);
+            if (left <= 0) {
+                event.setCurrentItem(null);
+            } else {
+                ItemStack rest = moving.clone();
+                rest.setAmount(left);
+                event.setCurrentItem(rest);
+            }
         }
     }
 
@@ -196,7 +216,7 @@ public class OfflineStorageViews implements Listener, OfflineStorageAccess {
             event.setCancelled(true);
             return;
         }
-        if (view.kind == Kind.INVENTORY && event.getRawSlots().stream().anyMatch(slot -> slot < INVENTORY_VIEW_SIZE && isFiller(slot))) {
+        if (view.kind == Kind.INVENTORY && event.getRawSlots().stream().anyMatch(slot -> slot < INVENTORY_VIEW_SIZE && isLocked(slot))) {
             event.setCancelled(true);
         }
     }
@@ -211,6 +231,9 @@ public class OfflineStorageViews implements Listener, OfflineStorageAccess {
             return;
         }
         HumanEntity viewer = event.getPlayer();
+        if (view.kind == Kind.INVENTORY) {
+            returnLockedSlotItems(view, viewer);
+        }
         if (onlinePlayer.apply(view.target) != null) {
             viewer.sendMessage(ChatColor.RED + view.targetName + " came online - your changes were not saved.");
             return;
@@ -218,7 +241,7 @@ public class OfflineStorageViews implements Listener, OfflineStorageAccess {
 
         Map<Integer, CompoundTag> edited = new TreeMap<>();
         ItemStack[] contents = view.inventory.getContents();
-        int end = view.kind == Kind.INVENTORY ? FIRST_FILLER : contents.length;
+        int end = view.kind == Kind.INVENTORY ? FIRST_LOCKED : contents.length;
         for (int slot = 0; slot < end; slot++) {
             ItemStack item = contents[slot];
             if (item != null && !item.isEmpty()) {
@@ -320,30 +343,60 @@ public class OfflineStorageViews implements Listener, OfflineStorageAccess {
         return view;
     }
 
-    /** The reverse of {@link #toViewSlots}; filler slots are ignored. */
+    /** The reverse of {@link #toViewSlots}; the locked slots are ignored. */
     static void fromViewSlots(Map<Integer, CompoundTag> view, Map<Integer, CompoundTag> main, Map<Equipment, CompoundTag> equipment) {
         view.forEach((slot, item) -> {
             if (slot < 27) {
                 main.put(slot + 9, item);
             } else if (slot < EQUIPMENT_ROW) {
                 main.put(slot - 27, item);
-            } else if (slot < FIRST_FILLER) {
+            } else if (slot < FIRST_LOCKED) {
                 equipment.put(EQUIPMENT_ORDER.get(slot - EQUIPMENT_ROW), item);
             }
         });
     }
 
-    static boolean isFiller(int viewSlot) {
-        return viewSlot >= FIRST_FILLER && viewSlot < INVENTORY_VIEW_SIZE;
+    /** The four unused slots at the end of the inventory view's last row. */
+    static boolean isLocked(int viewSlot) {
+        return viewSlot >= FIRST_LOCKED && viewSlot < INVENTORY_VIEW_SIZE;
     }
 
-    private static ItemStack filler() {
-        ItemStack pane = new ItemStack(Material.GRAY_STAINED_GLASS_PANE);
-        ItemMeta meta = pane.getItemMeta();
-        if (meta != null) {
-            meta.displayName(Component.text(" "));
-            pane.setItemMeta(meta);
+    /**
+     * Puts {@code moving} into {@code contents[0..end)} the way a shift-click would: first onto
+     * matching stacks, then into empty slots. Returns how many didn't fit; {@code moving} is untouched.
+     */
+    static int moveInto(ItemStack[] contents, int end, ItemStack moving) {
+        int remaining = moving.getAmount();
+        int max = Math.max(1, moving.getMaxStackSize());
+        for (int slot = 0; slot < end && remaining > 0; slot++) {
+            ItemStack existing = contents[slot];
+            if (existing != null && !existing.isEmpty() && existing.isSimilar(moving) && existing.getAmount() < max) {
+                int added = Math.min(remaining, max - existing.getAmount());
+                existing.setAmount(existing.getAmount() + added);
+                remaining -= added;
+            }
         }
-        return pane;
+        for (int slot = 0; slot < end && remaining > 0; slot++) {
+            if (contents[slot] == null || contents[slot].isEmpty()) {
+                ItemStack placed = moving.clone();
+                int amount = Math.min(remaining, max);
+                placed.setAmount(amount);
+                contents[slot] = placed;
+                remaining -= amount;
+            }
+        }
+        return remaining;
+    }
+
+    /** Safety net: anything in a locked slot would be lost on save, so the viewer gets it back. */
+    private static void returnLockedSlotItems(View view, HumanEntity viewer) {
+        for (int slot = FIRST_LOCKED; slot < INVENTORY_VIEW_SIZE; slot++) {
+            ItemStack item = view.inventory.getItem(slot);
+            if (item != null && !item.isEmpty()) {
+                view.inventory.setItem(slot, null);
+                viewer.getInventory().addItem(item).values()
+                        .forEach(left -> viewer.getWorld().dropItemNaturally(viewer.getLocation(), left));
+            }
+        }
     }
 }

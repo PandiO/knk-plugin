@@ -3,6 +3,7 @@ package net.knightsandkings.knk.paper.inventory;
 import net.knightsandkings.knk.core.nbt.NbtTag.CompoundTag;
 import net.knightsandkings.knk.core.nbt.NbtTag.StringTag;
 import net.knightsandkings.knk.core.nbt.PlayerStorageNbt.Equipment;
+import org.bukkit.inventory.ItemStack;
 import org.junit.jupiter.api.Test;
 
 import java.util.EnumMap;
@@ -12,7 +13,13 @@ import java.util.TreeMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /** KNG-13: the offline inventory view mirrors the player's own screen and maps back losslessly. */
 class OfflineStorageViewsLayoutTest {
@@ -56,10 +63,60 @@ class OfflineStorageViewsLayoutTest {
     }
 
     @Test
-    void theLastFourSlotsAreLockedFiller() {
-        assertFalse(OfflineStorageViews.isFiller(40));
-        assertTrue(OfflineStorageViews.isFiller(41));
-        assertTrue(OfflineStorageViews.isFiller(44));
-        assertFalse(OfflineStorageViews.isFiller(45)); // the viewer's own inventory
+    void theLastFourSlotsAreLocked() {
+        assertFalse(OfflineStorageViews.isLocked(40));
+        assertTrue(OfflineStorageViews.isLocked(41));
+        assertTrue(OfflineStorageViews.isLocked(44));
+        assertFalse(OfflineStorageViews.isLocked(45)); // the viewer's own inventory
+    }
+
+    /** A stand-in ItemStack (a real one needs a server's item registry): kind, amount, max stack. */
+    private static ItemStack stack(String kind, int amount, int max) {
+        ItemStack item = mock(ItemStack.class);
+        int[] count = {amount};
+        when(item.getAmount()).thenAnswer(inv -> count[0]);
+        doAnswer(inv -> {
+            count[0] = inv.getArgument(0);
+            return null;
+        }).when(item).setAmount(anyInt());
+        when(item.getMaxStackSize()).thenReturn(max);
+        when(item.isEmpty()).thenAnswer(inv -> count[0] <= 0);
+        when(item.toString()).thenReturn(kind);
+        when(item.isSimilar(any())).thenAnswer(inv -> inv.getArgument(0) != null && kind.equals(inv.getArgument(0).toString()));
+        when(item.clone()).thenAnswer(inv -> stack(kind, count[0], max));
+        return item;
+    }
+
+    @Test
+    void shiftClickFillsMatchingStacksThenEmptySlotsButNeverTheLockedOnes() {
+        ItemStack[] contents = new ItemStack[45];
+        for (int slot = 0; slot < 41; slot++) {
+            contents[slot] = stack("dirt", 64, 64); // full
+        }
+        contents[3] = stack("bread", 60, 64);
+        contents[7] = null;
+
+        int left = OfflineStorageViews.moveInto(contents, 41, stack("bread", 20, 64));
+
+        assertEquals(64, contents[3].getAmount());
+        assertEquals("bread", contents[7].toString());
+        assertEquals(16, contents[7].getAmount());
+        assertEquals(0, left);
+        for (int slot = 41; slot < 45; slot++) {
+            assertNull(contents[slot]);
+        }
+    }
+
+    @Test
+    void whatDoesNotFitStaysWithTheViewer() {
+        ItemStack[] contents = new ItemStack[45];
+        for (int slot = 0; slot < 41; slot++) {
+            contents[slot] = stack("dirt", 64, 64);
+        }
+
+        assertEquals(10, OfflineStorageViews.moveInto(contents, 41, stack("bread", 10, 64)));
+        for (int slot = 41; slot < 45; slot++) {
+            assertNull(contents[slot]);
+        }
     }
 }
