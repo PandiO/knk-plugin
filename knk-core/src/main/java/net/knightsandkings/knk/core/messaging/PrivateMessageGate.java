@@ -6,8 +6,8 @@ import java.util.Set;
 
 /**
  * One check a private message must pass before it is delivered (docs/specs/private-messages/
- * DESIGN.md §3.3.6). Gates run in order and the first denial wins: frozen, rate limit, then (Phase
- * 2) ignore. A later mute is one more gate - nothing else changes.
+ * DESIGN.md §3.3.6). Gates run in order and the first denial wins: frozen, rate limit, then ignore
+ * ({@link IgnoreGate}, whose denial is silent). A later mute is one more gate - nothing else changes.
  * <p>
  * Gates are pure: whatever permission nodes they need are resolved by the caller beforehand and
  * passed in {@link SendAttempt#senderNodes()} / {@link SendAttempt#recipientNodes()} (nodes from

@@ -19,6 +19,7 @@ import net.knightsandkings.knk.api.impl.DomainsQueryApiImpl;
 import net.knightsandkings.knk.api.impl.UsersQueryApiImpl;
 import net.knightsandkings.knk.api.impl.UsersCommandApiImpl;
 import net.knightsandkings.knk.api.impl.PlayerNotificationsApiImpl;
+import net.knightsandkings.knk.api.impl.UserIgnoresApiImpl;
 import net.knightsandkings.knk.api.impl.UserAccountApiImpl;
 import net.knightsandkings.knk.api.impl.WorldTasksApiImpl;
 import net.knightsandkings.knk.api.impl.GateStructuresApiImpl;
@@ -45,6 +46,7 @@ import net.knightsandkings.knk.core.ports.api.DomainsQueryApi;
 import net.knightsandkings.knk.core.ports.api.UsersQueryApi;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.core.ports.api.PlayerNotificationsApi;
+import net.knightsandkings.knk.core.ports.api.UserIgnoresApi;
 import net.knightsandkings.knk.core.ports.api.UserAccountApi;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
 import net.knightsandkings.knk.api.GateStructuresApi;
@@ -93,6 +95,7 @@ public class KnkApiClient {
     private final UsersQueryApi usersQueryApi;
     private final UsersCommandApi usersCommandApi;
     private final PlayerNotificationsApi playerNotificationsApi;
+    private final UserIgnoresApi userIgnoresApi;
     private final UserAccountApi userAccountApi;
     private final WorldTasksApi worldTasksApi;
     private final GateStructuresApi gateStructuresApi;
@@ -136,6 +139,7 @@ public class KnkApiClient {
         this.usersQueryApi = new UsersQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.usersCommandApi = new UsersCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.playerNotificationsApi = new PlayerNotificationsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.userIgnoresApi = new UserIgnoresApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.userAccountApi = new UserAccountApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.worldTasksApi = new WorldTasksApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.gateStructuresApi = new GateStructuresApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -220,6 +224,11 @@ public class KnkApiClient {
 
     public PlayerNotificationsApi getPlayerNotificationsApi() {
         return playerNotificationsApi;
+    }
+
+    /** KNG-18 Phase 2: players' ignore lists. */
+    public UserIgnoresApi getUserIgnoresApi() {
+        return userIgnoresApi;
     }
     
     public UserAccountApi getUserAccountApi() {
