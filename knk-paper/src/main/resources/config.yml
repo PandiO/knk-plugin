@@ -9,25 +9,27 @@ api:
   # Allow untrusted SSL certificates (ONLY for development with self-signed certs)
   allow-untrusted-ssl: true
   
-  # Authentication configuration
+  # Authentication configuration (KNG-22)
+  #
+  # knk-web-api refuses game-server calls to its protected routes (balances, salary, kits,
+  # presence, staff mode, freeze, ranks/permissions, account merge...) unless they carry its
+  # shared key. Set api-key below to the SAME random value as the API's
+  # Security:PluginApiKey (appsettings / environment variable Security__PluginApiKey), e.g.
+  # generated with: openssl rand -hex 32
+  # With the key the API also trusts the in-game staff member this plugin names for
+  # audit-logged changes (X-Acting-User-Id).
+  # The plugin won't start with type apikey and an empty api-key - that's deliberate.
+  # (Development only: the API can be told to skip the check instead, see
+  # Security:AllowUnauthenticatedPluginCalls in knk-web-api - then type none works.)
   auth:
     # Type: none, bearer, apikey
-    # apikey is the plugin's service identity: every request carries `api-key` in the
-    # `api-key-header` header. Use it on any server whose API has a plugin key configured
-    # (knk-web-api `Security:PluginServiceKey` / `Security:PluginApiKey`, header X-API-Key);
-    # once one is set there, its plugin-only endpoints (e.g. lootbox claims) refuse requests
-    # without the key.
-    # Set the value per server and keep the key out of version control:
-    #   type: apikey
-    #   api-key: "<the key configured on the API>"
-    type: none
+    type: apikey
     # Bearer token (only used if type=bearer)
     bearer-token: ""
-    # API key (only used if type=apikey). Set the same value as knk-web-api's
-    # Security:PluginApiKey in production: the API then only trusts the in-game staff member
-    # this plugin names for audit-logged changes (X-Acting-User-Id) on requests carrying it.
+    # API key (only used if type=apikey) - must equal knk-web-api's Security:PluginApiKey.
     api-key: ""
-    # API key header name (only used if type=apikey)
+    # API key header name (only used if type=apikey). Keep X-API-Key: that's the header the
+    # API reads.
     api-key-header: "X-API-Key"
   
   # HTTP timeouts (in seconds)
