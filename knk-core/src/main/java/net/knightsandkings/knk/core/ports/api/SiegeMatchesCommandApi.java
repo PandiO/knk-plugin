@@ -10,16 +10,15 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Write-side port for match lifecycle checkpoints (DESIGN §3.10, §7.6, §11.2).
- * <b>Interface only in Phase 4</b>: the {@code /api/siege-matches} endpoints and this port's
- * implementation are Phase 6, which may still reshape the records. Calls never block the main
- * thread; Phase 6 retries {@code complete}/{@code abort} with the existing {@code RetryPolicy} and
- * spools failures to {@code siege-vault/pending-results/}. The server makes complete/abort
- * idempotent, so a replay is safe.
+ * Write-side port for match lifecycle checkpoints (DESIGN §3.10, §7.6, §11.2), implemented over
+ * knk-web-api's {@code /api/siege-matches} endpoints (siege Phase 6). Calls never block the main
+ * thread. The server makes start/complete/abort idempotent, so a retry or a spooled replay is safe;
+ * {@code SiegeMatchRecorder} (knk-core) adds the retry policy, the pending-results spool and startup
+ * recovery around an implementation of this port.
  * <p>
- * Call points (Phase 5/6): {@link #createMatch} on the draw, {@link #startMatch} at match start,
+ * Call points: {@link #createMatch} on the draw, {@link #startMatch} at match start,
  * {@link #participantLeft} on leave/quit, {@link #completeMatch} at the end, {@link #abortMatch} on
- * admin stop, shutdown and startup recovery.
+ * admin stop and shutdown, {@link #abortUnfinished} on startup (after replaying the spool).
  */
 public interface SiegeMatchesCommandApi {
     /** {@code POST /api/siege-matches}: a {@code Created} match row; completes with its id. */
@@ -36,4 +35,12 @@ public interface SiegeMatchesCommandApi {
 
     /** {@code POST /api/siege-matches/{id}/abort}: {@code Aborted}, no rewards. */
     CompletableFuture<Void> abortMatch(long matchId, SiegeEndReason reason);
+
+    /**
+     * {@code POST /api/siege-matches/abort-unfinished}: aborts every match still {@code Created} or
+     * {@code InProgress} (startup recovery - a restart ends any running match, DESIGN §5.1).
+     *
+     * @return the ids of the matches it aborted
+     */
+    CompletableFuture<List<Long>> abortUnfinished(SiegeEndReason reason);
 }
