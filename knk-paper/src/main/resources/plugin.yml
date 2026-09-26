@@ -83,6 +83,12 @@ commands:
     usage: "/menu"
     permission: knk.menu
 
+  discoveries:
+    description: "See the towns, districts and structures you have discovered (docs/specs/domain-discovery DESIGN.md §3.7)"
+    usage: "/discoveries"
+    aliases: [disc]
+    permission: knk.discoveries
+
   # KNG-9: v2 player commands ported to v3 (docs/specs/legacy/commands-v2.md §1/§7). None has a
   # permission: entry - /user statistics is open to everyone, and the others check their knk.<cmd>
   # nodes through KnkPermissible inside the executor (same reasoning as /kit and /ownermode).
@@ -193,6 +199,7 @@ permissions:
       knk.admin.user.mode: true
       knk.admin.user.salary: true
       knk.admin.tp: true
+      knk.admin.discovery: true
 
   knk.admin.health:
     description: Access to /knk health
@@ -574,3 +581,14 @@ permissions:
   knk.menu:
     description: Open the InventoryMenu hub with /menu (content port CP1).
     default: true
+
+  knk.discoveries:
+    description: Open your discoveries menu with /discoveries (domain discovery, KNG-20).
+    default: true
+
+  knk.admin.discovery:
+    description: >-
+      /knk discovery list|reset|status - list a player's discoveries, reset one so it can be
+      discovered and rewarded again (no claw-back), and see the tracker/spool. The same node gates
+      the web app's discovery admin page. Also granted through the in-house permission system.
+    default: false

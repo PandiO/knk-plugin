@@ -1,6 +1,12 @@
 package net.knightsandkings.knk.paper.config;
 
 import java.time.Duration;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import org.bukkit.GameMode;
 
 import net.knightsandkings.knk.core.teleport.TeleportSettings;
 
@@ -12,15 +18,17 @@ public record KnkConfig(
     CacheConfig cache,
     AccountConfig account,
     MessagesConfig messages,
-    TeleportSettings teleport
+    TeleportSettings teleport,
+    DiscoveryConfig discovery
 ) {
     public KnkConfig {
         // No teleport: block (e.g. an older config.yml) means the DESIGN §3.11 defaults.
         teleport = teleport != null ? teleport : TeleportSettings.defaults();
     }
 
+    /** Without teleport and discovery sections: their defaults. */
     public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages) {
-        this(api, cache, account, messages, TeleportSettings.defaults());
+        this(api, cache, account, messages, TeleportSettings.defaults(), DiscoveryConfig.defaults());
     }
 
     public record ApiConfig(
@@ -103,6 +111,10 @@ public record KnkConfig(
             throw new IllegalArgumentException("messages configuration is required");
         }
         messages.validate();
+        if (discovery == null) {
+            throw new IllegalArgumentException("discovery configuration is required");
+        }
+        discovery.validate();
     }
     
     public record CacheConfig(
@@ -364,6 +376,100 @@ public record KnkConfig(
             }
             if (mergeComplete == null || mergeComplete.isBlank()) {
                 throw new IllegalArgumentException("messages.merge-complete is required");
+            }
+        }
+    }
+
+    /**
+     * Domain discovery (docs/specs/domain-discovery DESIGN.md §3.6): first entry into a Town,
+     * District or Structure rewards the player once. Amounts are decided by knk-web-api; this only
+     * controls detection, batching, the API-down spool and the effects.
+     *
+     * @param batchWindowTicks     how often pending candidates are sent (one request per player)
+     * @param excludedGameModes    players in these game modes discover nothing
+     * @param spoolDirectory       under the plugin folder; one file per player while the API is down
+     * @param effectSpacingTicks   delay between the effects of several places discovered at once
+     */
+    public record DiscoveryConfig(
+        boolean enabled,
+        int batchWindowTicks,
+        int maxRequestsPerMinute,
+        Set<GameMode> excludedGameModes,
+        boolean excludeSiegeParticipants,
+        String spoolDirectory,
+        int replayIntervalSeconds,
+        int effectSpacingTicks,
+        EffectsConfig effects,
+        MessagesConfig messages
+    ) {
+        public static final List<String> DEFAULT_EXCLUDED_GAME_MODES = List.of("CREATIVE", "SPECTATOR");
+
+        public record EffectsConfig(
+            String sound,
+            float soundVolume,
+            float soundPitch,
+            String particle,
+            int particleCount,
+            double particleSpread,
+            boolean townFirework
+        ) {
+            public static EffectsConfig defaults() {
+                return new EffectsConfig("UI_TOAST_CHALLENGE_COMPLETE", 0.8f, 1.0f, "HAPPY_VILLAGER", 30, 0.6, true);
+            }
+        }
+
+        /**
+         * @param discovered    one line per discovered place; {type}, {name}, {parent} (" in &a<town>")
+         * @param replaySummary after a replay of discoveries made while the API was down; {count}
+         */
+        public record MessagesConfig(String discovered, String replaySummary) {
+            public static MessagesConfig defaults() {
+                return new MessagesConfig(
+                    "&bYou discovered {type} &a{name}&b{parent}!",
+                    "&bWhile the server was busy you discovered &a{count}&b place(s):");
+            }
+        }
+
+        public DiscoveryConfig {
+            excludedGameModes = excludedGameModes == null ? Set.of() : Set.copyOf(excludedGameModes);
+            effects = effects == null ? EffectsConfig.defaults() : effects;
+            messages = messages == null ? MessagesConfig.defaults() : messages;
+        }
+
+        public static DiscoveryConfig defaults() {
+            return new DiscoveryConfig(true, 20, 12, parseGameModes(DEFAULT_EXCLUDED_GAME_MODES), true, "discovery-spool", 60, 10,
+                EffectsConfig.defaults(), MessagesConfig.defaults());
+        }
+
+        /** Game mode names, any case; an unknown name is a config error. */
+        public static Set<GameMode> parseGameModes(List<String> names) {
+            if (names == null) {
+                return Set.of();
+            }
+            return names.stream().map(name -> {
+                try {
+                    return GameMode.valueOf(name.trim().toUpperCase(Locale.ROOT));
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException("discovery.excluded-game-modes: unknown game mode '" + name + "'");
+                }
+            }).collect(Collectors.toUnmodifiableSet());
+        }
+
+        public void validate() {
+            if (batchWindowTicks < 1) {
+                throw new IllegalArgumentException("discovery.batch-window-ticks must be at least 1 (got: " + batchWindowTicks + ")");
+            }
+            if (maxRequestsPerMinute < 1) {
+                throw new IllegalArgumentException("discovery.max-requests-per-minute must be at least 1 (got: " + maxRequestsPerMinute + ")");
+            }
+            if (replayIntervalSeconds < 10) {
+                throw new IllegalArgumentException("discovery.replay-interval-seconds must be at least 10 (got: " + replayIntervalSeconds + ")");
+            }
+            if (effectSpacingTicks < 0) {
+                throw new IllegalArgumentException("discovery.effects.spacing-ticks must not be negative (got: " + effectSpacingTicks + ")");
+            }
+            if (spoolDirectory == null || spoolDirectory.isBlank()) {
+                throw new IllegalArgumentException("discovery.spool-directory is required");
             }
         }
     }

@@ -62,6 +62,8 @@ final class ContentFeatures {
                 new net.knightsandkings.knk.core.cache.UserCache(java.time.Duration.ofMinutes(5)),
                 mock(net.knightsandkings.knk.core.dataaccess.TitleBracketsDataAccess.class),
                 mock(net.knightsandkings.knk.core.dataaccess.PermissionGroupsDataAccess.class), List::of));
+        features.add(new DiscoveriesMenuFeature(mock(net.knightsandkings.knk.core.ports.api.DiscoveriesApi.class),
+                new net.knightsandkings.knk.core.cache.UserCache(java.time.Duration.ofMinutes(5)), Clock.systemUTC()));
         return features;
     }
 

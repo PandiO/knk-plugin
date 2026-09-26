@@ -171,6 +171,11 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.core.dataaccess.PermissionGroupsDataAccess permissionGroupsDataAccess;
     private net.knightsandkings.knk.paper.user.UserAdminService userAdminService;
     private net.knightsandkings.knk.paper.user.SalaryPayoutScheduler salaryPayoutScheduler;
+    private net.knightsandkings.knk.paper.discovery.DiscoveryEligibility discoveryEligibility;
+    private net.knightsandkings.knk.paper.discovery.DiscoveryFlushTask discoveryFlushTask;
+    private net.knightsandkings.knk.core.discovery.DiscoveryTracker discoveryTracker;
+    private net.knightsandkings.knk.core.discovery.DiscoverySpool discoverySpool;
+    private net.knightsandkings.knk.paper.menu.content.DiscoveriesMenuFeature discoveriesMenuFeature;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private PermissionsDataAccess permissionsDataAccess;
     private KnkPermissible knkPermissible;
@@ -564,10 +569,16 @@ public class KnKPlugin extends JavaPlugin {
             );
             getServer().getPluginManager().registerEvents(salaryPayoutScheduler, this);
             salaryPayoutScheduler.start();
+            startDomainDiscovery();
             // Rank changes made outside the plugin (web app, expiring temporary rank) show right away.
             if (playerNotificationPoller != null) {
                 playerNotificationPoller.setRankChangedHandler(userAdminService::resyncDisplay);
             }
+            // Domain discovery (KNG-20): registered even with discovery.enabled false - the hub's
+            // Discoveries tile reads its root, and the menu still lists past discoveries.
+            this.discoveriesMenuFeature = new net.knightsandkings.knk.paper.menu.content.DiscoveriesMenuFeature(
+                apiClient.getDiscoveriesApi(), cacheManager.getUserCache(), java.time.Clock.systemUTC()
+            );
             List<MenuFeature> menuFeatures = List.of(
                 registries -> {
                     MenuVariableContext.registerDefaults(registries.variables());
@@ -589,7 +600,8 @@ public class KnKPlugin extends JavaPlugin {
                     permissionGroupsDataAccess, usersQueryApi, cacheManager.getUserCache()),
                 new net.knightsandkings.knk.paper.menu.content.UserManagerMenuFeature(
                     userAdminService, usersQueryApi, cacheManager.getUserCache(), titleBracketsDataAccess,
-                    permissionGroupsDataAccess, org.bukkit.Bukkit::getOnlinePlayers)
+                    permissionGroupsDataAccess, org.bukkit.Bukkit::getOnlinePlayers),
+                discoveriesMenuFeature
             );
             menuFeatures.forEach(feature -> feature.registerMenuHandlers(menuRegistries));
 
@@ -802,6 +814,11 @@ public class KnKPlugin extends JavaPlugin {
         if (salaryPayoutScheduler != null) {
             salaryPayoutScheduler.stop();
         }
+        if (discoveryFlushTask != null) {
+            // Unsent candidates and grants still in flight go to the spool, replayed on the next start.
+            discoveryFlushTask.stop();
+            discoveryFlushTask.spoolEverything();
+        }
         if (cacheManager != null) {
             getLogger().info("Logging final cache metrics...");
             cacheManager.logMetrics();
@@ -818,6 +835,58 @@ public class KnKPlugin extends JavaPlugin {
             regionLookupExecutor.shutdownNow();
         }
         getLogger().info("KnightsAndKings Plugin Disabled!");
+    }
+
+    /**
+     * Domain discovery (KNG-20, docs/specs/domain-discovery DESIGN.md §3.6): first entry into a Town,
+     * District or Structure is granted by the API once, with sound, particles and the reward lines.
+     * Needs the user cache, mode/freeze/loading state and the scoreboard refresher, so it starts after
+     * the salary scheduler.
+     */
+    private void startDomainDiscovery() {
+        KnkConfig.DiscoveryConfig discoveryConfig = config.discovery();
+        if (!discoveryConfig.enabled()) {
+            getLogger().info("Domain discovery disabled (discovery.enabled: false)");
+            return;
+        }
+        java.time.Clock clock = java.time.Clock.systemUTC();
+        this.discoveryEligibility = new net.knightsandkings.knk.paper.discovery.DiscoveryEligibility(
+            true, joinLoadingGuard::isLoading, modeService::getActiveMode, adminFreezeManager::isFrozen,
+            discoveryConfig.excludedGameModes(), discoveryConfig.excludeSiegeParticipants()
+        );
+        // Siege isn't on trunk: when it lands, plug SiegeService.isParticipant in with
+        // getDiscoveryEligibility().setSiegeParticipantCheck(...).
+        this.discoveryTracker =
+            new net.knightsandkings.knk.core.discovery.DiscoveryTracker(discoveryConfig.maxRequestsPerMinute());
+        this.discoverySpool = new net.knightsandkings.knk.core.discovery.DiscoverySpool(
+            new java.io.File(getDataFolder(), discoveryConfig.spoolDirectory()).toPath(), getLogger()
+        );
+        net.knightsandkings.knk.core.discovery.DiscoveryRecorder discoveryRecorder = new net.knightsandkings.knk.core.discovery.DiscoveryRecorder(
+            apiClient.getDiscoveriesApi(), net.knightsandkings.knk.core.dataaccess.RetryPolicy.defaultPolicy(), discoverySpool, getLogger()
+        );
+        net.knightsandkings.knk.paper.discovery.DiscoveryEffects discoveryEffects = new net.knightsandkings.knk.paper.discovery.DiscoveryEffects(
+            this, discoveryConfig, usersDataAccess,
+            (player, summary) -> net.knightsandkings.knk.paper.utils.ScoreboardUtil.setScoreboard(List.of(player), knkPermissible, summary)
+        );
+        this.discoveryFlushTask = new net.knightsandkings.knk.paper.discovery.DiscoveryFlushTask(
+            this, discoveryTracker, discoveryRecorder, discoveryEffects, clock,
+            discoveryConfig.batchWindowTicks(), discoveryConfig.replayIntervalSeconds()
+        );
+        net.knightsandkings.knk.paper.discovery.DomainDiscoveryListener discoveryListener =
+            new net.knightsandkings.knk.paper.discovery.DomainDiscoveryListener(
+                this, discoveryTracker, discoveryRecorder, apiClient.getDiscoveriesApi(), discoveryEligibility,
+                discoveryFlushTask, clock
+            );
+        getServer().getPluginManager().registerEvents(discoveryListener, this);
+        discoveryFlushTask.start();
+        discoveryListener.startOnlinePlayers(uuid -> cacheManager.getUserCache().getByUuid(uuid)
+            .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null));
+        getLogger().info("Domain discovery started (spool: " + discoverySpool.directory() + ")");
+    }
+
+    /** Domain discovery's exclusions; null when discovery is disabled. The siege hook goes here. */
+    public net.knightsandkings.knk.paper.discovery.DiscoveryEligibility getDiscoveryEligibility() {
+        return discoveryEligibility;
     }
 
     private void registerEvents(WorldGuardRegionTracker regionTracker) {
@@ -896,6 +965,24 @@ public class KnKPlugin extends JavaPlugin {
                 menuService,
                 userAdminService
             );
+            if (userAdminService != null) {
+                // Domain discovery (KNG-20): /knk discovery list|reset|status, node knk.admin.discovery.
+                knkAdminCommand.registerSubcommand(
+                    net.knightsandkings.knk.paper.commands.DiscoveryAdminCommand.metadata(),
+                    new net.knightsandkings.knk.paper.commands.DiscoveryAdminCommand(
+                        apiClient.getDiscoveriesApi(), userAdminService, MenuService.mainThreadExecutor(this),
+                        player -> cacheManager.getUserCache().getStale(player.getUniqueId())
+                            .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null),
+                        (player, node) -> knkPermissible != null && knkPermissible.hasPermission(player, node),
+                        () -> discoveryTracker, () -> discoverySpool, org.bukkit.Bukkit::getPlayer,
+                        uuid -> {
+                            if (discoveriesMenuFeature != null) {
+                                discoveriesMenuFeature.invalidate(uuid);
+                            }
+                        }
+                    )
+                );
+            }
             knkCommand.setExecutor(knkAdminCommand);
             knkCommand.setTabCompleter(knkAdminCommand);
             getLogger().info("Registered /knk admin command");
@@ -935,6 +1022,8 @@ public class KnKPlugin extends JavaPlugin {
 
         // Content port CP1: /menu opens the InventoryMenu hub (docs/specs/inventory-menu/CONTENT_PORT_PLAN.md §3).
         registerSimpleCommand("menu", new net.knightsandkings.knk.paper.commands.MenuCommand(() -> menuService));
+        // Domain discovery (KNG-20): /discoveries (/disc) opens discoveries.main.
+        registerSimpleCommand("discoveries", new net.knightsandkings.knk.paper.commands.DiscoveriesCommand(() -> menuService));
 
         registerPlayerCommands();
 
