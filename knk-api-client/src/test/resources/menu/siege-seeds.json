@@ -1,0 +1,2003 @@
+[
+  {
+    "id": 19,
+    "key": "siege.overview",
+    "name": "&8Siege",
+    "description": "Every siege lobby (siege.lobbies), matchmaking first. Siege Phase 8b, MENU_TEMPLATES.md C.2.",
+    "height": 5,
+    "growth": "Static",
+    "backgroundMaterialRefId": null,
+    "autoRefreshTicks": 20,
+    "minHeight": null,
+    "backgroundMaterial": null,
+    "sections": [
+      {
+        "id": 36,
+        "name": "Header",
+        "kind": "StaticButtons",
+        "sortOrder": 0,
+        "displaySlot": 0,
+        "width": 9,
+        "height": 1,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "minHeight": null,
+        "searchable": false,
+        "contentSourceId": null,
+        "contentSourceParamsJson": "{}",
+        "items": [
+          {
+            "id": 141,
+            "sortOrder": 0,
+            "slotOverride": 4,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 406,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "WHITE_BANNER",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 407,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aSiege",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 408,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Check the status of",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 409,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "&7active sieges or join",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 410,
+                "targetProperty": "Lore",
+                "sortOrder": 2,
+                "expression": "&7a siege",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 411,
+                "targetProperty": "Lore",
+                "sortOrder": 3,
+                "expression": "",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 412,
+                "targetProperty": "Lore",
+                "sortOrder": 4,
+                "expression": "&7Active sieges: &a$siegeServer.getLobbyCount$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 413,
+                "targetProperty": "Lore",
+                "sortOrder": 5,
+                "expression": "&7Players playing Siege: &a$siegeServer.getPlayingCount$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 414,
+                "targetProperty": "Lore",
+                "sortOrder": 6,
+                "expression": "$siegeServer.getEntryHintLine$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 142,
+            "sortOrder": 1,
+            "slotOverride": 8,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 415,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BARRIER",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 416,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&c$menu.getBackLabel$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 417,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7$menu.getBackHint$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 86,
+                "actionTypeId": "menu.back",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      },
+      {
+        "id": 37,
+        "name": "Sieges",
+        "kind": "ContentGrid",
+        "sortOrder": 1,
+        "displaySlot": 9,
+        "width": 9,
+        "height": 4,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Scroll",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "minHeight": null,
+        "searchable": false,
+        "contentSourceId": "siege.lobbies",
+        "contentSourceParamsJson": "{}",
+        "items": [
+          {
+            "id": 146,
+            "sortOrder": 0,
+            "slotOverride": null,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": true,
+            "variableBindings": [
+              {
+                "id": 428,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "$row.getBannerMaterial$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 429,
+                "targetProperty": "Amount",
+                "sortOrder": 0,
+                "expression": "$row.getMemberCountOrOne$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 430,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&7$row.getName$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 431,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Scenario: $row.getScenarioLabel$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 432,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "&7Joined players: $row.getMemberCountLabel$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 433,
+                "targetProperty": "Lore",
+                "sortOrder": 2,
+                "expression": "&7Current stage: &a$row.getPhaseLabel$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 434,
+                "targetProperty": "Lore",
+                "sortOrder": 3,
+                "expression": "$row.getEntryRequirementLine$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 435,
+                "targetProperty": "Lore",
+                "sortOrder": 4,
+                "expression": "",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 436,
+                "targetProperty": "Lore",
+                "sortOrder": 5,
+                "expression": "&7$row.getTimerLabel$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 437,
+                "targetProperty": "Lore",
+                "sortOrder": 6,
+                "expression": "&a$row.getTimeRemaining$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 438,
+                "targetProperty": "Lore",
+                "sortOrder": 7,
+                "expression": "",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 439,
+                "targetProperty": "Lore",
+                "sortOrder": 8,
+                "expression": "$row.getJoinHintLines$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              }
+            ],
+            "actions": [
+              {
+                "id": 89,
+                "actionTypeId": "menu.open",
+                "paramsJson": "{\"key\":\"siege.information\",\"ctx.lobbyId\":\"$row.getLobbyId$\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 145,
+            "sortOrder": 50,
+            "slotOverride": 22,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 424,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BARRIER",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 425,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&cNo Sieges",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 426,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7There are currently no active Sieges.",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 427,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "&7Sieges start automatically - check back soon.",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": [
+              {
+                "id": 45,
+                "conditionTypeId": "siege.lobbies-empty",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "phase": "Render"
+              }
+            ]
+          },
+          {
+            "id": 143,
+            "sortOrder": 136,
+            "slotOverride": 36,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 418,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "ARROW",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 419,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aPrevious page",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 420,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 87,
+                "actionTypeId": "menu.page.prev",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 144,
+            "sortOrder": 144,
+            "slotOverride": 44,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 421,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "ARROW",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 422,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aNext page",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 423,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 88,
+                "actionTypeId": "menu.page.next",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      }
+    ]
+  },
+  {
+    "id": 20,
+    "key": "siege.information",
+    "name": "&8Siege information",
+    "description": "One siege lobby (ctx.lobbyId), per phase. Siege Phase 8b, MENU_TEMPLATES.md C.3.",
+    "height": 6,
+    "growth": "Static",
+    "backgroundMaterialRefId": null,
+    "autoRefreshTicks": 20,
+    "minHeight": null,
+    "backgroundMaterial": null,
+    "sections": [
+      {
+        "id": 38,
+        "name": "Header",
+        "kind": "StaticButtons",
+        "sortOrder": 0,
+        "displaySlot": 0,
+        "width": 9,
+        "height": 1,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "minHeight": null,
+        "searchable": false,
+        "contentSourceId": null,
+        "contentSourceParamsJson": "{}",
+        "items": [
+          {
+            "id": 147,
+            "sortOrder": 0,
+            "slotOverride": 2,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 440,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "COMPASS",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 441,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aChange spawnpoint",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 442,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Click to choose where you",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 443,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "&7respawn when killed",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 444,
+                "targetProperty": "Lore",
+                "sortOrder": 2,
+                "expression": "",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 445,
+                "targetProperty": "Lore",
+                "sortOrder": 3,
+                "expression": "&7Current: &a$siegeViewer.getCurrentSpawnName$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              }
+            ],
+            "actions": [
+              {
+                "id": 90,
+                "actionTypeId": "menu.open",
+                "paramsJson": "{\"key\":\"siege.spawnpoint\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 46,
+                "conditionTypeId": "siege.phase",
+                "paramsJson": "{\"lobbyId\":\"$ctx.lobbyId$\",\"phases\":\"IN_PROGRESS\"}",
+                "sortOrder": 0,
+                "phase": "Render"
+              },
+              {
+                "id": 47,
+                "conditionTypeId": "siege.participating",
+                "paramsJson": "{\"lobbyId\":\"$ctx.lobbyId$\",\"expected\":\"true\"}",
+                "sortOrder": 0,
+                "phase": "Render"
+              }
+            ]
+          },
+          {
+            "id": 148,
+            "sortOrder": 1,
+            "slotOverride": 4,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 446,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "$siege.getBannerMaterial$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 447,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&7$siege.getName$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 448,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Scenario: $siege.getScenarioLabel$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 449,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "&7Joined players: $siege.getMemberCountLabel$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 450,
+                "targetProperty": "Lore",
+                "sortOrder": 2,
+                "expression": "&7Current stage: &a$siege.getPhaseLabel$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 451,
+                "targetProperty": "Lore",
+                "sortOrder": 3,
+                "expression": "$siege.getEntryRequirementLine$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 452,
+                "targetProperty": "Lore",
+                "sortOrder": 4,
+                "expression": "",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 453,
+                "targetProperty": "Lore",
+                "sortOrder": 5,
+                "expression": "&7$siege.getTimerLabel$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 454,
+                "targetProperty": "Lore",
+                "sortOrder": 6,
+                "expression": "&a$siege.getTimeRemaining$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 455,
+                "targetProperty": "Lore",
+                "sortOrder": 7,
+                "expression": "$siegeViewer.getTeamLine$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 149,
+            "sortOrder": 2,
+            "slotOverride": 6,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 456,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "COMPASS",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 457,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&7Objective information",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 458,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&6How to play",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 459,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "&7Objectives are marked by a banner.",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 460,
+                "targetProperty": "Lore",
+                "sortOrder": 2,
+                "expression": "&7Stand inside an objective's circle",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 461,
+                "targetProperty": "Lore",
+                "sortOrder": 3,
+                "expression": "&7to capture (attackers) or defend it.",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 462,
+                "targetProperty": "Lore",
+                "sortOrder": 4,
+                "expression": "&7Capturing a \"&aWin&7\" objective ends the game.",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 463,
+                "targetProperty": "Lore",
+                "sortOrder": 5,
+                "expression": "&7Held objectives are extra spawnpoints.",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 464,
+                "targetProperty": "Lore",
+                "sortOrder": 6,
+                "expression": "&7Selected gates can be opened and closed",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 465,
+                "targetProperty": "Lore",
+                "sortOrder": 7,
+                "expression": "&7by the team that owns them.",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 466,
+                "targetProperty": "Lore",
+                "sortOrder": 8,
+                "expression": "$siege.getRecaptureLine$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 467,
+                "targetProperty": "Lore",
+                "sortOrder": 9,
+                "expression": "&7Enchantment books appear near objectives;",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 468,
+                "targetProperty": "Lore",
+                "sortOrder": 10,
+                "expression": "&7click one onto an item to apply it.",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 469,
+                "targetProperty": "Lore",
+                "sortOrder": 11,
+                "expression": "&8Siege enchantments are removed afterwards.",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 470,
+                "targetProperty": "Lore",
+                "sortOrder": 12,
+                "expression": "",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 471,
+                "targetProperty": "Lore",
+                "sortOrder": 13,
+                "expression": "&7Objectives: &a$siege.getObjectiveCount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 472,
+                "targetProperty": "Lore",
+                "sortOrder": 14,
+                "expression": "&7Objectives with a gate: &a$siege.getGateObjectiveCount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": [
+              {
+                "id": 48,
+                "conditionTypeId": "value-equals",
+                "paramsJson": "{\"value\":\"$siege.getScenarioKnown$\",\"expected\":\"true\"}",
+                "sortOrder": 0,
+                "phase": "Render"
+              }
+            ]
+          },
+          {
+            "id": 150,
+            "sortOrder": 3,
+            "slotOverride": 8,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 473,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BARRIER",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 474,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&c$menu.getBackLabel$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 475,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7$menu.getBackHint$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 91,
+                "actionTypeId": "menu.back",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      },
+      {
+        "id": 39,
+        "name": "Votes",
+        "kind": "ContentGrid",
+        "sortOrder": 1,
+        "displaySlot": 9,
+        "width": 4,
+        "height": 1,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "minHeight": null,
+        "searchable": false,
+        "contentSourceId": "siege.vote-candidates",
+        "contentSourceParamsJson": "{\"lobbyId\":\"$ctx.lobbyId$\"}",
+        "items": [
+          {
+            "id": 151,
+            "sortOrder": 0,
+            "slotOverride": null,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": true,
+            "variableBindings": [
+              {
+                "id": 476,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "$row.getMaterial$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 477,
+                "targetProperty": "Amount",
+                "sortOrder": 0,
+                "expression": "$row.getVoteCountOrOne$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 478,
+                "targetProperty": "DisplayMode",
+                "sortOrder": 0,
+                "expression": "$row.getDisplayMode$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 479,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "$row.getTitle$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 480,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$row.getLines$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 92,
+                "actionTypeId": "siege.vote",
+                "paramsJson": "{\"lobbyId\":\"$ctx.lobbyId$\",\"scenarioId\":\"$row.getChoiceKey$\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 49,
+                "conditionTypeId": "siege.participating",
+                "paramsJson": "{\"lobbyId\":\"$ctx.lobbyId$\",\"expected\":\"true\"}",
+                "sortOrder": 0,
+                "phase": "Click"
+              },
+              {
+                "id": 50,
+                "conditionTypeId": "siege.vote-open",
+                "paramsJson": "{\"lobbyId\":\"$ctx.lobbyId$\"}",
+                "sortOrder": 1,
+                "phase": "Click"
+              }
+            ]
+          }
+        ],
+        "variableBindings": []
+      },
+      {
+        "id": 40,
+        "name": "Actions",
+        "kind": "StaticButtons",
+        "sortOrder": 2,
+        "displaySlot": 13,
+        "width": 5,
+        "height": 1,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "minHeight": null,
+        "searchable": false,
+        "contentSourceId": null,
+        "contentSourceParamsJson": "{}",
+        "items": [
+          {
+            "id": 152,
+            "sortOrder": 0,
+            "slotOverride": 14,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 481,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "$siegeViewer.getJoinLeaveMaterial$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 482,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "$siegeViewer.getJoinLeaveName$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 483,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$siegeViewer.getParticipationLine$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 484,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "$siegeViewer.getJoinDenialLine$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              }
+            ],
+            "actions": [
+              {
+                "id": 93,
+                "actionTypeId": "siege.join",
+                "paramsJson": "{\"lobbyId\":\"$ctx.lobbyId$\"}",
+                "sortOrder": 0,
+                "conditions": [
+                  {
+                    "id": 51,
+                    "conditionTypeId": "value-equals",
+                    "paramsJson": "{\"value\":\"$siegeViewer.getIsMember$\",\"expected\":\"false\"}",
+                    "sortOrder": 0,
+                    "phase": "Render"
+                  },
+                  {
+                    "id": 52,
+                    "conditionTypeId": "siege.join-eligible",
+                    "paramsJson": "{\"lobbyId\":\"$ctx.lobbyId$\"}",
+                    "sortOrder": 1,
+                    "phase": "Click"
+                  }
+                ]
+              },
+              {
+                "id": 94,
+                "actionTypeId": "menu.confirm.doubleclick",
+                "paramsJson": "{\"actionTypeId\":\"siege.leave\",\"actionParamsJson\":\"{}\",\"windowTicks\":\"60\",\"armMessage\":\"Click again within 3s to leave the siege.\"}",
+                "sortOrder": 1,
+                "conditions": [
+                  {
+                    "id": 53,
+                    "conditionTypeId": "value-equals",
+                    "paramsJson": "{\"value\":\"$siegeViewer.getIsMember$\",\"expected\":\"true\"}",
+                    "sortOrder": 0,
+                    "phase": "Render"
+                  }
+                ]
+              }
+            ],
+            "conditions": [
+              {
+                "id": 54,
+                "conditionTypeId": "siege.phase",
+                "paramsJson": "{\"lobbyId\":\"$ctx.lobbyId$\",\"phases\":\"MATCHMAKING\"}",
+                "sortOrder": 0,
+                "phase": "Render"
+              }
+            ]
+          }
+        ],
+        "variableBindings": []
+      },
+      {
+        "id": 41,
+        "name": "Divider",
+        "kind": "StaticButtons",
+        "sortOrder": 3,
+        "displaySlot": 18,
+        "width": 9,
+        "height": 1,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "minHeight": null,
+        "searchable": false,
+        "contentSourceId": null,
+        "contentSourceParamsJson": "{}",
+        "items": [
+          {
+            "id": 161,
+            "sortOrder": 0,
+            "slotOverride": 22,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 501,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "SKELETON_SKULL",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 502,
+                "targetProperty": "Amount",
+                "sortOrder": 0,
+                "expression": "$siege.getMemberCountOrOne$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 503,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aJoined players",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 504,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Joined players: $siege.getMemberCountLabel$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 505,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "$siege.getPlayersMinLine$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 506,
+                "targetProperty": "Lore",
+                "sortOrder": 2,
+                "expression": "$siege.getPlayersMaxLine$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 507,
+                "targetProperty": "Lore",
+                "sortOrder": 3,
+                "expression": "$siege.getTeamSummaryLines$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 153,
+            "sortOrder": 18,
+            "slotOverride": 18,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 485,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BLACK_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 486,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": " ",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 154,
+            "sortOrder": 19,
+            "slotOverride": 19,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 487,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BLACK_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 488,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": " ",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 155,
+            "sortOrder": 20,
+            "slotOverride": 20,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 489,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BLACK_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 490,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": " ",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 156,
+            "sortOrder": 21,
+            "slotOverride": 21,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 491,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BLACK_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 492,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": " ",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 157,
+            "sortOrder": 23,
+            "slotOverride": 23,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 493,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BLACK_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 494,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": " ",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 158,
+            "sortOrder": 24,
+            "slotOverride": 24,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 495,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BLACK_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 496,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": " ",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 159,
+            "sortOrder": 25,
+            "slotOverride": 25,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 497,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BLACK_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 498,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": " ",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 160,
+            "sortOrder": 26,
+            "slotOverride": 26,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 499,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BLACK_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 500,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": " ",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      },
+      {
+        "id": 42,
+        "name": "Body",
+        "kind": "ContentGrid",
+        "sortOrder": 4,
+        "displaySlot": 27,
+        "width": 9,
+        "height": 3,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Scroll",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "minHeight": null,
+        "searchable": false,
+        "contentSourceId": "siege.body",
+        "contentSourceParamsJson": "{\"lobbyId\":\"$ctx.lobbyId$\"}",
+        "items": [
+          {
+            "id": 164,
+            "sortOrder": 0,
+            "slotOverride": null,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": true,
+            "variableBindings": [
+              {
+                "id": 514,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "$row.getMaterial$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 515,
+                "targetProperty": "SkullOwner",
+                "sortOrder": 0,
+                "expression": "$row.getSkullOwner$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 516,
+                "targetProperty": "BannerPatterns",
+                "sortOrder": 0,
+                "expression": "$row.getBannerPatterns$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 517,
+                "targetProperty": "DisplayMode",
+                "sortOrder": 0,
+                "expression": "$row.getDisplayMode$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 518,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "$row.getTitle$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 519,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$row.getLines$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 162,
+            "sortOrder": 145,
+            "slotOverride": 45,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 508,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "ARROW",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 509,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aPrevious page",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 510,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 95,
+                "actionTypeId": "menu.page.prev",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 163,
+            "sortOrder": 153,
+            "slotOverride": 53,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 511,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "ARROW",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 512,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aNext page",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 513,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 96,
+                "actionTypeId": "menu.page.next",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      }
+    ]
+  },
+  {
+    "id": 21,
+    "key": "siege.spawnpoint",
+    "name": "&8Choose a spawnpoint",
+    "description": "The viewer's respawn options in their running siege. Siege Phase 8b, MENU_TEMPLATES.md C.4.",
+    "height": 3,
+    "growth": "Static",
+    "backgroundMaterialRefId": null,
+    "autoRefreshTicks": 20,
+    "minHeight": null,
+    "backgroundMaterial": null,
+    "sections": [
+      {
+        "id": 43,
+        "name": "Header",
+        "kind": "StaticButtons",
+        "sortOrder": 0,
+        "displaySlot": 0,
+        "width": 9,
+        "height": 1,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "minHeight": null,
+        "searchable": false,
+        "contentSourceId": null,
+        "contentSourceParamsJson": "{}",
+        "items": [
+          {
+            "id": 165,
+            "sortOrder": 0,
+            "slotOverride": 4,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 520,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "COMPASS",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 521,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aChoose a place to spawn",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 522,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Current: &a$siegeViewer.getCurrentSpawnName$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 523,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "&7Close this menu to keep it.",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 166,
+            "sortOrder": 1,
+            "slotOverride": 8,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 524,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BARRIER",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 525,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&cClose",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 97,
+                "actionTypeId": "menu.close",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      },
+      {
+        "id": 44,
+        "name": "Options",
+        "kind": "ContentGrid",
+        "sortOrder": 1,
+        "displaySlot": 9,
+        "width": 9,
+        "height": 2,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Scroll",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "minHeight": null,
+        "searchable": false,
+        "contentSourceId": "siege.spawn-options",
+        "contentSourceParamsJson": "{}",
+        "items": [
+          {
+            "id": 169,
+            "sortOrder": 0,
+            "slotOverride": null,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": true,
+            "variableBindings": [
+              {
+                "id": 532,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "$row.getMaterial$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 533,
+                "targetProperty": "BannerPatterns",
+                "sortOrder": 0,
+                "expression": "$row.getBannerPatterns$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 534,
+                "targetProperty": "DisplayMode",
+                "sortOrder": 0,
+                "expression": "$row.getDisplayMode$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 535,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "$row.getName$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 536,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$row.getStatusLines$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              }
+            ],
+            "actions": [
+              {
+                "id": 100,
+                "actionTypeId": "siege.spawn",
+                "paramsJson": "{\"option\":\"$row.getOption$\"}",
+                "sortOrder": 0,
+                "conditions": []
+              },
+              {
+                "id": 101,
+                "actionTypeId": "menu.close",
+                "paramsJson": "{}",
+                "sortOrder": 1,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 55,
+                "conditionTypeId": "siege.spawn-available",
+                "paramsJson": "{\"option\":\"$row.getOption$\"}",
+                "sortOrder": 0,
+                "phase": "Click"
+              }
+            ]
+          },
+          {
+            "id": 167,
+            "sortOrder": 118,
+            "slotOverride": 18,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 526,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "ARROW",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 527,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aPrevious page",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 528,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 98,
+                "actionTypeId": "menu.page.prev",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 168,
+            "sortOrder": 126,
+            "slotOverride": 26,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 529,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "ARROW",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 530,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aNext page",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 531,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 99,
+                "actionTypeId": "menu.page.next",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      }
+    ]
+  }
+]
