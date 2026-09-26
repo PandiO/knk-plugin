@@ -114,8 +114,17 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         // Register cache command
         if (cacheManager != null) {
             registry.register(
-                new CommandMetadata("cache", "View cache statistics and health", "/knk cache", "knk.admin.cache"),
+                new CommandMetadata("cache", "View cache statistics and health, or drop cached settings", "/knk cache [refresh]", "knk.admin.cache",
+                        List.of("/knk cache", "/knk cache refresh")),
                 (sender, args) -> {
+                    if (args.length > 0 && args[0].equalsIgnoreCase("refresh")) {
+                        // Caches kept outside the CacheManager, e.g. the /spawn destination (teleport Phase 4).
+                        List<String> refreshed = cacheManager.runRefreshHooks();
+                        sender.sendMessage(ChatColor.GREEN + (refreshed.isEmpty()
+                                ? "Nothing to refresh."
+                                : "Refreshed: " + String.join(", ", refreshed) + "."));
+                        return true;
+                    }
                     sender.sendMessage(ChatColor.translateAlternateColorCodes('§', cacheManager.getHealthSummary()));
                     return true;
                 }

@@ -1,6 +1,10 @@
 package net.knightsandkings.knk.paper.cache;
 
 import java.time.Duration;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 import net.knightsandkings.knk.core.cache.*;
 import net.knightsandkings.knk.core.regions.RegionDomainResolver;
@@ -32,6 +36,8 @@ public class CacheManager {
 
     private final Duration cacheTtl;
     private RegionDomainResolver regionResolver; // Optional - set after initialization
+    /** Caches kept outside this manager that {@code /knk cache refresh} drops, by display name. */
+    private final Map<String, Runnable> refreshHooks = new ConcurrentHashMap<>();
 
     /**
      * Creates a new cache manager with the specified TTL for all caches.
@@ -137,6 +143,33 @@ public class CacheManager {
         userCache.clear();
 
         LOGGER.info("All caches cleared");
+    }
+
+    /**
+     * Register a cache kept elsewhere (e.g. the {@code /spawn} destination) so {@code /knk cache refresh}
+     * drops it too.
+     *
+     * @param name    shown to the staff member who refreshes
+     * @param refresh drops the cached data; must be cheap and thread-safe
+     */
+    public void registerRefreshHook(String name, Runnable refresh) {
+        refreshHooks.put(name, refresh);
+    }
+
+    /**
+     * {@code /knk cache refresh}: runs every registered refresh hook.
+     *
+     * @return the names of the caches that were dropped, sorted
+     */
+    public List<String> runRefreshHooks() {
+        refreshHooks.forEach((name, refresh) -> {
+            try {
+                refresh.run();
+            } catch (RuntimeException ex) {
+                LOGGER.log(Level.WARNING, "Refreshing the " + name + " cache failed", ex);
+            }
+        });
+        return refreshHooks.keySet().stream().sorted().toList();
     }
 
     /**

@@ -211,6 +211,8 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.commands.StaffTeleportCommand staffTeleportCommand;
     private net.knightsandkings.knk.paper.teleport.TeleportRequestService teleportRequestService;
     private net.knightsandkings.knk.paper.commands.TeleportRequestCommand teleportRequestCommand;
+    private net.knightsandkings.knk.paper.teleport.SpawnDestinationResolver spawnDestinationResolver;
+    private net.knightsandkings.knk.paper.commands.SpawnCommand spawnCommand;
     
     @Override
     public void onEnable() {
@@ -956,6 +958,11 @@ public class KnKPlugin extends JavaPlugin {
         } else {
             getLogger().warning("/tpa, /tpahere, /tpaccept, /tpdeny, /tpcancel not registered - the teleport engine failed to initialize");
         }
+        if (spawnCommand != null) {
+            registerTabCommand("spawn", spawnCommand);
+        } else {
+            getLogger().warning("/spawn not registered - the teleport engine or the spawn lookup failed to initialize");
+        }
     }
 
     /**
@@ -1015,8 +1022,39 @@ public class KnKPlugin extends JavaPlugin {
             modeService::isVanished, org.bukkit.Bukkit::getWorld,
             () -> org.bukkit.Bukkit.getWorlds().stream().map(org.bukkit.World::getName).toList()
         );
+        // Phase 4: /spawn (DESIGN.md §3.6).
+        this.spawnCommand = createSpawnCommand(support, rankCheck, targets);
         getLogger().info("Teleport engine initialized (warmup " + config.teleport().warmupSeconds() + "s / "
             + config.teleport().warmupShortSeconds() + "s, cooldown " + config.teleport().cooldownSeconds() + "s)");
+    }
+
+    /**
+     * {@code /spawn} (docs/specs/teleport/DESIGN.md §3.6): the spawn set on the web-app Game Settings
+     * page ({@code GET /api/GameSettings}), resolved through the Location/Town/District/Structure
+     * gateways and cached 5 min ({@code /knk cache refresh} drops it). Null when the API client or the
+     * caches didn't start. The join/respawn listeners still choose their own spot.
+     */
+    private net.knightsandkings.knk.paper.commands.SpawnCommand createSpawnCommand(
+            net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport support,
+            net.knightsandkings.knk.paper.commands.support.TargetRankCheck rankCheck,
+            net.knightsandkings.knk.paper.teleport.VisibleTargetResolver targets) {
+        if (apiClient == null || cacheManager == null || dataAccessFactory == null || townsDataAccess == null
+                || locationsQueryApi == null || districtsQueryApi == null || structuresQueryApi == null) {
+            getLogger().warning("/spawn not available - the API client or caches failed to initialize");
+            return null;
+        }
+        this.spawnDestinationResolver = net.knightsandkings.knk.paper.teleport.SpawnDestinationResolver.create(
+            apiClient.getGameSettingsQueryApi(),
+            dataAccessFactory.createLocationsDataAccess(config.cache().ttl(), locationsQueryApi),
+            townsDataAccess,
+            dataAccessFactory.createDistrictsDataAccess(cacheManager.getDistrictCache(), districtsQueryApi),
+            dataAccessFactory.createStructuresDataAccess(cacheManager.getStructureCache(), structuresQueryApi),
+            org.bukkit.Bukkit::getWorld,
+            () -> org.bukkit.Bukkit.getWorlds().isEmpty() ? null : org.bukkit.Bukkit.getWorlds().get(0)
+        );
+        cacheManager.registerRefreshHook("spawn destination", spawnDestinationResolver::invalidate);
+        return new net.knightsandkings.knk.paper.commands.SpawnCommand(
+            support, rankCheck, targets, teleportService, spawnDestinationResolver, modeService::isVanished);
     }
 
     /**

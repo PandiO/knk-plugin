@@ -47,8 +47,20 @@ public record TeleportPlan(
 
     /** A staff teleport of {@code subject} to a fixed location. */
     public static TeleportPlan staffToLocation(CommandSender actor, Player subject, Location destination, String label) {
+        return staffToLocation(actor, subject, destination, label, false);
+    }
+
+    /** A staff teleport of {@code subject} to a fixed location, optionally without telling them. */
+    public static TeleportPlan staffToLocation(CommandSender actor, Player subject, Location destination, String label,
+                                               boolean silent) {
         Location target = destination.clone();
-        return new TeleportPlan(subject, target::clone, TeleportKind.STAFF, actor, null, false, label);
+        return new TeleportPlan(subject, target::clone, TeleportKind.STAFF, actor, null, silent, label);
+    }
+
+    /** A player's own {@code /spawn} (warmup, cooldown, combat tag and safe-spot check apply). */
+    public static TeleportPlan spawn(Player subject, Location destination, String label) {
+        Location target = destination.clone();
+        return new TeleportPlan(subject, target::clone, TeleportKind.SPAWN, subject, null, false, label);
     }
 
     public boolean movesActor() {

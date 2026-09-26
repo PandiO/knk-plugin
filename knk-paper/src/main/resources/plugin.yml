@@ -152,6 +152,12 @@ commands:
     description: "Withdraw your teleport request, or stop your running teleport"
     usage: "/tpcancel"
 
+  # Server spawn (DESIGN.md §3.6, Phase 4) - the spawn set on the web-app Game Settings page, else
+  # the main world's spawn. Nodes checked in SpawnCommand.
+  spawn:
+    description: "Teleport to the server spawn, or send a player there"
+    usage: "/spawn | /spawn <player> [-s]"
+
 permissions:
   knk.admin:
     description: >-
@@ -193,7 +199,7 @@ permissions:
     default: false
 
   knk.admin.cache:
-    description: Access to /knk cache
+    description: Access to /knk cache (statistics) and /knk cache refresh (drops cached settings such as the /spawn destination)
     default: false
 
   knk.admin.towns:
@@ -520,7 +526,7 @@ permissions:
     default: op
 
   knk.teleport.staff.others:
-    description: Move other players - /tp <player> <target> and /tphere <player>. You must outrank everyone involved.
+    description: Move other players - /tp <player> <target>, /tphere <player> and /spawn <player>. You must outrank everyone involved.
     default: op
 
   knk.teleport.staff.silent:
@@ -535,6 +541,12 @@ permissions:
 
   knk.teleport.request.here:
     description: /tpahere <player> - ask a player to teleport to you. Meant for the Dragon Blood premium tier.
+    default: op
+
+  knk.teleport.spawn:
+    description: >-
+      /spawn - teleport to the server spawn (set on the web-app Game Settings page, else the main
+      world's spawn). Free; warmup, cooldown and combat tag apply. Meant for the Default group.
     default: op
 
   knk.teleport.warmup.short:
