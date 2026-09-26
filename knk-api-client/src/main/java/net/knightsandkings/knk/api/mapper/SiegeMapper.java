@@ -143,7 +143,8 @@ public final class SiegeMapper {
                 or(dto.enchantDropsEnabled(), true),
                 mapList(dto.teams(), SiegeMapper::toCore),
                 mapList(dto.objectives(), SiegeMapper::toCore),
-                mapList(dto.gates(), SiegeMapper::toCore)
+                mapList(dto.gates(), SiegeMapper::toCore),
+                dto.areaGateStructureIds()
         );
     }
 

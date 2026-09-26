@@ -48,7 +48,7 @@ class KnkSiegeDomainTest {
         KnkSiegeObjective o0 = objective(7, -1);
 
         KnkSiegeScenario scenario = new KnkSiegeScenario(1, "S", null, 5, "Town", null, null, null, 2, 20,
-                null, null, null, null, true, false, true, List.of(late, early), List.of(o2, o1, o0), null);
+                null, null, null, null, true, false, true, List.of(late, early), List.of(o2, o1, o0), null, null);
 
         assertEquals(List.of(4, 9), scenario.teams().stream().map(KnkSiegeTeam::id).toList());
         assertEquals(List.of(7, 1, 2), scenario.objectives().stream().map(KnkSiegeObjective::id).toList());

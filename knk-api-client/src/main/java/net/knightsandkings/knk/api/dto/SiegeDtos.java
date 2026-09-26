@@ -103,7 +103,8 @@ public final class SiegeDtos {
             @JsonProperty("enchantDropsEnabled") Boolean enchantDropsEnabled,
             @JsonProperty("teams") List<RuntimeTeamDto> teams,
             @JsonProperty("objectives") List<RuntimeObjectiveDto> objectives,
-            @JsonProperty("gates") List<RuntimeGateDto> gates
+            @JsonProperty("gates") List<RuntimeGateDto> gates,
+            @JsonProperty("areaGateStructureIds") List<Integer> areaGateStructureIds
     ) {}
 
     public record RuntimeDistrictDto(

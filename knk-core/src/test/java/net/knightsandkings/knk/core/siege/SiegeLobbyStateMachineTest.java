@@ -432,9 +432,9 @@ class SiegeLobbyStateMachineTest {
     @Test
     void joinRequirementsFollowTheCandidatesThenTheDrawnScenario() {
         KnkSiegeScenario veteran = new KnkSiegeScenario(7, "Veteran", null, 8, "Town 8", null, null, null,
-                2, 40, 3, 1000, null, null, true, false, true, cinix.teams(), cinix.objectives(), null);
+                2, 40, 3, 1000, null, null, true, false, true, cinix.teams(), cinix.objectives(), null, null);
         KnkSiegeScenario open = new KnkSiegeScenario(8, "Open", null, 9, "Town 9", null, null, null,
-                2, 10, null, null, null, null, true, false, true, cinix.teams(), cinix.objectives(), null);
+                2, 10, null, null, null, null, true, false, true, cinix.teams(), cinix.objectives(), null, null);
         SiegeLobbyStateMachine m = machine(lobby(1, 300, 900, 2, true, veteran, open), CONFIG);
         m.start();
 

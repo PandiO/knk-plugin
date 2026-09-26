@@ -17,6 +17,8 @@ import java.util.Optional;
  * @param townWgRegionId     the town's WorldGuard region id, or null
  * @param minTitleBracketId  minimum title bracket to join, or null for none
  * @param minTitleExperience that bracket's MinExperience, so entry can be checked without a lookup
+ * @param areaGateStructureIds the other gate structures in the scenario area (its districts, or the
+ *                           town's), which a match forces open and invincible (Phase 7, DESIGN §8.1)
  */
 public record KnkSiegeScenario(
         int id,
@@ -38,7 +40,8 @@ public record KnkSiegeScenario(
         boolean enchantDropsEnabled,
         List<KnkSiegeTeam> teams,
         List<KnkSiegeObjective> objectives,
-        List<KnkSiegeGate> gates
+        List<KnkSiegeGate> gates,
+        List<Integer> areaGateStructureIds
 ) {
     private static final Comparator<KnkSiegeTeam> TEAM_ORDER =
             Comparator.comparingInt(KnkSiegeTeam::sortOrder).thenComparingInt(KnkSiegeTeam::id);
@@ -50,6 +53,8 @@ public record KnkSiegeScenario(
         teams = teams == null ? List.of() : teams.stream().sorted(TEAM_ORDER).toList();
         objectives = objectives == null ? List.of() : objectives.stream().sorted(OBJECTIVE_ORDER).toList();
         gates = gates == null ? List.of() : List.copyOf(gates);
+        areaGateStructureIds = areaGateStructureIds == null ? List.of()
+                : areaGateStructureIds.stream().filter(java.util.Objects::nonNull).distinct().toList();
         if (matchLength == null) matchLength = KnkSiegeMatchLength.DEFAULT;
         if (rewards == null) rewards = KnkSiegeRewards.NONE;
     }

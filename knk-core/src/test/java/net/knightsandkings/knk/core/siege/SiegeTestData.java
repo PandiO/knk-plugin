@@ -50,7 +50,7 @@ final class SiegeTestData {
                                      List<KnkSiegeObjective> objectives, boolean allowRecapture, List<KnkSiegeGate> gates) {
         return new KnkSiegeScenario(id, "Scenario " + id, null, townId, "Town " + townId, null, List.of(), null,
                 playersMin, 20, null, null, KnkSiegeMatchLength.DEFAULT, null, true, allowRecapture, true,
-                teams, objectives, gates);
+                teams, objectives, gates, List.of());
     }
 
     /** Defenders (team 1, alliance 1) vs attackers (team 2, alliance 2); an IV keep and a side gate. */
