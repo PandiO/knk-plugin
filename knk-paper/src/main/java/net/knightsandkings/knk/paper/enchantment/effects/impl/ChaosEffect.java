@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.paper.enchantment.effects.impl;
 
 import net.knightsandkings.knk.paper.enchantment.effects.SupportEnchantmentEffect;
+import net.knightsandkings.knk.paper.regions.CombatSafezoneCheck;
 import org.bukkit.Effect;
 import org.bukkit.Location;
 import org.bukkit.Sound;
@@ -21,8 +22,16 @@ public class ChaosEffect extends SupportEnchantmentEffect {
     private static final double KNOCKBACK_RADIUS = 5.0d;
     private static final double DAMAGE_AMOUNT = 40.0d;
 
+    private final CombatSafezoneCheck safezones;
+
     public ChaosEffect(Plugin plugin) {
+        this(plugin, CombatSafezoneCheck.NONE);
+    }
+
+    /** @param safezones players in a combat safezone are neither damaged nor knocked back (KNG-11) */
+    public ChaosEffect(Plugin plugin, CombatSafezoneCheck safezones) {
         super("chaos", plugin);
+        this.safezones = safezones != null ? safezones : CombatSafezoneCheck.NONE;
     }
 
     @Override
@@ -34,7 +43,8 @@ public class ChaosEffect extends SupportEnchantmentEffect {
 
         Set<LivingEntity> knockedBackEntities = new HashSet<>();
         for (Entity nearby : player.getNearbyEntities(KNOCKBACK_RADIUS, KNOCKBACK_RADIUS, KNOCKBACK_RADIUS)) {
-            if (!(nearby instanceof LivingEntity livingEntity) || livingEntity.getUniqueId().equals(player.getUniqueId())) {
+            if (!(nearby instanceof LivingEntity livingEntity) || livingEntity.getUniqueId().equals(player.getUniqueId())
+                    || safezones.isProtected(player, livingEntity)) {
                 continue;
             }
 
@@ -53,7 +63,8 @@ public class ChaosEffect extends SupportEnchantmentEffect {
         for (Entity nearby : player.getNearbyEntities(KNOCKBACK_RADIUS, KNOCKBACK_RADIUS, KNOCKBACK_RADIUS)) {
             if (!(nearby instanceof LivingEntity livingEntity)
                     || livingEntity.getUniqueId().equals(player.getUniqueId())
-                    || knockedBackEntities.contains(livingEntity)) {
+                    || knockedBackEntities.contains(livingEntity)
+                    || safezones.isProtected(player, livingEntity)) {
                 continue;
             }
 

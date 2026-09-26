@@ -84,8 +84,7 @@ public final class ItemBlueprintMapper {
     }
 
     public static KnkGrade toCore(GradeDto dto) {
-        if (dto == null) return null;
-        return new KnkGrade(dto.id(), dto.name(), dto.stars());
+        return GradeMapper.toCore(dto);
     }
 
     public static KnkTag toCore(net.knightsandkings.knk.api.dto.TagDto dto) {

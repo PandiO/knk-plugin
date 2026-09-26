@@ -89,6 +89,40 @@ commands:
     usage: "/menu"
     permission: knk.menu
 
+  # KNG-9: v2 player commands ported to v3 (docs/specs/legacy/commands-v2.md §1/§7). None has a
+  # permission: entry - /user statistics is open to everyone, and the others check their knk.<cmd>
+  # nodes through KnkPermissible inside the executor (same reasoning as /kit and /ownermode).
+  user:
+    description: "Show your statistics, or another player's"
+    usage: "/user statistics [player]"
+    aliases: [u]
+
+  stats:
+    description: "Show your statistics, or another player's (same as /user statistics)"
+    usage: "/stats [player]"
+
+  fly:
+    description: "Toggle or set flight for yourself or an online player"
+    usage: "/fly [on|off] [player]"
+
+  heal:
+    description: "Heal yourself, an online player, or everyone online"
+    usage: "/heal [player|all]"
+
+  feed:
+    description: "Feed yourself, an online player, or everyone online"
+    usage: "/feed [player|all]"
+
+  enderchest:
+    description: "Open your ender chest, or an online player's"
+    usage: "/enderchest [player]"
+    aliases: [ec]
+
+  inventory:
+    description: "Open or clear an online player's inventory"
+    usage: "/inventory open <player> | /inventory clear <player> confirm"
+    aliases: [inv, invsee]
+
 permissions:
   knk.admin:
     description: >-
@@ -304,6 +338,58 @@ permissions:
       Gates /kit manage's FormWizard-pointer subcommands (docs/specs/kits/DESIGN.md §0c/§4.5) -
       no in-game Kit CRUD exists, this only guards advertising the FormWizard route to players
       with no reason to see it. Same KnkPermissible/op-bypass caveat as knk.kit.list.
+    default: op
+
+  # KNG-9 player commands. Resolved through KnkPermissible (the REST-backed permission model), not
+  # Bukkit's permission tree - these declarations document the nodes; the same caveat as knk.kit.list
+  # applies (ops pass via KnkPermissible's op bypass, non-ops need a real grant or group membership).
+  # Wildcards work in grants, e.g. knk.heal.* covers knk.heal, knk.heal.others and knk.heal.all.
+  knk.fly:
+    description: Toggle your own flight with /fly (KNG-9).
+    default: op
+
+  knk.fly.others:
+    description: Toggle or set an online player's flight with /fly [on|off] <player> (KNG-9).
+    default: op
+
+  knk.heal:
+    description: Heal yourself with /heal (KNG-9).
+    default: op
+
+  knk.heal.others:
+    description: Heal an online player with /heal <player> (KNG-9).
+    default: op
+
+  knk.heal.all:
+    description: Heal every online player with /heal all (KNG-9).
+    default: op
+
+  knk.feed:
+    description: Feed yourself with /feed (KNG-9). Its own node - v2's /feed wrongly checked the /heal nodes.
+    default: op
+
+  knk.feed.others:
+    description: Feed an online player with /feed <player> (KNG-9).
+    default: op
+
+  knk.feed.all:
+    description: Feed every online player with /feed all (KNG-9).
+    default: op
+
+  knk.enderchest:
+    description: Open your own ender chest with /enderchest (/ec) (KNG-9).
+    default: op
+
+  knk.enderchest.open:
+    description: Open an online player's ender chest with /enderchest <player> (KNG-9). Rank-checked (RankHierarchy).
+    default: op
+
+  knk.inventory.open:
+    description: Open (and edit) an online player's inventory with /inventory open <player> (KNG-9). Rank-checked (RankHierarchy).
+    default: op
+
+  knk.inventory.clear:
+    description: Clear an online player's inventory with /inventory clear <player> confirm (KNG-9). Rank-checked (RankHierarchy) unless it's your own.
     default: op
 
   knk.freeze:

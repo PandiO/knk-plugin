@@ -249,7 +249,8 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                         )
                 ),
                 (sender, args) -> itemBlueprintsCommand.onCommand(sender, null, "knk", args),
-                "itemblueprint"
+                "itemblueprint",
+                "ib"
         );
 
         // InventoryMenu Phases 2 & 5 dev harness (docs/specs/inventory-menu/IMPLEMENTATION_PLAN.md) -

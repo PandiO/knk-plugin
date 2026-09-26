@@ -1127,6 +1127,18 @@ public final class SiegeService {
         return new SiegeCombatRules.Combatant(rt.get().id(), inProgress, teamId, safe);
     }
 
+    /**
+     * True when the siege rules allow this hit (enemies in the same running match, neither in their
+     * spawn area). The KNG-11 combat safezone check uses it so custom enchantments keep working in
+     * sieges fought inside towns.
+     */
+    public boolean allowsCombat(Player attacker, Player victim) {
+        SiegeCombatRules.Combatant a = combatantOf(attacker);
+        SiegeCombatRules.Combatant v = combatantOf(victim);
+        if (a == null || v == null || a.lobbyId() != v.lobbyId()) return false;
+        return SiegeCombatRules.decide(a, v, alliancesOf(v.lobbyId())) == SiegeCombatRules.Outcome.ALLOW;
+    }
+
     /** The alliances of the lobby's running match, or null. */
     public AllianceResolver alliancesOf(int lobbyId) {
         SiegeLobbyRuntime rt = lobbies.get(lobbyId);
