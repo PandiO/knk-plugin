@@ -335,7 +335,9 @@ class MessageCommandsTest {
         assertTrue(inboxOf(bob).isEmpty());
         verify(bob, never()).playSound(any(net.kyori.adventure.sound.Sound.class));
         org.mockito.ArgumentCaptor<Component> spyLine = org.mockito.ArgumentCaptor.forClass(Component.class);
-        verify(spy).broadcast(eq(id(alice)), eq(id(bob)), spyLine.capture());
+        ParticipantId from = id(alice);
+        ParticipantId to = id(bob);
+        verify(spy).broadcast(eq(from), eq(to), spyLine.capture());
         assertTrue(PlainTextComponentSerializer.plainText().serialize(spyLine.getValue()).startsWith("[Spy][ignored] Alice -> Bob"));
         assertEquals(PrivateMessageLogger.Outcome.BLOCKED_IGNORED, logged.get(0).outcome());
 

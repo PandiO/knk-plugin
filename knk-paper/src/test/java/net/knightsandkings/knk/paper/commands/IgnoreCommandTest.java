@@ -194,8 +194,8 @@ class IgnoreCommandTest {
 
     @Test
     void list_showsNamesAndDates() {
-        when(api.list(1)).thenReturn(CompletableFuture.completedFuture(List.of(
-                new UserIgnore(2, "Bob", bob.getUniqueId(), OffsetDateTime.parse("2026-09-01T10:00:00Z")))));
+        UserIgnore entry = new UserIgnore(2, "Bob", bob.getUniqueId(), OffsetDateTime.parse("2026-09-01T10:00:00Z"));
+        when(api.list(1)).thenReturn(CompletableFuture.completedFuture(List.of(entry)));
         loaded();
 
         run(ignore, alice);
