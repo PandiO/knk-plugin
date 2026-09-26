@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -46,7 +47,9 @@ class UserAdminServiceTest {
     private final PermissionGroupsQueryApi groupsApi = mock(PermissionGroupsQueryApi.class);
     private final RankHierarchy ranks = mock(RankHierarchy.class);
     private final AdminFreezeManager freeze = new AdminFreezeManager();
-    private final UserAdminService service = new UserAdminService(Runnable::run, users, api, groupsApi, ranks, null, freeze);
+    private final List<Object[]> redrawn = new java.util.ArrayList<>();
+    private final UserAdminService service = new UserAdminService(Runnable::run, users, api, groupsApi, ranks, null, freeze,
+            (player, summary) -> redrawn.add(new Object[] { player, summary }));
     private final Player staff = mock(Player.class);
     private final UUID staffUuid = UUID.randomUUID();
     private MockedStatic<Bukkit> bukkit;
@@ -57,6 +60,12 @@ class UserAdminServiceTest {
     }
 
     private final UserSummary target = user(7, "Steve", 250, 120);
+
+    /** Steve as the API returns him after a change, holding {@code tierName} (id {@code tierId}). */
+    private UserSummary steveWithTier(Integer tierId, String tierName) {
+        return new UserSummary(7, "Steve", target.uuid(), null, 250, 5, 120, true, false, GatePassThroughMethod.DEFAULT,
+                ActiveMode.NONE, null, null, 0, tierId, tierName, null, false, null, null, "&e", "&6", "&e");
+    }
 
     @BeforeEach
     void setUp() {
@@ -69,6 +78,8 @@ class UserAdminServiceTest {
         when(api.withActor(42)).thenReturn(acting);
         when(acting.adjustBalancesById(anyInt(), anyInt(), anyInt(), anyInt(), anyString(), anyBoolean()))
                 .thenReturn(CompletableFuture.completedFuture(new BalanceAdjustmentResult(0, 0, 0, null)));
+        when(users.refreshAsync(target.uuid()))
+                .thenReturn(CompletableFuture.completedFuture(FetchResult.missFetched(steveWithTier(null, null))));
     }
 
     @AfterEach
@@ -182,5 +193,79 @@ class UserAdminServiceTest {
         when(groupsApi.list()).thenReturn(CompletableFuture.completedFuture(List.of()));
         assertFalse(service.changeGroupByName(staff, target, "Nope", true, null).join());
         verify(staff).sendMessage(eq("§cNo PermissionGroup named 'Nope'."));
+    }
+
+    // ===== re-sync after a change (premium tier / title shown in chat and the tab list) =====
+
+    @Test
+    void groupChangeRefreshesTheTargetAndRedrawsTheirTabList() {
+        PermissionGroupSummary noble = new PermissionGroupSummary(4, "Noble", 10, true, 1.1);
+        UserSummary fresh = steveWithTier(4, "Noble");
+        Player online = mock(Player.class);
+        bukkit.when(() -> Bukkit.getPlayer(target.uuid())).thenReturn(online);
+        when(ranks.actorOutranks(42, 7)).thenReturn(CompletableFuture.completedFuture(true));
+        when(acting.addGroupMembership(7, 4, null)).thenReturn(CompletableFuture.completedFuture(null));
+        when(users.refreshAsync(target.uuid())).thenReturn(CompletableFuture.completedFuture(FetchResult.missFetched(fresh)));
+
+        assertTrue(service.changeGroup(staff, target, noble, true, null).join());
+
+        verify(users).refreshAsync(target.uuid());
+        assertEquals(1, redrawn.size());
+        assertSame(online, redrawn.get(0)[0]);
+        assertSame(fresh, redrawn.get(0)[1]);
+        verify(staff).sendMessage("§7Steve's displayed premium tier is now Noble.");
+    }
+
+    @Test
+    void addingALowerTierNextToAHigherOneSaysTheHigherOneStillShows() {
+        PermissionGroupSummary noble = new PermissionGroupSummary(4, "Noble", 10, true, 1.1);
+        when(ranks.actorOutranks(42, 7)).thenReturn(CompletableFuture.completedFuture(true));
+        when(acting.addGroupMembership(7, 4, null)).thenReturn(CompletableFuture.completedFuture(null));
+        when(users.refreshAsync(target.uuid()))
+                .thenReturn(CompletableFuture.completedFuture(FetchResult.missFetched(steveWithTier(5, "Royal"))));
+
+        assertTrue(service.changeGroup(staff, target, noble, true, null).join());
+
+        verify(staff).sendMessage("§eSteve's displayed premium tier is still Royal (the highest-weight tier wins)"
+                + " - remove Royal to show Noble.");
+    }
+
+    @Test
+    void offlineTargetIsStillRefreshedButNothingIsRedrawn() {
+        PermissionGroupSummary royal = new PermissionGroupSummary(5, "Royal", 30, true, 1.2);
+        when(ranks.actorOutranks(42, 7)).thenReturn(CompletableFuture.completedFuture(true));
+        when(acting.removeGroupMembership(7, 5)).thenReturn(CompletableFuture.completedFuture(null));
+
+        assertTrue(service.changeGroup(staff, target, royal, false, null).join());
+
+        verify(users).refreshAsync(target.uuid());
+        assertTrue(redrawn.isEmpty());
+        verify(staff).sendMessage("§7Steve's displayed premium tier is now none.");
+    }
+
+    @Test
+    void aFailedRefreshDoesNotFailTheChange() {
+        PermissionGroupSummary staffGroup = new PermissionGroupSummary(9, "Staff", 100, false, 1.0);
+        when(ranks.actorOutranks(42, 7)).thenReturn(CompletableFuture.completedFuture(true));
+        when(acting.addGroupMembership(7, 9, null)).thenReturn(CompletableFuture.completedFuture(null));
+        when(users.refreshAsync(target.uuid())).thenReturn(CompletableFuture.failedFuture(new RuntimeException("down")));
+
+        assertTrue(service.changeGroup(staff, target, staffGroup, true, null).join());
+
+        verify(staff).sendMessage("§aAdded Steve's membership in Staff (permanent).");
+        assertTrue(redrawn.isEmpty());
+    }
+
+    @Test
+    void titleChangeRefreshesTheTargetAndRedrawsTheirTabList() {
+        TitleBracket knight = new TitleBracket(3, "Knight", "Dame", 300, 40, 0, 0, 0);
+        Player online = mock(Player.class);
+        bukkit.when(() -> Bukkit.getPlayer(target.uuid())).thenReturn(online);
+
+        assertTrue(service.setTitle(staff, target, knight).join());
+
+        verify(users).refreshAsync(target.uuid());
+        assertEquals(1, redrawn.size());
+        assertSame(online, redrawn.get(0)[0]);
     }
 }

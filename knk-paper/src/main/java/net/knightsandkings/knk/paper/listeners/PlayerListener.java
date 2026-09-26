@@ -101,7 +101,11 @@ public class PlayerListener implements Listener {
 		String username = e.getName();
 
 		try {
-			FetchResult<UserSummary> result = usersDataAccess.getByUuidAsync(uuid, FetchPolicy.STALE_OK).join();
+			// API first, so a relog always picks up changes made since the cache was filled (a premium
+			// tier or title changed from the web-app, the Player manager, or an expired temporary
+			// tier). STALE_OK served any unexpired cache entry without asking the API. The cached
+			// value is still used when the API can't be reached.
+			FetchResult<UserSummary> result = usersDataAccess.getByUuidAsync(uuid, FetchPolicy.API_THEN_CACHE_REFRESH).join();
 			if (result.isStale()) {
 				triggerBackgroundUserRefresh(uuid);
 			}
