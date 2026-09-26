@@ -84,4 +84,28 @@ class CaptureProgressGradientTest {
                 AllianceResolver.of(SiegeTestData.scenario(2, 5, List.of(team(1, SiegeTeamRole.DEFENDER, 1, "D")),
                         List.of(), false)), List.of(1), null));
     }
+
+    @Test
+    void objectiveBannerShowsFullTeamBannersAtTheEndsAndTheGradientBetween() {
+        BannerPatternSpec lion = BannerPatternSpec.parse("BLUE|minecraft:cross:YELLOW");
+        BannerPatternSpec skull = BannerPatternSpec.parse("RED|minecraft:skull:BLACK");
+
+        assertEquals(lion, CaptureProgressGradient.objectiveBanner(500, 500, false, lion, "BLUE", skull, "RED"));
+        assertEquals(skull, CaptureProgressGradient.objectiveBanner(0, 500, false, lion, "BLUE", skull, "RED"));
+        BannerPatternSpec half = CaptureProgressGradient.objectiveBanner(250, 500, false, lion, "BLUE", skull, "RED");
+        assertEquals("BLUE", half.baseColor());
+        assertEquals("minecraft:gradient", half.layers().get(0).patternKey());
+        assertEquals("RED", half.layers().get(0).color());
+    }
+
+    @Test
+    void anObjectiveCapturedForGoodShowsItsNewHoldersBanner_andMissingDesignsUsePlainColours() {
+        BannerPatternSpec skull = BannerPatternSpec.parse("RED|minecraft:skull:BLACK");
+        // Final capture: points stay 0, the capturer is the holder, the "attacker" is the old holder.
+        assertEquals(skull, CaptureProgressGradient.objectiveBanner(0, 500, true, skull, "RED", null, "BLUE"));
+
+        BannerPatternSpec plain = CaptureProgressGradient.objectiveBanner(500, 500, false, null, "GREEN", null, null);
+        assertEquals("GREEN", plain.baseColor());
+        assertTrue(plain.layers().isEmpty());
+    }
 }

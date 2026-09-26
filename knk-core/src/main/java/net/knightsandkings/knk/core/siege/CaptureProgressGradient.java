@@ -55,6 +55,30 @@ public final class CaptureProgressGradient {
     }
 
     /**
+     * The objective banner to show (smoke test 2026-09-26): the holder's <b>full team banner</b> while
+     * the objective is fully held, and for good once it is captured for good (the capturer is then the
+     * holder); the attacker's full banner at the moment of capture; the base-colour gradient in between
+     * (the v2 transition from holding to attacking banner). A missing design falls back to the plain
+     * team colour.
+     *
+     * @param holderDesign   the holding team's banner, or null
+     * @param attackerDesign the leading attacker's banner, or null
+     */
+    public static BannerPatternSpec objectiveBanner(int points, int capturePoints, boolean capturedFinal,
+                                                    BannerPatternSpec holderDesign, String holderColor,
+                                                    BannerPatternSpec attackerDesign, String attackerColor) {
+        int index = capturedFinal ? STAGES - 1 : index(points, capturePoints);
+        if (index >= STAGES - 1) return full(holderDesign, holderColor);
+        if (index <= 0) return full(attackerDesign, attackerColor != null ? attackerColor : holderColor);
+        return banner(index, holderColor, attackerColor);
+    }
+
+    private static BannerPatternSpec full(BannerPatternSpec design, String color) {
+        if (design != null && !design.isEmpty() && design.baseColor() != null) return design;
+        return banner(STAGES - 1, color, color);
+    }
+
+    /**
      * The attacking team to colour an objective with: the enemy team with the most members inside
      * the radius (ties: first in scenario order); with no attacker present, the previous one; with
      * none ever, the first enemy team in scenario order.

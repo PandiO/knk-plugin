@@ -80,9 +80,7 @@ public final class SiegeWorldPresenter implements SiegeMatchObserver {
         /** Last label per audience (alliance group; {@code null} key = neutral), to skip unchanged updates. */
         final Map<Integer, SiegeObjectiveLabels.Label> lastLabels = new HashMap<>();
         int lastHolder = -1;
-        int lastIndex = -1;
-        String lastHolderColor;
-        String lastAttackerColor;
+        BannerPatternSpec lastBanner;
     }
 
     public SiegeWorldPresenter(Plugin plugin, File vaultDirectory) {
@@ -105,13 +103,16 @@ public final class SiegeWorldPresenter implements SiegeMatchObserver {
                 continue;
             }
             ObjectiveVisual v = new ObjectiveVisual();
-            v.center = center.get();
-            Block block = v.center.getBlock();
+            // Smoke test 2026-09-26: the banner stands on the floor under the capture point, like the ring.
+            v.center = SiegeBukkit.floorOf(center.get());
+            Block block = v.center.getWorld().getBlockAt(v.center.getBlockX(),
+                    (int) Math.ceil(v.center.getY() - 1e-6), v.center.getBlockZ());
             if (block.getType().isAir()) {
                 v.placedBanner = block;
             } else {
-                logger.info("[Siege] Objective " + objective.id() + " capture point isn't air (" + block.getType()
-                        + "); no banner block placed there");
+                logger.warning("[Siege] Objective " + objective.id() + " banner spot " + block.getX() + "," + block.getY()
+                        + "," + block.getZ() + " isn't air (" + block.getType() + "); no banner placed - clear it or "
+                        + "re-capture the objective's location");
             }
             v.neutral = spawnLabel(v.center, match.matchToken(), true);
             for (Integer alliance : match.alliances().alliances()) {
@@ -183,15 +184,14 @@ public final class SiegeWorldPresenter implements SiegeMatchObserver {
 
             KnkSiegeTeam holder = scenario.team(state.holderTeamId()).orElse(null);
             KnkSiegeTeam attackerTeam = attacker == null ? null : scenario.team(attacker).orElse(null);
-            String holderColor = bannerColor(holder);
-            String attackerColor = bannerColor(attackerTeam);
-            int index = CaptureProgressGradient.index(state.points(), state.objective().capturePoints());
-            if (v.placedBanner != null && (index != v.lastIndex || !Objects.equals(holderColor, v.lastHolderColor)
-                    || !Objects.equals(attackerColor, v.lastAttackerColor))) {
-                paintBanner(v.placedBanner, CaptureProgressGradient.banner(index, holderColor, attackerColor));
-                v.lastIndex = index;
-                v.lastHolderColor = holderColor;
-                v.lastAttackerColor = attackerColor;
+            // Smoke test 2026-09-26: the holder's full team banner when fully held (also from match
+            // start), the v2 gradient towards the attacker's colour while it's being captured.
+            BannerPatternSpec banner = CaptureProgressGradient.objectiveBanner(state.points(),
+                    state.objective().capturePoints(), state.isCapturedFinal(),
+                    bannerDesign(holder), bannerColor(holder), bannerDesign(attackerTeam), bannerColor(attackerTeam));
+            if (v.placedBanner != null && !banner.equals(v.lastBanner)) {
+                paintBanner(v.placedBanner, banner);
+                v.lastBanner = banner;
             }
 
             String name = SiegeDisplayText.clean(state.objective().name(), "#" + state.objectiveId())
@@ -259,6 +259,10 @@ public final class SiegeWorldPresenter implements SiegeMatchObserver {
     }
 
     /** The team's banner base colour for the gradient; its chat colour as a dye when it has no banner. */
+    private static BannerPatternSpec bannerDesign(KnkSiegeTeam team) {
+        return team == null || team.bannerDesign() == null ? null : team.bannerDesign().toPatternSpec();
+    }
+
     private static String bannerColor(KnkSiegeTeam team) {
         if (team == null) return null;
         String base = BannerDesignBukkitMapper.baseColor(team.bannerDesign());
