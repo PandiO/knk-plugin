@@ -158,10 +158,6 @@ public class MessagingService {
         rateLimiter.forget(participant);
     }
 
-    ReplyTargets replyTargets() {
-        return replyTargets;
-    }
-
     private void deliver(CommandSender sender, CommandSender recipient, PrivateMessageGate.SendAttempt attempt) {
         if (sender instanceof Player senderPlayer && !senderPlayer.isOnline()) {
             return;

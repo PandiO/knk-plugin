@@ -141,7 +141,9 @@ class MessageCommandsTest {
 
         assertEquals(List.of("[me -> Bob] hi there"), inboxOf(alice));
         assertEquals(List.of("[Alice -> me] hi there"), inboxOf(bob));
-        verify(spy).broadcast(eq(id(alice)), eq(id(bob)), any(Component.class));
+        ParticipantId from = id(alice);
+        ParticipantId to = id(bob);
+        verify(spy).broadcast(eq(from), eq(to), any(Component.class));
         assertEquals(1, logged.size());
         assertEquals(PrivateMessageLogger.Outcome.DELIVERED, logged.get(0).outcome());
         assertEquals("hi there", logged.get(0).text());
