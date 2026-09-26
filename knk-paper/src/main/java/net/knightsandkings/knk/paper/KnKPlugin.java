@@ -180,6 +180,7 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.lootbox.LootboxSpawnScheduler lootboxSpawnScheduler;
     private net.knightsandkings.knk.paper.commands.LootboxAdminCommand lootboxAdminCommand;
     private net.knightsandkings.knk.paper.commands.LootboxCommand lootboxCommand;
+    private net.knightsandkings.knk.paper.lootbox.LootboxTokenDelivery lootboxTokenDelivery;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private PermissionsDataAccess permissionsDataAccess;
     private KnkPermissible knkPermissible;
@@ -1111,7 +1112,8 @@ public class KnKPlugin extends JavaPlugin {
                     scheduler.start();
                 },
                 mainThread,
-                tokenDelivery);
+                tokenDelivery,
+                inSiege);
             this.lootboxCommand = new net.knightsandkings.knk.paper.commands.LootboxCommand(
                 runtime::config, queryApi, permission, mainThread);
 
@@ -1119,6 +1121,7 @@ public class KnKPlugin extends JavaPlugin {
             scheduler.start();
             this.lootboxRuntime = runtime;
             this.lootboxSpawnScheduler = scheduler;
+            this.lootboxTokenDelivery = tokenDelivery;
             getLogger().info("Lootboxes initialized (enabled=" + runtime.settings().enabled() + ")");
         } catch (Exception e) {
             getLogger().log(java.util.logging.Level.SEVERE, "Lootboxes failed to initialize; they stay off", e);
@@ -1138,6 +1141,27 @@ public class KnKPlugin extends JavaPlugin {
             .map(lobby -> lobby.drawnScenario().orElse(null))
             .filter(java.util.Objects::nonNull)
             .toList());
+    }
+
+    /**
+     * After a siege restored a player's own inventory: hand over the lootbox tokens held back during the siege, so they
+     * don't have to rejoin. A second later, so a quitting player is gone (their next join delivers them) and a player
+     * who immediately joined another siege is skipped.
+     */
+    private void deliverLootboxTokensAfterSiege(org.bukkit.entity.Player player) {
+        var tokenDelivery = lootboxTokenDelivery;
+        // Not while disabling (siege shutdown restores everyone; scheduling then throws): their next join delivers.
+        if (tokenDelivery == null || !isEnabled()) {
+            return;
+        }
+        java.util.UUID uuid = player.getUniqueId();
+        getServer().getScheduler().runTaskLater(this, () -> {
+            org.bukkit.entity.Player online = getServer().getPlayer(uuid);
+            if (online != null && online.isOnline()
+                && (siegeService == null || siegeService.activeLobbyOf(uuid).isEmpty())) {
+                tokenDelivery.deliverUndelivered(online);
+            }
+        }, 20L);
     }
 
     private void registerTabCommand(String name, org.bukkit.command.TabExecutor executor) {
@@ -1259,7 +1283,10 @@ public class KnKPlugin extends JavaPlugin {
         siegeService.addObserver(new net.knightsandkings.knk.paper.siege.SiegeCaptureFeedback());
         var siegeBooks = new net.knightsandkings.knk.paper.siege.SiegeEnchantBooks(this, siegeService, siegeRandom);
         siegeService.addObserver(siegeBooks);
-        siegeVault.setAfterRestore(siegeBooks::sweep);
+        siegeVault.setAfterRestore(player -> {
+            siegeBooks.sweep(player);
+            deliverLootboxTokensAfterSiege(player);
+        });
 
         var pluginManager = getServer().getPluginManager();
         pluginManager.registerEvents(new SiegeSessionListener(siegeService, siegeBooks::sweep), this);

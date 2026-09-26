@@ -27,6 +27,7 @@ import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 /**
  * {@code /knk lootbox} (docs/specs/lootboxes/DESIGN.md §3.4, D18): the admin side, registered in
@@ -55,6 +56,7 @@ public final class LootboxAdminCommand {
     private final Runnable reload;
     private final Executor mainThread;
     private final LootboxTokenDelivery tokens;
+    private final Predicate<UUID> inSiege;
 
     public LootboxAdminCommand(
             LootboxRuntime runtime,
@@ -68,7 +70,8 @@ public final class LootboxAdminCommand {
             Runnable reload,
             Executor mainThread
     ) {
-        this(runtime, commandApi, delivery, announcer, areaCommand, permission, userIdOf, onlinePlayer, reload, mainThread, null);
+        this(runtime, commandApi, delivery, announcer, areaCommand, permission, userIdOf, onlinePlayer, reload, mainThread, null,
+                id -> false);
     }
 
     public LootboxAdminCommand(
@@ -82,9 +85,11 @@ public final class LootboxAdminCommand {
             Function<String, Player> onlinePlayer,
             Runnable reload,
             Executor mainThread,
-            LootboxTokenDelivery tokens
+            LootboxTokenDelivery tokens,
+            Predicate<UUID> inSiege
     ) {
         this.tokens = tokens;
+        this.inSiege = inSiege != null ? inSiege : id -> false;
         this.runtime = runtime;
         this.commandApi = commandApi;
         this.delivery = delivery;
@@ -254,6 +259,19 @@ public final class LootboxAdminCommand {
         player.teleport(new Location(world, box.get().x() + 0.5, box.get().y(), box.get().z() + 1.5));
     }
 
+    /**
+     * A player in a siege (hub or match) has the siege inventory, and the saved one replaces it afterwards: anything
+     * given now would be wiped. Refused for everyone (console included) before any API call.
+     */
+    private boolean refuseInSiege(CommandSender sender, Player target) {
+        if (!inSiege.test(target.getUniqueId())) {
+            return false;
+        }
+        sender.sendMessage(ChatColor.RED + target.getName() + " is in a siege - their inventory is restored afterwards, so the item "
+                + "would be lost. Try again once the siege is over.");
+        return true;
+    }
+
     // ===== give =====
 
     private void give(CommandSender sender, String[] args) {
@@ -264,6 +282,9 @@ public final class LootboxAdminCommand {
         Player target = onlinePlayer.apply(args[0]);
         if (target == null) {
             sender.sendMessage(ChatColor.RED + "Player not found or not online: " + args[0]);
+            return;
+        }
+        if (refuseInSiege(sender, target)) {
             return;
         }
         Integer targetUserId = userIdOf.apply(target);
@@ -328,6 +349,9 @@ public final class LootboxAdminCommand {
         Player target = onlinePlayer.apply(args[0]);
         if (target == null) {
             sender.sendMessage(ChatColor.RED + "Player not found or not online: " + args[0]);
+            return;
+        }
+        if (refuseInSiege(sender, target)) {
             return;
         }
         Integer targetUserId = userIdOf.apply(target);

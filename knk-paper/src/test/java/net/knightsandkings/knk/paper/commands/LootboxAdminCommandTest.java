@@ -44,6 +44,8 @@ class LootboxAdminCommandTest {
     private final Player steve = mock(Player.class);
     private final List<String> granted = new ArrayList<>();
     private int reloads;
+    private static final java.util.UUID STEVE_ID = java.util.UUID.fromString("00000000-0000-0000-0000-00000000057e");
+    private boolean steveInSiege;
     private LootboxAdminCommand command;
 
     @BeforeEach
@@ -53,6 +55,7 @@ class LootboxAdminCommandTest {
         when(runtime.settings()).thenReturn(LootboxSettings.defaults());
         when(runtime.clock()).thenReturn(Clock.systemUTC());
         when(steve.getName()).thenReturn("Steve");
+        when(steve.getUniqueId()).thenReturn(STEVE_ID);
         command = new LootboxAdminCommand(runtime, api, delivery, mock(LootboxAnnouncer.class), area,
                 (player, node) -> granted.contains(node), p -> p == steve ? 9 : 42,
                 name -> "Steve".equalsIgnoreCase(name) ? steve : null, () -> reloads++, Runnable::run);
@@ -151,7 +154,8 @@ class LootboxAdminCommandTest {
     private LootboxAdminCommand withTokens(LootboxTokenDelivery tokens) {
         return new LootboxAdminCommand(runtime, api, delivery, mock(LootboxAnnouncer.class), area,
                 (player, node) -> granted.contains(node), p -> p == steve ? 9 : 42,
-                name -> "Steve".equalsIgnoreCase(name) ? steve : null, () -> reloads++, Runnable::run, tokens);
+                name -> "Steve".equalsIgnoreCase(name) ? steve : null, () -> reloads++, Runnable::run, tokens,
+                id -> steveInSiege && id.equals(STEVE_ID));
     }
 
     @Test
@@ -184,5 +188,36 @@ class LootboxAdminCommandTest {
 
         verify(api, never()).issueTokens(any(), anyInt(), anyInt(), any(), anyInt(), any(), any());
         verify(admin).sendMessage(contains("Amount is 1-64"));
+    }
+
+    // ===== siege =====
+
+    @Test
+    void giveAndToken_toAPlayerInASiege_areRefusedBeforeAnyApiCall_evenFromTheConsole() {
+        granted.add("knk.lootbox.admin.give");
+        granted.add("knk.lootbox.admin.token");
+        steveInSiege = true;
+        LootboxAdminCommand command = withTokens(mock(LootboxTokenDelivery.class));
+        CommandSender console = mock(CommandSender.class);
+
+        command.execute(admin, new String[]{"give", "Steve", "weapons", "5"});
+        command.execute(admin, new String[]{"token", "Steve", "weapons", "5", "2"});
+        command.execute(console, new String[]{"give", "Steve", "weapons"});
+        command.execute(console, new String[]{"token", "Steve", "weapons"});
+
+        verify(api, never()).adminGive(any(), anyInt(), anyInt(), any(), any());
+        verify(api, never()).issueTokens(any(), anyInt(), anyInt(), any(), anyInt(), any(), any());
+        verify(admin, org.mockito.Mockito.times(2)).sendMessage(contains("Steve is in a siege"));
+        verify(console, org.mockito.Mockito.times(2)).sendMessage(contains("would be lost"));
+    }
+
+    @Test
+    void give_toAPlayerNotInASiege_stillCallsTheApi() {
+        granted.add("knk.lootbox.admin.give");
+        when(api.adminGive(any(), anyInt(), anyInt(), any(), any())).thenReturn(new CompletableFuture<>());
+
+        withTokens(mock(LootboxTokenDelivery.class)).execute(admin, new String[]{"give", "Steve", "weapons", "5"});
+
+        verify(api).adminGive(eq(42), eq(9), eq(3), eq(5), anyString());
     }
 }
