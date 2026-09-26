@@ -23,7 +23,7 @@ public record UserSummaryDto (
     @JsonProperty("frozenReason") String frozenReason,
     // "Male" / "Female" / null (InventoryMenu content port CP3).
     @JsonProperty("gender") String gender,
-    // KNG-7 display colors (Minecraft color names), resolved server-side from the premium tier
+    // KNG-7 display styles (Minecraft "&" formatting codes), resolved server-side from the premium tier
     // with the Default group as fallback.
     @JsonProperty("chatPrimaryColor") String chatPrimaryColor,
     @JsonProperty("chatSecondaryColor") String chatSecondaryColor,

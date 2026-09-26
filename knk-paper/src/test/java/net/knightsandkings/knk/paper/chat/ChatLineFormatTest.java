@@ -17,6 +17,7 @@ import net.knightsandkings.knk.paper.utils.ColorOptions;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 
@@ -69,7 +70,7 @@ class ChatLineFormatTest {
 
     @Test
     void owner_ignoresPremiumTierAndItsColors() {
-        Component line = ChatLineFormat.render(Rank.OWNER, "Pandi", summary("Knight", 12, "Noble", "YELLOW", "GOLD"), MSG);
+        Component line = ChatLineFormat.render(Rank.OWNER, "Pandi", summary("Knight", 12, "Noble", "&e", "&6"), MSG);
 
         assertEquals("[OWNER]-{Knight}- Pandi: Hello", plain(line));
         assertEquals(ColorOptions.ownersubjects, piece(line, "Knight").color());
@@ -92,7 +93,7 @@ class ChatLineFormatTest {
 
     @Test
     void premiumTier_tierNameInsideBraces_tierColors_notBold() {
-        Component line = ChatLineFormat.render(Rank.MEMBER, "Pandi", summary("Knight", 12, "Noble", "YELLOW", "GOLD"), MSG);
+        Component line = ChatLineFormat.render(Rank.MEMBER, "Pandi", summary("Knight", 12, "Noble", "&e", "&6"), MSG);
 
         assertEquals("-{Noble Knight}- Pandi: Hello", plain(line));
         assertEquals(NamedTextColor.GOLD, piece(line, "-{").color());
@@ -105,12 +106,12 @@ class ChatLineFormatTest {
     @Test
     void premiumTier_withoutTitle_showsTierAlone() {
         assertEquals("-{Dragon Blood}- Pandi: Hello",
-            plain(ChatLineFormat.render(Rank.MEMBER, "Pandi", summary(null, 13, "Dragon Blood", "RED", "DARK_RED"), MSG)));
+            plain(ChatLineFormat.render(Rank.MEMBER, "Pandi", summary(null, 13, "Dragon Blood", "&c", "&4"), MSG)));
     }
 
     @Test
     void default_withDbColors_usesThem() {
-        Component line = ChatLineFormat.render(Rank.MEMBER, "Pandi", summary("Knight", null, null, "GREEN", "DARK_GREEN"), MSG);
+        Component line = ChatLineFormat.render(Rank.MEMBER, "Pandi", summary("Knight", null, null, "&a", "&2"), MSG);
 
         assertEquals("-{Knight}- Pandi: Hello", plain(line));
         assertEquals(NamedTextColor.DARK_GREEN, piece(line, "-{").color());
@@ -119,7 +120,7 @@ class ChatLineFormatTest {
 
     @Test
     void default_withoutColors_fallsBackToColorOptions() {
-        Component line = ChatLineFormat.render(Rank.MEMBER, "Pandi", summary("Knight", null, null, null, "NOT_A_COLOR"), MSG);
+        Component line = ChatLineFormat.render(Rank.MEMBER, "Pandi", summary("Knight", null, null, null, "NOT_CODES"), MSG);
 
         assertEquals(ColorOptions.defaultformat, piece(line, "-{").color());
         assertEquals(ColorOptions.defaultsubjects, piece(line, "Knight").color());
@@ -134,12 +135,32 @@ class ChatLineFormatTest {
     }
 
     @Test
-    void message_isChildOfNamePiece_soItInheritsTheNameColor() {
-        Component line = ChatLineFormat.render(Rank.MEMBER, "Pandi", summary("Knight", 12, "Royal", "AQUA", "BLUE"), MSG);
+    void message_takesNameColorButNotItsFormats() {
+        Component line = ChatLineFormat.render(Rank.MEMBER, "Pandi", summary("Knight", 12, "Royal", "&b&l", "&9"), MSG);
 
-        TextComponent name = piece(line, " Pandi: ");
-        assertEquals(List.of(MSG), name.children());
-        assertEquals(NamedTextColor.AQUA, name.color());
+        assertEquals(TextDecoration.State.TRUE, piece(line, " Pandi: ").decoration(TextDecoration.BOLD));
+        TextComponent message = piece(line, "Hello");
+        assertEquals(NamedTextColor.AQUA, message.color());
+        assertNotEquals(TextDecoration.State.TRUE, message.decoration(TextDecoration.BOLD));
+    }
+
+    @Test
+    void message_ownColorCodesWin() {
+        Component colored = Component.text("Hi", NamedTextColor.RED);
+        Component line = ChatLineFormat.render(Rank.MEMBER, "Pandi", summary(null, null, null, "&a", "&2"), colored);
+
+        assertEquals(NamedTextColor.RED, piece(line, "Hi").color());
+    }
+
+    @Test
+    void premiumTier_boldAndHexStyles() {
+        Component line = ChatLineFormat.render(Rank.MEMBER, "Pandi",
+            summary("Knight", 20, "Emperor", "&x&f&f&a&a&0&0&l", "&5"), MSG);
+
+        assertEquals("-{Emperor Knight}- Pandi: Hello", plain(line));
+        assertEquals(TextColor.color(0xFFAA00), piece(line, "Emperor Knight").color());
+        assertEquals(TextDecoration.State.TRUE, piece(line, "Emperor Knight").decoration(TextDecoration.BOLD));
+        assertEquals(NamedTextColor.DARK_PURPLE, piece(line, "-{").color());
     }
 
     @Test

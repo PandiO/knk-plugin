@@ -27,10 +27,10 @@ public record UserSummary(
     // "Male", "Female" or null (unset - title names fall back to the male name). Added for the
     // InventoryMenu Profile menu (docs/specs/inventory-menu/CONTENT_PORT_PLAN.md CP3).
     String gender,
-    // Chat and tab-list colors (KNG-7) as Minecraft color names ("YELLOW", "DARK_RED", ...):
-    // the premium tier's, else the Default PermissionGroup's, resolved server-side. Primary =
-    // title + username, secondary = the "-{ }-" brackets, name = scoreboard team color. Null =
-    // the plugin's built-in default.
+    // Chat and tab-list styles (KNG-7) as Minecraft "&" formatting codes ("&e", "&6&l", hex
+    // "&x&f&f&a&a&0&0"): the premium tier's, else the Default PermissionGroup's, resolved
+    // server-side. Primary = title + username, secondary = the "-{ }-" brackets, name =
+    // scoreboard team color. Null = the plugin's built-in default.
     String chatPrimaryColor,
     String chatSecondaryColor,
     String nameColor

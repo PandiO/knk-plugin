@@ -13,7 +13,7 @@ public record PermissionGroupSummary(
     // PermissionGroup.SalaryMultiplier (1.0 = none) - shown by the InventoryMenu premium-tier
     // screen (docs/specs/inventory-menu/CONTENT_PORT_PLAN.md CP5).
     double salaryMultiplier,
-    // KNG-7 chat/tab-list colors as Minecraft color names (PermissionGroup.ChatPrimaryColor etc.),
+    // KNG-7 chat/tab-list styles as Minecraft "&" formatting codes (PermissionGroup.ChatPrimaryColor etc.),
     // null when unset.
     String chatPrimaryColor,
     String chatSecondaryColor,

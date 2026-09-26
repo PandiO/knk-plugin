@@ -20,17 +20,17 @@ class UsersMapperDisplayColorsTest {
     @Test
     void userSummaryCarriesDisplayColorsBothWays() throws Exception {
         UserSummaryDto dto = mapper.readValue("{\"id\":1,\"username\":\"a\",\"premiumTierName\":\"Royal\","
-                + "\"chatPrimaryColor\":\"AQUA\",\"chatSecondaryColor\":\"BLUE\",\"nameColor\":\"AQUA\"}", UserSummaryDto.class);
+                + "\"chatPrimaryColor\":\"&b\",\"chatSecondaryColor\":\"&9\",\"nameColor\":\"&b\"}", UserSummaryDto.class);
         UserSummary summary = UsersMapper.mapUserSummary(dto);
 
-        assertEquals("AQUA", summary.chatPrimaryColor());
-        assertEquals("BLUE", summary.chatSecondaryColor());
-        assertEquals("AQUA", summary.nameColor());
+        assertEquals("&b", summary.chatPrimaryColor());
+        assertEquals("&9", summary.chatSecondaryColor());
+        assertEquals("&b", summary.nameColor());
 
         UserSummaryDto back = UsersMapper.mapUserSummary(summary);
-        assertEquals("AQUA", back.chatPrimaryColor());
-        assertEquals("BLUE", back.chatSecondaryColor());
-        assertEquals("AQUA", back.nameColor());
+        assertEquals("&b", back.chatPrimaryColor());
+        assertEquals("&9", back.chatSecondaryColor());
+        assertEquals("&b", back.nameColor());
     }
 
     @Test
@@ -45,13 +45,13 @@ class UsersMapperDisplayColorsTest {
     @Test
     void withActiveModeAndWithFrozen_keepColors() {
         UserSummary summary = UsersMapper.mapUserSummary(new UserSummaryDto(1, "a", null, null, 0, 0, 0, false,
-                null, null, null, null, 0, 12, "Noble", null, false, null, null, "YELLOW", "GOLD", "YELLOW"));
+                null, null, null, null, 0, 12, "Noble", null, false, null, null, "&e", "&6", "&e"));
 
         UserSummary copied = summary.withActiveMode(net.knightsandkings.knk.core.domain.users.ActiveMode.STAFF)
                 .withFrozen(true, "test");
 
-        assertEquals("YELLOW", copied.chatPrimaryColor());
-        assertEquals("GOLD", copied.chatSecondaryColor());
-        assertEquals("YELLOW", copied.nameColor());
+        assertEquals("&e", copied.chatPrimaryColor());
+        assertEquals("&6", copied.chatSecondaryColor());
+        assertEquals("&e", copied.nameColor());
     }
 }

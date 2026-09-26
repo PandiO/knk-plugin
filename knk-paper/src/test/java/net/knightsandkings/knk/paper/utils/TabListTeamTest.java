@@ -23,17 +23,22 @@ class TabListTeamTest {
 
     @Test
     void owner_winsOverEverything() {
-        assertEquals(new TabListTeam("owner", NamedTextColor.DARK_PURPLE), TabListTeam.resolve(true, true, summary(12, "AQUA")));
+        assertEquals(new TabListTeam("owner", NamedTextColor.DARK_PURPLE), TabListTeam.resolve(true, true, summary(12, "&b")));
     }
 
     @Test
     void staff_winsOverPremiumTier() {
-        assertEquals(new TabListTeam("staff", NamedTextColor.BLUE), TabListTeam.resolve(false, true, summary(12, "AQUA")));
+        assertEquals(new TabListTeam("staff", NamedTextColor.BLUE), TabListTeam.resolve(false, true, summary(12, "&b")));
     }
 
     @Test
     void premiumTier_getsTeamPerGroupId_coloredByNameColor() {
-        assertEquals(new TabListTeam("tier_12", NamedTextColor.AQUA), TabListTeam.resolve(false, false, summary(12, "AQUA")));
+        assertEquals(new TabListTeam("tier_12", NamedTextColor.AQUA), TabListTeam.resolve(false, false, summary(12, "&b")));
+    }
+
+    @Test
+    void premiumTier_hexOrFormattedNameColor_usesNearestNamedColor() {
+        assertEquals(new TabListTeam("tier_12", NamedTextColor.GOLD), TabListTeam.resolve(false, false, summary(12, "&x&f&f&a&a&0&0&l")));
     }
 
     @Test
@@ -43,7 +48,7 @@ class TabListTeamTest {
 
     @Test
     void default_usesDefaultGroupNameColor() {
-        assertEquals(new TabListTeam("default", NamedTextColor.WHITE), TabListTeam.resolve(false, false, summary(null, "WHITE")));
+        assertEquals(new TabListTeam("default", NamedTextColor.WHITE), TabListTeam.resolve(false, false, summary(null, "&f")));
     }
 
     @Test
