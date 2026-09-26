@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper;
 
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.logging.Logger;
@@ -43,7 +44,9 @@ import net.knightsandkings.knk.core.dataaccess.DomainCatalogDataAccess;
 import net.knightsandkings.knk.core.menu.ActionRegistry;
 import net.knightsandkings.knk.core.menu.ConditionRegistry;
 import net.knightsandkings.knk.core.menu.MenuContentSourceRegistry;
+import net.knightsandkings.knk.core.menu.MenuRefreshSchedule;
 import net.knightsandkings.knk.core.menu.MenuSessionRegistry;
+import net.knightsandkings.knk.core.menu.MenuVariableProviderRegistry;
 import net.knightsandkings.knk.paper.menu.AnvilCaptureManager;
 import net.knightsandkings.knk.paper.menu.MenuActionContext;
 import net.knightsandkings.knk.paper.menu.MenuActionHandlers;
@@ -52,7 +55,13 @@ import net.knightsandkings.knk.paper.menu.MenuConditionHandlers;
 import net.knightsandkings.knk.paper.menu.MenuContentSourceContext;
 import net.knightsandkings.knk.paper.menu.MenuContentSourceHandlers;
 import net.knightsandkings.knk.paper.menu.MenuControlHintListener;
+import net.knightsandkings.knk.paper.menu.MenuAutoRefreshTask;
 import net.knightsandkings.knk.paper.menu.MenuDefinitionValidationRunner;
+import net.knightsandkings.knk.paper.menu.MenuFeature;
+import net.knightsandkings.knk.paper.menu.MenuFeatureRegistries;
+import net.knightsandkings.knk.paper.menu.MenuVariableContext;
+import net.knightsandkings.knk.paper.menu.example.ExampleDomainMenuFeature;
+import net.knightsandkings.knk.paper.menu.content.HubMenuFeature;
 import net.knightsandkings.knk.paper.menu.MenuLifecycleListener;
 import net.knightsandkings.knk.paper.menu.MenuRenderer;
 import net.knightsandkings.knk.paper.menu.MenuService;
@@ -154,6 +163,10 @@ public class KnKPlugin extends JavaPlugin {
     private ItemBlueprintsDataAccess itemBlueprintsDataAccess;
     private KitsDataAccess kitsDataAccess;
     private MenuTemplatesDataAccess menuTemplatesDataAccess;
+    private net.knightsandkings.knk.paper.kit.KitGrantFlow kitGrantFlow;
+    private net.knightsandkings.knk.core.dataaccess.TitleBracketsDataAccess titleBracketsDataAccess;
+    private net.knightsandkings.knk.core.dataaccess.PermissionGroupsDataAccess permissionGroupsDataAccess;
+    private net.knightsandkings.knk.paper.user.UserAdminService userAdminService;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private PermissionsDataAccess permissionsDataAccess;
     private KnkPermissible knkPermissible;
@@ -171,6 +184,7 @@ public class KnKPlugin extends JavaPlugin {
     private ActionRegistry<MenuActionContext> menuActionRegistry;
     private ConditionRegistry<MenuActionContext> menuConditionRegistry;
     private MenuContentSourceRegistry<MenuContentSourceContext> menuContentSourceRegistry;
+    private MenuVariableProviderRegistry<org.bukkit.entity.Player> menuVariableRegistry;
     private WorldTasksApi worldTasksApi;
     private GateStructuresApi gateStructuresApi;
     private GateDoorsApi gateDoorsApi;
@@ -496,29 +510,78 @@ public class KnKPlugin extends JavaPlugin {
             // existing itemBlueprintsDataAccess gateway above, not a synthetic
             // dataset.
             this.menuContentSourceRegistry = new MenuContentSourceRegistry<>();
-            MenuContentSourceHandlers.registerDefaults(menuContentSourceRegistry, itemBlueprintsDataAccess);
-            MenuRenderer menuRenderer = new MenuRenderer(minecraftMaterialRefsDataAccess, menuContentSourceRegistry);
-            this.menuService = new MenuService(
-                this, menuTemplatesDataAccess, menuSessionRegistry, openMenuContextRegistry, menuRenderer,
-                anvilCaptureManager
-            );
-            getLogger().info("InventoryMenu rendering engine initialized (Phase 2)");
-
             // InventoryMenu Phase 6 (docs/specs/inventory-menu/IMPLEMENTATION_PLAN.md,
-            // DESIGN_REVIEW.md §2.2): wire ActionRegistry/ConditionRegistry with their
-            // real, currently-supportable handler library before the click listener
-            // and startup validator need them. Phase 7 extends the same two
-            // registries in place with the pagination/search/filter/confirm preset
-            // library (MenuActionHandlers/MenuConditionHandlers.registerDefaults) -
-            // no separate Phase 7 registry, per that phase's own decision not to
-            // build a SectionTypeRegistry (see ACTIVE_SESSIONS.md's Phase 7 entry).
+            // DESIGN_REVIEW.md §2.2) action/condition registries; Phase 7 extends the
+            // same two in place with the preset library.
             this.menuActionRegistry = new ActionRegistry<>();
             this.menuConditionRegistry = new ConditionRegistry<>();
-            MenuActionHandlers.registerDefaults(menuActionRegistry);
-            MenuConditionHandlers.registerDefaults(menuConditionRegistry);
+            // InventoryMenu Phase 9 (E2): getter-chain roots ($player$ + feature roots).
+            this.menuVariableRegistry = new MenuVariableProviderRegistry<>();
+            MenuFeatureRegistries menuRegistries = new MenuFeatureRegistries(
+                menuActionRegistry, menuConditionRegistry, menuContentSourceRegistry, menuVariableRegistry
+            );
+
+            // InventoryMenu Phase 9 (E2): every menu feature registers its roots,
+            // content sources, actions and conditions HERE - before
+            // MenuDefinitionValidationRunner below, which locks all four registries
+            // (a later registration throws). Engine defaults first. Siege Phase 8b:
+            // add the SiegeMenuFeature to this list.
+            // Content port CP2: /kit and the kits.overview menu share one grant path.
+            this.kitGrantFlow = new net.knightsandkings.knk.paper.kit.KitGrantFlow(
+                MenuService.mainThreadExecutor(this), kitsCommandApi, itemBlueprintsDataAccess,
+                minecraftMaterialRefsDataAccess, knkPermissible, cacheManager.getUserCache()
+            );
+            // Content port CP3/CP8: title brackets are seeded data - cache the list for 10 minutes.
+            this.titleBracketsDataAccess = new net.knightsandkings.knk.core.dataaccess.TitleBracketsDataAccess(
+                apiClient.getTitleBracketsQueryApi(), java.time.Duration.ofMinutes(10)
+            );
+            this.permissionGroupsDataAccess = new net.knightsandkings.knk.core.dataaccess.PermissionGroupsDataAccess(
+                apiClient.getPermissionGroupsQueryApi(), java.time.Duration.ofMinutes(2), java.time.Clock.systemUTC()
+            );
+            // Content port CP8: /knk user, /freeze|/unfreeze and the Player manager share one service.
+            this.userAdminService = new net.knightsandkings.knk.paper.user.UserAdminService(
+                MenuService.mainThreadExecutor(this), usersDataAccess, usersCommandApi, apiClient.getPermissionGroupsQueryApi(),
+                rankHierarchy, modeService, adminFreezeManager
+            );
+            List<MenuFeature> menuFeatures = List.of(
+                registries -> {
+                    MenuVariableContext.registerDefaults(registries.variables());
+                    MenuContentSourceHandlers.registerDefaults(registries.contentSources(), itemBlueprintsDataAccess);
+                    MenuActionHandlers.registerDefaults(registries.actions());
+                    MenuConditionHandlers.registerDefaults(registries.conditions());
+                },
+                new ExampleDomainMenuFeature(),
+                new HubMenuFeature(),
+                new net.knightsandkings.knk.paper.menu.content.KitsMenuFeature(
+                    kitsDataAccess, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, kitGrantFlow,
+                    java.time.Clock.systemUTC()),
+                new net.knightsandkings.knk.paper.menu.content.ProfileMenuFeature(
+                    usersQueryApi, cacheManager.getUserCache(), titleBracketsDataAccess),
+                new net.knightsandkings.knk.paper.menu.content.ItemsCatalogMenuFeature(
+                    itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, apiClient.getCategoriesQueryApi(),
+                    java.time.Clock.systemUTC()),
+                new net.knightsandkings.knk.paper.menu.content.PremiumMenuFeature(
+                    permissionGroupsDataAccess, usersQueryApi, cacheManager.getUserCache()),
+                new net.knightsandkings.knk.paper.menu.content.UserManagerMenuFeature(
+                    userAdminService, usersQueryApi, cacheManager.getUserCache(), titleBracketsDataAccess,
+                    permissionGroupsDataAccess, org.bukkit.Bukkit::getOnlinePlayers)
+            );
+            menuFeatures.forEach(feature -> feature.registerMenuHandlers(menuRegistries));
+
+            MenuRenderer menuRenderer = new MenuRenderer(
+                minecraftMaterialRefsDataAccess, menuContentSourceRegistry, menuConditionRegistry, menuVariableRegistry,
+                MenuService.mainThreadExecutor(this)
+            );
+            this.menuService = new MenuService(
+                this, menuTemplatesDataAccess, menuSessionRegistry, openMenuContextRegistry, menuRenderer,
+                anvilCaptureManager, new MenuRefreshSchedule()
+            );
+            getLogger().info("InventoryMenu rendering engine initialized (Phase 2 + 9)");
+
             getServer().getPluginManager().registerEvents(
                 new MenuClickListener(
-                    openMenuContextRegistry, menuSessionRegistry, menuActionRegistry, menuConditionRegistry, menuService
+                    openMenuContextRegistry, menuSessionRegistry, menuActionRegistry, menuConditionRegistry, menuService,
+                    menuVariableRegistry
                 ), this
             );
             getServer().getPluginManager().registerEvents(
@@ -527,6 +590,8 @@ public class KnKPlugin extends JavaPlugin {
             getServer().getPluginManager().registerEvents(
                 new MenuControlHintListener(openMenuContextRegistry), this
             );
+            // InventoryMenu Phase 9 (E4): one sync task repaints every due open menu per tick.
+            new MenuAutoRefreshTask(menuService).runTaskTimer(this, 1L, 1L);
             getLogger().info("InventoryMenu conditional actions + preset library initialized (Phase 6 + 7)");
 
             // InventoryMenu Phase 3 (docs/specs/inventory-menu/IMPLEMENTATION_PLAN.md,
@@ -536,10 +601,8 @@ public class KnKPlugin extends JavaPlugin {
             // refuses to open for any player, rather than surfacing as a silent blank/
             // literal-text tooltip or a click-time failure the first time someone
             // happens to open it or click it.
-            MenuDefinitionValidationRunner.runAtStartup(menuTemplatesDataAccess, menuService, getLogger(),
-                menuActionRegistry.registeredIds(), menuConditionRegistry.registeredIds(),
-                menuContentSourceRegistry.registeredIds());
-            getLogger().info("InventoryMenu variable resolution + load-time validation initialized (Phase 3 + 6 + 8)");
+            MenuDefinitionValidationRunner.runAtStartup(menuTemplatesDataAccess, menuService, getLogger(), menuRegistries);
+            getLogger().info("InventoryMenu variable resolution + load-time validation initialized (Phase 3 + 6 + 8 + 9)");
 
             initializeEnchantmentRuntime();
             getLogger().info("Registered custom enchantment runtime listeners and /ce command");
@@ -790,7 +853,8 @@ public class KnKPlugin extends JavaPlugin {
                 districtGateLoader,
                 gateDoorRegionCaptureHandler,
                 serverId,
-                menuService
+                menuService,
+                userAdminService
             );
             knkCommand.setExecutor(knkAdminCommand);
             knkCommand.setTabCompleter(knkAdminCommand);
@@ -817,10 +881,8 @@ public class KnKPlugin extends JavaPlugin {
         registerModeCommand("ownermode", ActiveMode.OWNER);
         registerModeCommand("staffmode", ActiveMode.STAFF);
 
-        registerSimpleCommand("freeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(
-            this, usersDataAccess, usersCommandApi, rankHierarchy, adminFreezeManager, true));
-        registerSimpleCommand("unfreeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(
-            this, usersDataAccess, usersCommandApi, rankHierarchy, adminFreezeManager, false));
+        registerSimpleCommand("freeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(userAdminService, true));
+        registerSimpleCommand("unfreeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(userAdminService, false));
         registerSimpleCommand("staffchat", new net.knightsandkings.knk.paper.commands.StaffChatCommand());
         registerSimpleCommand("msg", new net.knightsandkings.knk.paper.commands.MessageCommand(messagingService));
         registerSimpleCommand("reply", new net.knightsandkings.knk.paper.commands.ReplyCommand(messagingService));
@@ -828,12 +890,11 @@ public class KnKPlugin extends JavaPlugin {
         registerSimpleCommand("kit", new net.knightsandkings.knk.paper.commands.KitCommand(
             this,
             kitsDataAccess,
-            kitsCommandApi,
-            itemBlueprintsDataAccess,
-            minecraftMaterialRefsDataAccess,
-            knkPermissible,
-            this.getCacheManager()
+            kitGrantFlow
         ));
+
+        // Content port CP1: /menu opens the InventoryMenu hub (docs/specs/inventory-menu/CONTENT_PORT_PLAN.md §3).
+        registerSimpleCommand("menu", new net.knightsandkings.knk.paper.commands.MenuCommand(() -> menuService));
     }
 
     private void registerSimpleCommand(String name, org.bukkit.command.CommandExecutor executor) {

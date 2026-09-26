@@ -3,6 +3,7 @@ package net.knightsandkings.knk.core.menu;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -26,11 +27,13 @@ public final class MenuSession {
 
     private final UUID playerId;
     private final Instant createdAt;
-    private final Deque<String> menuKeyHistory = new ArrayDeque<>();
+    private final Deque<NavigationEntry> history = new ArrayDeque<>();
     private final Map<Integer, Integer> sectionPages = new ConcurrentHashMap<>();
-    private final Map<Integer, CachedVariable> variableCache = new ConcurrentHashMap<>();
+    private final Map<CacheKey, CachedVariable> variableCache = new ConcurrentHashMap<>();
     private final Map<Integer, MenuContentQuery> contentQueries = new ConcurrentHashMap<>();
-    private volatile String currentMenuKey;
+    /** Content port CP6 (engine gap G1): per-session scratch state - see {@link #getState}. */
+    private final Map<String, String> state = new ConcurrentHashMap<>();
+    private volatile NavigationEntry current;
     private volatile boolean dirty;
     private volatile PendingConfirmation pendingConfirmation;
     private volatile DoubleClickArm doubleClickArm;
@@ -50,30 +53,161 @@ public final class MenuSession {
     }
 
     public Optional<String> currentMenuKey() {
-        return Optional.ofNullable(currentMenuKey);
+        NavigationEntry entry = current;
+        return entry != null ? Optional.of(entry.key()) : Optional.empty();
     }
 
-    /** Opens {@code menuKey}, pushing whatever was open before onto the back-navigation stack. */
-    public void navigateTo(String menuKey) {
-        if (currentMenuKey != null) {
-            menuKeyHistory.push(currentMenuKey);
+    /**
+     * InventoryMenu Phase 9 (E1): one navigation stack entry - the menu key, the
+     * {@link MenuContextParams} it was opened with, and its (raw, possibly
+     * colour-coded) title once known, so {@code $menu.getBackHint$} can name the
+     * menu Back returns to without re-fetching it. Back navigation restores key
+     * <em>and</em> ctx.
+     */
+    public record NavigationEntry(String key, MenuContextParams context, String title) {
+        public NavigationEntry {
+            context = context != null ? context : MenuContextParams.EMPTY;
         }
-        currentMenuKey = menuKey;
+
+        /** Same menu opened with the same context (the title doesn't make it a different destination). */
+        public boolean sameTarget(String otherKey, MenuContextParams otherContext) {
+            return key.equals(otherKey)
+                    && context.equals(otherContext != null ? otherContext : MenuContextParams.EMPTY);
+        }
+    }
+
+    public Optional<NavigationEntry> currentEntry() {
+        return Optional.ofNullable(current);
+    }
+
+    /** The current menu's context parameters, or {@link MenuContextParams#EMPTY} if no menu is current. */
+    public MenuContextParams currentContext() {
+        NavigationEntry entry = current;
+        return entry != null ? entry.context() : MenuContextParams.EMPTY;
+    }
+
+    /** The entry {@link #goBackEntry()} would return to, if any. */
+    public synchronized Optional<NavigationEntry> previousEntry() {
+        return Optional.ofNullable(history.peek());
+    }
+
+    public synchronized boolean hasPrevious() {
+        return !history.isEmpty();
+    }
+
+    /** Opens {@code menuKey} with no context, pushing whatever was open before onto the back-navigation stack. */
+    public void navigateTo(String menuKey) {
+        navigateTo(menuKey, MenuContextParams.EMPTY, null);
+    }
+
+    /**
+     * InventoryMenu Phase 9 (E1): opens {@code menuKey} with {@code context},
+     * pushing the current entry onto the back-navigation stack - unless the
+     * current entry is already the same key + context (a re-open), which is
+     * replaced instead so re-opening a menu never grows the stack. Every
+     * navigation starts the new menu with an empty variable cache: a different
+     * ctx must never show the previous ctx's cached values.
+     */
+    public synchronized void navigateTo(String menuKey, MenuContextParams context, String title) {
+        NavigationEntry target = new NavigationEntry(menuKey, context, title);
+        if (current != null && !current.sameTarget(menuKey, context)) {
+            history.push(current);
+        }
+        current = target;
+        variableCache.clear();
+    }
+
+    /**
+     * InventoryMenu Phase 9 (E1): opens {@code menuKey} as a fresh navigation
+     * root - clearing the back stack, so Back reads "Exit". Used when a menu is
+     * opened from outside any menu (a command, a respawn hook), matching v2's
+     * {@code /siege join} behaviour.
+     */
+    public synchronized void openAsRoot(String menuKey, MenuContextParams context, String title) {
+        history.clear();
+        current = new NavigationEntry(menuKey, context, title);
+        variableCache.clear();
+        // G1: a fresh navigation root starts with fresh state (the previous menu visit ended).
+        state.clear();
+    }
+
+    // ===== Content port CP6 (engine gap G1): per-session menu state =====
+    //
+    // A string -> string scratch map template authors namespace themselves ("pm.coinStep"): the
+    // Player manager's step sizes, and any later stepper (gate health, scenario player counts).
+    // Written by menu.state.set / menu.state.cycle and by menu.open's "state.<key>" params (set
+    // only if unset, so a template can declare its defaults on open); read through the engine
+    // root $state.<key>$ (MenuStateView). Lives as long as the session: dropped on quit (the
+    // session itself is discarded) and cleared when a menu is opened as a fresh navigation root.
+
+    /** The value stored under {@code key}, or null when unset. */
+    public String getState(String key) {
+        return key == null ? null : state.get(key);
+    }
+
+    /** Stores {@code value} under {@code key}; a null value unsets it. */
+    public void setState(String key, String value) {
+        if (key == null || key.isBlank()) {
+            throw new IllegalArgumentException("Menu state key must not be blank");
+        }
+        if (value == null) {
+            state.remove(key);
+        } else {
+            state.put(key, value);
+        }
+    }
+
+    /** Stores {@code value} only if {@code key} is unset; returns true when it was stored. */
+    public boolean setStateIfAbsent(String key, String value) {
+        if (key == null || key.isBlank() || value == null) {
+            return false;
+        }
+        return state.putIfAbsent(key, value) == null;
+    }
+
+    /**
+     * Advances {@code key} to the value after its current one in {@code values} (wrapping), or to
+     * the first value when it is unset or not in the list. Returns the new value.
+     */
+    public String cycleState(String key, List<String> values) {
+        if (values == null || values.isEmpty()) {
+            throw new IllegalArgumentException("Menu state cycle for '" + key + "' needs at least one value");
+        }
+        String next = state.compute(key, (k, current) -> {
+            int index = current == null ? -1 : values.indexOf(current);
+            return index < 0 ? values.get(0) : values.get((index + 1) % values.size());
+        });
+        return next;
+    }
+
+    /** An immutable snapshot of every state key (for tests and diagnostics). */
+    public Map<String, String> stateSnapshot() {
+        return Map.copyOf(state);
     }
 
     /** Pops the back-navigation stack and makes it current, or does nothing if there's no history. */
     public Optional<String> goBack() {
-        String previous = menuKeyHistory.poll();
+        return goBackEntry().map(NavigationEntry::key);
+    }
+
+    /**
+     * InventoryMenu Phase 9 (E9): pops the back-navigation stack and makes that
+     * entry (key + ctx) current - backs {@code menu.back}. Empty when there is
+     * no previous entry (the caller closes the menu instead).
+     */
+    public synchronized Optional<NavigationEntry> goBackEntry() {
+        NavigationEntry previous = history.poll();
         if (previous != null) {
-            currentMenuKey = previous;
+            current = previous;
+            variableCache.clear();
         }
         return Optional.ofNullable(previous);
     }
 
     /** Clears navigation state entirely (e.g. when the top-level menu is closed, not just navigated away from). */
-    public void resetNavigation() {
-        currentMenuKey = null;
-        menuKeyHistory.clear();
+    public synchronized void resetNavigation() {
+        current = null;
+        history.clear();
     }
 
     /** Current page for a section (keyed by its template id), defaulting to 0. */
@@ -201,15 +335,49 @@ public final class MenuSession {
      * past a single render. Keyed by the binding's stable persisted id, which
      * does survive reassembly.
      */
-    public record CachedVariable(String value, long resolvedAtTick) {
+    /**
+     * InventoryMenu Phase 9: {@code value} is the resolved <em>shape</em> - a
+     * {@code String}, a {@code List<String>} (E8 lore expansion) or {@code null}
+     * (E8 omission) - so the refresh policies apply to every shape alike.
+     * {@code rowIdentity} (E3) is the identity of the row a row-scoped entry was
+     * resolved for ({@link MenuRowKey#menuRowKey()} or the row itself); a
+     * different row at the same position is a cache miss.
+     */
+    public record CachedVariable(Object value, long resolvedAtTick, Object rowIdentity) {
+        public CachedVariable(Object value, long resolvedAtTick) {
+            this(value, resolvedAtTick, null);
+        }
+    }
+
+    /**
+     * InventoryMenu Phase 9 (E3): a variable cache key - the binding's persisted
+     * id plus an optional scope. {@code scope} is null for ordinary bindings;
+     * for a row-template binding it is the row's position (section id + index
+     * on the page), so N rows rendered through one template never share one
+     * cache entry, while memory stays bounded by slots x bindings.
+     */
+    public record CacheKey(int bindingId, Object scope) {
     }
 
     public Optional<CachedVariable> getCachedVariable(int bindingId) {
-        return Optional.ofNullable(variableCache.get(bindingId));
+        return getCachedVariable(bindingId, null);
     }
 
     public void cacheVariable(int bindingId, CachedVariable value) {
-        variableCache.put(bindingId, value);
+        cacheVariable(bindingId, null, value);
+    }
+
+    public Optional<CachedVariable> getCachedVariable(int bindingId, Object scope) {
+        return Optional.ofNullable(variableCache.get(new CacheKey(bindingId, scope)));
+    }
+
+    public void cacheVariable(int bindingId, Object scope, CachedVariable value) {
+        variableCache.put(new CacheKey(bindingId, scope), value);
+    }
+
+    /** Number of cached variable entries - exposed for tests asserting the cache stays bounded. */
+    public int cachedVariableCount() {
+        return variableCache.size();
     }
 
     /**

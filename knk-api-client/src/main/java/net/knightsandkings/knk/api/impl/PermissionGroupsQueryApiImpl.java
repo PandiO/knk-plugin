@@ -38,11 +38,16 @@ public class PermissionGroupsQueryApiImpl extends BaseApiImpl implements Permiss
                 List<PermissionGroupListItemDto> dtos = parse(json, new TypeReference<List<PermissionGroupListItemDto>>() {}, url);
                 return dtos.stream()
                     .filter(d -> d.id() != null)
-                    .map(d -> new PermissionGroupSummary(d.id(), d.name(), d.weight(), d.isPremiumTier()))
+                    .map(PermissionGroupsQueryApiImpl::toSummary)
                     .collect(Collectors.toList());
             } catch (ApiException | IOException e) {
                 throw new RuntimeException("Failed to list permission groups", e);
             }
         }, executor);
+    }
+
+    static PermissionGroupSummary toSummary(PermissionGroupListItemDto dto) {
+        double multiplier = dto.salaryMultiplier() != null ? dto.salaryMultiplier() : 1.0;
+        return new PermissionGroupSummary(dto.id(), dto.name(), dto.weight(), dto.isPremiumTier(), multiplier);
     }
 }

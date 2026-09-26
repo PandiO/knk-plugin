@@ -92,4 +92,14 @@ public interface UsersCommandApi {
     CompletableFuture<Void> freezeById(int userId, String reason);
 
     CompletableFuture<Void> unfreezeById(int userId);
+
+    /**
+     * InventoryMenu content port CP7: the same API, with every request attributed to
+     * {@code actorUserId} - the in-game staff member acting - so knk-web-api can audit-log the
+     * change under them instead of a null actor. The implementation sends it as the
+     * {@code X-Acting-User-Id} header on every call made through the returned instance; the
+     * receiver keeps no state beyond that, so callers create one per action (cheap). Whether and
+     * how the server honours the header is CONTENT_PORT_PLAN.md CP7's open server-side question.
+     */
+    UsersCommandApi withActor(int actorUserId);
 }

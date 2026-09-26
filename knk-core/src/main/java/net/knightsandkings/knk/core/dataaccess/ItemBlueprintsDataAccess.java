@@ -81,14 +81,11 @@ public class ItemBlueprintsDataAccess {
     }
 
     public CompletableFuture<Page<KnkItemBlueprint>> searchAsync(PagedQuery query) {
-        return queryApi.search(query).thenApply(page -> {
-            if (page != null && page.items() != null) {
-                for (KnkItemBlueprint itemBlueprint : page.items()) {
-                    cache.put(itemBlueprint);
-                }
-            }
-            return page;
-        });
+        // Search results are ItemBlueprintListDto summaries (no description, grade, origins,
+        // enchantments). They used to be put into the by-id cache, so a later getByIdAsync -
+        // KitGrantPlacer, /knk itemblueprints give, the item catalogue - could build an item from
+        // the summary and lose its lore (found in the menu follow-up 2026-09-26). Not cached now.
+        return queryApi.search(query);
     }
 
     public CompletableFuture<Page<KnkItemBlueprint>> listAsync(int pageNumber, int pageSize) {

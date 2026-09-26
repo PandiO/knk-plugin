@@ -78,6 +78,11 @@ commands:
     # node through KnkPermissible inside KitCommand, same reasoning /knk and /ownermode|/staffmode
     # have none (Bukkit would check its own permission tree before this executor ever ran).
 
+  menu:
+    description: "Open the Knights and Kings menu (InventoryMenu hub, docs/specs/inventory-menu/CONTENT_PORT_PLAN.md §3)"
+    usage: "/menu"
+    permission: knk.menu
+
 permissions:
   knk.admin:
     description: >-
@@ -108,6 +113,10 @@ permissions:
       knk.admin.user.xp: true
       knk.admin.user.group: true
       knk.admin.user.perm: true
+      knk.admin.user.manage: true
+      knk.admin.user.manage.all: true
+      knk.admin.user.mode: true
+      knk.admin.user.salary: true
       knk.admin.tp: true
 
   knk.admin.health:
@@ -160,6 +169,29 @@ permissions:
 
   knk.admin.street:
     description: Access to /knk street
+    default: false
+
+  knk.admin.user.manage:
+    description: >-
+      Open the in-game Player manager (InventoryMenu users.manager, content port CP8) and see its
+      hub tile. Every edit inside it is still gated by its own knk.admin.user.<property> node.
+    default: false
+
+  knk.admin.user.manage.all:
+    description: >-
+      Owner override (menu follow-up 2026-09-26): the Player manager lists every player, online and
+      offline (searchable), including yourself, and user edits - menu and /knk user - skip the
+      rank check (RankHierarchy). The per-property knk.admin.user.<property> nodes still apply.
+    default: op
+
+  knk.admin.user.mode:
+    description: >-
+      Switch another player's staff mode from the in-game Player manager (content port CP8).
+      Only to a mode the target holds the node for; owner mode is only set by its holder.
+    default: false
+
+  knk.admin.user.salary:
+    description: Pay out another player's outstanding salary from the in-game Player manager (content port CP8).
     default: false
 
   knk.admin.user.info:
@@ -354,3 +386,7 @@ permissions:
   customenchantments.command.reload:
     description: Allows reloading custom enchantment config with /ce reload
     default: op
+
+  knk.menu:
+    description: Open the InventoryMenu hub with /menu (content port CP1).
+    default: true

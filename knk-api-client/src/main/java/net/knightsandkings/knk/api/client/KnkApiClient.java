@@ -30,6 +30,7 @@ import net.knightsandkings.knk.api.impl.MenuTemplatesQueryApiImpl;
 import net.knightsandkings.knk.api.impl.PermissionsApiImpl;
 import net.knightsandkings.knk.api.impl.PermissionGroupsQueryApiImpl;
 import net.knightsandkings.knk.api.impl.KitsQueryApiImpl;
+import net.knightsandkings.knk.api.impl.TitleBracketsQueryApiImpl;
 import net.knightsandkings.knk.api.impl.KitsCommandApiImpl;
 import net.knightsandkings.knk.core.ports.api.HealthApi;
 import net.knightsandkings.knk.core.ports.api.TownsQueryApi;
@@ -55,6 +56,7 @@ import net.knightsandkings.knk.core.ports.api.MenuTemplatesQueryApi;
 import net.knightsandkings.knk.core.ports.api.PermissionsApi;
 import net.knightsandkings.knk.core.ports.api.PermissionGroupsQueryApi;
 import net.knightsandkings.knk.core.ports.api.KitsQueryApi;
+import net.knightsandkings.knk.core.ports.api.TitleBracketsQueryApi;
 import net.knightsandkings.knk.core.ports.api.KitsCommandApi;
 import net.knightsandkings.knk.core.ports.api.RegionsCommandApi;
 import okhttp3.OkHttpClient;
@@ -102,6 +104,8 @@ public class KnkApiClient {
     private final PermissionsApi permissionsApi;
     private final PermissionGroupsQueryApi permissionGroupsQueryApi;
     private final KitsQueryApi kitsQueryApi;
+    private final TitleBracketsQueryApi titleBracketsQueryApi;
+    private final net.knightsandkings.knk.core.ports.api.CategoriesQueryApi categoriesQueryApi;
     private final KitsCommandApi kitsCommandApi;
 
     private KnkApiClient(
@@ -144,6 +148,8 @@ public class KnkApiClient {
         this.permissionGroupsQueryApi = new PermissionGroupsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.kitsQueryApi = new KitsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.kitsCommandApi = new KitsCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.titleBracketsQueryApi = new TitleBracketsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.categoriesQueryApi = new net.knightsandkings.knk.api.impl.CategoriesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
     }
     
     public HealthApi getHealthApi() {
@@ -172,6 +178,16 @@ public class KnkApiClient {
 
     public KitsCommandApi getKitsCommandApi() {
         return kitsCommandApi;
+    }
+
+    /** Menu follow-up 2026-09-26: {@code GET /api/Categories} (catalogue category filter). */
+    public net.knightsandkings.knk.core.ports.api.CategoriesQueryApi getCategoriesQueryApi() {
+        return categoriesQueryApi;
+    }
+
+    /** InventoryMenu content port CP3: {@code GET /api/title-brackets}. */
+    public TitleBracketsQueryApi getTitleBracketsQueryApi() {
+        return titleBracketsQueryApi;
     }
 
     public MinecraftMaterialRefsQueryApi getMinecraftMaterialRefsQueryApi() {

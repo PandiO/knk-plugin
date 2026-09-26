@@ -1,7 +1,9 @@
 package net.knightsandkings.knk.paper.menu;
 
+import net.knightsandkings.knk.core.menu.MenuContextParams;
 import net.knightsandkings.knk.core.menu.RuntimeMenuItem;
 import net.knightsandkings.knk.core.menu.RuntimeMenuSection;
+import net.knightsandkings.knk.core.menu.SectionView;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.List;
@@ -11,9 +13,8 @@ import java.util.Map;
  * The computed "desired state" of one render pass: which {@link ItemStack}
  * goes in which absolute slot, and which {@link RuntimeMenuItem} (if any)
  * backs that slot for click routing. Deliberately separate from actually
- * touching a Bukkit {@code Inventory} - computing this is the "expensive
- * work" ARCHITECTURE_DESIGN.md §6.3 says belongs off the main thread;
- * applying it is the cheap part that must happen back on the main thread.
+ * touching a Bukkit {@code Inventory} - applying it is the cheap part that
+ * must happen on the main thread.
  * <p>
  * {@code sectionsBySlot} (IMPLEMENTATION_PLAN.md Phase 7) is the other half
  * of {@code itemsBySlot}'s click-routing snapshot: a section-scoped action
@@ -24,18 +25,29 @@ import java.util.Map;
  * <p>
  * {@code controlHintLoreBySlot} (post-Phase-8 QOL follow-up) is a third,
  * independent slot-keyed map: the "what does this button do" lore lines
- * {@code MenuRenderer.resolveControlHints} precomputes for every function
- * button, shown only while the viewing player holds shift. Captured here
- * (and copied onto {@link OpenMenuContext} alongside the other two maps)
- * so {@link MenuControlHintListener} can toggle them live off a
- * {@code PlayerToggleSneakEvent} without a full re-render - see that
- * class's own javadoc for why a sneak toggle, not literal hover+shift, is
- * what's actually observable here.
+ * shown only while the viewing player holds shift - see
+ * {@link MenuControlHintListener}.
+ * <p>
+ * InventoryMenu Phase 9 additions: {@code itemsBySlot} now holds the
+ * <em>rendered snapshot</em> of each item (effective display mode, actions
+ * that survived their Render conditions - E5/E6); {@code rowsBySlot} (E3) the
+ * row a row-template slot was rendered for; {@code sectionViewsBySectionId}
+ * (E9) the {@code $section$} paging facts per section, reused at click time;
+ * {@code materialNamespaceKeys} the material-ref lookups this pass needed,
+ * kept so an auto-refresh (E4) never has to repeat them; {@code menuContext}
+ * (E1) the ctx params the pass rendered with.
  */
 public record MenuRenderResult(
         Map<Integer, ItemStack> itemStacksBySlot,
         Map<Integer, RuntimeMenuItem> itemsBySlot,
         Map<Integer, RuntimeMenuSection> sectionsBySlot,
-        Map<Integer, List<String>> controlHintLoreBySlot
+        Map<Integer, List<String>> controlHintLoreBySlot,
+        Map<Integer, Object> rowsBySlot,
+        Map<Integer, SectionView> sectionViewsBySectionId,
+        Map<Integer, String> materialNamespaceKeys,
+        MenuContextParams menuContext,
+        // Menu follow-up 2026-09-26: the Inventory size this render needs (a DYNAMIC menu can be
+        // shorter than its template height).
+        int totalSlots
 ) {
 }

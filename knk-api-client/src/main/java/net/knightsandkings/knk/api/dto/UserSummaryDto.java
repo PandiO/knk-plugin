@@ -20,5 +20,7 @@ public record UserSummaryDto (
     @JsonProperty("premiumTierName") String premiumTierName,
     @JsonProperty("premiumTierExpiresAt") java.time.OffsetDateTime premiumTierExpiresAt,
     @JsonProperty("isFrozen") boolean isFrozen,
-    @JsonProperty("frozenReason") String frozenReason
+    @JsonProperty("frozenReason") String frozenReason,
+    // "Male" / "Female" / null (InventoryMenu content port CP3).
+    @JsonProperty("gender") String gender
 ) {}

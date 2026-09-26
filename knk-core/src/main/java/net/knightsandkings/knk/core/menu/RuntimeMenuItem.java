@@ -20,6 +20,10 @@ import java.util.function.Predicate;
  * Menu's Inventory (not relative to the owning section) - it pins the item in
  * place, bypassing the section's automatic grid-fill/pagination entirely; see
  * {@link RuntimeMenuSection#resolveSlots}.
+ * <p>
+ * {@code rowTemplate} (InventoryMenu Phase 9, E3): this item is its section's
+ * row template - never placed itself; each row the section's content source
+ * yields is rendered through it with root {@code $row$}.
  */
 public record RuntimeMenuItem(
         Integer id,
@@ -34,8 +38,35 @@ public record RuntimeMenuItem(
         String actionPermission,
         List<KnkVariableBinding> variableBindings,
         List<KnkActionBinding> actions,
-        List<KnkConditionBinding> conditions
+        List<KnkConditionBinding> conditions,
+        boolean rowTemplate
 ) {
+
+    /** Pre-Phase-9 shape: not a row template. */
+    public RuntimeMenuItem(Integer id, int sortOrder, Integer slotOverride, Integer materialRefId, int amount,
+                           String chatColorName, String chatColorDescription, MenuDisplayMode displayMode,
+                           String visibilityPermission, String actionPermission,
+                           List<KnkVariableBinding> variableBindings, List<KnkActionBinding> actions,
+                           List<KnkConditionBinding> conditions) {
+        this(id, sortOrder, slotOverride, materialRefId, amount, chatColorName, chatColorDescription, displayMode,
+                visibilityPermission, actionPermission, variableBindings, actions, conditions, false);
+    }
+
+    /**
+     * InventoryMenu Phase 9 (E5/E6): the rendered snapshot of this item for one
+     * render pass - the effective display mode (a {@code DisplayMode} binding may
+     * override the column) and the actions that survived their Render-phase
+     * conditions. Stored per slot for click routing, so a click sees exactly
+     * what was rendered.
+     */
+    public RuntimeMenuItem withRenderState(MenuDisplayMode effectiveDisplayMode, List<KnkActionBinding> effectiveActions) {
+        if (effectiveDisplayMode == displayMode && effectiveActions.equals(actions)) {
+            return this;
+        }
+        return new RuntimeMenuItem(id, sortOrder, slotOverride, materialRefId, amount, chatColorName,
+                chatColorDescription, effectiveDisplayMode, visibilityPermission, actionPermission,
+                variableBindings, List.copyOf(effectiveActions), conditions, rowTemplate);
+    }
 
     /**
      * IMPLEMENTATION_PLAN.md Phase 4 / DESIGN_REVIEW.md §2.4: whether this item

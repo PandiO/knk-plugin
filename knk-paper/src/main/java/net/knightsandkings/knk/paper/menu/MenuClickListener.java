@@ -6,6 +6,14 @@ import net.knightsandkings.knk.core.menu.ActionRegistry;
 import net.knightsandkings.knk.core.menu.ConditionOutcome;
 import net.knightsandkings.knk.core.menu.ConditionRegistry;
 import net.knightsandkings.knk.core.menu.MenuActionException;
+import net.knightsandkings.knk.core.menu.MenuConditionEvaluator;
+import net.knightsandkings.knk.core.menu.MenuConditionPhase;
+import net.knightsandkings.knk.core.menu.MenuVariableProviderRegistry;
+import net.knightsandkings.knk.core.menu.MenuVariableScope;
+import net.knightsandkings.knk.core.menu.MenuStateView;
+import net.knightsandkings.knk.core.menu.MenuView;
+import net.knightsandkings.knk.core.menu.RuntimeMenu;
+import net.knightsandkings.knk.core.menu.SectionView;
 import net.knightsandkings.knk.core.menu.MenuDisplayMode;
 import net.knightsandkings.knk.core.menu.MenuParams;
 import net.knightsandkings.knk.core.menu.MenuSession;
@@ -52,14 +60,17 @@ public final class MenuClickListener implements Listener {
     private final ActionRegistry<MenuActionContext> actionRegistry;
     private final ConditionRegistry<MenuActionContext> conditionRegistry;
     private final MenuService menuService;
+    private final MenuVariableProviderRegistry<Player> variableRegistry;
 
     public MenuClickListener(
             OpenMenuContextRegistry openMenuContextRegistry,
             MenuSessionRegistry sessionRegistry,
             ActionRegistry<MenuActionContext> actionRegistry,
             ConditionRegistry<MenuActionContext> conditionRegistry,
-            MenuService menuService
+            MenuService menuService,
+            MenuVariableProviderRegistry<Player> variableRegistry
     ) {
+        this.variableRegistry = variableRegistry;
         this.openMenuContextRegistry = openMenuContextRegistry;
         this.sessionRegistry = sessionRegistry;
         this.actionRegistry = actionRegistry;
@@ -128,9 +139,15 @@ public final class MenuClickListener implements Listener {
         // right now - never reused from whatever render pass produced the
         // Inventory the player is looking at, which is the entire point of a
         // click-time (re-)check instead of trusting render-time state alone.
+        //
+        // InventoryMenu Phase 9: the click scope is the same shape as the render
+        // scope - feature roots (providers re-run now, E2), $ctx$ (E1), $menu$/
+        // $section$ (E9) and, for a row-template slot, the $row$ the slot was
+        // rendered with (E3) - so params interpolate exactly as they rendered.
+        Object row = context.get().rowsBySlot().get(slot);
+        MenuVariableScope scope = clickScope(player, session.get(), context.get(), section, row);
         MenuActionContext actionContext = new MenuActionContext(
-                player, session.get(), MenuVariableContext.liveValues(player), menuService,
-                context.get().menu(), section, item);
+                player, session.get(), scope, menuService, context.get().menu(), section, item, row);
 
         // Post-Phase-8 QOL follow-up: shift-clicking a search button clears
         // the search instead of opening the anvil prompt - consolidates
@@ -199,7 +216,19 @@ public final class MenuClickListener implements Listener {
      * item and the very same click doesn't.
      */
     private void executeClick(RuntimeMenuItem item, MenuActionContext context, Player player) {
-        ConditionOutcome itemOutcome = evaluateConditions(item.conditions(), context);
+        Map<String, Object> scope = context.variableContext();
+
+        // InventoryMenu Phase 9 (E5): Render conditions are re-checked silently -
+        // the item may have become invisible since it was rendered; ignore the
+        // click and repaint so the player sees the current state.
+        if (!MenuConditionEvaluator.evaluate(item.conditions(), MenuConditionPhase.RENDER, conditionRegistry, context, scope)
+                .allowed()) {
+            menuService.refreshOpenMenu(player);
+            return;
+        }
+
+        ConditionOutcome itemOutcome = MenuConditionEvaluator.evaluate(
+                item.conditions(), MenuConditionPhase.CLICK, conditionRegistry, context, scope);
         if (!itemOutcome.allowed()) {
             if (itemOutcome.denialMessage() != null) {
                 player.sendMessage(ChatColor.YELLOW + itemOutcome.denialMessage());
@@ -208,15 +237,35 @@ public final class MenuClickListener implements Listener {
         }
 
         for (KnkActionBinding action : item.actions()) {
-            ConditionOutcome actionOutcome = evaluateConditions(action.conditions(), context);
+            if (!MenuConditionEvaluator.evaluate(action.conditions(), MenuConditionPhase.RENDER, conditionRegistry, context, scope)
+                    .allowed()) {
+                continue;
+            }
+            ConditionOutcome actionOutcome = MenuConditionEvaluator.evaluate(
+                    action.conditions(), MenuConditionPhase.CLICK, conditionRegistry, context, scope);
             if (!actionOutcome.allowed()) {
                 if (actionOutcome.denialMessage() != null) {
                     player.sendMessage(ChatColor.YELLOW + actionOutcome.denialMessage());
                 }
                 continue;
             }
-            actionRegistry.execute(action.actionTypeId(), context, MenuParams.parse(action.paramsJson()));
+            // E3: $...$ in params values resolve against the click scope (incl. $row$).
+            actionRegistry.execute(action.actionTypeId(), context, MenuParams.resolve(action.paramsJson(), scope));
         }
+    }
+
+    private MenuVariableScope clickScope(Player player, MenuSession session, OpenMenuContext open,
+                                         RuntimeMenuSection section, Object row) {
+        RuntimeMenu menu = open.menu();
+        MenuVariableScope scope = variableRegistry.scope(player, session.currentContext(),
+                Map.of(MenuVariableProviderRegistry.ROOT_MENU, MenuView.of(menu.key(), menu.title(), session),
+                        MenuVariableProviderRegistry.ROOT_STATE, MenuStateView.of(session)));
+        if (section != null) {
+            SectionView sectionView = open.sectionView(section.id());
+            scope = scope.with(MenuVariableProviderRegistry.ROOT_SECTION, sectionView != null ? sectionView
+                    : new SectionView(section.name(), session.getPage(section.id()), 0));
+        }
+        return row != null ? scope.with(MenuVariableProviderRegistry.ROOT_ROW, row) : scope;
     }
 
     /** Whether {@code item} has an action bound to the given {@code actionTypeId}, anywhere in its actions list. */
@@ -229,18 +278,4 @@ public final class MenuClickListener implements Listener {
         return false;
     }
 
-    /** Every condition in the list must pass (AND); the first denial found wins and short-circuits the rest. */
-    private ConditionOutcome evaluateConditions(List<KnkConditionBinding> conditions, MenuActionContext context) {
-        if (conditions == null || conditions.isEmpty()) {
-            return ConditionOutcome.allow();
-        }
-        for (KnkConditionBinding condition : conditions) {
-            ConditionOutcome outcome = conditionRegistry.test(
-                    condition.conditionTypeId(), context, MenuParams.parse(condition.paramsJson()));
-            if (!outcome.allowed()) {
-                return outcome;
-            }
-        }
-        return ConditionOutcome.allow();
-    }
 }

@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Predicate;
 
 /**
@@ -38,11 +39,26 @@ public record RuntimeMenuSection(
         List<RuntimeMenuItem> items,
         List<KnkVariableBinding> variableBindings,
         String contentSourceId,
-        Map<String, String> contentSourceParams
+        Map<String, String> contentSourceParams,
+        // Menu follow-up 2026-09-26: rows at the top of this section a DYNAMIC menu always keeps.
+        int minHeight
 ) {
 
     public RuntimeMenuSection {
         contentSourceParams = contentSourceParams == null ? Map.of() : Map.copyOf(contentSourceParams);
+        minHeight = Math.max(0, Math.min(minHeight, height));
+    }
+
+    /** Shape before minHeight (0 = no protected rows). */
+    public RuntimeMenuSection(Integer id, String name, MenuSectionKind kind, int sortOrder, int displaySlot, int width,
+                              int height, MenuPositionMode positionMode, MenuAlignVertical alignVertical,
+                              MenuAlignHorizontal alignHorizontal, MenuOverflowMode overflow, MenuListMode listMode,
+                              MenuRenderPriority priority, String visibilityPermission, boolean searchable,
+                              List<RuntimeMenuItem> items, List<KnkVariableBinding> variableBindings,
+                              String contentSourceId, Map<String, String> contentSourceParams) {
+        this(id, name, kind, sortOrder, displaySlot, width, height, positionMode, alignVertical, alignHorizontal, overflow,
+                listMode, priority, visibilityPermission, searchable, items, variableBindings, contentSourceId,
+                contentSourceParams, 0);
     }
 
     /**
@@ -60,6 +76,15 @@ public record RuntimeMenuSection(
      */
     public boolean hasContentSource() {
         return contentSourceId != null && !contentSourceId.isBlank();
+    }
+
+    /**
+     * InventoryMenu Phase 9 (E3): this section's row template (the item with
+     * {@link RuntimeMenuItem#rowTemplate()} set), if any - the item every row a
+     * row-yielding content source returns is rendered through.
+     */
+    public Optional<RuntimeMenuItem> rowTemplate() {
+        return items.stream().filter(RuntimeMenuItem::rowTemplate).findFirst();
     }
 
     /**
@@ -154,7 +179,10 @@ public record RuntimeMenuSection(
         List<RuntimeMenuItem> auto = new ArrayList<>();
         if (!hasContentSource()) {
             for (RuntimeMenuItem item : items) {
-                if (item.slotOverride() == null && contentFilter.test(item)) {
+                // A row template is never placed itself (InventoryMenu Phase 9, E3) -
+                // MenuDefinitionValidator rejects one outside a content-source
+                // section, this just keeps a broken menu from rendering it raw.
+                if (item.slotOverride() == null && !item.rowTemplate() && contentFilter.test(item)) {
                     auto.add(item);
                 }
             }

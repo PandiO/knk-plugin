@@ -17,5 +17,7 @@ public record MenuItemTemplateDto(
         @JsonProperty("actionPermission") String actionPermission,
         @JsonProperty("variableBindings") List<VariableBindingDto> variableBindings,
         @JsonProperty("actions") List<ActionBindingDto> actions,
-        @JsonProperty("conditions") List<ConditionBindingDto> conditions
+        @JsonProperty("conditions") List<ConditionBindingDto> conditions,
+        // InventoryMenu Phase 9 (E3): renders each content-source row with root $row$.
+        @JsonProperty("isRowTemplate") Boolean isRowTemplate
 ) {}

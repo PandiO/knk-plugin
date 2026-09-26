@@ -8,6 +8,8 @@ import java.util.Optional;
  * of the assembled Menu -&gt; MenuSection -&gt; MenuItem composite tree
  * (composite pattern per ARCHITECTURE_DESIGN.md §2.1), produced by
  * {@link MenuTemplateAssembler} from a persisted {@code KnkMenuTemplate}.
+ * <p>
+ * {@code autoRefreshTicks} (InventoryMenu Phase 9, E4): 0 = off.
  */
 public record RuntimeMenu(
         String key,
@@ -15,8 +17,34 @@ public record RuntimeMenu(
         int height,
         MenuGrowth growth,
         Integer backgroundMaterialRefId,
-        List<RuntimeMenuSection> sections
+        List<RuntimeMenuSection> sections,
+        int autoRefreshTicks,
+        // Menu follow-up 2026-09-26: a DYNAMIC menu drops rows left empty after rendering down to
+        // minHeight (>= 1); backgroundMaterial = filler by name (null = engine default).
+        int minHeight,
+        String backgroundMaterial
 ) {
+
+    public RuntimeMenu {
+        minHeight = Math.max(1, Math.min(minHeight, height));
+    }
+
+    /** Phase 9 shape: static-height defaults (minHeight 1, default background). */
+    public RuntimeMenu(String key, String title, int height, MenuGrowth growth, Integer backgroundMaterialRefId,
+                       List<RuntimeMenuSection> sections, int autoRefreshTicks) {
+        this(key, title, height, growth, backgroundMaterialRefId, sections, autoRefreshTicks, 1, null);
+    }
+
+    /** Pre-Phase-9 shape: no auto-refresh. */
+    public RuntimeMenu(String key, String title, int height, MenuGrowth growth, Integer backgroundMaterialRefId,
+                       List<RuntimeMenuSection> sections) {
+        this(key, title, height, growth, backgroundMaterialRefId, sections, 0);
+    }
+
+    /** InventoryMenu Phase 9 (E4): whether open instances re-render every {@link #autoRefreshTicks} ticks. */
+    public boolean autoRefreshes() {
+        return autoRefreshTicks > 0;
+    }
 
     /** Total inventory slots for this menu ({@code height} rows of 9). */
     public int totalSlots() {
