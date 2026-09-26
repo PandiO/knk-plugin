@@ -39,7 +39,8 @@ class SiegeCommandAliasesTest {
         Command reply = command("reply");
         when(commandMap.getCommand("reply")).thenReturn(reply);
         when(commandMap.getCommand("r")).thenReturn(reply);
-        when(commandMap.getCommand("teammsg")).thenReturn(command("minecraft:teammsg"));
+        Command teammsg = command("minecraft:teammsg"); // stubbed before, not inside, the next when(...)
+        when(commandMap.getCommand("teammsg")).thenReturn(teammsg);
         resolver = SiegeCommandAliases.resolver(() -> commandMap);
     }
 
