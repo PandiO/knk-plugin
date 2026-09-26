@@ -171,6 +171,8 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.core.dataaccess.PermissionGroupsDataAccess permissionGroupsDataAccess;
     private net.knightsandkings.knk.paper.user.UserAdminService userAdminService;
     private net.knightsandkings.knk.paper.user.SalaryPayoutScheduler salaryPayoutScheduler;
+    private net.knightsandkings.knk.paper.discovery.DiscoveryEligibility discoveryEligibility;
+    private net.knightsandkings.knk.paper.discovery.DiscoveryFlushTask discoveryFlushTask;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private PermissionsDataAccess permissionsDataAccess;
     private KnkPermissible knkPermissible;
@@ -558,6 +560,7 @@ public class KnKPlugin extends JavaPlugin {
             );
             getServer().getPluginManager().registerEvents(salaryPayoutScheduler, this);
             salaryPayoutScheduler.start();
+            startDomainDiscovery();
             // Rank changes made outside the plugin (web app, expiring temporary rank) show right away.
             if (playerNotificationPoller != null) {
                 playerNotificationPoller.setRankChangedHandler(userAdminService::resyncDisplay);
@@ -788,6 +791,11 @@ public class KnKPlugin extends JavaPlugin {
         if (salaryPayoutScheduler != null) {
             salaryPayoutScheduler.stop();
         }
+        if (discoveryFlushTask != null) {
+            // Unsent candidates and grants still in flight go to the spool, replayed on the next start.
+            discoveryFlushTask.stop();
+            discoveryFlushTask.spoolEverything();
+        }
         if (cacheManager != null) {
             getLogger().info("Logging final cache metrics...");
             cacheManager.logMetrics();
@@ -804,6 +812,58 @@ public class KnKPlugin extends JavaPlugin {
             regionLookupExecutor.shutdownNow();
         }
         getLogger().info("KnightsAndKings Plugin Disabled!");
+    }
+
+    /**
+     * Domain discovery (KNG-20, docs/specs/domain-discovery DESIGN.md §3.6): first entry into a Town,
+     * District or Structure is granted by the API once, with sound, particles and the reward lines.
+     * Needs the user cache, mode/freeze/loading state and the scoreboard refresher, so it starts after
+     * the salary scheduler.
+     */
+    private void startDomainDiscovery() {
+        KnkConfig.DiscoveryConfig discoveryConfig = config.discovery();
+        if (!discoveryConfig.enabled()) {
+            getLogger().info("Domain discovery disabled (discovery.enabled: false)");
+            return;
+        }
+        java.time.Clock clock = java.time.Clock.systemUTC();
+        this.discoveryEligibility = new net.knightsandkings.knk.paper.discovery.DiscoveryEligibility(
+            true, joinLoadingGuard::isLoading, modeService::getActiveMode, adminFreezeManager::isFrozen,
+            discoveryConfig.excludedGameModes(), discoveryConfig.excludeSiegeParticipants()
+        );
+        // Siege isn't on trunk: when it lands, plug SiegeService.isParticipant in with
+        // getDiscoveryEligibility().setSiegeParticipantCheck(...).
+        net.knightsandkings.knk.core.discovery.DiscoveryTracker discoveryTracker =
+            new net.knightsandkings.knk.core.discovery.DiscoveryTracker(discoveryConfig.maxRequestsPerMinute());
+        net.knightsandkings.knk.core.discovery.DiscoverySpool discoverySpool = new net.knightsandkings.knk.core.discovery.DiscoverySpool(
+            new java.io.File(getDataFolder(), discoveryConfig.spoolDirectory()).toPath(), getLogger()
+        );
+        net.knightsandkings.knk.core.discovery.DiscoveryRecorder discoveryRecorder = new net.knightsandkings.knk.core.discovery.DiscoveryRecorder(
+            apiClient.getDiscoveriesApi(), net.knightsandkings.knk.core.dataaccess.RetryPolicy.defaultPolicy(), discoverySpool, getLogger()
+        );
+        net.knightsandkings.knk.paper.discovery.DiscoveryEffects discoveryEffects = new net.knightsandkings.knk.paper.discovery.DiscoveryEffects(
+            this, discoveryConfig, usersDataAccess,
+            (player, summary) -> net.knightsandkings.knk.paper.utils.ScoreboardUtil.setScoreboard(List.of(player), knkPermissible, summary)
+        );
+        this.discoveryFlushTask = new net.knightsandkings.knk.paper.discovery.DiscoveryFlushTask(
+            this, discoveryTracker, discoveryRecorder, discoveryEffects, clock,
+            discoveryConfig.batchWindowTicks(), discoveryConfig.replayIntervalSeconds()
+        );
+        net.knightsandkings.knk.paper.discovery.DomainDiscoveryListener discoveryListener =
+            new net.knightsandkings.knk.paper.discovery.DomainDiscoveryListener(
+                this, discoveryTracker, discoveryRecorder, apiClient.getDiscoveriesApi(), discoveryEligibility,
+                discoveryFlushTask, clock
+            );
+        getServer().getPluginManager().registerEvents(discoveryListener, this);
+        discoveryFlushTask.start();
+        discoveryListener.startOnlinePlayers(uuid -> cacheManager.getUserCache().getByUuid(uuid)
+            .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null));
+        getLogger().info("Domain discovery started (spool: " + discoverySpool.directory() + ")");
+    }
+
+    /** Domain discovery's exclusions; null when discovery is disabled. The siege hook goes here. */
+    public net.knightsandkings.knk.paper.discovery.DiscoveryEligibility getDiscoveryEligibility() {
+        return discoveryEligibility;
     }
 
     private void registerEvents(WorldGuardRegionTracker regionTracker) {

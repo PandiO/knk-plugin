@@ -101,12 +101,55 @@ public class ConfigLoader {
             messagesSection.getString("merge-complete", "&aAccount merge complete. Your account now has {coins} coins, {gems} gems, and {exp} XP.")
         );
         
-        KnkConfig knkConfig = new KnkConfig(apiConfig, cacheConfig, accountConfig, messagesConfig);
+        KnkConfig knkConfig = new KnkConfig(apiConfig, cacheConfig, accountConfig, messagesConfig,
+            loadDiscovery(config.getConfigurationSection("discovery")));
         knkConfig.validate();
         
         return knkConfig;
     }
     
+    /** Domain discovery; every key has a default, so a missing section means "on, with defaults". */
+    static KnkConfig.DiscoveryConfig loadDiscovery(ConfigurationSection section) {
+        KnkConfig.DiscoveryConfig defaults = KnkConfig.DiscoveryConfig.defaults();
+        if (section == null) {
+            return defaults;
+        }
+        KnkConfig.DiscoveryConfig.EffectsConfig effectDefaults = defaults.effects();
+        ConfigurationSection effects = section.getConfigurationSection("effects");
+        KnkConfig.DiscoveryConfig.EffectsConfig effectsConfig = effects == null ? effectDefaults
+            : new KnkConfig.DiscoveryConfig.EffectsConfig(
+                effects.getString("sound", effectDefaults.sound()),
+                (float) effects.getDouble("sound-volume", effectDefaults.soundVolume()),
+                (float) effects.getDouble("sound-pitch", effectDefaults.soundPitch()),
+                effects.getString("particle", effectDefaults.particle()),
+                effects.getInt("particle-count", effectDefaults.particleCount()),
+                effects.getDouble("particle-spread", effectDefaults.particleSpread()),
+                effects.getBoolean("town-firework", effectDefaults.townFirework())
+            );
+        KnkConfig.DiscoveryConfig.MessagesConfig messageDefaults = defaults.messages();
+        ConfigurationSection messages = section.getConfigurationSection("messages");
+        KnkConfig.DiscoveryConfig.MessagesConfig messagesConfig = messages == null ? messageDefaults
+            : new KnkConfig.DiscoveryConfig.MessagesConfig(
+                messages.getString("discovered", messageDefaults.discovered()),
+                messages.getString("replay-summary", messageDefaults.replaySummary())
+            );
+        java.util.List<String> gameModes = section.contains("excluded-game-modes")
+            ? section.getStringList("excluded-game-modes")
+            : KnkConfig.DiscoveryConfig.DEFAULT_EXCLUDED_GAME_MODES;
+        return new KnkConfig.DiscoveryConfig(
+            section.getBoolean("enabled", defaults.enabled()),
+            section.getInt("batch-window-ticks", defaults.batchWindowTicks()),
+            section.getInt("max-requests-per-minute", defaults.maxRequestsPerMinute()),
+            KnkConfig.DiscoveryConfig.parseGameModes(gameModes),
+            section.getBoolean("exclude-siege-participants", defaults.excludeSiegeParticipants()),
+            section.getString("spool-directory", defaults.spoolDirectory()),
+            section.getInt("replay-interval-seconds", defaults.replayIntervalSeconds()),
+            effects == null ? defaults.effectSpacingTicks() : effects.getInt("spacing-ticks", defaults.effectSpacingTicks()),
+            effectsConfig,
+            messagesConfig
+        );
+    }
+
     private static KnkConfig.EntityCacheSettings loadEntityCacheSettings(ConfigurationSection cacheSection) {
         ConfigurationSection entitiesSection = cacheSection.getConfigurationSection("entities");
         if (entitiesSection == null) {

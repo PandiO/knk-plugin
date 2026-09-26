@@ -72,6 +72,44 @@ player-notifications:
   # How often the plugin polls the API for them (skipped while no players are online)
   poll-interval-seconds: 2
 
+# Domain discovery (Linear KNG-20, knk-workspace docs/specs/domain-discovery/DESIGN.md §3.6):
+# the first time a player enters a Town, District or Structure it is recorded and rewarded once.
+# knk-web-api decides everything that matters (which regions are domains, the amounts, the
+# once-per-player rule, an hourly cap); these settings only control detection and effects.
+# Players in staff/owner mode, frozen, still loading, in an excluded game mode or in a siege
+# discover nothing - they discover a place the next time they are in it without being excluded.
+discovery:
+  enabled: true
+  # How often (ticks) the regions players entered are sent to the API, one request per player
+  batch-window-ticks: 20
+  # At most this many discovery requests per player per minute; the rest waits
+  max-requests-per-minute: 12
+  excluded-game-modes: [CREATIVE, SPECTATOR]
+  exclude-siege-participants: true
+  # Under the plugin folder: discoveries made while the API was unreachable, one file per
+  # player, replayed every replay-interval-seconds and on the player's next join
+  spool-directory: discovery-spool
+  replay-interval-seconds: 60
+  effects:
+    # A Bukkit Sound name (or a namespaced sound key such as minecraft:ui.toast.challenge_complete)
+    sound: UI_TOAST_CHALLENGE_COMPLETE
+    sound-volume: 0.8
+    sound-pitch: 1.0
+    # A Bukkit Particle name that needs no extra data
+    particle: HAPPY_VILLAGER
+    particle-count: 30
+    particle-spread: 0.6
+    # An extra firework burst when a Town is discovered
+    town-firework: true
+    # Ticks between the effects of several places discovered at once (Town, then District, ...)
+    spacing-ticks: 10
+  messages:
+    # One line per place, followed by its reward lines. {type} = "the town"/"the district"/...,
+    # {parent} = " in &a<town>" for Districts and Structures (empty for a Town)
+    discovered: "&bYou discovered {type} &a{name}&b{parent}!"
+    # Shown instead when discoveries made while the API was down are granted later
+    replay-summary: "&bWhile the server was busy you discovered &a{count}&b place(s):"
+
 # Gate structure state synchronization
 gates:
   # How often (seconds) the plugin pushes the current open/closed/destroyed state of every
