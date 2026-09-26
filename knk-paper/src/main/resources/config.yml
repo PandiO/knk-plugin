@@ -70,6 +70,21 @@ player-notifications:
   # How often the plugin polls the API for them (skipped while no players are online)
   poll-interval-seconds: 2
 
+# Teleport engine (docs/specs/teleport/DESIGN.md §3.11, knk-workspace). Staff teleports (/tp,
+# /tphere, /knk tp) are instant and skip warmup, cooldown, combat tag and the safe-spot check; the
+# settings below apply to player teleports (/tpa, /spawn, /warp, /back - later phases).
+teleport:
+  # Seconds a player waits before teleporting; moving to another block or taking damage cancels it
+  warmup-seconds: 5            # v1 default
+  # Warmup for holders of knk.teleport.warmup.short (granted to the Noble premium tier and up)
+  warmup-short-seconds: 3      # v1 premium
+  # Seconds after a player teleport before the same kind of teleport can be used again
+  cooldown-seconds: 30
+  # A PvP hit (dealt or taken) blocks player teleports for this long
+  combat-tag-seconds: 10       # v1 Main.combat
+  # How far (blocks) to look for a safe spot around an unsafe destination before refusing
+  safe-search-radius: 3
+
 # Gate structure state synchronization
 gates:
   # How often (seconds) the plugin pushes the current open/closed/destroyed state of every

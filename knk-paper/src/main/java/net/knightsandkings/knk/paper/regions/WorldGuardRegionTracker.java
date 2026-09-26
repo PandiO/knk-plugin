@@ -10,6 +10,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
+import java.util.function.Predicate;
 import java.util.logging.Logger;
 
 import org.bukkit.Bukkit;
@@ -55,6 +56,8 @@ public class WorldGuardRegionTracker {
     private final Map<UUID, Set<String>> regionsByPlayer = new HashMap<>();
     private final Map<String, Long> failedRegionLookups = new ConcurrentHashMap<>();
     private final Map<String, CompletableFuture<Void>> inFlightLookups = new ConcurrentHashMap<>();
+    // Who may ignore AllowEntry/AllowExit denials (knk.region.bypass, docs/specs/teleport/DESIGN.md §4 D11).
+    private volatile Predicate<Player> denialBypass = player -> false;
     
     private static final long FAILED_LOOKUP_COOLDOWN_MS = 30000;  // 30 second cooldown
 
@@ -148,6 +151,40 @@ public class WorldGuardRegionTracker {
         }
         
         return decision;
+    }
+
+    /**
+     * Players matching {@code bypass} are never stopped by an AllowEntry/AllowExit denial - neither
+     * by {@code WorldGuardRegionListener} nor by the delayed re-validation below.
+     */
+    public void setDenialBypass(Predicate<Player> bypass) {
+        this.denialBypass = bypass != null ? bypass : player -> false;
+    }
+
+    public boolean bypassesDenials(Player player) {
+        return player != null && denialBypass.test(player);
+    }
+
+    /**
+     * Would moving {@code player} to {@code to} be refused by a domain's AllowEntry/AllowExit?
+     * Side-effect free (no region events, no tracked-region update, no gate control) and cache-only,
+     * for the teleport engine's up-front check (docs/specs/teleport/DESIGN.md §3.4). Main thread only.
+     *
+     * @return a deny decision, or null when allowed or not decidable from the cache
+     */
+    public RegionTransitionDecision previewAccess(Player player, Location to) {
+        if (player == null || to == null || to.getWorld() == null) {
+            return null;
+        }
+        Set<String> oldRegions = regionsByPlayer.get(player.getUniqueId());
+        if (oldRegions == null) {
+            oldRegions = getRegionNamesAt(player.getLocation());
+        }
+        Set<String> newRegions = getRegionNamesAt(to);
+        if (oldRegions.equals(newRegions)) {
+            return null;
+        }
+        return transitionService.previewAccess(oldRegions, newRegions);
     }
 
     public void handleQuit(Player player) {
@@ -377,7 +414,11 @@ public class WorldGuardRegionTracker {
         // Re-run transition check with fresh data
         RegionTransitionDecision decision = transitionService.handleRegionTransition(playerId, oldRegions, currentRegions);
 
-        if (decision != null && !decision.isMovementAllowed()) {
+        if (decision != null && !decision.isMovementAllowed() && bypassesDenials(player)) {
+            if (logger != null) {
+                logger.fine("[KnK Tracker] " + player.getName() + " entry denied after revalidation, but holds the region bypass");
+            }
+        } else if (decision != null && !decision.isMovementAllowed()) {
             // Movement should have been denied - teleport player back
             if (logger != null) {
                 logger.warning("[KnK Tracker] " + player.getName() + " entry denied after revalidation, teleporting to spawn");

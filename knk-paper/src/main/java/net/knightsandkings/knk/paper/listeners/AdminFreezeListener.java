@@ -1,5 +1,7 @@
 package net.knightsandkings.knk.paper.listeners;
 
+import java.util.Set;
+
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
@@ -12,6 +14,7 @@ import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.plugin.Plugin;
 
 import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
@@ -61,6 +64,24 @@ public class AdminFreezeListener implements Listener {
             && from.getBlockZ() == to.getBlockZ();
         if (!samePosition) {
             event.setTo(from);
+        }
+    }
+
+    /**
+     * Teleports the frozen player sets off themselves (ender pearl, chorus fruit, portals) - the move
+     * handler above never sees them, PlayerTeleportEvent has its own handler list. Compared by name
+     * because the chorus-fruit cause was renamed across 1.21 releases. Command/plugin teleports stay
+     * allowed so staff can still move a frozen player (docs/specs/teleport/DESIGN.md §4 D10); the
+     * teleport engine refuses player teleports of frozen players itself (FreezeTeleportRestriction).
+     */
+    private static final Set<String> SELF_TELEPORT_CAUSES = Set.of(
+        "ENDER_PEARL", "CHORUS_FRUIT", "CONSUMABLE_EFFECT", "NETHER_PORTAL", "END_PORTAL", "END_GATEWAY");
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onTeleport(PlayerTeleportEvent event) {
+        if (freezeManager.isFrozen(event.getPlayer().getUniqueId())
+                && SELF_TELEPORT_CAUSES.contains(event.getCause().name())) {
+            event.setCancelled(true);
         }
     }
 

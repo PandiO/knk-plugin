@@ -3,6 +3,8 @@ package net.knightsandkings.knk.paper.config;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 
+import net.knightsandkings.knk.core.teleport.TeleportSettings;
+
 /**
  * Loads and parses plugin configuration from config.yml.
  */
@@ -101,12 +103,28 @@ public class ConfigLoader {
             messagesSection.getString("merge-complete", "&aAccount merge complete. Your account now has {coins} coins, {gems} gems, and {exp} XP.")
         );
         
-        KnkConfig knkConfig = new KnkConfig(apiConfig, cacheConfig, accountConfig, messagesConfig);
+        KnkConfig knkConfig = new KnkConfig(apiConfig, cacheConfig, accountConfig, messagesConfig,
+            loadTeleportSettings(config.getConfigurationSection("teleport")));
         knkConfig.validate();
         
         return knkConfig;
     }
     
+    /** The teleport: block (docs/specs/teleport/DESIGN.md §3.11); missing keys fall back to the defaults. */
+    static TeleportSettings loadTeleportSettings(ConfigurationSection section) {
+        TeleportSettings defaults = TeleportSettings.defaults();
+        if (section == null) {
+            return defaults;
+        }
+        return new TeleportSettings(
+            section.getInt("warmup-seconds", defaults.warmupSeconds()),
+            section.getInt("warmup-short-seconds", defaults.warmupShortSeconds()),
+            section.getInt("cooldown-seconds", defaults.cooldownSeconds()),
+            section.getInt("combat-tag-seconds", defaults.combatTagSeconds()),
+            section.getInt("safe-search-radius", defaults.safeSearchRadius())
+        );
+    }
+
     private static KnkConfig.EntityCacheSettings loadEntityCacheSettings(ConfigurationSection cacheSection) {
         ConfigurationSection entitiesSection = cacheSection.getConfigurationSection("entities");
         if (entitiesSection == null) {

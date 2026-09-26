@@ -2,6 +2,8 @@ package net.knightsandkings.knk.paper.config;
 
 import java.time.Duration;
 
+import net.knightsandkings.knk.core.teleport.TeleportSettings;
+
 /**
  * Plugin configuration loaded from config.yml.
  */
@@ -9,8 +11,18 @@ public record KnkConfig(
     ApiConfig api,
     CacheConfig cache,
     AccountConfig account,
-    MessagesConfig messages
+    MessagesConfig messages,
+    TeleportSettings teleport
 ) {
+    public KnkConfig {
+        // No teleport: block (e.g. an older config.yml) means the DESIGN §3.11 defaults.
+        teleport = teleport != null ? teleport : TeleportSettings.defaults();
+    }
+
+    public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages) {
+        this(api, cache, account, messages, TeleportSettings.defaults());
+    }
+
     public record ApiConfig(
         String baseUrl,
         boolean debugLogging,
