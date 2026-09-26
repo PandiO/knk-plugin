@@ -111,8 +111,10 @@ class PlayerCurrencyServiceTest {
     @Test
     void aVanishedPlayer_isLookedUpLikeAnOfflineOne() {
         when(alice.canSee(bob)).thenReturn(false);
+        UUID bobUuid = bob.getUniqueId(); // read before when(...): calling a mock inside a stubbing is a Mockito misuse
+        UserSummary bobAccount = new UserSummary(2, "bob", bobUuid, 100);
         when(usersDataAccess.getByUsernameAsync("bob")).thenReturn(CompletableFuture.completedFuture(
-            FetchResult.<UserSummary>missFetched(new UserSummary(2, "bob", bob.getUniqueId(), 100))));
+            FetchResult.<UserSummary>missFetched(bobAccount)));
         when(api.transfer(1, 2, BalanceCurrency.COINS, 50, false)).thenReturn(CompletableFuture.completedFuture(completed(50, 4950)));
 
         service.pay(alice, "bob", "50", BalanceCurrency.COINS);
