@@ -39,6 +39,7 @@ import net.knightsandkings.knk.core.dataaccess.PermissionsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MenuTemplatesDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.GradesDataAccess;
+import net.knightsandkings.knk.core.domain.item.GradeCatalog;
 import net.knightsandkings.knk.core.dataaccess.TagsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.DomainCatalogDataAccess;
 import net.knightsandkings.knk.core.menu.ActionRegistry;
@@ -116,7 +117,9 @@ import net.knightsandkings.knk.paper.listeners.WorldTaskChatListener;
 import net.knightsandkings.knk.paper.listeners.WorldTaskLocationSelectionListener;
 import net.knightsandkings.knk.paper.modes.ModeService;
 import net.knightsandkings.knk.paper.permissions.KnkPermissible;
+import net.knightsandkings.knk.paper.regions.CombatSafezoneCheck;
 import net.knightsandkings.knk.paper.regions.WorldGuardRegionTracker;
+import net.knightsandkings.knk.paper.regions.WorldGuardCombatSafezones;
 import net.knightsandkings.knk.paper.integration.WorldGuardIntegration;
 import net.knightsandkings.knk.paper.tasks.TempRegionRetentionTask;
 import net.knightsandkings.knk.paper.tasks.WgRegionIdTaskHandler;
@@ -477,6 +480,8 @@ public class KnKPlugin extends JavaPlugin {
                 config.cache().ttl(),
                 gradesQueryApi
             );
+            // KNG-6: the grade table (enchant-book level-cap divisors), readable synchronously from click handlers.
+            startGradeCatalogRefresh();
             this.tagsDataAccess = dataAccessFactory.createTagsDataAccess(
                 config.cache().ttl(),
                 tagsQueryApi
@@ -604,14 +609,9 @@ public class KnKPlugin extends JavaPlugin {
             MenuDefinitionValidationRunner.runAtStartup(menuTemplatesDataAccess, menuService, getLogger(), menuRegistries);
             getLogger().info("InventoryMenu variable resolution + load-time validation initialized (Phase 3 + 6 + 8 + 9)");
 
-            initializeEnchantmentRuntime();
-            getLogger().info("Registered custom enchantment runtime listeners and /ce command");
-
-            // Register commands
-            registerCommands();
-
-            // Register region listeners (WorldGuard)
-            // Create domain resolver for mapping WG region IDs to domain entities
+            // Create domain resolver for mapping WG region IDs to domain entities. Built before the
+            // enchantment runtime, whose Town/District combat safezones (KNG-11) read it; the
+            // constructor does no I/O.
             RegionDomainResolver regionDomainResolver = new RegionDomainResolver(
                 townsQueryApi,
                 districtsQueryApi,
@@ -625,6 +625,15 @@ public class KnKPlugin extends JavaPlugin {
             // Wire resolver into cache manager for metrics tracking
             cacheManager.setRegionResolver(regionDomainResolver);
 
+            // KNG-11: no combat exemption on main yet. When the siege minigame lands, exempt pairs its
+            // SiegeCombatListener governs, or enchantments stop working in sieges fought in towns.
+            initializeEnchantmentRuntime(new WorldGuardCombatSafezones(regionDomainResolver, (attacker, victim) -> false));
+            getLogger().info("Registered custom enchantment runtime listeners and /ce command");
+
+            // Register commands
+            registerCommands();
+
+            // Register region listeners (WorldGuard)
             // Dedicated executor for region lookup (API prefetch); daemon threads to avoid blocking shutdown.
             regionLookupExecutor = Executors.newFixedThreadPool(
                 Math.max(2, Runtime.getRuntime().availableProcessors() / 2),
@@ -996,8 +1005,34 @@ public class KnKPlugin extends JavaPlugin {
         return worldTasksApi;
     }
 
-    private void initializeEnchantmentRuntime() {
-        EnchantmentBootstrap bootstrap = new EnchantmentBootstrap(this);
+    /**
+     * Loads the grade table into {@link GradeCatalog} now and every {@code enchant-books.grade-cap.grade-refresh-minutes}
+     * (KNG-6, docs/specs/items/GRADE_DROPCHANCE.md §4). Until the first load succeeds the catalog answers with
+     * the seeded defaults, so the enchant-book cap never waits on the API.
+     */
+    private void startGradeCatalogRefresh() {
+        int minutes = Math.max(1, getConfig().getInt("enchant-books.grade-cap.grade-refresh-minutes", 10));
+        long ticks = minutes * 60L * 20L;
+        getServer().getScheduler().runTaskTimerAsynchronously(this, this::refreshGradeCatalog, 0L, ticks);
+    }
+
+    private void refreshGradeCatalog() {
+        gradesDataAccess.listAsync(1, 100).whenComplete((page, error) -> {
+            if (error != null || page == null || page.items() == null) {
+                getLogger().warning("Grade table refresh failed; keeping the previous/default enchant-book caps"
+                        + (error != null ? ": " + error.getMessage() : ""));
+                return;
+            }
+            boolean first = !GradeCatalog.getInstance().isLoaded();
+            GradeCatalog.getInstance().replace(page.items());
+            if (first) {
+                getLogger().info("Grade table loaded (" + page.items().size() + " grades) for the enchant-book level cap");
+            }
+        });
+    }
+
+    private void initializeEnchantmentRuntime(CombatSafezoneCheck safezones) {
+        EnchantmentBootstrap bootstrap = new EnchantmentBootstrap(this, safezones);
         this.enchantmentRuntime = bootstrap.initialize();
     }
 
