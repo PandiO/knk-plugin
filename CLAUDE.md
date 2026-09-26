@@ -39,6 +39,11 @@ confirmed no `pom.xml` anywhere in the repo. Targets Paper API
   `plugins/` folder of the dev server at the path set by the
   `devServerDirectory` Gradle property (currently
   `gradle.properties` → `MinecraftServer/Servers/DEV_SERVER_1.21.10`)
+- CI: `.github/workflows/build.yml` runs `./gradlew build` (all modules +
+  unit tests) on every push and PR. It exists because cloud agent sessions
+  can't reach `repo.papermc.io`, so they can't build locally — push and
+  check the GitHub run instead. As of 2026-09-26 it's only on the feature
+  branches (e.g. `claude/currency-payments`), not yet on `main`.
 
 **Structure** (all under
 `knk-paper/src/main/java/net/knightsandkings/knk/paper/` unless noted):
@@ -50,17 +55,36 @@ confirmed no `pom.xml` anywhere in the repo. Targets Paper API
 - Gate structures (relevant to the current siege-minigame/gate work):
   `gates/`
 - Config: `src/main/resources/config.yml`, `plugin.yml`
-- No dedicated `gui/`/`menus/` package exists yet — searched for
-  Menu/Gui-named classes and found none. Inventory menus (see
-  `docs/specs/inventory-menu` in `knk-workspace`) don't appear to be
-  implemented in V3 yet.
+- Inventory menus: `menu/` holds the menu engine (`MenuService`,
+  `MenuRenderer`, `MenuFeature`/`MenuFeatureRegistries`, click/lifecycle
+  listeners); the concrete menus are `MenuFeature` implementations in
+  `menu/content/` (hub, profile, kits, items catalog, user manager, ...)
+  plus feature-owned ones elsewhere (e.g. `siege/SiegeMenuFeature`). Spec:
+  `docs/specs/inventory-menu/` in `knk-workspace`.
+- Pollers: `tasks/HeadlessWorldTaskPoller` (player-less WorldTasks) and
+  `tasks/PlayerNotificationPoller` (queued in-game notifications)
 - REST client, DTOs, and auth live in the `knk-api-client` module under
-  `net/knightsandkings/knk/api/` (auth: `api/auth/BearerAuthProvider.java`)
+  `net/knightsandkings/knk/api/` (auth providers in `api/auth/`:
+  `NoAuthProvider`, `BearerAuthProvider`, `ApiKeyAuthProvider`)
 
 **Conventions:**
-- Talks to `knk-web-api` via direct REST calls from `knk-api-client`,
-  authenticated with a JWT bearer token (`BearerAuthProvider`), matching
-  the API's JWT setup — no polling/webhook indirection found.
+- Talks to `knk-web-api` via direct REST calls from `knk-api-client`.
+  Auth is set by `api.auth.type` in `config.yml` (`none`, `bearer`, or
+  `apikey`). On `main` it ships as `none`: the plugin calls anonymously.
+  With `apikey`, `ApiKeyAuthProvider` sends the `X-API-Key` header, which
+  must match the API's `Security:PluginApiKey`. The API on `master` only
+  checks that key once it's set there, and only in two places: before
+  trusting the `X-Acting-User-Id` staff attribution header, and on the
+  opt-in `[RequirePluginServiceKey]` endpoints (siege match writes, one
+  gate-structure endpoint). `bearer` (`BearerAuthProvider`) is supported
+  but isn't the plugin's model: the API issues JWTs to web-app users at
+  login (`TokenService`), with no service token for the plugin.
+  KNG-22 (unmerged branch `claude/currency-payments`) makes `apikey` the
+  default. The plugin then refuses to start with an empty `api-key`, and
+  the API rejects plugin calls to its protected routes without the key.
+- The API never pushes to the plugin. The plugin polls it instead (see
+  Pollers above: world tasks and player notifications). Both carry a
+  TODO to switch to an API push, e.g. SignalR, once one exists.
 - No local/legacy flat-file or embedded-DB storage remains:
   `dataaccess/DataAccessFactory.java` builds cache-first gateways
   (`FetchPolicy.CACHE_FIRST` by default, per-entity configurable, TTL +
