@@ -22,7 +22,11 @@ class ConfigLoaderDiscoveryTest {
     private static YamlConfiguration bundledConfig() throws Exception {
         try (InputStream in = ConfigLoaderDiscoveryTest.class.getResourceAsStream("/config.yml")) {
             assertNotNull(in, "config.yml on the classpath");
-            return YamlConfiguration.loadConfiguration(new InputStreamReader(in, StandardCharsets.UTF_8));
+            YamlConfiguration config = YamlConfiguration.loadConfiguration(new InputStreamReader(in, StandardCharsets.UTF_8));
+            // KNG-22: the shipped config uses auth type apikey with an empty key, which the loader
+            // refuses on purpose until the server owner sets one.
+            config.set("api.auth.api-key", "test-key");
+            return config;
         }
     }
 
