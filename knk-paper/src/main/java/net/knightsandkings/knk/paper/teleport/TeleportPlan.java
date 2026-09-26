@@ -86,6 +86,15 @@ public record TeleportPlan(
         return new TeleportPlan(subject, target::clone, TeleportKind.WARP, subject, null, false, label, charge);
     }
 
+    /**
+     * A player's own {@code /back} to where they died (Phase 7): warmup, cooldown, combat tag, every
+     * guard and the safe-spot check (the death spot may be lava or a cliff edge). {@code destination}
+     * answers null once the death's world is gone.
+     */
+    public static TeleportPlan back(Player subject, Supplier<Location> destination, String label) {
+        return new TeleportPlan(subject, destination, TeleportKind.BACK, subject, null, false, label);
+    }
+
     public boolean movesActor() {
         return actor instanceof Player player && player.getUniqueId().equals(subject.getUniqueId());
     }

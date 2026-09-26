@@ -175,6 +175,12 @@ commands:
     description: "List the places you can teleport to with /warp"
     usage: "/warps"
 
+  # Back to where you died (DESIGN.md Phase 7, developer decision Q5) - death location only, for a few
+  # minutes, never after a siege death. Node checked in BackCommand.
+  back:
+    description: "Teleport back to where you last died (for a few minutes after the death)"
+    usage: "/back"
+
 permissions:
   knk.admin:
     description: >-
@@ -573,6 +579,13 @@ permissions:
       destination. Warmup, cooldown and combat tag apply; the web API checks the destination's title,
       premium tier and discovery requirements and takes its gem price after the warmup. Meant for the
       Default group.
+    default: op
+
+  knk.teleport.back:
+    description: >-
+      /back - return to where you last died, within teleport.back.expire-seconds (5 min) of the death,
+      once per death. Warmup, cooldown, combat tag and the safe-spot check apply; a siege death gives no
+      /back. Meant for the Dragon Blood premium tier.
     default: op
 
   knk.teleport.bypass.requirements:

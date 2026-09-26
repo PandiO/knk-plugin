@@ -2,9 +2,9 @@ package net.knightsandkings.knk.core.teleport;
 
 /**
  * The {@code teleport:} block of the plugin's config.yml (docs/specs/teleport/DESIGN.md §3.11):
- * the engine keys (Phase 1), the {@code request:} sub-block (Phase 3) and
- * {@code destinations.cache-seconds} (Phase 5) - the back keys arrive with their phase. Negative values are clamped to 0 so a typo can't make a warmup or
- * cooldown negative.
+ * the engine keys (Phase 1), the {@code request:} sub-block (Phase 3),
+ * {@code destinations.cache-seconds} (Phase 5) and the {@code back:} sub-block (Phase 7). Negative
+ * values are clamped to 0 so a typo can't make a warmup or cooldown negative.
  *
  * @param warmupSeconds       player teleport warmup (v1: 5 s)
  * @param warmupShortSeconds  warmup for holders of {@code knk.teleport.warmup.short} (v1 premium: 3 s)
@@ -15,6 +15,7 @@ package net.knightsandkings.knk.core.teleport;
  * @param destinationsCacheSeconds how long a player's {@code /warp} destination list is cached
  *                            ({@code teleport.destinations.cache-seconds}, Phase 5); the charge
  *                            re-checks everything server-side, so a stale list can't grant anything
+ * @param back                {@code /back} settings (Phase 7)
  */
 public record TeleportSettings(
     int warmupSeconds,
@@ -23,7 +24,8 @@ public record TeleportSettings(
     int combatTagSeconds,
     int safeSearchRadius,
     TeleportRequestSettings request,
-    int destinationsCacheSeconds
+    int destinationsCacheSeconds,
+    TeleportBackSettings back
 ) {
     public TeleportSettings {
         warmupSeconds = Math.max(0, warmupSeconds);
@@ -33,6 +35,14 @@ public record TeleportSettings(
         safeSearchRadius = Math.max(0, safeSearchRadius);
         request = request != null ? request : TeleportRequestSettings.defaults();
         destinationsCacheSeconds = Math.max(0, destinationsCacheSeconds);
+        back = back != null ? back : TeleportBackSettings.defaults();
+    }
+
+    /** Engine, request and destination settings with the default {@code /back} settings. */
+    public TeleportSettings(int warmupSeconds, int warmupShortSeconds, int cooldownSeconds, int combatTagSeconds,
+                            int safeSearchRadius, TeleportRequestSettings request, int destinationsCacheSeconds) {
+        this(warmupSeconds, warmupShortSeconds, cooldownSeconds, combatTagSeconds, safeSearchRadius, request,
+            destinationsCacheSeconds, TeleportBackSettings.defaults());
     }
 
     /** Engine and request settings with the default destination cache time. */
@@ -54,6 +64,7 @@ public record TeleportSettings(
 
     /** The DESIGN §3.11 defaults, used when config.yml has no {@code teleport:} block. */
     public static TeleportSettings defaults() {
-        return new TeleportSettings(5, 3, 30, 10, 3, TeleportRequestSettings.defaults(), DEFAULT_DESTINATIONS_CACHE_SECONDS);
+        return new TeleportSettings(5, 3, 30, 10, 3, TeleportRequestSettings.defaults(), DEFAULT_DESTINATIONS_CACHE_SECONDS,
+            TeleportBackSettings.defaults());
     }
 }

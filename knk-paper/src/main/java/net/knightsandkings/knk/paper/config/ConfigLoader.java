@@ -3,6 +3,7 @@ package net.knightsandkings.knk.paper.config;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 
+import net.knightsandkings.knk.core.teleport.TeleportBackSettings;
 import net.knightsandkings.knk.core.teleport.TeleportRequestSettings;
 import net.knightsandkings.knk.core.teleport.TeleportSettings;
 
@@ -125,7 +126,20 @@ public class ConfigLoader {
             section.getInt("combat-tag-seconds", defaults.combatTagSeconds()),
             section.getInt("safe-search-radius", defaults.safeSearchRadius()),
             loadTeleportRequestSettings(section.getConfigurationSection("request")),
-            section.getInt("destinations.cache-seconds", defaults.destinationsCacheSeconds())
+            section.getInt("destinations.cache-seconds", defaults.destinationsCacheSeconds()),
+            loadTeleportBackSettings(section.getConfigurationSection("back"))
+        );
+    }
+
+    /** teleport.back (DESIGN §3.11, Phase 7); missing keys fall back to the defaults. */
+    static TeleportBackSettings loadTeleportBackSettings(ConfigurationSection section) {
+        TeleportBackSettings defaults = TeleportBackSettings.defaults();
+        if (section == null) {
+            return defaults;
+        }
+        return new TeleportBackSettings(
+            section.getBoolean("enabled", defaults.enabled()),
+            section.getInt("expire-seconds", defaults.expireSeconds())
         );
     }
 

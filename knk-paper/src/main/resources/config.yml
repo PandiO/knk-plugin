@@ -114,6 +114,12 @@ teleport:
   destinations:
     # Seconds a player's destination list (names, prices, locks) is cached
     cache-seconds: 60
+  # /back (knk.teleport.back, meant for Dragon Blood): back to where you last died, once per death.
+  # Warmup, cooldown, combat tag and the safe-spot check apply; a siege death gives no /back.
+  back:
+    enabled: true
+    # Seconds after a death during which /back can be started
+    expire-seconds: 300        # developer decision Q5: 5 minutes
 
 # Domain discovery (Linear KNG-20, knk-workspace docs/specs/domain-discovery/DESIGN.md §3.6):
 # the first time a player enters a Town, District or Structure it is recorded and rewarded once.

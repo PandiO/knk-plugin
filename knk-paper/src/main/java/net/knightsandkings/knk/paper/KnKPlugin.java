@@ -220,6 +220,8 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.commands.SpawnCommand spawnCommand;
     private net.knightsandkings.knk.core.dataaccess.TeleportDestinationsDataAccess teleportDestinationsDataAccess;
     private net.knightsandkings.knk.paper.commands.WarpCommand warpCommand;
+    private net.knightsandkings.knk.paper.teleport.BackService backService;
+    private net.knightsandkings.knk.paper.commands.BackCommand backCommand;
     /** What the teleport menu uses; set once the teleport engine started (after the menu registries lock). */
     private volatile net.knightsandkings.knk.paper.menu.content.TeleportMenuFeature.Teleports teleportMenuParts;
     
@@ -1064,6 +1066,11 @@ public class KnKPlugin extends JavaPlugin {
         } else {
             getLogger().warning("/warp and /warps not registered - the teleport engine or the API client failed to initialize");
         }
+        if (backCommand != null) {
+            registerTabCommand("back", backCommand);
+        } else {
+            getLogger().warning("/back not registered - the teleport engine failed to initialize");
+        }
     }
 
     /**
@@ -1102,15 +1109,21 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().warning("teleport.request.price-coins is " + config.teleport().request().priceCoins()
                 + " but the API client isn't available to charge it, so /tpa and /tpahere will be refused.");
         }
+        // Phase 7: /back to the last death (developer decision Q5); siege deaths are excluded through
+        // registerBackDeathExclusion.
+        this.backService = new net.knightsandkings.knk.paper.teleport.BackService(
+            teleportService, mainThread, knkPermissible::hasPermissionAsync, org.bukkit.Bukkit::getWorld);
         getServer().getScheduler().runTaskTimer(this, () -> {
             teleportService.tick(adminFreezeManager::isFrozen);
             teleportRequestService.tick();
+            backService.purgeExpired();
         }, 5L, 5L);
 
         var pluginManager = getServer().getPluginManager();
         pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.TeleportWarmupListener(
             teleportService, teleportRequestService), this);
         pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.CombatTagListener(teleportService), this);
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.BackDeathListener(backService), this);
 
         var support = new net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport(
             knkPermissible, mainThread, org.bukkit.Bukkit::getPlayerExact, org.bukkit.Bukkit::getOnlinePlayers
@@ -1130,6 +1143,8 @@ public class KnKPlugin extends JavaPlugin {
         this.spawnCommand = createSpawnCommand(support, rankCheck, targets);
         // Phase 5: /warp, /warps (DESIGN.md §3.7).
         this.warpCommand = createWarpCommand(support, rankCheck, targets, charges);
+        // Phase 7: /back.
+        this.backCommand = new net.knightsandkings.knk.paper.commands.BackCommand(support, backService);
         // Phase 6: the teleport menu (teleport.destinations) runs the same /warp, /spawn and request paths,
         // and a bare /warp opens it (the chat list while the menu isn't available).
         this.teleportMenuParts = new net.knightsandkings.knk.paper.menu.content.TeleportMenuFeature.Teleports(
@@ -1249,6 +1264,18 @@ public class KnKPlugin extends JavaPlugin {
     public void registerTeleportRestriction(net.knightsandkings.knk.paper.teleport.TeleportRestriction restriction) {
         if (teleportService != null) {
             teleportService.registerRestriction(restriction);
+        }
+    }
+
+    /**
+     * Keep some deaths from giving a {@code /back} (docs/specs/teleport Phase 7, developer decision Q5:
+     * not after a siege death) - the siege branch registers
+     * {@code p -> siegeService.activeLobbyOf(p.getUniqueId()).isPresent()} here, next to its teleport
+     * restriction. No-op when the teleport engine didn't start.
+     */
+    public void registerBackDeathExclusion(net.knightsandkings.knk.paper.teleport.BackDeathExclusion exclusion) {
+        if (backService != null) {
+            backService.registerDeathExclusion(exclusion);
         }
     }
 

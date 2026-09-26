@@ -31,6 +31,9 @@ public final class TeleportNodes {
     /** Warp without paying a destination's gem price. */
     public static final String BYPASS_COST = "knk.teleport.bypass.cost";
 
+    /** {@code /back} - to where you last died, for a few minutes (Dragon Blood, developer decision Q5). */
+    public static final String BACK = "knk.teleport.back";
+
     /** 3 s instead of 5 s warmup (v1: any donator rank). */
     public static final String WARMUP_SHORT = "knk.teleport.warmup.short";
     public static final String BYPASS_WARMUP = "knk.teleport.bypass.warmup";
