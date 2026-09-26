@@ -19,8 +19,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class EnchantmentCombatListenerTest {
 
+    // KNG-11: MONITOR (was LOWEST), so effects only follow hits that every other listener let through.
     @Test
-    void eventHandlerIsConfiguredForLowestPriorityAndIgnoreCancelled() throws Exception {
+    void eventHandlerIsConfiguredForMonitorPriorityAndIgnoreCancelled() throws Exception {
         Method handlerMethod = EnchantmentCombatListener.class.getDeclaredMethod(
                 "onEntityDamage",
                 org.bukkit.event.entity.EntityDamageByEntityEvent.class
@@ -29,7 +30,7 @@ class EnchantmentCombatListenerTest {
         EventHandler eventHandler = handlerMethod.getAnnotation(EventHandler.class);
 
         assertNotNull(eventHandler);
-        assertEquals(EventPriority.LOWEST, eventHandler.priority());
+        assertEquals(EventPriority.MONITOR, eventHandler.priority());
         assertTrue(eventHandler.ignoreCancelled());
     }
 

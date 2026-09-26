@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.config;
 
+import net.knightsandkings.knk.core.enchantbook.EnchantBookCapSettings;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.plugin.Plugin;
 
@@ -8,6 +9,7 @@ import java.util.Map;
 public class EnchantmentConfigManager {
     private static final String ROOT = "custom-enchantments";
     private static final String DEFAULT_COOLDOWN_MESSAGE = "&c%seconds% seconds remaining";
+    private static final String BOOK_CAP_ROOT = "enchant-books.grade-cap";
 
     private final Plugin plugin;
 
@@ -50,6 +52,21 @@ public class EnchantmentConfigManager {
             value = value.replace(entry.getKey(), entry.getValue());
         }
         return value;
+    }
+
+    /** {@code enchant-books.grade-cap} (KNG-6); missing keys take {@link EnchantBookCapSettings#DEFAULTS}. */
+    public EnchantBookCapSettings enchantBookCapSettings() {
+        FileConfiguration config = plugin.getConfig();
+        EnchantBookCapSettings d = EnchantBookCapSettings.DEFAULTS;
+        if (config == null) {
+            return d;
+        }
+        return new EnchantBookCapSettings(
+                config.getBoolean(BOOK_CAP_ROOT + ".enabled", d.enabled()),
+                config.getBoolean(BOOK_CAP_ROOT + ".apply-to-custom", d.applyToCustom()),
+                config.getInt(BOOK_CAP_ROOT + ".ungraded-stars", d.ungradedStars()),
+                config.getDouble(BOOK_CAP_ROOT + ".bonus-level-chance", d.bonusLevelChance())
+        );
     }
 
     public void reload() {

@@ -2,6 +2,7 @@ package net.knightsandkings.knk.paper.mapper;
 
 import net.knightsandkings.knk.core.domain.enchantment.EnchantmentRegistry;
 import net.knightsandkings.knk.core.domain.enchantments.KnkEnchantmentDefinition;
+import net.knightsandkings.knk.core.domain.item.KnkItemBlueprintDefaultEnchantment;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Registry;
 import org.bukkit.enchantments.Enchantment;
@@ -14,6 +15,32 @@ import java.util.Locale;
 public final class EnchantmentDefinitionBukkitMapper {
 
     private EnchantmentDefinitionBukkitMapper() {
+    }
+
+    /**
+     * A definition built from an ItemBlueprint default enchantment's denormalized fields (key, display
+     * name, isCustom, maxLevel) - enough for {@link #toBukkit}/{@link #toCustom} without fetching the
+     * full definition. Used by {@code /knk itemblueprints give} as its fallback and by permanent
+     * enchantment books (KNG-5), which are built synchronously from the blueprint.
+     */
+    public static KnkEnchantmentDefinition fromDefaultEnchantment(KnkItemBlueprintDefaultEnchantment relation) {
+        if (relation == null) {
+            return null;
+        }
+
+        String key = relation.enchantmentKey();
+        String baseNamespace = key != null && key.startsWith("minecraft:") ? key : null;
+
+        return new KnkEnchantmentDefinition(
+                relation.enchantmentDefinitionId(),
+                key,
+                relation.enchantmentDisplayName(),
+                null,
+                relation.enchantmentIsCustom(),
+                relation.enchantmentMaxLevel(),
+                null,
+                baseNamespace
+        );
     }
 
     public static BukkitEnchantmentResolution toBukkit(KnkEnchantmentDefinition definition) {
