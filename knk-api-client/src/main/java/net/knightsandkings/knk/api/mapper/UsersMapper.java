@@ -111,7 +111,9 @@ public class UsersMapper {
             dto.rankMultiplier(),
             dto.newCoinsBalance(),
             dto.lastSalaryPayoutAt(),
-            dto.nextEligibleAt()
+            dto.nextEligibleAt(),
+            dto.titleBracketId(),
+            dto.titleSalary()
         );
     }
 

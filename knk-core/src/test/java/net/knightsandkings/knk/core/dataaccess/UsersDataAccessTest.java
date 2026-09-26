@@ -279,7 +279,7 @@ public class UsersDataAccessTest {
         public CompletableFuture<SalaryPayoutResult> payOutSalaryById(int id) {
             java.time.OffsetDateTime now = java.time.OffsetDateTime.now();
             return CompletableFuture.completedFuture(
-                new SalaryPayoutResult(false, 0, 0, 0, 0, 0, 0, now, now));
+                new SalaryPayoutResult(false, 0, 0, 0, 0, 0, 0, now, now, null, 0));
         }
 
         @Override

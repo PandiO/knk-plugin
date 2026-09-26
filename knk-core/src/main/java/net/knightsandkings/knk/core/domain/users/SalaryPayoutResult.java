@@ -16,5 +16,9 @@ public record SalaryPayoutResult(
     double rankMultiplier,
     int newCoinsBalance,
     OffsetDateTime lastSalaryPayoutAt,
-    OffsetDateTime nextEligibleAt
+    OffsetDateTime nextEligibleAt,
+    // The title bracket whose Salary was the hourly base rate, and that Salary before any
+    // multiplier. Null/0 when paid() is false or the API predates the title-based salary fix.
+    Integer titleBracketId,
+    int titleSalary
 ) {}

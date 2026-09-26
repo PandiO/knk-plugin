@@ -170,6 +170,7 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.core.dataaccess.TitleBracketsDataAccess titleBracketsDataAccess;
     private net.knightsandkings.knk.core.dataaccess.PermissionGroupsDataAccess permissionGroupsDataAccess;
     private net.knightsandkings.knk.paper.user.UserAdminService userAdminService;
+    private net.knightsandkings.knk.paper.user.SalaryPayoutScheduler salaryPayoutScheduler;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private PermissionsDataAccess permissionsDataAccess;
     private KnkPermissible knkPermissible;
@@ -550,6 +551,13 @@ public class KnKPlugin extends JavaPlugin {
                 // After a group/title change: redraw the target's tab-list team and footer (KNG-7).
                 (player, summary) -> net.knightsandkings.knk.paper.utils.ScoreboardUtil.setScoreboard(List.of(player), knkPermissible, summary)
             );
+            // Salary on join (offline gap) and every hour online; the scoreboard is redrawn after a payout.
+            this.salaryPayoutScheduler = new net.knightsandkings.knk.paper.user.SalaryPayoutScheduler(
+                this, usersCommandApi, cacheManager.getUserCache(), usersDataAccess,
+                (player, summary) -> net.knightsandkings.knk.paper.utils.ScoreboardUtil.setScoreboard(List.of(player), knkPermissible, summary)
+            );
+            getServer().getPluginManager().registerEvents(salaryPayoutScheduler, this);
+            salaryPayoutScheduler.start();
             List<MenuFeature> menuFeatures = List.of(
                 registries -> {
                     MenuVariableContext.registerDefaults(registries.variables());
@@ -772,6 +780,9 @@ public class KnKPlugin extends JavaPlugin {
         }
         if (tempRegionRetentionTask != null) {
             tempRegionRetentionTask.stop();
+        }
+        if (salaryPayoutScheduler != null) {
+            salaryPayoutScheduler.stop();
         }
         if (cacheManager != null) {
             getLogger().info("Logging final cache metrics...");
