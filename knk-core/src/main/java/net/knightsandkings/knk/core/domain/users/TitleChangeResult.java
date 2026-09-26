@@ -17,8 +17,22 @@ public record TitleChangeResult(
     List<TitleCrossing> crossedTitles, // promotion only, per-tier bonuses folded into the totals below
     int coinBonusGranted,
     int gemBonusGranted,
-    int expBonusGranted
+    int expBonusGranted,
+    // KNG-16: the bonuses summed before multipliers, and the multipliers applied to each
+    // (personal, then one per rank). 0/empty on demotion or from an API that predates them.
+    int coinBonusBase,
+    int gemBonusBase,
+    int expBonusBase,
+    List<RewardMultiplier> coinBonusMultipliers,
+    List<RewardMultiplier> gemBonusMultipliers,
+    List<RewardMultiplier> expBonusMultipliers
 ) {
+    public TitleChangeResult {
+        coinBonusMultipliers = coinBonusMultipliers == null ? List.of() : List.copyOf(coinBonusMultipliers);
+        gemBonusMultipliers = gemBonusMultipliers == null ? List.of() : List.copyOf(gemBonusMultipliers);
+        expBonusMultipliers = expBonusMultipliers == null ? List.of() : List.copyOf(expBonusMultipliers);
+    }
+
     public boolean isPromotion() {
         return "promotion".equals(direction);
     }

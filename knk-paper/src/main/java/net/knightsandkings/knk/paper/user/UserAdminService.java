@@ -8,6 +8,7 @@ import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.PermissionGroupsQueryApi;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
+import net.knightsandkings.knk.paper.chat.RewardMessageFormat;
 import net.knightsandkings.knk.paper.commands.support.PromotionEffects;
 import net.knightsandkings.knk.paper.commands.support.RankHierarchy;
 import net.knightsandkings.knk.paper.modes.ModeService;
@@ -196,6 +197,10 @@ public final class UserAdminService {
      */
     public CompletableFuture<Boolean> changeBalance(CommandSender sender, UserSummary target, String property, String action,
                                                     int amount, String reason) {
+        // No typed reason: the audit log still needs one, but the player's message leaves it out
+        // (it would only repeat who did it).
+        boolean typedReason = reason != null && !reason.isBlank();
+        String auditReason = typedReason ? reason : "/knk user command by " + sender.getName();
         int current = currentValue(target, property);
         int delta = switch (action) {
             case "set" -> amount - current;
@@ -206,12 +211,22 @@ public final class UserAdminService {
             sender.sendMessage(ChatColor.YELLOW + target.username() + "'s " + property + " is already " + amount + ".");
             return CompletableFuture.completedFuture(false);
         }
-        return adjustBalance(sender, target, property, delta, reason);
+        return adjustBalance(sender, target, property, delta, auditReason, typedReason ? reason : null);
     }
 
     /** Adds {@code delta} (may be negative) to one balance; the server rejects underflow. */
     public CompletableFuture<Boolean> adjustBalance(CommandSender sender, UserSummary target, String property, int delta,
                                                     String reason) {
+        return adjustBalance(sender, target, property, delta, reason, null);
+    }
+
+    /**
+     * {@link #adjustBalance(CommandSender, UserSummary, String, int, String)}, telling an online
+     * target what changed in the shared reward format (KNG-16), with {@code playerNote} (nullable)
+     * as the reason they see; {@code reason} goes to the audit log.
+     */
+    public CompletableFuture<Boolean> adjustBalance(CommandSender sender, UserSummary target, String property, int delta,
+                                                    String reason, String playerNote) {
         int current = currentValue(target, property);
         int coinsDelta = property.equals("coins") ? delta : 0;
         int gemsDelta = property.equals("gems") ? delta : 0;
@@ -230,6 +245,10 @@ public final class UserAdminService {
                     sender.sendMessage(ChatColor.GREEN + verb + " " + target.username() + "'s " + property
                             + " by " + Math.abs(delta) + " (now " + (current + delta) + ").");
                     Player targetPlayer = Bukkit.getPlayerExact(target.username());
+                    RewardMessageFormat.Currency currency = RewardMessageFormat.Currency.forProperty(property);
+                    if (targetPlayer != null && currency != null) {
+                        targetPlayer.sendMessage(RewardMessageFormat.adminChange(sender.getName(), currency, delta, playerNote));
+                    }
                     if (targetOnline && targetPlayer != null && result != null && result.titleChange() != null) {
                         PromotionEffects.show(targetPlayer, result.titleChange());
                     }
@@ -259,7 +278,7 @@ public final class UserAdminService {
             sender.sendMessage(ChatColor.YELLOW + target.username() + " already has exactly the XP for " + name + ".");
             return CompletableFuture.completedFuture(false);
         }
-        return adjustBalance(sender, target, "xp", delta, "Title set to " + name + " by " + sender.getName());
+        return adjustBalance(sender, target, "xp", delta, "Title set to " + name + " by " + sender.getName(), "Title set to " + name);
     }
 
     private static int currentValue(UserSummary target, String property) {
@@ -452,7 +471,7 @@ public final class UserAdminService {
                 sender.sendMessage(ChatColor.GREEN + "Paid " + target.username() + " " + result.amountPaid() + " coins of salary.");
                 Player targetPlayer = Bukkit.getPlayerExact(target.username());
                 if (targetPlayer != null) {
-                    targetPlayer.sendMessage(ChatColor.GREEN + "You received " + result.amountPaid() + " coins in salary.");
+                    RewardMessageFormat.salary(result, target.titleName()).forEach(targetPlayer::sendMessage);
                 }
                 done.complete(true);
             } else {

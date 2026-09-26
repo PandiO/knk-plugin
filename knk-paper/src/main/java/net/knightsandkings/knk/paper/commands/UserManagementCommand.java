@@ -117,9 +117,10 @@ public class UserManagementCommand implements CommandExecutor {
             return;
         }
 
+        // Null when none was typed: UserAdminService.changeBalance fills in the audit default.
         String reason = args.length > 4
             ? String.join(" ", java.util.Arrays.copyOfRange(args, 4, args.length))
-            : "/knk user command by " + sender.getName();
+            : null;
 
         userAdminService.resolveTarget(sender, targetName,
             target -> userAdminService.changeBalance(sender, target, property, action, amount, reason));
