@@ -5,6 +5,8 @@ import java.util.concurrent.CompletableFuture;
 
 import net.knightsandkings.knk.core.domain.users.ActiveMode;
 import net.knightsandkings.knk.core.domain.users.BalanceAdjustmentResult;
+import net.knightsandkings.knk.core.domain.users.BalanceCurrency;
+import net.knightsandkings.knk.core.domain.users.BalanceOperation;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.domain.users.SalaryPayoutResult;
 import net.knightsandkings.knk.core.domain.users.UserDetail;
@@ -44,18 +46,23 @@ public interface UsersCommandApi {
     CompletableFuture<SalaryPayoutResult> payOutSalaryById(int id);
 
     /**
-     * Adjusts a user's coins/gems/experience by a signed delta, with an audit reason (backs
-     * /knk user &lt;player&gt; coins|gems|xp set|add|remove, developer request 2026-09-25).
-     * Server-side rejects any delta that would take a balance negative, and - for a non-zero
-     * experienceDelta - automatically resolves and audit-logs a title change if the new XP total
-     * crosses a bracket boundary (same PUT /api/users/{id}/balances endpoint the web admin's
-     * quick actions already use, so this gets that behavior for free).
+     * One staff change to a user's coins, gems or XP (backs /knk user &lt;player&gt;
+     * coins|gems|xp set|add|remove and the Player manager): {@code mode} ADD/REMOVE take a positive
+     * {@code amount}, SET the target balance. The API posts it to the currency ledger and applies
+     * a SET itself under the row lock - the plugin never computes a delta from a cached balance
+     * (currency DESIGN.md §1.4 A6); show the numbers in the result. A non-zero XP change resolves
+     * and audit-logs a title change (bracket bonuses are paid once per player, ever).
+     * <p>
+     * Every call carries a fresh {@code Idempotency-Key}; the HTTP client's own retry of the same
+     * request reuses it, so a lost response can't apply the change twice. {@code reason} is
+     * required by the API.
      *
      * @param notifyPlayer whether the API should queue a resulting title change for
      *     PlayerNotificationPoller to show in-game. Pass false when the caller shows
      *     {@link BalanceAdjustmentResult#titleChange()} to the online target itself.
      */
-    CompletableFuture<BalanceAdjustmentResult> adjustBalancesById(int id, int coinsDelta, int gemsDelta, int experienceDelta, String reason, boolean notifyPlayer);
+    CompletableFuture<BalanceAdjustmentResult> adjustBalanceById(int id, BalanceCurrency currency, BalanceOperation mode, long amount,
+                                                                 String reason, boolean notifyPlayer);
 
     /**
      * Adds/updates this user's membership in the given PermissionGroup (backs

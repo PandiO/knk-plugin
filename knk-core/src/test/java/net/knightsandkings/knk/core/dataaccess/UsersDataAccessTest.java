@@ -273,9 +273,11 @@ public class UsersDataAccessTest {
         }
 
         @Override
-        public CompletableFuture<net.knightsandkings.knk.core.domain.users.BalanceAdjustmentResult> adjustBalancesById(int id, int coinsDelta, int gemsDelta, int experienceDelta, String reason, boolean notifyPlayer) {
+        public CompletableFuture<net.knightsandkings.knk.core.domain.users.BalanceAdjustmentResult> adjustBalanceById(int id,
+                net.knightsandkings.knk.core.domain.users.BalanceCurrency currency, net.knightsandkings.knk.core.domain.users.BalanceOperation mode,
+                long amount, String reason, boolean notifyPlayer) {
             return CompletableFuture.completedFuture(
-                new net.knightsandkings.knk.core.domain.users.BalanceAdjustmentResult(coinsDelta, gemsDelta, experienceDelta, null));
+                new net.knightsandkings.knk.core.domain.users.BalanceAdjustmentResult(0, 0, 0, null));
         }
 
         @Override

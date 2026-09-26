@@ -2,6 +2,8 @@ package net.knightsandkings.knk.api.impl;
 
 import java.io.IOException;
 import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.logging.Logger;
@@ -23,13 +25,17 @@ import net.knightsandkings.knk.api.dto.UserDto;
 import net.knightsandkings.knk.api.mapper.UsersMapper;
 import net.knightsandkings.knk.core.domain.users.ActiveMode;
 import net.knightsandkings.knk.core.domain.users.BalanceAdjustmentResult;
+import net.knightsandkings.knk.core.domain.users.BalanceCurrency;
+import net.knightsandkings.knk.core.domain.users.BalanceOperation;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.domain.users.SalaryPayoutResult;
 import net.knightsandkings.knk.core.domain.users.UserDetail;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
+import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import okhttp3.RequestBody;
 
 /**
  * Command-side implementation for user write operations.
@@ -143,12 +149,26 @@ public class UsersCommandApiImpl extends BaseApiImpl implements UsersCommandApi 
     }
 
     @Override
-    public CompletableFuture<BalanceAdjustmentResult> adjustBalancesById(int id, int coinsDelta, int gemsDelta, int experienceDelta, String reason, boolean notifyPlayer) {
+    public CompletableFuture<BalanceAdjustmentResult> adjustBalanceById(int id, BalanceCurrency currency, BalanceOperation mode, long amount,
+                                                                        String reason, boolean notifyPlayer) {
+        // One key per staff action, generated before the request so every resend of it carries the same key.
+        String idempotencyKey = UUID.randomUUID().toString();
         return CompletableFuture.supplyAsync(() -> {
             String url = baseUrl + USERS_ENDPOINT + "/" + id + "/balances";
             try {
-                String bodyJson = objectMapper.writeValueAsString(new AdjustBalancesDto(coinsDelta, gemsDelta, experienceDelta, reason, notifyPlayer));
-                String responseJson = putJson(url, bodyJson);
+                String bodyJson = objectMapper.writeValueAsString(new AdjustBalancesDto(
+                    List.of(new AdjustBalancesDto.Change(currency.wireValue(), mode.wireValue(), amount, null)), reason, notifyPlayer));
+                Request request = newRequest(url)
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("Accept", "application/json")
+                    .header(IDEMPOTENCY_KEY_HEADER, idempotencyKey)
+                    .put(RequestBody.create(bodyJson, MediaType.get("application/json")))
+                    .build();
+                if (debugLogging) {
+                    LOGGER.info("API Request: PUT " + url + " (Idempotency-Key " + idempotencyKey + ")");
+                    LOGGER.info("  Body: " + snippet(bodyJson));
+                }
+                String responseJson = execute(request, url);
                 BalanceAdjustmentResultDto dto = objectMapper.readValue(responseJson, BalanceAdjustmentResultDto.class);
                 return UsersMapper.mapBalanceAdjustmentResult(dto);
             } catch (ApiException | IOException e) {

@@ -3,6 +3,9 @@ package net.knightsandkings.knk.paper.user;
 import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
 import net.knightsandkings.knk.core.domain.permissions.PermissionGroupSummary;
 import net.knightsandkings.knk.core.domain.users.ActiveMode;
+import net.knightsandkings.knk.core.domain.users.BalanceChange;
+import net.knightsandkings.knk.core.domain.users.BalanceCurrency;
+import net.knightsandkings.knk.core.domain.users.BalanceOperation;
 import net.knightsandkings.knk.core.domain.users.TitleBracket;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.core.exception.ApiException;
@@ -35,8 +38,9 @@ import java.util.function.Consumer;
  *   <li>{@link RankHierarchy#actorOutranks} for group/perm/freeze (and the new mode/salary
  *       actions) - the actor's highest group weight must exceed the target's; the console and
  *       holders of {@link #MANAGE_ALL_NODE} always pass;</li>
- *   <li>balances as signed deltas on {@code PUT /api/users/{id}/balances} (a "set" is a computed
- *       delta), promotion effects shown for an online target;</li>
+ *   <li>balances as add/remove/set on {@code PUT /api/users/{id}/balances} (the server applies a
+ *       "set" and every message shows its numbers - currency ledger, KNG-21), promotion effects
+ *       shown for an online target;</li>
  *   <li>{@code ModeService.refreshVisibilityFor} after a group/perm change;</li>
  *   <li>every mutation goes through {@code UsersCommandApi.withActor(actor)} (content port CP7) so
  *       it can be audit-logged under the staff member.</li>
@@ -192,8 +196,9 @@ public final class UserAdminService {
     // ===== balances (coins / gems / xp) =====
 
     /**
-     * {@code /knk user <p> coins|gems|xp set|add|remove <amount>}: turns the action into a signed
-     * delta against the target's current value, then {@link #adjustBalance}.
+     * {@code /knk user <p> coins|gems|xp set|add|remove <amount>}: sent to the API as that mode -
+     * a "set" is applied by the server to the balance it finds under the row lock, not turned into
+     * a delta against this plugin's cached (possibly stale) value (currency DESIGN.md §1.4 A6).
      */
     public CompletableFuture<Boolean> changeBalance(CommandSender sender, UserSummary target, String property, String action,
                                                     int amount, String reason) {
@@ -201,20 +206,14 @@ public final class UserAdminService {
         // (it would only repeat who did it).
         boolean typedReason = reason != null && !reason.isBlank();
         String auditReason = typedReason ? reason : "/knk user command by " + sender.getName();
-        int current = currentValue(target, property);
-        int delta = switch (action) {
-            case "set" -> amount - current;
-            case "remove" -> -amount;
-            default -> amount;
-        };
-        if (delta == 0) {
-            sender.sendMessage(ChatColor.YELLOW + target.username() + "'s " + property + " is already " + amount + ".");
-            return CompletableFuture.completedFuture(false);
+        BalanceOperation mode = BalanceOperation.forAction(action);
+        if (mode == null) {
+            mode = BalanceOperation.ADD;
         }
-        return adjustBalance(sender, target, property, delta, auditReason, typedReason ? reason : null);
+        return applyBalance(sender, target, property, mode, amount, auditReason, typedReason ? reason : null);
     }
 
-    /** Adds {@code delta} (may be negative) to one balance; the server rejects underflow. */
+    /** Adds {@code delta} (may be negative: a removal) to one balance; the server rejects underflow. */
     public CompletableFuture<Boolean> adjustBalance(CommandSender sender, UserSummary target, String property, int delta,
                                                     String reason) {
         return adjustBalance(sender, target, property, delta, reason, null);
@@ -227,10 +226,25 @@ public final class UserAdminService {
      */
     public CompletableFuture<Boolean> adjustBalance(CommandSender sender, UserSummary target, String property, int delta,
                                                     String reason, String playerNote) {
-        int current = currentValue(target, property);
-        int coinsDelta = property.equals("coins") ? delta : 0;
-        int gemsDelta = property.equals("gems") ? delta : 0;
-        int experienceDelta = property.equals("xp") ? delta : 0;
+        if (delta == 0) {
+            return CompletableFuture.completedFuture(false);
+        }
+        BalanceOperation mode = delta > 0 ? BalanceOperation.ADD : BalanceOperation.REMOVE;
+        return applyBalance(sender, target, property, mode, Math.abs((long) delta), reason, playerNote);
+    }
+
+    /**
+     * One staff balance change through the API's currency ledger. Every number shown comes from
+     * the API's response (the change it applied and the balance after), never from local
+     * arithmetic on the cached summary.
+     */
+    private CompletableFuture<Boolean> applyBalance(CommandSender sender, UserSummary target, String property,
+                                                    BalanceOperation mode, long amount, String reason, String playerNote) {
+        BalanceCurrency currency = BalanceCurrency.forProperty(property);
+        if (currency == null) {
+            sender.sendMessage(ChatColor.RED + "Unknown balance '" + property + "'.");
+            return CompletableFuture.completedFuture(false);
+        }
 
         // Online target: show any title change right here from the response, and tell the API
         // not to also queue it for PlayerNotificationPoller (which would show it twice).
@@ -239,15 +253,24 @@ public final class UserAdminService {
 
         CompletableFuture<Boolean> done = new CompletableFuture<>();
         actorApi(sender)
-                .thenCompose(api -> api.adjustBalancesById(target.id(), coinsDelta, gemsDelta, experienceDelta, reason, !targetOnline))
+                .thenCompose(api -> api.adjustBalanceById(target.id(), currency, mode, amount, reason, !targetOnline))
                 .thenAccept(result -> mainThread.execute(() -> {
+                    BalanceChange change = result == null ? null : result.changeFor(currency);
+                    long delta = change != null ? change.amount() : 0;
+                    long now = change != null ? change.balanceAfter() : (result == null ? 0 : result.balanceOf(currency));
+                    if (delta == 0) {
+                        sender.sendMessage(ChatColor.YELLOW + target.username() + "'s " + property + " is already " + now + ".");
+                        done.complete(false);
+                        return;
+                    }
                     String verb = delta > 0 ? "Increased" : "Decreased";
                     sender.sendMessage(ChatColor.GREEN + verb + " " + target.username() + "'s " + property
-                            + " by " + Math.abs(delta) + " (now " + (current + delta) + ").");
+                            + " by " + Math.abs(delta) + " (now " + now + ").");
                     Player targetPlayer = Bukkit.getPlayerExact(target.username());
-                    RewardMessageFormat.Currency currency = RewardMessageFormat.Currency.forProperty(property);
-                    if (targetPlayer != null && currency != null) {
-                        targetPlayer.sendMessage(RewardMessageFormat.adminChange(sender.getName(), currency, delta, playerNote));
+                    RewardMessageFormat.Currency messageCurrency = RewardMessageFormat.Currency.forProperty(property);
+                    if (targetPlayer != null && messageCurrency != null) {
+                        targetPlayer.sendMessage(RewardMessageFormat.adminChange(sender.getName(), messageCurrency,
+                                (int) Math.max(Integer.MIN_VALUE, Math.min(Integer.MAX_VALUE, delta)), playerNote));
                     }
                     if (targetOnline && targetPlayer != null && result != null && result.titleChange() != null) {
                         PromotionEffects.show(targetPlayer, result.titleChange());
@@ -267,26 +290,14 @@ public final class UserAdminService {
     }
 
     /**
-     * Player manager "set title": the XP delta that puts the target exactly on the bracket's
-     * minimum ({@code minExperience - xp}, negative for a demotion) - the server then resolves and
-     * audit-logs the title change like any XP adjustment.
+     * Player manager "set title": sets the target's XP to exactly the bracket's minimum (a server-
+     * side set, so a stale cached XP can't land them on the wrong title) - the server then resolves
+     * and audit-logs the title change like any XP change.
      */
     public CompletableFuture<Boolean> setTitle(CommandSender sender, UserSummary target, TitleBracket bracket) {
-        int delta = bracket.minExperience() - target.experiencePoints();
         String name = bracket.nameFor(target.gender());
-        if (delta == 0) {
-            sender.sendMessage(ChatColor.YELLOW + target.username() + " already has exactly the XP for " + name + ".");
-            return CompletableFuture.completedFuture(false);
-        }
-        return adjustBalance(sender, target, "xp", delta, "Title set to " + name + " by " + sender.getName(), "Title set to " + name);
-    }
-
-    private static int currentValue(UserSummary target, String property) {
-        return switch (property) {
-            case "coins" -> target.coins();
-            case "gems" -> target.gems();
-            default -> target.experiencePoints();
-        };
+        return applyBalance(sender, target, "xp", BalanceOperation.SET, bracket.minExperience(),
+                "Title set to " + name + " by " + sender.getName(), "Title set to " + name);
     }
 
     // ===== group membership / permission grants =====

@@ -146,8 +146,18 @@ public class UsersMapper {
     public static net.knightsandkings.knk.core.domain.users.BalanceAdjustmentResult mapBalanceAdjustmentResult(
         net.knightsandkings.knk.api.dto.BalanceAdjustmentResultDto dto
     ) {
+        java.util.List<net.knightsandkings.knk.core.domain.users.BalanceChange> changes = dto.changes() == null
+            ? java.util.List.of()
+            : dto.changes().stream()
+                .map(c -> new net.knightsandkings.knk.core.domain.users.BalanceChange(
+                    net.knightsandkings.knk.core.domain.users.BalanceCurrency.fromWireValue(c.currency()),
+                    net.knightsandkings.knk.core.domain.users.BalanceOperation.forAction(c.mode()),
+                    c.amount(), c.balanceBefore(), c.balanceAfter(), c.transactionPublicId(), c.replayed()))
+                .filter(c -> c.currency() != null)
+                .toList();
         return new net.knightsandkings.knk.core.domain.users.BalanceAdjustmentResult(
-            dto.newCoins(), dto.newGems(), dto.newExperiencePoints(), mapTitleChange(dto.titleChange())
+            dto.newCoins(), dto.newGems(), dto.newExperiencePoints(), mapTitleChange(dto.titleChange()),
+            changes, dto.replayed()
         );
     }
 
