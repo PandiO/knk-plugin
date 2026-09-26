@@ -16,6 +16,7 @@ import net.knightsandkings.knk.paper.listeners.EnchantmentCombatListener;
 import net.knightsandkings.knk.paper.listeners.EnchantmentEnchantTableListener;
 import net.knightsandkings.knk.paper.listeners.EnchantmentInteractListener;
 import net.knightsandkings.knk.paper.listeners.FreezeMovementListener;
+import net.knightsandkings.knk.paper.regions.CombatSafezoneCheck;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.Plugin;
 
@@ -23,9 +24,16 @@ import java.util.concurrent.ThreadLocalRandom;
 
 public class EnchantmentBootstrap {
         private final Plugin plugin;
+        private final CombatSafezoneCheck safezones;
 
         public EnchantmentBootstrap(Plugin plugin) {
+        this(plugin, CombatSafezoneCheck.NONE);
+    }
+
+    /** @param safezones Town/District combat safezones for enchantment effects and abilities (KNG-11) */
+    public EnchantmentBootstrap(Plugin plugin, CombatSafezoneCheck safezones) {
         this.plugin = plugin;
+        this.safezones = safezones != null ? safezones : CombatSafezoneCheck.NONE;
     }
 
     public EnchantmentRuntime initialize() {
@@ -33,7 +41,7 @@ public class EnchantmentBootstrap {
         EnchantmentRepository enchantmentRepository = new LocalEnchantmentRepositoryImpl();
         CooldownManager cooldownManager = new InMemoryCooldownManager();
         FrozenPlayerTracker frozenPlayerTracker = new FrozenPlayerTracker(plugin);
-        EnchantmentExecutor enchantmentExecutor = new ExecutorImpl(plugin, cooldownManager, frozenPlayerTracker);
+        EnchantmentExecutor enchantmentExecutor = new ExecutorImpl(plugin, cooldownManager, frozenPlayerTracker, safezones);
         EnchantmentCommandHandler commandHandler = new EnchantmentCommandHandler(
                 plugin,
                 configManager,
@@ -46,7 +54,8 @@ public class EnchantmentBootstrap {
                 new EnchantmentCombatListener(
                         enchantmentRepository,
                         enchantmentExecutor,
-                        configManager.disableForCreative()
+                        configManager.disableForCreative(),
+                        safezones
                 ),
                 plugin
         );
