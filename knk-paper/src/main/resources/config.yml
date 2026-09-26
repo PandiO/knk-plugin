@@ -12,6 +12,14 @@ api:
   # Authentication configuration
   auth:
     # Type: none, bearer, apikey
+    # apikey is the plugin's service identity: every request carries `api-key` in the
+    # `api-key-header` header. Use it on any server whose API has a plugin key configured
+    # (knk-web-api `Security:PluginServiceKey` / `Security:PluginApiKey`, header X-API-Key);
+    # once one is set there, its plugin-only endpoints (e.g. lootbox claims) refuse requests
+    # without the key.
+    # Set the value per server and keep the key out of version control:
+    #   type: apikey
+    #   api-key: "<the key configured on the API>"
     type: none
     # Bearer token (only used if type=bearer)
     bearer-token: ""
