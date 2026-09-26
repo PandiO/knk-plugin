@@ -330,11 +330,10 @@ public final class UserAdminService {
 
     /**
      * Player manager rank switch: makes {@code rank} (Default or a premium tier, see
-     * {@link PlayerRanks}) the target's only rank, permanently - added first, then each of
-     * {@code replacedRanks} removed, so a failure part-way never leaves them without a rank.
-     * Rank-checked and attributed like {@link #changeGroup}; the target is re-read afterwards so
-     * chat and the tab list show the new rank. {@code /knk user ... group add} still adds
-     * alongside, e.g. a temporary higher tier on top of a permanent one.
+     * {@link PlayerRanks}) the target's rank, permanently. knk-web-api enforces one rank per user,
+     * so adding it replaces their other rank(s); {@code replacedRanks} is only used for the message.
+     * Rank-checked and attributed like {@link #changeGroup}; the target is re-read afterwards so chat
+     * and the tab list show the new rank.
      */
     public CompletableFuture<Boolean> setRank(CommandSender sender, UserSummary target, PermissionGroupSummary rank,
                                               java.util.List<PermissionGroupSummary> replacedRanks) {
@@ -342,9 +341,6 @@ public final class UserAdminService {
         CompletableFuture<Boolean> done = new CompletableFuture<>();
         withRankCheck(sender, target, api -> {
             CompletableFuture<Void> chain = api.addGroupMembership(target.id(), rank.id(), null);
-            for (PermissionGroupSummary old : replaced) {
-                chain = chain.thenCompose(v -> api.removeGroupMembership(target.id(), old.id()));
-            }
             chain.thenCompose(v -> refreshTargetSummary(target)).thenAccept(fresh -> mainThread.execute(() -> {
                 String was = replaced.stream().map(PermissionGroupSummary::name).collect(java.util.stream.Collectors.joining(", "));
                 sender.sendMessage(ChatColor.GREEN + "Set " + target.username() + "'s rank to " + rank.name()
@@ -508,6 +504,17 @@ public final class UserAdminService {
         }
         return usersDataAccess.refreshAsync(target.uuid())
                 .handle((result, ex) -> ex == null && result != null ? result.value().orElse(null) : null);
+    }
+
+    /**
+     * A rank/group change the plugin didn't make itself (web app, or a temporary rank expiring -
+     * the API's RankChanged notification, see PlayerNotificationPoller): re-read the player and
+     * redraw their tab list; chat reads the refreshed cache.
+     */
+    public void resyncDisplay(Player player) {
+        usersDataAccess.refreshAsync(player.getUniqueId())
+                .handle((result, ex) -> ex == null && result != null ? result.value().orElse(null) : null)
+                .thenAccept(fresh -> mainThread.execute(() -> refreshTargetDisplay(fresh)));
     }
 
     /** Main thread: re-renders an online player's tab-list team and footer from {@code fresh}. */

@@ -550,6 +550,10 @@ public class KnKPlugin extends JavaPlugin {
                 // After a group/title change: redraw the target's tab-list team and footer (KNG-7).
                 (player, summary) -> net.knightsandkings.knk.paper.utils.ScoreboardUtil.setScoreboard(List.of(player), knkPermissible, summary)
             );
+            // Rank changes made outside the plugin (web app, expiring temporary rank) show right away.
+            if (playerNotificationPoller != null) {
+                playerNotificationPoller.setRankChangedHandler(userAdminService::resyncDisplay);
+            }
             List<MenuFeature> menuFeatures = List.of(
                 registries -> {
                     MenuVariableContext.registerDefaults(registries.variables());
