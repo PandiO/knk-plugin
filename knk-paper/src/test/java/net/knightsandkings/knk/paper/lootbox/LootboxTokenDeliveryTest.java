@@ -52,7 +52,8 @@ class LootboxTokenDeliveryTest {
         when(player.getUniqueId()).thenReturn(UUID.randomUUID());
         when(player.getInventory()).thenReturn(inventory);
         when(player.getEnderChest()).thenReturn(enderChest);
-        when(inventory.getContents()).thenReturn(new ItemStack[]{null, token(held, 1)});
+        ItemStack heldItem = token(held, 1); // built first: it stubs its own mocks
+        when(inventory.getContents()).thenReturn(new ItemStack[]{null, heldItem});
         when(enderChest.getContents()).thenReturn(new ItemStack[0]);
         when(inventory.addItem(built)).thenReturn(new HashMap<>());
         when(commandApi.markTokensDelivered(anyInt(), anyList())).thenReturn(CompletableFuture.completedFuture(null));
@@ -112,7 +113,9 @@ class LootboxTokenDeliveryTest {
     @Test
     void removeAll_takesEveryCopyOfASpentToken_andNothingElse() {
         ItemStack other = token(fresh, 1);
-        when(inventory.getContents()).thenReturn(new ItemStack[]{token(held, 2), other, token(held, 1)});
+        ItemStack first = token(held, 2);
+        ItemStack last = token(held, 1);
+        when(inventory.getContents()).thenReturn(new ItemStack[]{first, other, last});
 
         assertEquals(3, LootboxTokenDelivery.removeAll(player, held));
         verify(inventory).setItem(0, null);
