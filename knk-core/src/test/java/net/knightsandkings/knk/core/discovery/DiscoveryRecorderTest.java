@@ -139,6 +139,29 @@ class DiscoveryRecorderTest {
     }
 
     @Test
+    void anAuthRefusalKeepsTheSpoolForAfterTheKeyIsFixed() {
+        // 401: the API key doesn't match (or isn't set on the API yet). Dropping would throw away
+        // every discovery made meanwhile; they are spooled and kept until the replay gets through.
+        create();
+        spool.add(PLAYER, 7, entries("town_rivia"));
+        api.answer = regions -> failing(new ApiException("u", 401, "key", ""));
+
+        assertEquals(DiscoveryRecorder.Status.SPOOLED,
+                recorder.grant(PLAYER, 7, entries("district_market"), DiscoverySource.REGION_ENTER).join().status());
+        assertTrue(recorder.replay().join().isEmpty());
+        assertEquals(2, spool.get(PLAYER).orElseThrow().entries().size());
+
+        api.answer = regions -> CompletableFuture.completedFuture(granted(regions));
+        assertEquals(1, recorder.replay().join().size());
+        assertTrue(spool.isEmpty());
+
+        for (int status : new int[] {401, 403, 408, 429}) {
+            assertFalse(DiscoveryRecorder.isFinalRejection(new ApiException("u", status, "x", "")), "HTTP " + status);
+        }
+        assertTrue(DiscoveryRecorder.isFinalRejection(new ApiException("u", 409, "cap", "")));
+    }
+
+    @Test
     void replayDeliversWithSourceReplayAndRemovesTheFile() {
         create();
         spool.add(PLAYER, 7, entries("town_rivia", "district_market"));

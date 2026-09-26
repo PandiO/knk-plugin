@@ -25,8 +25,9 @@ import net.knightsandkings.knk.core.ports.api.DiscoveriesApi;
  * the siege match recorder):
  * <ul>
  *   <li><b>Retry</b> each grant with the existing {@link RetryPolicy} (it retries network failures only).</li>
- *   <li><b>Spool</b> a grant that still fails transiently (network error, 5xx) to {@link DiscoverySpool};
- *   any other answer (4xx, an unreadable 200) is the server's final word and is only logged. Grants
+ *   <li><b>Spool</b> a grant that still fails transiently (network error, 5xx, 401/403 from an API key
+ *   mismatch, 408/429) to {@link DiscoverySpool}; any other answer (another 4xx, an unreadable 200) is
+ *   the server's final word and is only logged. Grants
  *   still in flight at shutdown are spooled by {@link #spoolInFlight()}.</li>
  *   <li><b>Replay</b> spooled discoveries ({@link #replay()} on enable and on a timer, {@link #replay(UUID)}
  *   on the player's next join) with source Replay, 50 ids per request. The server is idempotent, so a
@@ -204,11 +205,19 @@ public final class DiscoveryRecorder {
 
     /**
      * The server's final answer: any HTTP status below 500 (a 4xx refusal, or a 200 whose body couldn't
-     * be read - replaying it would get the same answer). Network failures and 5xx are transient.
+     * be read - replaying it would get the same answer). Network failures and 5xx are transient, and so
+     * are 401/403 (the API key doesn't match or isn't set on the API yet - a deployment slip that gets
+     * fixed, after which the spooled discoveries must still be there) and 408/429.
      */
     public static boolean isFinalRejection(Throwable error) {
         ApiException api = apiException(error);
-        return api != null && api.getStatusCode() > 0 && api.getStatusCode() < 500;
+        if (api == null || api.getStatusCode() <= 0 || api.getStatusCode() >= 500) {
+            return false;
+        }
+        return switch (api.getStatusCode()) {
+            case 401, 403, 408, 429 -> false;
+            default -> true;
+        };
     }
 
     private static ApiException apiException(Throwable error) {
