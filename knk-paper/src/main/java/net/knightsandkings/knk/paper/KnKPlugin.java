@@ -895,6 +895,56 @@ public class KnKPlugin extends JavaPlugin {
 
         // Content port CP1: /menu opens the InventoryMenu hub (docs/specs/inventory-menu/CONTENT_PORT_PLAN.md §3).
         registerSimpleCommand("menu", new net.knightsandkings.knk.paper.commands.MenuCommand(() -> menuService));
+
+        registerPlayerCommands();
+    }
+
+    /**
+     * KNG-9: v2's /user statistics, /fly, /heal, /feed, /enderchest and /inventory
+     * (docs/specs/legacy/commands-v2.md §1/§7).
+     */
+    private void registerPlayerCommands() {
+        java.util.concurrent.Executor mainThread = MenuService.mainThreadExecutor(this);
+
+        if (usersQueryApi != null && usersDataAccess != null && titleBracketsDataAccess != null) {
+            registerTabCommand("user", new net.knightsandkings.knk.paper.commands.UserCommand(
+                mainThread, usersQueryApi, usersDataAccess, cacheManager.getUserCache(), titleBracketsDataAccess,
+                () -> org.bukkit.Bukkit.getOnlinePlayers().stream().map(org.bukkit.entity.Player::getName).toList()
+            ));
+        } else {
+            getLogger().warning("/user not registered - user data access failed to initialize");
+        }
+
+        if (knkPermissible == null || userAdminService == null) {
+            getLogger().warning("/fly, /heal, /feed, /enderchest and /inventory not registered - permissions failed to initialize");
+            return;
+        }
+        var support = new net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport(
+            knkPermissible, mainThread, org.bukkit.Bukkit::getPlayerExact, org.bukkit.Bukkit::getOnlinePlayers
+        );
+        // Same rank check as /knk tp, /freeze and /knk user (console and knk.admin.user.manage.all pass).
+        net.knightsandkings.knk.paper.commands.support.TargetRankCheck rankCheck = (sender, target, onAllowed) ->
+            userAdminService.resolveTarget(sender, target.getName(), summary ->
+                userAdminService.withRankCheck(sender, summary, api -> onAllowed.run(), () -> { }));
+
+        registerTabCommand("fly", new net.knightsandkings.knk.paper.commands.FlyCommand(support));
+        registerTabCommand("heal", new net.knightsandkings.knk.paper.commands.RestoreCommand(
+            support, net.knightsandkings.knk.paper.commands.RestoreCommand.Kind.HEAL));
+        registerTabCommand("feed", new net.knightsandkings.knk.paper.commands.RestoreCommand(
+            support, net.knightsandkings.knk.paper.commands.RestoreCommand.Kind.FEED));
+        registerTabCommand("enderchest", new net.knightsandkings.knk.paper.commands.EnderchestCommand(support, rankCheck));
+        registerTabCommand("inventory", new net.knightsandkings.knk.paper.commands.InventoryCommand(support, rankCheck));
+    }
+
+    private void registerTabCommand(String name, org.bukkit.command.TabExecutor executor) {
+        PluginCommand pluginCommand = getCommand(name);
+        if (pluginCommand != null) {
+            pluginCommand.setExecutor(executor);
+            pluginCommand.setTabCompleter(executor);
+            getLogger().info("Registered /" + name + " command");
+        } else {
+            getLogger().warning("Failed to register /" + name + " command - not defined in plugin.yml?");
+        }
     }
 
     private void registerSimpleCommand(String name, org.bukkit.command.CommandExecutor executor) {

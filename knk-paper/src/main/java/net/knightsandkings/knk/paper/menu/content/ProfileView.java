@@ -29,6 +29,11 @@ public final class ProfileView {
         this.progress = user != null ? TitleProgress.of(this.brackets, user.titleBracketId(), user.experiencePoints()) : null;
     }
 
+    /** For callers outside the menu, e.g. {@code /user statistics} (KNG-9), so both show the same numbers. */
+    public static ProfileView of(UserSummary user, List<TitleBracket> brackets) {
+        return new ProfileView(user, brackets);
+    }
+
     /** Shown while the viewer's account isn't loaded. */
     static ProfileView unavailable() {
         return new ProfileView(null, List.of());
