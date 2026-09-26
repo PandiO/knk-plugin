@@ -27,6 +27,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -90,6 +91,15 @@ class TeleportServiceTest {
         return new TeleportPlan(subject, () -> spawn, TeleportKind.SPAWN, subject, null, false, "spawn");
     }
 
+    /** The outcome, failing (not hanging) when the engine never completes it. */
+    private static TeleportOutcome done(CompletableFuture<TeleportOutcome> future) {
+        try {
+            return future.get(5, TimeUnit.SECONDS);
+        } catch (Exception ex) {
+            throw new AssertionError("teleport outcome not completed", ex);
+        }
+    }
+
     private void advance(long millis) {
         now += millis;
         service.tick(id -> false);
@@ -102,7 +112,7 @@ class TeleportServiceTest {
         Location bobsSpot = bob.getLocation();
         CompletableFuture<TeleportOutcome> result = service.start(TeleportPlan.staffToPlayer(alice, alice, bob, false));
 
-        assertTrue(result.join().isTeleported());
+        assertTrue(done(result).isTeleported());
         verify(alice).teleportAsync(eq(bobsSpot), eq(TeleportCause.COMMAND));
     }
 
@@ -110,15 +120,15 @@ class TeleportServiceTest {
     void staffTeleportIgnoresCombatTagAndCooldown() {
         service.combatTags().tag(alice.getUniqueId(), now);
 
-        assertTrue(service.start(TeleportPlan.staffToPlayer(alice, alice, bob, false)).join().isTeleported());
-        assertTrue(service.start(TeleportPlan.staffToPlayer(alice, alice, bob, false)).join().isTeleported());
+        assertTrue(done(service.start(TeleportPlan.staffToPlayer(alice, alice, bob, false))).isTeleported());
+        assertTrue(done(service.start(TeleportPlan.staffToPlayer(alice, alice, bob, false))).isTeleported());
     }
 
     @Test
     void staffTeleportToAPlayerWhoWentOfflineFails() {
         when(bob.isOnline()).thenReturn(false);
 
-        TeleportOutcome outcome = service.start(TeleportPlan.staffToPlayer(alice, alice, bob, false)).join();
+        TeleportOutcome outcome = done(service.start(TeleportPlan.staffToPlayer(alice, alice, bob, false)));
 
         assertEquals(TeleportOutcome.Status.FAILED, outcome.status());
         verify(alice, never()).teleportAsync(any(Location.class), any(TeleportCause.class));
@@ -128,7 +138,7 @@ class TeleportServiceTest {
     void teleportBlockedByAnotherListenerIsReportedAsFailed() {
         when(alice.teleportAsync(any(Location.class), any(TeleportCause.class))).thenReturn(CompletableFuture.completedFuture(false));
 
-        TeleportOutcome outcome = service.start(TeleportPlan.staffToPlayer(alice, alice, bob, false)).join();
+        TeleportOutcome outcome = done(service.start(TeleportPlan.staffToPlayer(alice, alice, bob, false)));
 
         assertEquals(TeleportOutcome.Status.FAILED, outcome.status());
     }
@@ -139,7 +149,7 @@ class TeleportServiceTest {
     void restrictionRefusesBeforeAnythingHappens() {
         service.registerRestriction(check -> Optional.of(TeleportDenial.of(TeleportDenial.SIEGE, "Alice is in a siege match.")));
 
-        TeleportOutcome outcome = service.start(TeleportPlan.staffToPlayer(bob, alice, bob, false)).join();
+        TeleportOutcome outcome = done(service.start(TeleportPlan.staffToPlayer(bob, alice, bob, false)));
 
         assertEquals(TeleportOutcome.Status.DENIED, outcome.status());
         assertEquals("Alice is in a siege match.", outcome.message());
@@ -152,7 +162,7 @@ class TeleportServiceTest {
             throw new IllegalStateException("boom");
         });
 
-        assertEquals(TeleportOutcome.Status.DENIED, service.start(spawnPlan(alice)).join().status());
+        assertEquals(TeleportOutcome.Status.DENIED, done(service.start(spawnPlan(alice))).status());
     }
 
     @Test
@@ -173,9 +183,9 @@ class TeleportServiceTest {
         });
 
         // Bob (holds the bypass) sends Alice (doesn't) - allowed.
-        assertTrue(service.start(TeleportPlan.staffToLocation(staff, alice, spawn, "jail")).join().isTeleported());
+        assertTrue(done(service.start(TeleportPlan.staffToLocation(staff, alice, spawn, "jail"))).isTeleported());
         // Alice's own player teleport - refused, her permissions count.
-        assertEquals(TeleportOutcome.Status.DENIED, service.start(spawnPlan(alice)).join().status());
+        assertEquals(TeleportOutcome.Status.DENIED, done(service.start(spawnPlan(alice))).status());
     }
 
     @Test
@@ -199,7 +209,7 @@ class TeleportServiceTest {
 
         assertTrue(service.hasInFlightBypass(alice.getUniqueId(), TeleportNodes.REGION_BYPASS));
         pending.complete(true);
-        assertTrue(result.join().isTeleported());
+        assertTrue(done(result).isTeleported());
         assertFalse(service.hasInFlightBypass(alice.getUniqueId(), TeleportNodes.REGION_BYPASS));
     }
 
@@ -215,7 +225,7 @@ class TeleportServiceTest {
         verify(alice, never()).teleportAsync(any(Location.class), any(TeleportCause.class));
 
         advance(100);
-        assertTrue(result.join().isTeleported());
+        assertTrue(done(result).isTeleported());
         verify(alice).teleportAsync(eq(spawn), eq(TeleportCause.COMMAND));
     }
 
@@ -226,14 +236,14 @@ class TeleportServiceTest {
 
         advance(3_000);
 
-        assertTrue(result.join().isTeleported());
+        assertTrue(done(result).isTeleported());
     }
 
     @Test
     void warmupBypassTeleportsImmediately() {
         grant(alice, TeleportNodes.BYPASS_WARMUP);
 
-        assertTrue(service.start(spawnPlan(alice)).join().isTeleported());
+        assertTrue(done(service.start(spawnPlan(alice))).isTeleported());
     }
 
     @Test
@@ -242,8 +252,8 @@ class TeleportServiceTest {
 
         warmupListener.onMove(new PlayerMoveEvent(alice, new Location(world, 0.5, 64, 0.5), new Location(world, 1.5, 64, 0.5)));
 
-        assertEquals(TeleportOutcome.Status.CANCELLED, result.join().status());
-        assertEquals(WarmupCancelReason.MOVED.name(), result.join().code());
+        assertEquals(TeleportOutcome.Status.CANCELLED, done(result).status());
+        assertEquals(WarmupCancelReason.MOVED.name(), done(result).code());
         advance(10_000);
         verify(alice, never()).teleportAsync(any(Location.class), any(TeleportCause.class));
     }
@@ -257,7 +267,7 @@ class TeleportServiceTest {
 
         assertTrue(service.isWarmingUp(alice.getUniqueId()));
         advance(5_000);
-        assertTrue(result.join().isTeleported());
+        assertTrue(done(result).isTeleported());
     }
 
     @Test
@@ -268,7 +278,7 @@ class TeleportServiceTest {
 
         warmupListener.onDamage(damage);
 
-        assertEquals(WarmupCancelReason.DAMAGED.name(), result.join().code());
+        assertEquals(WarmupCancelReason.DAMAGED.name(), done(result).code());
     }
 
     @Test
@@ -276,9 +286,9 @@ class TeleportServiceTest {
         CompletableFuture<TeleportOutcome> first = service.start(spawnPlan(alice));
         CompletableFuture<TeleportOutcome> second = service.start(spawnPlan(alice));
 
-        assertEquals(WarmupCancelReason.REPLACED.name(), first.join().code());
+        assertEquals(WarmupCancelReason.REPLACED.name(), done(first).code());
         advance(5_000);
-        assertTrue(second.join().isTeleported());
+        assertTrue(done(second).isTeleported());
     }
 
     @Test
@@ -292,7 +302,7 @@ class TeleportServiceTest {
         joinedSiege.set(true);
         advance(5_000);
 
-        assertEquals(TeleportOutcome.Status.DENIED, result.join().status());
+        assertEquals(TeleportOutcome.Status.DENIED, done(result).status());
         verify(alice, never()).teleportAsync(any(Location.class), any(TeleportCause.class));
     }
 
@@ -304,15 +314,15 @@ class TeleportServiceTest {
         now += 1_000;
         service.tick(id -> id.equals(alice.getUniqueId()));
 
-        assertEquals(WarmupCancelReason.FROZEN.name(), result.join().code());
+        assertEquals(WarmupCancelReason.FROZEN.name(), done(result).code());
     }
 
     @Test
     void frozenPlayerCanNotStartAPlayerTeleportButStaffCanMoveThem() {
         service.registerRestriction(new FreezeTeleportRestriction(id -> id.equals(alice.getUniqueId())));
 
-        assertEquals(TeleportDenial.FROZEN, service.start(spawnPlan(alice)).join().code());
-        assertTrue(service.start(TeleportPlan.staffToLocation(bob, alice, spawn, "jail")).join().isTeleported());
+        assertEquals(TeleportDenial.FROZEN, done(service.start(spawnPlan(alice))).code());
+        assertTrue(done(service.start(TeleportPlan.staffToLocation(bob, alice, spawn, "jail"))).isTeleported());
     }
 
     // ===== cooldown, combat tag, safety =====
@@ -320,14 +330,14 @@ class TeleportServiceTest {
     @Test
     void cooldownStartsAfterAPlayerTeleport() {
         grant(alice, TeleportNodes.BYPASS_WARMUP);
-        assertTrue(service.start(spawnPlan(alice)).join().isTeleported());
+        assertTrue(done(service.start(spawnPlan(alice))).isTeleported());
 
-        TeleportOutcome again = service.start(spawnPlan(alice)).join();
+        TeleportOutcome again = done(service.start(spawnPlan(alice)));
 
         assertEquals(TeleportDenial.COOLDOWN, again.code());
         assertEquals("You can teleport again in 30 s.", again.message());
         now += 30_000;
-        assertTrue(service.start(spawnPlan(alice)).join().isTeleported());
+        assertTrue(done(service.start(spawnPlan(alice))).isTeleported());
     }
 
     @Test
@@ -340,11 +350,11 @@ class TeleportServiceTest {
         new CombatTagListener(service).onDamage(hit);
         now += 3_000;
 
-        TeleportOutcome outcome = service.start(spawnPlan(alice)).join();
+        TeleportOutcome outcome = done(service.start(spawnPlan(alice)));
 
         assertEquals(TeleportDenial.COMBAT, outcome.code());
         assertEquals("You were in combat 3 s ago; wait 7 s.", outcome.message());
-        assertEquals(TeleportDenial.COMBAT, service.start(spawnPlan(bob)).join().code(), "the shooter is tagged too");
+        assertEquals(TeleportDenial.COMBAT, done(service.start(spawnPlan(bob))).code(), "the shooter is tagged too");
         grant(alice, TeleportNodes.BYPASS_COMBAT);
         service.start(spawnPlan(alice));
         assertTrue(service.isWarmingUp(alice.getUniqueId()), "the combat bypass lets the warmup start");
@@ -365,7 +375,7 @@ class TeleportServiceTest {
         now += 5_000;
         lava.tick(id -> false);
 
-        assertEquals(TeleportDenial.UNSAFE, result.join().code());
+        assertEquals(TeleportDenial.UNSAFE, done(result).code());
         verify(alice, never()).teleportAsync(any(Location.class), any(TeleportCause.class));
     }
 
@@ -377,7 +387,7 @@ class TeleportServiceTest {
 
         advance(5_000);
 
-        assertTrue(result.join().isTeleported());
+        assertTrue(done(result).isTeleported());
         verify(alice).teleportAsync(eq(new Location(world, 50.5, 64, 50.5, 90, 0)), eq(TeleportCause.COMMAND));
     }
 }

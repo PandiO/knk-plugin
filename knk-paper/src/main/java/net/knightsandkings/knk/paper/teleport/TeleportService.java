@@ -147,12 +147,8 @@ public class TeleportService {
             if (ex != null) {
                 LOGGER.log(Level.WARNING, "Teleport permission lookup failed for " + plan.subject().getName(), ex);
             }
-            try {
-                begin(plan, ex != null || authority == null ? Authority.NONE : authority, result);
-            } catch (RuntimeException failure) {
-                LOGGER.log(Level.SEVERE, "Teleport of " + plan.subject().getName() + " failed", failure);
-                result.complete(TeleportOutcome.failed("Teleport failed - see the server log."));
-            }
+            Authority resolved = ex != null || authority == null ? Authority.NONE : authority;
+            guarded(plan, result, () -> begin(plan, resolved, result));
         }));
         return result;
     }
@@ -199,12 +195,7 @@ public class TeleportService {
         }
         for (WarmupBook.Pending<Warmup> due : warmups.takeDue(now)) {
             Warmup warmup = due.payload();
-            try {
-                commit(warmup.plan, warmup.authority, warmup.result, true);
-            } catch (RuntimeException failure) {
-                LOGGER.log(Level.SEVERE, "Teleport of " + warmup.plan.subject().getName() + " failed", failure);
-                warmup.result.complete(TeleportOutcome.failed("Teleport failed - see the server log."));
-            }
+            guarded(warmup.plan, warmup.result, () -> commit(warmup.plan, warmup.authority, warmup.result, true));
         }
         if (now - lastPurgeMillis >= PURGE_INTERVAL_MILLIS) {
             lastPurgeMillis = now;
@@ -267,7 +258,7 @@ public class TeleportService {
             return;
         }
         World world = to.getWorld();
-        world.getChunkAtAsync(to).whenComplete((chunk, ex) -> mainThread.execute(() -> {
+        world.getChunkAtAsync(to).whenComplete((chunk, ex) -> mainThread.execute(() -> guarded(plan, result, () -> {
             if (ex != null) {
                 LOGGER.log(Level.WARNING, "Could not load the destination chunk for " + subject.getName(), ex);
                 result.complete(TeleportOutcome.failed("The destination couldn't be loaded. Try again."));
@@ -283,7 +274,7 @@ public class TeleportService {
                 return;
             }
             teleport(plan, authority, toLocation(to, spot.get()), result);
-        }));
+        })));
     }
 
     private void teleport(TeleportPlan plan, Authority authority, Location to, CompletableFuture<TeleportOutcome> result) {
@@ -298,7 +289,7 @@ public class TeleportService {
             inFlight.remove(id, authority);
             throw ex;
         }
-        teleported.whenComplete((ok, ex) -> mainThread.execute(() -> {
+        teleported.whenComplete((ok, ex) -> mainThread.execute(() -> guarded(plan, result, () -> {
             inFlight.remove(id, authority);
             if (ex != null || !Boolean.TRUE.equals(ok)) {
                 if (ex != null) {
@@ -312,7 +303,17 @@ public class TeleportService {
             }
             log(plan, from, to);
             result.complete(TeleportOutcome.teleported());
-        }));
+        })));
+    }
+
+    /** Runs a step so that whatever it throws still completes the teleport's result (never left hanging). */
+    private static void guarded(TeleportPlan plan, CompletableFuture<TeleportOutcome> result, Runnable step) {
+        try {
+            step.run();
+        } catch (RuntimeException failure) {
+            LOGGER.log(Level.SEVERE, "Teleport of " + plan.subject().getName() + " failed", failure);
+            result.complete(TeleportOutcome.failed("Teleport failed - see the server log."));
+        }
     }
 
     private Optional<TeleportDenial> checkGuards(TeleportPlan plan, Authority authority, Location to) {
