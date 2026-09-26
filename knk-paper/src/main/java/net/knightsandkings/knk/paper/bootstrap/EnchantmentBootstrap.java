@@ -69,7 +69,7 @@ public class EnchantmentBootstrap {
                 GradeCatalog.getInstance(),
                 () -> ThreadLocalRandom.current().nextDouble()
         );
-        pluginManager.registerEvents(new EnchantBookListener(enchantBooks), plugin);
+        pluginManager.registerEvents(new EnchantBookListener(enchantBooks, plugin), plugin);
 
                 PluginCommand enchantmentCommand = plugin.getServer().getPluginCommand("ce");
         if (enchantmentCommand == null) {

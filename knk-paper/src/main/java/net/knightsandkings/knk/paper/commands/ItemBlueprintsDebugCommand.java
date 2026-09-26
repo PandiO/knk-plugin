@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.commands;
 
+import net.knightsandkings.knk.core.domain.enchantment.CustomEnchantmentLore;
 import net.knightsandkings.knk.api.impl.enchantment.LocalEnchantmentRepositoryImpl;
 import net.knightsandkings.knk.core.dataaccess.EnchantmentDefinitionsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.FetchResult;
@@ -345,33 +346,7 @@ public class ItemBlueprintsDebugCommand implements CommandExecutor {
     }
 
     private List<String> reorderLoreEnchantmentsFirst(List<String> loreLines) {
-        if (loreLines == null || loreLines.isEmpty()) {
-            return List.of();
-        }
-
-        Map<String, Integer> enchantments = customEnchantmentRepository.getEnchantments(loreLines).join();
-        if (enchantments.isEmpty()) {
-            return loreLines;
-        }
-
-        List<String> nonEnchantmentLore = new ArrayList<>(loreLines);
-        for (String enchantmentId : enchantments.keySet()) {
-            nonEnchantmentLore = customEnchantmentRepository.removeEnchantment(nonEnchantmentLore, enchantmentId).join();
-        }
-
-        List<String> enchantmentLore = new ArrayList<>();
-        for (Map.Entry<String, Integer> enchantmentEntry : enchantments.entrySet()) {
-            int level = enchantmentEntry.getValue() != null && enchantmentEntry.getValue() > 0
-                    ? enchantmentEntry.getValue()
-                    : 1;
-            enchantmentLore = customEnchantmentRepository
-                    .applyEnchantment(enchantmentLore, enchantmentEntry.getKey(), level)
-                    .join();
-        }
-
-        List<String> reorderedLore = new ArrayList<>(enchantmentLore);
-        reorderedLore.addAll(nonEnchantmentLore);
-        return reorderedLore;
+        return CustomEnchantmentLore.enchantmentsFirst(customEnchantmentRepository, loreLines);
     }
 
     private CompletableFuture<String> resolveMaterialNamespaceKey(KnkItemBlueprint blueprint) {

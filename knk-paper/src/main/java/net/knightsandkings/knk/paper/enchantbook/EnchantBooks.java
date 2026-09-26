@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.enchantbook;
 
+import net.knightsandkings.knk.core.domain.enchantment.CustomEnchantmentLore;
 import net.knightsandkings.knk.core.domain.enchantment.EnchantmentRegistry;
 import net.knightsandkings.knk.core.domain.item.GradeCatalog;
 import net.knightsandkings.knk.core.enchantbook.EnchantBookCapSettings;
@@ -26,7 +27,8 @@ import java.util.function.DoubleSupplier;
  * Linear KNG-5): the siege-agnostic counterpart of {@code SiegeEnchantBooks} on {@code claude/siege-minigame}.
  * Reads the facts off the items, lets {@link EnchantBookRules} decide, and writes a normal permanent
  * enchantment - vanilla via {@code addEnchant} (unsafe levels allowed, as {@code /knk itemblueprints give}),
- * custom via the {@link EnchantmentRepository} lore lines. Never writes the siege PDC markers, so the siege
+ * custom via the {@link EnchantmentRepository} lore lines ({@link CustomEnchantmentLore}, the same pipeline as
+ * {@code /ce add}). Never writes the siege PDC markers, so the siege
  * stripping sweep leaves the result alone.
  * <p>
  * KNG-6 (docs/specs/items/GRADE_DROPCHANCE.md): the target's grade ({@link ItemGradeTag}, looked up live in
@@ -119,7 +121,8 @@ public final class EnchantBooks {
             meta.addEnchant(vanilla(payload), level, true);
         } else {
             List<String> lore = meta.hasLore() && meta.getLore() != null ? meta.getLore() : List.of();
-            meta.setLore(enchantmentRepository.applyEnchantment(lore, payload.enchantmentKey(), level).join());
+            // The shared pipeline: custom enchantment lines on top, under the vanilla list; Grade/Origin stay last.
+            meta.setLore(CustomEnchantmentLore.apply(enchantmentRepository, lore, payload.enchantmentKey(), level));
         }
         updated.setItemMeta(meta);
         return new Outcome(ApplyResult.APPLIED, updated, level, decision.capped(), bonus);

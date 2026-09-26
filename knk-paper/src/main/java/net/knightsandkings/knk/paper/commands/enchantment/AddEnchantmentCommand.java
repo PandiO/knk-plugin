@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.commands.enchantment;
 
+import net.knightsandkings.knk.core.domain.enchantment.CustomEnchantmentLore;
 import net.knightsandkings.knk.core.domain.enchantment.Enchantment;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentRepository;
 import org.bukkit.command.CommandSender;
@@ -105,33 +106,7 @@ public class AddEnchantmentCommand implements EnchantmentSubcommand {
     }
 
     private List<String> reorderLoreEnchantmentsFirst(List<String> loreLines) {
-        if (loreLines == null || loreLines.isEmpty()) {
-            return List.of();
-        }
-
-        Map<String, Integer> enchantments = repository.getEnchantments(loreLines).join();
-        if (enchantments.isEmpty()) {
-            return loreLines;
-        }
-
-        List<String> nonEnchantmentLore = loreLines;
-        for (String enchantmentId : enchantments.keySet()) {
-            nonEnchantmentLore = repository.removeEnchantment(nonEnchantmentLore, enchantmentId).join();
-        }
-
-        List<String> enchantmentLore = List.of();
-        for (Map.Entry<String, Integer> enchantmentEntry : enchantments.entrySet()) {
-            int enchantmentLevel = enchantmentEntry.getValue() != null && enchantmentEntry.getValue() > 0
-                    ? enchantmentEntry.getValue()
-                    : 1;
-            enchantmentLore = repository
-                    .applyEnchantment(enchantmentLore, enchantmentEntry.getKey(), enchantmentLevel)
-                    .join();
-        }
-
-        List<String> reorderedLore = new java.util.ArrayList<>(enchantmentLore);
-        reorderedLore.addAll(nonEnchantmentLore);
-        return reorderedLore;
+        return CustomEnchantmentLore.enchantmentsFirst(repository, loreLines);
     }
 
     @Override
