@@ -35,7 +35,10 @@ public class UsersMapper {
             dto.premiumTierExpiresAt(),
             dto.isFrozen(),
             dto.frozenReason(),
-            dto.gender()
+            dto.gender(),
+            dto.chatPrimaryColor(),
+            dto.chatSecondaryColor(),
+            dto.nameColor()
         );
     }
 
@@ -59,7 +62,10 @@ public class UsersMapper {
             domain.premiumTierExpiresAt(),
             domain.isFrozen(),
             domain.frozenReason(),
-            domain.gender()
+            domain.gender(),
+            domain.chatPrimaryColor(),
+            domain.chatSecondaryColor(),
+            domain.nameColor()
         );
     }
 

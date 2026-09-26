@@ -20,6 +20,7 @@ import net.knightsandkings.knk.paper.menu.MenuActionContext;
 import net.knightsandkings.knk.paper.menu.MenuContentSourceContext;
 import net.knightsandkings.knk.paper.menu.MenuFeature;
 import net.knightsandkings.knk.paper.menu.MenuFeatureRegistries;
+import net.knightsandkings.knk.paper.user.PlayerRanks;
 import net.knightsandkings.knk.paper.user.UserAdminService;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
@@ -79,6 +80,8 @@ public final class UserManagerMenuFeature implements MenuFeature {
 
     private static final Logger LOGGER = Logger.getLogger(UserManagerMenuFeature.class.getName());
     private static final int MAX_CACHED = 256;
+    /** {@code users.group} op a rank click confirms into: replace the target's rank. */
+    static final String SET_RANK_OP = "set-rank";
 
     private record TargetState(UserSummary user, Boolean outranks) {
     }
@@ -336,14 +339,81 @@ public final class UserManagerMenuFeature implements MenuFeature {
         PermissionGroupSummary group = groups.cachedOrEmpty().stream()
                 .filter(g -> groupId != null && g.id() == groupId)
                 .findFirst().orElse(null);
-        if (group == null || !Set.of("add", "remove").contains(op)) {
+        if (group == null || !Set.of("add", "remove", SET_RANK_OP).contains(op)) {
             player.sendMessage(ChatColor.RED + "That group is not available - reopen the menu.");
             return;
         }
         if (!admin.requireProperty(player, "group")) {
             return;
         }
-        withTarget(context, params, target -> admin.changeGroup(player, target, group, op.equals("add"), null));
+        if (!PlayerRanks.isRank(group)) {
+            // Staff and other non-rank groups: plain add/remove, next to whatever rank they hold.
+            withTarget(context, params, target -> admin.changeGroup(player, target, group, op.equals("add"), null));
+            return;
+        }
+        // Ranks (Default + premium tiers): a player holds exactly one.
+        switch (op) {
+            case "add" -> requestRankSwitch(context, params, group);
+            case SET_RANK_OP -> withTarget(context, params, target -> switchRank(player, target, group));
+            default -> {
+                // Removing a rank (already confirmed by the seed's remove action) drops the player
+                // back to the free Default rank; Default itself can only be replaced, not removed.
+                PermissionGroupSummary defaultRank = PlayerRanks.findDefault(groups.cachedOrEmpty()).orElse(null);
+                if (PlayerRanks.isDefault(group)) {
+                    player.sendMessage(ChatColor.YELLOW + "Default is the base rank - pick another rank to replace it.");
+                } else if (defaultRank == null) {
+                    withTarget(context, params, target -> admin.changeGroup(player, target, group, false, null));
+                } else {
+                    withTarget(context, params, target -> switchRank(player, target, defaultRank));
+                }
+            }
+        }
+    }
+
+    /**
+     * Clicking a rank the target doesn't hold: stores a {@code users.group set-rank} confirmation
+     * (shown by the header's Confirm/Cancel, condition {@code users.pending}) and repaints so those
+     * buttons appear right away. The seed binds the row to a plain "add"; doing the switch here
+     * keeps existing menu templates working without a re-seed.
+     */
+    private void requestRankSwitch(MenuActionContext context, Map<String, String> params, PermissionGroupSummary rank) {
+        Player player = context.player();
+        Integer userId = parseId(params.get("userId"));
+        TargetState state = userId != null ? targets.get(key(player.getUniqueId(), userId)) : null;
+        if (state == null || state.user() == null) {
+            player.sendMessage(ChatColor.RED + "That player isn't loaded - reopen the menu.");
+            return;
+        }
+        if (context.session() == null) {
+            throw new MenuActionException("users.group needs a menu session to confirm a rank switch");
+        }
+        UserSummary target = state.user();
+        // The API's premium tier, else the free rank they're on.
+        String current = target.premiumTierName() != null ? target.premiumTierName() : PlayerRanks.DEFAULT_RANK_NAME;
+        String prompt = "Set " + target.username() + "'s rank to " + rank.name()
+                + (!current.equalsIgnoreCase(rank.name()) ? " (replaces " + current + ")" : "")
+                + "? Click Confirm or Cancel.";
+        context.session().setPendingConfirmation(new MenuSession.PendingConfirmation("users.group",
+                Map.of("userId", String.valueOf(userId), "groupId", String.valueOf(rank.id()), "op", SET_RANK_OP), prompt));
+        player.sendMessage(ChatColor.YELLOW + prompt);
+        if (context.menuService() != null) {
+            context.menuService().refreshOpenMenu(player);
+        }
+    }
+
+    /** Confirmed switch: {@code rank} replaces every other active rank membership (Default or premium). */
+    private CompletableFuture<Boolean> switchRank(Player player, UserSummary target, PermissionGroupSummary rank) {
+        return usersQueryApi.getGroupMemberships(target.id())
+                .thenCompose(memberships -> admin.setRank(player, target, rank, memberships.stream()
+                        .filter(m -> m.isActive() && PlayerRanks.isRank(m) && m.groupId() != rank.id())
+                        .map(m -> new PermissionGroupSummary(m.groupId(), m.groupName(), m.weight(), m.isPremiumTier()))
+                        .toList()))
+                .exceptionally(ex -> {
+                    LOGGER.log(Level.WARNING, "users.group set-rank: failed to load memberships", ex);
+                    player.sendMessage(ChatColor.RED + "Failed to load " + target.username() + "'s groups: "
+                            + UserAdminService.describeError(ex));
+                    return false;
+                });
     }
 
     private void mode(MenuActionContext context, Map<String, String> params) {

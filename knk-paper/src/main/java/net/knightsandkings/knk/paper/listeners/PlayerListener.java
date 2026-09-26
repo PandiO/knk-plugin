@@ -44,6 +44,7 @@ import net.knightsandkings.knk.core.ports.api.KitsCommandApi;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.paper.KnKPlugin;
 import net.knightsandkings.knk.paper.cache.CacheManager;
+import net.knightsandkings.knk.paper.chat.ChatLineFormat;
 import net.knightsandkings.knk.paper.kit.KitGrantPlacer;
 import net.knightsandkings.knk.paper.modes.ModeService;
 import net.knightsandkings.knk.paper.permissions.KnkPermissible;
@@ -100,7 +101,11 @@ public class PlayerListener implements Listener {
 		String username = e.getName();
 
 		try {
-			FetchResult<UserSummary> result = usersDataAccess.getByUuidAsync(uuid, FetchPolicy.STALE_OK).join();
+			// API first, so a relog always picks up changes made since the cache was filled (a premium
+			// tier or title changed from the web-app, the Player manager, or an expired temporary
+			// tier). STALE_OK served any unexpired cache entry without asking the API. The cached
+			// value is still used when the API can't be reached.
+			FetchResult<UserSummary> result = usersDataAccess.getByUuidAsync(uuid, FetchPolicy.API_THEN_CACHE_REFRESH).join();
 			if (result.isStale()) {
 				triggerBackgroundUserRefresh(uuid);
 			}
@@ -322,23 +327,14 @@ public class PlayerListener implements Listener {
 		String legacyFormattedMessage = ChatColor.translateAlternateColorCodes('&', capitalizedMessage);
 		Component messageComponent = LegacyComponentSerializer.legacySection().deserialize(legacyFormattedMessage);
 
-		Component finalMessage;
-		if (knkPermissible.hasPermission(player, "knk.mode.owner")) {
-			// Build owner format with proper Components using ColorOptions TextColor objects
-			Component prefixComponent = Component.text("[")
-					.color(ColorOptions.ownerformat)
-					.append(Component.text("OWNER").color(ColorOptions.ownersubjects))
-					.append(Component.text("]").color(ColorOptions.ownerformat))
-					.append(Component.text(" " + dn + ": ").color(ColorOptions.ownersubjects));
-			finalMessage = prefixComponent.append(messageComponent);
-			e.renderer((source, sourceDisplayName, message, viewer) -> finalMessage);
-		} else {
-			// Build default format with proper Components using ColorOptions TextColor objects
-			Component prefixComponent = Component.text(" " + dn + ": ")
-					.color(ColorOptions.defaultsubjects);
-			finalMessage = prefixComponent.append(messageComponent);
-			e.renderer((source, sourceDisplayName, message, viewer) -> finalMessage);
-		}
+		// Title, premium tier and tier colors come from the cached summary (KNG-7/KNG-8) — stale
+		// is fine for display, and chat must not wait on an API call.
+		UserSummary user = cacheManager.getUserCache().getStale(player.getUniqueId()).orElse(null);
+		ChatLineFormat.Rank rank = knkPermissible.hasPermission(player, ModeService.OWNER_NODE) ? ChatLineFormat.Rank.OWNER
+				: knkPermissible.hasPermission(player, ModeService.STAFF_NODE) ? ChatLineFormat.Rank.STAFF
+				: ChatLineFormat.Rank.MEMBER;
+		Component finalMessage = ChatLineFormat.render(rank, dn, user, messageComponent);
+		e.renderer((source, sourceDisplayName, message, viewer) -> finalMessage);
 
 		/**
 		 * Player mention

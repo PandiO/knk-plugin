@@ -19,6 +19,7 @@ import org.bukkit.entity.Player;
 import java.time.OffsetDateTime;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
@@ -58,10 +59,21 @@ public final class UserAdminService {
     private final RankHierarchy rankHierarchy;
     private final ModeService modeService;
     private final AdminFreezeManager freezeManager;
+    /** Re-renders an online player's tab-list team and footer from a fresh summary (KNG-7). */
+    private final BiConsumer<Player, UserSummary> displayRefresher;
 
     public UserAdminService(Executor mainThread, UsersDataAccess usersDataAccess, UsersCommandApi usersCommandApi,
                             PermissionGroupsQueryApi permissionGroupsQueryApi, RankHierarchy rankHierarchy,
                             ModeService modeService, AdminFreezeManager freezeManager) {
+        this(mainThread, usersDataAccess, usersCommandApi, permissionGroupsQueryApi, rankHierarchy, modeService,
+                freezeManager, (player, summary) -> { });
+    }
+
+    public UserAdminService(Executor mainThread, UsersDataAccess usersDataAccess, UsersCommandApi usersCommandApi,
+                            PermissionGroupsQueryApi permissionGroupsQueryApi, RankHierarchy rankHierarchy,
+                            ModeService modeService, AdminFreezeManager freezeManager,
+                            BiConsumer<Player, UserSummary> displayRefresher) {
+        this.displayRefresher = displayRefresher;
         this.mainThread = mainThread;
         this.usersDataAccess = usersDataAccess;
         this.usersCommandApi = usersCommandApi;
@@ -222,6 +234,8 @@ public final class UserAdminService {
                         PromotionEffects.show(targetPlayer, result.titleChange());
                     }
                     done.complete(true);
+                    // New balances/title into the cache, and the title into chat and the tab list.
+                    refreshTargetSummary(target).thenAccept(fresh -> mainThread.execute(() -> refreshTargetDisplay(fresh)));
                 }))
                 .exceptionally(ex -> {
                     mainThread.execute(() -> {
@@ -285,7 +299,11 @@ public final class UserAdminService {
         return done;
     }
 
-    /** Adds or removes one group membership (rank-checked, attributed, visibility refreshed). */
+    /**
+     * Adds or removes one group membership (rank-checked, attributed, visibility refreshed), then
+     * re-reads the target so their premium tier shows in chat and the tab list straight away and
+     * on their next login.
+     */
     public CompletableFuture<Boolean> changeGroup(CommandSender sender, UserSummary target, PermissionGroupSummary group,
                                                   boolean adding, OffsetDateTime expiresAt) {
         CompletableFuture<Boolean> done = new CompletableFuture<>();
@@ -293,15 +311,53 @@ public final class UserAdminService {
             CompletableFuture<Void> call = adding
                     ? api.addGroupMembership(target.id(), group.id(), expiresAt)
                     : api.removeGroupMembership(target.id(), group.id());
-            call.thenAccept(v -> mainThread.execute(() -> {
+            call.thenCompose(v -> refreshTargetSummary(target)).thenAccept(fresh -> mainThread.execute(() -> {
                 String verb = adding ? "Added" : "Removed";
                 String durationSuffix = adding ? (expiresAt != null ? " (expires " + expiresAt + ")" : " (permanent)") : "";
                 sender.sendMessage(ChatColor.GREEN + verb + " " + target.username() + "'s membership in "
                         + group.name() + durationSuffix + ".");
+                if (group.isPremiumTier()) {
+                    reportPremiumTier(sender, target, group, adding, fresh);
+                }
                 notifyGroupChange(target, group, adding);
                 refreshTargetVisibility(target);
+                refreshTargetDisplay(fresh);
                 done.complete(true);
             })).exceptionally(ex -> fail(sender, done, ex));
+        }, () -> done.complete(false));
+        return done;
+    }
+
+    /**
+     * Player manager rank switch: makes {@code rank} (Default or a premium tier, see
+     * {@link PlayerRanks}) the target's only rank, permanently - added first, then each of
+     * {@code replacedRanks} removed, so a failure part-way never leaves them without a rank.
+     * Rank-checked and attributed like {@link #changeGroup}; the target is re-read afterwards so
+     * chat and the tab list show the new rank. {@code /knk user ... group add} still adds
+     * alongside, e.g. a temporary higher tier on top of a permanent one.
+     */
+    public CompletableFuture<Boolean> setRank(CommandSender sender, UserSummary target, PermissionGroupSummary rank,
+                                              java.util.List<PermissionGroupSummary> replacedRanks) {
+        java.util.List<PermissionGroupSummary> replaced = replacedRanks.stream().filter(g -> g.id() != rank.id()).toList();
+        CompletableFuture<Boolean> done = new CompletableFuture<>();
+        withRankCheck(sender, target, api -> {
+            CompletableFuture<Void> chain = api.addGroupMembership(target.id(), rank.id(), null);
+            for (PermissionGroupSummary old : replaced) {
+                chain = chain.thenCompose(v -> api.removeGroupMembership(target.id(), old.id()));
+            }
+            chain.thenCompose(v -> refreshTargetSummary(target)).thenAccept(fresh -> mainThread.execute(() -> {
+                String was = replaced.stream().map(PermissionGroupSummary::name).collect(java.util.stream.Collectors.joining(", "));
+                sender.sendMessage(ChatColor.GREEN + "Set " + target.username() + "'s rank to " + rank.name()
+                        + (was.isEmpty() ? "" : " (was " + was + ")") + ".");
+                notifyRankChange(target, rank);
+                refreshTargetVisibility(target);
+                refreshTargetDisplay(fresh);
+                done.complete(true);
+            })).exceptionally(ex -> {
+                // Part of the switch may have gone through - re-read so what's shown matches.
+                refreshTargetSummary(target).thenAccept(fresh -> mainThread.execute(() -> refreshTargetDisplay(fresh)));
+                return fail(sender, done, ex);
+            });
         }, () -> done.complete(false));
         return done;
     }
@@ -440,6 +496,51 @@ public final class UserAdminService {
     }
 
     /**
+     * Re-reads {@code target} from the API into the user cache after a change that affects how
+     * they are shown (premium tier, title, balances). Chat reads that cache, and the next login
+     * would otherwise start from the pre-change summary. Never fails - the change itself already
+     * went through, so a failed refresh only means the old display lingers - and resolves to the
+     * fresh summary, or null (no UUID, e.g. a web-only account, or the read failed).
+     */
+    private CompletableFuture<UserSummary> refreshTargetSummary(UserSummary target) {
+        if (target.uuid() == null) {
+            return CompletableFuture.completedFuture(null);
+        }
+        return usersDataAccess.refreshAsync(target.uuid())
+                .handle((result, ex) -> ex == null && result != null ? result.value().orElse(null) : null);
+    }
+
+    /** Main thread: re-renders an online player's tab-list team and footer from {@code fresh}. */
+    private void refreshTargetDisplay(UserSummary fresh) {
+        if (fresh == null || fresh.uuid() == null) {
+            return;
+        }
+        Player targetPlayer = Bukkit.getPlayer(fresh.uuid());
+        if (targetPlayer != null) {
+            displayRefresher.accept(targetPlayer, fresh);
+        }
+    }
+
+    /**
+     * The displayed premium tier is the highest-weight active premium membership, so adding a
+     * lower tier next to a higher one changes nothing visible - say so, rather than leave the
+     * staff member wondering why the prefix didn't change.
+     */
+    static void reportPremiumTier(CommandSender sender, UserSummary target, PermissionGroupSummary group,
+                                  boolean adding, UserSummary fresh) {
+        if (fresh == null) {
+            return;
+        }
+        String shown = fresh.premiumTierName() != null ? fresh.premiumTierName() : "none";
+        if (adding && !java.util.Objects.equals(fresh.premiumTierGroupId(), group.id())) {
+            sender.sendMessage(ChatColor.YELLOW + target.username() + "'s displayed premium tier is still " + shown
+                    + " (the highest-weight tier wins) - remove " + shown + " to show " + group.name() + ".");
+        } else {
+            sender.sendMessage(ChatColor.GRAY + target.username() + "'s displayed premium tier is now " + shown + ".");
+        }
+    }
+
+    /**
      * A group/perm change can affect what an online target may now see (e.g. granting
      * knk.mode.staff should let them immediately see already-vanished players, not just after
      * their next relog) - docs/specs/user-features/IMPLEMENTATION_PLAN.md §3's carried-forward gap
@@ -453,6 +554,15 @@ public final class UserAdminService {
         if (targetPlayer != null) {
             modeService.refreshVisibilityFor(targetPlayer);
         }
+    }
+
+    private void notifyRankChange(UserSummary target, PermissionGroupSummary rank) {
+        Player targetPlayer = Bukkit.getPlayerExact(target.username());
+        if (targetPlayer == null) {
+            return; // Offline - nothing to notify.
+        }
+        targetPlayer.playSound(targetPlayer.getLocation(), org.bukkit.Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.0f);
+        targetPlayer.sendMessage(ChatColor.GOLD + "" + ChatColor.BOLD + "✦ " + ChatColor.YELLOW + "Your rank is now " + rank.name() + "!");
     }
 
     private void notifyGroupChange(UserSummary target, PermissionGroupSummary group, boolean added) {

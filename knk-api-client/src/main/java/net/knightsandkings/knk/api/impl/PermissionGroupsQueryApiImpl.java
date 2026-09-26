@@ -48,6 +48,7 @@ public class PermissionGroupsQueryApiImpl extends BaseApiImpl implements Permiss
 
     static PermissionGroupSummary toSummary(PermissionGroupListItemDto dto) {
         double multiplier = dto.salaryMultiplier() != null ? dto.salaryMultiplier() : 1.0;
-        return new PermissionGroupSummary(dto.id(), dto.name(), dto.weight(), dto.isPremiumTier(), multiplier);
+        return new PermissionGroupSummary(dto.id(), dto.name(), dto.weight(), dto.isPremiumTier(), multiplier,
+            dto.chatPrimaryColor(), dto.chatSecondaryColor(), dto.nameColor());
     }
 }

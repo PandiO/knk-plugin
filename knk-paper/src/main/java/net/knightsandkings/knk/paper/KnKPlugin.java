@@ -556,7 +556,9 @@ public class KnKPlugin extends JavaPlugin {
             // Content port CP8: /knk user, /freeze|/unfreeze and the Player manager share one service.
             this.userAdminService = new net.knightsandkings.knk.paper.user.UserAdminService(
                 MenuService.mainThreadExecutor(this), usersDataAccess, usersCommandApi, apiClient.getPermissionGroupsQueryApi(),
-                rankHierarchy, modeService, adminFreezeManager
+                rankHierarchy, modeService, adminFreezeManager,
+                // After a group/title change: redraw the target's tab-list team and footer (KNG-7).
+                (player, summary) -> net.knightsandkings.knk.paper.utils.ScoreboardUtil.setScoreboard(List.of(player), knkPermissible, summary)
             );
             List<MenuFeature> menuFeatures = List.of(
                 registries -> {

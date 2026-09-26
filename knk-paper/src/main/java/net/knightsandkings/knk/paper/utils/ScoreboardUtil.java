@@ -41,6 +41,11 @@ public class ScoreboardUtil {
         owner.prefix(Component.text("§5"));
         owner.color(NamedTextColor.DARK_PURPLE);
 
+        // Premium tier teams ("tier_<groupId>") are registered on demand by teamFor, since the
+        // tiers and their NameColor come from the API (KNG-7).
+        Team staff = scoreboard.registerNewTeam(TabListTeam.STAFF);
+        staff.color(NamedTextColor.BLUE);
+
         Objective health = scoreboard.registerNewObjective("Health", Criteria.HEALTH.getName(), Component.text("❤").color(ColorOptions.error), RenderType.HEARTS);
         health.setDisplaySlot(DisplaySlot.BELOW_NAME);
 
@@ -54,8 +59,9 @@ public class ScoreboardUtil {
     /**
      * @param userSummary The joining player's summary, used to render their title/prestige XP
      * (docs/specs/user-features/IMPLEMENTATION_PLAN.md §4) and premium tier (§5) in the tab list
-     * footer. Null skips both lines (e.g. summary not yet cached). Only meaningful when {@code players} has exactly
-     * one player — {@link #getScoreboard()} is one Scoreboard instance shared by every player
+     * footer, and to pick their name-color team (KNG-7, see {@link TabListTeam}). Null (e.g.
+     * summary not yet cached) skips both footer lines and puts a non-owner/staff player on the
+     * default team. Only meaningful when {@code players} has exactly one player — {@link #getScoreboard()} is one Scoreboard instance shared by every player
      * (each player calls {@link Player#setScoreboard}, but they all get the *same* object), and
      * Bukkit scores on a shared Scoreboard are visible identically to everyone who has it set, so
      * there is no sidebar Objective this method could use to show a different value per viewer.
@@ -66,10 +72,10 @@ public class ScoreboardUtil {
         Scoreboard scoreboard = getScoreboard();
 
         for (Player p : players) {
-            Team team = scoreboard.getTeam("default");
-            if (knkPermissible.hasPermission(p, "knk.mode.owner")) {
-                team = scoreboard.getTeam("owner");
-            }
+            Team team = teamFor(scoreboard, TabListTeam.resolve(
+                knkPermissible.hasPermission(p, "knk.mode.owner"),
+                knkPermissible.hasPermission(p, "knk.mode.staff"),
+                userSummary));
 
             team.addPlayer(p);
             p.setScoreboard(scoreboard);
@@ -81,6 +87,22 @@ public class ScoreboardUtil {
                 .append(premiumTierFooterLine(userSummary));
             p.sendPlayerListHeaderAndFooter(header, footer);
         }
+    }
+
+    /**
+     * Gets (registering it if needed) the team for {@code target} and applies its color, if it
+     * has one. The color is re-applied every time, so an admin's NameColor change reaches the
+     * shared team on the next join of any of its members.
+     */
+    private static Team teamFor(Scoreboard scoreboard, TabListTeam target) {
+        Team team = scoreboard.getTeam(target.name());
+        if (team == null) {
+            team = scoreboard.registerNewTeam(target.name());
+        }
+        if (target.color() != null) {
+            team.color(target.color());
+        }
+        return team;
     }
 
     // Package-private for ScoreboardUtilTest (setScoreboard itself needs a live Bukkit server).
