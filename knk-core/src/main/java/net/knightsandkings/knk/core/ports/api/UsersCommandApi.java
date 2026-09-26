@@ -9,6 +9,7 @@ import net.knightsandkings.knk.core.domain.users.BalanceAdjustmentResult;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.domain.users.SalaryPayoutResult;
 import net.knightsandkings.knk.core.domain.users.UserDetail;
+import net.knightsandkings.knk.core.teleport.TeleportAudit;
 
 /**
  * Command-side operations for users (CQRS).
@@ -93,6 +94,14 @@ public interface UsersCommandApi {
     CompletableFuture<Void> freezeById(int userId, String reason);
 
     CompletableFuture<Void> unfreezeById(int userId);
+
+    /**
+     * Records one staff teleport in the web API's audit log as a {@code PlayerTeleported} entry on
+     * {@link TeleportAudit#targetUserId()} (docs/specs/teleport/DESIGN.md §3.10). The staff member
+     * is attributed through {@link #withActor} like every other call - use an instance made with
+     * {@code withActor(audit.actorUserId())} when there is one.
+     */
+    CompletableFuture<Void> recordTeleportAudit(TeleportAudit audit);
 
     /**
      * InventoryMenu content port CP7: the same API, with every request attributed to

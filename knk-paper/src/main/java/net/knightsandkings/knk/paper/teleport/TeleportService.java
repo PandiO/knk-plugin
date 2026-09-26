@@ -54,7 +54,8 @@ import net.kyori.adventure.text.Component;
  *       (player teleports only - staff land exactly where they asked), then
  *       {@code teleportAsync(loc, TeleportCause.COMMAND)} - never the default {@code PLUGIN} cause,
  *       so the region and siege-lockdown listeners see these teleports like vanilla ones.</li>
- *   <li><b>After</b>: cooldown (player teleports), a log line (INFO for staff teleports).</li>
+ *   <li><b>After</b>: cooldown (player teleports), a log line (INFO for staff teleports), and for
+ *       staff teleports an audit entry in the web API ({@link TeleportAuditor}, Phase 2).</li>
  * </ol>
  * The returned future completes on the main thread with the {@link TeleportOutcome}; the caller
  * reports it. Warmup notices and cancel reasons are sent to the moving player by the engine itself.
@@ -88,6 +89,8 @@ public class TeleportService {
     private final Map<UUID, Authority> inFlight = new ConcurrentHashMap<>();
     private volatile TeleportSettings settings;
     private volatile WarmupPolicy warmupPolicy;
+    /** Null when the API client isn't available - staff teleports are then only logged locally. */
+    private volatile TeleportAuditor auditor;
     private long lastPurgeMillis;
 
     public TeleportService(Executor mainThread, PermissionLookup permissions, TeleportSettings settings,
@@ -105,6 +108,11 @@ public class TeleportService {
     /** Add a guard (see {@link TeleportRestriction}); later registrations are checked after earlier ones. */
     public void registerRestriction(TeleportRestriction restriction) {
         restrictions.add(Objects.requireNonNull(restriction, "restriction must not be null"));
+    }
+
+    /** Where staff teleports are audited (docs/specs/teleport/DESIGN.md §3.10); null turns auditing off. */
+    public void setAuditor(TeleportAuditor auditor) {
+        this.auditor = auditor;
     }
 
     public TeleportSettings settings() {
@@ -302,8 +310,24 @@ public class TeleportService {
                 cooldowns.start(id, plan.kind(), clock.getAsLong(), settings.cooldownSeconds());
             }
             log(plan, from, to);
+            if (plan.kind().isStaff()) {
+                audit(plan, from, to);
+            }
             result.complete(TeleportOutcome.teleported());
         })));
+    }
+
+    /** Hands a finished staff teleport to the auditor; a failure there never touches the teleport's outcome. */
+    private void audit(TeleportPlan plan, Location from, Location to) {
+        TeleportAuditor current = auditor;
+        if (current == null) {
+            return;
+        }
+        try {
+            current.record(plan, from, to);
+        } catch (RuntimeException ex) {
+            LOGGER.log(Level.WARNING, "[KnK Teleport] Could not audit the teleport of " + plan.subject().getName(), ex);
+        }
     }
 
     /** Runs a step so that whatever it throws still completes the teleport's result (never left hanging). */

@@ -18,6 +18,7 @@ import net.knightsandkings.knk.api.dto.FreezePlayerDto;
 import net.knightsandkings.knk.api.dto.GatePassThroughMethodUpdateDto;
 import net.knightsandkings.knk.api.dto.PresenceUpdateDto;
 import net.knightsandkings.knk.api.dto.SalaryPayoutResultDto;
+import net.knightsandkings.knk.api.dto.TeleportAuditDto;
 import net.knightsandkings.knk.api.dto.UpsertGroupMembershipDto;
 import net.knightsandkings.knk.api.dto.UpsertPermissionGrantByNodeDto;
 import net.knightsandkings.knk.api.dto.UserCreateDto;
@@ -30,6 +31,7 @@ import net.knightsandkings.knk.core.domain.users.SalaryPayoutResult;
 import net.knightsandkings.knk.core.domain.users.UserDetail;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
+import net.knightsandkings.knk.core.teleport.TeleportAudit;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 
@@ -266,6 +268,33 @@ public class UsersCommandApiImpl extends BaseApiImpl implements UsersCommandApi 
                 throw new RuntimeException("Failed to unfreeze player", e);
             }
         }, executor);
+    }
+
+    @Override
+    public CompletableFuture<Void> recordTeleportAudit(TeleportAudit audit) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + USERS_ENDPOINT + "/" + audit.targetUserId() + "/teleport-audit";
+            try {
+                String bodyJson = objectMapper.writeValueAsString(new TeleportAuditDto(
+                    audit.kind().name(),
+                    audit.subjectUserId(),
+                    audit.visitedUserId(),
+                    toPoint(audit.from()),
+                    toPoint(audit.to()),
+                    audit.silent(),
+                    audit.reason(),
+                    audit.console() ? "console" : "command"
+                ));
+                postJson(url, bodyJson);
+                return null;
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to record teleport audit", e);
+            }
+        }, executor);
+    }
+
+    private static TeleportAuditDto.Point toPoint(TeleportAudit.Point point) {
+        return new TeleportAuditDto.Point(point.world(), point.x(), point.y(), point.z());
     }
 
     @Override

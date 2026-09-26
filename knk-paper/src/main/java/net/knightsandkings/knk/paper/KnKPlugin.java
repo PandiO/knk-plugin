@@ -959,6 +959,14 @@ public class KnKPlugin extends JavaPlugin {
         );
         teleportService.registerRestriction(
             new net.knightsandkings.knk.paper.teleport.FreezeTeleportRestriction(adminFreezeManager::isFrozen));
+        if (usersCommandApi != null && usersDataAccess != null) {
+            // Phase 2: every staff teleport also lands in the web API's audit log (DESIGN.md §3.10).
+            teleportService.setAuditor(new net.knightsandkings.knk.paper.teleport.TeleportAuditor(usersCommandApi,
+                uuid -> usersDataAccess.getByUuidAsync(uuid).thenApply(result ->
+                    result != null && result.isSuccess() && result.value().isPresent() ? result.value().get().id() : null)));
+        } else {
+            getLogger().warning("Staff teleports won't be audited - the users API isn't available");
+        }
         getServer().getScheduler().runTaskTimer(this, () -> teleportService.tick(adminFreezeManager::isFrozen), 5L, 5L);
 
         var pluginManager = getServer().getPluginManager();

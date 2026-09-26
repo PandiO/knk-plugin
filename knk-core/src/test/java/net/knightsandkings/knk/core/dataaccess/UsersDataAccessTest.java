@@ -317,5 +317,10 @@ public class UsersDataAccessTest {
         public CompletableFuture<Void> unfreezeById(int userId) {
             return CompletableFuture.completedFuture(null);
         }
+
+        @Override
+        public CompletableFuture<Void> recordTeleportAudit(net.knightsandkings.knk.core.teleport.TeleportAudit audit) {
+            return CompletableFuture.completedFuture(null);
+        }
     }
 }

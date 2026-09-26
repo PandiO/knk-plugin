@@ -37,6 +37,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -141,6 +142,52 @@ class TeleportServiceTest {
         TeleportOutcome outcome = done(service.start(TeleportPlan.staffToPlayer(alice, alice, bob, false)));
 
         assertEquals(TeleportOutcome.Status.FAILED, outcome.status());
+    }
+
+    // ===== audit (Phase 2) =====
+
+    @Test
+    void everyStaffTeleportIsAuditedOnce() {
+        TeleportAuditor auditor = mock(TeleportAuditor.class);
+        service.setAuditor(auditor);
+        Location alicesSpot = alice.getLocation();
+        Location bobsSpot = bob.getLocation();
+        TeleportPlan plan = TeleportPlan.staffToPlayer(alice, alice, bob, false);
+
+        assertTrue(done(service.start(plan)).isTeleported());
+
+        verify(auditor, times(1)).record(plan, alicesSpot, bobsSpot);
+    }
+
+    @Test
+    void playerTeleportsAreNotAudited() {
+        TeleportAuditor auditor = mock(TeleportAuditor.class);
+        service.setAuditor(auditor);
+        grant(alice, TeleportNodes.BYPASS_WARMUP);
+
+        assertTrue(done(service.start(spawnPlan(alice))).isTeleported());
+
+        verify(auditor, never()).record(any(), any(), any());
+    }
+
+    @Test
+    void blockedStaffTeleportIsNotAudited() {
+        TeleportAuditor auditor = mock(TeleportAuditor.class);
+        service.setAuditor(auditor);
+        when(alice.teleportAsync(any(Location.class), any(TeleportCause.class))).thenReturn(CompletableFuture.completedFuture(false));
+
+        done(service.start(TeleportPlan.staffToPlayer(alice, alice, bob, false)));
+
+        verify(auditor, never()).record(any(), any(), any());
+    }
+
+    @Test
+    void brokenAuditorDoesNotFailTheTeleport() {
+        TeleportAuditor auditor = mock(TeleportAuditor.class);
+        when(auditor.record(any(), any(), any())).thenThrow(new IllegalStateException("boom"));
+        service.setAuditor(auditor);
+
+        assertTrue(done(service.start(TeleportPlan.staffToPlayer(alice, alice, bob, false))).isTeleported());
     }
 
     // ===== restrictions =====
