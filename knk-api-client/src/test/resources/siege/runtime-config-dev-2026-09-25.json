@@ -1,0 +1,291 @@
+{
+  "generatedAt": "2026-09-25T19:22:58.5111715Z",
+  "configuration": {
+    "captureAttackBase": 5,
+    "captureAttackPerExtra": 2,
+    "captureAttackPerExtraInstantVictory": 5,
+    "captureDefendBase": 6,
+    "captureDefendPerExtra": 3,
+    "captureDefendPerExtraInstantVictory": 6,
+    "sideCaptureReduction": 0.4,
+    "voteCloseSecondsBeforeStart": 30,
+    "drawSecondsBeforeStart": 25,
+    "hubSecondsBeforeStart": 15,
+    "teamSplitSecondsBeforeStart": 10,
+    "matchmakingAnnouncementMarks": [
+      290,
+      60,
+      30,
+      15
+    ],
+    "killAnnouncementThresholds": [
+      5,
+      10,
+      15
+    ],
+    "killStreakAnnounceAbove": 3,
+    "headshotMultiplier": 1.5,
+    "allowedCommands": [
+      "/siege",
+      "/msg",
+      "/r",
+      "/staffchat",
+      "/menu"
+    ],
+    "spawnPickerDelayTicks": 20,
+    "enchantDropChancePerMille": 30,
+    "allowedEnchantmentKeys": [
+      "minecraft:sharpness",
+      "minecraft:smite",
+      "minecraft:bane_of_arthropods",
+      "minecraft:knockback",
+      "minecraft:fire_aspect",
+      "minecraft:sweeping_edge",
+      "minecraft:protection",
+      "minecraft:fire_protection",
+      "minecraft:blast_protection",
+      "minecraft:projectile_protection",
+      "minecraft:thorns",
+      "minecraft:feather_falling",
+      "minecraft:power",
+      "minecraft:punch",
+      "minecraft:flame",
+      "minecraft:infinity",
+      "minecraft:unbreaking"
+    ],
+    "enchantLevelMin": 1,
+    "enchantLevelMax": 2,
+    "maxBooksAlive": 10,
+    "nonMemberGateView": "PreLockdownView",
+    "updatedAt": "2026-09-25T17:23:39.97414Z"
+  },
+  "lobbies": [
+    {
+      "id": 1,
+      "name": "[TEST] Siege â€” Cinix",
+      "key": "test-cinix",
+      "mode": "Continuous",
+      "matchmakingSeconds": 300,
+      "cooldownSeconds": 900,
+      "voteCandidateCount": 2,
+      "allowRandomVote": true,
+      "rotation": [
+        {
+          "weight": 1,
+          "scenario": {
+            "id": 1,
+            "name": "[TEST] Siege of Cinix",
+            "description": "Phase 2 test data - safe to delete",
+            "townId": 5,
+            "townName": "Cinix",
+            "townWgRegionId": "town_1",
+            "districts": [
+              {
+                "id": 6,
+                "name": "Merchant's District\n",
+                "wgRegionId": "district_1000002"
+              },
+              {
+                "id": 7,
+                "name": "Residential District\n",
+                "wgRegionId": "district_1000004"
+              },
+              {
+                "id": 8,
+                "name": "The Keep",
+                "wgRegionId": "district_1000006"
+              }
+            ],
+            "hubLocation": {
+              "id": 62,
+              "name": "[TEST] Siege hub (Market Square)",
+              "x": 1443.4,
+              "y": 43,
+              "z": -567,
+              "yaw": 7,
+              "pitch": 0,
+              "world": "world_KNK-DEV"
+            },
+            "playersMin": 2,
+            "playersMax": 20,
+            "minTitleBracketId": null,
+            "minTitleExperience": null,
+            "matchDurationMinSeconds": 300,
+            "matchDurationPerPlayerSeconds": 75,
+            "matchDurationMaxSeconds": 1800,
+            "coinRewardWin": 100,
+            "expRewardWin": 10,
+            "gemRewardWin": 1,
+            "coinRewardHolding": 50,
+            "expRewardHolding": 5,
+            "coinRewardCapture": 50,
+            "expRewardCapture": 5,
+            "lockdownScenarioArea": true,
+            "allowRecapture": false,
+            "enchantDropsEnabled": true,
+            "teams": [
+              {
+                "id": 1,
+                "sortOrder": 0,
+                "role": "Defender",
+                "allianceGroup": 1,
+                "clanId": 1,
+                "name": "[TEST] Cinix Garrison",
+                "chatColor": "GOLD",
+                "bannerDesign": {
+                  "id": 1,
+                  "name": "[TEST] Cinix crown",
+                  "baseColor": "YELLOW",
+                  "layers": [
+                    {
+                      "id": 1,
+                      "bannerDesignId": 1,
+                      "sortOrder": 0,
+                      "patternKey": "minecraft:border",
+                      "color": "RED"
+                    },
+                    {
+                      "id": 2,
+                      "bannerDesignId": 1,
+                      "sortOrder": 1,
+                      "patternKey": "minecraft:rhombus",
+                      "color": "RED"
+                    }
+                  ],
+                  "exceedsSurvivalLoomLimit": false
+                },
+                "startMessage": "Hold the Keep!",
+                "spawnpoints": [
+                  {
+                    "id": 1,
+                    "sortOrder": 0,
+                    "name": "Keep Square",
+                    "location": {
+                      "id": 63,
+                      "name": "[TEST] Defender spawn (Keep Square)",
+                      "x": 1417,
+                      "y": 83,
+                      "z": -548,
+                      "yaw": 0,
+                      "pitch": 0,
+                      "world": "world_KNK-DEV"
+                    },
+                    "safeZoneRadius": 4
+                  }
+                ]
+              },
+              {
+                "id": 2,
+                "sortOrder": 1,
+                "role": "Attacker",
+                "allianceGroup": 2,
+                "clanId": null,
+                "name": "Raiders",
+                "chatColor": "RED",
+                "bannerDesign": {
+                  "id": 2,
+                  "name": "[TEST] Raider skull",
+                  "baseColor": "BLACK",
+                  "layers": [
+                    {
+                      "id": 3,
+                      "bannerDesignId": 2,
+                      "sortOrder": 0,
+                      "patternKey": "minecraft:skull",
+                      "color": "WHITE"
+                    }
+                  ],
+                  "exceedsSurvivalLoomLimit": false
+                },
+                "startMessage": "Take the Keep!",
+                "spawnpoints": [
+                  {
+                    "id": 2,
+                    "sortOrder": 0,
+                    "name": "Merchant Square",
+                    "location": {
+                      "id": 64,
+                      "name": "[TEST] Attacker spawn (Merchant Square)",
+                      "x": 1430,
+                      "y": 43,
+                      "z": -553,
+                      "yaw": -132,
+                      "pitch": 0,
+                      "world": "world_KNK-DEV"
+                    },
+                    "safeZoneRadius": 4
+                  }
+                ]
+              }
+            ],
+            "objectives": [
+              {
+                "id": 1,
+                "sortOrder": 0,
+                "name": "The Keep",
+                "captureLocation": {
+                  "id": 65,
+                  "name": "[TEST] Objective: The Keep",
+                  "x": 1416,
+                  "y": 72,
+                  "z": -532,
+                  "yaw": 0,
+                  "pitch": 0,
+                  "world": "world_KNK-DEV"
+                },
+                "gateStructureId": null,
+                "capturePoints": 500,
+                "captureRadius": 2.5,
+                "instantVictory": true,
+                "initialHolderTeamId": 1,
+                "spawnWhenHeld": true,
+                "gateStateOnCapture": "OPEN"
+              },
+              {
+                "id": 2,
+                "sortOrder": 1,
+                "name": "South Gate",
+                "captureLocation": {
+                  "id": 39,
+                  "name": "Location",
+                  "x": 1421.3857603075921,
+                  "y": 49,
+                  "z": -450.267790285259,
+                  "yaw": -140.615,
+                  "pitch": 6.00013,
+                  "world": "world_KNK-DEV"
+                },
+                "gateStructureId": 13,
+                "capturePoints": 500,
+                "captureRadius": 2.5,
+                "instantVictory": false,
+                "initialHolderTeamId": 1,
+                "spawnWhenHeld": true,
+                "gateStateOnCapture": "OPEN"
+              }
+            ],
+            "gates": [
+              {
+                "gateStructureId": 13,
+                "name": "South Gate",
+                "initialOwnerTeamId": 1,
+                "initialState": "CLOSED",
+                "damageable": true,
+                "isObjectiveGate": true
+              },
+              {
+                "gateStructureId": 14,
+                "name": "Northern Gate",
+                "initialOwnerTeamId": 1,
+                "initialState": "CLOSED",
+                "damageable": true,
+                "isObjectiveGate": false
+              }
+            ]
+          }
+        }
+      ],
+      "skippedScenarios": []
+    }
+  ]
+}

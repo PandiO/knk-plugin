@@ -78,6 +78,18 @@ commands:
     # node through KnkPermissible inside KitCommand, same reasoning /knk and /ownermode|/staffmode
     # have none (Bukkit would check its own permission tree before this executor ever ran).
 
+  siege:
+    description: "Siege minigame: lobbies, join/leave, vote, spawn choice, admin controls (docs/specs/siege-minigame/DESIGN.md §11.1)"
+    usage: "/siege [join|leave|menu|info|vote|spawn|skip|admin] ..."
+    # No permission: here - each subcommand is gated on its own knk.siege.* node through
+    # KnkPermissible inside SiegeCommand, same reasoning as /kit and /knk.
+
+  siegemenu:
+    description: "Open your siege menu while you are in a siege (same as /siege menu)"
+    usage: "/siegemenu"
+    aliases: [sgm]
+    # /sm is /staffmode's alias. Gated on knk.siege.play inside SiegeCommand.
+
   menu:
     description: "Open the Knights and Kings menu (InventoryMenu hub, docs/specs/inventory-menu/CONTENT_PORT_PLAN.md §3)"
     usage: "/menu"
@@ -130,6 +142,7 @@ permissions:
     children:
       knk.admin.health: true
       knk.admin.cache: true
+      knk.admin.clans: true
       knk.admin.towns: true
       knk.admin.town: true
       knk.admin.districts: true
@@ -159,6 +172,10 @@ permissions:
 
   knk.admin.cache:
     description: Access to /knk cache
+    default: false
+
+  knk.admin.clans:
+    description: Access to /knk clans (Siege Phase 1 clan/banner inspection)
     default: false
 
   knk.admin.towns:
@@ -472,6 +489,38 @@ permissions:
   customenchantments.command.reload:
     description: Allows reloading custom enchantment config with /ce reload
     default: op
+
+  # Siege minigame (docs/specs/siege-minigame/DESIGN.md §11.1). Checked through KnkPermissible, like
+  # the kit nodes: these declarations are documentation, an op short-circuits to allowed, and a
+  # non-op needs a PermissionGrant/group membership. DESIGN §11.1: no Bukkit default beyond
+  # knk.siege.play.
+  knk.siege.play:
+    description: Play sieges - /siege, join, leave, info, vote, spawn
+    default: true
+
+  knk.siege.skip:
+    description: Skip a lobby's cooldown with /siege skip (v1 donator perk; grant to a premium group)
+    default: false
+
+  knk.siege.admin.list:
+    description: /siege admin list - every lobby with phase, lock and members
+    default: false
+
+  knk.siege.admin.control:
+    description: /siege admin start|stop|skip|kick - start matchmaking, abort (restore, no rewards), skip, remove a member
+    default: false
+
+  knk.siege.admin.reload:
+    description: /siege admin reload - refresh the runtime config for lobbies not in a match
+    default: false
+
+  knk.siege.admin.manage:
+    description: /siege admin manage - pointer to the web-app forms (no in-game editing)
+    default: false
+
+  knk.siege.bypass.commands:
+    description: Run any command while in a siege match (bypasses SiegeConfiguration.AllowedCommands, DESIGN §6.9)
+    default: false
 
   knk.menu:
     description: Open the InventoryMenu hub with /menu (content port CP1).

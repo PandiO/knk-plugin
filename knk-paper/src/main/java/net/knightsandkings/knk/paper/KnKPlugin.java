@@ -133,6 +133,10 @@ import net.knightsandkings.knk.paper.tasks.ItemScanTaskHandler;
 import net.knightsandkings.knk.paper.tasks.KitScanTaskHandler;
 import net.knightsandkings.knk.paper.user.JoinLoadingGuard;
 import net.knightsandkings.knk.paper.user.UserManager;
+import net.knightsandkings.knk.paper.siege.SiegePlayerVault;
+import net.knightsandkings.knk.paper.siege.SiegeService;
+import net.knightsandkings.knk.paper.commands.SiegeCommand;
+import net.knightsandkings.knk.paper.listeners.SiegeSessionListener;
 import net.knightsandkings.knk.paper.utils.CommandCooldownManager;
 
 public class KnKPlugin extends JavaPlugin {
@@ -207,6 +211,12 @@ public class KnKPlugin extends JavaPlugin {
     private EnchantmentBootstrap.EnchantmentRuntime enchantmentRuntime;
     private ExecutorService regionLookupExecutor;
     private TempRegionRetentionTask tempRegionRetentionTask;
+    private SiegeService siegeService;
+    private net.knightsandkings.knk.core.siege.SiegeMatchRecorder siegeMatchRecorder;
+    /** Kept for the siege gate controller (Phase 7a), which respawns doors a match destroyed. */
+    private HealthSystem gateHealthSystem;
+    /** Kept for the siege non-member pass-through (Phase 7b, TELEPORT mode only). */
+    private net.knightsandkings.knk.paper.gates.GatePassThroughService gatePassThroughService;
     
     @Override
     public void onEnable() {
@@ -583,7 +593,10 @@ public class KnKPlugin extends JavaPlugin {
                     permissionGroupsDataAccess, usersQueryApi, cacheManager.getUserCache()),
                 new net.knightsandkings.knk.paper.menu.content.UserManagerMenuFeature(
                     userAdminService, usersQueryApi, cacheManager.getUserCache(), titleBracketsDataAccess,
-                    permissionGroupsDataAccess, org.bukkit.Bukkit::getOnlinePlayers)
+                    permissionGroupsDataAccess, org.bukkit.Bukkit::getOnlinePlayers),
+                // Siege Phase 8b: the siege menus. SiegeService is created later (initializeSiege),
+                // so the feature looks it up on every call.
+                new net.knightsandkings.knk.paper.siege.SiegeMenuFeature(() -> siegeService)
             );
             menuFeatures.forEach(feature -> feature.registerMenuHandlers(menuRegistries));
 
@@ -639,9 +652,10 @@ public class KnKPlugin extends JavaPlugin {
             // Wire resolver into cache manager for metrics tracking
             cacheManager.setRegionResolver(regionDomainResolver);
 
-            // KNG-11: no combat exemption on main yet. When the siege minigame lands, exempt pairs its
-            // SiegeCombatListener governs, or enchantments stop working in sieges fought in towns.
-            initializeEnchantmentRuntime(new WorldGuardCombatSafezones(regionDomainResolver, (attacker, victim) -> false));
+            // KNG-11: hits the siege rules allow stay exempt, so enchantments keep working in sieges fought
+            // in towns. siegeService is created later (initializeSiege), so it's read per hit.
+            initializeEnchantmentRuntime(new WorldGuardCombatSafezones(regionDomainResolver,
+                (attacker, victim) -> siegeService != null && siegeService.allowsCombat(attacker, victim)));
             getLogger().info("Registered custom enchantment runtime listeners and /ce command");
 
             // Register commands
@@ -692,6 +706,7 @@ public class KnKPlugin extends JavaPlugin {
             registerEvents(regionTracker);
 
             HealthSystem healthSystem = new HealthSystem(gateDoorsApi, this, gateDisplayManager, gateManager);
+            this.gateHealthSystem = healthSystem;
             GateDoorHitService gateDoorHitService = new GateDoorHitService(gateManager);
 
             long fireDurationMillis = getConfig().getLong("gates.fire-duration-seconds", 8) * 1000L;
@@ -706,6 +721,7 @@ public class KnKPlugin extends JavaPlugin {
             GatePassThroughService gatePassThroughService = new GatePassThroughService(
                 gateManager, this,
                 passThroughInstantOpenRadius, passThroughInstantOpenTimeoutSeconds);
+            this.gatePassThroughService = gatePassThroughService;
             getServer().getPluginManager().registerEvents(
                 new GatePassThroughConsequenceListener(gatePassThroughService, userManager), this);
 
@@ -756,6 +772,8 @@ public class KnKPlugin extends JavaPlugin {
             
             getLogger().info("Region transition service initialized with domain resolver and gate control");
 
+            initializeSiege();
+
             getLogger().info("KnightsAndKings Plugin Enabled!");
             
         } catch (Exception e) {
@@ -768,6 +786,24 @@ public class KnKPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        // Siege first (DESIGN §5.1/§9.2): stops every lobby with SERVER_RESTART, which aborts running
+        // matches and restores every member's vault while the players and the API client still exist.
+        if (siegeService != null) {
+            try {
+                siegeService.shutdown();
+            } catch (RuntimeException e) {
+                getLogger().log(java.util.logging.Level.SEVERE, "Siege shutdown failed", e);
+            }
+        }
+        // Phase 6: match results still being sent (incl. the shutdown aborts above) go to the spool,
+        // replayed on the next enable.
+        if (siegeMatchRecorder != null) {
+            try {
+                siegeMatchRecorder.spoolInFlight();
+            } catch (RuntimeException e) {
+                getLogger().log(java.util.logging.Level.SEVERE, "Spooling in-flight siege results failed", e);
+            }
+        }
         if (gateStateSyncTask != null) {
             gateStateSyncTask.stop();
             getLogger().info("Persisting final gate states before shutdown...");
@@ -880,6 +916,7 @@ public class KnKPlugin extends JavaPlugin {
                 gateDoorRegionCaptureHandler,
                 serverId,
                 menuService,
+                apiClient.getClansQueryApi(),
                 userAdminService
             );
             knkCommand.setExecutor(knkAdminCommand);
@@ -1029,6 +1066,118 @@ public class KnKPlugin extends JavaPlugin {
 
     public WorldTasksApi getWorldTasksApi() {
         return worldTasksApi;
+    }
+
+    /**
+     * Siege minigame runtime (docs/specs/siege-minigame/IMPLEMENTATION_PLAN.md Phase 5): the
+     * runtime-config gateway, one SiegeService (one shared SiegeRuntimeLocks and one long-lived
+     * RandomGenerator inside), the /siege command and the siege listeners. Match results (Phase 6)
+     * go to knk-web-api's /api/siege-matches through SiegeMatchRecorder (retry, a pending-results
+     * spool in siege-vault/pending-results/, startup recovery: replay the spool, then abort matches
+     * the last run left open).
+     */
+    private void initializeSiege() {
+        var siegeDataAccess = dataAccessFactory.createSiegeDataAccess(
+            apiClient.getSiegeLobbiesQueryApi(),
+            apiClient.getSiegeScenariosQueryApi()
+        );
+        java.io.File siegeVaultDirectory = new java.io.File(getDataFolder(), "siege-vault");
+        SiegePlayerVault siegeVault = new SiegePlayerVault(siegeVaultDirectory, getLogger());
+        // One long-lived generator for draws, splits and book drops (a new Random per draw correlates draws).
+        java.util.random.RandomGenerator siegeRandom = new java.util.SplittableRandom();
+        var siegeResultSpool = new net.knightsandkings.knk.core.siege.SiegeResultSpool(
+            new java.io.File(siegeVaultDirectory, "pending-results").toPath(), getLogger());
+        this.siegeMatchRecorder = new net.knightsandkings.knk.core.siege.SiegeMatchRecorder(
+            apiClient.getSiegeMatchesCommandApi(),
+            net.knightsandkings.knk.core.dataaccess.RetryPolicy.defaultPolicy(),
+            siegeResultSpool,
+            getLogger());
+        // Before the runtime can draw: createMatch waits for this recovery.
+        siegeMatchRecorder.recoverOnStartup();
+        this.siegeService = new SiegeService(
+            this,
+            siegeDataAccess,
+            apiClient.getTitleBracketsQueryApi(),
+            siegeMatchRecorder,
+            siegeVault,
+            knkPermissible,
+            cacheManager.getUserCache(),
+            siegeRandom
+        );
+
+        PluginCommand siegeCommand = getCommand("siege");
+        if (siegeCommand != null) {
+            SiegeCommand executor = new SiegeCommand(siegeService);
+            siegeCommand.setExecutor(executor);
+            siegeCommand.setTabCompleter(executor);
+            getLogger().info("Registered /siege command");
+            // /siegemenu (/sgm): shortcut for /siege menu.
+            PluginCommand siegeMenuCommand = getCommand("siegemenu");
+            if (siegeMenuCommand != null) {
+                siegeMenuCommand.setExecutor((sender, command, label, args) ->
+                        executor.onCommand(sender, command, label, new String[] {"menu"}));
+            }
+        } else {
+            getLogger().warning("Failed to register /siege command - not defined in plugin.yml?");
+        }
+
+        var siegeWorld = new net.knightsandkings.knk.paper.siege.SiegeWorldPresenter(this, siegeVaultDirectory);
+        siegeService.addObserver(siegeWorld);
+        getServer().getPluginManager().registerEvents(siegeWorld, this); // objective banner protection
+        siegeService.addObserver(new net.knightsandkings.knk.paper.siege.SiegeScoreboardPresenter());
+        // Smoke test 2026-09-26: sounds, particles and chat when objectives start being attacked/defended.
+        siegeService.addObserver(new net.knightsandkings.knk.paper.siege.SiegeCaptureFeedback());
+        var siegeBooks = new net.knightsandkings.knk.paper.siege.SiegeEnchantBooks(this, siegeService, siegeRandom);
+        siegeService.addObserver(siegeBooks);
+        siegeVault.setAfterRestore(siegeBooks::sweep);
+
+        var pluginManager = getServer().getPluginManager();
+        pluginManager.registerEvents(new SiegeSessionListener(siegeService, siegeBooks::sweep), this);
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeEnchantBookListener(siegeBooks), this);
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeCombatListener(siegeService,
+            uuid -> adminFreezeManager.isFrozen(uuid) || joinLoadingGuard.isLoading(uuid)), this);
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeDeathRespawnListener(siegeService), this);
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeCommandFilterListener(siegeService), this);
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeInventoryGuardListener(siegeService,
+            player -> modeService.getActiveMode(player) != ActiveMode.NONE), this);
+
+        // Phase 8b: menus open from /siege and the spawn picker (chat fallbacks stay) and repaint on changes.
+        if (menuService != null) {
+            var siegeMenus = new net.knightsandkings.knk.paper.siege.SiegeMenuBridge(menuService);
+            siegeService.addObserver(siegeMenus);
+            siegeService.setMenuHooks(siegeMenus);
+        }
+
+        // Phase 7a: the gates of the scenario area (lockdown, owner control, damage rules, restore,
+        // crash recovery). The area itself stays open to non-members (smoke test 2026-09-26): they can't
+        // fight members, capture or touch siege gates, and walk through the locked gates.
+        if (gateManager != null && gateHealthSystem != null) {
+            var siegeGates = new net.knightsandkings.knk.paper.siege.SiegeGateController(
+                this, gateManager, gateHealthSystem, apiClient.getSiegeGatesCommandApi());
+            siegeService.addObserver(siegeGates);
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeGateListener(siegeGates, gateManager), this);
+            siegeGates.recoverOnStartup();
+            // Phase 7b: non-members see the locked gates removed and walk through them (degrade
+            // switch: NonMemberGateView = PassThroughOnly).
+            if (gatePassThroughService != null) siegeGates.setPassThrough(gatePassThroughService);
+            var siegeGateView = new net.knightsandkings.knk.paper.siege.SiegeGateViewService(this, siegeGates, gateManager,
+                getConfig().getBoolean("gates.rotationGapFill.rasterization-enabled", true));
+            pluginManager.registerEvents(siegeGateView, this);
+            siegeGateView.start();
+        } else {
+            getLogger().warning("Siege gate integration disabled: the gate system isn't initialized");
+        }
+
+        // Hourly salary and rank refreshes reset scoreboards; siege members keep their match board.
+        net.knightsandkings.knk.paper.utils.ScoreboardUtil.setKeepOwnScoreboard(
+            p -> siegeService.activeLobbyOf(p.getUniqueId()).isPresent());
+
+        siegeService.start();
+        getLogger().info("Siege runtime initialized");
+    }
+
+    public SiegeService getSiegeService() {
+        return siegeService;
     }
 
     /**

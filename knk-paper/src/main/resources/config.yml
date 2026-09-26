@@ -313,6 +313,17 @@ cache:
       retry-attempts: 3
       retry-backoff-ms: 100
 
+    # Siege runtime-config (lobbies + resolved scenarios + SiegeConfiguration), one cache entry.
+    # A lobby's config is frozen during a match and refreshed only between matches, so the TTL
+    # just bounds how old a cache-first read may be (Siege Phase 4, SiegeDataAccess).
+    siege:
+      ttl-minutes: 30
+      max-ttl-minutes: 240
+      default-policy: CACHE_FIRST
+      allow-stale: true
+      retry-attempts: 3
+      retry-backoff-ms: 200
+
     health:
       ttl-seconds: 30          # Health uses seconds (short TTL)
       max-ttl-seconds: 120
