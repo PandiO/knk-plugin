@@ -55,7 +55,15 @@ public final class GroupRow implements MenuRowKey {
         if (group.isPremiumTier()) {
             lines.add("&6Premium tier");
         }
-        lines.add(member ? "&aMember &7- click to remove" : "&7Not a member &7- click to add");
+        if (member) {
+            lines.add("&aMember &7- click to remove");
+        } else if (group.isPremiumTier()) {
+            // One premium tier per player here - clicking one switches to it (UserManagerMenuFeature).
+            lines.add("&7Click to make this their premium tier");
+            lines.add("&8Replaces their current tier, after confirmation");
+        } else {
+            lines.add("&7Not a member &7- click to add");
+        }
         return lines;
     }
 

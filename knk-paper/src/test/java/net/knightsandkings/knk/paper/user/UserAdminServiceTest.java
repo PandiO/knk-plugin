@@ -268,4 +268,49 @@ class UserAdminServiceTest {
         assertEquals(1, redrawn.size());
         assertSame(online, redrawn.get(0)[0]);
     }
+
+    // ===== premium tier switch (Player manager) =====
+
+    @Test
+    void setPremiumTierAddsTheNewTierThenRemovesTheOldOnes() {
+        PermissionGroupSummary royal = new PermissionGroupSummary(5, "Royal", 30, true, 1.2);
+        PermissionGroupSummary noble = new PermissionGroupSummary(4, "Noble", 10, true);
+        when(ranks.actorOutranks(42, 7)).thenReturn(CompletableFuture.completedFuture(true));
+        when(acting.addGroupMembership(7, 5, null)).thenReturn(CompletableFuture.completedFuture(null));
+        when(acting.removeGroupMembership(7, 4)).thenReturn(CompletableFuture.completedFuture(null));
+
+        assertTrue(service.setPremiumTier(staff, target, royal, List.of(noble)).join());
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(acting, users);
+        order.verify(acting).addGroupMembership(7, 5, null);
+        order.verify(acting).removeGroupMembership(7, 4);
+        order.verify(users).refreshAsync(target.uuid());
+        verify(staff).sendMessage("§aSet Steve's premium tier to Royal (was Noble).");
+    }
+
+    @Test
+    void setPremiumTierNeverRemovesTheTierItAdds() {
+        PermissionGroupSummary royal = new PermissionGroupSummary(5, "Royal", 30, true, 1.2);
+        when(ranks.actorOutranks(42, 7)).thenReturn(CompletableFuture.completedFuture(true));
+        when(acting.addGroupMembership(7, 5, null)).thenReturn(CompletableFuture.completedFuture(null));
+
+        assertTrue(service.setPremiumTier(staff, target, royal, List.of(royal)).join());
+
+        verify(acting, never()).removeGroupMembership(anyInt(), anyInt());
+        verify(staff).sendMessage("§aSet Steve's premium tier to Royal.");
+    }
+
+    @Test
+    void setPremiumTierReportsAFailedRemovalAndStillRefreshes() {
+        PermissionGroupSummary royal = new PermissionGroupSummary(5, "Royal", 30, true, 1.2);
+        PermissionGroupSummary noble = new PermissionGroupSummary(4, "Noble", 10, true);
+        when(ranks.actorOutranks(42, 7)).thenReturn(CompletableFuture.completedFuture(true));
+        when(acting.addGroupMembership(7, 5, null)).thenReturn(CompletableFuture.completedFuture(null));
+        when(acting.removeGroupMembership(7, 4)).thenReturn(CompletableFuture.failedFuture(new RuntimeException("boom")));
+
+        assertFalse(service.setPremiumTier(staff, target, royal, List.of(noble)).join());
+
+        verify(users).refreshAsync(target.uuid());
+        verify(staff).sendMessage(org.mockito.ArgumentMatchers.startsWith("§cFailed: "));
+    }
 }

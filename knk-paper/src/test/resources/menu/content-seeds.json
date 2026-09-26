@@ -4235,7 +4235,7 @@
     "id": 18,
     "key": "users.manager.groups",
     "name": "&8Groups",
-    "description": "Every permission group; click to add the player in ctx.userId or (confirmed) remove them (users.groups). Content port CP8.",
+    "description": "Every permission group; click to add the player in ctx.userId or (confirmed) remove them (users.groups). A premium tier click is a confirmed switch - the plugin replaces their other premium tiers (one tier per player here). Content port CP8.",
     "height": 6,
     "growth": "Dynamic",
     "backgroundMaterialRefId": null,
@@ -4304,7 +4304,15 @@
                 "id": 387,
                 "targetProperty": "Lore",
                 "sortOrder": 1,
-                "expression": "&7Removing a group asks for confirmation",
+                "expression": "&7Removing a group or switching premium tier",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 388,
+                "targetProperty": "Lore",
+                "sortOrder": 2,
+                "expression": "&7asks for confirmation",
                 "refreshPolicy": "Static",
                 "ttlTicks": null
               }
@@ -4326,7 +4334,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 393,
+                "id": 394,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "BARRIER",
@@ -4334,7 +4342,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 394,
+                "id": 395,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "&c$menu.getBackLabel$",
@@ -4342,7 +4350,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 395,
+                "id": 396,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "&7$menu.getBackHint$",
@@ -4375,7 +4383,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 388,
+                "id": 389,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "LIME_CONCRETE",
@@ -4383,7 +4391,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 389,
+                "id": 390,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "&aConfirm",
@@ -4391,7 +4399,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 390,
+                "id": 391,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "&7Confirm the removal you picked (see chat)",
@@ -4432,7 +4440,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 391,
+                "id": 392,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "RED_CONCRETE",
@@ -4440,7 +4448,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 392,
+                "id": 393,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "&cCancel",
@@ -4504,7 +4512,7 @@
             "isRowTemplate": true,
             "variableBindings": [
               {
-                "id": 402,
+                "id": 403,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "$row.getMaterial$",
@@ -4512,7 +4520,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 403,
+                "id": 404,
                 "targetProperty": "DisplayMode",
                 "sortOrder": 0,
                 "expression": "$row.getDisplayMode$",
@@ -4520,7 +4528,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 404,
+                "id": 405,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "&f$row.getName$",
@@ -4528,7 +4536,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 405,
+                "id": 406,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "$row.getLoreLines$",
@@ -4592,7 +4600,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 396,
+                "id": 397,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "ARROW",
@@ -4600,7 +4608,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 397,
+                "id": 398,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "&aPrevious page",
@@ -4608,7 +4616,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 398,
+                "id": 399,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
@@ -4641,7 +4649,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 399,
+                "id": 400,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "ARROW",
@@ -4649,7 +4657,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 400,
+                "id": 401,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "&aNext page",
@@ -4657,7 +4665,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 401,
+                "id": 402,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",

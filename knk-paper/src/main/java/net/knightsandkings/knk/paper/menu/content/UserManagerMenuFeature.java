@@ -79,6 +79,8 @@ public final class UserManagerMenuFeature implements MenuFeature {
 
     private static final Logger LOGGER = Logger.getLogger(UserManagerMenuFeature.class.getName());
     private static final int MAX_CACHED = 256;
+    /** {@code users.group} op a premium-tier click confirms into: replace the target's tier. */
+    static final String SET_TIER_OP = "set-tier";
 
     private record TargetState(UserSummary user, Boolean outranks) {
     }
@@ -336,14 +338,72 @@ public final class UserManagerMenuFeature implements MenuFeature {
         PermissionGroupSummary group = groups.cachedOrEmpty().stream()
                 .filter(g -> groupId != null && g.id() == groupId)
                 .findFirst().orElse(null);
-        if (group == null || !Set.of("add", "remove").contains(op)) {
+        if (group == null || !Set.of("add", "remove", SET_TIER_OP).contains(op)) {
             player.sendMessage(ChatColor.RED + "That group is not available - reopen the menu.");
             return;
         }
         if (!admin.requireProperty(player, "group")) {
             return;
         }
+        if (group.isPremiumTier() && op.equals("add")) {
+            // A player holds one premium tier here: adding one is a switch, confirmed first.
+            requestTierSwitch(context, params, group);
+            return;
+        }
+        if (op.equals(SET_TIER_OP)) {
+            if (!group.isPremiumTier()) {
+                player.sendMessage(ChatColor.RED + group.name() + " is not a premium tier - reopen the menu.");
+                return;
+            }
+            withTarget(context, params, target -> switchTier(player, target, group));
+            return;
+        }
         withTarget(context, params, target -> admin.changeGroup(player, target, group, op.equals("add"), null));
+    }
+
+    /**
+     * Clicking a premium tier the target doesn't hold: stores a {@code users.group set-tier}
+     * confirmation (shown by the header's Confirm/Cancel, condition {@code users.pending}) and
+     * repaints so those buttons appear right away. The seed binds the row to a plain "add"; doing
+     * the switch here keeps existing menu templates working without a re-seed.
+     */
+    private void requestTierSwitch(MenuActionContext context, Map<String, String> params, PermissionGroupSummary tier) {
+        Player player = context.player();
+        Integer userId = parseId(params.get("userId"));
+        TargetState state = userId != null ? targets.get(key(player.getUniqueId(), userId)) : null;
+        if (state == null || state.user() == null) {
+            player.sendMessage(ChatColor.RED + "That player isn't loaded - reopen the menu.");
+            return;
+        }
+        if (context.session() == null) {
+            throw new MenuActionException("users.group needs a menu session to confirm a premium tier switch");
+        }
+        UserSummary target = state.user();
+        String current = target.premiumTierName();
+        String prompt = "Set " + target.username() + "'s premium tier to " + tier.name()
+                + (current != null && !current.equalsIgnoreCase(tier.name()) ? " (replaces " + current + ")" : "")
+                + "? Click Confirm or Cancel.";
+        context.session().setPendingConfirmation(new MenuSession.PendingConfirmation("users.group",
+                Map.of("userId", String.valueOf(userId), "groupId", String.valueOf(tier.id()), "op", SET_TIER_OP), prompt));
+        player.sendMessage(ChatColor.YELLOW + prompt);
+        if (context.menuService() != null) {
+            context.menuService().refreshOpenMenu(player);
+        }
+    }
+
+    /** Confirmed switch: {@code tier} replaces every other active premium membership the target holds. */
+    private CompletableFuture<Boolean> switchTier(Player player, UserSummary target, PermissionGroupSummary tier) {
+        return usersQueryApi.getGroupMemberships(target.id())
+                .thenCompose(memberships -> admin.setPremiumTier(player, target, tier, memberships.stream()
+                        .filter(m -> m.isActive() && m.isPremiumTier() && m.groupId() != tier.id())
+                        .map(m -> new PermissionGroupSummary(m.groupId(), m.groupName(), m.weight(), true))
+                        .toList()))
+                .exceptionally(ex -> {
+                    LOGGER.log(Level.WARNING, "users.group set-tier: failed to load memberships", ex);
+                    player.sendMessage(ChatColor.RED + "Failed to load " + target.username() + "'s groups: "
+                            + UserAdminService.describeError(ex));
+                    return false;
+                });
     }
 
     private void mode(MenuActionContext context, Map<String, String> params) {

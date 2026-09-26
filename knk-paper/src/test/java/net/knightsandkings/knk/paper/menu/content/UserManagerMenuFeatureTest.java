@@ -312,4 +312,79 @@ class UserManagerMenuFeatureTest {
             assertDoesNotThrow(() -> ContentSeedFixture.validate(menu, ContentFeatures.all()), key);
         }
     }
+
+    // ===== one premium tier per player (a premium click is a confirmed switch) =====
+
+    private MenuSession loadedSession() {
+        loadSteve();
+        groups.listAsync().join();
+        return new MenuSessionRegistry().open(staff.getUniqueId());
+    }
+
+    @Test
+    void clickingAPremiumTierAsksToSwitchAndRepaintsForTheConfirmButtons() {
+        MenuSession session = loadedSession();
+
+        registries.actions().execute("users.group", actionContext(session), Map.of("userId", "7", "groupId", "5", "op", "add"));
+
+        MenuSession.PendingConfirmation pending = session.getPendingConfirmation().orElseThrow();
+        assertEquals("users.group", pending.actionTypeId());
+        assertEquals(Map.of("userId", "7", "groupId", "5", "op", UserManagerMenuFeature.SET_TIER_OP), pending.actionParams());
+        assertTrue(registries.conditions().test("users.pending", actionContext(session), Map.of()).allowed());
+        verify(staff).sendMessage("§eSet Steve's premium tier to Royal? Click Confirm or Cancel.");
+        verify(menuService).refreshOpenMenu(staff);
+        verify(admin, never()).changeGroup(any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any());
+    }
+
+    @Test
+    void confirmingTheSwitchReplacesEveryOtherActivePremiumTier() {
+        MenuSession session = loadedSession();
+        when(usersQueryApi.getGroupMemberships(7)).thenReturn(CompletableFuture.completedFuture(List.of(
+                new GroupMembershipSummary(1, "Default", 0, false, null, true),
+                new GroupMembershipSummary(4, "Noble", 10, true, null, true),
+                new GroupMembershipSummary(6, "Dragon Blood", 40, true, null, false))));
+        when(admin.setPremiumTier(any(), any(), any(), any())).thenReturn(CompletableFuture.completedFuture(true));
+
+        registries.actions().execute("users.group", actionContext(session), Map.of("userId", "7", "groupId", "5", "op", "add"));
+        registries.actions().execute("menu.confirm.accept", actionContext(session), Map.of());
+
+        verify(admin).setPremiumTier(staff, steveUser, groups.cachedOrEmpty().get(1),
+                List.of(new PermissionGroupSummary(4, "Noble", 10, true)));
+        assertTrue(session.getPendingConfirmation().isEmpty());
+    }
+
+    @Test
+    void addingANonPremiumGroupIsStillDirect() {
+        MenuSession session = loadedSession();
+        when(admin.changeGroup(any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any()))
+                .thenReturn(CompletableFuture.completedFuture(true));
+
+        registries.actions().execute("users.group", actionContext(session), Map.of("userId", "7", "groupId", "1", "op", "add"));
+
+        verify(admin).changeGroup(staff, steveUser, groups.cachedOrEmpty().get(0), true, null);
+        assertTrue(session.getPendingConfirmation().isEmpty());
+    }
+
+    @Test
+    void premiumRowsSayTheyReplaceTheCurrentTier() {
+        when(usersQueryApi.getGroupMemberships(7)).thenReturn(CompletableFuture.completedFuture(List.of()));
+
+        List<GroupRow> rows = feature.fetchGroups(sourceContext(staff, MenuContextParams.EMPTY),
+                Map.of("userId", "7", "name", "Steve")).join().items();
+
+        assertTrue(rows.get(0).getLoreLines().contains("&7Not a member &7- click to add"));
+        assertTrue(rows.get(1).getLoreLines().contains("&7Click to make this their premium tier"));
+    }
+
+    @Test
+    void requestingOrCancellingAConfirmationRepaintsTheMenu() {
+        MenuSession session = new MenuSessionRegistry().open(staff.getUniqueId());
+
+        registries.actions().execute("menu.confirm.request", actionContext(session),
+                Map.of("actionTypeId", "users.ban", "actionParamsJson", "{\"userId\":\"7\"}", "prompt", "Ban?"));
+        registries.actions().execute("menu.confirm.cancel", actionContext(session), Map.of());
+
+        verify(menuService, org.mockito.Mockito.times(2)).refreshOpenMenu(staff);
+        assertTrue(session.getPendingConfirmation().isEmpty());
+    }
 }

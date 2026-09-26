@@ -328,6 +328,40 @@ public final class UserAdminService {
         return done;
     }
 
+    /**
+     * Player manager premium-tier switch: makes {@code tier} the target's only premium tier
+     * (permanent) - added first, then each of {@code replacedTiers} removed, so a failure part-way
+     * never leaves them with no tier at all. Rank-checked and attributed like {@link #changeGroup};
+     * the target is re-read afterwards so chat and the tab list show the new tier.
+     * {@code /knk user ... group add} still adds alongside, e.g. a temporary higher tier on top of
+     * a permanent one.
+     */
+    public CompletableFuture<Boolean> setPremiumTier(CommandSender sender, UserSummary target, PermissionGroupSummary tier,
+                                                     java.util.List<PermissionGroupSummary> replacedTiers) {
+        java.util.List<PermissionGroupSummary> replaced = replacedTiers.stream().filter(g -> g.id() != tier.id()).toList();
+        CompletableFuture<Boolean> done = new CompletableFuture<>();
+        withRankCheck(sender, target, api -> {
+            CompletableFuture<Void> chain = api.addGroupMembership(target.id(), tier.id(), null);
+            for (PermissionGroupSummary old : replaced) {
+                chain = chain.thenCompose(v -> api.removeGroupMembership(target.id(), old.id()));
+            }
+            chain.thenCompose(v -> refreshTargetSummary(target)).thenAccept(fresh -> mainThread.execute(() -> {
+                String was = replaced.stream().map(PermissionGroupSummary::name).collect(java.util.stream.Collectors.joining(", "));
+                sender.sendMessage(ChatColor.GREEN + "Set " + target.username() + "'s premium tier to " + tier.name()
+                        + (was.isEmpty() ? "" : " (was " + was + ")") + ".");
+                notifyGroupChange(target, tier, true);
+                refreshTargetVisibility(target);
+                refreshTargetDisplay(fresh);
+                done.complete(true);
+            })).exceptionally(ex -> {
+                // Part of the switch may have gone through - re-read so what's shown matches.
+                refreshTargetSummary(target).thenAccept(fresh -> mainThread.execute(() -> refreshTargetDisplay(fresh)));
+                return fail(sender, done, ex);
+            });
+        }, () -> done.complete(false));
+        return done;
+    }
+
     /** Grants or revokes one permission node (rank-checked, attributed, visibility refreshed). */
     public CompletableFuture<Boolean> changePermission(CommandSender sender, UserSummary target, String node, boolean granting,
                                                        OffsetDateTime expiresAt) {
