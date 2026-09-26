@@ -9,6 +9,7 @@ import net.knightsandkings.knk.paper.enchantbook.EnchantBookItems;
 import net.knightsandkings.knk.paper.mapper.EnchantmentDefinitionBukkitMapper;
 import net.knightsandkings.knk.paper.mapper.ItemBlueprintBukkitMapper;
 import org.bukkit.Bukkit;
+import org.bukkit.Material;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -274,7 +275,7 @@ public final class BlueprintItemAssembler {
     }
 
     private boolean applyCustomLoreEnchantment(ItemStack itemStack, String enchantmentId, int level) {
-        if (itemStack == null || itemStack.getType().isAir()) {
+        if (itemStack == null || isAir(itemStack.getType())) {
             return false;
         }
 
@@ -295,8 +296,16 @@ public final class BlueprintItemAssembler {
         return true;
     }
 
+    /**
+     * {@link Material#isAir()} for item types, without it: on Paper it goes through the item/block type registry,
+     * which only exists on a running server.
+     */
+    private static boolean isAir(Material type) {
+        return type == null || type == Material.AIR || type == Material.CAVE_AIR || type == Material.VOID_AIR;
+    }
+
     private void reorderLoreEnchantmentsFirst(ItemStack itemStack) {
-        if (itemStack == null || itemStack.getType().isAir()) {
+        if (itemStack == null || isAir(itemStack.getType())) {
             return;
         }
 
