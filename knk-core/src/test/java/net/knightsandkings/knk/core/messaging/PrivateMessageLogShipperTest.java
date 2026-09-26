@@ -42,7 +42,7 @@ class PrivateMessageLogShipperTest {
         shippers.forEach(PrivateMessageLogShipper::close);
     }
 
-    /** Status to fail the next sends with; 0 = succeed; -1 = connection error. */
+    /** Status to fail the next sends with; 0 = succeed; -1 = connection error; -2 = never answers. */
     private static final class FakeApi implements PrivateMessageLogApi {
         final List<List<PrivateMessageLogEntry>> batches = new CopyOnWriteArrayList<>();
         volatile int failWith;
@@ -50,6 +50,9 @@ class PrivateMessageLogShipperTest {
         @Override
         public CompletableFuture<BatchResult> submitBatch(List<PrivateMessageLogEntry> entries) {
             batches.add(List.copyOf(entries));
+            if (failWith == -2) {
+                return new CompletableFuture<>();
+            }
             if (failWith == -1) {
                 return CompletableFuture.failedFuture(new RuntimeException("Failed to send",
                         new java.net.ConnectException("Connection refused")));
@@ -192,6 +195,30 @@ class PrivateMessageLogShipperTest {
         second.flushNow();
         assertEquals("one", api.batches.get(0).get(0).content());
         assertEquals(console, api.batches.get(0).get(1));
+    }
+
+    @Test
+    void sendHangingAtShutdown_StillSpoolsEverything() throws Exception {
+        Path spool = dir.resolve("pm-log-spool.jsonl");
+        PrivateMessageLogShipper first = shipper(1000, spool);
+        first.closeWait(Duration.ofMillis(300));
+        first.start();
+        api.failWith = -2;
+        IntStream.range(0, 50).forEach(i -> first.submit(pm("m" + i)));  // a send starts and hangs
+        first.submit(pm("late"));
+
+        first.close();
+
+        assertTrue(Files.exists(spool), "spooled although the close task never ran");
+        api.failWith = 0;
+        api.batches.clear();
+        PrivateMessageLogShipper second = shipper(1000, spool);
+        second.start();
+        second.awaitIdle();
+        assertEquals(51, second.queueDepth(), "the hanging batch and the one behind it");
+        second.flushNow();
+        assertEquals("m0", api.sentTexts().get(0));
+        assertEquals("late", api.sentTexts().get(50));
     }
 
     @Test

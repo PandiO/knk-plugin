@@ -71,6 +71,8 @@ public final class PrivateMessageLogShipper {
     private final Deque<PrivateMessageLogEntry> queue = new ArrayDeque<>();
     private final AtomicLong dropped = new AtomicLong();
     private volatile boolean closed;
+    /** How long {@link #close()} waits for the sender thread; shorter in tests. */
+    private Duration closeWait = Duration.ofSeconds(15);
 
     // Sender thread only.
     private int consecutiveFailures;
@@ -158,14 +160,26 @@ public final class PrivateMessageLogShipper {
         }
         executor.shutdown();
         try {
-            if (!executor.awaitTermination(15, TimeUnit.SECONDS)) {
-                LOGGER.warning("Private message log shipper did not finish within 15s; unsent entries are in the spool file.");
+            if (!executor.awaitTermination(closeWait.toMillis(), TimeUnit.MILLISECONDS)) {
+                // A send was still hanging (API unreachable, client pool busy), so the spool task
+                // above never ran - shutdownNow() discards it. Interrupt the send (its batch goes
+                // back to the queue) and write the spool from here instead.
                 executor.shutdownNow();
+                executor.awaitTermination(2, TimeUnit.SECONDS);
+                writeSpool();
+                LOGGER.warning("Private message log shipper did not finish within " + closeWait.toSeconds()
+                        + "s; unsent entries are in the spool file.");
             }
         } catch (InterruptedException e) {
             executor.shutdownNow();
+            writeSpool();
             Thread.currentThread().interrupt();
         }
+    }
+
+    /** Tests: don't wait 15 s for a hanging send on close. */
+    void closeWait(Duration wait) {
+        this.closeWait = Objects.requireNonNull(wait, "wait must not be null");
     }
 
     /** Runs one send round on the sender thread and waits for it (tests). */
