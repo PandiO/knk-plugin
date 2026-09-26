@@ -315,6 +315,7 @@ class UserAdminServiceTest {
         TitleBracket knight = new TitleBracket(3, "Knight", "Dame", 300, 40, 0, 0, 0);
         Player online = mock(Player.class);
         bukkit.when(() -> Bukkit.getPlayer(target.uuid())).thenReturn(online);
+        apiApplies(BalanceCurrency.EXPERIENCE, BalanceOperation.SET, 180, 120);
 
         assertTrue(service.setTitle(staff, target, knight).join());
 
