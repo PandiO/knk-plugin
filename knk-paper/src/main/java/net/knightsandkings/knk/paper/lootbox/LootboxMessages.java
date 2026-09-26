@@ -13,6 +13,7 @@ public final class LootboxMessages {
     public static final String INVENTORY_FULL = ChatColor.RED + "Your inventory is full — make room to open this lootbox.";
     public static final String STUCK = ChatColor.RED + "The lootbox is stuck — try again in a moment.";
     public static final String TOO_FAR = ChatColor.RED + "Get closer to open this lootbox.";
+    public static final String NO_LINE_OF_SIGHT = ChatColor.RED + "You can't reach this lootbox from there.";
     public static final String NO_PERMISSION = ChatColor.RED + "You can't open lootboxes.";
     public static final String STAFF_MODE = ChatColor.RED + "You can't open lootboxes in staff or owner mode.";
     public static final String NO_ACCOUNT = ChatColor.RED + "Your account isn't loaded yet - try again in a moment.";

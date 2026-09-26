@@ -86,6 +86,7 @@ class LootboxInteractListenerTest {
         PersistentDataContainer pdc = mock(PersistentDataContainer.class);
         when(pdc.get(LootboxPresenter.TOKEN_KEY, PersistentDataType.STRING)).thenReturn(TOKEN.toString());
         when(hitbox.getPersistentDataContainer()).thenReturn(pdc);
+        when(player.hasLineOfSight(hitbox)).thenReturn(true);
 
         listener = new LootboxInteractListener(runtime, new ClaimGuard(), api, delivery, mock(LootboxAnnouncer.class),
                 (p, node) -> allowed, p -> mode, p -> userId, Runnable::run);
@@ -128,6 +129,29 @@ class LootboxInteractListenerTest {
 
         assertEquals(LootboxInteractListener.Attempt.TOO_FAR, listener.attemptOpen(player, hitbox));
         verify(player).sendMessage(contains("closer"));
+    }
+
+    @Test
+    void throughAWall_isRefusedBeforeAnyApiCall() {
+        when(player.hasLineOfSight(hitbox)).thenReturn(false);
+
+        assertEquals(LootboxInteractListener.Attempt.NO_LINE_OF_SIGHT, listener.attemptOpen(player, hitbox));
+        verify(player).sendMessage(contains("can't reach"));
+        verify(api, never()).claim(anyInt(), any(), anyInt(), anyString());
+    }
+
+    @Test
+    void aReplayOfAClaimAlreadyHandedOver_isNotStuck() {
+        KnkLootboxClaimResult claim = new KnkLootboxClaimResult(41, true, 9, 12, 3, 5, "Legendary Weapons Lootbox", 5L, 77,
+                "Steel Sword", 3, 3, 1, false, null, false, null, null);
+        when(api.claim(anyInt(), any(), anyInt(), anyString())).thenReturn(CompletableFuture.completedFuture(claim));
+        when(player.isOnline()).thenReturn(true);
+        when(delivery.deliver(player, claim, false)).thenReturn(CompletableFuture.completedFuture(
+                new LootboxDelivery.Outcome(false, true, null, null, java.util.List.of())));
+
+        listener.attemptOpen(player, hitbox);
+
+        verify(player, never()).sendMessage(contains("stuck"));
     }
 
     @Test

@@ -33,8 +33,8 @@ import java.util.logging.Logger;
 /**
  * Opening a box (docs/specs/lootboxes/DESIGN.md §3.4): a right- or left-click on a box's hitbox. In order: the
  * {@code knk.lootbox.open} node, not in staff/owner mode (unless {@code staff-mode-can-claim}), within
- * {@code claim-max-distance}, a loaded account, a free slot ({@code full-inventory: refuse}; no API call without one)
- * and the {@link ClaimGuard}. Then the claim goes to the API asynchronously and the item is delivered on the main
+ * {@code claim-max-distance} and in line of sight (no clicks through walls), a loaded account, a free slot
+ * ({@code full-inventory: refuse}; no API call without one) and the {@link ClaimGuard}. Then the claim goes to the API asynchronously and the item is delivered on the main
  * thread. The API decides everything that matters (who wins, what it is, the daily cap).
  */
 public final class LootboxInteractListener implements Listener {
@@ -42,7 +42,7 @@ public final class LootboxInteractListener implements Listener {
     private static final Logger LOGGER = Logger.getLogger(LootboxInteractListener.class.getName());
 
     /** Why a click did or didn't start a claim (for tests). */
-    public enum Attempt { NOT_A_BOX, ORPHAN, NO_PERMISSION, STAFF_MODE, TOO_FAR, NO_ACCOUNT, INVENTORY_FULL, IN_FLIGHT, CLAIMING }
+    public enum Attempt { NOT_A_BOX, ORPHAN, NO_PERMISSION, STAFF_MODE, TOO_FAR, NO_LINE_OF_SIGHT, NO_ACCOUNT, INVENTORY_FULL, IN_FLIGHT, CLAIMING }
 
     private final LootboxRuntime runtime;
     private final ClaimGuard guard;
@@ -124,6 +124,11 @@ public final class LootboxInteractListener implements Listener {
             player.sendMessage(LootboxMessages.TOO_FAR);
             return Attempt.TOO_FAR;
         }
+        // The server checks an entity click's distance only; a modified client can click through a wall.
+        if (!player.hasLineOfSight(clicked)) {
+            player.sendMessage(LootboxMessages.NO_LINE_OF_SIGHT);
+            return Attempt.NO_LINE_OF_SIGHT;
+        }
         Integer userId = userIdOf.apply(player);
         if (userId == null) {
             player.sendMessage(LootboxMessages.NO_ACCOUNT);
@@ -158,7 +163,7 @@ public final class LootboxInteractListener implements Listener {
         delivery.deliver(player, claim, false).thenAccept(outcome -> {
             if (outcome.given() && player.isOnline()) {
                 announcer.opened(player, claim, outcome.item(), runtime.settings(), runtime.config());
-            } else if (!outcome.given() && player.isOnline()) {
+            } else if (!outcome.given() && !outcome.alreadyHeld() && player.isOnline()) {
                 player.sendMessage(LootboxMessages.STUCK);
             }
         });
