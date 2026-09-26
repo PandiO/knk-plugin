@@ -47,7 +47,8 @@ import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 
 /**
  * KNG-18 Phase 1: /msg and /reply through MessagingService - vanish-safe lookup, console on both
- * ends, frozen players, rate limit, spy fan-out and the log (DESIGN.md §3.3).
+ * ends, frozen players, rate limit, spy fan-out and the log (DESIGN.md §3.3). Phase 2: the ignore
+ * gate's silent drop.
  */
 class MessageCommandsTest {
 
@@ -57,6 +58,8 @@ class MessageCommandsTest {
     private final SpyService spy = mock(SpyService.class);
     private final List<PrivateMessageLogger.Entry> logged = new ArrayList<>();
     private final Map<CommandSender, List<String>> inbox = new IdentityHashMap<>();
+    /** (recipient, sender) pairs where the recipient ignores the sender. */
+    private final Set<List<ParticipantId>> ignoring = new HashSet<>();
 
     private final Player alice = player("Alice");
     private final Player bob = player("Bob");
@@ -69,7 +72,8 @@ class MessageCommandsTest {
     private final VisiblePlayers visiblePlayers = new VisiblePlayers(
             name -> byName.get(name.toLowerCase()), byUuid::get, () -> List.of(alice, bob, staff));
     private final MessagingService service = new MessagingService(
-            KnkConfig.PrivateMessagesConfig.defaults(), permissible, freeze, spy, logged::add, visiblePlayers,
+            KnkConfig.PrivateMessagesConfig.defaults(), permissible, freeze, spy, logged::add,
+            (recipient, sender) -> ignoring.contains(List.of(recipient, sender)), visiblePlayers,
             player -> null, () -> console, Runnable::run,
             Clock.fixed(Instant.parse("2026-09-26T19:04:00Z"), ZoneOffset.UTC));
     private final MessageCommand msg = new MessageCommand(service, visiblePlayers);
@@ -317,6 +321,58 @@ class MessageCommandsTest {
         }
 
         assertEquals(8, inboxOf(bob).size());
+    }
+
+    // ===== ignore =====
+
+    @Test
+    void ignoredSender_seesTheNormalEcho_butNothingIsDelivered() {
+        ignoring.add(List.of(id(bob), id(alice)));
+
+        msg(alice, "Bob", "hello?");
+
+        assertEquals(List.of("[me -> Bob] hello?"), inboxOf(alice));
+        assertTrue(inboxOf(bob).isEmpty());
+        verify(bob, never()).playSound(any(net.kyori.adventure.sound.Sound.class));
+        org.mockito.ArgumentCaptor<Component> spyLine = org.mockito.ArgumentCaptor.forClass(Component.class);
+        verify(spy).broadcast(eq(id(alice)), eq(id(bob)), spyLine.capture());
+        assertTrue(PlainTextComponentSerializer.plainText().serialize(spyLine.getValue()).startsWith("[Spy][ignored] Alice -> Bob"));
+        assertEquals(PrivateMessageLogger.Outcome.BLOCKED_IGNORED, logged.get(0).outcome());
+
+        // No reply link either way.
+        reply(bob, "hm");
+        assertEquals("Nobody to reply to.", lastOf(bob));
+        reply(alice, "again");
+        assertEquals("Nobody to reply to.", lastOf(alice));
+    }
+
+    @Test
+    void ignore_onlyAppliesOneWay() {
+        ignoring.add(List.of(id(bob), id(alice)));
+
+        msg(bob, "Alice", "you can't answer me");
+
+        assertEquals("[Bob -> me] you can't answer me", lastOf(alice));
+    }
+
+    @Test
+    void bypassIgnore_reachesThePlayerAnyway() {
+        ignoring.add(List.of(id(bob), id(staff)));
+        grant(staff, PrivateMessageNodes.BYPASS_IGNORE);
+
+        msg(staff, "Bob", "staff here");
+
+        assertEquals("[Staff -> me] staff here", lastOf(bob));
+        assertEquals(PrivateMessageLogger.Outcome.DELIVERED, logged.get(0).outcome());
+    }
+
+    @Test
+    void console_isNeverIgnored() {
+        ignoring.add(List.of(id(bob), ParticipantId.CONSOLE));
+
+        msg(console, "Bob", "server notice");
+
+        assertEquals("[CONSOLE -> me] server notice", lastOf(bob));
     }
 
     @Test

@@ -48,6 +48,7 @@ import net.knightsandkings.knk.paper.chat.ChatLineFormat;
 import net.knightsandkings.knk.paper.kit.KitGrantPlacer;
 import net.knightsandkings.knk.paper.modes.ModeService;
 import net.knightsandkings.knk.paper.permissions.KnkPermissible;
+import net.knightsandkings.knk.paper.user.IgnoreService;
 import net.knightsandkings.knk.paper.utils.ColorOptions;
 import net.knightsandkings.knk.paper.utils.ScoreboardUtil;
 import net.kyori.adventure.text.Component;
@@ -74,6 +75,8 @@ public class PlayerListener implements Listener {
 	private final KitsCommandApi kitsCommandApi;
 	private final ItemBlueprintsDataAccess itemBlueprintsDataAccess;
 	private final MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
+	/** Null-safe: chat works unfiltered without it. */
+	private final IgnoreService ignoreService;
 
 	public PlayerListener(
 			UsersDataAccess usersDataAccess,
@@ -83,7 +86,8 @@ public class PlayerListener implements Listener {
 			UsersCommandApi usersCommandApi,
 			KitsCommandApi kitsCommandApi,
 			ItemBlueprintsDataAccess itemBlueprintsDataAccess,
-			MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess
+			MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess,
+			IgnoreService ignoreService
 	) {
 		this.usersDataAccess = usersDataAccess;
 		this.townsDataAccess = townsDataAccess;
@@ -93,6 +97,7 @@ public class PlayerListener implements Listener {
 		this.kitsCommandApi = kitsCommandApi;
 		this.itemBlueprintsDataAccess = itemBlueprintsDataAccess;
 		this.minecraftMaterialRefsDataAccess = minecraftMaterialRefsDataAccess;
+		this.ignoreService = ignoreService;
 	}
 
 	@EventHandler
@@ -287,6 +292,13 @@ public class PlayerListener implements Listener {
 	@EventHandler(priority = EventPriority.NORMAL)
 	public void onChat(AsyncChatEvent e) {
 		Player player = e.getPlayer();
+		UUID senderUuid = player.getUniqueId();
+
+		// KNG-18 Phase 2: players ignoring the sender don't see the line (DESIGN.md §4 D6). The
+		// ignore lists are concurrent snapshots - safe to read on this async chat thread.
+		if (ignoreService != null) {
+			e.viewers().removeIf(viewer -> viewer instanceof Player viewerPlayer && ignoreService.ignores(viewerPlayer.getUniqueId(), senderUuid));
+		}
 
 		String rawMessage = PlainTextComponentSerializer.plainText().serialize(e.message());
 		String dn = player.getName();
@@ -315,6 +327,9 @@ public class PlayerListener implements Listener {
 				String lowered = rawMessage.toLowerCase();
 				for (Player p : Bukkit.getOnlinePlayers()) {
 					if (!lowered.contains(p.getName().toLowerCase())) {
+						continue;
+					}
+					if (ignoreService != null && ignoreService.ignores(p.getUniqueId(), senderUuid)) {
 						continue;
 					}
 					Long last = mentionSoundCooldowns.get(p.getUniqueId());

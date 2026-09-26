@@ -22,6 +22,7 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
 import net.knightsandkings.knk.core.messaging.FrozenGate;
+import net.knightsandkings.knk.core.messaging.IgnoreGate;
 import net.knightsandkings.knk.core.messaging.ParticipantId;
 import net.knightsandkings.knk.core.messaging.PrivateMessageGate;
 import net.knightsandkings.knk.core.messaging.PrivateMessageNodes;
@@ -42,11 +43,15 @@ import net.kyori.adventure.text.format.TextColor;
  * hardened per docs/specs/private-messages/DESIGN.md §3.3. No permission is needed to send.
  * <p>
  * {@link #send} runs one message through: permission snapshot (the nodes the gates need, resolved
- * async through {@link KnkPermissible}) → gate chain ({@link FrozenGate}, {@link RateLimitGate};
- * the Phase 2 ignore gate and a future mute slot in here) → length cap → delivery (Adventure lines,
+ * async through {@link KnkPermissible}) → gate chain ({@link FrozenGate}, {@link RateLimitGate},
+ * {@link IgnoreGate}; a future mute slots in here) → length cap → delivery (Adventure lines,
  * sound) → reply links ({@link ReplyTargets}: reciprocal on every delivered message) → social spy
  * ({@link SpyService}) → log ({@link PrivateMessageLogger}). Everything after the permission
  * snapshot runs on the main thread.
+ * <p>
+ * A message to a player who ignores the sender is dropped silently (DESIGN.md §4 D5): the sender
+ * sees their normal echo, the recipient nothing, spies a {@code [Spy][ignored]} line, and no reply
+ * link is set.
  * <p>
  * The console takes part as {@link ParticipantId#CONSOLE}: it can /msg a player, a player can /r
  * the console, and the console can /r its last partner.
@@ -71,13 +76,14 @@ public class MessagingService {
     private final List<PrivateMessageGate> gates;
 
     /**
+     * @param ignores   who ignores whom (IgnoreService's cached lists)
      * @param rankColor name colour per player (TabListTeam: owner, staff, premium tier, default);
      *                  null means default
      * @param clock     wall clock; its zone decides the "Sent 21:04" hover time
      */
     public MessagingService(KnkConfig.PrivateMessagesConfig config, KnkPermissible knkPermissible,
                             AdminFreezeManager freezeManager, SpyService spyService, PrivateMessageLogger messageLog,
-                            VisiblePlayers visiblePlayers, Function<Player, TextColor> rankColor,
+                            IgnoreGate.Lookup ignores, VisiblePlayers visiblePlayers, Function<Player, TextColor> rankColor,
                             Supplier<CommandSender> console, Executor mainThread, Clock clock) {
         this.config = Objects.requireNonNull(config, "config must not be null");
         this.knkPermissible = Objects.requireNonNull(knkPermissible, "knkPermissible must not be null");
@@ -92,7 +98,7 @@ public class MessagingService {
         this.replyTargets = new ReplyTargets(clock);
         KnkConfig.PrivateMessagesConfig.RateLimitConfig limit = config.rateLimit();
         this.rateLimiter = new RateLimiter(limit.maxMessages(), limit.window(), limit.duplicateWindow(), clock);
-        this.gates = List.of(new FrozenGate(), new RateLimitGate(rateLimiter));
+        this.gates = List.of(new FrozenGate(), new RateLimitGate(rateLimiter), new IgnoreGate(ignores));
     }
 
     /** Joins command arguments from {@code from} into the message text, trimmed ("" when there is none). */
@@ -116,7 +122,7 @@ public class MessagingService {
         boolean senderFrozen = sender instanceof Player frozenCandidate && freezeManager.isFrozen(frozenCandidate.getUniqueId());
 
         CompletableFuture<Set<String>> senderNodes = sender instanceof Player senderPlayer
-                ? nodesHeld(senderPlayer, PrivateMessageNodes.BYPASS_RATE_LIMIT)
+                ? nodesHeld(senderPlayer, PrivateMessageNodes.BYPASS_RATE_LIMIT, PrivateMessageNodes.BYPASS_IGNORE)
                 : CompletableFuture.completedFuture(Set.of());
         CompletableFuture<Set<String>> recipientNodes = senderFrozen && recipient instanceof Player target
                 ? nodesHeld(target, PrivateMessageNodes.FREEZE)
@@ -170,7 +176,17 @@ public class MessagingService {
         }
 
         Instant now = clock.instant();
+        LocalTime time = LocalTime.ofInstant(now, clock.getZone());
         Optional<PrivateMessageGate.Denial> denial = PrivateMessageGate.firstDenial(gates, attempt);
+        if (denial.isPresent() && denial.get().reason() == PrivateMessageGate.Reason.IGNORED) {
+            // Silent drop (DESIGN.md §4 D5): the usual echo, nothing for the recipient, no reply link.
+            sender.sendMessage(PrivateMessageFormat.toSender(recipientParty, attempt.text()));
+            LOGGER.fine(() -> "Private message " + sender.getName() + " -> " + recipientParty.name() + " dropped: ignored");
+            spyService.broadcast(attempt.sender(), attempt.recipient(),
+                    PrivateMessageFormat.toSpy(senderParty, recipientParty, attempt.text(), time, attempt.viaReply(), true));
+            messageLog.log(entry(now, PrivateMessageLogger.Outcome.BLOCKED_IGNORED, sender, senderParty, recipient, recipientParty, attempt));
+            return;
+        }
         if (denial.isPresent()) {
             // Refused messages set no reply link and are not echoed to spies (DESIGN.md §3.3.4).
             sender.sendMessage(ChatColor.RED + denial.get().message());
@@ -180,7 +196,6 @@ public class MessagingService {
             return;
         }
 
-        LocalTime time = LocalTime.ofInstant(now, clock.getZone());
         String text = attempt.text();
         sender.sendMessage(PrivateMessageFormat.toSender(recipientParty, text));
         recipient.sendMessage(PrivateMessageFormat.toRecipient(senderParty, text, time));

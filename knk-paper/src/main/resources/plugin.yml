@@ -78,6 +78,16 @@ commands:
     aliases: [spy]
     # No permission: here - gated on knk.socialspy through KnkPermissible inside SocialSpyCommand.
 
+  ignore:
+    description: "List who you ignore, or ignore/unignore a player (their private messages and chat)"
+    usage: "/ignore [player]"
+    # No permission gate - any player may ignore another. Works for offline players; staff holding
+    # knk.msg.unignorable can't be ignored. The list is stored by knk-web-api.
+
+  unignore:
+    description: "Stop ignoring a player"
+    usage: "/unignore <player>"
+
   kit:
     description: "List, claim, give, and purchase Kits (docs/specs/kits/DESIGN.md §4.3)"
     usage: "/kit list | /kit get <name> | /kit give <player> <name> | /kit purchase <name> | /kit manage ..."
@@ -420,6 +430,18 @@ permissions:
 
   knk.msg.bypass.ratelimit:
     description: No private message rate limit (private-messages.rate-limit in config.yml).
+    default: op
+
+  knk.msg.bypass.ignore:
+    description: >-
+      Your private messages reach players who /ignore you (meant for staff). Checked through the
+      in-house permission model.
+    default: op
+
+  knk.msg.unignorable:
+    description: >-
+      Players can't /ignore you (meant for staff, so moderation contact stays possible). Checked by
+      knk-web-api through the in-house permission model.
     default: op
 
   knk.gate.open.*:
