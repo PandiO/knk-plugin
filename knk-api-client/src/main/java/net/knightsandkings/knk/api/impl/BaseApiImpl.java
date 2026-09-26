@@ -1,6 +1,8 @@
 package net.knightsandkings.knk.api.impl;
 
 import java.io.IOException;
+import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.logging.Logger;
 
@@ -9,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import net.knightsandkings.knk.api.auth.AuthProvider;
 import net.knightsandkings.knk.core.exception.ApiException;
+import okhttp3.Headers;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -50,6 +53,36 @@ public class BaseApiImpl {
         return builder;
     }
 
+    /**
+     * Headers whose values never go to the log: the plugin's service key and any bearer token or
+     * cookie. OkHttp's {@code Headers.toString()} redacts nothing custom, so logging
+     * {@code request.headers()} used to write the X-API-Key into latest.log.
+     */
+    static final Set<String> SENSITIVE_HEADERS = Set.of(
+        "x-api-key", "authorization", "proxy-authorization", "cookie", "set-cookie");
+
+    static final String REDACTED = "<redacted>";
+
+    /** {@code headers} one per line for the log, with sensitive values (and this client's own auth header) replaced. */
+    protected String loggableHeaders(Headers headers) {
+        String authHeader = authProvider != null ? authProvider.getAuthHeaderName() : null;
+        return redact(headers, authHeader);
+    }
+
+    static String redact(Headers headers, String extraSensitiveHeader) {
+        if (headers == null || headers.size() == 0) {
+            return "<none>";
+        }
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < headers.size(); i++) {
+            String name = headers.name(i);
+            boolean sensitive = SENSITIVE_HEADERS.contains(name.toLowerCase(Locale.ROOT))
+                || (extraSensitiveHeader != null && name.equalsIgnoreCase(extraSensitiveHeader));
+            out.append(name).append(": ").append(sensitive ? REDACTED : headers.value(i)).append('\n');
+        }
+        return out.toString();
+    }
+
     protected String snippet(String body) {
         if (body == null) return "";
         int max = MAX_RESPONSE_SNIPPET_LENGTH;
@@ -66,14 +99,14 @@ public class BaseApiImpl {
             if (!response.isSuccessful()) {
                 LOGGER.warning(String.format("API Error: %s %s -> [%d] %s in %dms",
                     request.method(), url, response.code(), response.message(), latency));
-                LOGGER.warning("  Request headers:\n" + request.headers());
-                LOGGER.warning("  Response headers:\n" + (response.headers() != null ? response.headers() : "<none>"));
+                LOGGER.warning("  Request headers:\n" + loggableHeaders(request.headers()));
+                LOGGER.warning("  Response headers:\n" + loggableHeaders(response.headers()));
                 LOGGER.warning("  Response body: " + snippet(responseBody));
             } else if (debugLogging) {
                 LOGGER.info(String.format("API Response: %s %s [%d] in %dms",
                     request.method(), url, response.code(), latency));
-                LOGGER.info("  Request headers:\n" + request.headers());
-                LOGGER.info("  Response headers:\n" + (response.headers() != null ? response.headers() : "<none>"));
+                LOGGER.info("  Request headers:\n" + loggableHeaders(request.headers()));
+                LOGGER.info("  Response headers:\n" + loggableHeaders(response.headers()));
                 LOGGER.info("  Response body: " + snippet(responseBody));
             }
 
