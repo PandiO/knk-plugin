@@ -190,9 +190,20 @@ class DiscoveriesApiImplTest {
         status = 204;
         responseJson = "";
 
-        api.reset(12, 4).join();
+        api.reset(42, 12, 4).join();
 
         assertEquals("DELETE", seen.get(0).method());
         assertEquals("http://api.test/api/users/12/discoveries/4", seen.get(0).url().toString());
+        assertEquals("42", seen.get(0).header("X-Acting-User-Id"));
+    }
+
+    @Test
+    void resetWithoutAnActorSendsNoActorHeader() {
+        status = 204;
+        responseJson = "";
+
+        api.reset(null, 12, 4).join();
+
+        assertNull(seen.get(0).header("X-Acting-User-Id"));
     }
 }

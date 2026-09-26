@@ -36,6 +36,10 @@ public interface DiscoveriesApi {
     /** Discovered vs. total per type, the latest discovery and lifetime totals. */
     CompletableFuture<DiscoverySummary> summary(int userId);
 
-    /** Staff reset of one discovery (the API requires a staff login for it). */
-    CompletableFuture<Void> reset(int userId, int domainId);
+    /**
+     * Staff reset of one discovery, so the domain can be discovered and rewarded again (no
+     * claw-back). {@code actorUserId} is the in-game staff member, sent as X-Acting-User-Id for the
+     * API's audit row (honoured only with the plugin's API key); null = system.
+     */
+    CompletableFuture<Void> reset(Integer actorUserId, int userId, int domainId);
 }

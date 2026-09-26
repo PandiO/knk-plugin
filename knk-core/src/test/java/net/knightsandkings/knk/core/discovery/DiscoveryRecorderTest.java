@@ -67,7 +67,7 @@ class DiscoveryRecorderTest {
         }
 
         @Override
-        public CompletableFuture<Void> reset(int userId, int domainId) {
+        public CompletableFuture<Void> reset(Integer actorUserId, int userId, int domainId) {
             return CompletableFuture.completedFuture(null);
         }
     }

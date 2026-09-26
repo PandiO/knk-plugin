@@ -50,6 +50,18 @@ class DiscoveryTrackerTest {
     }
 
     @Test
+    void replacingTheKnownSetAfterAResetMakesTheResetDomainACandidateAgain() {
+        tracker.knownLoaded(PLAYER, List.of(new KnownDiscovery(1, "town_rivia"), new KnownDiscovery(2, "district_market")));
+
+        tracker.replaceKnown(PLAYER, List.of(new KnownDiscovery(1, "town_rivia")));
+
+        assertFalse(tracker.isCandidate(PLAYER, "town_rivia", T0));
+        assertTrue(tracker.isCandidate(PLAYER, "district_market", T0));
+        assertEquals(1, tracker.knownCount(PLAYER));
+        tracker.replaceKnown(UUID.randomUUID(), List.of()); // no session: ignored
+    }
+
+    @Test
     void playersWithoutASessionHaveNoCandidates() {
         UUID other = UUID.randomUUID();
         assertFalse(tracker.isCandidate(other, "town_rivia", T0));

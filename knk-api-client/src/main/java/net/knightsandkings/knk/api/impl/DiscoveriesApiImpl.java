@@ -29,6 +29,7 @@ import net.knightsandkings.knk.core.domain.discovery.KnownDiscovery;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.DiscoveriesApi;
 import okhttp3.OkHttpClient;
+import okhttp3.Request;
 
 /**
  * knk-web-api's DiscoveriesController (domain discovery, KNG-20). A failed call completes
@@ -118,11 +119,17 @@ public class DiscoveriesApiImpl extends BaseApiImpl implements DiscoveriesApi {
     }
 
     @Override
-    public CompletableFuture<Void> reset(int userId, int domainId) {
+    public CompletableFuture<Void> reset(Integer actorUserId, int userId, int domainId) {
         return CompletableFuture.supplyAsync(() -> {
             String url = discoveriesUrl(userId) + "/" + domainId;
             try {
-                delete(url);
+                // The API trusts the actor header only on a request carrying the plugin's API key.
+                Request.Builder builder = newRequest(url).delete();
+                if (actorUserId != null) {
+                    builder.header(UsersCommandApiImpl.ACTING_USER_HEADER, String.valueOf(actorUserId));
+                }
+                if (debugLogging) LOGGER.info("API Request: DELETE " + url);
+                execute(builder.build(), url);
                 return null;
             } catch (ApiException | IOException e) {
                 throw new RuntimeException("Failed to reset discovery " + domainId + " of user " + userId, e);

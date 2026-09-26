@@ -136,6 +136,20 @@ public final class DiscoveryTracker {
         session.pending.keySet().removeIf(session.knownRegions::contains);
     }
 
+    /**
+     * The player's discovered domains were read again after a staff reset: forget everything
+     * known before (the reset domain may be discovered again this session) and remember these.
+     */
+    public synchronized void replaceKnown(UUID playerId, Collection<KnownDiscovery> known) {
+        Session session = sessions.get(playerId);
+        if (session == null) {
+            return;
+        }
+        session.knownRegions.clear();
+        session.knownDomains.clear();
+        knownLoaded(playerId, known);
+    }
+
     /** Loading the known set failed: send candidates anyway (the server dedups), still rate limited. */
     public synchronized void knownLoadFailed(UUID playerId) {
         Session session = sessions.get(playerId);
