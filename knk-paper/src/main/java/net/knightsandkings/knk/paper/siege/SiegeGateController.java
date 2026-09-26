@@ -79,8 +79,8 @@ public final class SiegeGateController implements SiegeMatchObserver {
     private GatePassThroughService passThrough;
 
     /**
-     * Phase 7b: one door of an applied lockdown with its pre-lockdown state - what the non-member view
-     * renders and where virtual collision / the temporary pass-through apply.
+     * Phase 7b: one door of an applied lockdown with its pre-lockdown state - the non-member view
+     * ({@code SiegeGateViewService}) and the right-click pass-through use it.
      */
     public record LockedDoor(SiegeLobbyRuntime lobby, SiegeNonMemberGateView viewMode, int gateStructureId, int doorId,
                              boolean preOpened, boolean preDestroyed) {}

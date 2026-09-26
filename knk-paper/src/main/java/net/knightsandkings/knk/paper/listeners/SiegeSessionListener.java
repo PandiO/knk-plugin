@@ -21,7 +21,6 @@ import java.util.function.Consumer;
  *       spawn teleport and the other join handlers.</li>
  * </ul>
  * Every join then runs the siege-enchantment stripping sweep (DESIGN §9.4: a crash or failed restore).
- * Phase 7 adds the scenario-area lockdown (region entry, teleports) here.
  */
 public class SiegeSessionListener implements Listener {
 

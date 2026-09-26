@@ -3,6 +3,7 @@ package net.knightsandkings.knk.paper.utils;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.function.Predicate;
 
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -52,6 +53,17 @@ public class ScoreboardUtil {
         return scoreboard;
     }
 
+    /**
+     * Players who keep the scoreboard they have (siege audit 2026-09-26: a siege member's match
+     * scoreboard): their tab team and header/footer still update, but {@link Player#setScoreboard}
+     * isn't called. Set by the siege runtime; the siege restores the shared board when they leave.
+     */
+    private static Predicate<Player> keepOwnScoreboard = p -> false;
+
+    public static void setKeepOwnScoreboard(Predicate<Player> predicate) {
+        keepOwnScoreboard = predicate == null ? p -> false : predicate;
+    }
+
     public static void setScoreboard(List<Player> players, KnkPermissible knkPermissible) {
         setScoreboard(players, knkPermissible, null);
     }
@@ -78,7 +90,9 @@ public class ScoreboardUtil {
                 userSummary));
 
             team.addPlayer(p);
-            p.setScoreboard(scoreboard);
+            if (!keepOwnScoreboard.test(p)) {
+                p.setScoreboard(scoreboard);
+            }
 
             // Set tab layout header/footer
             Component header = Component.text("§7Welcome to §9Knights and Kings");

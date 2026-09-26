@@ -1168,8 +1168,12 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().warning("Siege gate integration disabled: the gate system isn't initialized");
         }
 
+        // Hourly salary and rank refreshes reset scoreboards; siege members keep their match board.
+        net.knightsandkings.knk.paper.utils.ScoreboardUtil.setKeepOwnScoreboard(
+            p -> siegeService.activeLobbyOf(p.getUniqueId()).isPresent());
+
         siegeService.start();
-        getLogger().info("Siege runtime initialized (Phase 5-7a)");
+        getLogger().info("Siege runtime initialized");
     }
 
     public SiegeService getSiegeService() {
