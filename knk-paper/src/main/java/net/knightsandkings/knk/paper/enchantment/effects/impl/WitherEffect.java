@@ -18,7 +18,7 @@ public class WitherEffect extends AttackEnchantmentEffect {
     @Override
     protected void applyEffect(ItemStack weapon, Player attacker, LivingEntity target, int level) {
         int durationTicks = level * 40;
-        target.addPotionEffect(new PotionEffect(PotionEffectType.POISON, durationTicks, 1));
+        target.addPotionEffect(new PotionEffect(PotionEffectType.WITHER, durationTicks, 1));
 
         Location particleLocation = attacker.getLocation().clone().add(0.0d, 1.5d, 0.0d);
         playEffect(particleLocation, Effect.POTION_BREAK, 0);
