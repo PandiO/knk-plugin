@@ -59,7 +59,8 @@ public final class SiegeMatchMapper {
                         orZero(r.captureCount()),
                         orZero(r.coins()),
                         orZero(r.experience()),
-                        orZero(r.gems())))
+                        orZero(r.gems()),
+                        r.coinMultiplier() == null || r.coinMultiplier() < 0 ? 1.0 : r.coinMultiplier()))
                 .toList();
         long matchId = dto.matchId() == null ? requestedMatchId : dto.matchId();
         return new RewardSummary(matchId, Boolean.TRUE.equals(dto.alreadyCompleted()), rewards);

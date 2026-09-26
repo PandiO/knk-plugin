@@ -56,6 +56,9 @@ public final class KnkSiegeMatchRecords {
      * @param presentAtEnd  false for participants who left before the end (they get nothing)
      * @param holdingCount  objectives their team holds at the end and did not hold at the start
      * @param captureCount  distinct objectives they captured
+     * @param coins          granted coins, after {@code coinMultiplier}
+     * @param coinMultiplier personal salary multiplier x rank (premium) multiplier the server applied
+     *                       to the coins (1.0 = none; smoke test 2026-09-26)
      */
     public record ParticipantReward(
             int userId,
@@ -65,8 +68,14 @@ public final class KnkSiegeMatchRecords {
             int captureCount,
             int coins,
             int experience,
-            int gems
+            int gems,
+            double coinMultiplier
     ) {
+        public ParticipantReward(int userId, boolean presentAtEnd, boolean won, int holdingCount, int captureCount,
+                                 int coins, int experience, int gems) {
+            this(userId, presentAtEnd, won, holdingCount, captureCount, coins, experience, gems, 1.0);
+        }
+
         /** True when this player got anything. */
         public boolean hasRewards() {
             return coins > 0 || experience > 0 || gems > 0;

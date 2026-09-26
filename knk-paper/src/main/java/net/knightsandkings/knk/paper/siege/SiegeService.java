@@ -666,7 +666,14 @@ public final class SiegeService {
             return SiegeMessages.info("No rewards this time.");
         }
         StringBuilder parts = new StringBuilder();
-        if (r.coins() > 0) parts.append("+").append(r.coins()).append(" coins ");
+        if (r.coins() > 0) {
+            parts.append("+").append(r.coins()).append(" coins ");
+            // Smoke test 2026-09-26: the server applies the personal salary x rank (premium) multiplier.
+            if (Math.abs(r.coinMultiplier() - 1.0) > 0.001) {
+                parts.append("(x").append(new java.text.DecimalFormat("0.##",
+                        java.text.DecimalFormatSymbols.getInstance(Locale.ROOT)).format(r.coinMultiplier())).append(" bonus) ");
+            }
+        }
         if (r.experience() > 0) parts.append("+").append(r.experience()).append(" XP ");
         if (r.gems() > 0) parts.append("+").append(r.gems()).append(" gems ");
         List<String> why = new ArrayList<>();

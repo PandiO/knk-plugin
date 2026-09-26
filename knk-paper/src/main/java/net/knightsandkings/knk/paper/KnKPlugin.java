@@ -1106,6 +1106,8 @@ public class KnKPlugin extends JavaPlugin {
 
         siegeService.addObserver(new net.knightsandkings.knk.paper.siege.SiegeWorldPresenter(this, siegeVaultDirectory));
         siegeService.addObserver(new net.knightsandkings.knk.paper.siege.SiegeScoreboardPresenter());
+        // Smoke test 2026-09-26: sounds, particles and chat when objectives start being attacked/defended.
+        siegeService.addObserver(new net.knightsandkings.knk.paper.siege.SiegeCaptureFeedback());
         var siegeBooks = new net.knightsandkings.knk.paper.siege.SiegeEnchantBooks(this, siegeService, siegeRandom);
         siegeService.addObserver(siegeBooks);
         siegeVault.setAfterRestore(siegeBooks::sweep);

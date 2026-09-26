@@ -128,7 +128,7 @@ class SiegeMatchesCommandApiImplTest {
         responseByPath.put("/api/siege-matches/42/complete", """
                 {"matchId":42,"status":"Completed","alreadyCompleted":false,"rewards":[
                   {"userId":7,"siegeTeamId":202,"presentAtEnd":true,"won":true,"holdingCount":2,"captureCount":1,
-                   "coins":250,"experience":25,"gems":1,"titleChange":{"direction":"promotion"}},
+                   "coins":375,"baseCoins":250,"coinMultiplier":1.5,"experience":25,"gems":1,"titleChange":{"direction":"promotion"}},
                   {"userId":8,"presentAtEnd":false,"won":false,"coins":0,"experience":0,"gems":0}]}""");
         Completion completion = new Completion(SiegeEndReason.INSTANT_VICTORY, 2,
                 List.of(new ParticipantResult(7, 202, 3, 1, 2, 1)),
@@ -138,7 +138,8 @@ class SiegeMatchesCommandApiImplTest {
         RewardSummary summary = await(api.completeMatch(42, completion));
 
         assertEquals(42, summary.matchId());
-        assertEquals(List.of(new ParticipantReward(7, true, true, 2, 1, 250, 25, 1),
+        // coinMultiplier is carried; a reward without it maps to 1.0.
+        assertEquals(List.of(new ParticipantReward(7, true, true, 2, 1, 375, 25, 1, 1.5),
                 new ParticipantReward(8, false, false, 0, 0, 0, 0, 0)), summary.rewards());
         JsonNode body = json.readTree(bodies.get("/api/siege-matches/42/complete"));
         assertEquals("InstantVictory", body.get("endReason").asText());
