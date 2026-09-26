@@ -118,6 +118,19 @@ public final class SiegeService {
         }
     }
 
+    /**
+     * Phase 8b: how the service opens the siege menus without depending on the menu engine
+     * ({@code SiegeMenuBridge} implements it once the menu service exists). Each returns false when
+     * the menu isn't available (not seeded / blocked by validation) - callers then use the chat fallback.
+     */
+    public interface MenuHooks {
+        boolean openOverview(Player player);
+
+        boolean openInformation(Player player, int lobbyId);
+
+        boolean openSpawnPicker(Player player);
+    }
+
     public static final String PERMISSION_PLAY = "knk.siege.play";
     public static final String PERMISSION_SKIP = "knk.siege.skip";
     public static final String PERMISSION_ADMIN_LIST = "knk.siege.admin.list";
@@ -154,6 +167,7 @@ public final class SiegeService {
     private boolean refreshInFlight;
     private final List<CommandSender> refreshWaiters = new ArrayList<>();
     private boolean shuttingDown;
+    private MenuHooks menuHooks;
 
     public SiegeService(
             Plugin plugin,
@@ -174,6 +188,22 @@ public final class SiegeService {
         this.permissions = Objects.requireNonNull(permissions, "permissions");
         this.userCache = Objects.requireNonNull(userCache, "userCache");
         this.random = Objects.requireNonNull(random, "random");
+    }
+
+    /** Phase 8b: set by {@code SiegeMenuBridge}; null keeps every chat fallback. */
+    public void setMenuHooks(MenuHooks menuHooks) {
+        this.menuHooks = menuHooks;
+    }
+
+    /**
+     * Phase 8b: {@code /siege} (and the menu entry): the viewer's own siege Information, else the
+     * overview. False when the menus aren't available (the caller prints the chat list instead).
+     */
+    public boolean openMenu(Player player) {
+        if (menuHooks == null) return false;
+        Optional<SiegeLobbyRuntime> own = lobbyOf(player.getUniqueId());
+        if (own.isPresent() && menuHooks.openInformation(player, own.get().id())) return true;
+        return menuHooks.openOverview(player);
     }
 
     public void addObserver(SiegeMatchObserver observer) {
@@ -884,6 +914,64 @@ public final class SiegeService {
         return new Reply(ok, SiegeMessages.voteResult(result, label));
     }
 
+    /**
+     * Phase 8b ({@code siege.vote} menu action): votes for an exact choice - a candidate scenario id or
+     * Random - in the player's lobby. (The text form treats small numbers as list positions.)
+     */
+    public Reply vote(Player player, VoteChoice choice) {
+        Optional<SiegeLobbyRuntime> found = lobbyOf(player.getUniqueId());
+        if (found.isEmpty()) return Reply.fail(SiegeMessages.bad("Join a siege first: /siege join <lobby>."));
+        SiegeLobbyRuntime rt = found.get();
+        String label;
+        if (choice.isRandom()) {
+            label = "Random";
+        } else {
+            Optional<KnkSiegeScenario> scenario = rt.machine().candidates().stream()
+                    .filter(s -> s.id() == choice.scenarioId()).findFirst();
+            if (scenario.isEmpty()) {
+                return Reply.fail(SiegeMessages.voteResult(VoteResult.NOT_A_CANDIDATE, "that scenario"));
+            }
+            label = scenarioName(scenario.get());
+        }
+        VoteResult result = rt.machine().vote(player.getUniqueId(), choice);
+        notifyChanged(rt);
+        boolean ok = result == VoteResult.CAST || result == VoteResult.CHANGED || result == VoteResult.REMOVED;
+        return new Reply(ok, SiegeMessages.voteResult(result, label));
+    }
+
+    /**
+     * Phase 8b ({@code siege.join-eligible}, the Information join line): why this player can't join
+     * this lobby right now, or empty when {@link #join} would let them in. Mirrors join's checks
+     * without changing anything.
+     */
+    public Optional<String> joinDenial(Player player, SiegeLobbyRuntime rt) {
+        UUID id = player.getUniqueId();
+        if (!hasPermission(player, PERMISSION_PLAY)) return Optional.of("You don't have permission to play sieges.");
+        Optional<SiegeLobbyRuntime> current = lobbyOf(id);
+        if (current.isPresent()) {
+            return Optional.of(current.get() == rt ? "You are already in " + rt.displayName() + "."
+                    : "You are already in " + current.get().displayName() + ".");
+        }
+        SiegeLobbyStateMachine machine = rt.machine();
+        if (!machine.isJoinable()) return Optional.of(notJoinableReason(rt));
+        int capacity = machine.joinCapacity();
+        if (rt.memberCount() >= capacity) return Optional.of(rt.displayName() + " is full (" + capacity + " players).");
+        UserSummary user = userCache.getStale(id).orElse(null);
+        if (user == null || user.id() == null) return Optional.of("Your profile is still loading; try again in a moment.");
+        int minXp = machine.joinMinTitleExperience();
+        if (minXp > 0 && user.experiencePoints() < minXp) {
+            return Optional.of("You need at least the title " + titleRanks.requirementLabel(minXp) + ".");
+        }
+        Optional<Integer> claimed = locks.lobbyOfPlayer(id);
+        if (claimed.isPresent() && claimed.get() != rt.id()) return Optional.of("You are already in another siege.");
+        return Optional.empty();
+    }
+
+    /** Phase 8b: a player's cached profile (names/titles in the menus); never blocks. */
+    public Optional<UserSummary> cachedUser(UUID playerId) {
+        return userCache.getStale(playerId);
+    }
+
     private Optional<KnkSiegeScenario> resolveCandidate(SiegeLobbyRuntime rt, String text) {
         List<KnkSiegeScenario> candidates = rt.machine().candidates();
         String t = text.trim();
@@ -930,6 +1018,8 @@ public final class SiegeService {
 
     private void offerSpawnPicker(Player player, SiegeMatch match, KnkSiegeTeam team) {
         match.openSpawnPick(player.getUniqueId(), SPAWN_PICK_WINDOW.toNanos());
+        // Phase 8b: the siege.spawnpoint menu when it's available, else the clickable chat list.
+        if (menuHooks != null && menuHooks.openSpawnPicker(player)) return;
         player.sendMessage(spawnPickerMessage(match, team, player.getUniqueId()));
     }
 

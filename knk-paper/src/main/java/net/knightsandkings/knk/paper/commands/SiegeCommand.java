@@ -82,6 +82,9 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
 
     private void overview(CommandSender sender) {
         if (sender instanceof Player && !allowed(sender, SiegeService.PERMISSION_PLAY)) return;
+        // Phase 8b: the siege menus (own Information, else the overview); the chat list below stays
+        // as the fallback when the menus aren't available.
+        if (sender instanceof Player player && service.openMenu(player)) return;
         List<SiegeLobbyRuntime> lobbies = service.lobbies();
         Component msg = SiegeMessages.info("Siege lobbies:");
         if (lobbies.isEmpty()) {

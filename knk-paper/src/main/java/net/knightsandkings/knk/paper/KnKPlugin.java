@@ -572,7 +572,10 @@ public class KnKPlugin extends JavaPlugin {
                     permissionGroupsDataAccess, usersQueryApi, cacheManager.getUserCache()),
                 new net.knightsandkings.knk.paper.menu.content.UserManagerMenuFeature(
                     userAdminService, usersQueryApi, cacheManager.getUserCache(), titleBracketsDataAccess,
-                    permissionGroupsDataAccess, org.bukkit.Bukkit::getOnlinePlayers)
+                    permissionGroupsDataAccess, org.bukkit.Bukkit::getOnlinePlayers),
+                // Siege Phase 8b: the siege menus. SiegeService is created later (initializeSiege),
+                // so the feature looks it up on every call.
+                new net.knightsandkings.knk.paper.siege.SiegeMenuFeature(() -> siegeService)
             );
             menuFeatures.forEach(feature -> feature.registerMenuHandlers(menuRegistries));
 
@@ -1036,6 +1039,13 @@ public class KnKPlugin extends JavaPlugin {
         pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeCommandFilterListener(siegeService), this);
         pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeInventoryGuardListener(siegeService,
             player -> modeService.getActiveMode(player) != ActiveMode.NONE), this);
+
+        // Phase 8b: menus open from /siege and the spawn picker (chat fallbacks stay) and repaint on changes.
+        if (menuService != null) {
+            var siegeMenus = new net.knightsandkings.knk.paper.siege.SiegeMenuBridge(menuService);
+            siegeService.addObserver(siegeMenus);
+            siegeService.setMenuHooks(siegeMenus);
+        }
 
         // Phase 7a: gates of the scenario area (lockdown, owner control, damage rules, restore, crash
         // recovery) and the area entry lockdown for non-members.
