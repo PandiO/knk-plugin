@@ -98,6 +98,14 @@ public class BaseApiImpl {
     }
 
     protected String postJson(String url, String json) throws ApiException, IOException {
+        return postJson(url, json, true);
+    }
+
+    /**
+     * @param logBody false for bodies that must never reach the server log even with
+     *                debug-logging on (e.g. private message content, KNG-18)
+     */
+    protected String postJson(String url, String json, boolean logBody) throws ApiException, IOException {
         Request request = newRequest(url)
             .addHeader("Content-Type", "application/json")
             .addHeader("Accept", "application/json")
@@ -105,7 +113,7 @@ public class BaseApiImpl {
             .build();
         if (debugLogging) {
             LOGGER.info("API Request: POST " + url);
-            LOGGER.info("  Body: " + snippet(json));
+            LOGGER.info("  Body: " + (logBody ? snippet(json) : "<" + json.length() + " chars, not logged>"));
         }
         return execute(request, url);
     }

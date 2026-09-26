@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.api.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -12,6 +13,9 @@ import java.util.UUID;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -91,6 +95,39 @@ class PrivateMessageLogApiImplTest {
         assertEquals("BlockedRateLimited", first.get("outcome").asText());
         assertTrue(first.get("viaReply").asBoolean());
         assertEquals("Delivered", body.get(1).get("outcome").asText());
+    }
+
+    @Test
+    void debugLogging_NeverLogsTheMessageContent() {
+        List<String> logged = new ArrayList<>();
+        Handler capture = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                logged.add(record.getMessage());
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        Logger logger = Logger.getLogger(BaseApiImpl.class.getName());
+        logger.addHandler(capture);
+        try {
+            PrivateMessageLogApiImpl debugApi = new PrivateMessageLogApiImpl("http://api.test/api", client, mapper,
+                    new ApiKeyAuthProvider("secret"), executor, true);
+            debugApi.submitBatch(List.of(new PrivateMessageLogEntry(UUID.randomUUID(), Instant.now(), null, "CONSOLE",
+                    null, "CONSOLE", "my secret words", Outcome.DELIVERED, false))).join();
+        } finally {
+            logger.removeHandler(capture);
+        }
+
+        assertTrue(logged.stream().anyMatch(line -> line.contains("POST")), "the request itself is still logged");
+        assertFalse(logged.stream().anyMatch(line -> line.contains("my secret words")), String.join("\n", logged));
+        assertTrue(bodies.get(0).contains("my secret words"), "the API still receives the content");
     }
 
     @Test

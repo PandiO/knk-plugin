@@ -41,7 +41,9 @@ public class PrivateMessageLogApiImpl extends BaseApiImpl implements PrivateMess
         return CompletableFuture.supplyAsync(() -> {
             String url = baseUrl + ENDPOINT;
             try {
-                PrivateMessageLogBatchResultDto result = parse(postJson(url, objectMapper.writeValueAsString(body)),
+                // Never log the body: it is players' private messages, and the server log has no
+                // retention (api.debug-logging would otherwise copy every PM into latest.log).
+                PrivateMessageLogBatchResultDto result = parse(postJson(url, objectMapper.writeValueAsString(body), false),
                     PrivateMessageLogBatchResultDto.class, url);
                 return new BatchResult(result.accepted(), result.duplicates());
             } catch (ApiException | IOException e) {
