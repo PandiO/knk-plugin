@@ -4,10 +4,12 @@ import net.knightsandkings.knk.core.cache.UserCache;
 import net.knightsandkings.knk.core.dataaccess.PermissionGroupsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.TitleBracketsDataAccess;
 import net.knightsandkings.knk.core.domain.common.Page;
+import net.knightsandkings.knk.core.domain.common.PagedQuery;
 import net.knightsandkings.knk.core.domain.permissions.PermissionGroupSummary;
 import net.knightsandkings.knk.core.domain.users.ActiveMode;
 import net.knightsandkings.knk.core.domain.users.GroupMembershipSummary;
 import net.knightsandkings.knk.core.domain.users.TitleBracket;
+import net.knightsandkings.knk.core.domain.users.UserListItem;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.core.menu.ConditionOutcome;
 import net.knightsandkings.knk.core.menu.MenuActionException;
@@ -49,7 +51,9 @@ import java.util.stream.Collectors;
  * behind, because they run on the main thread and must not block):
  * <ul>
  *   <li>{@code users.online} → {@link OnlinePlayerRow}: online players the viewer outranks
- *       ({@code RankHierarchy}), from the user cache; one disabled row when there is nobody;</li>
+ *       ({@code RankHierarchy}), from the user cache; one disabled row when there is nobody. With
+ *       {@code knk.admin.user.manage.all} (owner, menu follow-up 2026-09-26): every account,
+ *       online or offline, the viewer included, paged + searchable ({@link #fetchEveryone});</li>
  *   <li>{@code users.target {userId, name}} → {@link TargetUserView} (one row, the head): a fresh
  *       read of the target plus whether the viewer outranks them - cached per (viewer, target) for
  *       the root, the condition and the actions;</li>
@@ -59,7 +63,7 @@ import java.util.stream.Collectors;
  *       → online count.</li>
  * </ul>
  * <b>Conditions</b>: {@code users.outranks-target {userId}} (Click; "You can only manage players
- * ranked below you") and {@code users.pending} (a pending confirmation is a {@code users.*} action,
+ * ranked below you"; always allows {@code knk.admin.user.manage.all}) and {@code users.pending} (a pending confirmation is a {@code users.*} action,
  * so another menu's abandoned confirmation never shows here).
  * <p>
  * <b>Actions</b> (each re-checks its permission node, then calls the service, then repaints):
@@ -105,7 +109,7 @@ public final class UserManagerMenuFeature implements MenuFeature {
 
     @Override
     public void registerMenuHandlers(MenuFeatureRegistries registries) {
-        registries.contentSources().registerRows("users.online", OnlinePlayerRow.class, (context, params, query) -> fetchOnline(context));
+        registries.contentSources().registerRows("users.online", OnlinePlayerRow.class, (context, params, query) -> fetchOnline(context, query));
         registries.contentSources().registerRows("users.target", TargetUserView.class,
                 (context, params, query) -> fetchTarget(context, params).thenApply(view -> page(List.of(view))));
         registries.contentSources().registerRows("users.titles", TitleRow.class, (context, params, query) -> fetchTitles(context, params));
@@ -129,18 +133,25 @@ public final class UserManagerMenuFeature implements MenuFeature {
 
     // ===== reads =====
 
-    CompletableFuture<Page<OnlinePlayerRow>> fetchOnline(MenuContentSourceContext context) {
+    CompletableFuture<Page<OnlinePlayerRow>> fetchOnline(MenuContentSourceContext context, PagedQuery query) {
         Player viewer = context.player();
+        if (viewer != null && viewer.hasPermission(MANAGE_NODE) && viewer.hasPermission(UserAdminService.MANAGE_ALL_NODE)) {
+            return fetchEveryone(viewer, query);
+        }
         Integer viewerId = viewer != null ? viewerId(viewer) : null;
         if (viewer == null || viewerId == null || !viewer.hasPermission(MANAGE_NODE)) {
             return CompletableFuture.completedFuture(page(List.of(OnlinePlayerRow.none())));
         }
+        String search = query != null && query.searchTerm() != null ? query.searchTerm().trim().toLowerCase(Locale.ROOT) : "";
         List<UserSummary> candidates = new ArrayList<>();
         for (Player online : onlinePlayers.get()) {
             if (online.getUniqueId().equals(viewer.getUniqueId())) {
                 continue;
             }
-            userCache.getStale(online.getUniqueId()).filter(user -> user.id() != null).ifPresent(candidates::add);
+            userCache.getStale(online.getUniqueId())
+                    .filter(user -> user.id() != null)
+                    .filter(user -> search.isEmpty() || user.username().toLowerCase(Locale.ROOT).contains(search))
+                    .ifPresent(candidates::add);
         }
         Map<UserSummary, CompletableFuture<Boolean>> checks = new LinkedHashMap<>();
         for (UserSummary candidate : candidates) {
@@ -157,6 +168,38 @@ public final class UserManagerMenuFeature implements MenuFeature {
                 rows.add(OnlinePlayerRow.none());
             }
             return page(rows);
+        });
+    }
+
+    /**
+     * Menu follow-up 2026-09-26 ({@code knk.admin.user.manage.all}): every account, online or not,
+     * the viewer included - one page of {@code UsersQueryApi.search} (the section's search term and
+     * page), sorted by username, online players marked from the server's player list.
+     */
+    CompletableFuture<Page<OnlinePlayerRow>> fetchEveryone(Player viewer, PagedQuery query) {
+        PagedQuery base = query != null ? query : new PagedQuery(1, 36, null, null, false, Map.of());
+        PagedQuery byName = new PagedQuery(base.pageNumber(), base.pageSize(), base.searchTerm(), "username", false, base.filters());
+        Set<UUID> online = onlinePlayers.get().stream().map(Player::getUniqueId).collect(Collectors.toSet());
+        return usersQueryApi.search(byName).thenApply(result -> {
+            List<OnlinePlayerRow> rows = new ArrayList<>();
+            if (result != null && result.items() != null) {
+                for (UserListItem item : result.items()) {
+                    if (item == null || item.id() == null) {
+                        continue;
+                    }
+                    UserSummary cached = item.uuid() != null ? userCache.getStale(item.uuid()).orElse(null) : null;
+                    boolean isOnline = item.uuid() != null && online.contains(item.uuid());
+                    rows.add(OnlinePlayerRow.of(item, cached, isOnline, viewer.getUniqueId().equals(item.uuid())));
+                }
+            }
+            if (rows.isEmpty()) {
+                return page(List.of(OnlinePlayerRow.none()));
+            }
+            int total = result != null ? result.totalCount() : rows.size();
+            return new Page<>(rows, total, byName.pageNumber(), byName.pageSize());
+        }).exceptionally(ex -> {
+            LOGGER.log(Level.WARNING, "users.online: player search failed", ex);
+            return page(List.of(OnlinePlayerRow.none()));
         });
     }
 
@@ -178,7 +221,9 @@ public final class UserManagerMenuFeature implements MenuFeature {
                     if (user == null || !Objects.equals(user.id(), userId)) {
                         return CompletableFuture.completedFuture(TargetUserView.unknown(name));
                     }
-                    CompletableFuture<Boolean> outranks = viewerId != null
+                    CompletableFuture<Boolean> outranks = viewer.hasPermission(UserAdminService.MANAGE_ALL_NODE)
+                            ? CompletableFuture.completedFuture(true)
+                            : viewerId != null
                             ? admin.outranks(viewerId, userId).exceptionally(ex -> null)
                             : CompletableFuture.completedFuture((Boolean) null);
                     return outranks.thenApply(result -> {
@@ -229,6 +274,9 @@ public final class UserManagerMenuFeature implements MenuFeature {
     // ===== conditions =====
 
     ConditionOutcome outranksTarget(MenuActionContext context, Map<String, String> params) {
+        if (context.player() != null && context.player().hasPermission(UserAdminService.MANAGE_ALL_NODE)) {
+            return ConditionOutcome.allow();
+        }
         Integer userId = parseId(params.get("userId"));
         TargetState state = context.player() != null && userId != null
                 ? targets.get(key(context.player().getUniqueId(), userId)) : null;

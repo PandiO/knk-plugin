@@ -47,6 +47,16 @@ public final class ProfileMenuFeature implements MenuFeature {
     public void registerMenuHandlers(MenuFeatureRegistries registries) {
         registries.variables().register(ROOT, ProfileView.class, (player, ctx) -> profileFor(player));
         registries.contentSources().registerRows(ROWS_SOURCE, TitleRow.class, (context, params, query) -> fetchRows(context));
+        // Warm the bracket list: the hub's quick-stats head reads it (cachedOrEmpty) before any
+        // titles.brackets fetch has run.
+        try {
+            titleBrackets.listAsync().exceptionally(ex -> {
+                LOGGER.log(Level.FINE, "profile: couldn't preload title brackets", ex);
+                return List.of();
+            });
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.FINE, "profile: couldn't preload title brackets", e);
+        }
     }
 
     /** Main thread, no I/O. */

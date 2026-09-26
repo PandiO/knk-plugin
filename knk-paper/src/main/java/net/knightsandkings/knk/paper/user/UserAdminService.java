@@ -31,8 +31,8 @@ import java.util.function.Consumer;
  *   <li>per-property permission {@code knk.admin.user.<property>} (plain Bukkit nodes, like every
  *       other {@code /knk} admin subcommand);</li>
  *   <li>{@link RankHierarchy#actorOutranks} for group/perm/freeze (and the new mode/salary
- *       actions) - the actor's highest group weight must exceed the target's; the console always
- *       passes;</li>
+ *       actions) - the actor's highest group weight must exceed the target's; the console and
+ *       holders of {@link #MANAGE_ALL_NODE} always pass;</li>
  *   <li>balances as signed deltas on {@code PUT /api/users/{id}/balances} (a "set" is a computed
  *       delta), promotion effects shown for an online target;</li>
  *   <li>{@code ModeService.refreshVisibilityFor} after a group/perm change;</li>
@@ -45,6 +45,11 @@ import java.util.function.Consumer;
 public final class UserAdminService {
 
     public static final String NODE_PREFIX = "knk.admin.user.";
+    /**
+     * Menu follow-up 2026-09-26 (owner request): edit every player - equal or higher rank, offline,
+     * or yourself - without {@link RankHierarchy#actorOutranks}. Per-property nodes still apply.
+     */
+    public static final String MANAGE_ALL_NODE = NODE_PREFIX + "manage.all";
 
     private final Executor mainThread;
     private final UsersDataAccess usersDataAccess;
@@ -113,6 +118,10 @@ public final class UserAdminService {
                 });
                 return;
             }
+            if (bypassesRankCheck(sender)) {
+                mainThread.execute(() -> onAllowed.accept(usersCommandApi.withActor(actor.id())));
+                return;
+            }
             rankHierarchy.actorOutranks(actor.id(), target.id()).thenAccept(outranks -> mainThread.execute(() -> {
                 if (!outranks) {
                     sender.sendMessage(ChatColor.RED + "You cannot act on a player of equal or higher rank.");
@@ -134,6 +143,11 @@ public final class UserAdminService {
             });
             return null;
         });
+    }
+
+    /** Holders of {@link #MANAGE_ALL_NODE} may edit anyone, themselves included; the console always may. */
+    public static boolean bypassesRankCheck(CommandSender sender) {
+        return !(sender instanceof Player) || sender.hasPermission(MANAGE_ALL_NODE);
     }
 
     /** Whether {@code actorUserId} outranks {@code targetUserId} (the menu's click condition reads a cached answer). */

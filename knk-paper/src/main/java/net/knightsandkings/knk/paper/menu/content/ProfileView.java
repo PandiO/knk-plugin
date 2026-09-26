@@ -16,6 +16,7 @@ import java.util.List;
  */
 public final class ProfileView {
 
+    private static final int PROGRESS_BAR_WIDTH = 20;
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneOffset.UTC);
 
     private final UserSummary user;
@@ -98,6 +99,62 @@ public final class ProfileView {
             lines.add("&7Next: &f" + progress.next().nameFor(user.gender()) + " &7- &f" + progress.experienceToNext() + " XP &7to go");
         }
         return lines;
+    }
+
+    /**
+     * Menu follow-up 2026-09-26: a progress bar towards the next title,
+     * "&a||||||||&7|||||||||||| &f40%", or null at the highest title / without progress.
+     */
+    public String getProgressBar() {
+        if (user == null || progress == null || progress.next() == null) {
+            return null;
+        }
+        int from = progress.current() != null ? progress.current().minExperience() : 0;
+        int span = progress.next().minExperience() - from;
+        int percent = span <= 0 ? 100 : (int) Math.max(0, Math.min(100, (user.experiencePoints() - from) * 100L / span));
+        int filled = percent * PROGRESS_BAR_WIDTH / 100;
+        return "&a" + "|".repeat(filled) + "&7" + "|".repeat(PROGRESS_BAR_WIDTH - filled) + " &f" + percent + "%";
+    }
+
+    /** "&7Title rank: &f3&7/&f19", or null while the brackets aren't known. */
+    public String getTitleRankLine() {
+        if (user == null || progress == null || progress.current() == null || brackets.isEmpty()) {
+            return null;
+        }
+        return "&7Title rank: &f" + (progress.currentIndex(brackets) + 1) + "&7/&f" + brackets.size();
+    }
+
+    /**
+     * Menu follow-up 2026-09-26: the hub's centre head and the profile head - title, rank on the
+     * ladder, progress to the next title, balances and premium tier at a glance.
+     */
+    public List<String> getQuickStatsLines() {
+        List<String> lines = new ArrayList<>();
+        if (user == null) {
+            lines.add("&cYour account isn't loaded yet");
+            return lines;
+        }
+        lines.add(getTitleLine());
+        addIfPresent(lines, getTitleRankLine());
+        if (progress != null && progress.next() != null) {
+            lines.add("&7Next: &f" + progress.next().nameFor(user.gender()) + " &7(&f" + progress.experienceToNext() + " XP&7)");
+            addIfPresent(lines, getProgressBar());
+        } else if (progress != null && progress.isHighest()) {
+            lines.add("&aHighest title reached");
+        }
+        lines.add("");
+        lines.add("&7Coins: &6" + user.coins());
+        lines.add("&7Gems: &b" + user.gems());
+        lines.add("&7Experience: &f" + user.experiencePoints());
+        addIfPresent(lines, getPrestigeLine());
+        addIfPresent(lines, getPremiumLine());
+        return lines;
+    }
+
+    private static void addIfPresent(List<String> lines, String line) {
+        if (line != null) {
+            lines.add(line);
+        }
     }
 
     public boolean isHighestTitle() {

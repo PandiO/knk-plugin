@@ -19,14 +19,17 @@ public final class TitleRow implements MenuRowKey {
     private final int salary;
     private final List<String> loreLines;
     private final String displayMode;
+    private final int order;
 
-    private TitleRow(int bracketId, String name, int minExperience, int salary, List<String> loreLines, String displayMode) {
+    private TitleRow(int bracketId, String name, int minExperience, int salary, List<String> loreLines, String displayMode,
+                     int order) {
         this.bracketId = bracketId;
         this.name = name;
         this.minExperience = minExperience;
         this.salary = salary;
         this.loreLines = List.copyOf(loreLines);
         this.displayMode = displayMode;
+        this.order = order;
     }
 
     /** Rows for every bracket as seen by a user of {@code gender} holding {@code progress}. */
@@ -37,6 +40,7 @@ public final class TitleRow implements MenuRowKey {
             TitleBracket bracket = brackets.get(i);
             String mode = i == currentIndex ? "HIGHLIGHT" : (i < currentIndex ? "NORMAL" : "DISABLED");
             List<String> lore = new ArrayList<>();
+            lore.add("&7Title &f" + (i + 1) + " &7of &f" + brackets.size());
             lore.add("&7Required XP: &f" + bracket.minExperience());
             lore.add("&7Salary: &f" + bracket.salary() + " coins");
             List<String> bonuses = new ArrayList<>();
@@ -58,7 +62,7 @@ public final class TitleRow implements MenuRowKey {
             } else {
                 lore.add("&c" + Math.max(0, bracket.minExperience() - experience) + " more XP needed");
             }
-            rows.add(new TitleRow(bracket.id(), own, bracket.minExperience(), bracket.salary(), lore, mode));
+            rows.add(new TitleRow(bracket.id(), own, bracket.minExperience(), bracket.salary(), lore, mode, i + 1));
         }
         return rows;
     }
@@ -85,6 +89,32 @@ public final class TitleRow implements MenuRowKey {
 
     public String getDisplayMode() {
         return displayMode;
+    }
+
+    /** 1-based position on the title ladder - bound to the stack Amount so the order reads at a glance (max 64). */
+    public int getOrder() {
+        return Math.min(order, 64);
+    }
+
+    /**
+     * Menu follow-up 2026-09-26 ("show more clearly which titles have been reached"): lime for
+     * reached, gold for the current title, gray for the ones still ahead.
+     */
+    public String getMaterial() {
+        return switch (displayMode) {
+            case "HIGHLIGHT" -> "GOLDEN_HELMET";
+            case "NORMAL" -> "LIME_STAINED_GLASS_PANE";
+            default -> "GRAY_STAINED_GLASS_PANE";
+        };
+    }
+
+    /** The name with a state marker: "&a✔ Squire", "&6&l» Knight «", "&7Lord". */
+    public String getMarkedName() {
+        return switch (displayMode) {
+            case "HIGHLIGHT" -> "&6&l» " + name + " «";
+            case "NORMAL" -> "&a✔ " + name;
+            default -> "&7" + name;
+        };
     }
 
     /**

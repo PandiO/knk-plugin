@@ -114,6 +114,7 @@ permissions:
       knk.admin.user.group: true
       knk.admin.user.perm: true
       knk.admin.user.manage: true
+      knk.admin.user.manage.all: true
       knk.admin.user.mode: true
       knk.admin.user.salary: true
       knk.admin.tp: true
@@ -175,6 +176,13 @@ permissions:
       Open the in-game Player manager (InventoryMenu users.manager, content port CP8) and see its
       hub tile. Every edit inside it is still gated by its own knk.admin.user.<property> node.
     default: false
+
+  knk.admin.user.manage.all:
+    description: >-
+      Owner override (menu follow-up 2026-09-26): the Player manager lists every player, online and
+      offline (searchable), including yourself, and user edits - menu and /knk user - skip the
+      rank check (RankHierarchy). The per-property knk.admin.user.<property> nodes still apply.
+    default: op
 
   knk.admin.user.mode:
     description: >-

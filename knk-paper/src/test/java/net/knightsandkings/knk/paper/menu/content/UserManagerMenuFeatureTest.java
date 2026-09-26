@@ -7,7 +7,10 @@ import net.knightsandkings.knk.core.domain.permissions.PermissionGroupSummary;
 import net.knightsandkings.knk.core.domain.users.ActiveMode;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.domain.users.GroupMembershipSummary;
+import net.knightsandkings.knk.core.domain.users.UserListItem;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
+import net.knightsandkings.knk.core.domain.common.Page;
+import net.knightsandkings.knk.core.domain.common.PagedQuery;
 import net.knightsandkings.knk.core.menu.ConditionOutcome;
 import net.knightsandkings.knk.core.menu.MenuContextParams;
 import net.knightsandkings.knk.core.menu.MenuSession;
@@ -107,7 +110,7 @@ class UserManagerMenuFeatureTest {
 
     @Test
     void onlineListShowsOnlyPlayersTheViewerOutranks() {
-        List<OnlinePlayerRow> rows = feature.fetchOnline(sourceContext(staff, MenuContextParams.EMPTY)).join().items();
+        List<OnlinePlayerRow> rows = feature.fetchOnline(sourceContext(staff, MenuContextParams.EMPTY), null).join().items();
 
         assertEquals(List.of("Steve"), rows.stream().map(OnlinePlayerRow::getName).toList());
         assertEquals(7, rows.get(0).getUserId());
@@ -118,10 +121,57 @@ class UserManagerMenuFeatureTest {
     void onlineListIsEmptyWithoutTheManageNode() {
         when(staff.hasPermission(UserManagerMenuFeature.MANAGE_NODE)).thenReturn(false);
 
-        List<OnlinePlayerRow> rows = feature.fetchOnline(sourceContext(staff, MenuContextParams.EMPTY)).join().items();
+        List<OnlinePlayerRow> rows = feature.fetchOnline(sourceContext(staff, MenuContextParams.EMPTY), null).join().items();
 
         assertEquals(1, rows.size());
         assertEquals("DISABLED", rows.get(0).getDisplayMode());
+    }
+
+    @Test
+    void onlineListFiltersByTheSearchTerm() {
+        Player bob = player("Bob");
+        cache.put(user(8, "Bob", bob.getUniqueId()));
+        online.add(bob);
+        when(admin.outranks(42, 8)).thenReturn(CompletableFuture.completedFuture(true));
+
+        PagedQuery query = new PagedQuery(1, 36, "ste", null, false, Map.of());
+        List<OnlinePlayerRow> rows = feature.fetchOnline(sourceContext(staff, MenuContextParams.EMPTY), query).join().items();
+
+        assertEquals(List.of("Steve"), rows.stream().map(OnlinePlayerRow::getName).toList());
+    }
+
+    @Test
+    void manageAllListsEveryAccountOnlineOfflineAndSelfFromTheSearch() {
+        when(staff.hasPermission(UserAdminService.MANAGE_ALL_NODE)).thenReturn(true);
+        UUID offlineUuid = UUID.randomUUID();
+        List<UserListItem> found = List.of(
+                new UserListItem(42, "Admin", staff.getUniqueId(), null, 100),
+                new UserListItem(1, "Owner", owner.getUniqueId(), null, 100),
+                new UserListItem(99, "Offliner", offlineUuid, null, 12));
+        when(usersQueryApi.search(any())).thenReturn(CompletableFuture.completedFuture(new Page<>(found, 40, 2, 3)));
+
+        PagedQuery query = new PagedQuery(2, 3, "o", null, false, Map.of());
+        Page<OnlinePlayerRow> page = feature.fetchOnline(sourceContext(staff, MenuContextParams.EMPTY), query).join();
+
+        assertEquals(40, page.totalCount());
+        assertEquals(List.of("Admin", "Owner", "Offliner"), page.items().stream().map(OnlinePlayerRow::getName).toList());
+        assertEquals("&a● &fAdmin &d(you)", page.items().get(0).getDisplayName());
+        assertEquals("&7● &fOffliner", page.items().get(2).getDisplayName());
+        assertTrue(page.items().get(2).getLoreLines().contains("&7Offline"));
+        assertTrue(page.items().get(2).getLoreLines().contains("&7Coins: &f12"));
+        verify(usersQueryApi).search(new PagedQuery(2, 3, "o", "username", false, Map.of()));
+        verify(admin, never()).outranks(anyInt(), anyInt());
+    }
+
+    @Test
+    void manageAllPassesTheOutranksConditionForAnyTargetIncludingSelf() {
+        when(staff.hasPermission(UserAdminService.MANAGE_ALL_NODE)).thenReturn(true);
+        when(usersQueryApi.getByUsername("Owner")).thenReturn(CompletableFuture.completedFuture(ownerUser));
+
+        feature.fetchTarget(sourceContext(staff, MenuContextParams.EMPTY), Map.of("userId", "1", "name", "Owner")).join();
+
+        assertTrue(registries.conditions().test("users.outranks-target", actionContext(null), Map.of("userId", "1")).allowed());
+        assertTrue(registries.conditions().test("users.outranks-target", actionContext(null), Map.of("userId", "42")).allowed());
     }
 
     @Test

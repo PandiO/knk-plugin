@@ -89,6 +89,45 @@ class ProfileMenuFeatureTest {
         assertTrue(view.getProgressLines().isEmpty());
     }
 
+    @Test
+    void quickStatsShowTitleRankProgressBalancesAndPremium() {
+        OffsetDateTime until = OffsetDateTime.of(2026, 10, 1, 12, 0, 0, 0, ZoneOffset.UTC);
+        ProfileView view = new ProfileView(user(UUID.randomUUID(), 150, 2, "Male", 0, "Noble", until), BRACKETS);
+
+        // 150 XP between Squire (100) and Knight (300): 25%
+        assertEquals("&a" + "|".repeat(5) + "&7" + "|".repeat(15) + " &f25%", view.getProgressBar());
+        assertEquals("&7Title rank: &f2&7/&f3", view.getTitleRankLine());
+        assertEquals(List.of(
+                "&7Title: &fSquire",
+                "&7Title rank: &f2&7/&f3",
+                "&7Next: &fKnight &7(&f150 XP&7)",
+                "&a" + "|".repeat(5) + "&7" + "|".repeat(15) + " &f25%",
+                "",
+                "&7Coins: &6120",
+                "&7Gems: &b7",
+                "&7Experience: &f150",
+                "&7Premium tier: &6Noble &7(until 2026-10-01)"), view.getQuickStatsLines());
+    }
+
+    @Test
+    void quickStatsAtTheTopHaveNoBarAndUnloadedSaysSo() {
+        ProfileView top = new ProfileView(user(UUID.randomUUID(), 900, 3, "Male", 0, null, null), BRACKETS);
+        assertNull(top.getProgressBar());
+        assertTrue(top.getQuickStatsLines().contains("&aHighest title reached"));
+        assertEquals(List.of("&cYour account isn't loaded yet"), ProfileView.unavailable().getQuickStatsLines());
+    }
+
+    @Test
+    void titleRowsShowStateByMaterialMarkerAndOrder() {
+        List<TitleRow> rows = TitleRow.rows(BRACKETS, TitleProgress.of(BRACKETS, 2, 150), "Male", 150);
+
+        assertEquals(List.of("LIME_STAINED_GLASS_PANE", "GOLDEN_HELMET", "GRAY_STAINED_GLASS_PANE"),
+                rows.stream().map(TitleRow::getMaterial).toList());
+        assertEquals(List.of("&a✔ Peasant", "&6&l» Squire «", "&7Knight"), rows.stream().map(TitleRow::getMarkedName).toList());
+        assertEquals(List.of(1, 2, 3), rows.stream().map(TitleRow::getOrder).toList());
+        assertEquals("&7Title &f2 &7of &f3", rows.get(1).getLoreLines().get(0));
+    }
+
     // ===== TitleRow =====
 
     @Test
