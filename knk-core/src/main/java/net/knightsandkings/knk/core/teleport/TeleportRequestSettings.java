@@ -8,10 +8,9 @@ package net.knightsandkings.knk.core.teleport;
  * @param expireSeconds   how long a request can be answered (v1: 30 s); at least 1
  * @param cooldownSeconds how long a player waits between sending two requests
  * @param maxIncoming     pending requests one player can have; the oldest is dropped past it; at least 1
- * @param priceCoins      coins a request would cost the requester (v1 designed 10000, never charged).
- *                        Only 0 is supported until the server-side charge path exists (DESIGN §3.5:
- *                        the same path as warps, Phase 5) - a non-zero price turns requests off
- *                        rather than charging from the plugin.
+ * @param priceCoins      coins a request costs the requester (v1 designed 10000, never charged; 0 =
+ *                        free). Charged server-side when the teleport commits, through the same
+ *                        charge path as warps (DESIGN §3.5, Phase 5), and refunded if it then fails.
  */
 public record TeleportRequestSettings(
     int expireSeconds,
@@ -31,7 +30,7 @@ public record TeleportRequestSettings(
         return new TeleportRequestSettings(30, 10, 5, 0);
     }
 
-    /** Whether requests would cost something - not supported yet, see {@link #priceCoins()}. */
+    /** Whether requests cost something (charged to the requester when the teleport commits). */
     public boolean isPaid() {
         return priceCoins > 0;
     }

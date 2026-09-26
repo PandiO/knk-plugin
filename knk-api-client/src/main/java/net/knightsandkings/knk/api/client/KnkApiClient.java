@@ -111,6 +111,7 @@ public class KnkApiClient {
     private final net.knightsandkings.knk.core.ports.api.CategoriesQueryApi categoriesQueryApi;
     private final KitsCommandApi kitsCommandApi;
     private final net.knightsandkings.knk.core.ports.api.GameSettingsQueryApi gameSettingsQueryApi;
+    private final net.knightsandkings.knk.api.impl.TeleportDestinationsApiImpl teleportDestinationsApi;
 
     private KnkApiClient(
         String baseUrl,
@@ -156,6 +157,7 @@ public class KnkApiClient {
         this.titleBracketsQueryApi = new TitleBracketsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.categoriesQueryApi = new net.knightsandkings.knk.api.impl.CategoriesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.gameSettingsQueryApi = new net.knightsandkings.knk.api.impl.GameSettingsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.teleportDestinationsApi = new net.knightsandkings.knk.api.impl.TeleportDestinationsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
     }
     
     public HealthApi getHealthApi() {
@@ -194,6 +196,16 @@ public class KnkApiClient {
     /** Teleport Phase 4 ({@code /spawn}): {@code GET /api/GameSettings}. */
     public net.knightsandkings.knk.core.ports.api.GameSettingsQueryApi getGameSettingsQueryApi() {
         return gameSettingsQueryApi;
+    }
+
+    /** Teleport Phase 5 ({@code /warp}): {@code GET /api/teleport-destinations?userId=}. */
+    public net.knightsandkings.knk.core.ports.api.TeleportDestinationsQueryApi getTeleportDestinationsQueryApi() {
+        return teleportDestinationsApi;
+    }
+
+    /** Teleport Phase 5: warp charges, /tpa fees and refunds ({@code POST /api/teleport-destinations/...}). */
+    public net.knightsandkings.knk.core.ports.api.TeleportDestinationsCommandApi getTeleportDestinationsCommandApi() {
+        return teleportDestinationsApi;
     }
 
     /** InventoryMenu content port CP3: {@code GET /api/title-brackets}. */
