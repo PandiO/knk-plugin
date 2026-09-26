@@ -7,6 +7,8 @@ import net.knightsandkings.knk.core.domain.currency.CurrencyException;
 import net.knightsandkings.knk.core.domain.currency.LeaderboardPage;
 import net.knightsandkings.knk.core.domain.currency.LedgerPage;
 import net.knightsandkings.knk.core.domain.currency.PendingTransfer;
+import net.knightsandkings.knk.core.domain.currency.ReversalOutcome;
+import net.knightsandkings.knk.core.domain.currency.TransferLock;
 import net.knightsandkings.knk.core.domain.currency.TransferLimits;
 import net.knightsandkings.knk.core.domain.currency.TransferOutcome;
 import net.knightsandkings.knk.core.domain.users.BalanceCurrency;
@@ -14,7 +16,8 @@ import net.knightsandkings.knk.core.domain.users.BalanceCurrency;
 /**
  * Player currency routes of knk-web-api ({@code api/currency}, currency-payments
  * IMPLEMENTATION_PLAN.md Phase 3): balances, /baltop, limits, /pay with its confirmation step, and
- * a player's ledger history. Refusals complete exceptionally with a {@link CurrencyException}
+ * a player's ledger history; and the staff routes of {@code api/currency/admin} (Phase 4):
+ * reversals and transfer locks. Refusals complete exceptionally with a {@link CurrencyException}
  * carrying the API's code (e.g. {@code DailyCapExceeded}); the server decides everything, the
  * plugin only shows what it answers.
  * <p>
@@ -48,4 +51,20 @@ public interface CurrencyApi {
 
     /** A player's ledger history, newest first; {@code currency} null for all of coins, gems and XP. */
     CompletableFuture<LedgerPage> getTransactions(int userId, BalanceCurrency currency, int page, int pageSize);
+
+    // ===== Staff (Phase 4; the caller checked the staff member's knk.admin.currency.* node) =====
+
+    /**
+     * {@code /knk currency reverse}: reverses transaction {@code publicId} as staff member
+     * {@code actingUserId} with {@code note} (at least 10 characters). {@code allowPartial}: reverse
+     * what is left when the player has spent some of it. Refused with {@code AlreadyReversed},
+     * {@code ReversalWouldGoNegative}, {@code NotReversible} or {@code TransactionNotFound}.
+     */
+    CompletableFuture<ReversalOutcome> reverseTransaction(int actingUserId, String publicId, String note, boolean allowPartial);
+
+    /** {@code /knk currency lock}: locks the player's transfers with a reason. */
+    CompletableFuture<TransferLock> lockTransfers(int actingUserId, int userId, String reason);
+
+    /** {@code /knk currency unlock}. */
+    CompletableFuture<TransferLock> unlockTransfers(int actingUserId, int userId);
 }

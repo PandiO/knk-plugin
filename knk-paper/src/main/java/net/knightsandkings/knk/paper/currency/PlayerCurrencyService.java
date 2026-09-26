@@ -31,6 +31,8 @@ import net.knightsandkings.knk.core.domain.currency.LeaderboardPage;
 import net.knightsandkings.knk.core.domain.currency.LedgerLine;
 import net.knightsandkings.knk.core.domain.currency.LedgerPage;
 import net.knightsandkings.knk.core.domain.currency.PendingTransfer;
+import net.knightsandkings.knk.core.domain.currency.ReversalOutcome;
+import net.knightsandkings.knk.core.domain.currency.TransferLock;
 import net.knightsandkings.knk.core.domain.currency.TransferOutcome;
 import net.knightsandkings.knk.core.domain.users.BalanceCurrency;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
@@ -43,7 +45,8 @@ import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 /**
  * The player side of the currency ledger (currency DESIGN.md §3.6, IMPLEMENTATION_PLAN.md
  * Phase 3): /pay (with its confirmation step), /balance, /baltop, /transactions and the staff
- * {@code /knk user <player> history}. Parses nothing and decides nothing that matters: knk-web-api
+ * {@code /knk user <player> history}; plus the staff {@code /knk currency reverse|history|lock|unlock}
+ * (Phase 4). Parses nothing and decides nothing that matters: knk-web-api
  * applies every rule and returns every number; this class checks the in-game nodes, resolves
  * names, calls {@link CurrencyApi} off the main thread and renders the answer on it.
  * <p>
@@ -61,6 +64,12 @@ public class PlayerCurrencyService {
     public static final String BALTOP_NODE = "knk.baltop";
     public static final String TRANSACTIONS_NODE = "knk.transactions";
     public static final String TRANSACTIONS_OTHERS_NODE = "knk.transactions.others";
+    /** Staff (currency DESIGN.md §3.8), the same strings the API checks for web callers. */
+    public static final String CURRENCY_HISTORY_NODE = "knk.admin.currency.history";
+    public static final String CURRENCY_REVERSE_NODE = "knk.admin.currency.reverse";
+    public static final String CURRENCY_LOCK_NODE = "knk.admin.currency.lock";
+    /** A staff note (reversal) must say more than "fix" - the API requires 10 characters too. */
+    public static final int MIN_STAFF_NOTE_LENGTH = 10;
 
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneOffset.UTC);
     private static final Pattern BUTTON = Pattern.compile("\\{(confirm|cancel)}");
@@ -354,10 +363,16 @@ public class PlayerCurrencyService {
             return;
         }
         currencyApi.getTransactions(target.id(), filter, page, settings.transactionsPageSize())
-            .whenComplete((ledger, ex) -> mainThread.execute(() -> renderLedger(viewer, target.username(), filter, ledger, ex)));
+            .whenComplete((ledger, ex) -> mainThread.execute(() -> renderLedger(viewer, target.username(), filter, ledger, ex, true)));
     }
 
     private void renderLedger(CommandSender viewer, String username, BalanceCurrency filter, LedgerPage ledger, Throwable ex) {
+        renderLedger(viewer, username, filter, ledger, ex, false);
+    }
+
+    /** {@code staff}: each line ends with its transaction id, which suggests {@code /knk currency reverse <id>} when clicked. */
+    private void renderLedger(CommandSender viewer, String username, BalanceCurrency filter, LedgerPage ledger, Throwable ex,
+                              boolean staff) {
         if (ex != null) {
             renderError(viewer, ex, BalanceCurrency.COINS, username);
             return;
@@ -370,7 +385,14 @@ public class PlayerCurrencyService {
             "filter", filter == null ? "" : CurrencyFormat.name(filter, 2) + " ",
             "page", String.valueOf(ledger.page()), "pages", String.valueOf(ledger.totalPages()));
         for (LedgerLine line : ledger.items()) {
-            viewer.sendMessage(ledgerLine(line));
+            if (staff && line.publicId() != null) {
+                viewer.sendMessage(LEGACY.deserialize(ledgerLine(line) + " ")
+                    .append(LEGACY.deserialize("§8#" + line.publicId())
+                        .clickEvent(ClickEvent.suggestCommand("/knk currency reverse " + line.publicId() + " "))
+                        .hoverEvent(HoverEvent.showText(Component.text("Transaction " + line.publicId() + " - click to reverse it")))));
+            } else {
+                viewer.sendMessage(ledgerLine(line));
+            }
         }
     }
 
@@ -395,6 +417,132 @@ public class PlayerCurrencyService {
             reason = "";
         }
         return reason.length() > MAX_REASON_LENGTH ? reason.substring(0, MAX_REASON_LENGTH - 3) + "..." : reason;
+    }
+
+    // ===== Staff: /knk currency (Phase 4) =====
+
+    /** {@code /knk currency history <player> [coins|gems|xp] [page]}. Main thread. */
+    public void staffHistory(CommandSender viewer, String targetName, BalanceCurrency filter, int page) {
+        CompletableFuture<Target> target = resolve(viewer, targetName);
+        requireAll(viewer, CURRENCY_HISTORY_NODE, null)
+            .thenCompose(ignored -> target)
+            .thenCompose(found -> {
+                if (found == null) {
+                    throw new Refusal("pay-unknown-player", "player", targetName);
+                }
+                return currencyApi.getTransactions(found.userId(), filter, page, settings.transactionsPageSize())
+                    .thenApply(ledger -> Map.entry(found, ledger));
+            })
+            .whenComplete((result, ex) -> mainThread.execute(() ->
+                renderLedger(viewer, result != null ? result.getKey().username() : targetName, filter,
+                    result != null ? result.getValue() : null, ex, true)));
+    }
+
+    /**
+     * {@code /knk currency reverse <txId> [--partial] <reason...>}: the server posts the mirror of
+     * the transaction once, never below zero (unless partial). Main thread.
+     */
+    public void staffReverse(CommandSender viewer, String publicId, String note, boolean allowPartial) {
+        String trimmed = note == null ? "" : note.trim();
+        if (trimmed.length() < MIN_STAFF_NOTE_LENGTH) {
+            send(viewer, "reverse-note-short", "min", String.valueOf(MIN_STAFF_NOTE_LENGTH));
+            return;
+        }
+        String id = publicId == null ? "" : publicId.trim().replaceFirst("^(?i)(tx|#)", "").toUpperCase(java.util.Locale.ROOT);
+        Integer actor = staffUserId(viewer);
+        if (actor == null) {
+            send(viewer, "account-not-loaded");
+            return;
+        }
+        requireAll(viewer, CURRENCY_REVERSE_NODE, null)
+            .thenCompose(ignored -> currencyApi.reverseTransaction(actor, id, trimmed, allowPartial))
+            .whenComplete((outcome, ex) -> mainThread.execute(() -> {
+                if (ex != null) {
+                    renderError(viewer, ex, BalanceCurrency.COINS, null);
+                    return;
+                }
+                renderReversal(viewer, outcome);
+            }));
+    }
+
+    private void renderReversal(CommandSender viewer, ReversalOutcome outcome) {
+        if (outcome == null) {
+            send(viewer, "error-generic");
+            return;
+        }
+        outcome.balances().forEach(this::updateCacheByUserId);
+        send(viewer, outcome.replayed() ? "reverse-replayed" : outcome.partial() ? "reverse-partial" : "reverse-done",
+            "tx", outcome.reversedPublicId(), "reversal", outcome.reversalPublicId());
+        for (ReversalOutcome.Leg leg : outcome.legs()) {
+            String color = leg.amount() > 0 ? "§a" : leg.amount() < 0 ? "§c" : "§7";
+            String change = color + CurrencyFormat.signed(leg.amount()) + " " + CurrencyFormat.name(leg.currency(), leg.amount());
+            viewer.sendMessage(CurrencySettings.fill(settings.template("reverse-leg").replace("{change}", change),
+                "user", "#" + leg.userId(), "balance", CurrencyFormat.amount(leg.balanceAfter())));
+        }
+    }
+
+    /** {@code /knk currency lock <player> <reason...>}: the player can neither send nor receive /pay. Main thread. */
+    public void staffLock(CommandSender viewer, String targetName, String reason) {
+        String trimmed = reason == null ? "" : reason.trim();
+        if (trimmed.isEmpty()) {
+            send(viewer, "currency-admin-usage");
+            return;
+        }
+        changeLock(viewer, targetName, (actor, target) -> currencyApi.lockTransfers(actor, target.userId(), trimmed));
+    }
+
+    /** {@code /knk currency unlock <player>}. Main thread. */
+    public void staffUnlock(CommandSender viewer, String targetName) {
+        changeLock(viewer, targetName, (actor, target) -> currencyApi.unlockTransfers(actor, target.userId()));
+    }
+
+    private void changeLock(CommandSender viewer, String targetName,
+                            java.util.function.BiFunction<Integer, Target, CompletableFuture<TransferLock>> call) {
+        Integer actor = staffUserId(viewer);
+        if (actor == null) {
+            send(viewer, "account-not-loaded");
+            return;
+        }
+        CompletableFuture<Target> target = resolve(viewer, targetName);
+        requireAll(viewer, CURRENCY_LOCK_NODE, null)
+            .thenCompose(ignored -> target)
+            .thenCompose(found -> {
+                if (found == null) {
+                    throw new Refusal("pay-unknown-player", "player", targetName);
+                }
+                return call.apply(actor, found);
+            })
+            .whenComplete((lock, ex) -> mainThread.execute(() -> {
+                if (ex != null) {
+                    renderError(viewer, ex, BalanceCurrency.COINS, targetName);
+                    return;
+                }
+                String name = lock != null && lock.username() != null ? lock.username() : targetName;
+                if (lock != null && lock.locked()) {
+                    send(viewer, "lock-done", "player", name, "reason", lock.reason());
+                } else {
+                    send(viewer, "unlock-done", "player", name);
+                }
+            }));
+    }
+
+    /** The staff member's user id for X-Acting-User-Id; 0 for the console (the API records the game server). Null: not loaded. */
+    private Integer staffUserId(CommandSender viewer) {
+        if (viewer instanceof Player player) {
+            return cachedUserId(player);
+        }
+        return 0;
+    }
+
+    private void updateCacheByUserId(Integer userId, Balances balances) {
+        if (userId == null || balances == null) {
+            return;
+        }
+        for (Player online : visiblePlayers.online()) {
+            if (userId.equals(cachedUserId(online))) {
+                updateCache(online.getUniqueId(), balances);
+            }
+        }
     }
 
     // ===== Rendering =====

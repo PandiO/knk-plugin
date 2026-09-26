@@ -52,7 +52,16 @@ public final class CurrencySettings {
         Map.entry("transactions-empty", "&7No transactions yet."),
         Map.entry("error-generic", "&cSomething went wrong - try again in a moment."),
         Map.entry("no-permission", "&cYou don't have permission to do that."),
-        Map.entry("account-not-loaded", "&cYour account isn't loaded yet - try again in a moment.")
+        Map.entry("account-not-loaded", "&cYour account isn't loaded yet - try again in a moment."),
+        // Staff: /knk currency (Phase 4)
+        Map.entry("reverse-done", "&aReversed &e{tx}&a (reversal &e{reversal}&a)."),
+        Map.entry("reverse-partial", "&eReversed what was left of &6{tx}&e (reversal &6{reversal}&e) - the player had spent part of it."),
+        Map.entry("reverse-replayed", "&7{tx} was already reversed by this request (&e{reversal}&7)."),
+        Map.entry("reverse-leg", "&7  {user}: {change} &8-> &f{balance}"),
+        Map.entry("reverse-note-short", "&cSay why in at least {min} characters."),
+        Map.entry("lock-done", "&aLocked &e{player}&a's payments: &f{reason}"),
+        Map.entry("unlock-done", "&a&e{player}&a can send and receive payments again."),
+        Map.entry("currency-admin-usage", "&eUsage: /knk currency reverse <txId> [--partial] <reason...> &7| &ehistory <player> [coins|gems|xp] [page] &7| &elock <player> <reason...> &7| &eunlock <player>")
     );
 
     private final Map<String, String> messages;

@@ -186,6 +186,7 @@ permissions:
       knk.admin.user.mode: true
       knk.admin.user.salary: true
       knk.admin.tp: true
+      knk.admin.currency: true
 
   knk.admin.health:
     description: Access to /knk health
@@ -304,6 +305,50 @@ permissions:
     description: >-
       View a player's coin, gem and XP ledger history via /knk user <player> history
       [coins|gems|xp] [page] (currency ledger, KNG-23). Read-only, so no rank check.
+    default: false
+
+  # Currency ledger staff nodes (docs/specs/currency-payments/DESIGN.md §3.8, Phase 4). The same
+  # strings are checked by knk-web-api for the web app's economy pages; in-game they are checked
+  # through KnkPermissible inside /knk currency and the Player manager.
+  knk.admin.currency:
+    description: Umbrella for every knk.admin.currency.* node below.
+    default: false
+    children:
+      knk.admin.currency.history: true
+      knk.admin.currency.reverse: true
+      knk.admin.currency.lock: true
+      knk.admin.currency.policy: true
+      knk.admin.currency.alerts: true
+      knk.admin.currency.unlimited: true
+
+  knk.admin.currency.history:
+    description: >-
+      Read any player's ledger history with /knk currency history <player> (each line shows its
+      transaction id for reversal); on the web, the balance event log and profile balance history.
+    default: false
+
+  knk.admin.currency.reverse:
+    description: >-
+      Reverse a ledger transaction with /knk currency reverse <txId> [--partial] <reason> (reason
+      of at least 10 characters). Never takes a balance below zero; --partial reverses what is left.
+    default: false
+
+  knk.admin.currency.lock:
+    description: Lock or unlock a player's payments with /knk currency lock <player> <reason> / unlock <player>.
+    default: false
+
+  knk.admin.currency.policy:
+    description: Edit the coin/gem policy (transfer limits, gem switch, fee, staff grant cap) in the web app.
+    default: false
+
+  knk.admin.currency.alerts:
+    description: See currency anomaly alerts (Phase 5).
+    default: false
+
+  knk.admin.currency.unlimited:
+    description: >-
+      Exempt from the per-staff daily grant cap (CurrencyPolicy.AdminDailyGrantCapPerActor) on
+      coin/gem/XP adjustments. Checked by the API against the acting staff member.
     default: false
 
   knk.tasks:

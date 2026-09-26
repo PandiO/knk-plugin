@@ -51,4 +51,9 @@ public final class VisiblePlayers {
             .sorted(String.CASE_INSENSITIVE_ORDER)
             .toList();
     }
+
+    /** Every online player, visible or not - for bookkeeping (cache updates), never for output to a viewer. */
+    public Collection<? extends Player> online() {
+        return onlinePlayers.get();
+    }
 }

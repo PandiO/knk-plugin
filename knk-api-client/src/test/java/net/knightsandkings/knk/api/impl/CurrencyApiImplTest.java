@@ -29,6 +29,8 @@ import net.knightsandkings.knk.api.mapper.UsersMapper;
 import net.knightsandkings.knk.core.domain.currency.CurrencyError;
 import net.knightsandkings.knk.core.domain.currency.CurrencyException;
 import net.knightsandkings.knk.core.domain.currency.LedgerPage;
+import net.knightsandkings.knk.core.domain.currency.ReversalOutcome;
+import net.knightsandkings.knk.core.domain.currency.TransferLock;
 import net.knightsandkings.knk.core.domain.currency.TransferOutcome;
 import net.knightsandkings.knk.core.domain.users.BalanceCurrency;
 import net.knightsandkings.knk.core.domain.users.PlayerNotification;
@@ -223,5 +225,65 @@ class CurrencyApiImplTest {
         assertEquals("alice", notification.payment().fromUsername());
         assertEquals(350, notification.payment().balanceAfter());
         assertEquals(BalanceCurrency.COINS, notification.payment().currency());
+    }
+
+    // ===== Staff routes (Phase 4) =====
+
+    @Test
+    void reverse_postsTheNoteAsTheStaffMember_andReadsTheReversal() throws Exception {
+        ReversalOutcome outcome = api(n -> json(200, """
+            {"reversedPublicId":"01M3FHW0E9NNVK4SWMK3BR002T","partial":true,
+             "posting":{"transactionId":9,"publicId":"01M3FJ00000000000000000000","replayed":false,"reasonCode":"REVERSAL",
+                        "entries":[{"userId":6,"currency":"Coins","operation":"Remove","amount":-60,"balanceBefore":60,"balanceAfter":0}],
+                        "balances":{"6":{"userId":6,"coins":0,"gems":2,"experiencePoints":10}}}}
+            """)).reverseTransaction(42, "01M3FHW0E9NNVK4SWMK3BR002T", "Paid twice by a bug", true).join();
+
+        Request request = seen.get(0);
+        assertEquals("POST", request.method());
+        assertEquals("http://api.test/api/currency/admin/transactions/01M3FHW0E9NNVK4SWMK3BR002T/reverse", request.url().toString());
+        assertEquals("42", request.header(CurrencyApiImpl.ACTING_USER_HEADER));
+        JsonNode body = new ObjectMapper().readTree(bodies.get(0));
+        assertEquals("Paid twice by a bug", body.get("note").asText());
+        assertTrue(body.get("allowPartial").asBoolean());
+
+        assertTrue(outcome.partial());
+        assertEquals("01M3FJ00000000000000000000", outcome.reversalPublicId());
+        assertEquals(-60, outcome.legs().get(0).amount());
+        assertEquals(BalanceCurrency.COINS, outcome.legs().get(0).currency());
+        assertEquals(2, outcome.balances().get(6).gems());
+    }
+
+    @Test
+    void reverse_refusalCarriesItsCode() {
+        CurrencyApiImpl api = api(n -> json(409, """
+            {"error":"AlreadyReversed","code":"AlreadyReversed","message":"Transaction 01M3 was already reversed by 01M4.","details":{"reversalPublicId":"01M4"}}
+            """));
+        CurrencyException error = CurrencyException.find(assertThrows(CompletionException.class,
+            () -> api.reverseTransaction(42, "01M3", "Paid twice by a bug", false).join()));
+        assertTrue(error.error().is("AlreadyReversed"));
+        assertEquals(1, seen.size());
+    }
+
+    @Test
+    void lockAndUnlock_putAndDeleteTheLock() throws Exception {
+        String locked = """
+            {"userId":6,"username":"bob","locked":true,"reason":"Alt funnel","lockedAt":"2026-09-26T20:00:00"}
+            """;
+        String unlocked = """
+            {"userId":6,"username":"bob","locked":false,"reason":null,"lockedAt":null}
+            """;
+        CurrencyApiImpl api = api(n -> json(200, n == 0 ? locked : unlocked));
+
+        TransferLock lock = api.lockTransfers(42, 6, "Alt funnel").join();
+        TransferLock open = api.unlockTransfers(42, 6).join();
+
+        assertEquals("PUT", seen.get(0).method());
+        assertEquals("http://api.test/api/currency/admin/users/6/transfer-lock", seen.get(0).url().toString());
+        assertEquals("Alt funnel", new ObjectMapper().readTree(bodies.get(0)).get("reason").asText());
+        assertEquals("DELETE", seen.get(1).method());
+        assertEquals("42", seen.get(1).header(CurrencyApiImpl.ACTING_USER_HEADER));
+        assertTrue(lock.locked());
+        assertEquals(Instant.parse("2026-09-26T20:00:00Z"), lock.lockedAt());
+        assertFalse(open.locked());
     }
 }

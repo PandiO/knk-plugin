@@ -148,4 +148,53 @@ public final class CurrencyDtos {
         @JsonProperty("message") String message,
         @JsonProperty("details") Map<String, Object> details
     ) {}
+
+    // ===== Staff routes, api/currency/admin (Phase 4) =====
+
+    /** Body of POST /api/currency/admin/transactions/{publicId}/reverse. */
+    public record ReverseTransactionDto(
+        @JsonProperty("note") String note,
+        @JsonProperty("allowPartial") boolean allowPartial
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record PostedEntryDto(
+        @JsonProperty("userId") int userId,
+        @JsonProperty("currency") String currency,
+        @JsonProperty("operation") String operation,
+        @JsonProperty("amount") long amount,
+        @JsonProperty("balanceBefore") long balanceBefore,
+        @JsonProperty("balanceAfter") long balanceAfter
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record PostingResultDto(
+        @JsonProperty("transactionId") long transactionId,
+        @JsonProperty("publicId") String publicId,
+        @JsonProperty("replayed") boolean replayed,
+        @JsonProperty("reasonCode") String reasonCode,
+        @JsonProperty("entries") List<PostedEntryDto> entries,
+        @JsonProperty("balances") Map<String, BalancesDto> balances
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record ReversalResultDto(
+        @JsonProperty("reversedPublicId") String reversedPublicId,
+        @JsonProperty("posting") PostingResultDto posting,
+        @JsonProperty("partial") boolean partial
+    ) {}
+
+    /** Body of PUT /api/currency/admin/users/{id}/transfer-lock. */
+    public record SetTransferLockDto(
+        @JsonProperty("reason") String reason
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record TransferLockDto(
+        @JsonProperty("userId") int userId,
+        @JsonProperty("username") String username,
+        @JsonProperty("locked") boolean locked,
+        @JsonProperty("reason") String reason,
+        @JsonProperty("lockedAt") String lockedAt
+    ) {}
 }

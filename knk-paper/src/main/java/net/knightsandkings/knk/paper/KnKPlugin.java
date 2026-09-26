@@ -609,7 +609,7 @@ public class KnKPlugin extends JavaPlugin {
                     permissionGroupsDataAccess, usersQueryApi, cacheManager.getUserCache()),
                 new net.knightsandkings.knk.paper.menu.content.UserManagerMenuFeature(
                     userAdminService, usersQueryApi, cacheManager.getUserCache(), titleBracketsDataAccess,
-                    permissionGroupsDataAccess, org.bukkit.Bukkit::getOnlinePlayers),
+                    permissionGroupsDataAccess, org.bukkit.Bukkit::getOnlinePlayers, this::askStaffReason),
                 // Siege Phase 8b: the siege menus. SiegeService is created later (initializeSiege),
                 // so the feature looks it up on every call.
                 new net.knightsandkings.knk.paper.siege.SiegeMenuFeature(() -> siegeService)
@@ -798,6 +798,21 @@ public class KnKPlugin extends JavaPlugin {
             e.printStackTrace();
             getServer().getPluginManager().disablePlugin(this);
         }
+    }
+
+    /**
+     * The Player manager's reason prompt for staged balance changes (currency Phase 4, D9): one line
+     * of chat through ChatCaptureManager, answered on the main thread (chat arrives off it).
+     */
+    private boolean askStaffReason(org.bukkit.entity.Player player, String prompt,
+                                   java.util.function.Consumer<String> onReason, Runnable onCancel) {
+        ChatCaptureManager capture = this.chatCaptureManager;
+        if (capture == null) {
+            return false;
+        }
+        java.util.concurrent.Executor main = MenuService.mainThreadExecutor(this);
+        capture.startTextCapture(player, prompt, text -> main.execute(() -> onReason.accept(text)), () -> main.execute(onCancel));
+        return true;
     }
 
     @Override

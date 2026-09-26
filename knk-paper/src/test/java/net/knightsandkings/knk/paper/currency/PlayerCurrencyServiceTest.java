@@ -37,6 +37,8 @@ import net.knightsandkings.knk.core.domain.currency.CurrencyError;
 import net.knightsandkings.knk.core.domain.currency.CurrencyException;
 import net.knightsandkings.knk.core.domain.currency.LedgerLine;
 import net.knightsandkings.knk.core.domain.currency.PendingTransfer;
+import net.knightsandkings.knk.core.domain.currency.ReversalOutcome;
+import net.knightsandkings.knk.core.domain.currency.TransferLock;
 import net.knightsandkings.knk.core.domain.currency.TransferOutcome;
 import net.knightsandkings.knk.core.domain.users.BalanceCurrency;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
@@ -221,5 +223,68 @@ class PlayerCurrencyServiceTest {
     void placeholderValues_cantCarryFormatting() {
         assertEquals("§aHi §eBobckid", CurrencySettings.fill("§aHi §e{p}", "p", "Bob§ckid"));
         assertEquals("x alb y", CurrencySettings.fill("x {v} y", "v", "a§lb"));
+    }
+
+    // ===== Staff: /knk currency (Phase 4) =====
+
+    @Test
+    void staffReverse_needsANoteAndTheNode_thenShowsTheServersResult() {
+        service.staffReverse(alice, "01M3", "oops", false);
+        assertEquals("§cSay why in at least 10 characters.", aliceSees.get(0));
+
+        nodes.put(PlayerCurrencyService.CURRENCY_REVERSE_NODE, false);
+        service.staffReverse(alice, "01M3", "Paid twice by a bug", false);
+        assertEquals("§cYou don't have permission to do that.", aliceSees.get(1));
+        verify(api, never()).reverseTransaction(anyInt(), anyString(), anyString(), anyBoolean());
+
+        nodes.put(PlayerCurrencyService.CURRENCY_REVERSE_NODE, true);
+        when(api.reverseTransaction(1, "01M3ABC", "Paid twice by a bug", true)).thenReturn(CompletableFuture.completedFuture(
+            new ReversalOutcome("01M3ABC", "01M4XYZ", false, true, List.of(new ReversalOutcome.Leg(2, BalanceCurrency.COINS, -60, 0)),
+                Map.of(2, new Balances(2, 0, 0, 0)))));
+
+        service.staffReverse(alice, "tx01m3abc", "  Paid twice by a bug ", true);
+
+        verify(api).reverseTransaction(1, "01M3ABC", "Paid twice by a bug", true);
+        assertTrue(aliceSees.get(2).contains("01M3ABC") && aliceSees.get(2).contains("01M4XYZ"), aliceSees.get(2));
+        assertTrue(aliceSees.get(3).contains("-60 coins"), aliceSees.get(3));
+        assertEquals(0, userCache.getStale(bob.getUniqueId()).orElseThrow().coins()); // bob's cached balance follows the server
+    }
+
+    @Test
+    void staffReverse_refusalShowsTheServersMessage() {
+        when(api.reverseTransaction(anyInt(), anyString(), anyString(), anyBoolean())).thenReturn(CompletableFuture.failedFuture(
+            new CurrencyException(new CurrencyError("AlreadyReversed", "AlreadyReversed: Transaction 01M3 was already reversed by 01M4.", Map.of()), 409, null)));
+
+        service.staffReverse(alice, "01M3", "Paid twice by a bug", false);
+
+        assertEquals("§cTransaction 01M3 was already reversed by 01M4.", aliceSees.get(0));
+    }
+
+    @Test
+    void staffLockAndUnlock_resolveThePlayer_andNeedTheLockNode() {
+        when(api.lockTransfers(1, 2, "suspected alt funnel")).thenReturn(CompletableFuture.completedFuture(
+            new TransferLock(2, "bob", true, "suspected alt funnel", Instant.parse("2026-09-26T12:00:00Z"))));
+        when(api.unlockTransfers(1, 2)).thenReturn(CompletableFuture.completedFuture(new TransferLock(2, "bob", false, null, null)));
+
+        service.staffLock(alice, "bob", " suspected alt funnel ");
+        service.staffUnlock(alice, "bob");
+        nodes.put(PlayerCurrencyService.CURRENCY_LOCK_NODE, false);
+        service.staffUnlock(alice, "bob");
+
+        assertEquals("§aLocked §ebob§a's payments: §fsuspected alt funnel", aliceSees.get(0));
+        assertTrue(aliceSees.get(1).contains("bob"), aliceSees.get(1));
+        assertEquals("§cYou don't have permission to do that.", aliceSees.get(2));
+        verify(api).unlockTransfers(1, 2);
+    }
+
+    @Test
+    void staffHistory_linesCarryTheirTransactionId() {
+        when(api.getTransactions(2, BalanceCurrency.COINS, 1, 8)).thenReturn(CompletableFuture.completedFuture(new net.knightsandkings.knk.core.domain.currency.LedgerPage(
+            List.of(new LedgerLine(1, "01M3ABC", Instant.parse("2026-09-26T11:00:00Z"), BalanceCurrency.COINS, 50, 0, 50, "Grant", "SALARY",
+                "Salary", "System", null, "SalaryService", null, null)), 1, 1, 8)));
+
+        service.staffHistory(alice, "bob", BalanceCurrency.COINS, 1);
+
+        assertTrue(aliceSees.get(1).endsWith("#01M3ABC"), aliceSees.get(1));
     }
 }

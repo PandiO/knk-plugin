@@ -22,6 +22,8 @@ import net.knightsandkings.knk.core.domain.currency.CurrencyException;
 import net.knightsandkings.knk.core.domain.currency.LeaderboardPage;
 import net.knightsandkings.knk.core.domain.currency.LedgerPage;
 import net.knightsandkings.knk.core.domain.currency.PendingTransfer;
+import net.knightsandkings.knk.core.domain.currency.ReversalOutcome;
+import net.knightsandkings.knk.core.domain.currency.TransferLock;
 import net.knightsandkings.knk.core.domain.currency.TransferLimits;
 import net.knightsandkings.knk.core.domain.currency.TransferOutcome;
 import net.knightsandkings.knk.core.domain.users.BalanceCurrency;
@@ -34,9 +36,10 @@ import okhttp3.RequestBody;
 
 /**
  * {@link CurrencyApi} over knk-web-api's {@code api/currency} routes (currency DESIGN.md §3.6,
- * IMPLEMENTATION_PLAN.md Phase 3).
+ * IMPLEMENTATION_PLAN.md Phase 3) and the staff {@code api/currency/admin} routes (Phase 4).
  * <p>
- * Writes carry {@code X-Acting-User-Id} = the sending player (the API refuses anything else) and
+ * Writes carry {@code X-Acting-User-Id} = the sending player or staff member (the API refuses a
+ * payment for anyone else) and
  * one {@code Idempotency-Key} generated per call before the first attempt. A write that fails
  * with an I/O error or a 5xx is retried with that same key after 250 ms, 1 s and 3 s (configurable),
  * so a request the API did process is answered from its stored result instead of paying twice.
@@ -154,6 +157,54 @@ public class CurrencyApiImpl extends BaseApiImpl implements CurrencyApi {
         }, executor);
     }
 
+    @Override
+    public CompletableFuture<ReversalOutcome> reverseTransaction(int actingUserId, String publicId, String note, boolean allowPartial) {
+        // Retries are safe without a client key: the server keys a reversal by the transaction
+        // (reverse:{id}), so a repeat returns the same reversal.
+        String idempotencyKey = UUID.randomUUID().toString();
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                String body = objectMapper.writeValueAsString(new CurrencyDtos.ReverseTransactionDto(note, allowPartial));
+                String url = baseUrl + ENDPOINT + "/admin/transactions/" + encode(publicId) + "/reverse";
+                String json = sendWithRetries("POST", url, body, actingUserId, idempotencyKey);
+                return CurrencyMapper.mapReversal(objectMapper.readValue(json, CurrencyDtos.ReversalResultDto.class));
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to read the reversal result", e);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<TransferLock> lockTransfers(int actingUserId, int userId, String reason) {
+        String idempotencyKey = UUID.randomUUID().toString();
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                String body = objectMapper.writeValueAsString(new CurrencyDtos.SetTransferLockDto(reason));
+                String json = sendWithRetries("PUT", lockUrl(userId), body, actingUserId, idempotencyKey);
+                return CurrencyMapper.mapLock(objectMapper.readValue(json, CurrencyDtos.TransferLockDto.class));
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to read the transfer lock", e);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<TransferLock> unlockTransfers(int actingUserId, int userId) {
+        String idempotencyKey = UUID.randomUUID().toString();
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                String json = sendWithRetries("DELETE", lockUrl(userId), null, actingUserId, idempotencyKey);
+                return CurrencyMapper.mapLock(objectMapper.readValue(json, CurrencyDtos.TransferLockDto.class));
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to read the transfer lock", e);
+            }
+        }, executor);
+    }
+
+    private String lockUrl(int userId) {
+        return baseUrl + ENDPOINT + "/admin/users/" + userId + "/transfer-lock";
+    }
+
     // ===== Plumbing =====
 
     @FunctionalInterface
@@ -178,6 +229,14 @@ public class CurrencyApiImpl extends BaseApiImpl implements CurrencyApi {
      * 5xx with the same key. Returns the response body; throws a {@link CurrencyException}.
      */
     String postWithRetries(String url, String body, int actingUserId, String idempotencyKey) {
+        return sendWithRetries("POST", url, body, actingUserId, idempotencyKey);
+    }
+
+    /**
+     * {@link #postWithRetries} for any method; a null {@code body} sends none (DELETE). Only for
+     * requests that are safe to repeat: keyed writes, or PUT/DELETE that set a state.
+     */
+    String sendWithRetries(String method, String url, String body, int actingUserId, String idempotencyKey) {
         Exception last = null;
         for (int attempt = 1; attempt <= maxAttempts(); attempt++) {
             if (attempt > 1) {
@@ -188,16 +247,21 @@ public class CurrencyApiImpl extends BaseApiImpl implements CurrencyApi {
                     break;
                 }
             }
-            Request request = newRequest(url)
+            Request.Builder builder = newRequest(url)
                 .addHeader("Content-Type", "application/json")
                 .addHeader("Accept", "application/json")
-                .header(ACTING_USER_HEADER, String.valueOf(actingUserId))
                 .header(IDEMPOTENCY_KEY_HEADER, idempotencyKey)
-                .post(RequestBody.create(body, MediaType.get("application/json")))
-                .build();
+                .method(method, body == null ? null : RequestBody.create(body, MediaType.get("application/json")));
+            if (actingUserId > 0) {
+                // 0 = the console: no acting user, the API records the game server itself.
+                builder.header(ACTING_USER_HEADER, String.valueOf(actingUserId));
+            }
+            Request request = builder.build();
             if (debugLogging) {
-                LOGGER.info("API Request: POST " + url + " (attempt " + attempt + ", Idempotency-Key " + idempotencyKey + ")");
-                LOGGER.info("  Body: " + snippet(body));
+                LOGGER.info("API Request: " + method + " " + url + " (attempt " + attempt + ", Idempotency-Key " + idempotencyKey + ")");
+                if (body != null) {
+                    LOGGER.info("  Body: " + snippet(body));
+                }
             }
             try {
                 return execute(request, url);
@@ -209,7 +273,7 @@ public class CurrencyApiImpl extends BaseApiImpl implements CurrencyApi {
             } catch (IOException e) {
                 last = e;
             }
-            LOGGER.warning("Currency write POST " + url + " failed (attempt " + attempt + "/" + maxAttempts() + "): "
+            LOGGER.warning("Currency write " + method + " " + url + " failed (attempt " + attempt + "/" + maxAttempts() + "): "
                 + (last != null ? last.getMessage() : "interrupted"));
         }
         throw new CurrencyException(new CurrencyError(CurrencyError.UNKNOWN_OUTCOME,

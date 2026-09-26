@@ -5,7 +5,9 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import net.knightsandkings.knk.api.dto.currency.CurrencyDtos;
 import net.knightsandkings.knk.core.domain.currency.Balances;
@@ -15,11 +17,13 @@ import net.knightsandkings.knk.core.domain.currency.LedgerLine;
 import net.knightsandkings.knk.core.domain.currency.LedgerPage;
 import net.knightsandkings.knk.core.domain.currency.PaymentNotice;
 import net.knightsandkings.knk.core.domain.currency.PendingTransfer;
+import net.knightsandkings.knk.core.domain.currency.ReversalOutcome;
+import net.knightsandkings.knk.core.domain.currency.TransferLock;
 import net.knightsandkings.knk.core.domain.currency.TransferLimits;
 import net.knightsandkings.knk.core.domain.currency.TransferOutcome;
 import net.knightsandkings.knk.core.domain.users.BalanceCurrency;
 
-/** {@code api/currency} DTOs → knk-core currency records (currency ledger, KNG-21 Phase 3). */
+/** {@code api/currency} DTOs → knk-core currency records (currency ledger, KNG-21 Phases 3–4). */
 public final class CurrencyMapper {
 
     private CurrencyMapper() {
@@ -87,6 +91,29 @@ public final class CurrencyMapper {
         }
         return new PaymentNotice(dto.amount(), currency(dto.currency()), dto.fromUserId(), dto.fromUsername(),
             dto.transactionPublicId(), dto.balanceAfter());
+    }
+
+    public static ReversalOutcome mapReversal(CurrencyDtos.ReversalResultDto dto) {
+        if (dto == null || dto.posting() == null) {
+            return null;
+        }
+        CurrencyDtos.PostingResultDto posting = dto.posting();
+        List<ReversalOutcome.Leg> legs = posting.entries() == null ? List.of() : posting.entries().stream()
+            .map(e -> new ReversalOutcome.Leg(e.userId(), currency(e.currency()), e.amount(), e.balanceAfter()))
+            .toList();
+        Map<Integer, Balances> balances = new HashMap<>();
+        if (posting.balances() != null) {
+            posting.balances().values().forEach(b -> {
+                if (b != null) {
+                    balances.put(b.userId(), mapBalances(b));
+                }
+            });
+        }
+        return new ReversalOutcome(dto.reversedPublicId(), posting.publicId(), posting.replayed(), dto.partial(), legs, balances);
+    }
+
+    public static TransferLock mapLock(CurrencyDtos.TransferLockDto dto) {
+        return dto == null ? null : new TransferLock(dto.userId(), dto.username(), dto.locked(), dto.reason(), instant(dto.lockedAt()));
     }
 
     /** "Coins"/"Gems"/"Experience" → enum; unknown → COINS (the API only sends these three). */

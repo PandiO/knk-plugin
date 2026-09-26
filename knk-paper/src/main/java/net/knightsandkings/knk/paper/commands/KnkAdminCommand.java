@@ -56,6 +56,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class KnkAdminCommand implements CommandExecutor, TabCompleter {
     private final CommandRegistry registry = new CommandRegistry();
     private final HelpSubcommand helpSubcommand;
+    /** /knk currency (currency Phase 4); null when the currency service isn't available. */
+    private CurrencyAdminCommand currencyAdminCommand;
         private final Plugin plugin;
         private final EnchantmentDefinitionsDataAccess enchantmentDefinitionsDataAccess;
         private final ItemBlueprintsDataAccess itemBlueprintsDataAccess;
@@ -372,6 +374,19 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                 (sender, args) -> userManagementCommand.onCommand(sender, null, "knk", args)
         );
 
+        // Currency ledger Phase 4: /knk currency reverse|history|lock|unlock. Null top-level
+        // permission like /knk user: each action checks its own knk.admin.currency.* node.
+        if (playerCurrencyService != null) {
+            currencyAdminCommand = new CurrencyAdminCommand(playerCurrencyService);
+            registry.register(
+                    new CommandMetadata("currency", "Reverse ledger transactions, read a player's history, lock payments",
+                            "/knk currency reverse <txId> [--partial] <reason> | history <player> [coins|gems|xp] [page] | lock <player> <reason> | unlock <player>", null,
+                            List.of("/knk currency history Steve coins", "/knk currency reverse 01J9ZX3K4Q7T8V2B5N6M1C0D9E granted twice by a bug",
+                                    "/knk currency lock Steve suspected alt funnel", "/knk currency unlock Steve")),
+                    (sender, args) -> currencyAdminCommand.execute(sender, args)
+            );
+        }
+
         // Register teleport-to-player (developer request, same round as group/perm/freeze/
         // staffchat/msg - rebuild of the one real, working part of v1's PlayerTeleportCommand).
         TeleportToPlayerCommand teleportToPlayerCommand = new TeleportToPlayerCommand(plugin, usersDataAccess, rankHierarchy);
@@ -440,6 +455,9 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                 String root = args[0].toLowerCase(Locale.ROOT);
                 if ("user".equals(root)) {
                         return completeUserSubcommand(Arrays.copyOfRange(args, 1, args.length));
+                }
+                if ("currency".equals(root) && currencyAdminCommand != null) {
+                        return currencyAdminCommand.complete(sender, Arrays.copyOfRange(args, 1, args.length));
                 }
                 if (!"item".equals(root)) {
                         return Collections.emptyList();
