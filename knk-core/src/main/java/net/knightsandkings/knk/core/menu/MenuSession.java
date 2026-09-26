@@ -3,6 +3,7 @@ package net.knightsandkings.knk.core.menu;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -30,6 +31,8 @@ public final class MenuSession {
     private final Map<Integer, Integer> sectionPages = new ConcurrentHashMap<>();
     private final Map<CacheKey, CachedVariable> variableCache = new ConcurrentHashMap<>();
     private final Map<Integer, MenuContentQuery> contentQueries = new ConcurrentHashMap<>();
+    /** Content port CP6 (engine gap G1): per-session scratch state - see {@link #getState}. */
+    private final Map<String, String> state = new ConcurrentHashMap<>();
     private volatile NavigationEntry current;
     private volatile boolean dirty;
     private volatile PendingConfirmation pendingConfirmation;
@@ -124,6 +127,62 @@ public final class MenuSession {
         history.clear();
         current = new NavigationEntry(menuKey, context, title);
         variableCache.clear();
+        // G1: a fresh navigation root starts with fresh state (the previous menu visit ended).
+        state.clear();
+    }
+
+    // ===== Content port CP6 (engine gap G1): per-session menu state =====
+    //
+    // A string -> string scratch map template authors namespace themselves ("pm.coinStep"): the
+    // Player manager's step sizes, and any later stepper (gate health, scenario player counts).
+    // Written by menu.state.set / menu.state.cycle and by menu.open's "state.<key>" params (set
+    // only if unset, so a template can declare its defaults on open); read through the engine
+    // root $state.<key>$ (MenuStateView). Lives as long as the session: dropped on quit (the
+    // session itself is discarded) and cleared when a menu is opened as a fresh navigation root.
+
+    /** The value stored under {@code key}, or null when unset. */
+    public String getState(String key) {
+        return key == null ? null : state.get(key);
+    }
+
+    /** Stores {@code value} under {@code key}; a null value unsets it. */
+    public void setState(String key, String value) {
+        if (key == null || key.isBlank()) {
+            throw new IllegalArgumentException("Menu state key must not be blank");
+        }
+        if (value == null) {
+            state.remove(key);
+        } else {
+            state.put(key, value);
+        }
+    }
+
+    /** Stores {@code value} only if {@code key} is unset; returns true when it was stored. */
+    public boolean setStateIfAbsent(String key, String value) {
+        if (key == null || key.isBlank() || value == null) {
+            return false;
+        }
+        return state.putIfAbsent(key, value) == null;
+    }
+
+    /**
+     * Advances {@code key} to the value after its current one in {@code values} (wrapping), or to
+     * the first value when it is unset or not in the list. Returns the new value.
+     */
+    public String cycleState(String key, List<String> values) {
+        if (values == null || values.isEmpty()) {
+            throw new IllegalArgumentException("Menu state cycle for '" + key + "' needs at least one value");
+        }
+        String next = state.compute(key, (k, current) -> {
+            int index = current == null ? -1 : values.indexOf(current);
+            return index < 0 ? values.get(0) : values.get((index + 1) % values.size());
+        });
+        return next;
+    }
+
+    /** An immutable snapshot of every state key (for tests and diagnostics). */
+    public Map<String, String> stateSnapshot() {
+        return Map.copyOf(state);
     }
 
     /** Pops the back-navigation stack and makes it current, or does nothing if there's no history. */

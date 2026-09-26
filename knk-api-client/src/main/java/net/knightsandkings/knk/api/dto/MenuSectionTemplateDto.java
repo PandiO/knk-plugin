@@ -23,5 +23,7 @@ public record MenuSectionTemplateDto(
         @JsonProperty("items") List<MenuItemTemplateDto> items,
         @JsonProperty("variableBindings") List<VariableBindingDto> variableBindings,
         @JsonProperty("contentSourceId") String contentSourceId,
-        @JsonProperty("contentSourceParamsJson") String contentSourceParamsJson
+        @JsonProperty("contentSourceParamsJson") String contentSourceParamsJson,
+        // Menu follow-up 2026-09-26: rows a Dynamic menu always keeps for this section.
+        @JsonProperty("minHeight") Integer minHeight
 ) {}

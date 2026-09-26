@@ -114,6 +114,7 @@ public class KnkApiClient {
     private final SiegeScenariosQueryApi siegeScenariosQueryApi;
     private final TitleBracketsQueryApi titleBracketsQueryApi;
     private final KitsQueryApi kitsQueryApi;
+    private final net.knightsandkings.knk.core.ports.api.CategoriesQueryApi categoriesQueryApi;
     private final KitsCommandApi kitsCommandApi;
 
     private KnkApiClient(
@@ -160,6 +161,7 @@ public class KnkApiClient {
         this.titleBracketsQueryApi = new TitleBracketsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.kitsQueryApi = new KitsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.kitsCommandApi = new KitsCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.categoriesQueryApi = new net.knightsandkings.knk.api.impl.CategoriesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
     }
     
     public HealthApi getHealthApi() {
@@ -188,6 +190,16 @@ public class KnkApiClient {
 
     public KitsCommandApi getKitsCommandApi() {
         return kitsCommandApi;
+    }
+
+    /** Menu follow-up 2026-09-26: {@code GET /api/Categories} (catalogue category filter). */
+    public net.knightsandkings.knk.core.ports.api.CategoriesQueryApi getCategoriesQueryApi() {
+        return categoriesQueryApi;
+    }
+
+    /** InventoryMenu content port CP3: {@code GET /api/title-brackets}. */
+    public TitleBracketsQueryApi getTitleBracketsQueryApi() {
+        return titleBracketsQueryApi;
     }
 
     public MinecraftMaterialRefsQueryApi getMinecraftMaterialRefsQueryApi() {
@@ -272,10 +284,6 @@ public class KnkApiClient {
 
     public SiegeScenariosQueryApi getSiegeScenariosQueryApi() {
         return siegeScenariosQueryApi;
-    }
-
-    public TitleBracketsQueryApi getTitleBracketsQueryApi() {
-        return titleBracketsQueryApi;
     }
 
     /**

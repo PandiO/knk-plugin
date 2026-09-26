@@ -129,6 +129,15 @@ public class ModeService {
      * knk-web-api. Returns a future that completes exceptionally if the API write failed.
      */
     public CompletableFuture<Void> persist(Player player, ActiveMode mode) {
+        return persist(player, mode, usersCommandApi);
+    }
+
+    /**
+     * {@link #persist(Player, ActiveMode)} through a specific command API - the Player manager
+     * (InventoryMenu content port CP8) passes one attributed to the acting staff member
+     * ({@code UsersCommandApi.withActor}) so the change is audit-logged under them.
+     */
+    public CompletableFuture<Void> persist(Player player, ActiveMode mode, UsersCommandApi api) {
         UUID uuid = player.getUniqueId();
         UserSummary cached = userCache.getStale(uuid).orElse(null);
         if (cached == null || cached.id() == null) {
@@ -136,10 +145,10 @@ public class ModeService {
         }
         userCache.put(cached.withActiveMode(mode));
 
-        if (usersCommandApi == null) {
+        if (api == null) {
             return CompletableFuture.completedFuture(null);
         }
-        return usersCommandApi.setActiveModeById(cached.id(), mode).whenComplete((ignored, ex) -> {
+        return api.setActiveModeById(cached.id(), mode).whenComplete((ignored, ex) -> {
             if (ex != null) {
                 LOGGER.log(Level.WARNING, "Failed to persist active mode " + mode + " for user " + cached.id(), ex);
             }

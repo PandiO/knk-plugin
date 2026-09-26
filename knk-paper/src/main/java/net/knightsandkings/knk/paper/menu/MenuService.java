@@ -20,6 +20,7 @@ import org.bukkit.plugin.Plugin;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
@@ -65,6 +66,8 @@ public final class MenuService {
     private final MenuRefreshSchedule refreshSchedule;
     private final Executor mainThread;
     private final Map<String, String> blockedMenus = new ConcurrentHashMap<>();
+    /** Keys that passed {@link MenuDefinitionValidationRunner} at startup (content port CP1, {@code menu-available}). */
+    private final Set<String> validatedMenus = ConcurrentHashMap.newKeySet();
 
     public MenuService(
             Plugin plugin,
@@ -225,6 +228,11 @@ public final class MenuService {
                     Optional<OpenMenuContext> current = openMenuContextRegistry.get(playerId);
                     if (current.isPresent() && current.get() == context
                             && player.getOpenInventory().getTopInventory().equals(context.inventory())) {
+                        if (context.inventory().getSize() != result.totalSlots()) {
+                            // Menu follow-up 2026-09-26: a DYNAMIC menu changed height - reopen at the new size.
+                            show(player, menu, result);
+                            return;
+                        }
                         renderer.applyToInventory(context.inventory(), result, player.isSneaking());
                         context.update(menu, result);
                     }
@@ -418,7 +426,7 @@ public final class MenuService {
         // rendered B into A's Inventory (A's title and size).
         if (existing.isPresent()
                 && existing.get().menuKey().equals(menu.key())
-                && existing.get().inventory().getSize() == menu.totalSlots()
+                && existing.get().inventory().getSize() == result.totalSlots()
                 && player.getOpenInventory().getTopInventory().equals(existing.get().inventory())) {
             renderer.applyToInventory(existing.get().inventory(), result, revealControls);
             existing.get().update(menu, result);
@@ -426,7 +434,7 @@ public final class MenuService {
             return;
         }
 
-        Inventory inventory = Bukkit.createInventory(null, menu.totalSlots(), DisplayTextFormatter.toComponent(menu.title()));
+        Inventory inventory = Bukkit.createInventory(null, result.totalSlots(), DisplayTextFormatter.toComponent(menu.title()));
         renderer.applyToInventory(inventory, result, revealControls);
         player.openInventory(inventory);
         openMenuContextRegistry.register(player.getUniqueId(), new OpenMenuContext(player, inventory, menu, result));
@@ -492,6 +500,24 @@ public final class MenuService {
      */
     public void blockMenu(String templateKey, String reason) {
         blockedMenus.put(templateKey, reason != null ? reason : "failed startup validation");
+    }
+
+    /**
+     * Content port CP1: records that {@code templateKey} was fetched, assembled and passed every
+     * startup validation step. Only {@link MenuDefinitionValidationRunner} calls this.
+     */
+    public void markValidated(String templateKey) {
+        validatedMenus.add(templateKey);
+    }
+
+    /**
+     * Content port CP1 ({@code menu-available} condition): true when a template with this key
+     * was registered at startup and passed validation (and has not been blocked since). A
+     * template created through the CRUD API after startup is not available until the next
+     * restart validates it - the same rule every other menu follows.
+     */
+    public boolean isMenuAvailable(String templateKey) {
+        return templateKey != null && validatedMenus.contains(templateKey) && !blockedMenus.containsKey(templateKey);
     }
 
     /** Currently-blocked menu keys and why, for admin visibility (e.g. {@code /knk menu broken}). */

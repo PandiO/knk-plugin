@@ -22,6 +22,8 @@ dependencies {
     
     testImplementation("io.papermc.paper:paper-api:1.21.10-R0.1-SNAPSHOT")
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.0")
+    // Content-port seed contract test reads knk-web-api's exported seed JSON through the api-client DTOs.
+    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.17.2")
     testImplementation("org.mockito:mockito-core:5.5.0")
     testImplementation("org.mockito:mockito-junit-jupiter:5.5.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

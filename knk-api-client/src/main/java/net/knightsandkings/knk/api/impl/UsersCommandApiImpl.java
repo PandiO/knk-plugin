@@ -31,6 +31,7 @@ import net.knightsandkings.knk.core.domain.users.UserDetail;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import okhttp3.OkHttpClient;
+import okhttp3.Request;
 
 /**
  * Command-side implementation for user write operations.
@@ -42,6 +43,12 @@ public class UsersCommandApiImpl extends BaseApiImpl implements UsersCommandApi 
     // Swagger shows /api/Users; baseUrl is expected to already include /api
     private static final String USERS_ENDPOINT = "/Users";
 
+    /** InventoryMenu content port CP7: header naming the in-game staff member a request acts for. */
+    public static final String ACTING_USER_HEADER = "X-Acting-User-Id";
+
+    /** Null for the plain instance; set on instances made by {@link #withActor(int)}. */
+    private final Integer actingUserId;
+
     public UsersCommandApiImpl(
         String baseUrl,
         OkHttpClient httpClient,
@@ -50,7 +57,34 @@ public class UsersCommandApiImpl extends BaseApiImpl implements UsersCommandApi 
         ExecutorService executor,
         boolean debugLogging
     ) {
+        this(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging, null);
+    }
+
+    private UsersCommandApiImpl(
+        String baseUrl,
+        OkHttpClient httpClient,
+        ObjectMapper objectMapper,
+        AuthProvider authProvider,
+        ExecutorService executor,
+        boolean debugLogging,
+        Integer actingUserId
+    ) {
         super(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.actingUserId = actingUserId;
+    }
+
+    @Override
+    public UsersCommandApi withActor(int actorUserId) {
+        return new UsersCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging, actorUserId);
+    }
+
+    @Override
+    protected Request.Builder newRequest(String url) {
+        Request.Builder builder = super.newRequest(url);
+        if (actingUserId != null) {
+            builder.header(ACTING_USER_HEADER, String.valueOf(actingUserId));
+        }
+        return builder;
     }
 
     @Override

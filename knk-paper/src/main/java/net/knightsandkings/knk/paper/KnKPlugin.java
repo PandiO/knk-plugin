@@ -61,6 +61,7 @@ import net.knightsandkings.knk.paper.menu.MenuFeature;
 import net.knightsandkings.knk.paper.menu.MenuFeatureRegistries;
 import net.knightsandkings.knk.paper.menu.MenuVariableContext;
 import net.knightsandkings.knk.paper.menu.example.ExampleDomainMenuFeature;
+import net.knightsandkings.knk.paper.menu.content.HubMenuFeature;
 import net.knightsandkings.knk.paper.menu.MenuLifecycleListener;
 import net.knightsandkings.knk.paper.menu.MenuRenderer;
 import net.knightsandkings.knk.paper.menu.MenuService;
@@ -167,6 +168,10 @@ public class KnKPlugin extends JavaPlugin {
     private ItemBlueprintsDataAccess itemBlueprintsDataAccess;
     private KitsDataAccess kitsDataAccess;
     private MenuTemplatesDataAccess menuTemplatesDataAccess;
+    private net.knightsandkings.knk.paper.kit.KitGrantFlow kitGrantFlow;
+    private net.knightsandkings.knk.core.dataaccess.TitleBracketsDataAccess titleBracketsDataAccess;
+    private net.knightsandkings.knk.core.dataaccess.PermissionGroupsDataAccess permissionGroupsDataAccess;
+    private net.knightsandkings.knk.paper.user.UserAdminService userAdminService;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private PermissionsDataAccess permissionsDataAccess;
     private KnkPermissible knkPermissible;
@@ -527,6 +532,23 @@ public class KnKPlugin extends JavaPlugin {
             // MenuDefinitionValidationRunner below, which locks all four registries
             // (a later registration throws). Engine defaults first. Siege Phase 8b:
             // add the SiegeMenuFeature to this list.
+            // Content port CP2: /kit and the kits.overview menu share one grant path.
+            this.kitGrantFlow = new net.knightsandkings.knk.paper.kit.KitGrantFlow(
+                MenuService.mainThreadExecutor(this), kitsCommandApi, itemBlueprintsDataAccess,
+                minecraftMaterialRefsDataAccess, knkPermissible, cacheManager.getUserCache()
+            );
+            // Content port CP3/CP8: title brackets are seeded data - cache the list for 10 minutes.
+            this.titleBracketsDataAccess = new net.knightsandkings.knk.core.dataaccess.TitleBracketsDataAccess(
+                apiClient.getTitleBracketsQueryApi(), java.time.Duration.ofMinutes(10)
+            );
+            this.permissionGroupsDataAccess = new net.knightsandkings.knk.core.dataaccess.PermissionGroupsDataAccess(
+                apiClient.getPermissionGroupsQueryApi(), java.time.Duration.ofMinutes(2), java.time.Clock.systemUTC()
+            );
+            // Content port CP8: /knk user, /freeze|/unfreeze and the Player manager share one service.
+            this.userAdminService = new net.knightsandkings.knk.paper.user.UserAdminService(
+                MenuService.mainThreadExecutor(this), usersDataAccess, usersCommandApi, apiClient.getPermissionGroupsQueryApi(),
+                rankHierarchy, modeService, adminFreezeManager
+            );
             List<MenuFeature> menuFeatures = List.of(
                 registries -> {
                     MenuVariableContext.registerDefaults(registries.variables());
@@ -534,7 +556,21 @@ public class KnKPlugin extends JavaPlugin {
                     MenuActionHandlers.registerDefaults(registries.actions());
                     MenuConditionHandlers.registerDefaults(registries.conditions());
                 },
-                new ExampleDomainMenuFeature()
+                new ExampleDomainMenuFeature(),
+                new HubMenuFeature(),
+                new net.knightsandkings.knk.paper.menu.content.KitsMenuFeature(
+                    kitsDataAccess, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, kitGrantFlow,
+                    java.time.Clock.systemUTC()),
+                new net.knightsandkings.knk.paper.menu.content.ProfileMenuFeature(
+                    usersQueryApi, cacheManager.getUserCache(), titleBracketsDataAccess),
+                new net.knightsandkings.knk.paper.menu.content.ItemsCatalogMenuFeature(
+                    itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, apiClient.getCategoriesQueryApi(),
+                    java.time.Clock.systemUTC()),
+                new net.knightsandkings.knk.paper.menu.content.PremiumMenuFeature(
+                    permissionGroupsDataAccess, usersQueryApi, cacheManager.getUserCache()),
+                new net.knightsandkings.knk.paper.menu.content.UserManagerMenuFeature(
+                    userAdminService, usersQueryApi, cacheManager.getUserCache(), titleBracketsDataAccess,
+                    permissionGroupsDataAccess, org.bukkit.Bukkit::getOnlinePlayers)
             );
             menuFeatures.forEach(feature -> feature.registerMenuHandlers(menuRegistries));
 
@@ -835,7 +871,8 @@ public class KnKPlugin extends JavaPlugin {
                 gateDoorRegionCaptureHandler,
                 serverId,
                 menuService,
-                apiClient.getClansQueryApi()
+                apiClient.getClansQueryApi(),
+                userAdminService
             );
             knkCommand.setExecutor(knkAdminCommand);
             knkCommand.setTabCompleter(knkAdminCommand);
@@ -862,10 +899,8 @@ public class KnKPlugin extends JavaPlugin {
         registerModeCommand("ownermode", ActiveMode.OWNER);
         registerModeCommand("staffmode", ActiveMode.STAFF);
 
-        registerSimpleCommand("freeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(
-            this, usersDataAccess, usersCommandApi, rankHierarchy, adminFreezeManager, true));
-        registerSimpleCommand("unfreeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(
-            this, usersDataAccess, usersCommandApi, rankHierarchy, adminFreezeManager, false));
+        registerSimpleCommand("freeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(userAdminService, true));
+        registerSimpleCommand("unfreeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(userAdminService, false));
         registerSimpleCommand("staffchat", new net.knightsandkings.knk.paper.commands.StaffChatCommand());
         registerSimpleCommand("msg", new net.knightsandkings.knk.paper.commands.MessageCommand(messagingService));
         registerSimpleCommand("reply", new net.knightsandkings.knk.paper.commands.ReplyCommand(messagingService));
@@ -873,12 +908,11 @@ public class KnKPlugin extends JavaPlugin {
         registerSimpleCommand("kit", new net.knightsandkings.knk.paper.commands.KitCommand(
             this,
             kitsDataAccess,
-            kitsCommandApi,
-            itemBlueprintsDataAccess,
-            minecraftMaterialRefsDataAccess,
-            knkPermissible,
-            this.getCacheManager()
+            kitGrantFlow
         ));
+
+        // Content port CP1: /menu opens the InventoryMenu hub (docs/specs/inventory-menu/CONTENT_PORT_PLAN.md §3).
+        registerSimpleCommand("menu", new net.knightsandkings.knk.paper.commands.MenuCommand(() -> menuService));
     }
 
     private void registerSimpleCommand(String name, org.bukkit.command.CommandExecutor executor) {

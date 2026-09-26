@@ -10,6 +10,7 @@ import net.knightsandkings.knk.core.menu.MenuConditionEvaluator;
 import net.knightsandkings.knk.core.menu.MenuConditionPhase;
 import net.knightsandkings.knk.core.menu.MenuVariableProviderRegistry;
 import net.knightsandkings.knk.core.menu.MenuVariableScope;
+import net.knightsandkings.knk.core.menu.MenuStateView;
 import net.knightsandkings.knk.core.menu.MenuView;
 import net.knightsandkings.knk.core.menu.RuntimeMenu;
 import net.knightsandkings.knk.core.menu.SectionView;
@@ -257,7 +258,8 @@ public final class MenuClickListener implements Listener {
                                          RuntimeMenuSection section, Object row) {
         RuntimeMenu menu = open.menu();
         MenuVariableScope scope = variableRegistry.scope(player, session.currentContext(),
-                Map.of(MenuVariableProviderRegistry.ROOT_MENU, MenuView.of(menu.key(), menu.title(), session)));
+                Map.of(MenuVariableProviderRegistry.ROOT_MENU, MenuView.of(menu.key(), menu.title(), session),
+                        MenuVariableProviderRegistry.ROOT_STATE, MenuStateView.of(session)));
         if (section != null) {
             SectionView sectionView = open.sectionView(section.id());
             scope = scope.with(MenuVariableProviderRegistry.ROOT_SECTION, sectionView != null ? sectionView

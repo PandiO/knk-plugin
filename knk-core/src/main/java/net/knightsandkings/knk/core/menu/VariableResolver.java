@@ -59,7 +59,8 @@ import java.util.stream.Stream;
  *       position ({@link RowScope}) and invalidated when a different row lands
  *       there.</li>
  *   <li><b>Map-like hops (E1).</b> A hop on a {@link MenuContextParams} (the
- *       {@code $ctx$} root) or any {@code Map} is a key lookup, not a getter.</li>
+ *       {@code $ctx$} root) or any {@code Map} is a key lookup, not a getter. On a
+ *       {@link MenuStateView} ({@code $state$}, G1) all remaining hops form one dotted key.</li>
  *   <li><b>{@link #interpolate}</b> - uncached text-form resolution for
  *       action/condition/content-source params values.</li>
  * </ul>
@@ -315,6 +316,10 @@ public final class VariableResolver {
         }
 
         for (int i = 1; i < hops.length && current != null; i++) {
+            if (current instanceof MenuStateView state) {
+                // G1: every remaining hop is one namespaced key ($state.pm.coinStep$ -> "pm.coinStep").
+                return state.get(String.join(".", java.util.Arrays.copyOfRange(hops, i, hops.length)));
+            }
             current = step(current, hops[i], bindingId, path);
         }
         return current;

@@ -37,7 +37,9 @@ public final class MenuTemplateMapper {
                 dto.growth(),
                 dto.backgroundMaterialRefId(),
                 sections,
-                dto.autoRefreshTicks()
+                dto.autoRefreshTicks(),
+                dto.minHeight(),
+                dto.backgroundMaterial()
         );
     }
 
@@ -83,7 +85,8 @@ public final class MenuTemplateMapper {
                 items,
                 bindings,
                 dto.contentSourceId(),
-                dto.contentSourceParamsJson()
+                dto.contentSourceParamsJson(),
+                dto.minHeight()
         );
     }
 

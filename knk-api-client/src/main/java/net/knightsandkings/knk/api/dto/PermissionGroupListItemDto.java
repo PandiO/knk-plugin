@@ -10,5 +10,6 @@ public record PermissionGroupListItemDto(
     @JsonProperty("id") Integer id,
     @JsonProperty("name") String name,
     @JsonProperty("weight") int weight,
-    @JsonProperty("isPremiumTier") boolean isPremiumTier
+    @JsonProperty("isPremiumTier") boolean isPremiumTier,
+    @JsonProperty("salaryMultiplier") Double salaryMultiplier
 ) {}
