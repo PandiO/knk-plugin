@@ -3,8 +3,9 @@ api:
   # TODO: Update this to match your backend server
   base-url: "http://localhost:5294/api"
   
-  # Enable debug logging (logs request URLs and latency)
-  debug-logging: true
+  # Enable debug logging (logs every request/response: URL, latency, headers, body). Off by
+  # default: it is noisy. The X-API-Key and Authorization values are redacted either way.
+  debug-logging: false
   
   # Allow untrusted SSL certificates (ONLY for development with self-signed certs)
   allow-untrusted-ssl: true
