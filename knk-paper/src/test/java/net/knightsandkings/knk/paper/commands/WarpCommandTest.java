@@ -300,4 +300,26 @@ class WarpCommandTest {
         assertTrue(command.onTabComplete(alice, mock(Command.class), "warp", new String[] {"m"})
             .containsAll(List.of("town:Market", "district:Market")));
     }
+
+    @Test
+    void aPlayerWhoLeavesTakesTheirCachedListAlong() {
+        granted.add(TeleportNodes.WARP);
+        run(alice, "list");
+        assertEquals(4, destinations.cachedOrEmpty(7).size());
+
+        command.forget(alice.getUniqueId());
+
+        assertTrue(destinations.cachedOrEmpty(7).isEmpty(), "no per-player list outlives the player");
+        command.forget(alice.getUniqueId()); // twice is fine
+    }
+
+    @Test
+    void aListLoadedByTheMenuIsAlsoDroppedOnQuit() {
+        destinations.listAsync(8).join();
+        command.rememberUserId(bob.getUniqueId(), 8);
+
+        command.forget(bob.getUniqueId());
+
+        assertTrue(destinations.cachedOrEmpty(8).isEmpty());
+    }
 }

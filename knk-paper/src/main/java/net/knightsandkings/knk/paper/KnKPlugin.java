@@ -1131,8 +1131,9 @@ public class KnKPlugin extends JavaPlugin {
         }, 5L, 5L);
 
         var pluginManager = getServer().getPluginManager();
-        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.TeleportWarmupListener(
-            teleportService, teleportRequestService), this);
+        var warmupListener = new net.knightsandkings.knk.paper.listeners.TeleportWarmupListener(
+            teleportService, teleportRequestService);
+        pluginManager.registerEvents(warmupListener, this);
         pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.CombatTagListener(teleportService), this);
         pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.BackDeathListener(backService), this);
 
@@ -1154,6 +1155,10 @@ public class KnKPlugin extends JavaPlugin {
         this.spawnCommand = createSpawnCommand(support, rankCheck, targets);
         // Phase 5: /warp, /warps (DESIGN.md §3.7).
         this.warpCommand = createWarpCommand(support, rankCheck, targets, charges);
+        if (warpCommand != null) {
+            // Each player's cached destination list and user id go when they leave.
+            warmupListener.addQuitHook(warpCommand::forget);
+        }
         // Phase 7: /back.
         this.backCommand = new net.knightsandkings.knk.paper.commands.BackCommand(support, backService);
         // Phase 6: the teleport menu (teleport.destinations) runs the same /warp, /spawn and request paths,

@@ -447,8 +447,19 @@ public class WarpCommand implements TabExecutor {
         }
     }
 
-    /** A player left: their id is looked up again next time. */
+    /**
+     * {@code player}'s knk user id, learnt elsewhere (the teleport menu loads the same list), so
+     * {@link #forget} can drop their cached list when they leave.
+     */
+    public void rememberUserId(UUID player, int userId) {
+        knownUserIds.put(player, userId);
+    }
+
+    /** A player left: their id is looked up again next time, and their cached destination list goes. */
     public void forget(UUID player) {
-        knownUserIds.remove(player);
+        Integer userId = knownUserIds.remove(player);
+        if (userId != null) {
+            deps.destinations().forget(userId);
+        }
     }
 }

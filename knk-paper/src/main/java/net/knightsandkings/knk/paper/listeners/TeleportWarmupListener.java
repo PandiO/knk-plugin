@@ -1,6 +1,12 @@
 package net.knightsandkings.knk.paper.listeners;
 
+import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Consumer;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
@@ -30,7 +36,11 @@ import net.knightsandkings.knk.paper.teleport.TeleportService;
  */
 public class TeleportWarmupListener implements Listener {
 
+    private static final Logger LOGGER = Logger.getLogger(TeleportWarmupListener.class.getName());
+
     private final TeleportService teleportService;
+    /** Other per-player teleport state to drop when a player quits (e.g. {@code WarpCommand::forget}). */
+    private final List<Consumer<UUID>> quitHooks = new CopyOnWriteArrayList<>();
     /** Null when teleport requests aren't wired (tests of the engine alone). */
     private final TeleportRequestService requestService;
 
@@ -41,6 +51,11 @@ public class TeleportWarmupListener implements Listener {
     public TeleportWarmupListener(TeleportService teleportService, TeleportRequestService requestService) {
         this.teleportService = Objects.requireNonNull(teleportService, "teleportService must not be null");
         this.requestService = requestService;
+    }
+
+    /** Also run {@code hook} with the player's id when they quit, so per-player caches don't outlive them. */
+    public void addQuitHook(Consumer<UUID> hook) {
+        quitHooks.add(Objects.requireNonNull(hook, "hook must not be null"));
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -82,6 +97,14 @@ public class TeleportWarmupListener implements Listener {
         if (requestService != null) {
             requestService.forget(event.getPlayer());
         }
-        teleportService.forget(event.getPlayer().getUniqueId());
+        UUID id = event.getPlayer().getUniqueId();
+        teleportService.forget(id);
+        for (Consumer<UUID> hook : quitHooks) {
+            try {
+                hook.accept(id);
+            } catch (RuntimeException ex) {
+                LOGGER.log(Level.WARNING, "[KnK Teleport] Quit cleanup failed for " + event.getPlayer().getName(), ex);
+            }
+        }
     }
 }

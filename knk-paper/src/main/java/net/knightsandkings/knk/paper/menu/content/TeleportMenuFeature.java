@@ -143,9 +143,14 @@ public final class TeleportMenuFeature implements MenuFeature {
         CompletableFuture<List<KnkTeleportDestination>> list;
         CompletableFuture<Access> access;
         try {
-            list = t.userIds().idOf(uuid).thenCompose(userId -> userId == null
-                    ? CompletableFuture.completedFuture((List<KnkTeleportDestination>) null)
-                    : t.destinations().listAsync(userId));
+            list = t.userIds().idOf(uuid).thenCompose(userId -> {
+                if (userId == null) {
+                    return CompletableFuture.completedFuture((List<KnkTeleportDestination>) null);
+                }
+                // So the cached list is dropped when the player leaves (WarpCommand.forget).
+                t.warps().rememberUserId(uuid, userId);
+                return t.destinations().listAsync(userId);
+            });
             access = access(t, player);
         } catch (RuntimeException e) {
             list = CompletableFuture.failedFuture(e);
