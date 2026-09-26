@@ -111,8 +111,27 @@ public class UsersMapper {
             dto.rankMultiplier(),
             dto.newCoinsBalance(),
             dto.lastSalaryPayoutAt(),
-            dto.nextEligibleAt()
+            dto.nextEligibleAt(),
+            dto.titleBracketId(),
+            dto.titleSalary(),
+            dto.paidHours(),
+            dto.baseAmount(),
+            mapRewardMultipliers(dto.multipliers())
         );
+    }
+
+    /** Null-safe: an API that predates KNG-16's reward breakdown sends no list. */
+    public static java.util.List<net.knightsandkings.knk.core.domain.users.RewardMultiplier> mapRewardMultipliers(
+        java.util.List<net.knightsandkings.knk.api.dto.RewardMultiplierDto> dtos
+    ) {
+        if (dtos == null) {
+            return java.util.List.of();
+        }
+        return dtos.stream()
+            .map(m -> new net.knightsandkings.knk.core.domain.users.RewardMultiplier(
+                m.source(), m.value(), m.permissionGroupId(), m.name(), m.isPremiumTier(),
+                m.chatPrimaryColor(), m.chatSecondaryColor()))
+            .toList();
     }
 
     public static Page<UserListItem> mapUserListItemPage(PagedResultDto<UserListDto> dtoPage) {
@@ -157,7 +176,13 @@ public class UsersMapper {
                 .toList(),
             tc.coinBonusGranted(),
             tc.gemBonusGranted(),
-            tc.expBonusGranted()
+            tc.expBonusGranted(),
+            tc.coinBonusBase(),
+            tc.gemBonusBase(),
+            tc.expBonusBase(),
+            mapRewardMultipliers(tc.coinBonusMultipliers()),
+            mapRewardMultipliers(tc.gemBonusMultipliers()),
+            mapRewardMultipliers(tc.expBonusMultipliers())
         );
     }
 }

@@ -23,7 +23,9 @@ api:
     type: none
     # Bearer token (only used if type=bearer)
     bearer-token: ""
-    # API key (only used if type=apikey)
+    # API key (only used if type=apikey). Set the same value as knk-web-api's
+    # Security:PluginApiKey in production: the API then only trusts the in-game staff member
+    # this plugin names for audit-logged changes (X-Acting-User-Id) on requests carrying it.
     api-key: ""
     # API key header name (only used if type=apikey)
     api-key-header: "X-API-Key"
