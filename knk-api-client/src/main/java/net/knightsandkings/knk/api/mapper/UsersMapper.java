@@ -159,7 +159,7 @@ public class UsersMapper {
         );
     }
 
-    private static net.knightsandkings.knk.core.domain.users.TitleChangeResult mapTitleChange(
+    public static net.knightsandkings.knk.core.domain.users.TitleChangeResult mapTitleChange(
         net.knightsandkings.knk.api.dto.TitleChangeResultDto tc
     ) {
         if (tc == null) {
