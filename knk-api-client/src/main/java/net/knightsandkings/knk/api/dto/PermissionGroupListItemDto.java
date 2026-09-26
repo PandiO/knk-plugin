@@ -11,5 +11,8 @@ public record PermissionGroupListItemDto(
     @JsonProperty("name") String name,
     @JsonProperty("weight") int weight,
     @JsonProperty("isPremiumTier") boolean isPremiumTier,
-    @JsonProperty("salaryMultiplier") Double salaryMultiplier
+    @JsonProperty("salaryMultiplier") Double salaryMultiplier,
+    @JsonProperty("chatPrimaryColor") String chatPrimaryColor,
+    @JsonProperty("chatSecondaryColor") String chatSecondaryColor,
+    @JsonProperty("nameColor") String nameColor
 ) {}

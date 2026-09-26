@@ -57,7 +57,8 @@ class UserManagerMenuFeatureTest {
     private final List<Player> online = new ArrayList<>();
     private final PermissionGroupsDataAccess groups = new PermissionGroupsDataAccess(() -> CompletableFuture.completedFuture(List.of(
             new PermissionGroupSummary(1, "Default", 0, false, 1.0),
-            new PermissionGroupSummary(5, "Royal", 30, true, 1.2))), Duration.ofMinutes(2), Clock.systemUTC());
+            new PermissionGroupSummary(5, "Royal", 30, true, 1.2),
+            new PermissionGroupSummary(9, "Staff", 100, false, 1.0))), Duration.ofMinutes(2), Clock.systemUTC());
     private final TitleBracketsDataAccess titles = new TitleBracketsDataAccess(
             () -> CompletableFuture.completedFuture(ProfileMenuFeatureTest.BRACKETS), Duration.ofMinutes(10));
     private final UserManagerMenuFeature feature = new UserManagerMenuFeature(admin, usersQueryApi, cache, titles, groups, () -> online);
@@ -263,13 +264,13 @@ class UserManagerMenuFeatureTest {
                 .thenReturn(CompletableFuture.completedFuture(true));
 
         registries.actions().execute("users.set-title", actionContext(null), Map.of("userId", "7", "bracketId", "3"));
-        registries.actions().execute("users.group", actionContext(null), Map.of("userId", "7", "groupId", "5", "op", "remove"));
+        registries.actions().execute("users.group", actionContext(null), Map.of("userId", "7", "groupId", "9", "op", "remove"));
         registries.actions().execute("users.mode", actionContext(null), Map.of("userId", "7", "mode", "staff"));
         registries.actions().execute("users.salary-payout", actionContext(null), Map.of("userId", "7"));
         registries.actions().execute("users.freeze", actionContext(null), Map.of("userId", "7", "op", "freeze"));
 
         verify(admin).setTitle(staff, steveUser, ProfileMenuFeatureTest.BRACKETS.get(2));
-        verify(admin).changeGroup(staff, steveUser, groups.cachedOrEmpty().get(1), false, null);
+        verify(admin).changeGroup(staff, steveUser, groups.cachedOrEmpty().get(2), false, null);
         verify(admin).setMode(staff, steveUser, ActiveMode.STAFF);
         verify(admin).payOutSalary(staff, steveUser);
         verify(admin).setFrozen(staff, steveUser, true, UserManagerMenuFeature.FREEZE_REASON);
@@ -283,7 +284,7 @@ class UserManagerMenuFeatureTest {
         List<GroupRow> rows = feature.fetchGroups(sourceContext(staff, MenuContextParams.EMPTY),
                 Map.of("userId", "7", "name", "Steve")).join().items();
 
-        assertEquals(List.of("NORMAL", "HIGHLIGHT"), rows.stream().map(GroupRow::getDisplayMode).toList());
+        assertEquals(List.of("NORMAL", "HIGHLIGHT", "NORMAL"), rows.stream().map(GroupRow::getDisplayMode).toList());
         assertTrue(rows.get(1).getIsMember());
     }
 
@@ -311,5 +312,125 @@ class UserManagerMenuFeatureTest {
             RuntimeMenu menu = ContentSeedFixture.assemble(key);
             assertDoesNotThrow(() -> ContentSeedFixture.validate(menu, ContentFeatures.all()), key);
         }
+    }
+
+    // ===== one rank per player (Default + premium tiers; a rank click is a confirmed switch) =====
+
+    private MenuSession loadedSession() {
+        loadSteve();
+        groups.listAsync().join();
+        return new MenuSessionRegistry().open(staff.getUniqueId());
+    }
+
+    private void stubMemberships(GroupMembershipSummary... memberships) {
+        when(usersQueryApi.getGroupMemberships(7)).thenReturn(CompletableFuture.completedFuture(List.of(memberships)));
+    }
+
+    @Test
+    void clickingAPremiumRankAsksToSwitchFromDefaultAndRepaints() {
+        MenuSession session = loadedSession();
+
+        registries.actions().execute("users.group", actionContext(session), Map.of("userId", "7", "groupId", "5", "op", "add"));
+
+        MenuSession.PendingConfirmation pending = session.getPendingConfirmation().orElseThrow();
+        assertEquals("users.group", pending.actionTypeId());
+        assertEquals(Map.of("userId", "7", "groupId", "5", "op", UserManagerMenuFeature.SET_RANK_OP), pending.actionParams());
+        assertTrue(registries.conditions().test("users.pending", actionContext(session), Map.of()).allowed());
+        verify(staff).sendMessage("§eSet Steve's rank to Royal (replaces Default)? Click Confirm or Cancel.");
+        verify(menuService).refreshOpenMenu(staff);
+        verify(admin, never()).changeGroup(any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any());
+    }
+
+    @Test
+    void confirmingASwitchReplacesDefaultAndEveryOtherActivePremiumRank() {
+        MenuSession session = loadedSession();
+        stubMemberships(
+                new GroupMembershipSummary(1, "Default", 0, false, null, true),
+                new GroupMembershipSummary(4, "Noble", 10, true, null, true),
+                new GroupMembershipSummary(6, "Dragon Blood", 40, true, null, false),
+                new GroupMembershipSummary(9, "Staff", 100, false, null, true));
+        when(admin.setRank(any(), any(), any(), any())).thenReturn(CompletableFuture.completedFuture(true));
+
+        registries.actions().execute("users.group", actionContext(session), Map.of("userId", "7", "groupId", "5", "op", "add"));
+        registries.actions().execute("menu.confirm.accept", actionContext(session), Map.of());
+
+        verify(admin).setRank(staff, steveUser, groups.cachedOrEmpty().get(1), List.of(
+                new PermissionGroupSummary(1, "Default", 0, false),
+                new PermissionGroupSummary(4, "Noble", 10, true)));
+        assertTrue(session.getPendingConfirmation().isEmpty());
+    }
+
+    @Test
+    void switchingBackToDefaultReplacesThePremiumRank() {
+        MenuSession session = loadedSession();
+        stubMemberships(new GroupMembershipSummary(5, "Royal", 30, true, null, true));
+        when(admin.setRank(any(), any(), any(), any())).thenReturn(CompletableFuture.completedFuture(true));
+
+        registries.actions().execute("users.group", actionContext(session), Map.of("userId", "7", "groupId", "1", "op", "add"));
+        registries.actions().execute("menu.confirm.accept", actionContext(session), Map.of());
+
+        verify(admin).setRank(staff, steveUser, groups.cachedOrEmpty().get(0),
+                List.of(new PermissionGroupSummary(5, "Royal", 30, true)));
+    }
+
+    @Test
+    void removingAPremiumRankDropsBackToDefault() {
+        loadedSession();
+        stubMemberships(new GroupMembershipSummary(5, "Royal", 30, true, null, true));
+        when(admin.setRank(any(), any(), any(), any())).thenReturn(CompletableFuture.completedFuture(true));
+
+        registries.actions().execute("users.group", actionContext(null), Map.of("userId", "7", "groupId", "5", "op", "remove"));
+
+        verify(admin).setRank(staff, steveUser, groups.cachedOrEmpty().get(0),
+                List.of(new PermissionGroupSummary(5, "Royal", 30, true)));
+        verify(admin, never()).changeGroup(any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any());
+    }
+
+    @Test
+    void defaultCannotBeRemovedOnlyReplaced() {
+        loadedSession();
+
+        registries.actions().execute("users.group", actionContext(null), Map.of("userId", "7", "groupId", "1", "op", "remove"));
+
+        verify(staff).sendMessage("§eDefault is the base rank - pick another rank to replace it.");
+        verify(admin, never()).setRank(any(), any(), any(), any());
+        verify(admin, never()).changeGroup(any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any());
+    }
+
+    @Test
+    void addingANonRankGroupIsStillDirect() {
+        MenuSession session = loadedSession();
+        when(admin.changeGroup(any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any()))
+                .thenReturn(CompletableFuture.completedFuture(true));
+
+        registries.actions().execute("users.group", actionContext(session), Map.of("userId", "7", "groupId", "9", "op", "add"));
+
+        verify(admin).changeGroup(staff, steveUser, groups.cachedOrEmpty().get(2), true, null);
+        assertTrue(session.getPendingConfirmation().isEmpty());
+    }
+
+    @Test
+    void groupRowsDescribeRanksAndPlainGroups() {
+        stubMemberships(new GroupMembershipSummary(1, "Default", 0, false, null, true));
+
+        List<GroupRow> rows = feature.fetchGroups(sourceContext(staff, MenuContextParams.EMPTY),
+                Map.of("userId", "7", "name", "Steve")).join().items();
+
+        assertEquals(List.of("IRON_BLOCK", "GOLD_BLOCK", "BOOK"), rows.stream().map(GroupRow::getMaterial).toList());
+        assertTrue(rows.get(0).getLoreLines().contains("&aCurrent rank &7- pick another rank to replace it"));
+        assertTrue(rows.get(1).getLoreLines().contains("&7Click to make this their rank"));
+        assertTrue(rows.get(2).getLoreLines().contains("&7Not a member &7- click to add"));
+    }
+
+    @Test
+    void requestingOrCancellingAConfirmationRepaintsTheMenu() {
+        MenuSession session = new MenuSessionRegistry().open(staff.getUniqueId());
+
+        registries.actions().execute("menu.confirm.request", actionContext(session),
+                Map.of("actionTypeId", "users.ban", "actionParamsJson", "{\"userId\":\"7\"}", "prompt", "Ban?"));
+        registries.actions().execute("menu.confirm.cancel", actionContext(session), Map.of());
+
+        verify(menuService, org.mockito.Mockito.times(2)).refreshOpenMenu(staff);
+        assertTrue(session.getPendingConfirmation().isEmpty());
     }
 }

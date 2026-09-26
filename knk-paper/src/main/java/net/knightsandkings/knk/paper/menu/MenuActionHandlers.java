@@ -232,6 +232,10 @@ public final class MenuActionHandlers {
         context.session().setPendingConfirmation(
                 new MenuSession.PendingConfirmation(actionTypeId, MenuParams.parse(actionParamsJson), prompt));
         context.player().sendMessage(ChatColor.YELLOW + prompt);
+        // Confirm/Cancel buttons render only while a confirmation is pending, so requesting,
+        // accepting or cancelling one repaints - otherwise they only showed up (or went away)
+        // when the menu was re-opened.
+        repaint(context);
     }
 
     /**
@@ -250,6 +254,7 @@ public final class MenuActionHandlers {
         MenuSession.PendingConfirmation pending = context.session().getPendingConfirmation()
                 .orElseThrow(() -> new MenuActionException(CONFIRM_ACCEPT + " action has no pending confirmation to accept"));
         context.session().clearPendingConfirmation();
+        repaint(context);
         registry.execute(pending.actionTypeId(), context, pending.actionParams());
     }
 
@@ -258,6 +263,7 @@ public final class MenuActionHandlers {
                 .orElseThrow(() -> new MenuActionException(CONFIRM_CANCEL + " action has no pending confirmation to cancel"));
         context.session().clearPendingConfirmation();
         context.player().sendMessage(ChatColor.YELLOW + "Cancelled.");
+        repaint(context);
     }
 
     /**
