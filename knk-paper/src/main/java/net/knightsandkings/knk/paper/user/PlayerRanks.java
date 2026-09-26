@@ -8,7 +8,8 @@ import java.util.Optional;
 
 /**
  * A player's rank: the free "Default" group or one of the paid premium tiers (Noble, Royal,
- * Dragon Blood), which upgrade from it. The Player manager keeps a player on exactly one of them.
+ * Dragon Blood), which upgrade from it. A player holds exactly one of them - knk-web-api enforces
+ * that (UserPermissionGroupService); the Player manager presents it as a confirmed switch.
  * Default is recognised by name, the same way knk-web-api's UserService.DefaultGroupName finds it
  * (it's an ordinary group, not flagged IsPremiumTier).
  */

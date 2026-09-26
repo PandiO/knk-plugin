@@ -558,6 +558,10 @@ public class KnKPlugin extends JavaPlugin {
             );
             getServer().getPluginManager().registerEvents(salaryPayoutScheduler, this);
             salaryPayoutScheduler.start();
+            // Rank changes made outside the plugin (web app, expiring temporary rank) show right away.
+            if (playerNotificationPoller != null) {
+                playerNotificationPoller.setRankChangedHandler(userAdminService::resyncDisplay);
+            }
             List<MenuFeature> menuFeatures = List.of(
                 registries -> {
                     MenuVariableContext.registerDefaults(registries.variables());
