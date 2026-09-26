@@ -85,7 +85,7 @@ public class TeleportCharges {
     }
 
     /** A destination's coordinates as a Bukkit Location; null when its world isn't loaded. */
-    static Location toLocation(KnkTeleportDestination destination, Function<String, World> worlds) {
+    public static Location toLocation(KnkTeleportDestination destination, Function<String, World> worlds) {
         World world = destination.world() != null ? worlds.apply(destination.world()) : null;
         if (world == null) {
             return null;
