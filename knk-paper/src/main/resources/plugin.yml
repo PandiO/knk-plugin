@@ -432,6 +432,12 @@ permissions:
     description: No private message rate limit (private-messages.rate-limit in config.yml).
     default: op
 
+  knk.pmlog.read:
+    description: >-
+      Read players' private messages in knk-web-api's PM log (web app, owner group). Checked by the
+      API; every read is written to the audit log. Listed here for documentation.
+    default: op
+
   knk.msg.bypass.ignore:
     description: >-
       Your private messages reach players who /ignore you (meant for staff). Checked through the

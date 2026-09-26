@@ -386,8 +386,12 @@ public record KnkConfig(
             }
         }
 
-        /** {@code apiEnabled}/{@code flushSeconds} are read now but only used by the Phase 3 API sink. */
-        public record LogConfig(boolean localEnabled, int localRetentionDays, boolean apiEnabled, int flushSeconds) {
+        /**
+         * {@code apiEnabled}: ship PMs to knk-web-api's log (needs api.auth.type apikey);
+         * {@code filterCommandLog}: keep PM command lines out of Paper's own command log.
+         */
+        public record LogConfig(boolean localEnabled, int localRetentionDays, boolean apiEnabled, int flushSeconds,
+                                boolean filterCommandLog) {
         }
 
         public static PrivateMessagesConfig defaults() {
@@ -396,7 +400,7 @@ public record KnkConfig(
                 new SoundConfig(true, 1.0f, 1.0f),
                 new RateLimitConfig(5, 5, 10),
                 60,
-                new LogConfig(true, 30, false, 5),
+                new LogConfig(true, 30, true, 5, true),
                 true
             );
         }
@@ -423,6 +427,10 @@ public record KnkConfig(
             if (log.localRetentionDays() < 1) {
                 throw new IllegalArgumentException(
                     "private-messages.log.local-retention-days must be at least 1 (got: " + log.localRetentionDays() + ")");
+            }
+            if (log.flushSeconds() < 1) {
+                throw new IllegalArgumentException(
+                    "private-messages.log.flush-seconds must be at least 1 (got: " + log.flushSeconds() + ")");
             }
         }
     }

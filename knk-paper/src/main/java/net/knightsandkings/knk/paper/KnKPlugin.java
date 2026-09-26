@@ -181,6 +181,8 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.user.SpyService spyService;
     private net.knightsandkings.knk.paper.user.IgnoreService ignoreService;
     private net.knightsandkings.knk.paper.user.PrivateMessageLogger privateMessageLogger;
+    private net.knightsandkings.knk.paper.user.ApiPrivateMessageLog apiPrivateMessageLog;
+    private net.knightsandkings.knk.paper.chat.PrivateMessageCommandLogFilter privateMessageCommandLogFilter;
     private net.knightsandkings.knk.paper.commands.support.VisiblePlayers visiblePlayers;
     private net.knightsandkings.knk.paper.commands.support.RankHierarchy rankHierarchy;
     private GradesDataAccess gradesDataAccess;
@@ -797,6 +799,10 @@ public class KnKPlugin extends JavaPlugin {
             cacheManager.logMetrics();
             cacheManager.clearAll();
         }
+        if (privateMessageLogger != null) {
+            // Before the API client: the API sink sends what is queued (or spools it) on close.
+            privateMessageLogger.close();
+        }
         if (apiClient != null) {
             getLogger().info("Shutting down API client...");
             apiClient.shutdown();
@@ -807,16 +813,16 @@ public class KnKPlugin extends JavaPlugin {
         if (regionLookupExecutor != null) {
             regionLookupExecutor.shutdownNow();
         }
-        if (privateMessageLogger != null) {
-            privateMessageLogger.close();
+        if (privateMessageCommandLogFilter != null) {
+            privateMessageCommandLogFilter.uninstall();
         }
         getLogger().info("KnightsAndKings Plugin Disabled!");
     }
 
     /**
      * KNG-18 Phase 1 (docs/specs/private-messages/DESIGN.md §3.3): /msg, /reply, social spy and the
-     * local PM log; Phase 2: ignore lists. Needs knkPermissible, adminFreezeManager, the user cache
-     * and the API client.
+     * local PM log; Phase 2: ignore lists; Phase 3: knk-web-api's PM log and the command-log filter.
+     * Needs knkPermissible, adminFreezeManager, the user cache and the API client.
      */
     private void initPrivateMessaging() {
         KnkConfig.PrivateMessagesConfig pmConfig = config.privateMessages();
@@ -837,13 +843,38 @@ public class KnKPlugin extends JavaPlugin {
         // Players already online after a reload: load their lists (joins load their own).
         getServer().getScheduler().runTaskLater(this, () -> org.bukkit.Bukkit.getOnlinePlayers()
             .forEach(online -> ignoreService.load(online.getUniqueId())), 20L);
+        java.util.List<net.knightsandkings.knk.paper.user.PrivateMessageLogger> pmLogSinks = new java.util.ArrayList<>();
         if (pmConfig.log().localEnabled()) {
             var localLog = new net.knightsandkings.knk.paper.user.LocalFilePrivateMessageLog(
                 getDataFolder().toPath().resolve("logs"), pmConfig.log().localRetentionDays(), clock);
             localLog.start();
-            this.privateMessageLogger = localLog;
-        } else {
-            this.privateMessageLogger = net.knightsandkings.knk.paper.user.PrivateMessageLogger.NONE;
+            pmLogSinks.add(localLog);
+        }
+        // Phase 3: knk-web-api's PM log (POST api/private-message-log/batch needs the service key).
+        if (pmConfig.log().apiEnabled()) {
+            this.apiPrivateMessageLog = new net.knightsandkings.knk.paper.user.ApiPrivateMessageLog(
+                new net.knightsandkings.knk.core.messaging.PrivateMessageLogShipper(
+                    apiClient.getPrivateMessageLogApi(),
+                    getDataFolder().toPath().resolve("private-messages-spool.jsonl"),
+                    net.knightsandkings.knk.core.messaging.PrivateMessageLogShipper.DEFAULT_CAPACITY,
+                    net.knightsandkings.knk.core.messaging.PrivateMessageLogShipper.DEFAULT_BATCH_SIZE,
+                    java.time.Duration.ofSeconds(pmConfig.log().flushSeconds()),
+                    clock));
+            apiPrivateMessageLog.start();
+            pmLogSinks.add(apiPrivateMessageLog);
+            if (!"apikey".equalsIgnoreCase(config.api().auth().type())) {
+                getLogger().warning("private-messages.log.api-enabled is on but api.auth.type is not apikey: knk-web-api "
+                    + "will refuse the PM log (401) and messages will pile up in the queue.");
+            }
+        }
+        this.privateMessageLogger = net.knightsandkings.knk.paper.user.PrivateMessageLogger.all(pmLogSinks);
+        // Only with a PM log in place: otherwise the server log would be the only record.
+        if (pmConfig.log().filterCommandLog() && !pmLogSinks.isEmpty()) {
+            var filter = new net.knightsandkings.knk.paper.chat.PrivateMessageCommandLogFilter();
+            if (filter.install()) {
+                this.privateMessageCommandLogFilter = filter;
+                getLogger().info("Private messages are filtered out of the server command log");
+            }
         }
         this.messagingService = new net.knightsandkings.knk.paper.user.MessagingService(
             pmConfig, knkPermissible, adminFreezeManager, spyService, privateMessageLogger, ignoreService, visiblePlayers,
@@ -877,6 +908,12 @@ public class KnKPlugin extends JavaPlugin {
         }
     }
     
+    /** Private messages waiting for knk-web-api's PM log (/knk health); -1 when that sink is off. */
+    public int privateMessageLogQueueDepth() {
+        var apiLog = apiPrivateMessageLog;
+        return apiLog == null ? -1 : apiLog.queueDepth();
+    }
+
     /**
      * Returns the cache manager for accessing cache statistics.
      *

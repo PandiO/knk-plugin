@@ -10,22 +10,36 @@ import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.plugin.Plugin;
 
+import java.util.function.IntSupplier;
+
 /**
  * Command handler for /knk health.
- * Performs async health check against the API backend.
+ * Performs async health check against the API backend, and shows how many private messages wait
+ * to be sent to the API's PM log (KNG-18 Phase 3).
  */
 public class HealthCommand implements CommandExecutor {
     private final Plugin plugin;
     private final HealthApi healthApi;
+    /** Queued PM log entries, or a negative number when the API sink is off; null = not shown. */
+    private final IntSupplier pmLogQueueDepth;
     
     public HealthCommand(Plugin plugin, HealthApi healthApi) {
+        this(plugin, healthApi, null);
+    }
+
+    public HealthCommand(Plugin plugin, HealthApi healthApi, IntSupplier pmLogQueueDepth) {
         this.plugin = plugin;
         this.healthApi = healthApi;
+        this.pmLogQueueDepth = pmLogQueueDepth;
     }
     
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         sender.sendMessage(ChatColor.GRAY + "Checking API health...");
+        if (pmLogQueueDepth != null) {
+            int depth = pmLogQueueDepth.getAsInt();
+            sender.sendMessage(ChatColor.GRAY + (depth < 0 ? "  pm-log: API sink off" : "  pm-log queue: " + depth));
+        }
         
         // Execute health check asynchronously
         healthApi.getHealth().thenAccept(health -> {

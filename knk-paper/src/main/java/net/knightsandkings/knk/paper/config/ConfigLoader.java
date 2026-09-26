@@ -136,7 +136,8 @@ public class ConfigLoader {
                 log != null ? log.getBoolean("local-enabled", defaults.log().localEnabled()) : defaults.log().localEnabled(),
                 log != null ? log.getInt("local-retention-days", defaults.log().localRetentionDays()) : defaults.log().localRetentionDays(),
                 log != null ? log.getBoolean("api-enabled", defaults.log().apiEnabled()) : defaults.log().apiEnabled(),
-                log != null ? log.getInt("flush-seconds", defaults.log().flushSeconds()) : defaults.log().flushSeconds()
+                log != null ? log.getInt("flush-seconds", defaults.log().flushSeconds()) : defaults.log().flushSeconds(),
+                log != null ? log.getBoolean("filter-command-log", defaults.log().filterCommandLog()) : defaults.log().filterCommandLog()
             ),
             section.getBoolean("block-vanilla-commands", defaults.blockVanillaCommands())
         );

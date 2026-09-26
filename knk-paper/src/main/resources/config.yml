@@ -98,9 +98,14 @@ private-messages:
     # plugins/KnightsAndKings/logs/private-messages-YYYY-MM-DD.log
     local-enabled: true
     local-retention-days: 30
-    # Server-side log (later phase) - stays off until the plugin authenticates to the API
-    api-enabled: false
+    # Server-side log in knk-web-api (30-day retention, staff read it with knk.pmlog.read). Needs
+    # api.auth.type: apikey. Sent every flush-seconds or every 50 messages; if the API is down the
+    # messages wait in memory (up to 1000) and in private-messages-spool.jsonl across a restart.
+    api-enabled: true
     flush-seconds: 5
+    # Keep "<player> issued server command: /msg ..." lines out of logs/latest.log (the PM log above
+    # is the moderation record, with retention; the server log has none)
+    filter-command-log: true
   # Route /minecraft:msg|tell|w through /msg and disable /teammsg, /tm and /me for non-ops, so they
   # can't bypass social spy, the rate limit and the log
   block-vanilla-commands: true

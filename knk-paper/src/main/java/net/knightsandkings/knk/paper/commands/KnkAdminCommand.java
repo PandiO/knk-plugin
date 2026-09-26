@@ -106,7 +106,8 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         this.helpSubcommand = new HelpSubcommand(registry);
         
         // Register health
-        HealthCommand healthCommand = new HealthCommand(plugin, healthApi);
+        HealthCommand healthCommand = new HealthCommand(plugin, healthApi,
+                plugin instanceof net.knightsandkings.knk.paper.KnKPlugin knkPlugin ? knkPlugin::privateMessageLogQueueDepth : null);
         registry.register(
                 new CommandMetadata("health", "Check API backend health", "/knk health", "knk.admin.health"),
                 (sender, args) -> healthCommand.onCommand(sender, null, "knk", new String[0])
