@@ -85,7 +85,7 @@ player-notifications:
 
 # Teleport engine (docs/specs/teleport/DESIGN.md §3.11, knk-workspace). Staff teleports (/tp,
 # /tphere, /knk tp) are instant and skip warmup, cooldown, combat tag and the safe-spot check; the
-# settings below apply to player teleports (/tpa, /tpahere; /spawn, /warp, /back in later phases).
+# settings below apply to player teleports (/tpa, /tpahere, /spawn, /warp; /back in a later phase).
 teleport:
   # Seconds a player waits before teleporting; moving to another block or taking damage cancels it
   warmup-seconds: 5            # v1 default
@@ -105,9 +105,15 @@ teleport:
     cooldown-seconds: 10
     # Pending requests one player can have; the oldest is dropped past this
     max-incoming: 5
-    # Coins a request costs. Keep 0: paid requests need the server-side charge path (warps,
-    # a later phase) - until then any other value turns /tpa and /tpahere off.
+    # Coins a request costs the requester (0 = free). Charged by the web API when the teleport
+    # happens (after the warmup) and refunded if it then fails.
     price-coins: 0             # v1 intended 10000, never charged
+  # /warp <destination> and /warps (knk.teleport.warp): Towns, Districts and Structures staff
+  # enabled as destinations in the web app. The web API checks the title / premium tier /
+  # discovery requirements and takes the gem price after the warmup.
+  destinations:
+    # Seconds a player's destination list (names, prices, locks) is cached
+    cache-seconds: 60
 
 # Domain discovery (Linear KNG-20, knk-workspace docs/specs/domain-discovery/DESIGN.md §3.6):
 # the first time a player enters a Town, District or Structure it is recorded and rewarded once.

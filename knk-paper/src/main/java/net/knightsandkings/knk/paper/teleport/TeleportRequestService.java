@@ -51,9 +51,10 @@ import net.kyori.adventure.text.format.TextDecoration;
  * A requester who isn't online, or who the answering player can't see (vanished since), counts as
  * "no pending request" - the same answer as for a name that never asked, so nothing is revealed.
  * <p>
- * Price: {@code teleport.request.price-coins} must stay 0 for now. Charging belongs on the
- * server-side charge path warps get in Phase 5 (DESIGN §3.5); until then a non-zero price refuses
- * every request instead of charging from the plugin.
+ * Price: {@code teleport.request.price-coins} coins (default 0 = free), charged to the requester by
+ * knk-web-api when the teleport commits - after the warmup, through the same charge path as warps
+ * ({@link TeleportCharges}, Phase 5) - and refunded if it then doesn't happen. Without the API
+ * client ({@link #setCharges} never called) a non-zero price refuses every request instead.
  * <p>
  * Threading: every public method runs on the main thread; permission lookups are async and hop
  * back through {@code mainThread}.
@@ -61,7 +62,7 @@ import net.kyori.adventure.text.format.TextDecoration;
 public class TeleportRequestService {
 
     private static final Logger LOGGER = Logger.getLogger(TeleportRequestService.class.getName());
-    static final String PAID_NOT_AVAILABLE = "Paid teleport requests aren't available yet.";
+    static final String PAID_NOT_AVAILABLE = "Paid teleport requests aren't available right now.";
 
     private final TeleportService engine;
     private final Executor mainThread;
@@ -73,6 +74,8 @@ public class TeleportRequestService {
     private volatile TeleportRequestSettings settings;
     /** Whether {@code viewer} ignores {@code sender} (UUIDs); none until an ignore list is wired in. */
     private volatile BiPredicate<UUID, UUID> ignores = (viewer, sender) -> false;
+    /** Charges the request fee server-side; null = paid requests are refused. */
+    private volatile TeleportCharges charges;
     private boolean warnedAboutPrice;
 
     public TeleportRequestService(TeleportService engine, Executor mainThread, TeleportService.PermissionLookup permissions,
@@ -98,6 +101,11 @@ public class TeleportRequestService {
 
     public TeleportRequestSettings settings() {
         return settings;
+    }
+
+    /** How the {@code teleport.request.price-coins} fee is charged (Phase 5); null refuses paid requests. */
+    public void setCharges(TeleportCharges charges) {
+        this.charges = charges;
     }
 
     // ----- send -----
@@ -188,6 +196,10 @@ public class TeleportRequestService {
                         + " was dropped: they have too many pending requests.");
                 }
                 requester.sendMessage(sentMessage(target, book.expireSeconds()));
+                if (settings.isPaid()) {
+                    requester.sendMessage(ChatColor.GRAY + "It costs you " + settings.priceCoins()
+                        + " coins if the teleport happens.");
+                }
                 target.sendMessage(requestNotice(requester, direction, book.expireSeconds()));
             }
         }
@@ -250,6 +262,11 @@ public class TeleportRequestService {
             requester.sendMessage(ChatColor.GREEN + target.getName() + " accepted your request and is on the way.");
         }
         TeleportPlan plan = plan(requester, target, request.direction());
+        TeleportCharges fees = charges;
+        if (settings.isPaid() && fees != null) {
+            // The requester pays, whoever moves; charged after the warmup, refunded if it fails.
+            plan = plan.withCharge(fees.requestFee(requester, target, settings.priceCoins()));
+        }
         engine.start(plan).thenAccept(outcome -> report(mover, stationary, outcome));
     }
 
@@ -388,14 +405,14 @@ public class TeleportRequestService {
     }
 
     private boolean refusedForPrice(Player player) {
-        if (!settings.isPaid()) {
+        if (!settings.isPaid() || charges != null) {
             return false;
         }
         if (!warnedAboutPrice) {
             warnedAboutPrice = true;
             LOGGER.warning("[KnK Teleport] teleport.request.price-coins is " + settings.priceCoins()
-                + ", but paid teleport requests need the server-side charge path (docs/specs/teleport, Phase 5)."
-                + " /tpa and /tpahere are refused until it is set back to 0.");
+                + ", but the API client isn't available to charge it."
+                + " /tpa and /tpahere are refused until it is set back to 0 or the API is reachable.");
         }
         player.sendMessage(ChatColor.RED + PAID_NOT_AVAILABLE);
         return true;

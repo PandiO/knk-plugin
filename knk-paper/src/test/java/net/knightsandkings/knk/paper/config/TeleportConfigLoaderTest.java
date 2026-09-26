@@ -37,4 +37,16 @@ class TeleportConfigLoaderTest {
         assertEquals(TeleportRequestSettings.defaults(),
             ConfigLoader.loadTeleportSettings(null).request());
     }
+
+    @Test
+    void destinationsCacheSecondsIsRead_AndDefaultsToAMinute() {
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("teleport.destinations.cache-seconds", 15);
+
+        assertEquals(15, ConfigLoader.loadTeleportSettings(yaml.getConfigurationSection("teleport")).destinationsCacheSeconds());
+        assertEquals(60, ConfigLoader.loadTeleportSettings(null).destinationsCacheSeconds());
+        YamlConfiguration empty = new YamlConfiguration();
+        empty.set("teleport.warmup-seconds", 5);
+        assertEquals(60, ConfigLoader.loadTeleportSettings(empty.getConfigurationSection("teleport")).destinationsCacheSeconds());
+    }
 }

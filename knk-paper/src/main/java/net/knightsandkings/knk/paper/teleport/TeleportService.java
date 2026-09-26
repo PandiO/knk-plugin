@@ -50,7 +50,9 @@ import net.kyori.adventure.text.Component;
  *       none with {@code knk.teleport.bypass.warmup}. Cancelled by a block move, damage, another
  *       teleport, death, quit or being frozen ({@code listeners/TeleportWarmupListener} and
  *       {@link #tick}). One warmup per player; a new one replaces the old one.</li>
- *   <li><b>Commit</b>: guards again (things change during a warmup), destination re-read, safe spot
+ *   <li><b>Commit</b>: guards again (things change during a warmup), destination re-read, then - for
+ *       a plan with a {@link TeleportCharge} (warps, paid requests) - the server authorizes and
+ *       charges it (and it is refunded if the teleport then doesn't happen), safe spot
  *       (player teleports only - staff land exactly where they asked), then
  *       {@code teleportAsync(loc, TeleportCause.COMMAND)} - never the default {@code PLUGIN} cause,
  *       so the region and siege-lockdown listeners see these teleports like vanilla ones.</li>
@@ -291,6 +293,67 @@ public class TeleportService {
             teleport(plan, authority, to, result);
             return;
         }
+        TeleportCharge charge = plan.charge();
+        if (charge == null) {
+            place(plan, authority, to, result);
+            return;
+        }
+        chargeThenPlace(plan, authority, charge, result);
+    }
+
+    /**
+     * Ask the server to allow and charge the teleport (DESIGN §3.4 step 3) - only now, after the
+     * warmup, so a cancelled warmup costs nothing. Once it is paid, every ending but TELEPORTED
+     * refunds it.
+     */
+    private void chargeThenPlace(TeleportPlan plan, Authority authority, TeleportCharge charge,
+                                 CompletableFuture<TeleportOutcome> result) {
+        CompletableFuture<TeleportCharge.Authorization> authorization;
+        try {
+            authorization = charge.authorize();
+        } catch (RuntimeException ex) {
+            authorization = CompletableFuture.failedFuture(ex);
+        }
+        authorization.whenComplete((answer, ex) -> mainThread.execute(() -> guarded(plan, result, () -> {
+            if (ex != null || answer == null) {
+                LOGGER.log(Level.WARNING, "[KnK Teleport] Charge for " + plan.subject().getName() + " failed", ex);
+                charge.refund("the charge failed");
+                result.complete(TeleportOutcome.failed("Teleporting isn't available right now. Try again."));
+                return;
+            }
+            if (!answer.isAllowed()) {
+                result.complete(TeleportOutcome.denied(answer.denial()));
+                return;
+            }
+            // Paid from here on: anything but arriving gives it back.
+            result.whenComplete((outcome, failure) -> {
+                if (failure != null || outcome == null || !outcome.isTeleported()) {
+                    charge.refund(outcome != null && outcome.message() != null ? outcome.message() : "the teleport didn't happen");
+                }
+            });
+            Player subject = plan.subject();
+            if (!subject.isOnline()) {
+                result.complete(TeleportOutcome.failed(subject.getName() + " went offline."));
+                return;
+            }
+            Location to = answer.destination() != null ? answer.destination() : plan.destination().get();
+            if (to == null || to.getWorld() == null) {
+                result.complete(TeleportOutcome.failed("The destination is no longer available."));
+                return;
+            }
+            // The charge took a moment: things may have changed (frozen, joined a siege...).
+            Optional<TeleportDenial> denial = checkGuards(plan, authority, to);
+            if (denial.isPresent()) {
+                result.complete(TeleportOutcome.denied(denial.get()));
+                return;
+            }
+            place(plan, authority, to, result);
+        })));
+    }
+
+    /** Load the chunk, find a safe spot near {@code to} and teleport there (player teleports). */
+    private void place(TeleportPlan plan, Authority authority, Location to, CompletableFuture<TeleportOutcome> result) {
+        Player subject = plan.subject();
         World world = to.getWorld();
         world.getChunkAtAsync(to).whenComplete((chunk, ex) -> mainThread.execute(() -> guarded(plan, result, () -> {
             if (ex != null) {
@@ -334,6 +397,13 @@ public class TeleportService {
             }
             if (!plan.kind().isStaff()) {
                 cooldowns.start(id, plan.kind(), clock.getAsLong(), settings.cooldownSeconds());
+            }
+            if (plan.charge() != null) {
+                try {
+                    plan.charge().completed(subject);
+                } catch (RuntimeException chargeMessage) {
+                    LOGGER.log(Level.WARNING, "[KnK Teleport] Could not report the charge to " + subject.getName(), chargeMessage);
+                }
             }
             log(plan, from, to);
             if (plan.kind().isStaff()) {

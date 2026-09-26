@@ -124,7 +124,8 @@ public class ConfigLoader {
             section.getInt("cooldown-seconds", defaults.cooldownSeconds()),
             section.getInt("combat-tag-seconds", defaults.combatTagSeconds()),
             section.getInt("safe-search-radius", defaults.safeSearchRadius()),
-            loadTeleportRequestSettings(section.getConfigurationSection("request"))
+            loadTeleportRequestSettings(section.getConfigurationSection("request")),
+            section.getInt("destinations.cache-seconds", defaults.destinationsCacheSeconds())
         );
     }
 

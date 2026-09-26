@@ -9,7 +9,7 @@ public final class TeleportNodes {
 
     /** {@code /tp <player>}, {@code /tp <x> <y> <z>}. */
     public static final String STAFF = "knk.teleport.staff";
-    /** Move other players: {@code /tp <a> <b>}, {@code /tphere}, {@code /spawn <player>}. */
+    /** Move other players: {@code /tp <a> <b>}, {@code /tphere}, {@code /spawn <player>}, {@code /warp <d> <player>}. */
     public static final String STAFF_OTHERS = "knk.teleport.staff.others";
     /** The {@code -s} flag (no message to the moved/visited player). */
     public static final String STAFF_SILENT = "knk.teleport.staff.silent";
@@ -23,6 +23,13 @@ public final class TeleportNodes {
 
     /** {@code /spawn} - to the server spawn (granted to the Default group). */
     public static final String SPAWN = "knk.teleport.spawn";
+
+    /** {@code /warp <destination>}, {@code /warps} - domain teleports (granted to the Default group). */
+    public static final String WARP = "knk.teleport.warp";
+    /** Warp without meeting a destination's title / premium tier / discovery requirements. */
+    public static final String BYPASS_REQUIREMENTS = "knk.teleport.bypass.requirements";
+    /** Warp without paying a destination's gem price. */
+    public static final String BYPASS_COST = "knk.teleport.bypass.cost";
 
     /** 3 s instead of 5 s warmup (v1: any donator rank). */
     public static final String WARMUP_SHORT = "knk.teleport.warmup.short";

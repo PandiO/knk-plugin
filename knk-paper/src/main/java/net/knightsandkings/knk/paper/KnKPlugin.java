@@ -218,6 +218,8 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.commands.TeleportRequestCommand teleportRequestCommand;
     private net.knightsandkings.knk.paper.teleport.SpawnDestinationResolver spawnDestinationResolver;
     private net.knightsandkings.knk.paper.commands.SpawnCommand spawnCommand;
+    private net.knightsandkings.knk.core.dataaccess.TeleportDestinationsDataAccess teleportDestinationsDataAccess;
+    private net.knightsandkings.knk.paper.commands.WarpCommand warpCommand;
     
     @Override
     public void onEnable() {
@@ -1052,6 +1054,12 @@ public class KnKPlugin extends JavaPlugin {
         } else {
             getLogger().warning("/spawn not registered - the teleport engine or the spawn lookup failed to initialize");
         }
+        if (warpCommand != null) {
+            registerTabCommand("warp", warpCommand);
+            registerTabCommand("warps", warpCommand.withForm(net.knightsandkings.knk.paper.commands.WarpCommand.Form.LIST));
+        } else {
+            getLogger().warning("/warp and /warps not registered - the teleport engine or the API client failed to initialize");
+        }
     }
 
     /**
@@ -1083,9 +1091,12 @@ public class KnKPlugin extends JavaPlugin {
         // Phase 3: /tpa, /tpahere and their answers (DESIGN.md §3.5).
         this.teleportRequestService = new net.knightsandkings.knk.paper.teleport.TeleportRequestService(
             teleportService, mainThread, knkPermissible::hasPermissionAsync, targets, org.bukkit.Bukkit::getPlayer);
-        if (config.teleport().request().isPaid()) {
+        // Phase 5: warp gem prices and /tpa coin fees are charged by the web API (DESIGN.md §3.5/§3.7).
+        net.knightsandkings.knk.paper.teleport.TeleportCharges charges = createTeleportCharges();
+        teleportRequestService.setCharges(charges);
+        if (config.teleport().request().isPaid() && charges == null) {
             getLogger().warning("teleport.request.price-coins is " + config.teleport().request().priceCoins()
-                + " - paid teleport requests aren't supported yet, so /tpa and /tpahere will be refused. Set it to 0.");
+                + " but the API client isn't available to charge it, so /tpa and /tpahere will be refused.");
         }
         getServer().getScheduler().runTaskTimer(this, () -> {
             teleportService.tick(adminFreezeManager::isFrozen);
@@ -1113,6 +1124,8 @@ public class KnKPlugin extends JavaPlugin {
         );
         // Phase 4: /spawn (DESIGN.md §3.6).
         this.spawnCommand = createSpawnCommand(support, rankCheck, targets);
+        // Phase 5: /warp, /warps (DESIGN.md §3.7).
+        this.warpCommand = createWarpCommand(support, rankCheck, targets, charges);
         getLogger().info("Teleport engine initialized (warmup " + config.teleport().warmupSeconds() + "s / "
             + config.teleport().warmupShortSeconds() + "s, cooldown " + config.teleport().cooldownSeconds() + "s)");
     }
@@ -1144,6 +1157,52 @@ public class KnKPlugin extends JavaPlugin {
         cacheManager.registerRefreshHook("spawn destination", spawnDestinationResolver::invalidate);
         return new net.knightsandkings.knk.paper.commands.SpawnCommand(
             support, rankCheck, targets, teleportService, spawnDestinationResolver, modeService::isVanished);
+    }
+
+    /**
+     * Charges for paid teleports (docs/specs/teleport/DESIGN.md §3.7.3): the web API's
+     * api/teleport-destinations charge/refund routes with retry-safe idempotency keys. Null when the
+     * API client or the user lookup isn't available.
+     */
+    private net.knightsandkings.knk.paper.teleport.TeleportCharges createTeleportCharges() {
+        if (apiClient == null || usersDataAccess == null) {
+            return null;
+        }
+        return new net.knightsandkings.knk.paper.teleport.TeleportCharges(
+            new net.knightsandkings.knk.core.teleport.TeleportCharger(apiClient.getTeleportDestinationsCommandApi()),
+            teleportUserIdLookup(), org.bukkit.Bukkit::getWorld, org.bukkit.Bukkit::getPlayer);
+    }
+
+    /** A player's knk user id through the users cache; null when they have no account or the lookup failed. */
+    private net.knightsandkings.knk.paper.teleport.TeleportAuditor.UserIdLookup teleportUserIdLookup() {
+        return uuid -> usersDataAccess.getByUuidAsync(uuid).thenApply(result ->
+            result != null && result.isSuccess() && result.value().isPresent() ? result.value().get().id() : null);
+    }
+
+    /**
+     * {@code /warp} and {@code /warps} (docs/specs/teleport/DESIGN.md §3.7): each player's destination
+     * list from {@code GET /api/teleport-destinations}, cached {@code teleport.destinations.cache-seconds}
+     * and dropped by {@code /knk cache refresh} and after a charge. Null without the API client.
+     */
+    private net.knightsandkings.knk.paper.commands.WarpCommand createWarpCommand(
+            net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport support,
+            net.knightsandkings.knk.paper.commands.support.TargetRankCheck rankCheck,
+            net.knightsandkings.knk.paper.teleport.VisibleTargetResolver targets,
+            net.knightsandkings.knk.paper.teleport.TeleportCharges charges) {
+        if (charges == null || cacheManager == null) {
+            getLogger().warning("/warp not available - the API client or caches failed to initialize");
+            return null;
+        }
+        this.teleportDestinationsDataAccess = new net.knightsandkings.knk.core.dataaccess.TeleportDestinationsDataAccess(
+            apiClient.getTeleportDestinationsQueryApi(),
+            java.time.Duration.ofSeconds(config.teleport().destinationsCacheSeconds()));
+        charges.setOnCharged(teleportDestinationsDataAccess::invalidate);
+        cacheManager.registerRefreshHook("warp destinations", teleportDestinationsDataAccess::invalidateAll);
+        return new net.knightsandkings.knk.paper.commands.WarpCommand(
+            net.knightsandkings.knk.paper.commands.WarpCommand.Form.WARP,
+            new net.knightsandkings.knk.paper.commands.WarpCommand.Deps(support, rankCheck, targets, teleportService,
+                teleportDestinationsDataAccess, charges, teleportUserIdLookup(), knkPermissible::hasPermissionAsync,
+                org.bukkit.Bukkit::getWorld, modeService::isVanished));
     }
 
     /**

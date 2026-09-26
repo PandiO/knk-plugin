@@ -21,6 +21,8 @@ import net.knightsandkings.knk.core.teleport.TeleportKind;
  * @param visited          the player whose location is the destination, when there is one
  * @param silent           no message to the moved/visited player
  * @param destinationLabel for log lines ("Bob", "10, 64, -3 in world")
+ * @param charge           what the server must allow (and charge) before the move - a warp's gem price,
+ *                         a paid request's coin fee (Phase 5); null = nothing to ask
  */
 public record TeleportPlan(
     Player subject,
@@ -29,7 +31,8 @@ public record TeleportPlan(
     CommandSender actor,
     Player visited,
     boolean silent,
-    String destinationLabel
+    String destinationLabel,
+    TeleportCharge charge
 ) {
     public TeleportPlan {
         Objects.requireNonNull(subject, "subject must not be null");
@@ -37,6 +40,17 @@ public record TeleportPlan(
         Objects.requireNonNull(kind, "kind must not be null");
         actor = actor != null ? actor : subject;
         destinationLabel = destinationLabel != null ? destinationLabel : "?";
+    }
+
+    /** A plan with nothing to charge. */
+    public TeleportPlan(Player subject, Supplier<Location> destination, TeleportKind kind, CommandSender actor,
+                        Player visited, boolean silent, String destinationLabel) {
+        this(subject, destination, kind, actor, visited, silent, destinationLabel, null);
+    }
+
+    /** This plan, paid for (or authorized) by {@code charge} when it commits. */
+    public TeleportPlan withCharge(TeleportCharge charge) {
+        return new TeleportPlan(subject, destination, kind, actor, visited, silent, destinationLabel, charge);
     }
 
     /** A staff teleport of {@code subject} to {@code visited}'s live location. */
@@ -61,6 +75,15 @@ public record TeleportPlan(
     public static TeleportPlan spawn(Player subject, Location destination, String label) {
         Location target = destination.clone();
         return new TeleportPlan(subject, target::clone, TeleportKind.SPAWN, subject, null, false, label);
+    }
+
+    /**
+     * A player's own {@code /warp} to a domain (Phase 5): warmup and every guard, then {@code charge}
+     * authorizes it server-side (title, premium tier, discovery) and takes the gem price.
+     */
+    public static TeleportPlan warp(Player subject, Location destination, String label, TeleportCharge charge) {
+        Location target = destination.clone();
+        return new TeleportPlan(subject, target::clone, TeleportKind.WARP, subject, null, false, label, charge);
     }
 
     public boolean movesActor() {

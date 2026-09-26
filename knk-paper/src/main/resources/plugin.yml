@@ -164,6 +164,17 @@ commands:
     description: "Teleport to the server spawn, or send a player there"
     usage: "/spawn | /spawn <player> [-s]"
 
+  # Domain teleports (DESIGN.md §3.7, Phase 5) - Towns/Districts/Structures enabled as destinations
+  # in the web app. Nodes checked in WarpCommand; the web API checks requirements and the price.
+  warp:
+    description: "Teleport to a town, district or structure, or send a player there"
+    usage: "/warp <destination> | /warp list | /warp <destination> <player> [-s]"
+    aliases: [point]
+
+  warps:
+    description: "List the places you can teleport to with /warp"
+    usage: "/warps"
+
 permissions:
   knk.admin:
     description: >-
@@ -533,7 +544,7 @@ permissions:
     default: op
 
   knk.teleport.staff.others:
-    description: Move other players - /tp <player> <target>, /tphere <player> and /spawn <player>. You must outrank everyone involved.
+    description: Move other players - /tp <player> <target>, /tphere <player>, /spawn <player> and /warp <destination> <player>. You must outrank everyone involved.
     default: op
 
   knk.teleport.staff.silent:
@@ -554,6 +565,22 @@ permissions:
     description: >-
       /spawn - teleport to the server spawn (set on the web-app Game Settings page, else the main
       world's spawn). Free; warmup, cooldown and combat tag apply. Meant for the Default group.
+    default: op
+
+  knk.teleport.warp:
+    description: >-
+      /warp <destination> (/point) and /warps - teleport to a Town, District or Structure enabled as a
+      destination. Warmup, cooldown and combat tag apply; the web API checks the destination's title,
+      premium tier and discovery requirements and takes its gem price after the warmup. Meant for the
+      Default group.
+    default: op
+
+  knk.teleport.bypass.requirements:
+    description: /warp ignores destinations' title, premium tier and discovery requirements.
+    default: op
+
+  knk.teleport.bypass.cost:
+    description: /warp is free (no gem price).
     default: op
 
   knk.teleport.warmup.short:
