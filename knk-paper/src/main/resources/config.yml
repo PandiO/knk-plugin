@@ -64,6 +64,35 @@ world-tasks:
   # removing the pickup-latency/idle-load trade-off these two settings exist to balance
   headless-poll-max-interval-seconds: 60
 
+# Private messages: /msg, /reply and /socialspy (docs/specs/private-messages/DESIGN.md 3.3.10)
+private-messages:
+  # Longer messages (only possible from the console - the client caps a command at 256) are cut off
+  max-length: 256
+  # Played to the recipient
+  sound:
+    enabled: true
+    volume: 1.0
+    pitch: 1.0
+  # At most max-messages per window-seconds per sender; the same text to the same player again
+  # within duplicate-window-seconds counts as spam. Bypass: knk.msg.bypass.ratelimit
+  rate-limit:
+    max-messages: 5
+    window-seconds: 5
+    duplicate-window-seconds: 10
+  spy:
+    # How often the social spy audience (knk.socialspy / knk.socialspy.exempt holders) is re-checked
+    refresh-seconds: 60
+  log:
+    # plugins/KnightsAndKings/logs/private-messages-YYYY-MM-DD.log
+    local-enabled: true
+    local-retention-days: 30
+    # Server-side log (later phase) - stays off until the plugin authenticates to the API
+    api-enabled: false
+    flush-seconds: 5
+  # Route /minecraft:msg|tell|w through /msg and disable /teammsg, /tm and /me for non-ops, so they
+  # can't bypass social spy, the rate limit and the log
+  block-vanilla-commands: true
+
 # In-game moments queued by the web API for writes made outside a plugin command - e.g. the
 # promotion sound/particles/message when an admin grants XP from the web app's player profile
 player-notifications:

@@ -9,7 +9,8 @@ public record KnkConfig(
     ApiConfig api,
     CacheConfig cache,
     AccountConfig account,
-    MessagesConfig messages
+    MessagesConfig messages,
+    PrivateMessagesConfig privateMessages
 ) {
     public record ApiConfig(
         String baseUrl,
@@ -91,6 +92,10 @@ public record KnkConfig(
             throw new IllegalArgumentException("messages configuration is required");
         }
         messages.validate();
+        if (privateMessages == null) {
+            throw new IllegalArgumentException("private-messages configuration is required");
+        }
+        privateMessages.validate();
     }
     
     public record CacheConfig(
@@ -352,6 +357,72 @@ public record KnkConfig(
             }
             if (mergeComplete == null || mergeComplete.isBlank()) {
                 throw new IllegalArgumentException("messages.merge-complete is required");
+            }
+        }
+    }
+
+    /**
+     * /msg, /reply and social spy (docs/specs/private-messages/DESIGN.md §3.3.10). Every key has a
+     * default, so an existing config.yml without the section keeps working.
+     */
+    public record PrivateMessagesConfig(
+        int maxLength,
+        SoundConfig sound,
+        RateLimitConfig rateLimit,
+        int spyRefreshSeconds,
+        LogConfig log,
+        boolean blockVanillaCommands
+    ) {
+        public record SoundConfig(boolean enabled, float volume, float pitch) {
+        }
+
+        public record RateLimitConfig(int maxMessages, int windowSeconds, int duplicateWindowSeconds) {
+            public Duration window() {
+                return Duration.ofSeconds(windowSeconds);
+            }
+
+            public Duration duplicateWindow() {
+                return Duration.ofSeconds(duplicateWindowSeconds);
+            }
+        }
+
+        /** {@code apiEnabled}/{@code flushSeconds} are read now but only used by the Phase 3 API sink. */
+        public record LogConfig(boolean localEnabled, int localRetentionDays, boolean apiEnabled, int flushSeconds) {
+        }
+
+        public static PrivateMessagesConfig defaults() {
+            return new PrivateMessagesConfig(
+                256,
+                new SoundConfig(true, 1.0f, 1.0f),
+                new RateLimitConfig(5, 5, 10),
+                60,
+                new LogConfig(true, 30, false, 5),
+                true
+            );
+        }
+
+        public void validate() {
+            if (maxLength < 1) {
+                throw new IllegalArgumentException("private-messages.max-length must be at least 1 (got: " + maxLength + ")");
+            }
+            if (sound == null || rateLimit == null || log == null) {
+                throw new IllegalArgumentException("private-messages.sound, rate-limit and log are required");
+            }
+            if (rateLimit.maxMessages() < 1) {
+                throw new IllegalArgumentException(
+                    "private-messages.rate-limit.max-messages must be at least 1 (got: " + rateLimit.maxMessages() + ")");
+            }
+            if (rateLimit.windowSeconds() < 1 || rateLimit.duplicateWindowSeconds() < 0) {
+                throw new IllegalArgumentException(
+                    "private-messages.rate-limit.window-seconds must be at least 1 and duplicate-window-seconds non-negative");
+            }
+            if (spyRefreshSeconds < 5) {
+                throw new IllegalArgumentException(
+                    "private-messages.spy.refresh-seconds must be at least 5 (got: " + spyRefreshSeconds + ")");
+            }
+            if (log.localRetentionDays() < 1) {
+                throw new IllegalArgumentException(
+                    "private-messages.log.local-retention-days must be at least 1 (got: " + log.localRetentionDays() + ")");
             }
         }
     }

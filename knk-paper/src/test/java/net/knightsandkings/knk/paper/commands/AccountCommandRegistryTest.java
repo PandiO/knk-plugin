@@ -134,6 +134,6 @@ class AccountCommandRegistryTest {
             "&aAccount merge complete. Your account now has {coins} coins, {gems} gems, and {exp} XP."
         );
 
-        return new KnkConfig(api, cache, account, messages);
+        return new KnkConfig(api, cache, account, messages, KnkConfig.PrivateMessagesConfig.defaults());
     }
 }

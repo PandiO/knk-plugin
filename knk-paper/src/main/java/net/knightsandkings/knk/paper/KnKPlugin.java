@@ -177,6 +177,9 @@ public class KnKPlugin extends JavaPlugin {
     private ModeService modeService;
     private net.knightsandkings.knk.paper.user.AdminFreezeManager adminFreezeManager;
     private net.knightsandkings.knk.paper.user.MessagingService messagingService;
+    private net.knightsandkings.knk.paper.user.SpyService spyService;
+    private net.knightsandkings.knk.paper.user.PrivateMessageLogger privateMessageLogger;
+    private net.knightsandkings.knk.paper.commands.support.VisiblePlayers visiblePlayers;
     private net.knightsandkings.knk.paper.commands.support.RankHierarchy rankHierarchy;
     private GradesDataAccess gradesDataAccess;
     private TagsDataAccess tagsDataAccess;
@@ -470,7 +473,7 @@ public class KnKPlugin extends JavaPlugin {
             this.joinLoadingGuard = new JoinLoadingGuard(this, knkPermissible);
             this.modeService = new ModeService(this, knkPermissible, cacheManager.getUserCache(), usersCommandApi);
             this.adminFreezeManager = new net.knightsandkings.knk.paper.user.AdminFreezeManager();
-            this.messagingService = new net.knightsandkings.knk.paper.user.MessagingService();
+            initPrivateMessaging();
             this.rankHierarchy = new net.knightsandkings.knk.paper.commands.support.RankHierarchy(usersQueryApi);
             this.minecraftMaterialRefsDataAccess = dataAccessFactory.createMinecraftMaterialRefsDataAccess(
                 config.cache().ttl(),
@@ -792,7 +795,40 @@ public class KnKPlugin extends JavaPlugin {
         if (regionLookupExecutor != null) {
             regionLookupExecutor.shutdownNow();
         }
+        if (privateMessageLogger != null) {
+            privateMessageLogger.close();
+        }
         getLogger().info("KnightsAndKings Plugin Disabled!");
+    }
+
+    /**
+     * KNG-18 Phase 1 (docs/specs/private-messages/DESIGN.md §3.3): /msg, /reply, social spy and the
+     * local PM log. Needs knkPermissible, adminFreezeManager and the user cache.
+     */
+    private void initPrivateMessaging() {
+        KnkConfig.PrivateMessagesConfig pmConfig = config.privateMessages();
+        java.time.Clock clock = java.time.Clock.systemDefaultZone();
+        this.visiblePlayers = net.knightsandkings.knk.paper.commands.support.VisiblePlayers.bukkit();
+        this.spyService = new net.knightsandkings.knk.paper.user.SpyService(
+            knkPermissible, new org.bukkit.NamespacedKey(this, "socialspy"), org.bukkit.Bukkit::getOnlinePlayers);
+        spyService.start(this, pmConfig.spyRefreshSeconds());
+        if (pmConfig.log().localEnabled()) {
+            var localLog = new net.knightsandkings.knk.paper.user.LocalFilePrivateMessageLog(
+                getDataFolder().toPath().resolve("logs"), pmConfig.log().localRetentionDays(), clock);
+            localLog.start();
+            this.privateMessageLogger = localLog;
+        } else {
+            this.privateMessageLogger = net.knightsandkings.knk.paper.user.PrivateMessageLogger.NONE;
+        }
+        this.messagingService = new net.knightsandkings.knk.paper.user.MessagingService(
+            pmConfig, knkPermissible, adminFreezeManager, spyService, privateMessageLogger, visiblePlayers,
+            // Same rank colour as the player's tab-list name (KNG-7); cache-only checks, display only.
+            player -> net.knightsandkings.knk.paper.utils.TabListTeam.resolve(
+                knkPermissible.hasPermission(player, ModeService.OWNER_NODE),
+                knkPermissible.hasPermission(player, ModeService.STAFF_NODE),
+                cacheManager.getUserCache().getStale(player.getUniqueId()).orElse(null)).color(),
+            org.bukkit.Bukkit::getConsoleSender, MenuService.mainThreadExecutor(this), clock
+        );
     }
 
     private void registerEvents(WorldGuardRegionTracker regionTracker) {
@@ -808,6 +844,12 @@ public class KnKPlugin extends JavaPlugin {
         getLogger().info("Registered ModeListener for owner/staff mode restore");
         pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.AdminFreezeListener(this, adminFreezeManager, usersDataAccess), this);
         getLogger().info("Registered AdminFreezeListener for /freeze enforcement");
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.PrivateMessageSessionListener(
+            this, messagingService, spyService), this);
+        if (config.privateMessages().blockVanillaCommands()) {
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.VanillaMessagingBlockListener(), this);
+            getLogger().info("Registered VanillaMessagingBlockListener (/minecraft:msg|tell|w -> /msg; /teammsg, /tm, /me off)");
+        }
     }
     
     /**
@@ -899,8 +941,13 @@ public class KnKPlugin extends JavaPlugin {
         registerSimpleCommand("freeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(userAdminService, true));
         registerSimpleCommand("unfreeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(userAdminService, false));
         registerSimpleCommand("staffchat", new net.knightsandkings.knk.paper.commands.StaffChatCommand());
-        registerSimpleCommand("msg", new net.knightsandkings.knk.paper.commands.MessageCommand(messagingService));
-        registerSimpleCommand("reply", new net.knightsandkings.knk.paper.commands.ReplyCommand(messagingService));
+        registerTabCommand("msg", new net.knightsandkings.knk.paper.commands.MessageCommand(messagingService, visiblePlayers));
+        registerTabCommand("reply", new net.knightsandkings.knk.paper.commands.ReplyCommand(messagingService));
+        registerTabCommand("socialspy", new net.knightsandkings.knk.paper.commands.SocialSpyCommand(
+            new net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport(
+                knkPermissible, MenuService.mainThreadExecutor(this),
+                org.bukkit.Bukkit::getPlayerExact, org.bukkit.Bukkit::getOnlinePlayers),
+            spyService, getLogger()));
 
         registerSimpleCommand("kit", new net.knightsandkings.knk.paper.commands.KitCommand(
             this,

@@ -1,38 +1,45 @@
 package net.knightsandkings.knk.paper.commands;
 
-import org.bukkit.ChatColor;
-import org.bukkit.command.Command;
-import org.bukkit.command.CommandExecutor;
-import org.bukkit.command.CommandSender;
-import org.bukkit.entity.Player;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
+import org.bukkit.command.TabExecutor;
+
+import net.knightsandkings.knk.paper.chat.PrivateMessageFormat;
 import net.knightsandkings.knk.paper.user.MessagingService;
 
-/** /reply (/r) &lt;message&gt; - replies to the last player who messaged (or was messaged by) you. */
-public class ReplyCommand implements CommandExecutor {
+/**
+ * /reply (/r) &lt;message&gt; - replies to the last player who messaged (or was messaged by) you.
+ * The console can reply too, and players can reply to the console.
+ */
+public class ReplyCommand implements TabExecutor {
+
+    /** Labels (primary + plugin.yml aliases) a frozen player may still use - see AdminFreezeListener. */
+    public static final Set<String> LABELS = Set.of("reply", "r");
+
     private final MessagingService messagingService;
 
     public ReplyCommand(MessagingService messagingService) {
-        this.messagingService = messagingService;
+        this.messagingService = Objects.requireNonNull(messagingService, "messagingService must not be null");
     }
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (!(sender instanceof Player senderPlayer)) {
-            sender.sendMessage(ChatColor.RED + "Only players can use this command.");
+        String text = MessagingService.joinText(args, 0);
+        if (text.isEmpty()) {
+            sender.sendMessage(PrivateMessageFormat.usage("/" + label + " <message>"));
             return true;
         }
-        if (args.length < 1) {
-            sender.sendMessage(ChatColor.YELLOW + "Usage: /reply <message>");
-            return true;
-        }
-        Player target = messagingService.replyTargetOf(senderPlayer);
-        if (target == null || !target.isOnline()) {
-            sender.sendMessage(ChatColor.RED + "No one to reply to.");
-            return true;
-        }
-        String message = String.join(" ", args);
-        messagingService.send(sender, target, message);
+        messagingService.reply(sender, text);
         return true;
+    }
+
+    /** No completions: everything after /r is message text, not a player name. */
+    @Override
+    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        return List.of();
     }
 }

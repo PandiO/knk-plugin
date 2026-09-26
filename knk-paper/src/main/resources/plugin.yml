@@ -62,14 +62,21 @@ commands:
   msg:
     description: "Send a private message to another player (rebuild of v1's MessageCommands)"
     usage: "/msg <player> <message>"
-    aliases: [tell, w]
+    aliases: [message, tell, whisper, w, m, pm]
     # No permission gate - matches v1's player-to-player intent (any player may message another).
+    # Works for the console too.
 
   reply:
     description: "Reply to the last player who messaged you"
     usage: "/reply <message>"
     aliases: [r]
     # No permission gate - same as /msg.
+
+  socialspy:
+    description: "Turn the social spy feed (other players' private messages) on or off"
+    usage: "/socialspy [on|off]"
+    aliases: [spy]
+    # No permission: here - gated on knk.socialspy through KnkPermissible inside SocialSpyCommand.
 
   kit:
     description: "List, claim, give, and purchase Kits (docs/specs/kits/DESIGN.md §4.3)"
@@ -395,8 +402,24 @@ permissions:
 
   knk.staffchat:
     description: >-
-      Send and receive /staffchat (/sc) broadcasts. Also determines who receives the /msg
-      "social spy" broadcast (every private message is echoed to holders of this node).
+      Send and receive /staffchat (/sc) broadcasts. (No longer drives the /msg social spy - see
+      knk.socialspy.)
+    default: op
+
+  knk.socialspy:
+    description: >-
+      Receive the social spy feed (every private message between two other players) and use
+      /socialspy to turn it on or off. Checked through the in-house permission model.
+    default: op
+
+  knk.socialspy.exempt:
+    description: >-
+      Your private messages (sent or received) are hidden from spies who don't hold this node
+      themselves; you do see such messages. Meant for the owner group.
+    default: op
+
+  knk.msg.bypass.ratelimit:
+    description: No private message rate limit (private-messages.rate-limit in config.yml).
     default: op
 
   knk.gate.open.*:
