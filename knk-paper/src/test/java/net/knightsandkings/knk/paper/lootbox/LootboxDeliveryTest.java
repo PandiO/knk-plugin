@@ -1,5 +1,8 @@
 package net.knightsandkings.knk.paper.lootbox;
 
+import net.knightsandkings.knk.core.dataaccess.FetchResult;
+import net.knightsandkings.knk.core.dataaccess.ItemBlueprintsDataAccess;
+import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
 import net.knightsandkings.knk.core.domain.enchantments.KnkEnchantmentDefinition;
 import net.knightsandkings.knk.core.domain.item.KnkGrade;
 import net.knightsandkings.knk.core.domain.item.KnkItemBlueprint;
@@ -7,6 +10,7 @@ import net.knightsandkings.knk.core.domain.item.KnkItemBlueprintDefaultEnchantme
 import net.knightsandkings.knk.core.lootbox.KnkLootboxClaimEnchantment;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxClaimResult;
 import net.knightsandkings.knk.core.lootbox.LootboxDeliveryMethod;
+import net.knightsandkings.knk.core.ports.api.LootboxesCommandApi;
 import net.knightsandkings.knk.paper.item.BlueprintItemAssembler;
 import net.knightsandkings.knk.paper.mapper.ItemInstanceTag;
 import net.knightsandkings.knk.paper.mapper.ItemInstanceTagTest;
@@ -23,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -30,8 +35,13 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -172,5 +182,39 @@ class LootboxDeliveryTest {
         assertTrue(LootboxDelivery.holdsInstance(player, 88L));
         assertFalse(LootboxDelivery.holdsInstance(player, 89L));
         verify(inventory, never()).addItem(any(ItemStack.class));
+    }
+
+    @Test
+    void aClaimThisServerHandedOver_isOnlyConfirmedAgain_neverGivenTwice() {
+        // The first confirmation failed (or is still on its way) and the claim comes back - a replay, a pending read
+        // after a relog: a stackable item can't be told apart, and an instanced one may have been moved to a chest.
+        KnkItemBlueprint bread = new KnkItemBlueprint(77, "Bread", null, null, "minecraft:bread", "&fBread", null, 16, 64,
+                List.of(), 0, null, List.of(), List.of());
+        ItemBlueprintsDataAccess blueprints = mock(ItemBlueprintsDataAccess.class);
+        when(blueprints.getByIdAsync(77)).thenReturn(CompletableFuture.completedFuture(FetchResult.hit(bread)));
+        ItemStack stack = mock(ItemStack.class);
+        BlueprintItemAssembler assembler = mock(BlueprintItemAssembler.class);
+        when(assembler.build(any(), anyString())).thenReturn(stack);
+        when(assembler.enchant(any(), any(), anyList(), any())).thenReturn(new BlueprintItemAssembler.Result(stack, 0, List.of()));
+        LootboxesCommandApi api = mock(LootboxesCommandApi.class);
+        when(api.markDelivered(anyInt(), any(), any(), any())).thenReturn(CompletableFuture.completedFuture(null));
+        PlayerInventory inventory = mock(PlayerInventory.class);
+        when(inventory.addItem(any(ItemStack.class))).thenReturn(new HashMap<>());
+        Player player = playerWithInventory(inventory);
+        when(player.isOnline()).thenReturn(true);
+        LootboxDelivery delivery = new LootboxDelivery(Runnable::run, blueprints, mock(MinecraftMaterialRefsDataAccess.class), null,
+                api, assembler);
+        KnkLootboxClaimResult claim = claim(null, 16, List.of(), null, null);
+
+        LootboxDelivery.Outcome first = delivery.deliver(player, claim, false).join();
+        LootboxDelivery.Outcome replay = delivery.deliver(player, claim, false).join();
+        LootboxDelivery.Outcome onRejoin = delivery.deliver(player, claim, true).join();
+
+        assertTrue(first.given());
+        assertFalse(replay.given());
+        assertTrue(replay.alreadyHeld());
+        assertFalse(onRejoin.given());
+        verify(inventory, times(1)).addItem(any(ItemStack.class));
+        verify(api, times(3)).markDelivered(eq(41), eq(LootboxDeliveryMethod.INVENTORY), any(), eq(9));
     }
 }

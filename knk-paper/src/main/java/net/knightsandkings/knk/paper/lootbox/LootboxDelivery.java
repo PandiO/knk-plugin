@@ -25,6 +25,7 @@ import org.bukkit.inventory.meta.ItemMeta;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -51,15 +52,23 @@ import java.util.logging.Logger;
  *   <li>Confirm {@code delivered} (retried a few times). A claim left unconfirmed is redelivered on the next join,
  *       where an instanced item already in the inventory or ender chest is confirmed instead of given twice.</li>
  * </ol>
+ * A claim this server already handed over is never given again while it runs, whatever the API says about it: a
+ * replay or a {@code pending} read can race a confirmation still on its way, and a failed confirmation followed by a
+ * relog would otherwise give a second copy (of a stackable item always; of an instanced one once it was moved out of
+ * the inventory and ender chest). Such a delivery is only confirmed again.
  */
 public final class LootboxDelivery {
 
     private static final Logger LOGGER = Logger.getLogger(LootboxDelivery.class.getName());
     private static final int ACK_ATTEMPTS = 3;
+    // Claims handed over since the server started (claim id -> how), main thread only. Bounded: the oldest are long
+    // confirmed by the time 10,000 newer ones exist.
+    private static final int HANDED_OVER_LIMIT = 10_000;
 
     /**
-     * What happened. {@code given} = an item went to the player now; {@code alreadyHeld} = a redelivery found the
-     * instance already in their inventory or ender chest. {@code item} is a copy of what was given (for messages).
+     * What happened. {@code given} = an item went to the player now; {@code alreadyHeld} = the claim was handed over
+     * before (a redelivery found the instance in their inventory or ender chest, or this server gave it already), so
+     * nothing was given now. {@code item} is a copy of what was given (for messages).
      */
     public record Outcome(boolean given, boolean alreadyHeld, ItemStack item, LootboxDeliveryMethod method, List<String> skipped) {
         static Outcome failed() {
@@ -80,6 +89,12 @@ public final class LootboxDelivery {
     private final EnchantmentDefinitionsDataAccess definitions;
     private final LootboxesCommandApi commandApi;
     private final BlueprintItemAssembler assembler;
+    private final Map<Integer, LootboxDeliveryMethod> handedOver = new LinkedHashMap<>() {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<Integer, LootboxDeliveryMethod> eldest) {
+            return size() > HANDED_OVER_LIMIT;
+        }
+    };
 
     public LootboxDelivery(
             Executor mainThread,
@@ -130,8 +145,15 @@ public final class LootboxDelivery {
         if (!player.isOnline()) {
             return Outcome.failed();
         }
+        LootboxDeliveryMethod earlier = handedOver.get(claim.claimId());
+        if (earlier != null) {
+            // Given by this server already; its confirmation failed or is still on its way.
+            acknowledge(claim, earlier, "already handed over on this server; not given again");
+            return new Outcome(false, true, null, earlier, List.of());
+        }
         if (redelivery && claim.itemInstanceId() != null && holdsInstance(player, claim.itemInstanceId())) {
             // Given before, but the confirmation never reached the API (crash between give and ACK).
+            handedOver.put(claim.claimId(), LootboxDeliveryMethod.REDELIVERED);
             acknowledge(claim, LootboxDeliveryMethod.REDELIVERED, "already held on rejoin; not given again");
             return new Outcome(false, true, null, LootboxDeliveryMethod.REDELIVERED, List.of());
         }
@@ -140,6 +162,7 @@ public final class LootboxDelivery {
         ItemStack item = build(resolved.blueprint(), resolved.materialKey(), claim, resolved.definitions(), skipped);
         ItemStack shown = item.clone();
         LootboxDeliveryMethod method = place(player, item, redelivery ? LootboxDeliveryMethod.REDELIVERED : LootboxDeliveryMethod.INVENTORY);
+        handedOver.put(claim.claimId(), method);
 
         String note = null;
         if (!skipped.isEmpty()) {

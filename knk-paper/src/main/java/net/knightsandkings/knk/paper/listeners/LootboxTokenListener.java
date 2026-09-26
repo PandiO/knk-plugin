@@ -190,7 +190,7 @@ public final class LootboxTokenListener implements Listener {
         delivery.deliver(player, claim, false).thenAccept(outcome -> {
             if (outcome.given() && player.isOnline()) {
                 announcer.opened(player, claim, outcome.item(), runtime.settings(), runtime.config());
-            } else if (!outcome.given() && player.isOnline()) {
+            } else if (!outcome.given() && !outcome.alreadyHeld() && player.isOnline()) {
                 player.sendMessage(LootboxMessages.STUCK);
             }
         });
