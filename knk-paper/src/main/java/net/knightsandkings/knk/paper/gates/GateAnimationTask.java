@@ -146,6 +146,10 @@ public class GateAnimationTask extends BukkitRunnable {
             AnimationState previousState = lastObservedState.put(gate.getId(), state);
             boolean justStartedAnimating = state != previousState
                 && (state == AnimationState.OPENING || state == AnimationState.CLOSING);
+            if (justStartedAnimating && displayManager != null) {
+                // The hover shows OPENING/CLOSING (the 1 s poller skips animating gates).
+                displayManager.syncDisplay(gate);
+            }
 
             if (justStartedAnimating && "ROTATION".equals(gate.getMotionType())) {
                 LOGGER.info("[GateAnimation] Gate '" + gate.getName() + "' (ID: " + gate.getId() + ") starting "
@@ -519,6 +523,7 @@ public class GateAnimationTask extends BukkitRunnable {
             int consecutiveTicks = jamTickCounters.merge(gate.getId(), 1, Integer::sum);
             if (consecutiveTicks >= JAM_THRESHOLD_TICKS && !gate.isJammed()) {
                 gate.setIsJammed(true);
+                if (displayManager != null) displayManager.syncDisplay(gate);
                 LOGGER.warning("[GateAnimation] Gate '" + gate.getName() + "' (ID: " + gate.getId()
                     + ") is JAMMED - an obstruction is blocking its door blocks.");
                 persistGateState(gate);
@@ -527,6 +532,7 @@ public class GateAnimationTask extends BukkitRunnable {
             jamTickCounters.remove(gate.getId());
             if (gate.isJammed()) {
                 gate.setIsJammed(false);
+                if (displayManager != null) displayManager.syncDisplay(gate);
                 LOGGER.info("[GateAnimation] Gate '" + gate.getName() + "' (ID: " + gate.getId()
                     + ") is no longer jammed - resuming animation.");
                 persistGateState(gate);

@@ -377,24 +377,29 @@ public class GateDisplayManager {
         return Component.text(healthText, color);
     }
 
+    /**
+     * The door's state, then " (JAMMED)" and " · INVINCIBLE" when they apply. Smoke test 2026-09-26:
+     * INVINCIBLE used to replace the state, so a siege gate its owners open and close but nobody may
+     * damage always read INVINCIBLE; and JAMMED was never shown.
+     */
     private Component buildStatusLine(CachedGateDoor gate) {
         if (gate.isEffectivelyDestroyed()) {
             return Component.text("DESTROYED", NamedTextColor.DARK_RED);
         }
-        if (gate.isEffectivelyInvincible()) {
-            return Component.text("INVINCIBLE", NamedTextColor.AQUA);
-        }
 
         AnimationState state = gate.getCurrentState();
-        if (state == null) {
-            return Component.text("UNKNOWN", NamedTextColor.GRAY);
-        }
-
-        return switch (state) {
+        Component line = state == null ? Component.text("UNKNOWN", NamedTextColor.GRAY) : switch (state) {
             case OPEN -> Component.text("OPEN", NamedTextColor.GREEN);
             case OPENING -> Component.text("OPENING", NamedTextColor.GOLD);
             case CLOSING -> Component.text("CLOSING", NamedTextColor.GOLD);
             case CLOSED -> Component.text("CLOSED", NamedTextColor.RED);
         };
+        if (gate.isJammed()) {
+            line = line.append(Component.text(" (JAMMED)", NamedTextColor.DARK_RED));
+        }
+        if (gate.isEffectivelyInvincible()) {
+            line = line.append(Component.text(" \u00b7 INVINCIBLE", NamedTextColor.AQUA));
+        }
+        return line;
     }
 }
