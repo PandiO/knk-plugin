@@ -329,27 +329,27 @@ public final class UserAdminService {
     }
 
     /**
-     * Player manager premium-tier switch: makes {@code tier} the target's only premium tier
-     * (permanent) - added first, then each of {@code replacedTiers} removed, so a failure part-way
-     * never leaves them with no tier at all. Rank-checked and attributed like {@link #changeGroup};
-     * the target is re-read afterwards so chat and the tab list show the new tier.
-     * {@code /knk user ... group add} still adds alongside, e.g. a temporary higher tier on top of
-     * a permanent one.
+     * Player manager rank switch: makes {@code rank} (Default or a premium tier, see
+     * {@link PlayerRanks}) the target's only rank, permanently - added first, then each of
+     * {@code replacedRanks} removed, so a failure part-way never leaves them without a rank.
+     * Rank-checked and attributed like {@link #changeGroup}; the target is re-read afterwards so
+     * chat and the tab list show the new rank. {@code /knk user ... group add} still adds
+     * alongside, e.g. a temporary higher tier on top of a permanent one.
      */
-    public CompletableFuture<Boolean> setPremiumTier(CommandSender sender, UserSummary target, PermissionGroupSummary tier,
-                                                     java.util.List<PermissionGroupSummary> replacedTiers) {
-        java.util.List<PermissionGroupSummary> replaced = replacedTiers.stream().filter(g -> g.id() != tier.id()).toList();
+    public CompletableFuture<Boolean> setRank(CommandSender sender, UserSummary target, PermissionGroupSummary rank,
+                                              java.util.List<PermissionGroupSummary> replacedRanks) {
+        java.util.List<PermissionGroupSummary> replaced = replacedRanks.stream().filter(g -> g.id() != rank.id()).toList();
         CompletableFuture<Boolean> done = new CompletableFuture<>();
         withRankCheck(sender, target, api -> {
-            CompletableFuture<Void> chain = api.addGroupMembership(target.id(), tier.id(), null);
+            CompletableFuture<Void> chain = api.addGroupMembership(target.id(), rank.id(), null);
             for (PermissionGroupSummary old : replaced) {
                 chain = chain.thenCompose(v -> api.removeGroupMembership(target.id(), old.id()));
             }
             chain.thenCompose(v -> refreshTargetSummary(target)).thenAccept(fresh -> mainThread.execute(() -> {
                 String was = replaced.stream().map(PermissionGroupSummary::name).collect(java.util.stream.Collectors.joining(", "));
-                sender.sendMessage(ChatColor.GREEN + "Set " + target.username() + "'s premium tier to " + tier.name()
+                sender.sendMessage(ChatColor.GREEN + "Set " + target.username() + "'s rank to " + rank.name()
                         + (was.isEmpty() ? "" : " (was " + was + ")") + ".");
-                notifyGroupChange(target, tier, true);
+                notifyRankChange(target, rank);
                 refreshTargetVisibility(target);
                 refreshTargetDisplay(fresh);
                 done.complete(true);
@@ -554,6 +554,15 @@ public final class UserAdminService {
         if (targetPlayer != null) {
             modeService.refreshVisibilityFor(targetPlayer);
         }
+    }
+
+    private void notifyRankChange(UserSummary target, PermissionGroupSummary rank) {
+        Player targetPlayer = Bukkit.getPlayerExact(target.username());
+        if (targetPlayer == null) {
+            return; // Offline - nothing to notify.
+        }
+        targetPlayer.playSound(targetPlayer.getLocation(), org.bukkit.Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.0f);
+        targetPlayer.sendMessage(ChatColor.GOLD + "" + ChatColor.BOLD + "✦ " + ChatColor.YELLOW + "Your rank is now " + rank.name() + "!");
     }
 
     private void notifyGroupChange(UserSummary target, PermissionGroupSummary group, boolean added) {

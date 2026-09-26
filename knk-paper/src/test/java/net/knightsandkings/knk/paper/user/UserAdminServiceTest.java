@@ -269,46 +269,46 @@ class UserAdminServiceTest {
         assertSame(online, redrawn.get(0)[0]);
     }
 
-    // ===== premium tier switch (Player manager) =====
+    // ===== rank switch (Player manager) =====
 
     @Test
-    void setPremiumTierAddsTheNewTierThenRemovesTheOldOnes() {
+    void setRankAddsTheNewRankThenRemovesTheOldOnes() {
         PermissionGroupSummary royal = new PermissionGroupSummary(5, "Royal", 30, true, 1.2);
         PermissionGroupSummary noble = new PermissionGroupSummary(4, "Noble", 10, true);
         when(ranks.actorOutranks(42, 7)).thenReturn(CompletableFuture.completedFuture(true));
         when(acting.addGroupMembership(7, 5, null)).thenReturn(CompletableFuture.completedFuture(null));
         when(acting.removeGroupMembership(7, 4)).thenReturn(CompletableFuture.completedFuture(null));
 
-        assertTrue(service.setPremiumTier(staff, target, royal, List.of(noble)).join());
+        assertTrue(service.setRank(staff, target, royal, List.of(noble)).join());
 
         org.mockito.InOrder order = org.mockito.Mockito.inOrder(acting, users);
         order.verify(acting).addGroupMembership(7, 5, null);
         order.verify(acting).removeGroupMembership(7, 4);
         order.verify(users).refreshAsync(target.uuid());
-        verify(staff).sendMessage("§aSet Steve's premium tier to Royal (was Noble).");
+        verify(staff).sendMessage("§aSet Steve's rank to Royal (was Noble).");
     }
 
     @Test
-    void setPremiumTierNeverRemovesTheTierItAdds() {
+    void setRankNeverRemovesTheRankItAdds() {
         PermissionGroupSummary royal = new PermissionGroupSummary(5, "Royal", 30, true, 1.2);
         when(ranks.actorOutranks(42, 7)).thenReturn(CompletableFuture.completedFuture(true));
         when(acting.addGroupMembership(7, 5, null)).thenReturn(CompletableFuture.completedFuture(null));
 
-        assertTrue(service.setPremiumTier(staff, target, royal, List.of(royal)).join());
+        assertTrue(service.setRank(staff, target, royal, List.of(royal)).join());
 
         verify(acting, never()).removeGroupMembership(anyInt(), anyInt());
-        verify(staff).sendMessage("§aSet Steve's premium tier to Royal.");
+        verify(staff).sendMessage("§aSet Steve's rank to Royal.");
     }
 
     @Test
-    void setPremiumTierReportsAFailedRemovalAndStillRefreshes() {
+    void setRankReportsAFailedRemovalAndStillRefreshes() {
         PermissionGroupSummary royal = new PermissionGroupSummary(5, "Royal", 30, true, 1.2);
         PermissionGroupSummary noble = new PermissionGroupSummary(4, "Noble", 10, true);
         when(ranks.actorOutranks(42, 7)).thenReturn(CompletableFuture.completedFuture(true));
         when(acting.addGroupMembership(7, 5, null)).thenReturn(CompletableFuture.completedFuture(null));
         when(acting.removeGroupMembership(7, 4)).thenReturn(CompletableFuture.failedFuture(new RuntimeException("boom")));
 
-        assertFalse(service.setPremiumTier(staff, target, royal, List.of(noble)).join());
+        assertFalse(service.setRank(staff, target, royal, List.of(noble)).join());
 
         verify(users).refreshAsync(target.uuid());
         verify(staff).sendMessage(org.mockito.ArgumentMatchers.startsWith("§cFailed: "));

@@ -20,6 +20,7 @@ import net.knightsandkings.knk.paper.menu.MenuActionContext;
 import net.knightsandkings.knk.paper.menu.MenuContentSourceContext;
 import net.knightsandkings.knk.paper.menu.MenuFeature;
 import net.knightsandkings.knk.paper.menu.MenuFeatureRegistries;
+import net.knightsandkings.knk.paper.user.PlayerRanks;
 import net.knightsandkings.knk.paper.user.UserAdminService;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
@@ -79,8 +80,8 @@ public final class UserManagerMenuFeature implements MenuFeature {
 
     private static final Logger LOGGER = Logger.getLogger(UserManagerMenuFeature.class.getName());
     private static final int MAX_CACHED = 256;
-    /** {@code users.group} op a premium-tier click confirms into: replace the target's tier. */
-    static final String SET_TIER_OP = "set-tier";
+    /** {@code users.group} op a rank click confirms into: replace the target's rank. */
+    static final String SET_RANK_OP = "set-rank";
 
     private record TargetState(UserSummary user, Boolean outranks) {
     }
@@ -338,36 +339,44 @@ public final class UserManagerMenuFeature implements MenuFeature {
         PermissionGroupSummary group = groups.cachedOrEmpty().stream()
                 .filter(g -> groupId != null && g.id() == groupId)
                 .findFirst().orElse(null);
-        if (group == null || !Set.of("add", "remove", SET_TIER_OP).contains(op)) {
+        if (group == null || !Set.of("add", "remove", SET_RANK_OP).contains(op)) {
             player.sendMessage(ChatColor.RED + "That group is not available - reopen the menu.");
             return;
         }
         if (!admin.requireProperty(player, "group")) {
             return;
         }
-        if (group.isPremiumTier() && op.equals("add")) {
-            // A player holds one premium tier here: adding one is a switch, confirmed first.
-            requestTierSwitch(context, params, group);
+        if (!PlayerRanks.isRank(group)) {
+            // Staff and other non-rank groups: plain add/remove, next to whatever rank they hold.
+            withTarget(context, params, target -> admin.changeGroup(player, target, group, op.equals("add"), null));
             return;
         }
-        if (op.equals(SET_TIER_OP)) {
-            if (!group.isPremiumTier()) {
-                player.sendMessage(ChatColor.RED + group.name() + " is not a premium tier - reopen the menu.");
-                return;
+        // Ranks (Default + premium tiers): a player holds exactly one.
+        switch (op) {
+            case "add" -> requestRankSwitch(context, params, group);
+            case SET_RANK_OP -> withTarget(context, params, target -> switchRank(player, target, group));
+            default -> {
+                // Removing a rank (already confirmed by the seed's remove action) drops the player
+                // back to the free Default rank; Default itself can only be replaced, not removed.
+                PermissionGroupSummary defaultRank = PlayerRanks.findDefault(groups.cachedOrEmpty()).orElse(null);
+                if (PlayerRanks.isDefault(group)) {
+                    player.sendMessage(ChatColor.YELLOW + "Default is the base rank - pick another rank to replace it.");
+                } else if (defaultRank == null) {
+                    withTarget(context, params, target -> admin.changeGroup(player, target, group, false, null));
+                } else {
+                    withTarget(context, params, target -> switchRank(player, target, defaultRank));
+                }
             }
-            withTarget(context, params, target -> switchTier(player, target, group));
-            return;
         }
-        withTarget(context, params, target -> admin.changeGroup(player, target, group, op.equals("add"), null));
     }
 
     /**
-     * Clicking a premium tier the target doesn't hold: stores a {@code users.group set-tier}
-     * confirmation (shown by the header's Confirm/Cancel, condition {@code users.pending}) and
-     * repaints so those buttons appear right away. The seed binds the row to a plain "add"; doing
-     * the switch here keeps existing menu templates working without a re-seed.
+     * Clicking a rank the target doesn't hold: stores a {@code users.group set-rank} confirmation
+     * (shown by the header's Confirm/Cancel, condition {@code users.pending}) and repaints so those
+     * buttons appear right away. The seed binds the row to a plain "add"; doing the switch here
+     * keeps existing menu templates working without a re-seed.
      */
-    private void requestTierSwitch(MenuActionContext context, Map<String, String> params, PermissionGroupSummary tier) {
+    private void requestRankSwitch(MenuActionContext context, Map<String, String> params, PermissionGroupSummary rank) {
         Player player = context.player();
         Integer userId = parseId(params.get("userId"));
         TargetState state = userId != null ? targets.get(key(player.getUniqueId(), userId)) : null;
@@ -376,30 +385,31 @@ public final class UserManagerMenuFeature implements MenuFeature {
             return;
         }
         if (context.session() == null) {
-            throw new MenuActionException("users.group needs a menu session to confirm a premium tier switch");
+            throw new MenuActionException("users.group needs a menu session to confirm a rank switch");
         }
         UserSummary target = state.user();
-        String current = target.premiumTierName();
-        String prompt = "Set " + target.username() + "'s premium tier to " + tier.name()
-                + (current != null && !current.equalsIgnoreCase(tier.name()) ? " (replaces " + current + ")" : "")
+        // The API's premium tier, else the free rank they're on.
+        String current = target.premiumTierName() != null ? target.premiumTierName() : PlayerRanks.DEFAULT_RANK_NAME;
+        String prompt = "Set " + target.username() + "'s rank to " + rank.name()
+                + (!current.equalsIgnoreCase(rank.name()) ? " (replaces " + current + ")" : "")
                 + "? Click Confirm or Cancel.";
         context.session().setPendingConfirmation(new MenuSession.PendingConfirmation("users.group",
-                Map.of("userId", String.valueOf(userId), "groupId", String.valueOf(tier.id()), "op", SET_TIER_OP), prompt));
+                Map.of("userId", String.valueOf(userId), "groupId", String.valueOf(rank.id()), "op", SET_RANK_OP), prompt));
         player.sendMessage(ChatColor.YELLOW + prompt);
         if (context.menuService() != null) {
             context.menuService().refreshOpenMenu(player);
         }
     }
 
-    /** Confirmed switch: {@code tier} replaces every other active premium membership the target holds. */
-    private CompletableFuture<Boolean> switchTier(Player player, UserSummary target, PermissionGroupSummary tier) {
+    /** Confirmed switch: {@code rank} replaces every other active rank membership (Default or premium). */
+    private CompletableFuture<Boolean> switchRank(Player player, UserSummary target, PermissionGroupSummary rank) {
         return usersQueryApi.getGroupMemberships(target.id())
-                .thenCompose(memberships -> admin.setPremiumTier(player, target, tier, memberships.stream()
-                        .filter(m -> m.isActive() && m.isPremiumTier() && m.groupId() != tier.id())
-                        .map(m -> new PermissionGroupSummary(m.groupId(), m.groupName(), m.weight(), true))
+                .thenCompose(memberships -> admin.setRank(player, target, rank, memberships.stream()
+                        .filter(m -> m.isActive() && PlayerRanks.isRank(m) && m.groupId() != rank.id())
+                        .map(m -> new PermissionGroupSummary(m.groupId(), m.groupName(), m.weight(), m.isPremiumTier()))
                         .toList()))
                 .exceptionally(ex -> {
-                    LOGGER.log(Level.WARNING, "users.group set-tier: failed to load memberships", ex);
+                    LOGGER.log(Level.WARNING, "users.group set-rank: failed to load memberships", ex);
                     player.sendMessage(ChatColor.RED + "Failed to load " + target.username() + "'s groups: "
                             + UserAdminService.describeError(ex));
                     return false;
