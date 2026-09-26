@@ -145,6 +145,11 @@ public class TeleportRequestService {
                 requester.sendMessage(ChatColor.RED + "No online player named '" + target.getName() + "'.");
                 return;
             }
+            if (!targets.canSee(target, requester)) {
+                // Vanished while the checks ran.
+                requester.sendMessage(ChatColor.RED + "You're vanished - " + target.getName() + " can't see you.");
+                return;
+            }
             if (denial.isPresent()) {
                 requester.sendMessage(ChatColor.RED + (direction == Direction.TO_TARGET
                     ? denial.get().message()
