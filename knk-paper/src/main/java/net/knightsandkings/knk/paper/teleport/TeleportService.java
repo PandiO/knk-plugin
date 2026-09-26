@@ -45,7 +45,7 @@ import net.kyori.adventure.text.Component;
  * builds a {@link TeleportPlan} and calls {@link #start}. Steps:
  * <ol>
  *   <li><b>Guards</b> - every registered {@link TeleportRestriction} (freeze, region entry/exit,
- *       and the siege guards once the siege branch registers them), then for player teleports the
+ *       and the siege match guard {@code SiegeTeleportRestriction}), then for player teleports the
  *       combat tag and the cooldown.</li>
  *   <li><b>Warmup</b> (player teleports only): 5 s, 3 s with {@code knk.teleport.warmup.short},
  *       none with {@code knk.teleport.bypass.warmup}. Cancelled by a block move, damage, another
@@ -56,7 +56,8 @@ import net.kyori.adventure.text.Component;
  *       charges it (and it is refunded if the teleport then doesn't happen), safe spot
  *       (player teleports only - staff land exactly where they asked), then
  *       {@code teleportAsync(loc, TeleportCause.COMMAND)} - never the default {@code PLUGIN} cause,
- *       so the region and siege-lockdown listeners see these teleports like vanilla ones.</li>
+ *       so the region listener sees these teleports like vanilla ones (the siege's own teleports use
+ *       {@code PLUGIN} and stay outside the engine).</li>
  *   <li><b>After</b>: cooldown (player teleports), a log line (INFO for staff teleports), and for
  *       staff teleports an audit entry in the web API ({@link TeleportAuditor}, Phase 2).</li>
  * </ol>

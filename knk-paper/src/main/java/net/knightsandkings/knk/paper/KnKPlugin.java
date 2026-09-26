@@ -1311,8 +1311,8 @@ public class KnKPlugin extends JavaPlugin {
 
     /**
      * Add a teleport guard (docs/specs/teleport/DESIGN.md §4 D9) - how the siege minigame blocks
-     * teleports of match members and into locked siege areas without the teleport engine depending
-     * on the siege code. No-op when the teleport engine didn't start.
+     * teleports of match members ({@code SiegeTeleportRestriction}, registered in initializeSiege)
+     * without the teleport engine depending on the siege code. No-op when the teleport engine didn't start.
      */
     public void registerTeleportRestriction(net.knightsandkings.knk.paper.teleport.TeleportRestriction restriction) {
         if (teleportService != null) {
@@ -1322,8 +1322,8 @@ public class KnKPlugin extends JavaPlugin {
 
     /**
      * Keep some deaths from giving a {@code /back} (docs/specs/teleport Phase 7, developer decision Q5:
-     * not after a siege death) - the siege branch registers
-     * {@code p -> siegeService.activeLobbyOf(p.getUniqueId()).isPresent()} here, next to its teleport
+     * not after a siege death) - initializeSiege registers
+     * {@code SiegeTeleportRestriction.backDeathExclusion()} here, next to the siege teleport
      * restriction. No-op when the teleport engine didn't start.
      */
     public void registerBackDeathExclusion(net.knightsandkings.knk.paper.teleport.BackDeathExclusion exclusion) {
@@ -1545,6 +1545,13 @@ public class KnKPlugin extends JavaPlugin {
         // Hourly salary and rank refreshes reset scoreboards; siege members keep their match board.
         net.knightsandkings.knk.paper.utils.ScoreboardUtil.setKeepOwnScoreboard(
             p -> siegeService.activeLobbyOf(p.getUniqueId()).isPresent());
+
+        // Teleport guards (docs/specs/teleport/DESIGN.md §4 D8/D9): no /tp, /tpa, /spawn, /warp, menu warp
+        // or /back moves a member while away in a siege, and a match death gives no /back. The siege's
+        // own teleports bypass the engine (SiegeBukkit.teleport, cause PLUGIN).
+        var siegeTeleports = net.knightsandkings.knk.paper.siege.SiegeTeleportRestriction.of(siegeService);
+        registerTeleportRestriction(siegeTeleports);
+        registerBackDeathExclusion(siegeTeleports.backDeathExclusion());
 
         siegeService.start();
         getLogger().info("Siege runtime initialized");

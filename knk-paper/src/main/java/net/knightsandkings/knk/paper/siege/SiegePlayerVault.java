@@ -223,7 +223,7 @@ public final class SiegePlayerVault {
     }
 
     private void teleportBack(Player player, Snapshot snapshot) {
-        player.teleport(resolveLocation(snapshot.returnLocation()));
+        SiegeBukkit.teleport(player, resolveLocation(snapshot.returnLocation()));
     }
 
     private Location resolveLocation(Location location) {

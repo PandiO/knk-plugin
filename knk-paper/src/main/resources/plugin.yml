@@ -664,7 +664,7 @@ permissions:
     default: false
 
   knk.siege.bypass.commands:
-    description: Run any command while in a siege match (bypasses SiegeConfiguration.AllowedCommands, DESIGN §6.9)
+    description: Run any command while in a siege match (bypasses SiegeConfiguration.AllowedCommands, DESIGN §6.9), and teleport yourself out of it (/tp, /spawn, /warp, /tpa, /back). Staff still can't move another member - /siege admin kick first.
     default: false
 
   knk.menu:
