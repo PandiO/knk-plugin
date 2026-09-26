@@ -3,6 +3,7 @@ package net.knightsandkings.knk.paper.commands;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.stream.Stream;
 
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
@@ -10,39 +11,40 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
 import org.bukkit.entity.Player;
 
+import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport;
 import net.knightsandkings.knk.paper.commands.support.TargetRankCheck;
+import net.knightsandkings.knk.paper.inventory.OfflineStorageAccess;
 
 /**
  * {@code /inventory <open|clear> <player>} (aliases {@code /inv}, {@code /invsee}) - port of v2's
- * {@code Inventory} (docs/specs/legacy/commands-v2.md §7, KNG-9). Both subcommands were disabled in
- * v2 (its offline NMS lookup broke in the 1.16→1.21 update); here they work on online players:
+ * {@code Inventory} (docs/specs/legacy/commands-v2.md §7, KNG-9; offline players KNG-13).
  * <ul>
- *   <li>{@code open|see|check <player>} opens the player's live inventory ({@value #NODE_OPEN}).
- *       The viewer can move items in and out, as with v2's ender chest {@code open}.</li>
- *   <li>{@code clear <player> confirm} empties it, armour and off-hand included ({@value #NODE_CLEAR}).
- *       Without {@code confirm} it only says what would happen - there is no undo.</li>
+ *   <li>{@code open|see|check <player>} opens the player's inventory ({@value #NODE_OPEN}): an online
+ *       player's live inventory, an offline player's saved one (written back when the view closes,
+ *       {@link OfflineStorageAccess}). The viewer can move items in and out.</li>
+ *   <li>{@code clear <player> confirm} empties it, armour and off-hand included ({@value #NODE_CLEAR}),
+ *       online or offline. Without {@code confirm} it only says what would happen - there is no undo.</li>
  * </ul>
- * Both are rank-checked. Offline players are a separate issue (KNG-13). v2's dead {@code clear all}
- * branch isn't ported.
+ * Both are rank-checked, except clearing your own. v2's dead {@code clear all} branch isn't ported.
  */
 public class InventoryCommand implements TabExecutor {
 
     public static final String NODE_OPEN = "knk.inventory.open";
     public static final String NODE_CLEAR = "knk.inventory.clear";
 
-    // Offline support is KNG-13 (persistence approach still to be decided).
-    static final String OFFLINE_HINT = "Offline inventories can't be viewed or cleared yet.";
     private static final List<String> OPEN_ALIASES = List.of("open", "see", "check");
     private static final String CLEAR = "clear";
     private static final String CONFIRM = "confirm";
 
     private final PlayerCommandSupport support;
     private final TargetRankCheck rankCheck;
+    private final OfflineStorageAccess offlineStorage;
 
-    public InventoryCommand(PlayerCommandSupport support, TargetRankCheck rankCheck) {
+    public InventoryCommand(PlayerCommandSupport support, TargetRankCheck rankCheck, OfflineStorageAccess offlineStorage) {
         this.support = support;
         this.rankCheck = rankCheck;
+        this.offlineStorage = offlineStorage;
     }
 
     @Override
@@ -67,50 +69,52 @@ public class InventoryCommand implements TabExecutor {
         if (viewer == null) {
             return;
         }
-        Player target = support.requireOnlinePlayer(sender, targetName, OFFLINE_HINT);
-        if (target == null) {
-            return;
-        }
-        if (PlayerCommandSupport.isSelf(viewer, target)) {
+        if (targetName.equalsIgnoreCase(viewer.getName())) {
             viewer.sendMessage(ChatColor.RED + "That's your own inventory - press your inventory key.");
             return;
         }
-        support.whenAllowed(viewer, NODE_OPEN, () -> rankCheck.whenOutranks(viewer, target, () -> {
-            if (!target.isOnline()) {
-                viewer.sendMessage(ChatColor.RED + target.getName() + " went offline.");
-                return;
+        support.whenAllowed(viewer, NODE_OPEN, () -> rankCheck.whenOutranks(viewer, targetName, target -> {
+            Player online = support.onlinePlayer(target.username());
+            if (online != null) {
+                viewer.openInventory(online.getInventory());
+                viewer.sendMessage(ChatColor.GRAY + "Opened " + ChatColor.WHITE + online.getName() + ChatColor.GRAY + "'s inventory.");
+            } else if (target.uuid() == null) {
+                viewer.sendMessage(ChatColor.RED + "No player found named '" + targetName + "'.");
+            } else {
+                offlineStorage.open(viewer, target.uuid(), target.username(), OfflineStorageAccess.Kind.INVENTORY);
             }
-            viewer.openInventory(target.getInventory());
-            viewer.sendMessage(ChatColor.GRAY + "Opened " + ChatColor.WHITE + target.getName() + ChatColor.GRAY + "'s inventory.");
         }));
     }
 
     private void handleClear(CommandSender sender, String targetName, boolean confirmed) {
-        Player target = support.requireOnlinePlayer(sender, targetName, OFFLINE_HINT);
-        if (target == null) {
+        if (!confirmed) {
+            boolean self = sender instanceof Player player && player.getName().equalsIgnoreCase(targetName);
+            sender.sendMessage(ChatColor.YELLOW + "This empties " + (self ? "your" : targetName + "'s")
+                    + " whole inventory, armour included, and can't be undone. Run "
+                    + ChatColor.WHITE + "/inventory clear " + targetName + " confirm" + ChatColor.YELLOW + " to go ahead.");
             return;
         }
-        boolean self = PlayerCommandSupport.isSelf(sender, target);
-        Runnable clear = () -> {
-            if (!confirmed) {
-                sender.sendMessage(ChatColor.YELLOW + "This empties " + (self ? "your" : target.getName() + "'s")
-                        + " whole inventory, armour included, and can't be undone. Run "
-                        + ChatColor.WHITE + "/inventory clear " + target.getName() + " confirm" + ChatColor.YELLOW + " to go ahead.");
-                return;
-            }
-            if (!target.isOnline()) {
-                sender.sendMessage(ChatColor.RED + target.getName() + " went offline.");
-                return;
-            }
-            target.getInventory().clear();
-            if (self) {
+        if (sender instanceof Player player && player.getName().equalsIgnoreCase(targetName)) {
+            support.whenAllowed(sender, NODE_CLEAR, () -> {
+                player.getInventory().clear();
                 sender.sendMessage(ChatColor.GREEN + "Your inventory was cleared.");
-                return;
-            }
-            sender.sendMessage(ChatColor.GREEN + "Cleared " + ChatColor.WHITE + target.getName() + ChatColor.GREEN + "'s inventory.");
-            target.sendMessage(ChatColor.RED + "Your inventory was cleared by " + ChatColor.WHITE + sender.getName() + ChatColor.RED + ".");
-        };
-        support.whenAllowed(sender, NODE_CLEAR, self ? clear : () -> rankCheck.whenOutranks(sender, target, clear));
+            });
+            return;
+        }
+        support.whenAllowed(sender, NODE_CLEAR, () -> rankCheck.whenOutranks(sender, targetName, target -> clearOther(sender, targetName, target)));
+    }
+
+    private void clearOther(CommandSender sender, String targetName, UserSummary target) {
+        Player online = support.onlinePlayer(target.username());
+        if (online != null) {
+            online.getInventory().clear();
+            sender.sendMessage(ChatColor.GREEN + "Cleared " + ChatColor.WHITE + online.getName() + ChatColor.GREEN + "'s inventory.");
+            online.sendMessage(ChatColor.RED + "Your inventory was cleared by " + ChatColor.WHITE + sender.getName() + ChatColor.RED + ".");
+        } else if (target.uuid() == null) {
+            sender.sendMessage(ChatColor.RED + "No player found named '" + targetName + "'.");
+        } else {
+            offlineStorage.clearInventory(sender, target.uuid(), target.username());
+        }
     }
 
     private void sendUsage(CommandSender sender) {
@@ -121,7 +125,7 @@ public class InventoryCommand implements TabExecutor {
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
             String prefix = args[0].toLowerCase(Locale.ROOT);
-            return java.util.stream.Stream.of("open", "clear").filter(s -> s.startsWith(prefix)).toList();
+            return Stream.of("open", "clear").filter(s -> s.startsWith(prefix)).toList();
         }
         String sub = args[0].toLowerCase(Locale.ROOT);
         if (args.length == 2 && (OPEN_ALIASES.contains(sub) || CLEAR.equals(sub))) {
