@@ -19,6 +19,8 @@ import net.knightsandkings.knk.api.impl.DomainsQueryApiImpl;
 import net.knightsandkings.knk.api.impl.UsersQueryApiImpl;
 import net.knightsandkings.knk.api.impl.UsersCommandApiImpl;
 import net.knightsandkings.knk.api.impl.PlayerNotificationsApiImpl;
+import net.knightsandkings.knk.api.impl.UserIgnoresApiImpl;
+import net.knightsandkings.knk.api.impl.PrivateMessageLogApiImpl;
 import net.knightsandkings.knk.api.impl.UserAccountApiImpl;
 import net.knightsandkings.knk.api.impl.WorldTasksApiImpl;
 import net.knightsandkings.knk.api.impl.GateStructuresApiImpl;
@@ -50,6 +52,8 @@ import net.knightsandkings.knk.core.ports.api.DomainsQueryApi;
 import net.knightsandkings.knk.core.ports.api.UsersQueryApi;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.core.ports.api.PlayerNotificationsApi;
+import net.knightsandkings.knk.core.ports.api.UserIgnoresApi;
+import net.knightsandkings.knk.core.ports.api.PrivateMessageLogApi;
 import net.knightsandkings.knk.core.ports.api.UserAccountApi;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
 import net.knightsandkings.knk.api.GateStructuresApi;
@@ -68,6 +72,7 @@ import net.knightsandkings.knk.core.ports.api.SiegeScenariosQueryApi;
 import net.knightsandkings.knk.core.ports.api.TitleBracketsQueryApi;
 import net.knightsandkings.knk.core.ports.api.KitsQueryApi;
 import net.knightsandkings.knk.core.ports.api.KitsCommandApi;
+import net.knightsandkings.knk.core.ports.api.CurrencyApi;
 import net.knightsandkings.knk.core.ports.api.RegionsCommandApi;
 import okhttp3.OkHttpClient;
 
@@ -103,6 +108,8 @@ public class KnkApiClient {
     private final UsersQueryApi usersQueryApi;
     private final UsersCommandApi usersCommandApi;
     private final PlayerNotificationsApi playerNotificationsApi;
+    private final UserIgnoresApi userIgnoresApi;
+    private final PrivateMessageLogApi privateMessageLogApi;
     private final UserAccountApi userAccountApi;
     private final WorldTasksApi worldTasksApi;
     private final GateStructuresApi gateStructuresApi;
@@ -124,6 +131,7 @@ public class KnkApiClient {
     private final KitsCommandApi kitsCommandApi;
     private final net.knightsandkings.knk.core.ports.api.LootboxesQueryApi lootboxesQueryApi;
     private final net.knightsandkings.knk.core.ports.api.LootboxesCommandApi lootboxesCommandApi;
+    private final CurrencyApi currencyApi;
 
     private KnkApiClient(
         String baseUrl,
@@ -153,6 +161,8 @@ public class KnkApiClient {
         this.usersQueryApi = new UsersQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.usersCommandApi = new UsersCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.playerNotificationsApi = new PlayerNotificationsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.userIgnoresApi = new UserIgnoresApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.privateMessageLogApi = new PrivateMessageLogApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.userAccountApi = new UserAccountApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.worldTasksApi = new WorldTasksApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.gateStructuresApi = new GateStructuresApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -171,6 +181,7 @@ public class KnkApiClient {
         this.titleBracketsQueryApi = new TitleBracketsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.kitsQueryApi = new KitsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.kitsCommandApi = new KitsCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.currencyApi = new net.knightsandkings.knk.api.impl.CurrencyApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.categoriesQueryApi = new net.knightsandkings.knk.api.impl.CategoriesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.lootboxesQueryApi = new net.knightsandkings.knk.api.impl.LootboxesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.lootboxesCommandApi = new net.knightsandkings.knk.api.impl.LootboxesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -198,6 +209,11 @@ public class KnkApiClient {
 
     public KitsQueryApi getKitsQueryApi() {
         return kitsQueryApi;
+    }
+
+    /** Player currency routes: balances, /baltop, /pay and history (currency ledger, KNG-21 Phase 3). */
+    public CurrencyApi getCurrencyApi() {
+        return currencyApi;
     }
 
     public KitsCommandApi getKitsCommandApi() {
@@ -254,6 +270,16 @@ public class KnkApiClient {
 
     public PlayerNotificationsApi getPlayerNotificationsApi() {
         return playerNotificationsApi;
+    }
+
+    /** KNG-18 Phase 2: players' ignore lists. */
+    public UserIgnoresApi getUserIgnoresApi() {
+        return userIgnoresApi;
+    }
+
+    /** KNG-18 Phase 3: the server-side private message log. */
+    public PrivateMessageLogApi getPrivateMessageLogApi() {
+        return privateMessageLogApi;
     }
     
     public UserAccountApi getUserAccountApi() {

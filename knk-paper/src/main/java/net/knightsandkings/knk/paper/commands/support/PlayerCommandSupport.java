@@ -16,6 +16,7 @@ import org.bukkit.ChatColor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
+import net.knightsandkings.knk.core.domain.permissions.PermissionDecision;
 import net.knightsandkings.knk.paper.permissions.KnkPermissible;
 
 /**
@@ -47,25 +48,32 @@ public final class PlayerCommandSupport {
         this.onlinePlayers = Objects.requireNonNull(onlinePlayers, "onlinePlayers must not be null");
     }
 
+    /** Told instead of "no permission" when the permission service couldn't be asked. */
+    public static final String UNAVAILABLE_MESSAGE =
+            ChatColor.RED + "Your permissions can't be checked right now (the KnK service is unreachable) - try again in a moment.";
+
     /**
      * Runs {@code onAllowed} on the main thread if {@code sender} holds {@code node}; otherwise tells
-     * the sender they lack permission.
+     * the sender they lack permission - or, when the check couldn't be made (API unreachable),
+     * that it couldn't be checked ({@link KnkPermissible#checkAsync}).
      */
     public void whenAllowed(CommandSender sender, String node, Runnable onAllowed) {
         if (!(sender instanceof Player player)) {
             onAllowed.run();
             return;
         }
-        knkPermissible.hasPermissionAsync(player, node)
+        knkPermissible.checkAsync(player, node)
                 .exceptionally(ex -> {
                     LOGGER.log(Level.WARNING, "Permission check failed for " + player.getName() + ", node " + node, ex);
-                    return false;
+                    return PermissionDecision.UNAVAILABLE;
                 })
-                .thenAccept(allowed -> mainThread.execute(() -> {
-                    if (Boolean.TRUE.equals(allowed)) {
+                .thenAccept(decision -> mainThread.execute(() -> {
+                    if (decision == PermissionDecision.ALLOWED) {
                         onAllowed.run();
-                    } else {
+                    } else if (decision == PermissionDecision.DENIED) {
                         sender.sendMessage(ChatColor.RED + "You don't have permission to do that.");
+                    } else {
+                        sender.sendMessage(UNAVAILABLE_MESSAGE);
                     }
                 }));
     }

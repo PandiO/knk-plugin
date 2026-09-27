@@ -174,6 +174,8 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.core.dataaccess.TitleBracketsDataAccess titleBracketsDataAccess;
     private net.knightsandkings.knk.core.dataaccess.PermissionGroupsDataAccess permissionGroupsDataAccess;
     private net.knightsandkings.knk.paper.user.UserAdminService userAdminService;
+    // Currency ledger Phase 3: /pay, /balance, /baltop, /transactions and /knk user <player> history.
+    private net.knightsandkings.knk.paper.currency.PlayerCurrencyService playerCurrencyService;
     private net.knightsandkings.knk.paper.user.SalaryPayoutScheduler salaryPayoutScheduler;
     // Lootboxes Phase 3 (docs/specs/lootboxes/IMPLEMENTATION_PLAN.md)
     private net.knightsandkings.knk.paper.lootbox.LootboxRuntime lootboxRuntime;
@@ -188,6 +190,12 @@ public class KnKPlugin extends JavaPlugin {
     private ModeService modeService;
     private net.knightsandkings.knk.paper.user.AdminFreezeManager adminFreezeManager;
     private net.knightsandkings.knk.paper.user.MessagingService messagingService;
+    private net.knightsandkings.knk.paper.user.SpyService spyService;
+    private net.knightsandkings.knk.paper.user.IgnoreService ignoreService;
+    private net.knightsandkings.knk.paper.user.PrivateMessageLogger privateMessageLogger;
+    private net.knightsandkings.knk.paper.user.ApiPrivateMessageLog apiPrivateMessageLog;
+    private net.knightsandkings.knk.paper.chat.PrivateMessageCommandLogFilter privateMessageCommandLogFilter;
+    private net.knightsandkings.knk.paper.commands.support.VisiblePlayers visiblePlayers;
     private net.knightsandkings.knk.paper.commands.support.RankHierarchy rankHierarchy;
     private GradesDataAccess gradesDataAccess;
     private TagsDataAccess tagsDataAccess;
@@ -487,7 +495,7 @@ public class KnKPlugin extends JavaPlugin {
             this.joinLoadingGuard = new JoinLoadingGuard(this, knkPermissible);
             this.modeService = new ModeService(this, knkPermissible, cacheManager.getUserCache(), usersCommandApi);
             this.adminFreezeManager = new net.knightsandkings.knk.paper.user.AdminFreezeManager();
-            this.messagingService = new net.knightsandkings.knk.paper.user.MessagingService();
+            initPrivateMessaging();
             this.rankHierarchy = new net.knightsandkings.knk.paper.commands.support.RankHierarchy(usersQueryApi);
             this.minecraftMaterialRefsDataAccess = dataAccessFactory.createMinecraftMaterialRefsDataAccess(
                 config.cache().ttl(),
@@ -578,6 +586,27 @@ public class KnKPlugin extends JavaPlugin {
             if (playerNotificationPoller != null) {
                 playerNotificationPoller.setRankChangedHandler(userAdminService::resyncDisplay);
             }
+            // Currency ledger Phase 3: player payments. Name lookups are vanish-safe (VisiblePlayers).
+            var currencySettings = net.knightsandkings.knk.paper.currency.CurrencySettings.from(getConfig());
+            this.playerCurrencyService = new net.knightsandkings.knk.paper.currency.PlayerCurrencyService(
+                MenuService.mainThreadExecutor(this), apiClient.getCurrencyApi(), usersDataAccess, cacheManager.getUserCache(),
+                knkPermissible::checkAsync,
+                new net.knightsandkings.knk.paper.currency.VisiblePlayers(org.bukkit.Bukkit::getPlayerExact, org.bukkit.Bukkit::getOnlinePlayers),
+                currencySettings, java.time.Clock.systemUTC(),
+                // The /pay confirmation expiry notice (main thread; cancelled when settled or on quit).
+                (delay, task) -> getServer().getScheduler().runTaskLater(this, task, Math.max(1L, delay.toMillis() / 50L))::cancel
+            );
+            if (playerNotificationPoller != null) {
+                // "You received N coins from X" - right away when online, else on the next join.
+                var paymentHandler = new net.knightsandkings.knk.paper.currency.PaymentNotificationHandler(
+                    currencySettings, uuid -> usersDataAccess.refreshAsync(uuid));
+                playerNotificationPoller.setPaymentReceivedHandler(paymentHandler::handle);
+                // Currency Phase 5: anomaly alerts for online staff with knk.admin.currency.alerts.
+                var alertNotifier = new net.knightsandkings.knk.paper.currency.CurrencyAlertNotifier(
+                    currencySettings, knkPermissible::checkAsync, org.bukkit.Bukkit::getOnlinePlayers,
+                    MenuService.mainThreadExecutor(this));
+                playerNotificationPoller.setCurrencyAlertHandler(alertNotifier::handle);
+            }
             List<MenuFeature> menuFeatures = List.of(
                 registries -> {
                     MenuVariableContext.registerDefaults(registries.variables());
@@ -599,7 +628,7 @@ public class KnKPlugin extends JavaPlugin {
                     permissionGroupsDataAccess, usersQueryApi, cacheManager.getUserCache()),
                 new net.knightsandkings.knk.paper.menu.content.UserManagerMenuFeature(
                     userAdminService, usersQueryApi, cacheManager.getUserCache(), titleBracketsDataAccess,
-                    permissionGroupsDataAccess, org.bukkit.Bukkit::getOnlinePlayers),
+                    permissionGroupsDataAccess, org.bukkit.Bukkit::getOnlinePlayers, this::askStaffReason),
                 // Siege Phase 8b: the siege menus. SiegeService is created later (initializeSiege),
                 // so the feature looks it up on every call.
                 new net.knightsandkings.knk.paper.siege.SiegeMenuFeature(() -> siegeService)
@@ -793,6 +822,21 @@ public class KnKPlugin extends JavaPlugin {
         }
     }
 
+    /**
+     * The Player manager's reason prompt for staged balance changes (currency Phase 4, D9): one line
+     * of chat through ChatCaptureManager, answered on the main thread (chat arrives off it).
+     */
+    private boolean askStaffReason(org.bukkit.entity.Player player, String prompt,
+                                   java.util.function.Consumer<String> onReason, Runnable onCancel) {
+        ChatCaptureManager capture = this.chatCaptureManager;
+        if (capture == null) {
+            return false;
+        }
+        java.util.concurrent.Executor main = MenuService.mainThreadExecutor(this);
+        capture.startTextCapture(player, prompt, text -> main.execute(() -> onReason.accept(text)), () -> main.execute(onCancel));
+        return true;
+    }
+
     @Override
     public void onDisable() {
         // Siege first (DESIGN §5.1/§9.2): stops every lobby with SERVER_RESTART, which aborts running
@@ -844,6 +888,10 @@ public class KnKPlugin extends JavaPlugin {
             cacheManager.logMetrics();
             cacheManager.clearAll();
         }
+        if (privateMessageLogger != null) {
+            // Before the API client: the API sink sends what is queued (or spools it) on close.
+            privateMessageLogger.close();
+        }
         if (apiClient != null) {
             getLogger().info("Shutting down API client...");
             apiClient.shutdown();
@@ -854,7 +902,78 @@ public class KnKPlugin extends JavaPlugin {
         if (regionLookupExecutor != null) {
             regionLookupExecutor.shutdownNow();
         }
+        if (privateMessageCommandLogFilter != null) {
+            privateMessageCommandLogFilter.uninstall();
+        }
         getLogger().info("KnightsAndKings Plugin Disabled!");
+    }
+
+    /**
+     * KNG-18 Phase 1 (docs/specs/private-messages/DESIGN.md §3.3): /msg, /reply, social spy and the
+     * local PM log; Phase 2: ignore lists; Phase 3: knk-web-api's PM log and the command-log filter.
+     * Needs knkPermissible, adminFreezeManager, the user cache and the API client.
+     */
+    private void initPrivateMessaging() {
+        KnkConfig.PrivateMessagesConfig pmConfig = config.privateMessages();
+        java.time.Clock clock = java.time.Clock.systemDefaultZone();
+        this.visiblePlayers = net.knightsandkings.knk.paper.commands.support.VisiblePlayers.bukkit();
+        this.spyService = new net.knightsandkings.knk.paper.user.SpyService(
+            knkPermissible, new org.bukkit.NamespacedKey(this, "socialspy"), org.bukkit.Bukkit::getOnlinePlayers);
+        spyService.start(this, pmConfig.spyRefreshSeconds());
+        this.ignoreService = new net.knightsandkings.knk.paper.user.IgnoreService(
+            apiClient.getUserIgnoresApi(),
+            uuid -> cacheManager.getUserCache().getStale(uuid)
+                .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null),
+            uuid -> {
+                org.bukkit.entity.Player online = org.bukkit.Bukkit.getPlayer(uuid);
+                return online != null && online.isOnline();
+            },
+            clock);
+        // Players already online after a reload: load their lists (joins load their own).
+        getServer().getScheduler().runTaskLater(this, () -> org.bukkit.Bukkit.getOnlinePlayers()
+            .forEach(online -> ignoreService.load(online.getUniqueId())), 20L);
+        java.util.List<net.knightsandkings.knk.paper.user.PrivateMessageLogger> pmLogSinks = new java.util.ArrayList<>();
+        if (pmConfig.log().localEnabled()) {
+            var localLog = new net.knightsandkings.knk.paper.user.LocalFilePrivateMessageLog(
+                getDataFolder().toPath().resolve("logs"), pmConfig.log().localRetentionDays(), clock);
+            localLog.start();
+            pmLogSinks.add(localLog);
+        }
+        // Phase 3: knk-web-api's PM log (POST api/private-message-log/batch needs the service key).
+        if (pmConfig.log().apiEnabled()) {
+            this.apiPrivateMessageLog = new net.knightsandkings.knk.paper.user.ApiPrivateMessageLog(
+                new net.knightsandkings.knk.core.messaging.PrivateMessageLogShipper(
+                    apiClient.getPrivateMessageLogApi(),
+                    getDataFolder().toPath().resolve("private-messages-spool.jsonl"),
+                    net.knightsandkings.knk.core.messaging.PrivateMessageLogShipper.DEFAULT_CAPACITY,
+                    net.knightsandkings.knk.core.messaging.PrivateMessageLogShipper.DEFAULT_BATCH_SIZE,
+                    java.time.Duration.ofSeconds(pmConfig.log().flushSeconds()),
+                    clock));
+            apiPrivateMessageLog.start();
+            pmLogSinks.add(apiPrivateMessageLog);
+            if (!"apikey".equalsIgnoreCase(config.api().auth().type())) {
+                getLogger().warning("private-messages.log.api-enabled is on but api.auth.type is not apikey: knk-web-api "
+                    + "will refuse the PM log (401) and messages will pile up in the queue.");
+            }
+        }
+        this.privateMessageLogger = net.knightsandkings.knk.paper.user.PrivateMessageLogger.all(pmLogSinks);
+        // Only with a PM log in place: otherwise the server log would be the only record.
+        if (pmConfig.log().filterCommandLog() && !pmLogSinks.isEmpty()) {
+            var filter = new net.knightsandkings.knk.paper.chat.PrivateMessageCommandLogFilter();
+            if (filter.install()) {
+                this.privateMessageCommandLogFilter = filter;
+                getLogger().info("Private messages are filtered out of the server command log");
+            }
+        }
+        this.messagingService = new net.knightsandkings.knk.paper.user.MessagingService(
+            pmConfig, knkPermissible, adminFreezeManager, spyService, privateMessageLogger, ignoreService, visiblePlayers,
+            // Same rank colour as the player's tab-list name (KNG-7); cache-only checks, display only.
+            player -> net.knightsandkings.knk.paper.utils.TabListTeam.resolve(
+                knkPermissible.hasPermission(player, ModeService.OWNER_NODE),
+                knkPermissible.hasPermission(player, ModeService.STAFF_NODE),
+                cacheManager.getUserCache().getStale(player.getUniqueId()).orElse(null)).color(),
+            org.bukkit.Bukkit::getConsoleSender, MenuService.mainThreadExecutor(this), clock
+        );
     }
 
     private void registerEvents(WorldGuardRegionTracker regionTracker) {
@@ -862,16 +981,32 @@ public class KnKPlugin extends JavaPlugin {
         // Event registration moved to onEnable after region transition service setup
 
         pluginManager.registerEvents(new WorldGuardRegionListener(regionTracker), this);
-        pluginManager.registerEvents(new PlayerListener(usersDataAccess, townsDataAccess, this.getCacheManager(), knkPermissible, usersCommandApi, kitsCommandApi, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess), this);
-        pluginManager.registerEvents(new UserAccountListener(this, userManager, joinLoadingGuard, config.messages(), getLogger()), this);
+        pluginManager.registerEvents(new PlayerListener(usersDataAccess, townsDataAccess, this.getCacheManager(), knkPermissible, usersCommandApi, kitsCommandApi, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, ignoreService), this);
+        if (playerCurrencyService != null) {
+            // Drops a leaving player's open /pay confirmation and its expiry notice.
+            pluginManager.registerEvents(playerCurrencyService, this);
+        }
+        pluginManager.registerEvents(new UserAccountListener(this, userManager, joinLoadingGuard, config.messages(), getLogger(), playerCurrencyService), this);
         getLogger().info("Registered UserAccountListener for account management");
         pluginManager.registerEvents(new JoinLoadingRestrictionListener(joinLoadingGuard), this);
         pluginManager.registerEvents(new ModeListener(modeService), this);
         getLogger().info("Registered ModeListener for owner/staff mode restore");
         pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.AdminFreezeListener(this, adminFreezeManager, usersDataAccess), this);
         getLogger().info("Registered AdminFreezeListener for /freeze enforcement");
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.PrivateMessageSessionListener(
+            this, messagingService, spyService, ignoreService), this);
+        if (config.privateMessages().blockVanillaCommands()) {
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.VanillaMessagingBlockListener(), this);
+            getLogger().info("Registered VanillaMessagingBlockListener (/minecraft:msg|tell|w -> /msg; /teammsg, /tm, /me off)");
+        }
     }
     
+    /** Private messages waiting for knk-web-api's PM log (/knk health); -1 when that sink is off. */
+    public int privateMessageLogQueueDepth() {
+        var apiLog = apiPrivateMessageLog;
+        return apiLog == null ? -1 : apiLog.queueDepth();
+    }
+
     /**
      * Returns the cache manager for accessing cache statistics.
      *
@@ -932,7 +1067,8 @@ public class KnKPlugin extends JavaPlugin {
                 serverId,
                 menuService,
                 apiClient.getClansQueryApi(),
-                userAdminService
+                userAdminService,
+                playerCurrencyService
             );
             if (lootboxAdminCommand != null) {
                 var lootboxAdmin = lootboxAdminCommand;
@@ -976,8 +1112,14 @@ public class KnKPlugin extends JavaPlugin {
         registerSimpleCommand("freeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(userAdminService, true));
         registerSimpleCommand("unfreeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(userAdminService, false));
         registerSimpleCommand("staffchat", new net.knightsandkings.knk.paper.commands.StaffChatCommand());
-        registerSimpleCommand("msg", new net.knightsandkings.knk.paper.commands.MessageCommand(messagingService));
-        registerSimpleCommand("reply", new net.knightsandkings.knk.paper.commands.ReplyCommand(messagingService));
+        registerTabCommand("msg", new net.knightsandkings.knk.paper.commands.MessageCommand(messagingService, visiblePlayers));
+        registerTabCommand("reply", new net.knightsandkings.knk.paper.commands.ReplyCommand(messagingService));
+        registerTabCommand("socialspy", new net.knightsandkings.knk.paper.commands.SocialSpyCommand(
+            new net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport(
+                knkPermissible, MenuService.mainThreadExecutor(this),
+                org.bukkit.Bukkit::getPlayerExact, org.bukkit.Bukkit::getOnlinePlayers),
+            spyService, getLogger()));
+        registerIgnoreCommands();
 
         registerSimpleCommand("kit", new net.knightsandkings.knk.paper.commands.KitCommand(
             this,
@@ -992,7 +1134,30 @@ public class KnKPlugin extends JavaPlugin {
         // Content port CP1: /menu opens the InventoryMenu hub (docs/specs/inventory-menu/CONTENT_PORT_PLAN.md §3).
         registerSimpleCommand("menu", new net.knightsandkings.knk.paper.commands.MenuCommand(() -> menuService));
 
+        // Currency ledger Phase 3 (docs/specs/currency-payments/DESIGN.md §3.6).
+        if (playerCurrencyService != null) {
+            registerTabCommand("pay", new net.knightsandkings.knk.paper.commands.PayCommand(playerCurrencyService));
+            registerTabCommand("balance", new net.knightsandkings.knk.paper.commands.BalanceCommand(playerCurrencyService));
+            registerTabCommand("baltop", new net.knightsandkings.knk.paper.commands.BaltopCommand(playerCurrencyService));
+            registerTabCommand("transactions", new net.knightsandkings.knk.paper.commands.TransactionsCommand(playerCurrencyService));
+        } else {
+            getLogger().warning("/pay, /balance, /baltop and /transactions not registered - currency service failed to initialize");
+        }
+
         registerPlayerCommands();
+    }
+
+    /** KNG-18 Phase 2: /ignore [player] and /unignore <player> (docs/specs/private-messages/DESIGN.md §3.3.5). */
+    private void registerIgnoreCommands() {
+        net.knightsandkings.knk.paper.commands.IgnoreCommand.TargetResolver targets = userAdminService::resolveTarget;
+        java.util.function.Function<java.util.UUID, java.util.concurrent.CompletableFuture<Boolean>> unignorable = uuid ->
+            knkPermissible.hasPermissionAsync(org.bukkit.Bukkit.getOfflinePlayer(uuid),
+                net.knightsandkings.knk.core.messaging.PrivateMessageNodes.UNIGNORABLE);
+        java.util.concurrent.Executor mainThread = MenuService.mainThreadExecutor(this);
+        registerTabCommand("ignore", new net.knightsandkings.knk.paper.commands.IgnoreCommand(
+            ignoreService, targets, unignorable, visiblePlayers, mainThread, getLogger(), false));
+        registerTabCommand("unignore", new net.knightsandkings.knk.paper.commands.IgnoreCommand(
+            ignoreService, targets, unignorable, visiblePlayers, mainThread, getLogger(), true));
     }
 
     /**
