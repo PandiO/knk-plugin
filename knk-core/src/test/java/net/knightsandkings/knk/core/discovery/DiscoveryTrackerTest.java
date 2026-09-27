@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -218,5 +219,88 @@ class DiscoveryTrackerTest {
         tracker.completed(batch, result(List.of(grant(1, "town_rivia", "Town")), List.of(), List.of()), T0);
 
         assertTrue(tracker.isCandidate(PLAYER, "town_rivia", T0), "the new session starts clean");
+    }
+
+    // ===== unresolved sessions (joined while the API was down) =====
+
+    @Test
+    void anUnresolvedSessionQueuesAndBatchesCandidatesWithoutAUserId() {
+        UUID joiner = UUID.randomUUID();
+        tracker.startSession(joiner, DiscoveryTracker.UNRESOLVED_USER);
+
+        assertTrue(tracker.hasSession(joiner));
+        assertTrue(tracker.userId(joiner).isEmpty());
+        assertEquals(List.of(joiner), tracker.unresolvedPlayers());
+        assertTrue(tracker.offer(joiner, "town_rivia", DiscoverySource.JOIN_INSIDE, T0));
+
+        // The known set counts as unavailable: the batch goes out at once, for the recorder to resolve.
+        Batch batch = tracker.nextBatch(joiner, T0).orElseThrow();
+        assertEquals(DiscoveryTracker.UNRESOLVED_USER, batch.userId());
+        assertFalse(batch.userResolved());
+        assertEquals(List.of("town_rivia"), batch.regionIds());
+
+        Map.Entry<Integer, List<PendingDiscovery>> drained;
+        tracker.offer(joiner, "district_market", DiscoverySource.REGION_ENTER, T0);
+        drained = tracker.endAll().get(joiner);
+        assertEquals(DiscoveryTracker.UNRESOLVED_USER, drained.getKey());
+        assertEquals(1, drained.getValue().size());
+    }
+
+    @Test
+    void resolvingTheUserUpgradesTheSessionInPlace() {
+        UUID joiner = UUID.randomUUID();
+        tracker.startUnresolvedSession(joiner);
+        tracker.offer(joiner, "town_rivia", DiscoverySource.JOIN_INSIDE, T0);
+        tracker.offer(joiner, "district_market", DiscoverySource.JOIN_INSIDE, T0);
+        Batch sentBefore = tracker.nextBatch(joiner, T0).orElseThrow();
+        tracker.deferred(sentBefore); // spooled while the API was down
+        tracker.offer(joiner, "smithy", DiscoverySource.REGION_ENTER, T0);
+
+        assertTrue(tracker.resolveUser(joiner, 9));
+        assertFalse(tracker.resolveUser(joiner, 10), "already resolved");
+        assertFalse(tracker.resolveUser(UUID.randomUUID(), 9), "no session");
+        assertEquals(9, tracker.userId(joiner).getAsInt());
+        assertTrue(tracker.unresolvedPlayers().isEmpty());
+
+        // The replay of the spooled batch now matches the session: applied, effects allowed.
+        tracker.replayed(joiner, 9, sentBefore.entries(), result(List.of(grant(1, "town_rivia", "Town")), List.of(2), List.of()), T0);
+        assertFalse(tracker.isCandidate(joiner, "town_rivia", T0));
+
+        // The known set loads and normal flushing resumes, with the user id.
+        tracker.knownLoaded(joiner, List.of(new KnownDiscovery(3, "structure_x")));
+        Batch next = tracker.nextBatch(joiner, T0).orElseThrow();
+        assertEquals(9, next.userId());
+        assertEquals(List.of("smithy"), next.regionIds());
+        tracker.completed(next, result(List.of(grant(4, "smithy", "Structure")), List.of(), List.of()), T0);
+        assertFalse(tracker.isCandidate(joiner, "smithy", T0), "an answer to the upgraded session applies");
+    }
+
+    @Test
+    void anAnswerToABatchSentBeforeTheUpgradeStillApplies() {
+        UUID joiner = UUID.randomUUID();
+        tracker.startUnresolvedSession(joiner);
+        tracker.offer(joiner, "town_rivia", DiscoverySource.JOIN_INSIDE, T0);
+        Batch batch = tracker.nextBatch(joiner, T0).orElseThrow();
+
+        tracker.resolveUser(joiner, 9); // the recorder looked the id up for this very batch
+        tracker.completed(batch, result(List.of(grant(1, "town_rivia", "Town")), List.of(), List.of()), T0);
+
+        assertFalse(tracker.isCandidate(joiner, "town_rivia", T0));
+        assertEquals(1, tracker.knownCount(joiner));
+    }
+
+    @Test
+    void aReplayForAStillUnresolvedSessionIsNotApplied() {
+        UUID joiner = UUID.randomUUID();
+        tracker.startUnresolvedSession(joiner);
+        tracker.offer(joiner, "town_rivia", DiscoverySource.JOIN_INSIDE, T0);
+        Batch batch = tracker.nextBatch(joiner, T0).orElseThrow();
+        tracker.deferred(batch);
+
+        tracker.replayed(joiner, 9, batch.entries(), result(List.of(grant(1, "town_rivia", "Town")), List.of(), List.of()), T0);
+
+        assertEquals(0, tracker.knownCount(joiner), "the caller upgrades the session first");
+        tracker.startUnresolvedSession(joiner); // keeps the existing session
+        assertFalse(tracker.isCandidate(joiner, "town_rivia", T0), "still suppressed");
     }
 }

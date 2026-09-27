@@ -40,13 +40,23 @@ import net.knightsandkings.knk.core.ports.api.DiscoveriesApi;
  * If loading fails, they are sent anyway (the server dedups) - still at most
  * {@code maxRequestsPerMinute} requests a minute per player.
  *
+ * <p>A player who joined while the API was down has no knk user id yet: their session starts
+ * <b>unresolved</b> ({@link #UNRESOLVED_USER}), with the known set treated as unavailable, so
+ * candidates still queue and go out as batches whose user id the {@link DiscoveryRecorder} resolves
+ * by UUID first (or spools under the UUID alone). Once the id is known, {@link #resolveUser} upgrades
+ * the session in place - same session id, so answers to batches sent before still apply.
+ *
  * <p>No Bukkit types; thread-safe (every method is synchronized). The caller passes the time.
  */
 public final class DiscoveryTracker {
 
+    /** The user id of a session (and of a batch or spool entry) whose knk user isn't known yet. */
+    public static final int UNRESOLVED_USER = 0;
+
     /**
      * One grant request's worth of a player's pending candidates, all with the same source.
      * {@code session} tells an answer for an earlier session (the player rejoined meanwhile) apart.
+     * {@code userId} is {@link #UNRESOLVED_USER} for a player whose user id wasn't known yet.
      */
     public record Batch(UUID playerId, int userId, long session, DiscoverySource source, List<PendingDiscovery> entries) {
         public Batch {
@@ -56,6 +66,10 @@ public final class DiscoveryTracker {
         public List<String> regionIds() {
             return entries.stream().map(PendingDiscovery::regionId).toList();
         }
+
+        public boolean userResolved() {
+            return userId > 0;
+        }
     }
 
     public static final Duration DEFAULT_NOT_DOMAIN_TTL = Duration.ofMinutes(10);
@@ -63,7 +77,7 @@ public final class DiscoveryTracker {
     private static final Duration RATE_WINDOW = Duration.ofMinutes(1);
 
     private static final class Session {
-        final int userId;
+        int userId;
         final long id;
         boolean knownLoaded;
         final Set<String> knownRegions = new HashSet<>();
@@ -101,21 +115,69 @@ public final class DiscoveryTracker {
 
     // ==================== Sessions ====================
 
-    /** Starts tracking a player (their account has loaded). Keeps an existing session for the same user. */
+    /**
+     * Starts tracking a player (their account has loaded). Keeps an existing session for the same user.
+     * A user id of {@link #UNRESOLVED_USER} (or below) starts an unresolved session, see
+     * {@link #startUnresolvedSession}.
+     */
     public synchronized void startSession(UUID playerId, int userId) {
+        if (userId <= 0) {
+            startUnresolvedSession(playerId);
+            return;
+        }
         Session existing = sessions.get(playerId);
         if (existing == null || existing.userId != userId) {
             sessions.put(playerId, new Session(userId, ++nextSessionId));
         }
     }
 
+    /**
+     * Starts tracking a player whose knk user id isn't known (they joined while the API was down).
+     * The known set counts as unavailable, like {@link #knownLoadFailed}: candidates are queued and
+     * sent (the recorder resolves the user id first, or spools them). Keeps an existing session.
+     */
+    public synchronized void startUnresolvedSession(UUID playerId) {
+        if (!sessions.containsKey(playerId)) {
+            Session session = new Session(UNRESOLVED_USER, ++nextSessionId);
+            session.knownLoaded = true;
+            sessions.put(playerId, session);
+        }
+    }
+
+    /**
+     * The knk user id of a player tracked without one became known: the session takes it over (same
+     * session, pending candidates and in-flight batches kept). Returns true when the session was
+     * upgraded - the caller then loads the player's known set - and false when there is no session
+     * or it already has a user id.
+     */
+    public synchronized boolean resolveUser(UUID playerId, int userId) {
+        Session session = sessions.get(playerId);
+        if (session == null || session.userId != UNRESOLVED_USER || userId <= 0) {
+            return false;
+        }
+        session.userId = userId;
+        return true;
+    }
+
     public synchronized boolean hasSession(UUID playerId) {
         return sessions.containsKey(playerId);
     }
 
+    /** The player's knk user id; empty when they aren't tracked or their session is still unresolved. */
     public synchronized OptionalInt userId(UUID playerId) {
         Session session = sessions.get(playerId);
-        return session == null ? OptionalInt.empty() : OptionalInt.of(session.userId);
+        return session == null || session.userId == UNRESOLVED_USER ? OptionalInt.empty() : OptionalInt.of(session.userId);
+    }
+
+    /** Players tracked without a knk user id yet. */
+    public synchronized List<UUID> unresolvedPlayers() {
+        List<UUID> players = new ArrayList<>();
+        sessions.forEach((id, session) -> {
+            if (session.userId == UNRESOLVED_USER) {
+                players.add(id);
+            }
+        });
+        return players;
     }
 
     /** The player's discovered domains arrived: remember them and drop pending candidates they cover. */
@@ -137,8 +199,9 @@ public final class DiscoveryTracker {
     }
 
     /**
-     * The player's discovered domains were read again after a staff reset: forget everything
-     * known before (the reset domain may be discovered again this session) and remember these.
+     * The player's discovered domains were read again after a staff reset (web app or
+     * {@code /knk discovery reset}): forget everything known before (the reset domain may be
+     * discovered again this session) and remember these. Running it twice for one reset is harmless.
      */
     public synchronized void replaceKnown(UUID playerId, Collection<KnownDiscovery> known) {
         Session session = sessions.get(playerId);
@@ -167,7 +230,10 @@ public final class DiscoveryTracker {
         return session == null ? List.of() : List.copyOf(session.pending.values());
     }
 
-    /** Ends every session (shutdown); pending candidates per player with their user id. */
+    /**
+     * Ends every session (shutdown); pending candidates per player with their user id
+     * ({@link #UNRESOLVED_USER} when it wasn't known).
+     */
     public synchronized Map<UUID, Map.Entry<Integer, List<PendingDiscovery>>> endAll() {
         Map<UUID, Map.Entry<Integer, List<PendingDiscovery>>> drained = new LinkedHashMap<>();
         for (Map.Entry<UUID, Session> entry : sessions.entrySet()) {
@@ -302,7 +368,10 @@ public final class DiscoveryTracker {
         });
     }
 
-    /** A spooled request for this player was delivered on replay: apply it like a live answer. */
+    /**
+     * A spooled request for this player was delivered on replay: apply it like a live answer. An
+     * unresolved session must have been upgraded with {@link #resolveUser} first.
+     */
     public synchronized void replayed(UUID playerId, int userId, List<PendingDiscovery> entries, DiscoveryGrantResult result, Instant now) {
         Session session = sessions.get(playerId);
         if (session == null || session.userId != userId) {
