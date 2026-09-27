@@ -95,6 +95,36 @@ public final class EdgePolyline {
         return interpolate(points.get(i), points.get(i + 1), t);
     }
 
+    /**
+     * The points between two positions along the polyline, in travel order: the interpolated
+     * start, every vertex strictly between, the interpolated end. {@code from > to} walks the edge
+     * backwards. Two equal positions give one point.
+     */
+    public List<double[]> subPolyline(double from, double to) {
+        double a = Math.max(0, Math.min(length(), from));
+        double b = Math.max(0, Math.min(length(), to));
+        List<double[]> out = new java.util.ArrayList<>();
+        out.add(pointAt(a));
+        if (a == b) {
+            return out;
+        }
+        if (a < b) {
+            for (int i = 1; i < points.size() - 1; i++) {
+                if (cumulative[i] > a && cumulative[i] < b) {
+                    out.add(toDouble(points.get(i)));
+                }
+            }
+        } else {
+            for (int i = points.size() - 2; i >= 1; i--) {
+                if (cumulative[i] < a && cumulative[i] > b) {
+                    out.add(toDouble(points.get(i)));
+                }
+            }
+        }
+        out.add(pointAt(b));
+        return out;
+    }
+
     static double[] interpolate(int[] a, int[] b, double t) {
         return new double[] {a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t};
     }
