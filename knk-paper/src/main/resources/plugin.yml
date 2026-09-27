@@ -469,12 +469,7 @@ permissions:
       knk.lootbox.admin.tp: true
       knk.lootbox.admin.give: true
       knk.lootbox.admin.token: true
-      knk.lootbox.admin.token:
-    description: >-
-      /knk lootbox token <player> <category> [stars|any] [amount] - issue lootbox token items (right-click to open;
-      identified by their knk_lootbox_token tag only), audited.
-    default: op
-  knk.lootbox.admin.reload: true
+      knk.lootbox.admin.reload: true
       knk.lootbox.admin.area: true
   knk.lootbox.admin.spawn:
     description: /knk lootbox spawn <category> [stars] - a box where you stand, ignoring caps (audited).
@@ -490,6 +485,11 @@ permissions:
     default: op
   knk.lootbox.admin.give:
     description: /knk lootbox give <player> <category> [stars] - roll and deliver without a world box (audited).
+    default: op
+  knk.lootbox.admin.token:
+    description: >-
+      /knk lootbox token <player> <category> [stars|any] [amount] - issue lootbox token items (right-click to open;
+      identified by their knk_lootbox_token tag only), audited.
     default: op
   knk.lootbox.admin.reload:
     description: /knk lootbox reload - re-read config.yml's lootboxes section and the API's runtime config.
