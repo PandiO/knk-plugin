@@ -94,6 +94,14 @@ public record UserSummary(
     }
 
     /**
+     * Copy with the coin and gem balances the API just returned (currency ledger, KNG-21 Phase 3:
+     * after a /pay, /balance or a received payment) - never a locally computed value.
+     */
+    public UserSummary withBalances(int coins, int gems) {
+        return new UserSummary(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience, premiumTierGroupId, premiumTierName, premiumTierExpiresAt, isFrozen, frozenReason, gender, chatPrimaryColor, chatSecondaryColor, nameColor);
+    }
+
+    /**
      * Copy with an updated admin-freeze state (after /freeze or /unfreeze) - used by
      * AdminFreezeManager to keep the cached UserSummary consistent with the join-time restore.
      */

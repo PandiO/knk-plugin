@@ -34,14 +34,22 @@ import net.knightsandkings.knk.core.domain.discovery.DiscoverySource;
  * siege result spool). Rewards are permanent one-offs, so a discovery made while the API is down is
  * kept and replayed rather than dropped; the server's idempotency makes a replay safe. Adding to a
  * player's file merges with what is already there (one entry per region id, the earliest sighting
- * kept). Thread-safe (every method is synchronized); no Bukkit types.
+ * kept). A player who joined while the API was down is spooled under their UUID with the user id
+ * unknown ({@link DiscoveryTracker#UNRESOLVED_USER}, {@code "userId": null} in the file); the
+ * replay resolves it by UUID. Files written before that (version 1, always with a user id) still
+ * read. Thread-safe (every method is synchronized); no Bukkit types.
  */
 public final class DiscoverySpool {
 
-    /** One player's spooled discoveries. */
+    /** One player's spooled discoveries; {@code userId} is {@link DiscoveryTracker#UNRESOLVED_USER} when unknown. */
     public record Pending(UUID playerId, int userId, List<PendingDiscovery> entries) {
         public Pending {
             entries = List.copyOf(entries);
+            userId = Math.max(userId, DiscoveryTracker.UNRESOLVED_USER);
+        }
+
+        public boolean userResolved() {
+            return userId > 0;
         }
     }
 
@@ -49,7 +57,10 @@ public final class DiscoverySpool {
 
     record EntryFile(String regionId, String source, String discoveredAt) {}
 
-    record PendingFile(int version, String playerId, int userId, List<EntryFile> entries) {}
+    /** Version 1 always had a user id; version 2 writes null while it is unknown. */
+    record PendingFile(int version, String playerId, Integer userId, List<EntryFile> entries) {}
+
+    static final int FILE_VERSION = 2;
 
     private final Path directory;
     private final Logger logger;
@@ -68,7 +79,8 @@ public final class DiscoverySpool {
 
     /**
      * Adds these discoveries to the player's file (creating it). Returns false when it couldn't be
-     * written - the discoveries are then lost until the player walks there again.
+     * written - the discoveries are then lost until the player walks there again. An unknown user id
+     * ({@link DiscoveryTracker#UNRESOLVED_USER}) doesn't overwrite one the file already has.
      */
     public synchronized boolean add(UUID playerId, int userId, Collection<PendingDiscovery> entries) {
         Objects.requireNonNull(playerId, "playerId");
@@ -76,11 +88,13 @@ public final class DiscoverySpool {
             return true;
         }
         Map<String, PendingDiscovery> merged = new LinkedHashMap<>();
-        read(playerId).ifPresent(existing -> existing.entries().forEach(e -> merged.put(e.key(), e)));
+        Optional<Pending> existing = read(playerId);
+        existing.ifPresent(file -> file.entries().forEach(e -> merged.put(e.key(), e)));
         for (PendingDiscovery entry : entries) {
             merged.merge(entry.key(), entry, (old, added) -> old.discoveredAt().isAfter(added.discoveredAt()) ? added : old);
         }
-        return write(new Pending(playerId, userId, new ArrayList<>(merged.values())));
+        int fileUserId = userId > 0 ? userId : existing.map(Pending::userId).orElse(DiscoveryTracker.UNRESOLVED_USER);
+        return write(new Pending(playerId, fileUserId, new ArrayList<>(merged.values())));
     }
 
     /** The player's spooled discoveries, if any. */
@@ -188,20 +202,22 @@ public final class DiscoverySpool {
     // ---- mapping ----
 
     static PendingFile toFile(Pending pending) {
-        return new PendingFile(1, pending.playerId().toString(), pending.userId(), pending.entries().stream()
-                .map(e -> new EntryFile(e.regionId(), e.source().apiName(), e.discoveredAt().toString()))
-                .toList());
+        return new PendingFile(FILE_VERSION, pending.playerId().toString(), pending.userResolved() ? pending.userId() : null,
+                pending.entries().stream()
+                        .map(e -> new EntryFile(e.regionId(), e.source().apiName(), e.discoveredAt().toString()))
+                        .toList());
     }
 
     static Pending fromFile(PendingFile file) {
-        if (file == null || file.playerId() == null || file.userId() <= 0) {
+        if (file == null || file.playerId() == null) {
             throw new IllegalArgumentException("incomplete spool file");
         }
+        int userId = file.userId() == null || file.userId() <= 0 ? DiscoveryTracker.UNRESOLVED_USER : file.userId();
         List<PendingDiscovery> entries = file.entries() == null ? List.of() : file.entries().stream()
                 .filter(e -> e.regionId() != null && !e.regionId().isBlank())
                 .map(e -> new PendingDiscovery(e.regionId(), DiscoverySource.fromApiName(e.source()),
                         e.discoveredAt() == null ? null : Instant.parse(e.discoveredAt())))
                 .toList();
-        return new Pending(UUID.fromString(file.playerId()), file.userId(), entries);
+        return new Pending(UUID.fromString(file.playerId()), userId, entries);
     }
 }

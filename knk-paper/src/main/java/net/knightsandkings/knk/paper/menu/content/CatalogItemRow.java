@@ -11,10 +11,11 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * One row of {@code items.catalog} (menu follow-up 2026-09-26): an item blueprint shown exactly as
- * a player receives it - {@link ItemBlueprintBukkitMapper#fromBlueprint}, the same call kit grants
- * ({@code KitGrantPlacer}) and {@code /knk itemblueprints give} use. The ItemStack is built lazily
- * on the main thread (render step 4) and kept for this row object.
+ * One row of {@code items.catalog} (menu follow-up 2026-09-26): an item blueprint shown as a player
+ * receives it - {@link ItemBlueprintBukkitMapper#fromBlueprint}, the base step of
+ * {@code BlueprintItemAssembler}, which kit grants ({@code KitGrantPlacer}) and
+ * {@code /knk itemblueprints give} use. The preview leaves off the default enchantments those add.
+ * The ItemStack is built lazily on the main thread (render step 4) and kept for this row object.
  */
 public final class CatalogItemRow implements MenuItemStackRow, MenuRowKey {
 

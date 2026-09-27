@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
@@ -43,9 +44,11 @@ class DiscoveryRecorderTest {
         Function<Collection<String>, CompletableFuture<DiscoveryGrantResult>> answer;
         final List<List<String>> sent = new ArrayList<>();
         final List<DiscoverySource> sources = new ArrayList<>();
+        final List<Integer> userIds = new ArrayList<>();
 
         @Override
         public CompletableFuture<DiscoveryGrantResult> grant(int userId, Collection<String> wgRegionIds, DiscoverySource source) {
+            userIds.add(userId);
             sent.add(List.copyOf(wgRegionIds));
             sources.add(source);
             return answer.apply(wgRegionIds);
@@ -89,9 +92,17 @@ class DiscoveryRecorderTest {
     private DiscoverySpool spool;
     private DiscoveryRecorder recorder;
 
+    /** The user id lookup by UUID; each test sets it. */
+    private Function<UUID, CompletableFuture<Optional<Integer>>> lookup =
+            uuid -> CompletableFuture.failedFuture(new ConnectException("refused"));
+    private final List<UUID> lookedUp = new ArrayList<>();
+
     private void create() {
         spool = new DiscoverySpool(dir, Logger.getLogger("test"));
-        recorder = new DiscoveryRecorder(api, RetryPolicy.noRetry(), spool, Logger.getLogger("test"));
+        recorder = new DiscoveryRecorder(api, RetryPolicy.noRetry(), spool, Logger.getLogger("test"), uuid -> {
+            lookedUp.add(uuid);
+            return lookup.apply(uuid);
+        });
     }
 
     private static List<PendingDiscovery> entries(String... regions) {
@@ -136,6 +147,29 @@ class DiscoveryRecorderTest {
         assertEquals(List.of("a"), spool.get(PLAYER).orElseThrow().entries().stream().map(PendingDiscovery::regionId).toList());
         assertTrue(DiscoveryRecorder.isFinalRejection(new ApiException("u", 404, "x", "")));
         assertFalse(DiscoveryRecorder.isFinalRejection(new RuntimeException(new ConnectException())));
+    }
+
+    @Test
+    void anAuthRefusalKeepsTheSpoolForAfterTheKeyIsFixed() {
+        // 401: the API key doesn't match (or isn't set on the API yet). Dropping would throw away
+        // every discovery made meanwhile; they are spooled and kept until the replay gets through.
+        create();
+        spool.add(PLAYER, 7, entries("town_rivia"));
+        api.answer = regions -> failing(new ApiException("u", 401, "key", ""));
+
+        assertEquals(DiscoveryRecorder.Status.SPOOLED,
+                recorder.grant(PLAYER, 7, entries("district_market"), DiscoverySource.REGION_ENTER).join().status());
+        assertTrue(recorder.replay().join().isEmpty());
+        assertEquals(2, spool.get(PLAYER).orElseThrow().entries().size());
+
+        api.answer = regions -> CompletableFuture.completedFuture(granted(regions));
+        assertEquals(1, recorder.replay().join().size());
+        assertTrue(spool.isEmpty());
+
+        for (int status : new int[] {401, 403, 408, 429}) {
+            assertFalse(DiscoveryRecorder.isFinalRejection(new ApiException("u", status, "x", "")), "HTTP " + status);
+        }
+        assertTrue(DiscoveryRecorder.isFinalRejection(new ApiException("u", 409, "cap", "")));
     }
 
     @Test
@@ -192,5 +226,97 @@ class DiscoveryRecorderTest {
         recorder.spoolInFlight();
 
         assertEquals(1, spool.get(PLAYER).orElseThrow().entries().size());
+    }
+
+    // ===== unknown user id (the player joined while the API was down) =====
+
+    @Test
+    void anUnresolvedGrantLooksTheUserUpFirstAndReportsTheId() {
+        create();
+        lookup = uuid -> CompletableFuture.completedFuture(Optional.of(9));
+        api.answer = regions -> CompletableFuture.completedFuture(granted(regions));
+
+        DiscoveryRecorder.Outcome outcome = recorder.grant(PLAYER, DiscoveryTracker.UNRESOLVED_USER, entries("town_rivia"),
+                DiscoverySource.REGION_ENTER).join();
+
+        assertEquals(DiscoveryRecorder.Status.DELIVERED, outcome.status());
+        assertEquals(9, outcome.userId());
+        assertEquals(List.of(9), api.userIds, "never sent with a made-up id");
+        assertEquals(List.of(PLAYER), lookedUp);
+    }
+
+    @Test
+    void anUnresolvableGrantIsSpooledUnderTheUuidWithoutCallingTheGrantApi() {
+        create();
+        api.answer = regions -> CompletableFuture.completedFuture(granted(regions));
+
+        DiscoveryRecorder.Outcome outcome = recorder.grant(PLAYER, DiscoveryTracker.UNRESOLVED_USER, entries("town_rivia"),
+                DiscoverySource.REGION_ENTER).join();
+
+        assertEquals(DiscoveryRecorder.Status.SPOOLED, outcome.status());
+        assertEquals(DiscoveryTracker.UNRESOLVED_USER, outcome.userId());
+        assertTrue(api.sent.isEmpty());
+        DiscoverySpool.Pending file = spool.get(PLAYER).orElseThrow();
+        assertFalse(file.userResolved());
+        assertEquals(1, file.entries().size());
+        assertTrue(recorder.lookUpUserId(PLAYER).join().isEmpty());
+    }
+
+    @Test
+    void aGrantForAPlayerWithNoAccountIsDropped() {
+        create();
+        lookup = uuid -> CompletableFuture.completedFuture(Optional.empty());
+
+        assertEquals(DiscoveryRecorder.Status.DROPPED, recorder.grant(PLAYER, DiscoveryTracker.UNRESOLVED_USER,
+                entries("town_rivia"), DiscoverySource.REGION_ENTER).join().status());
+        assertTrue(api.sent.isEmpty());
+        assertTrue(spool.isEmpty());
+    }
+
+    @Test
+    void replayResolvesAnUnknownUserIdBeforePosting() {
+        create();
+        spool.add(PLAYER, DiscoveryTracker.UNRESOLVED_USER, entries("town_rivia", "district_market"));
+        lookup = uuid -> CompletableFuture.completedFuture(Optional.of(9));
+        api.answer = regions -> CompletableFuture.completedFuture(granted(regions));
+
+        List<DiscoveryRecorder.Replayed> replayed = recorder.replay().join();
+
+        assertEquals(1, replayed.size());
+        assertEquals(9, replayed.get(0).userId());
+        assertEquals(List.of(9), api.userIds);
+        assertEquals(List.of(DiscoverySource.REPLAY), api.sources);
+        assertTrue(spool.isEmpty());
+    }
+
+    @Test
+    void replayKeepsAFileWhoseUserCantBeLookedUpYet() {
+        create();
+        spool.add(PLAYER, DiscoveryTracker.UNRESOLVED_USER, entries("town_rivia"));
+        api.answer = regions -> CompletableFuture.completedFuture(granted(regions));
+
+        assertTrue(recorder.replay().join().isEmpty());
+        assertTrue(recorder.replay(PLAYER).join().isEmpty());
+
+        assertTrue(api.sent.isEmpty());
+        assertEquals(1, spool.get(PLAYER).orElseThrow().entries().size(), "kept for when the API is back");
+    }
+
+    @Test
+    void replayDropsAFileWhoseUuidHasNoAccount() {
+        create();
+        spool.add(PLAYER, DiscoveryTracker.UNRESOLVED_USER, entries("town_rivia"));
+        UUID other = UUID.randomUUID();
+        spool.add(other, 8, entries("district_market"));
+        // A 404 from the lookup itself counts as "no such user" too.
+        lookup = uuid -> CompletableFuture.failedFuture(new RuntimeException(new ApiException("u", 404, "no user", "")));
+        api.answer = regions -> CompletableFuture.completedFuture(granted(regions));
+
+        List<DiscoveryRecorder.Replayed> replayed = recorder.replay().join();
+
+        assertTrue(spool.get(PLAYER).isEmpty(), "dropped");
+        assertEquals(List.of(other), replayed.stream().map(DiscoveryRecorder.Replayed::playerId).toList(),
+                "other players' files still replay");
+        assertEquals(List.of(8), api.userIds);
     }
 }

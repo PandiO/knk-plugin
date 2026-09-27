@@ -79,4 +79,50 @@ class DiscoverySpoolTest {
 
         assertEquals(1, spool.list().size());
     }
+
+    @Test
+    void anEntryWithAnUnknownUserIdRoundTrips_AndALaterKnownIdIsKept() throws Exception {
+        DiscoverySpool spool = spool();
+        assertTrue(spool.add(PLAYER, DiscoveryTracker.UNRESOLVED_USER,
+                List.of(new PendingDiscovery("town_rivia", DiscoverySource.JOIN_INSIDE, T0))));
+
+        String json = Files.readString(dir.resolve("discovery-spool").resolve(PLAYER + ".json"));
+        assertTrue(json.contains("\"userId\" : null"), json);
+        DiscoverySpool.Pending pending = spool().get(PLAYER).orElseThrow();
+        assertEquals(DiscoveryTracker.UNRESOLVED_USER, pending.userId());
+        assertFalse(pending.userResolved());
+        assertEquals(List.of(new PendingDiscovery("town_rivia", DiscoverySource.JOIN_INSIDE, T0)), pending.entries());
+        assertEquals(1, spool.list().size());
+
+        // A later add with the id fills it in; another unknown add doesn't erase it again.
+        spool.add(PLAYER, 7, List.of(new PendingDiscovery("district_market", DiscoverySource.REGION_ENTER, T0)));
+        spool.add(PLAYER, DiscoveryTracker.UNRESOLVED_USER, List.of(new PendingDiscovery("smithy", DiscoverySource.REGION_ENTER, T0)));
+        pending = spool.get(PLAYER).orElseThrow();
+        assertEquals(7, pending.userId());
+        assertEquals(3, pending.entries().size());
+    }
+
+    @Test
+    void versionOneFilesStillRead() throws Exception {
+        Path folder = Files.createDirectories(dir.resolve("discovery-spool"));
+        Files.writeString(folder.resolve(PLAYER + ".json"), """
+                {
+                  "version" : 1,
+                  "playerId" : "11111111-2222-3333-4444-555555555555",
+                  "userId" : 7,
+                  "entries" : [ {
+                    "regionId" : "town_rivia",
+                    "source" : "JoinInside",
+                    "discoveredAt" : "2026-09-26T12:00:00Z"
+                  } ]
+                }
+                """);
+
+        DiscoverySpool.Pending pending = spool().get(PLAYER).orElseThrow();
+
+        assertEquals(7, pending.userId());
+        assertTrue(pending.userResolved());
+        assertEquals(List.of(new PendingDiscovery("town_rivia", DiscoverySource.JOIN_INSIDE, T0)), pending.entries());
+        assertEquals(1, spool().list().size());
+    }
 }

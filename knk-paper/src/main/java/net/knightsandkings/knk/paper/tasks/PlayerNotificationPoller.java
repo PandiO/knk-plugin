@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.logging.Logger;
 
@@ -19,9 +20,13 @@ import net.knightsandkings.knk.paper.commands.support.PromotionEffects;
 
 /**
  * Delivers in-game moments the web API queued for writes the plugin didn't make itself -
+ * (currency Phase 3: also "you received N coins from X" after a /pay, on the recipient's next
+ * join when they were offline; Phase 5: currency anomaly alerts for online staff) -
  * a promotion/demotion from an XP change made through the web admin's player profile page, and a
  * rank change made outside the plugin (web app, or a temporary rank expiring), which re-reads the
- * player so chat and the tab list show the new rank within one poll. Without this, that path only ever showed a banner in the browser: the API returned the
+ * player so chat and the tab list show the new rank within one poll, and a domain discovery reset,
+ * which re-syncs the player's discovery tracking so the reset place counts again right away.
+ * Without this, that path only ever showed a banner in the browser: the API returned the
  * TitleChangeResult to the web app and the server never heard about it, so the online player got
  * the rewards but none of PromotionEffects' sound/particles/message. (/knk user ... xp worked
  * because the plugin was the caller and showed the effects straight from the response.)
@@ -49,6 +54,16 @@ public class PlayerNotificationPoller {
     private BukkitTask task;
     // Set once UserAdminService exists (it's built after this poller in KnKPlugin).
     private volatile Consumer<Player> rankChangedHandler;
+    // Set once lootboxes are initialized (Phase 5 token items the API issued itself).
+    private volatile Consumer<Player> lootboxTokensHandler;
+    // Set once the currency commands exist (currency Phase 3).
+    private volatile BiConsumer<Player, PlayerNotification> paymentReceivedHandler;
+    // Currency anomaly alerts for online staff (currency Phase 5); not addressed to one player.
+    private volatile Consumer<PlayerNotification> currencyAlertHandler;
+    // Other notifications for the game server itself (userId 0), by type: e.g. LootboxWorldChanged.
+    private final java.util.Map<String, Consumer<PlayerNotification>> serverHandlers = new ConcurrentHashMap<>();
+    // A discovery reset made outside the plugin's own command (domain discovery, KNG-20).
+    private volatile Consumer<Player> discoveryResetHandler;
 
     public PlayerNotificationPoller(PlayerNotificationsApi notificationsApi, Plugin plugin) {
         this(notificationsApi, plugin,
@@ -64,6 +79,47 @@ public class PlayerNotificationPoller {
     /** What to do for a {@link PlayerNotification#TYPE_RANK_CHANGED} whose player is online. */
     public void setRankChangedHandler(Consumer<Player> handler) {
         this.rankChangedHandler = handler;
+    }
+
+    /** What to do for a {@link PlayerNotification#TYPE_LOOTBOX_TOKENS_ISSUED} whose player is online. */
+    public void setLootboxTokensHandler(Consumer<Player> handler) {
+        this.lootboxTokensHandler = handler;
+    }
+
+    /** What to do for a {@link PlayerNotification#TYPE_PAYMENT_RECEIVED} whose player is online. */
+    public void setPaymentReceivedHandler(BiConsumer<Player, PlayerNotification> handler) {
+        this.paymentReceivedHandler = handler;
+    }
+
+    /**
+     * What to do for a {@link PlayerNotification#TYPE_DISCOVERY_RESET} whose player is online: re-sync
+     * their discovery tracking. An offline player's stays queued and is acknowledged on their join
+     * (harmless: the known set is loaded fresh then anyway).
+     */
+    public void setDiscoveryResetHandler(Consumer<Player> handler) {
+        this.discoveryResetHandler = handler;
+    }
+
+    /**
+     * What to do for a {@link PlayerNotification#TYPE_CURRENCY_ALERT}: it is for every online staff
+     * member with the alerts node, not one player, so it is handed over as soon as anyone is online.
+     * Without a handler it stays queued (the API expires it after 24h).
+     */
+    public void setCurrencyAlertHandler(Consumer<PlayerNotification> handler) {
+        this.currencyAlertHandler = handler;
+    }
+
+    /**
+     * What to do for a notification of {@code type} addressed to the game server rather than a player (userId 0,
+     * e.g. {@link PlayerNotification#TYPE_LOOTBOX_WORLD_CHANGED}). Handed over as soon as anyone is online; without a
+     * handler it stays queued.
+     */
+    public void setServerNotificationHandler(String type, Consumer<PlayerNotification> handler) {
+        if (handler == null) {
+            serverHandlers.remove(type);
+        } else {
+            serverHandlers.put(type, handler);
+        }
     }
 
     public void start() {
@@ -114,6 +170,31 @@ public class PlayerNotificationPoller {
                 toAcknowledge.add(notification.id());
                 continue;
             }
+            if (PlayerNotification.TYPE_CURRENCY_ALERT.equals(notification.type())) {
+                Consumer<PlayerNotification> handler = currencyAlertHandler;
+                if (handler == null) {
+                    continue;
+                }
+                try {
+                    handler.accept(notification);
+                } catch (RuntimeException e) {
+                    LOGGER.warning("Failed to show currency alert notification " + notification.id() + ": " + e.getMessage());
+                }
+                shownIds.add(notification.id());
+                toAcknowledge.add(notification.id());
+                continue;
+            }
+            Consumer<PlayerNotification> serverHandler = serverHandlers.get(notification.type());
+            if (serverHandler != null) {
+                try {
+                    serverHandler.accept(notification);
+                } catch (RuntimeException e) {
+                    LOGGER.warning("Failed to apply server notification " + notification.id() + " (" + notification.type() + "): " + e.getMessage());
+                }
+                shownIds.add(notification.id());
+                toAcknowledge.add(notification.id());
+                continue;
+            }
             Player player = findOnlinePlayer(notification);
             if (player == null) {
                 continue; // stays queued for their next join
@@ -123,6 +204,12 @@ public class PlayerNotificationPoller {
                     PromotionEffects.show(player, notification.titleChange());
                 } else if (PlayerNotification.TYPE_RANK_CHANGED.equals(notification.type()) && rankChangedHandler != null) {
                     rankChangedHandler.accept(player);
+                } else if (PlayerNotification.TYPE_LOOTBOX_TOKENS_ISSUED.equals(notification.type()) && lootboxTokensHandler != null) {
+                    lootboxTokensHandler.accept(player);
+                } else if (PlayerNotification.TYPE_PAYMENT_RECEIVED.equals(notification.type()) && paymentReceivedHandler != null) {
+                    paymentReceivedHandler.accept(player, notification);
+                } else if (PlayerNotification.TYPE_DISCOVERY_RESET.equals(notification.type()) && discoveryResetHandler != null) {
+                    discoveryResetHandler.accept(player);
                 }
             } catch (RuntimeException e) {
                 // Acknowledged anyway: retrying a notification that throws would only repeat

@@ -254,7 +254,8 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
 
                 // Create WorldGuard region from selection
                 String tempRegionId = TEMP_REGION_PREFIX + context.taskId;
-                ProtectedRegion region = createRegionFromSelection(selection, tempRegionId, context.priority);
+                ProtectedRegion region = net.knightsandkings.knk.paper.integration.WorldGuardIntegration.createRegionFromSelection(
+                    selection, tempRegionId, context.priority);
                 
                 // Store creation timestamp for retention policy
                 region.setFlag(CREATION_TIMESTAMP, String.valueOf(System.currentTimeMillis()));
@@ -575,35 +576,6 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
         BlockVector3 max = selection.getMaximumPoint();
         
         return parentRegion.contains(min) && parentRegion.contains(max);
-    }
-
-    /**
-     * Create a ProtectedRegion from a WorldEdit selection
-     */
-    private ProtectedRegion createRegionFromSelection(Region selection, String id, int priority) {
-        if (selection instanceof Polygonal2DRegion) {
-            Polygonal2DRegion poly = (Polygonal2DRegion) selection;
-            ProtectedPolygonalRegion region = new ProtectedPolygonalRegion(
-                id,
-                poly.getPoints(),
-                poly.getMinimumY(),
-                poly.getMaximumY()
-            );
-            region.setPriority(priority);
-            return region;
-        }
-        
-        // For other types, create a cuboid region from bounds
-        BlockVector3 min = selection.getMinimumPoint();
-        BlockVector3 max = selection.getMaximumPoint();
-        
-        ProtectedRegion region = new com.sk89q.worldguard.protection.regions.ProtectedCuboidRegion(
-            id,
-            min,
-            max
-        );
-        region.setPriority(priority);
-        return region;
     }
 
     /**

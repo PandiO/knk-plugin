@@ -37,6 +37,18 @@ import net.knightsandkings.knk.paper.permissions.KnkPermissible;
  * (rather than a single message that scrolls out of sight), and
  * {@link net.knightsandkings.knk.paper.listeners.JoinLoadingRestrictionListener} tells anyone
  * whose interaction with them got cancelled why nothing happened.
+ * <p>
+ * The hold must be undone on the live Player before Bukkit saves them: the ADVENTURE mode and
+ * the invulnerable flag are written to their playerdata. {@link #release(Player)} undoes it once
+ * their data loads, {@link #forget(Player)} when they quit first (PlayerQuitEvent fires before
+ * the save), and {@link #releaseAll()} on plugin disable for everyone still held.
+ * <p>
+ * Leaving the hold always clears the invulnerable flag rather than restoring what it was on join.
+ * Nothing in the plugin makes a player invulnerable on purpose besides this guard, so a player who
+ * joins already invulnerable is left over from an earlier hold that leaked (before quit/disable
+ * restored it) - trusting that {@code true} would keep them immune to all damage forever, with no
+ * vanilla way to clear it ({@code /data} can't edit players). If a feature ever sets player
+ * invulnerability deliberately, it must tell this guard so the hold can hand it back.
  */
 public class JoinLoadingGuard {
 
@@ -46,7 +58,6 @@ public class JoinLoadingGuard {
     private final Plugin plugin;
     private final KnkPermissible knkPermissible;
     private final Set<UUID> loadingPlayers = ConcurrentHashMap.newKeySet();
-    private final Map<UUID, Boolean> previousInvulnerable = new ConcurrentHashMap<>();
     private final Map<UUID, BukkitTask> reminderTasks = new ConcurrentHashMap<>();
 
     public JoinLoadingGuard(Plugin plugin, KnkPermissible knkPermissible) {
@@ -65,7 +76,11 @@ public class JoinLoadingGuard {
 
         UUID uuid = player.getUniqueId();
         loadingPlayers.add(uuid);
-        previousInvulnerable.put(uuid, player.isInvulnerable());
+        if (player.isInvulnerable()) {
+            // See the class Javadoc: nothing else sets this, so it leaked from an earlier hold.
+            plugin.getLogger().info("Clearing invulnerability left over from an interrupted join hold on "
+                + player.getName() + " when the hold ends");
+        }
 
         player.setGameMode(GameMode.ADVENTURE);
         player.setInvulnerable(true);
@@ -87,20 +102,9 @@ public class JoinLoadingGuard {
      * No-ops for players never held (e.g. owners).
      */
     public void release(Player player) {
-        UUID uuid = player.getUniqueId();
-        if (!loadingPlayers.remove(uuid)) {
-            return;
+        if (endHold(player)) {
+            player.sendActionBar(Component.text("You're all set!").color(NamedTextColor.GREEN));
         }
-
-        stopReminder(uuid);
-
-        Boolean wasInvulnerable = previousInvulnerable.remove(uuid);
-        if (player.getGameMode() == GameMode.ADVENTURE) {
-            // If something else already changed their gamemode, leave it alone.
-            player.setGameMode(GameMode.SURVIVAL);
-        }
-        player.setInvulnerable(wasInvulnerable != null && wasInvulnerable);
-        player.sendActionBar(Component.text("You're all set!").color(NamedTextColor.GREEN));
     }
 
     /**
@@ -113,12 +117,45 @@ public class JoinLoadingGuard {
     }
 
     /**
-     * Drops any held state for a player who disconnected before their data finished loading.
+     * Undoes the hold for a player who disconnects before their data finished loading. Called
+     * from PlayerQuitEvent, which fires before the player is saved, so the ADVENTURE mode and
+     * invulnerable flag never reach their playerdata. No-ops for players not held.
      */
-    public void forget(UUID uuid) {
-        loadingPlayers.remove(uuid);
-        previousInvulnerable.remove(uuid);
+    public void forget(Player player) {
+        endHold(player);
+    }
+
+    /**
+     * Undoes the hold for every online player still in it - for plugin disable (server stop or
+     * reload), when their data load will never complete and they are about to be saved.
+     */
+    public void releaseAll() {
+        for (UUID uuid : Set.copyOf(loadingPlayers)) {
+            Player player = Bukkit.getPlayer(uuid);
+            if (player != null) {
+                endHold(player);
+            } else {
+                loadingPlayers.remove(uuid);
+                stopReminder(uuid);
+            }
+        }
+    }
+
+    /** Takes the player out of the hold; false if they weren't in it. */
+    private boolean endHold(Player player) {
+        UUID uuid = player.getUniqueId();
+        if (!loadingPlayers.remove(uuid)) {
+            return false;
+        }
+
         stopReminder(uuid);
+
+        if (player.getGameMode() == GameMode.ADVENTURE) {
+            // If something else already changed their gamemode, leave it alone.
+            player.setGameMode(GameMode.SURVIVAL);
+        }
+        player.setInvulnerable(false);
+        return true;
     }
 
     private void stopReminder(UUID uuid) {

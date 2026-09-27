@@ -460,6 +460,10 @@ class TeleportRequestServiceTest {
     private void permissibleFromGrants() {
         when(permissible.hasPermissionAsync(any(Player.class), anyString())).thenAnswer(inv ->
             permissions.has(inv.getArgument(0), inv.getArgument(1)));
+        // PlayerCommandSupport asks checkAsync (allowed / denied / API unreachable); same grants.
+        when(permissible.checkAsync(any(), anyString())).thenAnswer(inv -> permissible
+            .hasPermissionAsync(inv.getArgument(0), inv.getArgument(1))
+            .thenApply(net.knightsandkings.knk.core.domain.permissions.PermissionDecision::of));
     }
 
     private static void run(TeleportRequestCommand command, Player sender, String... args) {

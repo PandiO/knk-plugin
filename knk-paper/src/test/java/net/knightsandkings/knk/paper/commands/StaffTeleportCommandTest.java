@@ -84,6 +84,10 @@ class StaffTeleportCommandTest {
             checkedNodes.add(node);
             return CompletableFuture.completedFuture(granted.contains(node));
         });
+        // PlayerCommandSupport asks checkAsync (allowed / denied / API unreachable); same grants.
+        when(permissible.checkAsync(any(), anyString())).thenAnswer(inv -> permissible
+            .hasPermissionAsync(inv.getArgument(0), inv.getArgument(1))
+            .thenApply(net.knightsandkings.knk.core.domain.permissions.PermissionDecision::of));
         when(teleportService.start(any())).thenReturn(CompletableFuture.completedFuture(TeleportOutcome.teleported()));
     }
 

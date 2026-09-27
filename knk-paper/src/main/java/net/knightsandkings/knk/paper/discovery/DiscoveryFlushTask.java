@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 import java.util.logging.Logger;
 
@@ -30,6 +31,11 @@ import net.knightsandkings.knk.core.domain.discovery.DiscoveryGrantResult;
  *   <li>every {@code replay-interval-seconds}, on enable and on a player's next join: the spool is
  *   replayed. A delivered replay shows full effects when the discovery was made under 30 s ago,
  *   otherwise one summary; nothing for a player who is offline (the menu shows it).</li>
+ *   <li>players tracked without a knk user id (they joined while the API was down) get it from the
+ *   recorder's lookup by UUID - on a grant, a replay, or the replay timer's lookup for every such
+ *   player - and their session is upgraded ({@link DiscoveryTracker#resolveUser}), then the listener
+ *   loads their known set ({@link #setUserResolvedHandler}). So discoveries resume without a rejoin
+ *   once the API is back.</li>
  * </ul>
  * Timers run on the main thread; API calls and spool file I/O run off it.
  */
@@ -47,6 +53,7 @@ public final class DiscoveryFlushTask {
     private final long replayIntervalTicks;
     private BukkitTask flushTimer;
     private BukkitTask replayTimer;
+    private volatile BiConsumer<UUID, Integer> userResolvedHandler;
 
     public DiscoveryFlushTask(Plugin plugin, DiscoveryTracker tracker, DiscoveryRecorder recorder, DiscoveryEffects effects,
                               Clock clock, int batchWindowTicks, int replayIntervalSeconds) {
@@ -62,8 +69,16 @@ public final class DiscoveryFlushTask {
     /** Starts both timers and replays whatever the last run left in the spool. */
     public void start() {
         flushTimer = Bukkit.getScheduler().runTaskTimer(plugin, this::flush, batchWindowTicks, batchWindowTicks);
-        replayTimer = Bukkit.getScheduler().runTaskTimer(plugin, this::replayAll, replayIntervalTicks, replayIntervalTicks);
+        replayTimer = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+            replayAll();
+            resolveUnresolved();
+        }, replayIntervalTicks, replayIntervalTicks);
         replayAll();
+    }
+
+    /** Runs (main thread) when a player tracked without a user id got one: e.g. load their known set. */
+    public void setUserResolvedHandler(BiConsumer<UUID, Integer> handler) {
+        this.userResolvedHandler = handler;
     }
 
     public void stop() {
@@ -105,6 +120,11 @@ public final class DiscoveryFlushTask {
 
     /** Main thread. */
     private void handle(DiscoveryTracker.Batch batch, DiscoveryRecorder.Outcome outcome) {
+        // A batch of a player tracked without a user id: the recorder looked it up by UUID.
+        int userId = batch.userResolved() ? batch.userId() : outcome.userId();
+        if (!batch.userResolved() && userId > 0) {
+            userResolved(batch.playerId(), userId);
+        }
         if (outcome.status() != DiscoveryRecorder.Status.DELIVERED) {
             tracker.deferred(batch);
             return;
@@ -114,10 +134,10 @@ public final class DiscoveryFlushTask {
         if (!result.hasGrants()) {
             return;
         }
-        LOGGER.fine("[Discovery] User " + batch.userId() + " discovered " + result.granted().size() + " place(s): +"
+        LOGGER.fine("[Discovery] User " + userId + " discovered " + result.granted().size() + " place(s): +"
                 + result.totalCoins() + " coins, +" + result.totalGems() + " gems, +" + result.totalExp() + " XP");
         Player player = Bukkit.getPlayer(batch.playerId());
-        if (player != null && tracker.userId(batch.playerId()).orElse(-1) == batch.userId()) {
+        if (player != null && tracker.userId(batch.playerId()).orElse(-1) == userId) {
             effects.show(player, result);
         }
     }
@@ -148,6 +168,9 @@ public final class DiscoveryFlushTask {
     private void handleReplayed(List<DiscoveryRecorder.Replayed> replayed) {
         Instant now = clock.instant();
         for (DiscoveryRecorder.Replayed delivery : replayed) {
+            // A file spooled without a user id: the replay looked it up, so an online player's
+            // unresolved session takes it over before the answer is applied.
+            userResolved(delivery.playerId(), delivery.userId());
             tracker.replayed(delivery.playerId(), delivery.userId(), delivery.entries(), delivery.result(), now);
             Player player = Bukkit.getPlayer(delivery.playerId());
             if (player == null || !delivery.result().hasGrants()) {
@@ -159,6 +182,29 @@ public final class DiscoveryFlushTask {
             } else {
                 effects.showSummary(player, delivery.result());
             }
+        }
+    }
+
+    /**
+     * Replay timer: looks up the user id of every player still tracked without one, so their session
+     * upgrades as soon as the API answers again, even when they found nothing new meanwhile.
+     */
+    void resolveUnresolved() {
+        for (UUID playerId : tracker.unresolvedPlayers()) {
+            recorder.lookUpUserId(playerId).thenAccept(found ->
+                    found.ifPresent(userId -> runOnMainThread(() -> userResolved(playerId, userId))));
+        }
+    }
+
+    /** Main thread. Upgrades an unresolved session; a no-op when it already has a user id. */
+    private void userResolved(UUID playerId, int userId) {
+        if (!tracker.resolveUser(playerId, userId)) {
+            return;
+        }
+        LOGGER.info("[Discovery] Player " + playerId + " now has user id " + userId + "; their discoveries resume");
+        BiConsumer<UUID, Integer> handler = userResolvedHandler;
+        if (handler != null) {
+            handler.accept(playerId, userId);
         }
     }
 

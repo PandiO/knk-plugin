@@ -135,6 +135,10 @@ class TeleportMenuFeatureTest {
     TeleportMenuFeatureTest() {
         when(permissible.hasPermissionAsync(any(), anyString())).thenAnswer(inv ->
             CompletableFuture.completedFuture(granted.contains((String) inv.getArgument(1))));
+        // PlayerCommandSupport asks checkAsync (allowed / denied / API unreachable); same grants.
+        when(permissible.checkAsync(any(), anyString())).thenAnswer(inv -> permissible
+            .hasPermissionAsync(inv.getArgument(0), inv.getArgument(1))
+            .thenApply(net.knightsandkings.knk.core.domain.permissions.PermissionDecision::of));
     }
 
     private static World world() {

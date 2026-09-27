@@ -174,11 +174,21 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.core.dataaccess.TitleBracketsDataAccess titleBracketsDataAccess;
     private net.knightsandkings.knk.core.dataaccess.PermissionGroupsDataAccess permissionGroupsDataAccess;
     private net.knightsandkings.knk.paper.user.UserAdminService userAdminService;
+    // Currency ledger Phase 3: /pay, /balance, /baltop, /transactions and /knk user <player> history.
+    private net.knightsandkings.knk.paper.currency.PlayerCurrencyService playerCurrencyService;
     private net.knightsandkings.knk.paper.user.SalaryPayoutScheduler salaryPayoutScheduler;
+    // Lootboxes Phase 3 (docs/specs/lootboxes/IMPLEMENTATION_PLAN.md)
+    private net.knightsandkings.knk.paper.lootbox.LootboxRuntime lootboxRuntime;
+    private net.knightsandkings.knk.paper.lootbox.LootboxSpawnScheduler lootboxSpawnScheduler;
+    private net.knightsandkings.knk.paper.commands.LootboxAdminCommand lootboxAdminCommand;
+    private net.knightsandkings.knk.paper.commands.LootboxCommand lootboxCommand;
+    private net.knightsandkings.knk.paper.lootbox.LootboxTokenDelivery lootboxTokenDelivery;
+    private net.knightsandkings.knk.paper.lootbox.LootboxOpening lootboxOpening;
     private net.knightsandkings.knk.paper.discovery.DiscoveryEligibility discoveryEligibility;
     private net.knightsandkings.knk.paper.discovery.DiscoveryFlushTask discoveryFlushTask;
     private net.knightsandkings.knk.core.discovery.DiscoveryTracker discoveryTracker;
     private net.knightsandkings.knk.core.discovery.DiscoverySpool discoverySpool;
+    private net.knightsandkings.knk.paper.discovery.DomainDiscoveryListener discoveryListener;
     private net.knightsandkings.knk.paper.menu.content.DiscoveriesMenuFeature discoveriesMenuFeature;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private PermissionsDataAccess permissionsDataAccess;
@@ -187,6 +197,12 @@ public class KnKPlugin extends JavaPlugin {
     private ModeService modeService;
     private net.knightsandkings.knk.paper.user.AdminFreezeManager adminFreezeManager;
     private net.knightsandkings.knk.paper.user.MessagingService messagingService;
+    private net.knightsandkings.knk.paper.user.SpyService spyService;
+    private net.knightsandkings.knk.paper.user.IgnoreService ignoreService;
+    private net.knightsandkings.knk.paper.user.PrivateMessageLogger privateMessageLogger;
+    private net.knightsandkings.knk.paper.user.ApiPrivateMessageLog apiPrivateMessageLog;
+    private net.knightsandkings.knk.paper.chat.PrivateMessageCommandLogFilter privateMessageCommandLogFilter;
+    private net.knightsandkings.knk.paper.commands.support.VisiblePlayers visiblePlayers;
     private net.knightsandkings.knk.paper.commands.support.RankHierarchy rankHierarchy;
     private GradesDataAccess gradesDataAccess;
     private TagsDataAccess tagsDataAccess;
@@ -498,7 +514,7 @@ public class KnKPlugin extends JavaPlugin {
             this.joinLoadingGuard = new JoinLoadingGuard(this, knkPermissible);
             this.modeService = new ModeService(this, knkPermissible, cacheManager.getUserCache(), usersCommandApi);
             this.adminFreezeManager = new net.knightsandkings.knk.paper.user.AdminFreezeManager();
-            this.messagingService = new net.knightsandkings.knk.paper.user.MessagingService();
+            initPrivateMessaging();
             this.rankHierarchy = new net.knightsandkings.knk.paper.commands.support.RankHierarchy(usersQueryApi);
             this.minecraftMaterialRefsDataAccess = dataAccessFactory.createMinecraftMaterialRefsDataAccess(
                 config.cache().ttl(),
@@ -595,6 +611,32 @@ public class KnKPlugin extends JavaPlugin {
             this.discoveriesMenuFeature = new net.knightsandkings.knk.paper.menu.content.DiscoveriesMenuFeature(
                 apiClient.getDiscoveriesApi(), cacheManager.getUserCache(), java.time.Clock.systemUTC()
             );
+            // A discovery reset made in the web app: drop the cached menu data and re-sync the online
+            // player's tracking (the same path /knk discovery reset takes, see its afterReset below).
+            if (playerNotificationPoller != null) {
+                playerNotificationPoller.setDiscoveryResetHandler(this::afterDiscoveryReset);
+            }
+            // Currency ledger Phase 3: player payments. Name lookups are vanish-safe (VisiblePlayers).
+            var currencySettings = net.knightsandkings.knk.paper.currency.CurrencySettings.from(getConfig());
+            this.playerCurrencyService = new net.knightsandkings.knk.paper.currency.PlayerCurrencyService(
+                MenuService.mainThreadExecutor(this), apiClient.getCurrencyApi(), usersDataAccess, cacheManager.getUserCache(),
+                knkPermissible::checkAsync,
+                new net.knightsandkings.knk.paper.currency.VisiblePlayers(org.bukkit.Bukkit::getPlayerExact, org.bukkit.Bukkit::getOnlinePlayers),
+                currencySettings, java.time.Clock.systemUTC(),
+                // The /pay confirmation expiry notice (main thread; cancelled when settled or on quit).
+                (delay, task) -> getServer().getScheduler().runTaskLater(this, task, Math.max(1L, delay.toMillis() / 50L))::cancel
+            );
+            if (playerNotificationPoller != null) {
+                // "You received N coins from X" - right away when online, else on the next join.
+                var paymentHandler = new net.knightsandkings.knk.paper.currency.PaymentNotificationHandler(
+                    currencySettings, uuid -> usersDataAccess.refreshAsync(uuid));
+                playerNotificationPoller.setPaymentReceivedHandler(paymentHandler::handle);
+                // Currency Phase 5: anomaly alerts for online staff with knk.admin.currency.alerts.
+                var alertNotifier = new net.knightsandkings.knk.paper.currency.CurrencyAlertNotifier(
+                    currencySettings, knkPermissible::checkAsync, org.bukkit.Bukkit::getOnlinePlayers,
+                    MenuService.mainThreadExecutor(this));
+                playerNotificationPoller.setCurrencyAlertHandler(alertNotifier::handle);
+            }
             List<MenuFeature> menuFeatures = List.of(
                 registries -> {
                     MenuVariableContext.registerDefaults(registries.variables());
@@ -616,7 +658,7 @@ public class KnKPlugin extends JavaPlugin {
                     permissionGroupsDataAccess, usersQueryApi, cacheManager.getUserCache()),
                 new net.knightsandkings.knk.paper.menu.content.UserManagerMenuFeature(
                     userAdminService, usersQueryApi, cacheManager.getUserCache(), titleBracketsDataAccess,
-                    permissionGroupsDataAccess, org.bukkit.Bukkit::getOnlinePlayers),
+                    permissionGroupsDataAccess, org.bukkit.Bukkit::getOnlinePlayers, this::askStaffReason),
                 discoveriesMenuFeature,
                 // Teleport menu (KNG-17 Phase 6): the engine starts later in onEnable, hence the supplier.
                 new net.knightsandkings.knk.paper.menu.content.TeleportMenuFeature(() -> teleportMenuParts),
@@ -687,6 +729,9 @@ public class KnKPlugin extends JavaPlugin {
             // Teleport engine + staff teleports (docs/specs/teleport, Phase 1) - before the commands,
             // /knk tp delegates to /tp.
             initializeTeleports();
+
+            // Lootboxes Phase 3: world boxes, claims and delivery; commands registered in registerCommands().
+            initializeLootboxes();
 
             // Register commands
             registerCommands();
@@ -815,8 +860,32 @@ public class KnKPlugin extends JavaPlugin {
         }
     }
 
+    /**
+     * The Player manager's reason prompt for staged balance changes (currency Phase 4, D9): one line
+     * of chat through ChatCaptureManager, answered on the main thread (chat arrives off it).
+     */
+    private boolean askStaffReason(org.bukkit.entity.Player player, String prompt,
+                                   java.util.function.Consumer<String> onReason, Runnable onCancel) {
+        ChatCaptureManager capture = this.chatCaptureManager;
+        if (capture == null) {
+            return false;
+        }
+        java.util.concurrent.Executor main = MenuService.mainThreadExecutor(this);
+        capture.startTextCapture(player, prompt, text -> main.execute(() -> onReason.accept(text)), () -> main.execute(onCancel));
+        return true;
+    }
+
     @Override
     public void onDisable() {
+        // Players still loading their account would otherwise be saved in the hold's ADVENTURE
+        // mode with the invulnerable flag set.
+        if (joinLoadingGuard != null) {
+            try {
+                joinLoadingGuard.releaseAll();
+            } catch (RuntimeException e) {
+                getLogger().log(java.util.logging.Level.SEVERE, "Releasing join-loading holds failed", e);
+            }
+        }
         // Siege first (DESIGN §5.1/§9.2): stops every lobby with SERVER_RESTART, which aborts running
         // matches and restores every member's vault while the players and the API client still exist.
         if (siegeService != null) {
@@ -869,6 +938,15 @@ public class KnKPlugin extends JavaPlugin {
         if (salaryPayoutScheduler != null) {
             salaryPayoutScheduler.stop();
         }
+        if (lootboxOpening != null) {
+            lootboxOpening.finishAll(); // items on a spinning reel are handed over before the stop
+        }
+        if (lootboxSpawnScheduler != null) {
+            lootboxSpawnScheduler.stop();
+        }
+        if (lootboxRuntime != null) {
+            lootboxRuntime.stop(); // removes the (non-persistent) box entities
+        }
         if (discoveryFlushTask != null) {
             // Unsent candidates and grants still in flight go to the spool, replayed on the next start.
             discoveryFlushTask.stop();
@@ -879,6 +957,10 @@ public class KnKPlugin extends JavaPlugin {
             cacheManager.logMetrics();
             cacheManager.clearAll();
         }
+        if (privateMessageLogger != null) {
+            // Before the API client: the API sink sends what is queued (or spools it) on close.
+            privateMessageLogger.close();
+        }
         if (apiClient != null) {
             getLogger().info("Shutting down API client...");
             apiClient.shutdown();
@@ -888,6 +970,9 @@ public class KnKPlugin extends JavaPlugin {
         }
         if (regionLookupExecutor != null) {
             regionLookupExecutor.shutdownNow();
+        }
+        if (privateMessageCommandLogFilter != null) {
+            privateMessageCommandLogFilter.uninstall();
         }
         getLogger().info("KnightsAndKings Plugin Disabled!");
     }
@@ -909,15 +994,26 @@ public class KnKPlugin extends JavaPlugin {
             true, joinLoadingGuard::isLoading, modeService::getActiveMode, adminFreezeManager::isFrozen,
             discoveryConfig.excludedGameModes(), discoveryConfig.excludeSiegeParticipants()
         );
-        // Siege isn't on trunk: when it lands, plug SiegeService.isParticipant in with
-        // getDiscoveryEligibility().setSiegeParticipantCheck(...).
+        // Siege members discover nothing (discovery.exclude-siege-participants). siegeService is
+        // created later (initializeSiege), so the check reads it on every call.
+        discoveryEligibility.setSiegeParticipantCheck(
+            net.knightsandkings.knk.paper.discovery.DiscoveryEligibility.siegeParticipants(() -> siegeService));
         this.discoveryTracker =
             new net.knightsandkings.knk.core.discovery.DiscoveryTracker(discoveryConfig.maxRequestsPerMinute());
         this.discoverySpool = new net.knightsandkings.knk.core.discovery.DiscoverySpool(
             new java.io.File(getDataFolder(), discoveryConfig.spoolDirectory()).toPath(), getLogger()
         );
+        // A player who joined while the API was down has no user id: the recorder looks it up by UUID
+        // before sending (null = no such user, a failure = still unreachable).
         net.knightsandkings.knk.core.discovery.DiscoveryRecorder discoveryRecorder = new net.knightsandkings.knk.core.discovery.DiscoveryRecorder(
-            apiClient.getDiscoveriesApi(), net.knightsandkings.knk.core.dataaccess.RetryPolicy.defaultPolicy(), discoverySpool, getLogger()
+            apiClient.getDiscoveriesApi(), net.knightsandkings.knk.core.dataaccess.RetryPolicy.defaultPolicy(), discoverySpool, getLogger(),
+            uuid -> usersQueryApi.getByUuid(uuid).thenApply(summary -> {
+                if (summary == null) {
+                    return java.util.Optional.<Integer>empty();
+                }
+                cacheManager.getUserCache().put(summary);
+                return java.util.Optional.ofNullable(summary.id());
+            })
         );
         net.knightsandkings.knk.paper.discovery.DiscoveryEffects discoveryEffects = new net.knightsandkings.knk.paper.discovery.DiscoveryEffects(
             this, discoveryConfig, usersDataAccess,
@@ -927,7 +1023,7 @@ public class KnKPlugin extends JavaPlugin {
             this, discoveryTracker, discoveryRecorder, discoveryEffects, clock,
             discoveryConfig.batchWindowTicks(), discoveryConfig.replayIntervalSeconds()
         );
-        net.knightsandkings.knk.paper.discovery.DomainDiscoveryListener discoveryListener =
+        this.discoveryListener =
             new net.knightsandkings.knk.paper.discovery.DomainDiscoveryListener(
                 this, discoveryTracker, discoveryRecorder, apiClient.getDiscoveriesApi(), discoveryEligibility,
                 discoveryFlushTask, clock
@@ -939,9 +1035,91 @@ public class KnKPlugin extends JavaPlugin {
         getLogger().info("Domain discovery started (spool: " + discoverySpool.directory() + ")");
     }
 
-    /** Domain discovery's exclusions; null when discovery is disabled. The siege hook goes here. */
+    /**
+     * After one of an online player's discoveries was reset (web app notification or
+     * {@code /knk discovery reset}): drops their cached discoveries menu data and re-syncs their
+     * discovery tracking so the place is discovered again, even standing still. Main thread.
+     */
+    private void afterDiscoveryReset(org.bukkit.entity.Player player) {
+        if (discoveriesMenuFeature != null) {
+            discoveriesMenuFeature.invalidate(player.getUniqueId());
+        }
+        if (discoveryListener != null) {
+            discoveryListener.resync(player);
+        }
+    }
+
+    /** Domain discovery's exclusions; null when discovery is disabled. */
     public net.knightsandkings.knk.paper.discovery.DiscoveryEligibility getDiscoveryEligibility() {
         return discoveryEligibility;
+    }
+
+    /**
+     * KNG-18 Phase 1 (docs/specs/private-messages/DESIGN.md §3.3): /msg, /reply, social spy and the
+     * local PM log; Phase 2: ignore lists; Phase 3: knk-web-api's PM log and the command-log filter.
+     * Needs knkPermissible, adminFreezeManager, the user cache and the API client.
+     */
+    private void initPrivateMessaging() {
+        KnkConfig.PrivateMessagesConfig pmConfig = config.privateMessages();
+        java.time.Clock clock = java.time.Clock.systemDefaultZone();
+        this.visiblePlayers = net.knightsandkings.knk.paper.commands.support.VisiblePlayers.bukkit();
+        this.spyService = new net.knightsandkings.knk.paper.user.SpyService(
+            knkPermissible, new org.bukkit.NamespacedKey(this, "socialspy"), org.bukkit.Bukkit::getOnlinePlayers);
+        spyService.start(this, pmConfig.spyRefreshSeconds());
+        this.ignoreService = new net.knightsandkings.knk.paper.user.IgnoreService(
+            apiClient.getUserIgnoresApi(),
+            uuid -> cacheManager.getUserCache().getStale(uuid)
+                .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null),
+            uuid -> {
+                org.bukkit.entity.Player online = org.bukkit.Bukkit.getPlayer(uuid);
+                return online != null && online.isOnline();
+            },
+            clock);
+        // Players already online after a reload: load their lists (joins load their own).
+        getServer().getScheduler().runTaskLater(this, () -> org.bukkit.Bukkit.getOnlinePlayers()
+            .forEach(online -> ignoreService.load(online.getUniqueId())), 20L);
+        java.util.List<net.knightsandkings.knk.paper.user.PrivateMessageLogger> pmLogSinks = new java.util.ArrayList<>();
+        if (pmConfig.log().localEnabled()) {
+            var localLog = new net.knightsandkings.knk.paper.user.LocalFilePrivateMessageLog(
+                getDataFolder().toPath().resolve("logs"), pmConfig.log().localRetentionDays(), clock);
+            localLog.start();
+            pmLogSinks.add(localLog);
+        }
+        // Phase 3: knk-web-api's PM log (POST api/private-message-log/batch needs the service key).
+        if (pmConfig.log().apiEnabled()) {
+            this.apiPrivateMessageLog = new net.knightsandkings.knk.paper.user.ApiPrivateMessageLog(
+                new net.knightsandkings.knk.core.messaging.PrivateMessageLogShipper(
+                    apiClient.getPrivateMessageLogApi(),
+                    getDataFolder().toPath().resolve("private-messages-spool.jsonl"),
+                    net.knightsandkings.knk.core.messaging.PrivateMessageLogShipper.DEFAULT_CAPACITY,
+                    net.knightsandkings.knk.core.messaging.PrivateMessageLogShipper.DEFAULT_BATCH_SIZE,
+                    java.time.Duration.ofSeconds(pmConfig.log().flushSeconds()),
+                    clock));
+            apiPrivateMessageLog.start();
+            pmLogSinks.add(apiPrivateMessageLog);
+            if (!"apikey".equalsIgnoreCase(config.api().auth().type())) {
+                getLogger().warning("private-messages.log.api-enabled is on but api.auth.type is not apikey: knk-web-api "
+                    + "will refuse the PM log (401) and messages will pile up in the queue.");
+            }
+        }
+        this.privateMessageLogger = net.knightsandkings.knk.paper.user.PrivateMessageLogger.all(pmLogSinks);
+        // Only with a PM log in place: otherwise the server log would be the only record.
+        if (pmConfig.log().filterCommandLog() && !pmLogSinks.isEmpty()) {
+            var filter = new net.knightsandkings.knk.paper.chat.PrivateMessageCommandLogFilter();
+            if (filter.install()) {
+                this.privateMessageCommandLogFilter = filter;
+                getLogger().info("Private messages are filtered out of the server command log");
+            }
+        }
+        this.messagingService = new net.knightsandkings.knk.paper.user.MessagingService(
+            pmConfig, knkPermissible, adminFreezeManager, spyService, privateMessageLogger, ignoreService, visiblePlayers,
+            // Same rank colour as the player's tab-list name (KNG-7); cache-only checks, display only.
+            player -> net.knightsandkings.knk.paper.utils.TabListTeam.resolve(
+                knkPermissible.hasPermission(player, ModeService.OWNER_NODE),
+                knkPermissible.hasPermission(player, ModeService.STAFF_NODE),
+                cacheManager.getUserCache().getStale(player.getUniqueId()).orElse(null)).color(),
+            org.bukkit.Bukkit::getConsoleSender, MenuService.mainThreadExecutor(this), clock
+        );
     }
 
     private void registerEvents(WorldGuardRegionTracker regionTracker) {
@@ -949,16 +1127,32 @@ public class KnKPlugin extends JavaPlugin {
         // Event registration moved to onEnable after region transition service setup
 
         pluginManager.registerEvents(new WorldGuardRegionListener(regionTracker), this);
-        pluginManager.registerEvents(new PlayerListener(usersDataAccess, townsDataAccess, this.getCacheManager(), knkPermissible, usersCommandApi, kitsCommandApi, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess), this);
-        pluginManager.registerEvents(new UserAccountListener(this, userManager, joinLoadingGuard, config.messages(), getLogger()), this);
+        pluginManager.registerEvents(new PlayerListener(usersDataAccess, townsDataAccess, this.getCacheManager(), knkPermissible, usersCommandApi, kitsCommandApi, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, ignoreService), this);
+        if (playerCurrencyService != null) {
+            // Drops a leaving player's open /pay confirmation and its expiry notice.
+            pluginManager.registerEvents(playerCurrencyService, this);
+        }
+        pluginManager.registerEvents(new UserAccountListener(this, userManager, joinLoadingGuard, config.messages(), getLogger(), playerCurrencyService), this);
         getLogger().info("Registered UserAccountListener for account management");
         pluginManager.registerEvents(new JoinLoadingRestrictionListener(joinLoadingGuard), this);
         pluginManager.registerEvents(new ModeListener(modeService), this);
         getLogger().info("Registered ModeListener for owner/staff mode restore");
         pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.AdminFreezeListener(this, adminFreezeManager, usersDataAccess), this);
         getLogger().info("Registered AdminFreezeListener for /freeze enforcement");
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.PrivateMessageSessionListener(
+            this, messagingService, spyService, ignoreService), this);
+        if (config.privateMessages().blockVanillaCommands()) {
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.VanillaMessagingBlockListener(), this);
+            getLogger().info("Registered VanillaMessagingBlockListener (/minecraft:msg|tell|w -> /msg; /teammsg, /tm, /me off)");
+        }
     }
     
+    /** Private messages waiting for knk-web-api's PM log (/knk health); -1 when that sink is off. */
+    public int privateMessageLogQueueDepth() {
+        var apiLog = apiPrivateMessageLog;
+        return apiLog == null ? -1 : apiLog.queueDepth();
+    }
+
     /**
      * Returns the cache manager for accessing cache statistics.
      *
@@ -1019,8 +1213,23 @@ public class KnKPlugin extends JavaPlugin {
                 serverId,
                 menuService,
                 apiClient.getClansQueryApi(),
-                userAdminService
+                userAdminService,
+                playerCurrencyService
             );
+            if (lootboxAdminCommand != null) {
+                var lootboxAdmin = lootboxAdminCommand;
+                knkAdminCommand.registerSubcommand(
+                    new net.knightsandkings.knk.paper.commands.CommandMetadata(
+                        "lootbox",
+                        "Spawn, list, give and despawn lootboxes; issue lootbox token items; manage lootbox spawn areas",
+                        net.knightsandkings.knk.paper.commands.LootboxAdminCommand.usage(),
+                        null, // each action checks its own knk.lootbox.admin.<action> node
+                        List.of("/knk lootbox spawn weapons 5", "/knk lootbox list", "/knk lootbox give Steve armor",
+                            "/knk lootbox token Steve weapons 5 2",
+                            "/knk lootbox area create spawn", "/knk lootbox area delete spawn")),
+                    lootboxAdmin::execute,
+                    lootboxAdmin::tabComplete);
+            }
             if (userAdminService != null) {
                 // Domain discovery (KNG-20): /knk discovery list|reset|status, node knk.admin.discovery.
                 knkAdminCommand.registerSubcommand(
@@ -1030,9 +1239,12 @@ public class KnKPlugin extends JavaPlugin {
                         player -> cacheManager.getUserCache().getStale(player.getUniqueId())
                             .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null),
                         (player, node) -> knkPermissible != null && knkPermissible.hasPermission(player, node),
-                        () -> discoveryTracker, () -> discoverySpool, org.bukkit.Bukkit::getPlayer,
+                        () -> discoveryTracker, () -> discoverySpool,
                         uuid -> {
-                            if (discoveriesMenuFeature != null) {
+                            org.bukkit.entity.Player target = org.bukkit.Bukkit.getPlayer(uuid);
+                            if (target != null) {
+                                afterDiscoveryReset(target);
+                            } else if (discoveriesMenuFeature != null) {
                                 discoveriesMenuFeature.invalidate(uuid);
                             }
                         }
@@ -1067,8 +1279,14 @@ public class KnKPlugin extends JavaPlugin {
         registerSimpleCommand("freeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(userAdminService, true));
         registerSimpleCommand("unfreeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(userAdminService, false));
         registerSimpleCommand("staffchat", new net.knightsandkings.knk.paper.commands.StaffChatCommand());
-        registerSimpleCommand("msg", new net.knightsandkings.knk.paper.commands.MessageCommand(messagingService));
-        registerSimpleCommand("reply", new net.knightsandkings.knk.paper.commands.ReplyCommand(messagingService));
+        registerTabCommand("msg", new net.knightsandkings.knk.paper.commands.MessageCommand(messagingService, visiblePlayers));
+        registerTabCommand("reply", new net.knightsandkings.knk.paper.commands.ReplyCommand(messagingService));
+        registerTabCommand("socialspy", new net.knightsandkings.knk.paper.commands.SocialSpyCommand(
+            new net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport(
+                knkPermissible, MenuService.mainThreadExecutor(this),
+                org.bukkit.Bukkit::getPlayerExact, org.bukkit.Bukkit::getOnlinePlayers),
+            spyService, getLogger()));
+        registerIgnoreCommands();
 
         registerSimpleCommand("kit", new net.knightsandkings.knk.paper.commands.KitCommand(
             this,
@@ -1076,10 +1294,24 @@ public class KnKPlugin extends JavaPlugin {
             kitGrantFlow
         ));
 
+        if (lootboxCommand != null) {
+            registerTabCommand("lootbox", lootboxCommand);
+        }
+
         // Content port CP1: /menu opens the InventoryMenu hub (docs/specs/inventory-menu/CONTENT_PORT_PLAN.md §3).
         registerSimpleCommand("menu", new net.knightsandkings.knk.paper.commands.MenuCommand(() -> menuService));
         // Domain discovery (KNG-20): /discoveries (/disc) opens discoveries.main.
         registerSimpleCommand("discoveries", new net.knightsandkings.knk.paper.commands.DiscoveriesCommand(() -> menuService));
+
+        // Currency ledger Phase 3 (docs/specs/currency-payments/DESIGN.md §3.6).
+        if (playerCurrencyService != null) {
+            registerTabCommand("pay", new net.knightsandkings.knk.paper.commands.PayCommand(playerCurrencyService));
+            registerTabCommand("balance", new net.knightsandkings.knk.paper.commands.BalanceCommand(playerCurrencyService));
+            registerTabCommand("baltop", new net.knightsandkings.knk.paper.commands.BaltopCommand(playerCurrencyService));
+            registerTabCommand("transactions", new net.knightsandkings.knk.paper.commands.TransactionsCommand(playerCurrencyService));
+        } else {
+            getLogger().warning("/pay, /balance, /baltop and /transactions not registered - currency service failed to initialize");
+        }
 
         registerPlayerCommands();
 
@@ -1336,6 +1568,19 @@ public class KnKPlugin extends JavaPlugin {
         return teleportService;
     }
 
+    /** KNG-18 Phase 2: /ignore [player] and /unignore <player> (docs/specs/private-messages/DESIGN.md §3.3.5). */
+    private void registerIgnoreCommands() {
+        net.knightsandkings.knk.paper.commands.IgnoreCommand.TargetResolver targets = userAdminService::resolveTarget;
+        java.util.function.Function<java.util.UUID, java.util.concurrent.CompletableFuture<Boolean>> unignorable = uuid ->
+            knkPermissible.hasPermissionAsync(org.bukkit.Bukkit.getOfflinePlayer(uuid),
+                net.knightsandkings.knk.core.messaging.PrivateMessageNodes.UNIGNORABLE);
+        java.util.concurrent.Executor mainThread = MenuService.mainThreadExecutor(this);
+        registerTabCommand("ignore", new net.knightsandkings.knk.paper.commands.IgnoreCommand(
+            ignoreService, targets, unignorable, visiblePlayers, mainThread, getLogger(), false));
+        registerTabCommand("unignore", new net.knightsandkings.knk.paper.commands.IgnoreCommand(
+            ignoreService, targets, unignorable, visiblePlayers, mainThread, getLogger(), true));
+    }
+
     /**
      * KNG-9: v2's /user statistics, /fly, /heal, /feed, /enderchest and /inventory
      * (docs/specs/legacy/commands-v2.md §1/§7).
@@ -1382,6 +1627,146 @@ public class KnKPlugin extends JavaPlugin {
             support, net.knightsandkings.knk.paper.commands.RestoreCommand.Kind.FEED));
         registerTabCommand("enderchest", new net.knightsandkings.knk.paper.commands.EnderchestCommand(support, rankCheck, offlineStorage));
         registerTabCommand("inventory", new net.knightsandkings.knk.paper.commands.InventoryCommand(support, rankCheck, offlineStorage));
+    }
+
+    /**
+     * Lootboxes Phase 3 (docs/specs/lootboxes/DESIGN.md §3.4): the runtime (cache + presenter, refreshed from the API),
+     * the spawn scheduler, the interact/chunk/join listeners and the two commands. A failure here disables lootboxes
+     * only, not the plugin.
+     */
+    private void initializeLootboxes() {
+        try {
+            var queryApi = apiClient.getLootboxesQueryApi();
+            var commandApi = apiClient.getLootboxesCommandApi();
+            java.util.concurrent.Executor mainThread = MenuService.mainThreadExecutor(this);
+            java.time.Clock clock = java.time.Clock.systemUTC();
+            java.util.function.BiPredicate<org.bukkit.entity.Player, String> permission =
+                (player, node) -> knkPermissible.hasPermission(player, node);
+            // Asked before refusing when nothing is cached yet (a first click right after joining).
+            java.util.function.BiFunction<org.bukkit.entity.Player, String, java.util.concurrent.CompletableFuture<Boolean>> freshPermission =
+                (player, node) -> knkPermissible.hasPermissionAsync(player, node);
+            java.util.function.Function<org.bukkit.entity.Player, Integer> userIdOf = player -> cacheManager.getUserCache()
+                .getStale(player.getUniqueId()).map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null);
+            // Siege (hub or match): the player's inventory is the siege one and is replaced afterwards, so no claims,
+            // token opens or token hand-overs then. siegeService is created later (initializeSiege), so it's read per call.
+            java.util.function.Predicate<java.util.UUID> inSiege =
+                uuid -> siegeService != null && siegeService.activeLobbyOf(uuid).isPresent();
+
+            var runtime = new net.knightsandkings.knk.paper.lootbox.LootboxRuntime(
+                this, queryApi, () -> getConfig().getConfigurationSection("lootboxes"), clock);
+            var regions = new net.knightsandkings.knk.paper.lootbox.WorldGuardLootboxRegions(new WorldGuardIntegration(this));
+            var announcer = new net.knightsandkings.knk.paper.lootbox.LootboxAnnouncer(
+                message -> org.bukkit.Bukkit.broadcast(message));
+            var delivery = new net.knightsandkings.knk.paper.lootbox.LootboxDelivery(
+                mainThread, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, enchantmentDefinitionsDataAccess, commandApi,
+                new net.knightsandkings.knk.paper.item.BlueprintItemAssembler(
+                    new net.knightsandkings.knk.api.impl.enchantment.LocalEnchantmentRepositoryImpl()));
+            var scheduler = new net.knightsandkings.knk.paper.lootbox.LootboxSpawnScheduler(
+                this, runtime, regions, commandApi, announcer,
+                new net.knightsandkings.knk.core.lootbox.LootboxSpawnPlanner(
+                    () -> java.util.concurrent.ThreadLocalRandom.current().nextDouble()),
+                this::siegeArenaRegionIds);
+
+            var pluginManager = getServer().getPluginManager();
+            // Phase 5: lootbox token items (open, hand over, keep out of placing/crafting). A world box is picked up
+            // as one (smoke test 2026-09-27, DESIGN.md §3.8) and every token opens on the reel (§3.9).
+            var tokenDelivery = new net.knightsandkings.knk.paper.lootbox.LootboxTokenDelivery(
+                mainThread, queryApi, commandApi, runtime::settings, userIdOf);
+            var opening = new net.knightsandkings.knk.paper.lootbox.LootboxOpening(
+                this, delivery, announcer, queryApi, runtime::settings, runtime::config,
+                () -> java.util.concurrent.ThreadLocalRandom.current().nextDouble());
+            pluginManager.registerEvents(opening, this);
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxInteractListener(
+                runtime, new net.knightsandkings.knk.core.lootbox.ClaimGuard(), commandApi, tokenDelivery, announcer,
+                permission, freshPermission, modeService::getActiveMode, inSiege, userIdOf, mainThread), this);
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxChunkListener(runtime), this);
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxJoinListener(
+                this, queryApi, delivery, userIdOf, mainThread), this);
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxTokenListener(
+                this, runtime, new net.knightsandkings.knk.core.lootbox.TokenOpenGuard(), commandApi, opening, tokenDelivery,
+                permission, freshPermission, modeService::getActiveMode, inSiege, userIdOf, mainThread), this);
+            if (playerNotificationPoller != null) {
+                // Held back during a siege; the next join or LootboxTokensIssued notification hands them over.
+                playerNotificationPoller.setLootboxTokensHandler(player -> {
+                    if (!inSiege.test(player.getUniqueId())) {
+                        tokenDelivery.deliverUndelivered(player);
+                    }
+                });
+                // Web despawns / area deletes and token revokes, applied within seconds (DESIGN.md §3.9).
+                var worldSync = new net.knightsandkings.knk.paper.lootbox.LootboxWorldSync(
+                    runtime::gone, org.bukkit.Bukkit::getOnlinePlayers);
+                playerNotificationPoller.setServerNotificationHandler(
+                    net.knightsandkings.knk.core.domain.users.PlayerNotification.TYPE_LOOTBOX_WORLD_CHANGED, worldSync::handle);
+            }
+
+            var areaCommand = new net.knightsandkings.knk.paper.commands.LootboxAreaCommand(
+                runtime::config, runtime.cache(), regions, commandApi, userIdOf, name -> org.bukkit.Bukkit.getWorld(name),
+                () -> runtime.refresh(), runtime::gone, mainThread, clock);
+            this.lootboxAdminCommand = new net.knightsandkings.knk.paper.commands.LootboxAdminCommand(
+                runtime, commandApi, delivery, announcer, areaCommand, permission, userIdOf,
+                name -> org.bukkit.Bukkit.getPlayerExact(name),
+                () -> {
+                    reloadConfig();
+                    runtime.reloadSettings();
+                    opening.clearCaches();
+                    scheduler.start();
+                },
+                mainThread,
+                tokenDelivery,
+                inSiege);
+            this.lootboxAdminCommand.setOpening(opening);
+            this.lootboxAdminCommand.setOnlinePlayerNames(() -> org.bukkit.Bukkit.getOnlinePlayers().stream()
+                .map(org.bukkit.entity.Player::getName).sorted(String.CASE_INSENSITIVE_ORDER).toList());
+            this.lootboxCommand = new net.knightsandkings.knk.paper.commands.LootboxCommand(
+                runtime::config, queryApi, permission, mainThread);
+            this.lootboxCommand.setFreshPermission(freshPermission);
+
+            runtime.start();
+            scheduler.start();
+            this.lootboxRuntime = runtime;
+            this.lootboxSpawnScheduler = scheduler;
+            this.lootboxTokenDelivery = tokenDelivery;
+            this.lootboxOpening = opening;
+            getLogger().info("Lootboxes initialized (enabled=" + runtime.settings().enabled() + ")");
+        } catch (Exception e) {
+            getLogger().log(java.util.logging.Level.SEVERE, "Lootboxes failed to initialize; they stay off", e);
+        }
+    }
+
+    /**
+     * The WorldGuard regions of every siege being fought now (hub or match): the drawn scenario's districts, or its
+     * town. The lootbox spawn scheduler keeps boxes out of them. Main thread.
+     */
+    private java.util.Set<String> siegeArenaRegionIds() {
+        if (siegeService == null) {
+            return java.util.Set.of();
+        }
+        return net.knightsandkings.knk.core.lootbox.LootboxSiegeRules.arenaRegionIds(siegeService.lobbies().stream()
+            .filter(lobby -> lobby.phase().isMatchActive())
+            .map(lobby -> lobby.drawnScenario().orElse(null))
+            .filter(java.util.Objects::nonNull)
+            .toList());
+    }
+
+    /**
+     * After a siege restored a player's own inventory: hand over the lootbox tokens held back during the siege, so they
+     * don't have to rejoin. A second later, so a quitting player is gone (their next join delivers them) and a player
+     * who immediately joined another siege is skipped.
+     */
+    private void deliverLootboxTokensAfterSiege(org.bukkit.entity.Player player) {
+        var tokenDelivery = lootboxTokenDelivery;
+        // Not while disabling (siege shutdown restores everyone; scheduling then throws): their next join delivers.
+        if (tokenDelivery == null || !isEnabled()) {
+            return;
+        }
+        java.util.UUID uuid = player.getUniqueId();
+        getServer().getScheduler().runTaskLater(this, () -> {
+            org.bukkit.entity.Player online = getServer().getPlayer(uuid);
+            if (online != null && online.isOnline()
+                && (siegeService == null || siegeService.activeLobbyOf(uuid).isEmpty())) {
+                tokenDelivery.deliverUndelivered(online);
+            }
+        }, 20L);
     }
 
     private void registerTabCommand(String name, org.bukkit.command.TabExecutor executor) {
@@ -1503,7 +1888,10 @@ public class KnKPlugin extends JavaPlugin {
         siegeService.addObserver(new net.knightsandkings.knk.paper.siege.SiegeCaptureFeedback());
         var siegeBooks = new net.knightsandkings.knk.paper.siege.SiegeEnchantBooks(this, siegeService, siegeRandom);
         siegeService.addObserver(siegeBooks);
-        siegeVault.setAfterRestore(siegeBooks::sweep);
+        siegeVault.setAfterRestore(player -> {
+            siegeBooks.sweep(player);
+            deliverLootboxTokensAfterSiege(player);
+        });
 
         var pluginManager = getServer().getPluginManager();
         pluginManager.registerEvents(new SiegeSessionListener(siegeService, siegeBooks::sweep), this);

@@ -38,7 +38,8 @@ import java.util.function.Supplier;
  *   <li>{@code list} - the player's per-type counts, lifetime rewards and discovered places (with
  *       their domain ids, for {@code reset}), newest first, 10 per page;</li>
  *   <li>{@code reset} - forgets one discovery so the place can be discovered and rewarded again
- *       (no claw-back). An online player's known set is reloaded so it counts this session;</li>
+ *       (no claw-back). An online player is re-synced (known set re-read, current location
+ *       re-checked) through {@code afterReset}, the same path as a reset made in the web app;</li>
  *   <li>{@code status} - tracker and spool sizes on this server.</li>
  * </ul>
  */
@@ -56,7 +57,6 @@ public class DiscoveryAdminCommand implements SubcommandExecutor {
     private final BiPredicate<Player, String> knkPermission;
     private final Supplier<DiscoveryTracker> tracker;
     private final Supplier<DiscoverySpool> spool;
-    private final Function<UUID, Player> onlinePlayer;
     private final Consumer<UUID> afterReset;
 
     /**
@@ -64,13 +64,14 @@ public class DiscoveryAdminCommand implements SubcommandExecutor {
      * @param knkPermission the in-house permission check ({@code KnkPermissible::hasPermission})
      * @param tracker       discovery's tracker, null while discovery is disabled
      * @param spool         discovery's spool, null while discovery is disabled
-     * @param onlinePlayer  an online player by UUID, or null
-     * @param afterReset    runs (main thread) with the target's UUID after a reset, e.g. to drop cached menu data
+     * @param afterReset    runs (main thread) with the target's UUID after a reset: drops cached menu data
+     *                      and re-syncs an online player's discovery tracking
+     *                      ({@code DomainDiscoveryListener.resync})
      */
     public DiscoveryAdminCommand(DiscoveriesApi discoveriesApi, UserAdminService userAdminService, Executor mainThread,
                                  Function<Player, Integer> cachedUserId, BiPredicate<Player, String> knkPermission,
                                  Supplier<DiscoveryTracker> tracker, Supplier<DiscoverySpool> spool,
-                                 Function<UUID, Player> onlinePlayer, Consumer<UUID> afterReset) {
+                                 Consumer<UUID> afterReset) {
         this.discoveriesApi = discoveriesApi;
         this.userAdminService = userAdminService;
         this.mainThread = mainThread;
@@ -78,7 +79,6 @@ public class DiscoveryAdminCommand implements SubcommandExecutor {
         this.knkPermission = knkPermission;
         this.tracker = tracker;
         this.spool = spool;
-        this.onlinePlayer = onlinePlayer;
         this.afterReset = afterReset;
     }
 
@@ -209,11 +209,8 @@ public class DiscoveryAdminCommand implements SubcommandExecutor {
                 }
                 sender.sendMessage(ChatColor.GREEN + "Reset " + target.username() + "'s discovery of domain #" + domainId
                         + ChatColor.GRAY + " - they can discover it again (the reward isn't taken back).");
-                if (target.uuid() != null) {
-                    reloadKnown(target.uuid(), target.id());
-                    if (afterReset != null) {
-                        afterReset.accept(target.uuid());
-                    }
+                if (target.uuid() != null && afterReset != null) {
+                    afterReset.accept(target.uuid());
                 }
             }));
         });
@@ -228,19 +225,6 @@ public class DiscoveryAdminCommand implements SubcommandExecutor {
             cause = cause.getCause();
         }
         return "Failed to reset the discovery: " + UserAdminService.describeError(ex);
-    }
-
-    /** Main thread. An online target's tracker forgets the reset domain, so re-entering it counts now. */
-    private void reloadKnown(UUID uuid, int userId) {
-        DiscoveryTracker current = tracker.get();
-        if (current == null || onlinePlayer.apply(uuid) == null || !current.hasSession(uuid)) {
-            return;
-        }
-        discoveriesApi.known(userId).whenComplete((known, ex) -> {
-            if (ex == null && known != null) {
-                mainThread.execute(() -> current.replaceKnown(uuid, known));
-            }
-        });
     }
 
     // ===== status =====

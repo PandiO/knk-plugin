@@ -106,6 +106,7 @@ public class ConfigLoader {
         );
         
         KnkConfig knkConfig = new KnkConfig(apiConfig, cacheConfig, accountConfig, messagesConfig,
+            loadPrivateMessages(config.getConfigurationSection("private-messages")),
             loadTeleportSettings(config.getConfigurationSection("teleport")),
             loadDiscovery(config.getConfigurationSection("discovery")));
         knkConfig.validate();
@@ -196,6 +197,41 @@ public class ConfigLoader {
             effects == null ? defaults.effectSpacingTicks() : effects.getInt("spacing-ticks", defaults.effectSpacingTicks()),
             effectsConfig,
             messagesConfig
+        );
+    }
+
+    /** private-messages: every key falls back to {@link KnkConfig.PrivateMessagesConfig#defaults()}. */
+    static KnkConfig.PrivateMessagesConfig loadPrivateMessages(ConfigurationSection section) {
+        KnkConfig.PrivateMessagesConfig defaults = KnkConfig.PrivateMessagesConfig.defaults();
+        if (section == null) {
+            return defaults;
+        }
+        ConfigurationSection sound = section.getConfigurationSection("sound");
+        ConfigurationSection rateLimit = section.getConfigurationSection("rate-limit");
+        ConfigurationSection spy = section.getConfigurationSection("spy");
+        ConfigurationSection log = section.getConfigurationSection("log");
+        return new KnkConfig.PrivateMessagesConfig(
+            section.getInt("max-length", defaults.maxLength()),
+            new KnkConfig.PrivateMessagesConfig.SoundConfig(
+                sound != null ? sound.getBoolean("enabled", defaults.sound().enabled()) : defaults.sound().enabled(),
+                sound != null ? (float) sound.getDouble("volume", defaults.sound().volume()) : defaults.sound().volume(),
+                sound != null ? (float) sound.getDouble("pitch", defaults.sound().pitch()) : defaults.sound().pitch()
+            ),
+            new KnkConfig.PrivateMessagesConfig.RateLimitConfig(
+                rateLimit != null ? rateLimit.getInt("max-messages", defaults.rateLimit().maxMessages()) : defaults.rateLimit().maxMessages(),
+                rateLimit != null ? rateLimit.getInt("window-seconds", defaults.rateLimit().windowSeconds()) : defaults.rateLimit().windowSeconds(),
+                rateLimit != null ? rateLimit.getInt("duplicate-window-seconds", defaults.rateLimit().duplicateWindowSeconds())
+                    : defaults.rateLimit().duplicateWindowSeconds()
+            ),
+            spy != null ? spy.getInt("refresh-seconds", defaults.spyRefreshSeconds()) : defaults.spyRefreshSeconds(),
+            new KnkConfig.PrivateMessagesConfig.LogConfig(
+                log != null ? log.getBoolean("local-enabled", defaults.log().localEnabled()) : defaults.log().localEnabled(),
+                log != null ? log.getInt("local-retention-days", defaults.log().localRetentionDays()) : defaults.log().localRetentionDays(),
+                log != null ? log.getBoolean("api-enabled", defaults.log().apiEnabled()) : defaults.log().apiEnabled(),
+                log != null ? log.getInt("flush-seconds", defaults.log().flushSeconds()) : defaults.log().flushSeconds(),
+                log != null ? log.getBoolean("filter-command-log", defaults.log().filterCommandLog()) : defaults.log().filterCommandLog()
+            ),
+            section.getBoolean("block-vanilla-commands", defaults.blockVanillaCommands())
         );
     }
 

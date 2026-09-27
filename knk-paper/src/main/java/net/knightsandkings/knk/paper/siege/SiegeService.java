@@ -169,6 +169,8 @@ public final class SiegeService {
     private final List<CommandSender> refreshWaiters = new ArrayList<>();
     private boolean shuttingDown;
     private MenuHooks menuHooks;
+    /** Command label -> primary command name, over the server's command map (for the command filter). */
+    private final java.util.function.UnaryOperator<String> commandAliases;
 
     public SiegeService(
             Plugin plugin,
@@ -189,6 +191,7 @@ public final class SiegeService {
         this.permissions = Objects.requireNonNull(permissions, "permissions");
         this.userCache = Objects.requireNonNull(userCache, "userCache");
         this.random = Objects.requireNonNull(random, "random");
+        this.commandAliases = SiegeCommandAliases.resolver(() -> plugin.getServer().getCommandMap());
     }
 
     /** Phase 8b: set by {@code SiegeMenuBridge}; null keeps every chat fallback. */
@@ -1304,12 +1307,16 @@ public final class SiegeService {
         });
     }
 
-    /** DESIGN §6.9: may this member run this command right now? True for everyone not away in a match. */
+    /**
+     * DESIGN §6.9: may this member run this command right now? True for everyone not away in a match.
+     * Aliases and namespaced forms count as the command they run (SiegeCommandAliases), so every
+     * spelling of an allowed command works - e.g. /tell, /w, /minecraft:msg with /msg on the list.
+     */
     public boolean isCommandAllowed(Player player, String message) {
         Optional<SiegeLobbyRuntime> rt = activeLobbyOf(player.getUniqueId());
         if (rt.isEmpty()) return true;
         if (hasPermission(player, PERMISSION_BYPASS_COMMANDS)) return true;
-        return SiegeCommandFilter.isAllowed(message, rt.get().machine().configuration().allowedCommands());
+        return SiegeCommandFilter.isAllowed(message, rt.get().machine().configuration().allowedCommands(), commandAliases);
     }
 
     /** The allowed-command list for the member's match, for the denial message. */
@@ -1501,6 +1508,16 @@ public final class SiegeService {
     /** The lobby the player is a member of (any phase). */
     public Optional<SiegeLobbyRuntime> lobbyOf(UUID playerId) {
         return locks.lobbyOfPlayer(playerId).map(lobbies::get).filter(rt -> rt.isMember(playerId));
+    }
+
+    /**
+     * Domain discovery's siege exclusion (domain-discovery DESIGN.md §3.6, D7): a member of a lobby
+     * at the hub, playing, or waiting to be restored after the match ({@link SiegePhase#blocksDiscovery}).
+     * Members queued in matchmaking still discover. They discover the place on their next visit after
+     * leaving the lobby.
+     */
+    public boolean isParticipant(UUID playerId) {
+        return lobbyOf(playerId).filter(rt -> rt.phase().blocksDiscovery()).isPresent();
     }
 
     /** The lobby when the player is snapshotted and away (HUB or IN_PROGRESS: filter, guards, lockdown). */

@@ -77,6 +77,40 @@ world-tasks:
   # removing the pickup-latency/idle-load trade-off these two settings exist to balance
   headless-poll-max-interval-seconds: 60
 
+# Private messages: /msg, /reply and /socialspy (docs/specs/private-messages/DESIGN.md 3.3.10)
+private-messages:
+  # Longer messages (only possible from the console - the client caps a command at 256) are cut off
+  max-length: 256
+  # Played to the recipient
+  sound:
+    enabled: true
+    volume: 1.0
+    pitch: 1.0
+  # At most max-messages per window-seconds per sender; the same text to the same player again
+  # within duplicate-window-seconds counts as spam. Bypass: knk.msg.bypass.ratelimit
+  rate-limit:
+    max-messages: 5
+    window-seconds: 5
+    duplicate-window-seconds: 10
+  spy:
+    # How often the social spy audience (knk.socialspy / knk.socialspy.exempt holders) is re-checked
+    refresh-seconds: 60
+  log:
+    # plugins/KnightsAndKings/logs/private-messages-YYYY-MM-DD.log
+    local-enabled: true
+    local-retention-days: 30
+    # Server-side log in knk-web-api (30-day retention, staff read it with knk.pmlog.read). Needs
+    # api.auth.type: apikey. Sent every flush-seconds or every 50 messages; if the API is down the
+    # messages wait in memory (up to 1000) and in private-messages-spool.jsonl across a restart.
+    api-enabled: true
+    flush-seconds: 5
+    # Keep "<player> issued server command: /msg ..." lines out of logs/latest.log (the PM log above
+    # is the moderation record, with retention; the server log has none)
+    filter-command-log: true
+  # Route /minecraft:msg|tell|w through /msg and disable /teammsg, /tm and /me for non-ops, so they
+  # can't bypass social spy, the rate limit and the log
+  block-vanilla-commands: true
+
 # In-game moments queued by the web API for writes made outside a plugin command - e.g. the
 # promotion sound/particles/message when an admin grants XP from the web app's player profile
 player-notifications:
@@ -134,6 +168,8 @@ discovery:
   # At most this many discovery requests per player per minute; the rest waits
   max-requests-per-minute: 12
   excluded-game-modes: [CREATIVE, SPECTATOR]
+  # Members of a siege lobby discover nothing from the hub teleport until they are restored after
+  # the match; players only queued in matchmaking still discover
   exclude-siege-participants: true
   # Under the plugin folder: discoveries made while the API was unreachable, one file per
   # player, replayed every replay-interval-seconds and on the player's next join
@@ -158,6 +194,17 @@ discovery:
     discovered: "&bYou discovered {type} &a{name}&b{parent}!"
     # Shown instead when discoveries made while the API was down are granted later
     replay-summary: "&bWhile the server was busy you discovered &a{count}&b place(s):"
+
+# Player payments (currency ledger Phase 3, docs/specs/currency-payments/DESIGN.md §3.6). Every
+# limit that matters (min/max, daily caps, cooldown, confirmation threshold, who may send) lives in
+# the API's currency policy; these only shape the in-game experience.
+currency:
+  # Pause between two /pay of one player, before even asking the API (the API has its own cooldown)
+  client-cooldown-seconds: 3
+  # Lines per /baltop page (max 50)
+  baltop-page-size: 10
+  # Lines per /transactions and /knk user <player> history page (max 50)
+  transactions-page-size: 8
 
 # Gate structure state synchronization
 gates:
@@ -231,6 +278,20 @@ messages:
   # Merge complete
   merge-complete: "&aAccount merge complete. Your account now has {coins} coins, {gems} gems, and {exp} XP."
 
+  # /pay, /balance, /baltop, /transactions (currency ledger Phase 3). Any key left out uses the
+  # built-in default (CurrencySettings.DEFAULT_MESSAGES); the most visible ones are listed here.
+  currency:
+    pay-sent: "&aSent &6{amount} {currency} &ato &e{player}&a. Balance: &6{balance}"
+    pay-received: "&aYou received &6{amount} {currency} &afrom &e{player}&a."
+    pay-confirm: "&eSend &6{amount} {currency} &eto &e{player}&e? {confirm} {cancel} &7(expires in {seconds}s)"
+    pay-insufficient: "&cYou only have &6{balance} {currency}&c."
+    pay-cap: "&cDaily limit reached - you can send &6{remaining} &cmore {currency} (resets in {when})."
+    pay-new-account: "&cYour account must be {hours}h old and reach {title} before sending {currency}."
+    pay-not-transferable: "&c{Currency} can't be transferred."
+    pay-self: "&cYou can't pay yourself."
+    pay-unknown: "&cWe couldn't confirm the payment. Check &e/transactions &cbefore trying again."
+    balance-self: "&7Balance: &6{coins} coins &7| &b{gems} gems"
+
 # Permanent enchantment books (Linear KNG-5) - the v1 grade level cap (Linear KNG-6,
 # knk-workspace docs/specs/items/GRADE_DROPCHANCE.md). An item of grade G may take an enchantment
 # only up to definitionMaxLevel / divisor(G) (integer division, as v1). The divisors themselves are
@@ -280,6 +341,44 @@ custom-enchantments:
     ench-use: "&cYou cannot use %enchantment%."
 
 # Cache configuration
+
+# Lootboxes (docs/specs/lootboxes/DESIGN.md §3.4). Everything the API decides - areas, limits, odds, the daily cap,
+# announcement templates - is set in the web app (/admin/lootboxes); this section is only how this server places,
+# shows and opens boxes. /knk lootbox reload re-reads it.
+lootboxes:
+  enabled: true
+  # Sent with every spawn so the drop log shows which server made the box.
+  server-id: "default"
+  runtime-refresh-seconds: 60      # runtime config + active boxes re-read from the API
+  scheduler-tick-seconds: 20       # how often each area is considered (its own interval still applies)
+  claim-max-distance: 5            # blocks between the player and the box
+  full-inventory: refuse           # refuse (no claim with a full inventory) | drop-owned (claim, drop leftovers owner-locked)
+  staff-mode-can-claim: false      # players in /staffmode or /ownermode can't open boxes
+  surface:
+    max-attempts-per-tick: 4       # random columns tried per area per try; ungenerated chunks are skipped
+    forbidden-ground: [WATER, LAVA, MAGMA_BLOCK, CACTUS, POWDER_SNOW]
+  display:
+    # What a world box looks like: token = the token item you pick up by clicking it (token.material below);
+    # type = the type's display material from the web app (its category icon).
+    model: token
+    label: true                    # floating "<colour><Grade> <Category> Lootbox ★★★" label
+    rotate: true
+    particles-radius: 15           # gold particles + a quiet chime every 4 s to players this close (0 = off)
+    grade-colors: { "1": "&9", "2": "&9", "3": "&b", "4": "&b", "5": "&d", "6": "&6", "7": "&6", "8": "&c", "9": "&c", "10": "&4" }
+  # Lootbox token items (right-click to open; picked up from world boxes, issued by /knk lootbox token, premium tiers
+  # and kits). An item is a token only by its knightsandkings:knk_lootbox_token tag, never by material or name. Pick
+  # something that isn't a fuel, a crafting ingredient or otherwise usable; placing and crafting with a token are
+  # blocked anyway.
+  token:
+    material: ENDER_CHEST
+  # Opening a token (right-click): a "wheel of fortune" menu whose middle row slows down and stops on the item the API
+  # already rolled; the item goes into the inventory when it stops (or at once when the menu is closed early).
+  opening:
+    style: wheel                   # wheel | instant (give the item straight away)
+    reel-steps: 32                 # items that scroll past the marker
+    slowest-step-ticks: 8          # the last step's delay; the reel starts at 1 tick per step and eases out
+    show-result-ticks: 50          # how long the menu stays open on the result
+    public-effects: true           # particles and sounds at the player that others nearby see and hear
 cache:
   # Global time-to-live for cached API responses (in seconds)
   # After this duration, cached data is considered stale and will be refetched

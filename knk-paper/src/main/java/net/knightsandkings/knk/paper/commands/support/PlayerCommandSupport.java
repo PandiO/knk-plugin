@@ -17,6 +17,7 @@ import org.bukkit.ChatColor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
+import net.knightsandkings.knk.core.domain.permissions.PermissionDecision;
 import net.knightsandkings.knk.paper.permissions.KnkPermissible;
 
 /**
@@ -48,54 +49,75 @@ public final class PlayerCommandSupport {
         this.onlinePlayers = Objects.requireNonNull(onlinePlayers, "onlinePlayers must not be null");
     }
 
+    /** Told instead of "no permission" when the permission service couldn't be asked. */
+    public static final String UNAVAILABLE_MESSAGE =
+            ChatColor.RED + "Your permissions can't be checked right now (the KnK service is unreachable) - try again in a moment.";
+
     /**
      * Runs {@code onAllowed} on the main thread if {@code sender} holds {@code node}; otherwise tells
-     * the sender they lack permission.
+     * the sender they lack permission - or, when the check couldn't be made (API unreachable),
+     * that it couldn't be checked ({@link KnkPermissible#checkAsync}).
      */
     public void whenAllowed(CommandSender sender, String node, Runnable onAllowed) {
         if (!(sender instanceof Player player)) {
             onAllowed.run();
             return;
         }
-        knkPermissible.hasPermissionAsync(player, node)
+        knkPermissible.checkAsync(player, node)
                 .exceptionally(ex -> {
                     LOGGER.log(Level.WARNING, "Permission check failed for " + player.getName() + ", node " + node, ex);
-                    return false;
+                    return PermissionDecision.UNAVAILABLE;
                 })
-                .thenAccept(allowed -> mainThread.execute(() -> {
-                    if (Boolean.TRUE.equals(allowed)) {
+                .thenAccept(decision -> mainThread.execute(() -> {
+                    if (decision == PermissionDecision.ALLOWED) {
                         onAllowed.run();
-                    } else {
+                    } else if (decision == PermissionDecision.DENIED) {
                         sender.sendMessage(ChatColor.RED + "You don't have permission to do that.");
+                    } else {
+                        sender.sendMessage(UNAVAILABLE_MESSAGE);
                     }
                 }));
     }
 
     /**
      * Like {@link #whenAllowed}, but holding any one of {@code nodes} is enough (e.g. a new node and
-     * the legacy node it replaces).
+     * the legacy node it replaces). Refused as "can't be checked" only when no node was allowed and
+     * at least one check couldn't be made.
      */
     public void whenAnyAllowed(CommandSender sender, List<String> nodes, Runnable onAllowed) {
         if (!(sender instanceof Player player)) {
             onAllowed.run();
             return;
         }
-        CompletableFuture<Boolean> any = CompletableFuture.completedFuture(false);
+        CompletableFuture<PermissionDecision> any = CompletableFuture.completedFuture(PermissionDecision.DENIED);
         for (String node : nodes) {
-            CompletableFuture<Boolean> check = knkPermissible.hasPermissionAsync(player, node)
+            CompletableFuture<PermissionDecision> check = knkPermissible.checkAsync(player, node)
                     .exceptionally(ex -> {
                         LOGGER.log(Level.WARNING, "Permission check failed for " + player.getName() + ", node " + node, ex);
-                        return false;
+                        return PermissionDecision.UNAVAILABLE;
                     });
-            any = any.thenCombine(check, (a, b) -> Boolean.TRUE.equals(a) || Boolean.TRUE.equals(b));
+            any = any.thenCombine(check, PlayerCommandSupport::either);
         }
-        any.thenAccept(allowed -> mainThread.execute(() -> {
-            if (Boolean.TRUE.equals(allowed)) {
+        any.thenAccept(decision -> mainThread.execute(() -> {
+            if (decision == PermissionDecision.ALLOWED) {
                 onAllowed.run();
-            } else {
+            } else if (decision == PermissionDecision.DENIED) {
                 sender.sendMessage(ChatColor.RED + "You don't have permission to do that.");
+            } else {
+                sender.sendMessage(UNAVAILABLE_MESSAGE);
             }
         }));
+    }
+
+    /** ALLOWED if either is; else UNAVAILABLE if either couldn't be checked; else DENIED. */
+    private static PermissionDecision either(PermissionDecision a, PermissionDecision b) {
+        if (a == PermissionDecision.ALLOWED || b == PermissionDecision.ALLOWED) {
+            return PermissionDecision.ALLOWED;
+        }
+        if (a == PermissionDecision.UNAVAILABLE || b == PermissionDecision.UNAVAILABLE) {
+            return PermissionDecision.UNAVAILABLE;
+        }
+        return PermissionDecision.DENIED;
     }
 
     /** The sender as a player, or null after telling a non-player sender the command is player-only. */

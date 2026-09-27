@@ -7,6 +7,7 @@ import java.util.function.Consumer;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
 
+import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -65,7 +66,7 @@ public class ChatCaptureManager {
         
         activeSessions.put(player.getUniqueId(), session);
         
-        String prefix = config.messages().prefix();
+        String prefix = prefix();
         
         // Display account comparison
         player.sendMessage(prefix + "§6=== Account Merge Required ===");
@@ -114,7 +115,7 @@ public class ChatCaptureManager {
         activeSessions.put(player.getUniqueId(), session);
 
         player.sendMessage(promptMessage);
-        player.sendMessage(config.messages().prefix() + "§7Type 'cancel' to cancel.");
+        player.sendMessage(prefix() + "§7Type 'cancel' to cancel.");
 
         startTimeoutTask(player);
     }
@@ -132,7 +133,7 @@ public class ChatCaptureManager {
             return false;
         }
         
-        String prefix = config.messages().prefix();
+        String prefix = prefix();
         
         // Check for cancel
         if (message.equalsIgnoreCase("cancel")) {
@@ -156,7 +157,7 @@ public class ChatCaptureManager {
      * Handle input for account merge flow.
      */
     private void handleMergeInput(Player player, ChatCaptureSession session, String input) {
-        String prefix = config.messages().prefix();
+        String prefix = prefix();
         
         switch (input.toUpperCase()) {
             case "A":
@@ -208,7 +209,7 @@ public class ChatCaptureManager {
         
         logger.info(player.getName() + " cancelled chat capture session (flow: " + session.getFlow() + ")");
         
-        String prefix = config.messages().prefix();
+        String prefix = prefix();
         player.sendMessage(prefix + "§cCancelled.");
         
         Runnable callback = session.getOnCancel();
@@ -246,13 +247,21 @@ public class ChatCaptureManager {
         
         plugin.getServer().getScheduler().scheduleSyncDelayedTask(plugin, () -> {
             if (activeSessions.containsKey(player.getUniqueId())) {
-                String prefix = config.messages().prefix();
+                String prefix = prefix();
                 player.sendMessage(prefix + "§cInput timeout. Please start over.");
                 cancelSession(player);
             }
         }, timeoutTicks);
     }
     
+    /**
+     * messages.prefix with its {@code &} colour codes applied: config.yml writes it as
+     * {@code "&8[&6KnK&8] &r"}, and a raw prefix showed those codes as text in every prompt.
+     */
+    String prefix() {
+        return ChatColor.translateAlternateColorCodes('&', config.messages().prefix());
+    }
+
     /**
      * Clear all active sessions (e.g., on plugin disable).
      */

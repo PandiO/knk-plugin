@@ -7,7 +7,6 @@ import net.knightsandkings.knk.core.domain.common.PagedQuery;
 import net.knightsandkings.knk.core.domain.discovery.DiscoveryProgressRow;
 import net.knightsandkings.knk.core.domain.discovery.DiscoverySummary;
 import net.knightsandkings.knk.core.domain.discovery.DiscoveryTypeCount;
-import net.knightsandkings.knk.core.domain.discovery.KnownDiscovery;
 import net.knightsandkings.knk.core.domain.discovery.DiscoverySource;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.core.exception.ApiException;
@@ -53,7 +52,6 @@ class DiscoveryCommandsTest {
     private final UUID steveUuid = UUID.randomUUID();
     private final UserSummary steve = new UserSummary(7, "Steve", steveUuid, 250);
     private final Player staff = mock(Player.class);
-    private final Player steveOnline = mock(Player.class);
     private final DiscoveryTracker tracker = new DiscoveryTracker(12);
     private final List<UUID> afterReset = new ArrayList<>();
 
@@ -68,7 +66,7 @@ class DiscoveryCommandsTest {
     private DiscoveryAdminCommand command(boolean bukkitNode, boolean knkNode) {
         when(staff.hasPermission(DiscoveryAdminCommand.NODE)).thenReturn(bukkitNode);
         return new DiscoveryAdminCommand(api, users, Runnable::run, player -> 42, (player, node) -> knkNode,
-                () -> tracker, () -> null, uuid -> uuid.equals(steveUuid) ? steveOnline : null, afterReset::add);
+                () -> tracker, () -> null, afterReset::add);
     }
 
     // ===== /discoveries =====
@@ -97,7 +95,7 @@ class DiscoveryCommandsTest {
 
         Player viaWeb = mock(Player.class);
         new DiscoveryAdminCommand(api, users, Runnable::run, p -> 42, (p, node) -> node.equals("knk.admin.discovery"),
-                () -> null, () -> null, u -> null, u -> { }).execute(viaWeb, new String[] {"status"});
+                () -> null, () -> null, u -> { }).execute(viaWeb, new String[] {"status"});
         verify(viaWeb).sendMessage(contains("disabled"));
 
         CommandSender console = mock(CommandSender.class);
@@ -140,19 +138,17 @@ class DiscoveryCommandsTest {
     // ===== reset =====
 
     @Test
-    void resetSendsTheStaffMemberAsActorAndReloadsAnOnlinePlayersKnownSet() {
-        tracker.startSession(steveUuid, 7);
-        tracker.knownLoaded(steveUuid, List.of(new KnownDiscovery(14, "district_market")));
+    void resetSendsTheStaffMemberAsActorAndResyncsTheTarget() {
         when(api.reset(42, 7, 14)).thenReturn(CompletableFuture.completedFuture(null));
-        when(api.known(7)).thenReturn(CompletableFuture.completedFuture(List.of()));
 
         command(false, true).execute(staff, new String[] {"reset", "Steve", "14"});
 
         verify(api).reset(42, 7, 14);
         verify(staff).sendMessage(contains("Reset Steve's discovery of domain #14"));
-        assertTrue(tracker.offer(steveUuid, "district_market", DiscoverySource.REGION_ENTER, Instant.now()),
-                "the reset place counts again this session");
+        // The resync itself (known set re-read, location re-checked) is DomainDiscoveryListener's,
+        // shared with the web app's DiscoveryReset notification; KnKPlugin wires it into afterReset.
         assertEquals(List.of(steveUuid), afterReset);
+        verify(api, never()).known(anyInt());
     }
 
     @Test
@@ -186,7 +182,7 @@ class DiscoveryCommandsTest {
         when(staff.hasPermission(DiscoveryAdminCommand.NODE)).thenReturn(true);
 
         new DiscoveryAdminCommand(api, users, Runnable::run, p -> 42, (p, n) -> false, () -> tracker, () -> spool,
-                u -> null, u -> { }).execute(staff, new String[] {"status"});
+                u -> { }).execute(staff, new String[] {"status"});
 
         verify(staff).sendMessage("§7Tracked players: §f1§7, pending places: §f1");
         verify(staff).sendMessage(contains("Spooled (API unreachable): §f3"));

@@ -54,7 +54,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public class KnkAdminCommand implements CommandExecutor, TabCompleter {
     private final CommandRegistry registry = new CommandRegistry();
+    private final java.util.Map<String, java.util.function.BiFunction<CommandSender, String[], List<String>>> extraTabCompleters =
+            new java.util.HashMap<>();
     private final HelpSubcommand helpSubcommand;
+    /** /knk currency (currency Phase 4); null when the currency service isn't available. */
+    private CurrencyAdminCommand currencyAdminCommand;
         private final Plugin plugin;
         private final EnchantmentDefinitionsDataAccess enchantmentDefinitionsDataAccess;
         private final ItemBlueprintsDataAccess itemBlueprintsDataAccess;
@@ -98,7 +102,8 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
             String serverId,
             MenuService menuService,
             ClansQueryApi clansQueryApi,
-            net.knightsandkings.knk.paper.user.UserAdminService userAdminService
+            net.knightsandkings.knk.paper.user.UserAdminService userAdminService,
+            net.knightsandkings.knk.paper.currency.PlayerCurrencyService playerCurrencyService
     ) {
                 this.plugin = plugin;
                 this.enchantmentDefinitionsDataAccess = enchantmentDefinitionsDataAccess;
@@ -107,7 +112,8 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         this.helpSubcommand = new HelpSubcommand(registry);
         
         // Register health
-        HealthCommand healthCommand = new HealthCommand(plugin, healthApi);
+        HealthCommand healthCommand = new HealthCommand(plugin, healthApi,
+                plugin instanceof net.knightsandkings.knk.paper.KnKPlugin knkPlugin ? knkPlugin::privateMessageLogQueueDepth : null);
         registry.register(
                 new CommandMetadata("health", "Check API backend health", "/knk health", "knk.admin.health"),
                 (sender, args) -> healthCommand.onCommand(sender, null, "knk", new String[0])
@@ -370,14 +376,28 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         // 2026-09-25 same day) - null top-level permission, same as gate, since it gates
         // coins/gems/xp/group/perm on their own separate nodes internally rather than one
         // umbrella (see UserManagementCommand's own javadoc).
-        UserManagementCommand userManagementCommand = new UserManagementCommand(userAdminService);
+        UserManagementCommand userManagementCommand = new UserManagementCommand(userAdminService, playerCurrencyService);
         registry.register(
                 new CommandMetadata("user", "View or edit a player's coins/gems/XP/rank/permissions",
-                        "/knk user <player> info | coins|gems set|add|remove <amount> <reason> | xp set|add|remove <amount> [reason] | group add|remove <groupName> [duration] | perm grant|revoke <node> [duration]", null,
+                        "/knk user <player> info | coins|gems set|add|remove <amount> <reason> | xp set|add|remove <amount> [reason] | group add|remove <groupName> [duration] | perm grant|revoke <node> [duration] | history [coins|gems|xp] [page]", null,
                         List.of("/knk user Steve info", "/knk user Steve coins add 100 event prize", "/knk user Steve xp set 50 promoted for good behavior", "/knk user Steve gems remove 10 refund reversed",
-                                "/knk user Steve group add Royal 2h", "/knk user Steve perm grant knk.mode.staff")),
+                                "/knk user Steve group add Royal 2h", "/knk user Steve perm grant knk.mode.staff", "/knk user Steve history coins")),
                 (sender, args) -> userManagementCommand.onCommand(sender, null, "knk", args)
         );
+
+        // Currency ledger Phase 4/5: /knk currency reverse|history|lock|unlock|alerts. Null top-level
+        // permission like /knk user: each action checks its own knk.admin.currency.* node.
+        if (playerCurrencyService != null) {
+            currencyAdminCommand = new CurrencyAdminCommand(playerCurrencyService);
+            registry.register(
+                    new CommandMetadata("currency", "Reverse ledger transactions, read a player's history, lock payments, see anomaly alerts",
+                            "/knk currency reverse <txId> [--partial] <reason> | history <player> [coins|gems|xp] [page] | lock <player> <reason> | unlock <player> | alerts [all] [page] | alerts ack <id>", null,
+                            List.of("/knk currency history Steve coins", "/knk currency reverse 01J9ZX3K4Q7T8V2B5N6M1C0D9E granted twice by a bug",
+                                    "/knk currency lock Steve suspected alt funnel", "/knk currency unlock Steve", "/knk currency alerts",
+                                    "/knk currency alerts ack 12")),
+                    (sender, args) -> currencyAdminCommand.execute(sender, args)
+            );
+        }
 
         // /knk tp <player> [-s]: alias of /tp <player> (docs/specs/teleport/DESIGN.md §4 D1), kept
         // on its original knk.admin.tp node. Not registered when the teleport engine didn't start.
@@ -403,11 +423,23 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
     }
 
     /**
-     * Adds a subcommand built outside this class (e.g. {@code /knk discovery}, which needs services
-     * wired after this command). Same registry, permission check and help listing as the rest.
+     * Adds a subcommand built outside this class (e.g. {@code /knk discovery} or {@code /knk lootbox}, which need
+     * services wired after this command). Same registry, permission check and help listing as the rest.
      */
     public void registerSubcommand(CommandMetadata metadata, SubcommandExecutor executor) {
+        registerSubcommand(metadata, executor, null);
+    }
+
+    /**
+     * As {@link #registerSubcommand(CommandMetadata, SubcommandExecutor)}, with tab completion: {@code tabCompleter}
+     * gets the arguments after the subcommand name; may be null.
+     */
+    public void registerSubcommand(CommandMetadata metadata, SubcommandExecutor executor,
+                                   java.util.function.BiFunction<CommandSender, String[], List<String>> tabCompleter) {
         registry.register(metadata, executor);
+        if (tabCompleter != null) {
+            extraTabCompleters.put(metadata.name().toLowerCase(Locale.ROOT), tabCompleter);
+        }
     }
 
     @Override
@@ -455,8 +487,15 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                 }
 
                 String root = args[0].toLowerCase(Locale.ROOT);
+                var extra = extraTabCompleters.get(root);
+                if (extra != null) {
+                        return extra.apply(sender, Arrays.copyOfRange(args, 1, args.length));
+                }
                 if ("user".equals(root)) {
                         return completeUserSubcommand(Arrays.copyOfRange(args, 1, args.length));
+                }
+                if ("currency".equals(root) && currencyAdminCommand != null) {
+                        return currencyAdminCommand.complete(sender, Arrays.copyOfRange(args, 1, args.length));
                 }
                 if (!"item".equals(root)) {
                         return Collections.emptyList();
@@ -711,7 +750,10 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                         return filterByPrefix(onlineNames, userArgs[0]);
                 }
                 if (userArgs.length == 2) {
-                        return filterByPrefix(List.of("info", "coins", "gems", "xp"), userArgs[1]);
+                        return filterByPrefix(List.of("info", "coins", "gems", "xp", "history"), userArgs[1]);
+                }
+                if (userArgs.length == 3 && "history".equalsIgnoreCase(userArgs[1])) {
+                        return filterByPrefix(List.of("coins", "gems", "xp"), userArgs[2]);
                 }
                 if (userArgs.length == 3 && !"info".equalsIgnoreCase(userArgs[1])) {
                         return filterByPrefix(List.of("set", "add", "remove"), userArgs[2]);
