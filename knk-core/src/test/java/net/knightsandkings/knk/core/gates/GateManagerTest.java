@@ -6,6 +6,8 @@ import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import org.bukkit.util.Vector;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -53,6 +55,52 @@ class GateManagerTest {
 
         assertNull(manager.getSpatialIndex().lookup(original.getWorldName(), 100, 64, 100));
         assertEquals(1, manager.getSpatialIndex().lookup(reloaded.getWorldName(), 200, 64, 200));
+    }
+
+    // === closedFootprint (R3) ===
+
+    @Test
+    void closedFootprintReturnsTheFrameZeroPositionsOfAClosedGate() {
+        GateManager manager = new GateManager();
+        manager.cacheGate(closedGateWithOneBlock(1));
+
+        List<Vector> footprint = manager.closedFootprint(1);
+
+        assertEquals(List.of(new Vector(100, 64, 100)), footprint);
+    }
+
+    @Test
+    void closedFootprintIgnoresTheGatesCurrentFrameWhenItIsOpen() {
+        GateManager manager = new GateManager();
+        CachedGateDoor gate = closedGateWithOneBlock(1);
+        gate.setCurrentState(AnimationState.OPEN);
+        gate.setCurrentFrame(gate.getAnimationDurationTicks());
+        manager.cacheGate(gate);
+
+        // The spatial index holds the open position; the closed footprint still says frame 0.
+        assertEquals(1, manager.getSpatialIndex().lookup("world", 100, 67, 100));
+        assertEquals(List.of(new Vector(100, 64, 100)), manager.closedFootprint(1));
+    }
+
+    @Test
+    void closedFootprintListsEveryDoorBlock() {
+        GateManager manager = new GateManager();
+        CachedGateDoor gate = closedGateWithOneBlock(1);
+        gate.addBlock(new BlockSnapshot(2, new Vector(1, 0, 0), 1, "stone", 0));
+        gate.addBlock(new BlockSnapshot(3, new Vector(0, 1, 0), 1, "stone", 0));
+        manager.cacheGate(gate);
+
+        List<Vector> footprint = manager.closedFootprint(1);
+
+        assertEquals(3, footprint.size());
+        assertTrue(footprint.contains(new Vector(100, 64, 100)));
+        assertTrue(footprint.contains(new Vector(101, 64, 100)));
+        assertTrue(footprint.contains(new Vector(100, 65, 100)));
+    }
+
+    @Test
+    void closedFootprintOfAnUnknownGateIsEmpty() {
+        assertEquals(List.of(), new GateManager().closedFootprint(42));
     }
 
     private static CachedGateDoor closedGateWithOneBlock(int id) {

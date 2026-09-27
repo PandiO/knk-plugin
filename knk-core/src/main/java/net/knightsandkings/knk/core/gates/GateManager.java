@@ -145,6 +145,23 @@ public class GateManager {
     }
 
     /**
+     * World positions of a gate's door blocks in its closed position (animation frame 0, the
+     * frame {@code forceGateState(id, false)} and a finished closing animation rest at), regardless
+     * of the gate's current state. This is the footprint a road build tags as gate cells (plan D9:
+     * the spatial index only holds the *current* frame, so an open gate would be missed there).
+     *
+     * @param gateId gate (door) ID
+     * @return the closed-frame block positions, or an empty list for an unknown gate
+     */
+    public List<Vector> closedFootprint(int gateId) {
+        CachedGateDoor gate = gateCache.get(gateId);
+        if (gate == null) {
+            return List.of();
+        }
+        return doorBlockPositions(gate, 0);
+    }
+
+    /**
      * World positions of a gate's door blocks at the given animation frame, skipping any
      * block clipped away by ClipToGeometryBounds (see GateFrameCalculator).
      */
