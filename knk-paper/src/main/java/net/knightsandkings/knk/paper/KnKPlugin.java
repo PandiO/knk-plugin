@@ -584,7 +584,7 @@ public class KnKPlugin extends JavaPlugin {
             var currencySettings = net.knightsandkings.knk.paper.currency.CurrencySettings.from(getConfig());
             this.playerCurrencyService = new net.knightsandkings.knk.paper.currency.PlayerCurrencyService(
                 MenuService.mainThreadExecutor(this), apiClient.getCurrencyApi(), usersDataAccess, cacheManager.getUserCache(),
-                knkPermissible::hasPermissionAsync,
+                knkPermissible::checkAsync,
                 new net.knightsandkings.knk.paper.currency.VisiblePlayers(org.bukkit.Bukkit::getPlayerExact, org.bukkit.Bukkit::getOnlinePlayers),
                 currencySettings, java.time.Clock.systemUTC(),
                 // The /pay confirmation expiry notice (main thread; cancelled when settled or on quit).

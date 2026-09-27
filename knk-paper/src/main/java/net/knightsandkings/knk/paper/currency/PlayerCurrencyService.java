@@ -40,6 +40,7 @@ import net.knightsandkings.knk.core.domain.currency.PendingTransfer;
 import net.knightsandkings.knk.core.domain.currency.ReversalOutcome;
 import net.knightsandkings.knk.core.domain.currency.TransferLock;
 import net.knightsandkings.knk.core.domain.currency.TransferOutcome;
+import net.knightsandkings.knk.core.domain.permissions.PermissionDecision;
 import net.knightsandkings.knk.core.domain.users.BalanceCurrency;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.core.ports.api.CurrencyApi;
@@ -84,11 +85,18 @@ public class PlayerCurrencyService implements Listener {
     private static final LegacyComponentSerializer LEGACY = LegacyComponentSerializer.legacySection();
     private static final int MAX_REASON_LENGTH = 40;
 
-    /** An in-game node check; true for the console. */
+    /**
+     * An in-game node check (KnkPermissible#checkAsync): UNAVAILABLE when it couldn't be made
+     * (API unreachable), which is refused with "can't be reached" rather than "no permission".
+     */
     @FunctionalInterface
     public interface PermissionCheck {
-        CompletableFuture<Boolean> has(Player player, String node);
+        CompletableFuture<PermissionDecision> has(Player player, String node);
     }
+
+    /** Message keys for "the economy service can't be reached" (for /pay: also "nothing was paid"). */
+    static final String SERVICE_UNAVAILABLE = "service-unavailable";
+    static final String PAY_SERVICE_UNAVAILABLE = "pay-service-unavailable";
 
     /** Runs {@code task} on the main thread after {@code delay}; returns what cancels it. */
     @FunctionalInterface
@@ -195,7 +203,7 @@ public class PlayerCurrencyService implements Listener {
                     throw new Refusal("pay-self");
                 }
                 return permissions.has(sender, PAY_BYPASS_NODE)
-                    .thenCompose(bypass -> currencyApi.transfer(senderId, recipient.userId(), currency, amount, Boolean.TRUE.equals(bypass)));
+                    .thenCompose(bypass -> currencyApi.transfer(senderId, recipient.userId(), currency, amount, bypass == PermissionDecision.ALLOWED));
             })
             .whenComplete((outcome, ex) -> mainThread.execute(() -> {
                 inFlight.remove(uuid);
@@ -206,7 +214,7 @@ public class PlayerCurrencyService implements Listener {
                     return;
                 }
                 if (ex != null) {
-                    renderError(sender, ex, currency, targetName);
+                    renderPayError(sender, ex, currency, targetName);
                 } else {
                     renderTransfer(sender, outcome);
                 }
@@ -237,7 +245,7 @@ public class PlayerCurrencyService implements Listener {
         boolean openHere = id.equals(lastPendingId.get(uuid));
         requireAll(sender, PAY_NODE, null)
             .thenCompose(ignored -> permissions.has(sender, PAY_BYPASS_NODE))
-            .thenCompose(bypass -> currencyApi.confirmTransfer(senderId, id, Boolean.TRUE.equals(bypass)))
+            .thenCompose(bypass -> currencyApi.confirmTransfer(senderId, id, bypass == PermissionDecision.ALLOWED))
             .whenComplete((outcome, ex) -> mainThread.execute(() -> {
                 inFlight.remove(uuid);
                 if (ex == null || isPendingGone(ex)) {
@@ -251,7 +259,7 @@ public class PlayerCurrencyService implements Listener {
                     return;
                 }
                 if (ex != null) {
-                    renderError(sender, ex, BalanceCurrency.COINS, null);
+                    renderPayError(sender, ex, BalanceCurrency.COINS, null);
                 } else if (alreadySent) {
                     if (outcome.senderBalances() != null) {
                         updateCache(uuid, outcome.senderBalances());
@@ -822,7 +830,7 @@ public class PlayerCurrencyService implements Listener {
         CurrencyException currencyException = CurrencyException.find(ex);
         if (currencyException == null) {
             LOGGER.warning("Currency request failed: " + ex);
-            send(sender, "error-generic");
+            send(sender, isUnreachable(ex) ? SERVICE_UNAVAILABLE : "error-generic");
             return;
         }
         CurrencyError error = currencyException.error();
@@ -874,6 +882,28 @@ public class PlayerCurrencyService implements Listener {
         }
     }
 
+    /** {@link #renderError} for /pay and /pay confirm: "can't be reached" also says nothing was paid. */
+    private void renderPayError(CommandSender sender, Throwable ex, BalanceCurrency currency, String targetName) {
+        Refusal refusal = findRefusal(ex);
+        if ((refusal != null && SERVICE_UNAVAILABLE.equals(refusal.key)) || (refusal == null && CurrencyException.find(ex) == null && isUnreachable(ex))) {
+            send(sender, PAY_SERVICE_UNAVAILABLE);
+            return;
+        }
+        renderError(sender, ex, currency, targetName);
+    }
+
+    /** A request that never reached the API (connection refused, timeout...). */
+    static boolean isUnreachable(Throwable ex) {
+        Throwable cause = ex;
+        while (cause != null) {
+            if (cause instanceof java.io.IOException) {
+                return true;
+            }
+            cause = cause.getCause();
+        }
+        return false;
+    }
+
     private String until(String isoInstant) {
         Instant at = net.knightsandkings.knk.api.mapper.CurrencyMapper.instant(isoInstant);
         return at == null ? "24h" : CurrencyFormat.duration(Duration.between(clock.instant(), at));
@@ -895,6 +925,9 @@ public class PlayerCurrencyService implements Listener {
             }
         }
         return usersDataAccess.getByUsernameAsync(name).thenApply(result -> {
+            if (result != null && result.status() == net.knightsandkings.knk.core.dataaccess.FetchStatus.ERROR) {
+                throw new Refusal(SERVICE_UNAVAILABLE); // not "no such player": the API couldn't be asked
+            }
             if (result == null || !result.isSuccess() || result.value().isEmpty() || result.value().get().id() == null) {
                 return null;
             }
@@ -903,17 +936,25 @@ public class PlayerCurrencyService implements Listener {
         });
     }
 
-    /** Completes when {@code viewer} holds every given node (null entries skipped); fails with a no-permission refusal otherwise. */
+    /**
+     * Completes when {@code viewer} holds every given node (null entries skipped); fails with a
+     * no-permission refusal on a real "no", or a service-unavailable one when a check couldn't be
+     * made (the API is down) - still refused, but not blamed on the player's rights.
+     */
     private CompletableFuture<Void> requireAll(CommandSender viewer, String node, String extraNode) {
         if (!(viewer instanceof Player player)) {
             return CompletableFuture.completedFuture(null);
         }
-        CompletableFuture<Boolean> first = permissions.has(player, node);
-        CompletableFuture<Boolean> both = extraNode == null
+        CompletableFuture<PermissionDecision> first = permissions.has(player, node);
+        CompletableFuture<PermissionDecision> both = extraNode == null
             ? first
-            : first.thenCompose(ok -> Boolean.TRUE.equals(ok) ? permissions.has(player, extraNode) : CompletableFuture.completedFuture(false));
-        return both.thenAccept(ok -> {
-            if (!Boolean.TRUE.equals(ok)) {
+            : first.thenCompose(decision -> decision == PermissionDecision.ALLOWED
+                ? permissions.has(player, extraNode) : CompletableFuture.completedFuture(decision));
+        return both.thenAccept(decision -> {
+            if (decision == PermissionDecision.UNAVAILABLE) {
+                throw new Refusal(SERVICE_UNAVAILABLE);
+            }
+            if (decision != PermissionDecision.ALLOWED) {
                 throw new Refusal("no-permission");
             }
         });

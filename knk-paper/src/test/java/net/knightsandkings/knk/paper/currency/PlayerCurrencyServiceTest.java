@@ -42,6 +42,7 @@ import net.knightsandkings.knk.core.domain.currency.PendingTransfer;
 import net.knightsandkings.knk.core.domain.currency.ReversalOutcome;
 import net.knightsandkings.knk.core.domain.currency.TransferLock;
 import net.knightsandkings.knk.core.domain.currency.TransferOutcome;
+import net.knightsandkings.knk.core.domain.permissions.PermissionDecision;
 import net.knightsandkings.knk.core.domain.users.BalanceCurrency;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.core.ports.api.CurrencyApi;
@@ -62,12 +63,18 @@ class PlayerCurrencyServiceTest {
     private final Player alice = player("alice", 1, 5000);
     private final Player bob = player("bob", 2, 100);
     private final List<String> aliceSees = new ArrayList<>();
+    /** Nodes whose check can't be made (knk-web-api down). */
+    private final java.util.Set<String> unreachable = new java.util.HashSet<>();
 
     private final PlayerCurrencyService service = new PlayerCurrencyService(
         Runnable::run, api, usersDataAccess, userCache,
-        (player, node) -> CompletableFuture.completedFuture(nodes.getOrDefault(node, true)),
+        (player, node) -> CompletableFuture.completedFuture(decide(node)),
         new VisiblePlayers(online::get, () -> (Collection<Player>) online.values()),
         CurrencySettings.defaults(), Clock.fixed(Instant.parse("2026-09-26T12:00:00Z"), ZoneOffset.UTC));
+
+    private PermissionDecision decide(String node) {
+        return unreachable.contains(node) ? PermissionDecision.UNAVAILABLE : PermissionDecision.of(nodes.getOrDefault(node, true));
+    }
 
     PlayerCurrencyServiceTest() {
         nodes.put(PlayerCurrencyService.PAY_BYPASS_NODE, false);
@@ -158,6 +165,35 @@ class PlayerCurrencyServiceTest {
 
         verify(api, never()).transfer(anyInt(), anyInt(), any(), anyLong(), anyBoolean());
         assertEquals("§cYou don't have permission to do that.", aliceSees.get(0));
+    }
+
+    @Test
+    void anUncheckableNode_saysTheEconomyServiceIsDown_notNoPermission() {
+        unreachable.add(PlayerCurrencyService.PAY_NODE);
+        unreachable.add(PlayerCurrencyService.BALANCE_NODE);
+
+        service.pay(alice, "bob", "5", BalanceCurrency.COINS);
+        service.balance(alice, null);
+
+        verify(api, never()).transfer(anyInt(), anyInt(), any(), anyLong(), anyBoolean());
+        verify(api, never()).getBalances(anyInt());
+        assertEquals("§cThe economy service can't be reached right now — try again in a moment. Nothing was paid.", aliceSees.get(0));
+        assertEquals("§cThe economy service can't be reached right now — try again in a moment.", aliceSees.get(1));
+    }
+
+    @Test
+    void anUnreachableApi_isNotReportedAsAnUnknownPlayer() {
+        when(alice.canSee(bob)).thenReturn(false); // looked up through the API
+        when(usersDataAccess.getByUsernameAsync("bob")).thenReturn(CompletableFuture.completedFuture(
+            FetchResult.<UserSummary>error(new java.io.IOException("Connection refused"))));
+        when(api.getBalances(1)).thenReturn(CompletableFuture.failedFuture(
+            new RuntimeException("Currency request failed", new java.io.IOException("Connection refused"))));
+
+        service.balance(alice, "bob");
+        service.balance(alice, null);
+
+        assertEquals("§cThe economy service can't be reached right now — try again in a moment.", aliceSees.get(0));
+        assertEquals("§cThe economy service can't be reached right now — try again in a moment.", aliceSees.get(1));
     }
 
     @Test
@@ -290,7 +326,7 @@ class PlayerCurrencyServiceTest {
 
     private PlayerCurrencyService serviceWith(ManualScheduler scheduler) {
         return new PlayerCurrencyService(Runnable::run, api, usersDataAccess, userCache,
-            (player, node) -> CompletableFuture.completedFuture(nodes.getOrDefault(node, true)),
+            (player, node) -> CompletableFuture.completedFuture(decide(node)),
             new VisiblePlayers(online::get, () -> (Collection<Player>) online.values()),
             new CurrencySettings(Map.of(), 0, 10, 8), Clock.fixed(Instant.parse("2026-09-26T12:00:00Z"), ZoneOffset.UTC), scheduler);
     }
