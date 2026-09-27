@@ -942,8 +942,17 @@ public class KnKPlugin extends JavaPlugin {
         this.discoverySpool = new net.knightsandkings.knk.core.discovery.DiscoverySpool(
             new java.io.File(getDataFolder(), discoveryConfig.spoolDirectory()).toPath(), getLogger()
         );
+        // A player who joined while the API was down has no user id: the recorder looks it up by UUID
+        // before sending (null = no such user, a failure = still unreachable).
         net.knightsandkings.knk.core.discovery.DiscoveryRecorder discoveryRecorder = new net.knightsandkings.knk.core.discovery.DiscoveryRecorder(
-            apiClient.getDiscoveriesApi(), net.knightsandkings.knk.core.dataaccess.RetryPolicy.defaultPolicy(), discoverySpool, getLogger()
+            apiClient.getDiscoveriesApi(), net.knightsandkings.knk.core.dataaccess.RetryPolicy.defaultPolicy(), discoverySpool, getLogger(),
+            uuid -> usersQueryApi.getByUuid(uuid).thenApply(summary -> {
+                if (summary == null) {
+                    return java.util.Optional.<Integer>empty();
+                }
+                cacheManager.getUserCache().put(summary);
+                return java.util.Optional.ofNullable(summary.id());
+            })
         );
         net.knightsandkings.knk.paper.discovery.DiscoveryEffects discoveryEffects = new net.knightsandkings.knk.paper.discovery.DiscoveryEffects(
             this, discoveryConfig, usersDataAccess,

@@ -47,7 +47,10 @@ import net.knightsandkings.knk.paper.events.UserDataLoadedEvent;
  *   every region at the destination that the {@link DiscoveryTracker} doesn't already know about.
  *   Moves are only looked at when the player changed block.</li>
  *   <li><b>Join</b>: on {@link UserDataLoadedEvent} (account loaded, loading hold off) the player's
- *   discovered set is loaded and every region they joined inside becomes a JoinInside candidate.</li>
+ *   discovered set is loaded and every region they joined inside becomes a JoinInside candidate. A
+ *   player whose account couldn't be loaded (API down: no user id) is tracked under their UUID anyway;
+ *   their candidates are sent once the user id is looked up, or spooled until then
+ *   ({@link DiscoveryFlushTask}), and their known set loads when the id is known.</li>
  *   <li><b>Resync</b> ({@link #resync}): after a staff reset (web app or {@code /knk discovery reset})
  *   the known set is read again and the regions the player stands in are re-checked, so the reset
  *   place is discovered again without moving.</li>
@@ -85,6 +88,7 @@ public final class DomainDiscoveryListener implements Listener {
         this.flushTask = flushTask;
         this.clock = clock;
         this.regionQuery = WorldGuard.getInstance().getPlatform().getRegionContainer().createQuery();
+        flushTask.setUserResolvedHandler(this::loadKnown);
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -108,9 +112,11 @@ public final class DomainDiscoveryListener implements Listener {
     public void onUserDataLoaded(UserDataLoadedEvent event) {
         Integer userId = event.getUserId();
         if (userId == null || userId <= 0) {
-            return;
+            // The account couldn't be loaded (API down): still track them, under their UUID.
+            startUnresolved(event.getPlayer());
+        } else {
+            start(event.getPlayer(), userId);
         }
-        start(event.getPlayer(), userId);
         flushTask.replayFor(event.getPlayer().getUniqueId());
     }
 
@@ -120,20 +126,23 @@ public final class DomainDiscoveryListener implements Listener {
         toConfirm.remove(uuid);
         OptionalInt userId = tracker.userId(uuid);
         List<PendingDiscovery> pending = tracker.endSession(uuid);
-        if (userId.isPresent() && !pending.isEmpty()) {
-            recorder.spoolPending(uuid, userId.getAsInt(), pending);
+        if (!pending.isEmpty()) {
+            // Without a user id yet, spooled under the UUID; the replay looks the id up.
+            recorder.spoolPending(uuid, userId.orElse(DiscoveryTracker.UNRESOLVED_USER), pending);
         }
     }
 
     /**
-     * Players already online when discovery starts (a plugin reload): tracked from now on when their
-     * user id is cached, with the regions they stand in as JoinInside candidates.
+     * Players already online when discovery starts (a plugin reload): tracked from now on - under
+     * their UUID when no user id is cached - with the regions they stand in as JoinInside candidates.
      */
     public void startOnlinePlayers(Function<UUID, Integer> cachedUserId) {
         for (Player player : Bukkit.getOnlinePlayers()) {
             Integer userId = cachedUserId.apply(player.getUniqueId());
             if (userId != null && userId > 0) {
                 start(player, userId);
+            } else {
+                startUnresolved(player);
             }
         }
     }
@@ -145,7 +154,7 @@ public final class DomainDiscoveryListener implements Listener {
      * they stand in (JoinInside, eligibility and next-tick confirmation as usual), so standing still
      * inside the reset place discovers it again. A second resync for the same reset (the command's own,
      * then its notification) finds nothing new to do: the server grants a place at most once. No-op
-     * for a player who isn't tracked.
+     * for a player who isn't tracked or whose user id isn't known yet (their known set loads then).
      * Main thread.
      */
     public void resync(Player player) {
@@ -179,7 +188,19 @@ public final class DomainDiscoveryListener implements Listener {
         detect(player, player.getLocation(), DiscoverySource.JOIN_INSIDE);
     }
 
-    /** Loads the player's discovered set. */
+    /**
+     * A player without a knk user id (the API was down at join): tracked under their UUID with the
+     * known set unavailable, so what they find is queued, then sent once the id is looked up or
+     * spooled until it can be.
+     */
+    private void startUnresolved(Player player) {
+        LOGGER.info("[Discovery] " + player.getName() + " has no user id yet (API unreachable at join); "
+                + "tracking their discoveries until it can be looked up");
+        tracker.startUnresolvedSession(player.getUniqueId());
+        detect(player, player.getLocation(), DiscoverySource.JOIN_INSIDE);
+    }
+
+    /** Loads the player's discovered set (join, or once an unresolved player's user id is known). */
     private void loadKnown(UUID uuid, int userId) {
         discoveriesApi.known(userId).whenComplete((known, error) -> runOnMainThread(() -> {
             if (error != null || known == null) {
