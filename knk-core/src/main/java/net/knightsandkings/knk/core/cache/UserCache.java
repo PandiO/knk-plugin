@@ -37,4 +37,17 @@ public class UserCache extends BaseCache<UUID, UserSummary> {
         }
         put(user.uuid(), user);
     }
+
+    /**
+     * Replaces the cached player's coins and gems with the values the API just returned
+     * (currency ledger, KNG-21 Phase 3). Updates the stale entry too, since the numbers are fresh;
+     * does nothing when the player isn't cached at all (the next read fetches them anyway).
+     * Values beyond int range (never produced by the API's caps) are ignored.
+     */
+    public void updateBalances(UUID uuid, long coins, long gems) {
+        if (uuid == null || coins < 0 || gems < 0 || coins > Integer.MAX_VALUE || gems > Integer.MAX_VALUE) {
+            return;
+        }
+        getStale(uuid).ifPresent(user -> put(uuid, user.withBalances((int) coins, (int) gems)));
+    }
 }

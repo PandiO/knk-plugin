@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.commands;
 
+import net.knightsandkings.knk.core.domain.permissions.PermissionDecision;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport;
 import net.knightsandkings.knk.paper.commands.support.TargetRankCheck;
@@ -43,6 +44,7 @@ class PlayerUtilityCommandsTest {
     private final KnkPermissible permissible = mock(KnkPermissible.class);
     private final Set<String> granted = new HashSet<>();
     private final List<String> checkedNodes = new ArrayList<>();
+    private boolean unreachable;
     private final Player alice = player("Alice");
     private final Player bob = player("Bob");
     private final Map<String, Player> online = Map.of("alice", alice, "bob", bob);
@@ -83,10 +85,11 @@ class PlayerUtilityCommandsTest {
     };
 
     PlayerUtilityCommandsTest() {
-        when(permissible.hasPermissionAsync(any(), anyString())).thenAnswer(inv -> {
+        when(permissible.checkAsync(any(), anyString())).thenAnswer(inv -> {
             String node = inv.getArgument(1);
             checkedNodes.add(node);
-            return CompletableFuture.completedFuture(granted.contains(node));
+            return CompletableFuture.completedFuture(unreachable ? PermissionDecision.UNAVAILABLE
+                    : PermissionDecision.of(granted.contains(node)));
         });
     }
 
@@ -117,6 +120,17 @@ class PlayerUtilityCommandsTest {
 
         assertEquals(List.of("knk.fly"), checkedNodes);
         verify(alice).setAllowFlight(true);
+    }
+
+    @Test
+    void anUncheckablePermission_saysTheServiceIsDown_notNoPermission() {
+        unreachable = true;
+
+        run(new FlyCommand(support), alice);
+
+        verify(alice).sendMessage(PlayerCommandSupport.UNAVAILABLE_MESSAGE);
+        verify(alice, never()).sendMessage(contains("don't have permission"));
+        verify(alice, never()).setAllowFlight(anyBoolean());
     }
 
     @Test

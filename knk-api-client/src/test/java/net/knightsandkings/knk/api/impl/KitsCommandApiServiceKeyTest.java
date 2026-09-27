@@ -17,6 +17,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
@@ -67,5 +69,18 @@ class KitsCommandApiServiceKeyTest {
         api.claimAsync(9, 7).join();
 
         assertEquals("secret", seen.get(0).header("X-API-Key"));
+    }
+
+    @Test
+    void everyClaimSendsItsOwnIdempotencyKey() {
+        // KNG-21 Phase 2: the claim's cost is a ledger posting keyed by this header.
+        api.claimAsync(9, 7).join();
+        api.claimAsync(9, 7).join();
+
+        String first = seen.get(0).header(BaseApiImpl.IDEMPOTENCY_KEY_HEADER);
+        String second = seen.get(1).header(BaseApiImpl.IDEMPOTENCY_KEY_HEADER);
+        assertNotNull(first);
+        assertNotNull(second);
+        assertNotEquals(first, second);
     }
 }

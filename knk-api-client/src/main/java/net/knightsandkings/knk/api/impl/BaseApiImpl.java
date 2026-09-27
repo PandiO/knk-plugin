@@ -22,6 +22,13 @@ public class BaseApiImpl {
     protected static Logger LOGGER = Logger.getLogger(BaseApiImpl.class.getName());
     protected static final int MAX_RESPONSE_SNIPPET_LENGTH = 1500;
 
+    /**
+     * Header making a ledger write safe to retry (currency ledger, KNG-21): a new random value
+     * per player/staff action. OkHttp's retry of the same Request resends the same value, and the
+     * API returns the stored result instead of posting again.
+     */
+    public static final String IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
+
     protected final String baseUrl;
     protected final OkHttpClient httpClient;
     protected final ObjectMapper objectMapper;

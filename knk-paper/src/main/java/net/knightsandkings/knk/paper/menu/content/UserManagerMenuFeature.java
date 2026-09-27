@@ -37,6 +37,8 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -72,6 +74,13 @@ import java.util.stream.Collectors;
  * bracketId}}, {@code users.group {userId, groupId, op: add|remove}}, {@code users.mode {userId,
  * mode}}, {@code users.salary-payout {userId}}, {@code users.freeze {userId, op: freeze|unfreeze}},
  * {@code users.kick {userId}} / {@code users.ban {userId}} (Paper's own commands, run as the viewer).
+ * <p>
+ * <b>Staged balance changes</b> (currency DESIGN.md §4 D9, IMPLEMENTATION_PLAN.md Phase 4): with a
+ * {@link ReasonPrompt}, the coin/gem/XP steppers don't post a ledger change per click. Clicks add
+ * up a pending delta per viewer (one player and balance at a time, shown in chat), and the first
+ * one asks for the reason in chat; typing it applies the whole delta as one staff change (one
+ * ADMIN_GRANT/ADMIN_TAKE with that reason), "cancel" discards it. Without a prompt (tests, or no
+ * chat capture) each click applies immediately as before.
  */
 public final class UserManagerMenuFeature implements MenuFeature {
 
@@ -86,12 +95,28 @@ public final class UserManagerMenuFeature implements MenuFeature {
     private record TargetState(UserSummary user, Boolean outranks) {
     }
 
+    /**
+     * Asks {@code player} for a line of chat (ChatCaptureManager): {@code onReason} gets the typed
+     * text, {@code onCancel} runs on "cancel" or a timeout - both on the main thread. Returns false
+     * when no prompt could be started (the caller then applies without asking).
+     */
+    @FunctionalInterface
+    public interface ReasonPrompt {
+        boolean ask(Player player, String prompt, Consumer<String> onReason, Runnable onCancel);
+    }
+
+    /** A viewer's not-yet-applied stepper total for one player's balance. */
+    record StagedChange(UserSummary target, String field, long delta) {
+    }
+
     private final UserAdminService admin;
     private final UsersQueryApi usersQueryApi;
     private final UserCache userCache;
     private final TitleBracketsDataAccess titleBrackets;
     private final PermissionGroupsDataAccess groups;
     private final Supplier<Collection<? extends Player>> onlinePlayers;
+    private final ReasonPrompt reasonPrompt;
+    private final Map<UUID, StagedChange> staged = new ConcurrentHashMap<>();
     private final Map<String, TargetState> targets = Collections.synchronizedMap(new LinkedHashMap<>(16, 0.75f, true) {
         @Override
         protected boolean removeEldestEntry(Map.Entry<String, TargetState> eldest) {
@@ -102,6 +127,14 @@ public final class UserManagerMenuFeature implements MenuFeature {
     public UserManagerMenuFeature(UserAdminService admin, UsersQueryApi usersQueryApi, UserCache userCache,
                                   TitleBracketsDataAccess titleBrackets, PermissionGroupsDataAccess groups,
                                   Supplier<Collection<? extends Player>> onlinePlayers) {
+        this(admin, usersQueryApi, userCache, titleBrackets, groups, onlinePlayers, null);
+    }
+
+    /** @param reasonPrompt stages stepper changes until a reason is typed (D9); null = apply each click. */
+    public UserManagerMenuFeature(UserAdminService admin, UsersQueryApi usersQueryApi, UserCache userCache,
+                                  TitleBracketsDataAccess titleBrackets, PermissionGroupsDataAccess groups,
+                                  Supplier<Collection<? extends Player>> onlinePlayers, ReasonPrompt reasonPrompt) {
+        this.reasonPrompt = reasonPrompt;
         this.admin = admin;
         this.usersQueryApi = usersQueryApi;
         this.userCache = userCache;
@@ -312,8 +345,90 @@ public final class UserManagerMenuFeature implements MenuFeature {
         if (!admin.requireProperty(player, field)) {
             return;
         }
-        withTarget(context, params, target -> admin.adjustBalance(player, target, field, delta,
-                "Player manager (" + player.getName() + ")"));
+        if (reasonPrompt == null) {
+            withTarget(context, params, target -> admin.adjustBalance(player, target, field, delta,
+                    "Player manager (" + player.getName() + ")"));
+            return;
+        }
+        UserSummary target = loadedTarget(player, params);
+        if (target != null) {
+            stage(player, target, field, delta);
+        }
+    }
+
+    /** Adds {@code delta} to the viewer's staged change; the first click of a new change asks for the reason. */
+    void stage(Player player, UserSummary target, String field, int delta) {
+        UUID viewer = player.getUniqueId();
+        StagedChange previous = staged.get(viewer);
+        boolean same = previous != null && Objects.equals(previous.target().id(), target.id()) && previous.field().equals(field);
+        long total = (same ? previous.delta() : 0) + delta;
+        if ("xp".equals(field) && total > 0 && !admin.requireXpRaise(player)) {
+            return; // raising XP can pay title bonuses: needs the coin and gem nodes too; the stage stays as it was
+        }
+        if (previous != null && !same && previous.delta() != 0) {
+            player.sendMessage(ChatColor.YELLOW + "Discarded the unapplied " + describe(previous) + ".");
+        }
+        if (Math.abs(total) > Integer.MAX_VALUE) {
+            player.sendMessage(ChatColor.RED + "That's more than one change can hold - apply it first.");
+            return;
+        }
+        StagedChange change = new StagedChange(target, field, total);
+        staged.put(viewer, change);
+        player.sendMessage(total == 0
+                ? ChatColor.GRAY + "Nothing staged for " + target.username() + "'s " + field + " any more."
+                : ChatColor.YELLOW + "Staged " + describe(change) + ChatColor.GRAY + " (not applied yet).");
+        if (previous != null) {
+            return; // the reason prompt from the first click is still open and applies the new total
+        }
+        boolean asked = reasonPrompt.ask(player,
+                ChatColor.GOLD + "Close the menu and type the reason in chat to apply the staged change (more clicks first still change the amount).",
+                reason -> applyStaged(player, reason),
+                () -> {
+                    StagedChange dropped = staged.remove(viewer);
+                    if (dropped != null && dropped.delta() != 0) {
+                        player.sendMessage(ChatColor.GRAY + "Discarded the unapplied " + describe(dropped) + ".");
+                    }
+                });
+        if (!asked) {
+            applyStaged(player, "Player manager (" + player.getName() + ")");
+        }
+    }
+
+    /** Posts the viewer's staged change as one staff adjustment with {@code reason}. Main thread. */
+    void applyStaged(Player player, String reason) {
+        StagedChange change = staged.remove(player.getUniqueId());
+        if (change == null || change.delta() == 0) {
+            player.sendMessage(ChatColor.GRAY + "Nothing to apply.");
+            return;
+        }
+        String typed = reason == null ? "" : reason.trim();
+        if (typed.isEmpty()) {
+            player.sendMessage(ChatColor.RED + "A reason is required - the change was not applied.");
+            return;
+        }
+        if (!admin.requireProperty(player, change.field())) {
+            return;
+        }
+        admin.adjustBalance(player, change.target(), change.field(), (int) change.delta(), typed, typed);
+    }
+
+    /** The viewer's staged change, if any (tests). */
+    StagedChange stagedFor(Player player) {
+        return staged.get(player.getUniqueId());
+    }
+
+    private static String describe(StagedChange change) {
+        return (change.delta() > 0 ? "+" : "") + change.delta() + " " + change.field() + " for " + change.target().username();
+    }
+
+    private UserSummary loadedTarget(Player player, Map<String, String> params) {
+        Integer userId = parseId(params.get("userId"));
+        TargetState state = userId != null ? targets.get(key(player.getUniqueId(), userId)) : null;
+        if (state == null || state.user() == null) {
+            player.sendMessage(ChatColor.RED + "That player isn't loaded - reopen the menu.");
+            return null;
+        }
+        return state.user();
     }
 
     private void setTitle(MenuActionContext context, Map<String, String> params) {

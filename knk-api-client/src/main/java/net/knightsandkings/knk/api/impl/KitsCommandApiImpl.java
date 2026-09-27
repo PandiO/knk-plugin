@@ -2,6 +2,7 @@ package net.knightsandkings.knk.api.impl;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
@@ -44,10 +45,19 @@ public class KitsCommandApiImpl extends BaseApiImpl implements KitsCommandApi {
 
     @Override
     public CompletableFuture<KnkKitClaimResult> claimAsync(int userId, int kitId) {
+        // A kit with a cost is paid through the API's currency ledger keyed by this (KNG-21): a
+        // resend of the same claim neither pays nor records it twice.
+        String idempotencyKey = UUID.randomUUID().toString();
         return CompletableFuture.supplyAsync(() -> {
             String url = baseUrl + BASE_ENDPOINT + "/" + kitId + "/claim?userId=" + userId;
             try {
-                String responseJson = postJson(url, "{}");
+                Request request = newRequest(url)
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("Accept", "application/json")
+                    .header(IDEMPOTENCY_KEY_HEADER, idempotencyKey)
+                    .post(RequestBody.create("{}", MediaType.get("application/json")))
+                    .build();
+                String responseJson = execute(request, url);
                 KitClaimResultDto dto = parse(responseJson, KitClaimResultDto.class, url);
                 return KitsMapper.toCore(dto);
             } catch (ApiException | IOException e) {

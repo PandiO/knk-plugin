@@ -174,6 +174,8 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.core.dataaccess.TitleBracketsDataAccess titleBracketsDataAccess;
     private net.knightsandkings.knk.core.dataaccess.PermissionGroupsDataAccess permissionGroupsDataAccess;
     private net.knightsandkings.knk.paper.user.UserAdminService userAdminService;
+    // Currency ledger Phase 3: /pay, /balance, /baltop, /transactions and /knk user <player> history.
+    private net.knightsandkings.knk.paper.currency.PlayerCurrencyService playerCurrencyService;
     private net.knightsandkings.knk.paper.user.SalaryPayoutScheduler salaryPayoutScheduler;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private PermissionsDataAccess permissionsDataAccess;
@@ -578,6 +580,27 @@ public class KnKPlugin extends JavaPlugin {
             if (playerNotificationPoller != null) {
                 playerNotificationPoller.setRankChangedHandler(userAdminService::resyncDisplay);
             }
+            // Currency ledger Phase 3: player payments. Name lookups are vanish-safe (VisiblePlayers).
+            var currencySettings = net.knightsandkings.knk.paper.currency.CurrencySettings.from(getConfig());
+            this.playerCurrencyService = new net.knightsandkings.knk.paper.currency.PlayerCurrencyService(
+                MenuService.mainThreadExecutor(this), apiClient.getCurrencyApi(), usersDataAccess, cacheManager.getUserCache(),
+                knkPermissible::checkAsync,
+                new net.knightsandkings.knk.paper.currency.VisiblePlayers(org.bukkit.Bukkit::getPlayerExact, org.bukkit.Bukkit::getOnlinePlayers),
+                currencySettings, java.time.Clock.systemUTC(),
+                // The /pay confirmation expiry notice (main thread; cancelled when settled or on quit).
+                (delay, task) -> getServer().getScheduler().runTaskLater(this, task, Math.max(1L, delay.toMillis() / 50L))::cancel
+            );
+            if (playerNotificationPoller != null) {
+                // "You received N coins from X" - right away when online, else on the next join.
+                var paymentHandler = new net.knightsandkings.knk.paper.currency.PaymentNotificationHandler(
+                    currencySettings, uuid -> usersDataAccess.refreshAsync(uuid));
+                playerNotificationPoller.setPaymentReceivedHandler(paymentHandler::handle);
+                // Currency Phase 5: anomaly alerts for online staff with knk.admin.currency.alerts.
+                var alertNotifier = new net.knightsandkings.knk.paper.currency.CurrencyAlertNotifier(
+                    currencySettings, knkPermissible::checkAsync, org.bukkit.Bukkit::getOnlinePlayers,
+                    MenuService.mainThreadExecutor(this));
+                playerNotificationPoller.setCurrencyAlertHandler(alertNotifier::handle);
+            }
             List<MenuFeature> menuFeatures = List.of(
                 registries -> {
                     MenuVariableContext.registerDefaults(registries.variables());
@@ -599,7 +622,7 @@ public class KnKPlugin extends JavaPlugin {
                     permissionGroupsDataAccess, usersQueryApi, cacheManager.getUserCache()),
                 new net.knightsandkings.knk.paper.menu.content.UserManagerMenuFeature(
                     userAdminService, usersQueryApi, cacheManager.getUserCache(), titleBracketsDataAccess,
-                    permissionGroupsDataAccess, org.bukkit.Bukkit::getOnlinePlayers),
+                    permissionGroupsDataAccess, org.bukkit.Bukkit::getOnlinePlayers, this::askStaffReason),
                 // Siege Phase 8b: the siege menus. SiegeService is created later (initializeSiege),
                 // so the feature looks it up on every call.
                 new net.knightsandkings.knk.paper.siege.SiegeMenuFeature(() -> siegeService)
@@ -790,6 +813,21 @@ public class KnKPlugin extends JavaPlugin {
         }
     }
 
+    /**
+     * The Player manager's reason prompt for staged balance changes (currency Phase 4, D9): one line
+     * of chat through ChatCaptureManager, answered on the main thread (chat arrives off it).
+     */
+    private boolean askStaffReason(org.bukkit.entity.Player player, String prompt,
+                                   java.util.function.Consumer<String> onReason, Runnable onCancel) {
+        ChatCaptureManager capture = this.chatCaptureManager;
+        if (capture == null) {
+            return false;
+        }
+        java.util.concurrent.Executor main = MenuService.mainThreadExecutor(this);
+        capture.startTextCapture(player, prompt, text -> main.execute(() -> onReason.accept(text)), () -> main.execute(onCancel));
+        return true;
+    }
+
     @Override
     public void onDisable() {
         // Siege first (DESIGN §5.1/§9.2): stops every lobby with SERVER_RESTART, which aborts running
@@ -929,7 +967,11 @@ public class KnKPlugin extends JavaPlugin {
 
         pluginManager.registerEvents(new WorldGuardRegionListener(regionTracker), this);
         pluginManager.registerEvents(new PlayerListener(usersDataAccess, townsDataAccess, this.getCacheManager(), knkPermissible, usersCommandApi, kitsCommandApi, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, ignoreService), this);
-        pluginManager.registerEvents(new UserAccountListener(this, userManager, joinLoadingGuard, config.messages(), getLogger()), this);
+        if (playerCurrencyService != null) {
+            // Drops a leaving player's open /pay confirmation and its expiry notice.
+            pluginManager.registerEvents(playerCurrencyService, this);
+        }
+        pluginManager.registerEvents(new UserAccountListener(this, userManager, joinLoadingGuard, config.messages(), getLogger(), playerCurrencyService), this);
         getLogger().info("Registered UserAccountListener for account management");
         pluginManager.registerEvents(new JoinLoadingRestrictionListener(joinLoadingGuard), this);
         pluginManager.registerEvents(new ModeListener(modeService), this);
@@ -1010,7 +1052,8 @@ public class KnKPlugin extends JavaPlugin {
                 serverId,
                 menuService,
                 apiClient.getClansQueryApi(),
-                userAdminService
+                userAdminService,
+                playerCurrencyService
             );
             knkCommand.setExecutor(knkAdminCommand);
             knkCommand.setTabCompleter(knkAdminCommand);
@@ -1057,6 +1100,16 @@ public class KnKPlugin extends JavaPlugin {
 
         // Content port CP1: /menu opens the InventoryMenu hub (docs/specs/inventory-menu/CONTENT_PORT_PLAN.md §3).
         registerSimpleCommand("menu", new net.knightsandkings.knk.paper.commands.MenuCommand(() -> menuService));
+
+        // Currency ledger Phase 3 (docs/specs/currency-payments/DESIGN.md §3.6).
+        if (playerCurrencyService != null) {
+            registerTabCommand("pay", new net.knightsandkings.knk.paper.commands.PayCommand(playerCurrencyService));
+            registerTabCommand("balance", new net.knightsandkings.knk.paper.commands.BalanceCommand(playerCurrencyService));
+            registerTabCommand("baltop", new net.knightsandkings.knk.paper.commands.BaltopCommand(playerCurrencyService));
+            registerTabCommand("transactions", new net.knightsandkings.knk.paper.commands.TransactionsCommand(playerCurrencyService));
+        } else {
+            getLogger().warning("/pay, /balance, /baltop and /transactions not registered - currency service failed to initialize");
+        }
 
         registerPlayerCommands();
     }

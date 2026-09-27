@@ -7,6 +7,7 @@ import java.util.concurrent.CompletableFuture;
 import net.knightsandkings.knk.core.cache.BaseCache;
 import net.knightsandkings.knk.core.domain.permissions.EffectivePermissionSet;
 import net.knightsandkings.knk.core.domain.permissions.PermissionCheckResult;
+import net.knightsandkings.knk.core.domain.permissions.PermissionDecision;
 import net.knightsandkings.knk.core.ports.api.PermissionsApi;
 
 /**
@@ -89,6 +90,29 @@ public class PermissionsDataAccess {
      */
     public CompletableFuture<FetchResult<PermissionCheckResult>> checkAsync(int userId, String node) {
         return checkAsync(userId, node, null);
+    }
+
+    /**
+     * {@link #checkAsync(int, String)} as a {@link PermissionDecision}: {@code ALLOWED} for a
+     * grant, {@code DENIED} for a real "no" (deny, undeclared, or a user the API doesn't know),
+     * {@code UNAVAILABLE} when the API couldn't be asked (error after retries, no cached answer).
+     * Never completes exceptionally.
+     */
+    public CompletableFuture<PermissionDecision> decideAsync(int userId, String node) {
+        return checkAsync(userId, node)
+            .thenApply(PermissionsDataAccess::decide)
+            .exceptionally(ex -> PermissionDecision.UNAVAILABLE);
+    }
+
+    /** A check's fetch result as a decision (see {@link #decideAsync}). */
+    public static PermissionDecision decide(FetchResult<PermissionCheckResult> result) {
+        if (result == null) {
+            return PermissionDecision.UNAVAILABLE;
+        }
+        if (result.isSuccess()) {
+            return PermissionDecision.of(result.value().map(PermissionCheckResult::isAllowed).orElse(false));
+        }
+        return result.status() == FetchStatus.NOT_FOUND ? PermissionDecision.DENIED : PermissionDecision.UNAVAILABLE;
     }
 
     /**

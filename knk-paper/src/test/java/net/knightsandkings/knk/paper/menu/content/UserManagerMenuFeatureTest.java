@@ -433,4 +433,77 @@ class UserManagerMenuFeatureTest {
         verify(menuService, org.mockito.Mockito.times(2)).refreshOpenMenu(staff);
         assertTrue(session.getPendingConfirmation().isEmpty());
     }
+
+    // ===== Staged balance changes (currency Phase 4, DESIGN.md D9) =====
+
+    /** A chat prompt the test answers by hand. */
+    private final List<java.util.function.Consumer<String>> reasonAnswers = new ArrayList<>();
+    private final List<Runnable> reasonCancels = new ArrayList<>();
+
+    private UserManagerMenuFeature stagingFeature() {
+        UserManagerMenuFeature staging = new UserManagerMenuFeature(admin, usersQueryApi, cache, titles, groups, () -> online,
+                (player, prompt, onReason, onCancel) -> {
+                    reasonAnswers.add(onReason);
+                    reasonCancels.add(onCancel);
+                    return true;
+                });
+        staging.fetchTarget(sourceContext(staff, MenuContextParams.EMPTY), Map.of("userId", "7", "name", "Steve")).join();
+        return staging;
+    }
+
+    @Test
+    void stepperClicks_addUp_andTheTypedReasonAppliesThemAsOneChange() {
+        UserManagerMenuFeature staging = stagingFeature();
+        MenuFeatureRegistries stagingRegistries = ContentFeatures.all(staging);
+        when(admin.adjustBalance(any(), any(), anyString(), anyInt(), anyString(), anyString())).thenReturn(CompletableFuture.completedFuture(true));
+
+        for (String delta : List.of("100", "100", "-50")) {
+            stagingRegistries.actions().execute("users.adjust", actionContext(null), Map.of("userId", "7", "field", "coins", "delta", delta));
+        }
+
+        verify(admin, never()).adjustBalance(any(), any(), anyString(), anyInt(), anyString(), anyString());
+        assertEquals(1, reasonAnswers.size()); // asked once, on the first click
+        assertEquals(150, staging.stagedFor(staff).delta());
+
+        reasonAnswers.get(0).accept("event prize for the build contest");
+
+        verify(admin).adjustBalance(staff, steveUser, "coins", 150, "event prize for the build contest", "event prize for the build contest");
+        assertEquals(null, staging.stagedFor(staff));
+    }
+
+    @Test
+    void switchingBalance_discardsTheOldStage_andCancelDiscardsEverything() {
+        UserManagerMenuFeature staging = stagingFeature();
+        MenuFeatureRegistries stagingRegistries = ContentFeatures.all(staging);
+
+        stagingRegistries.actions().execute("users.adjust", actionContext(null), Map.of("userId", "7", "field", "coins", "delta", "100"));
+        stagingRegistries.actions().execute("users.adjust", actionContext(null), Map.of("userId", "7", "field", "gems", "delta", "5"));
+
+        verify(staff).sendMessage("§eDiscarded the unapplied +100 coins for Steve.");
+        assertEquals("gems", staging.stagedFor(staff).field());
+        assertEquals(5, staging.stagedFor(staff).delta());
+
+        reasonCancels.get(0).run();
+        assertEquals(null, staging.stagedFor(staff));
+        reasonAnswers.get(0).accept("too late");
+        verify(admin, never()).adjustBalance(any(), any(), anyString(), anyInt(), anyString(), anyString());
+    }
+
+    @Test
+    void anXpRaise_isOnlyStagedWithTheCoinAndGemNodesToo() {
+        UserManagerMenuFeature staging = stagingFeature();
+        MenuFeatureRegistries stagingRegistries = ContentFeatures.all(staging);
+        when(admin.requireXpRaise(staff)).thenReturn(false);
+
+        stagingRegistries.actions().execute("users.adjust", actionContext(null), Map.of("userId", "7", "field", "xp", "delta", "100"));
+        assertEquals(null, staging.stagedFor(staff));
+        assertTrue(reasonAnswers.isEmpty());
+
+        stagingRegistries.actions().execute("users.adjust", actionContext(null), Map.of("userId", "7", "field", "xp", "delta", "-100"));
+        assertEquals(-100, staging.stagedFor(staff).delta()); // lowering only needs the XP node
+
+        when(admin.requireXpRaise(staff)).thenReturn(true);
+        stagingRegistries.actions().execute("users.adjust", actionContext(null), Map.of("userId", "7", "field", "xp", "delta", "500"));
+        assertEquals(400, staging.stagedFor(staff).delta());
+    }
 }
