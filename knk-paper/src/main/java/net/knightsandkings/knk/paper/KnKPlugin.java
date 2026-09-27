@@ -1385,6 +1385,10 @@ public class KnKPlugin extends JavaPlugin {
         // Phase 5: warp gem prices and /tpa coin fees are charged by the web API (DESIGN.md §3.5/§3.7).
         net.knightsandkings.knk.paper.teleport.TeleportCharges charges = createTeleportCharges();
         teleportRequestService.setCharges(charges);
+        // Private messages' ignore list (KNG-18): a player you /ignore can't /tpa or /tpahere you.
+        if (ignoreService != null) {
+            teleportRequestService.setIgnoreCheck(ignoreService::ignores);
+        }
         if (config.teleport().request().isPaid() && charges == null) {
             getLogger().warning("teleport.request.price-coins is " + config.teleport().request().priceCoins()
                 + " but the API client isn't available to charge it, so /tpa and /tpahere will be refused.");

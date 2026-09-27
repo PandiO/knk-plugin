@@ -75,7 +75,7 @@ public class TeleportRequestService {
     private final TeleportRequestBook book;
     private final TeleportCooldowns sendCooldowns = new TeleportCooldowns();
     private volatile TeleportRequestSettings settings;
-    /** Whether {@code viewer} ignores {@code sender} (UUIDs); none until an ignore list is wired in. */
+    /** Whether {@code viewer} ignores {@code sender} (UUIDs); nobody until {@link #setIgnoreCheck} is called. */
     private volatile BiPredicate<UUID, UUID> ignores = (viewer, sender) -> false;
     /** Charges the request fee server-side; null = paid requests are refused. */
     private volatile TeleportCharges charges;
@@ -94,9 +94,8 @@ public class TeleportRequestService {
 
     /**
      * Requests from a player the target ignores are swallowed: the requester is told it was sent,
-     * the target never sees it. Meant for the private-messages ignore list
-     * ({@code IgnoreService.ignores(viewer, sender)} on {@code claude/private-messages}) once both
-     * branches meet; null turns it off.
+     * the target never sees it. KnKPlugin wires in the private-messages ignore list
+     * ({@code IgnoreService.ignores(viewer, sender)}); null turns it off.
      */
     public void setIgnoreCheck(BiPredicate<UUID, UUID> ignores) {
         this.ignores = ignores != null ? ignores : (viewer, sender) -> false;
