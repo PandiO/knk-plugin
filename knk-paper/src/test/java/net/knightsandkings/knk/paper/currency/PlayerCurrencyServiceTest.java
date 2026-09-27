@@ -211,6 +211,16 @@ class PlayerCurrencyServiceTest {
     }
 
     @Test
+    void joinBalanceLine_isTheBalanceLine_readFresh_orTheJoinNumbersWhenTheApiIsDown() {
+        when(api.getBalances(1)).thenReturn(CompletableFuture.completedFuture(new Balances(1, 12_345, 67, 900)))
+            .thenReturn(CompletableFuture.failedFuture(new RuntimeException("connection refused")));
+
+        assertEquals("§7Balance: §612,345 coins §7| §b67 gems", service.joinBalanceLine(alice.getUniqueId(), 1, 5000, 0).join());
+        assertEquals(12_345, userCache.getStale(alice.getUniqueId()).orElseThrow().coins());
+        assertEquals("§7Balance: §65,000 coins §7| §b3 gems", service.joinBalanceLine(alice.getUniqueId(), 1, 5000, 3).join());
+    }
+
+    @Test
     void ledgerLines_sayWhoAndWhy() {
         LedgerLine sent = new LedgerLine(1, "01M3", Instant.parse("2026-09-26T19:08:00Z"), BalanceCurrency.COINS, -1000, 2000, 1000,
             "Transfer", "PLAYER_TRANSFER", "Player transfer", "Player", "alice", null, 2, "bob");

@@ -273,7 +273,7 @@ public class PlayerCurrencyService {
                         return;
                     }
                     updateCache(player.getUniqueId(), balances);
-                    send(viewer, "balance-self", "coins", CurrencyFormat.amount(balances.coins()), "gems", CurrencyFormat.amount(balances.gems()));
+                    viewer.sendMessage(balanceSelfLine(settings, balances.coins(), balances.gems()));
                 }));
             return;
         }
@@ -296,6 +296,32 @@ public class PlayerCurrencyService {
                 send(viewer, "balance-other", "player", result.getKey().username(),
                     "coins", CurrencyFormat.amount(b.coins()), "gems", CurrencyFormat.amount(b.gems()));
             }));
+    }
+
+    /**
+     * The join message's balance line: the same {@code balance-self} line as {@code /balance},
+     * read fresh from the API (the join lookup can predate an offline payment or the salary paid
+     * on join). If the API doesn't answer, the join lookup's numbers in the same format. Never
+     * fails; may complete off the main thread.
+     */
+    public CompletableFuture<String> joinBalanceLine(UUID uuid, int userId, long fallbackCoins, long fallbackGems) {
+        return currencyApi.getBalances(userId)
+            .thenApply(balances -> {
+                if (balances == null) {
+                    return balanceSelfLine(settings, fallbackCoins, fallbackGems);
+                }
+                updateCache(uuid, balances);
+                return balanceSelfLine(settings, balances.coins(), balances.gems());
+            })
+            .exceptionally(ex -> {
+                LOGGER.fine("Join balance read failed, showing the join lookup's numbers: " + ex);
+                return balanceSelfLine(settings, fallbackCoins, fallbackGems);
+            });
+    }
+
+    /** {@code /balance}'s own line for {@code coins} and {@code gems}. */
+    public static String balanceSelfLine(CurrencySettings settings, long coins, long gems) {
+        return settings.message("balance-self", "coins", CurrencyFormat.amount(coins), "gems", CurrencyFormat.amount(gems));
     }
 
     // ===== /baltop =====

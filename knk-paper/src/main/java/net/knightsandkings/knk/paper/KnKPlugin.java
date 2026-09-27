@@ -965,7 +965,7 @@ public class KnKPlugin extends JavaPlugin {
 
         pluginManager.registerEvents(new WorldGuardRegionListener(regionTracker), this);
         pluginManager.registerEvents(new PlayerListener(usersDataAccess, townsDataAccess, this.getCacheManager(), knkPermissible, usersCommandApi, kitsCommandApi, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, ignoreService), this);
-        pluginManager.registerEvents(new UserAccountListener(this, userManager, joinLoadingGuard, config.messages(), getLogger()), this);
+        pluginManager.registerEvents(new UserAccountListener(this, userManager, joinLoadingGuard, config.messages(), getLogger(), playerCurrencyService), this);
         getLogger().info("Registered UserAccountListener for account management");
         pluginManager.registerEvents(new JoinLoadingRestrictionListener(joinLoadingGuard), this);
         pluginManager.registerEvents(new ModeListener(modeService), this);

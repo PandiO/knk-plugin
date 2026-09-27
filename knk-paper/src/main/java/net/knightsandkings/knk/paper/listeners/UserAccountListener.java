@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.paper.listeners;
 
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.logging.Logger;
 
 import org.bukkit.Bukkit;
@@ -14,6 +15,8 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.Plugin;
 
 import net.knightsandkings.knk.paper.config.KnkConfig;
+import net.knightsandkings.knk.paper.currency.CurrencySettings;
+import net.knightsandkings.knk.paper.currency.PlayerCurrencyService;
 import net.knightsandkings.knk.paper.user.JoinLoadingGuard;
 import net.knightsandkings.knk.paper.user.PlayerUserData;
 import net.knightsandkings.knk.paper.user.UserManager;
@@ -51,19 +54,23 @@ public class UserAccountListener implements Listener {
     private final JoinLoadingGuard joinLoadingGuard;
     private final KnkConfig.MessagesConfig messagesConfig;
     private final Logger logger;
+    /** The balance line in /balance's format (currency ledger); null if the currency service failed to start. */
+    private final PlayerCurrencyService currencyService;
 
     public UserAccountListener(
         Plugin plugin,
         UserManager userManager,
         JoinLoadingGuard joinLoadingGuard,
         KnkConfig.MessagesConfig messagesConfig,
-        Logger logger
+        Logger logger,
+        PlayerCurrencyService currencyService
     ) {
         this.plugin = plugin;
         this.userManager = userManager;
         this.joinLoadingGuard = joinLoadingGuard;
         this.messagesConfig = messagesConfig;
         this.logger = logger;
+        this.currencyService = currencyService;
     }
     
     /**
@@ -93,41 +100,49 @@ public class UserAccountListener implements Listener {
         logger.info("Player " + player.getName() + " joined, syncing account data...");
         joinLoadingGuard.hold(player);
 
-        userManager.onPlayerJoinAsync(player).thenAccept(userData ->
+        userManager.onPlayerJoinAsync(player).thenAccept(userData -> {
+            // Release the hold as soon as the account is known; the welcome lines wait for the
+            // fresh balance read below, which must not keep the player in the loading hold.
             Bukkit.getScheduler().runTask(plugin, () -> {
                 // Player may have disconnected again before the fetch finished.
                 Player online = Bukkit.getPlayer(uuid);
-                if (online == null) {
-                    return;
+                if (online != null) {
+                    joinLoadingGuard.release(online);
                 }
+            });
+            balanceLine(uuid, userData).thenAccept(balanceLine ->
+                Bukkit.getScheduler().runTask(plugin, () -> sendJoinMessages(uuid, userData, balanceLine)));
+        });
+    }
 
-                joinLoadingGuard.release(online);
+    private void sendJoinMessages(UUID uuid, PlayerUserData userData, String balanceLine) {
+        Player online = Bukkit.getPlayer(uuid);
+        if (online == null) {
+            return;
+        }
+        try {
+            sendWelcomeMessage(online, balanceLine);
 
-                try {
-                    sendWelcomeMessage(online, userData);
+            // Check for duplicate account and prompt if needed
+            if (userData.hasDuplicateAccount()) {
+                sendDuplicateAccountPrompt(online, userData);
+            }
 
-                    // Check for duplicate account and prompt if needed
-                    if (userData.hasDuplicateAccount()) {
-                        sendDuplicateAccountPrompt(online, userData);
-                    }
+            // Check for minecraft-only account and suggest linking
+            // hasEmailLinked now reflects isFullAccount from API (true = has email + password)
+            if (!userData.hasEmailLinked() && userData.userId() != null) {
+                sendAccountLinkSuggestion(online);
+            }
+        } catch (Exception ex) {
+            logger.severe("Failed to display join messages for " + online.getName() + ": " + ex.getMessage());
+            ex.printStackTrace();
 
-                    // Check for minecraft-only account and suggest linking
-                    // hasEmailLinked now reflects isFullAccount from API (true = has email + password)
-                    if (!userData.hasEmailLinked() && userData.userId() != null) {
-                        sendAccountLinkSuggestion(online);
-                    }
-                } catch (Exception ex) {
-                    logger.severe("Failed to display join messages for " + online.getName() + ": " + ex.getMessage());
-                    ex.printStackTrace();
-
-                    online.sendMessage(
-                        getPrefixComponent()
-                            .append(Component.text("Welcome! Your account data could not be loaded. Please contact an admin if this persists.")
-                                .color(NamedTextColor.YELLOW))
-                    );
-                }
-            })
-        );
+            online.sendMessage(
+                getPrefixComponent()
+                    .append(Component.text("Welcome! Your account data could not be loaded. Please contact an admin if this persists.")
+                        .color(NamedTextColor.YELLOW))
+            );
+        }
     }
     
     /**
@@ -142,9 +157,26 @@ public class UserAccountListener implements Listener {
     }
     
     /**
+     * The balance line, in {@code /balance}'s format ({@code messages.currency.balance-self}) and
+     * read fresh from the API like {@code /balance}; the join lookup's numbers if the API doesn't
+     * answer. Completes with null when the player has no account yet.
+     */
+    private CompletableFuture<String> balanceLine(UUID uuid, PlayerUserData userData) {
+        if (userData == null || userData.userId() == null) {
+            return CompletableFuture.completedFuture(null);
+        }
+        long coins = userData.coins() != null ? userData.coins() : 0;
+        long gems = userData.gems() != null ? userData.gems() : 0;
+        if (currencyService == null) {
+            return CompletableFuture.completedFuture(PlayerCurrencyService.balanceSelfLine(CurrencySettings.defaults(), coins, gems));
+        }
+        return currencyService.joinBalanceLine(uuid, userData.userId(), coins, gems);
+    }
+
+    /**
      * Send welcome message with account balance info.
      */
-    private void sendWelcomeMessage(Player player, PlayerUserData userData) {
+    private void sendWelcomeMessage(Player player, String balanceLine) {
         Component welcomeMsg = getPrefixComponent()
             .append(Component.text("Welcome back, ")
                 .color(NamedTextColor.GREEN))
@@ -157,22 +189,8 @@ public class UserAccountListener implements Listener {
         player.sendMessage(welcomeMsg);
         
         // Show balance if available
-        if (userData.userId() != null) {
-            Component balanceMsg = getPrefixComponent()
-                .append(Component.text("Balance: ")
-                    .color(NamedTextColor.GRAY))
-                .append(Component.text(userData.coins() + " coins")
-                    .color(NamedTextColor.GOLD))
-                .append(Component.text(", ")
-                    .color(NamedTextColor.GRAY))
-                .append(Component.text(userData.gems() + " gems")
-                    .color(NamedTextColor.AQUA))
-                .append(Component.text(", ")
-                    .color(NamedTextColor.GRAY))
-                .append(Component.text(userData.experiencePoints() + " XP")
-                    .color(NamedTextColor.GREEN));
-            
-            player.sendMessage(balanceMsg);
+        if (balanceLine != null) {
+            player.sendMessage(getPrefixComponent().append(LegacyComponentSerializer.legacySection().deserialize(balanceLine)));
         }
     }
     
