@@ -171,7 +171,14 @@ public class UsersCommandApiImpl extends BaseApiImpl implements UsersCommandApi 
                 String responseJson = execute(request, url);
                 BalanceAdjustmentResultDto dto = objectMapper.readValue(responseJson, BalanceAdjustmentResultDto.class);
                 return UsersMapper.mapBalanceAdjustmentResult(dto);
-            } catch (ApiException | IOException e) {
+            } catch (ApiException e) {
+                if (e.getStatusCode() >= 400 && e.getStatusCode() < 500) {
+                    // A refusal ({error, message, details}, e.g. 422 AdminDailyCapExceeded): keep its
+                    // code and details so the staff member sees the reason, not the raw body.
+                    throw CurrencyApiImpl.toCurrencyException(objectMapper, e);
+                }
+                throw new RuntimeException("Failed to adjust balances", e);
+            } catch (IOException e) {
                 throw new RuntimeException("Failed to adjust balances", e);
             }
         }, executor);

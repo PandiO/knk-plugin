@@ -361,10 +361,13 @@ public final class UserManagerMenuFeature implements MenuFeature {
         UUID viewer = player.getUniqueId();
         StagedChange previous = staged.get(viewer);
         boolean same = previous != null && Objects.equals(previous.target().id(), target.id()) && previous.field().equals(field);
+        long total = (same ? previous.delta() : 0) + delta;
+        if ("xp".equals(field) && total > 0 && !admin.requireXpRaise(player)) {
+            return; // raising XP can pay title bonuses: needs the coin and gem nodes too; the stage stays as it was
+        }
         if (previous != null && !same && previous.delta() != 0) {
             player.sendMessage(ChatColor.YELLOW + "Discarded the unapplied " + describe(previous) + ".");
         }
-        long total = (same ? previous.delta() : 0) + delta;
         if (Math.abs(total) > Integer.MAX_VALUE) {
             player.sendMessage(ChatColor.RED + "That's more than one change can hold - apply it first.");
             return;

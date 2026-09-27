@@ -21,6 +21,7 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.BiConsumer;
@@ -56,6 +57,14 @@ public final class UserAdminService {
      * or yourself - without {@link RankHierarchy#actorOutranks}. Per-property nodes still apply.
      */
     public static final String MANAGE_ALL_NODE = NODE_PREFIX + "manage.all";
+    /**
+     * Raising XP can cross a title bracket, whose bonus pays coins and gems, so it needs the coin
+     * and gem nodes as well as the XP one (developer decision, currency smoke test 2026-09-27).
+     * Lowering XP only needs {@code knk.admin.user.xp}.
+     */
+    public static final List<String> XP_RAISE_NODES = List.of(NODE_PREFIX + "xp", NODE_PREFIX + "coins", NODE_PREFIX + "gems");
+    public static final String XP_RAISE_REFUSED = ChatColor.RED + "Raising XP can pay title bonuses in coins and gems, so it needs "
+            + "knk.admin.user.xp, knk.admin.user.coins and knk.admin.user.gems (lowering XP only needs knk.admin.user.xp).";
 
     private final Executor mainThread;
     private final UsersDataAccess usersDataAccess;
@@ -89,6 +98,31 @@ public final class UserAdminService {
     }
 
     // ===== permission, target, actor, rank =====
+
+    /** {@link #XP_RAISE_NODES} on the sender (the console holds all); tells them when missing. */
+    public boolean requireXpRaise(CommandSender sender) {
+        if (XP_RAISE_NODES.stream().allMatch(sender::hasPermission)) {
+            return true;
+        }
+        sender.sendMessage(XP_RAISE_REFUSED);
+        return false;
+    }
+
+    /**
+     * Whether this change can raise {@code target}'s XP: an add, or a set above the XP we last read
+     * for them (the server applies the set to its own value; a stale read only errs toward asking
+     * for more nodes when XP went down meanwhile, or fewer when it went up).
+     */
+    static boolean raisesXp(BalanceCurrency currency, BalanceOperation mode, long amount, UserSummary target) {
+        if (currency != BalanceCurrency.EXPERIENCE || amount <= 0) {
+            return false;
+        }
+        return switch (mode) {
+            case ADD -> true;
+            case SET -> target == null || amount > target.experiencePoints();
+            case REMOVE -> false;
+        };
+    }
 
     /** {@code knk.admin.user.<property>} on the sender; tells them when missing. */
     public boolean requireProperty(CommandSender sender, String property) {
@@ -245,6 +279,10 @@ public final class UserAdminService {
             sender.sendMessage(ChatColor.RED + "Unknown balance '" + property + "'.");
             return CompletableFuture.completedFuture(false);
         }
+        // /knk user xp add|set, the Player manager's XP steppers and "set title" all land here.
+        if (raisesXp(currency, mode, amount, target) && !requireXpRaise(sender)) {
+            return CompletableFuture.completedFuture(false);
+        }
 
         // Online target: show any title change right here from the response, and tell the API
         // not to also queue it for PlayerNotificationPoller (which would show it twice).
@@ -281,7 +319,10 @@ public final class UserAdminService {
                 }))
                 .exceptionally(ex -> {
                     mainThread.execute(() -> {
-                        sender.sendMessage(ChatColor.RED + "Failed: " + describeError(ex));
+                        // A refusal (e.g. 422 AdminDailyCapExceeded, which also counts the title
+                        // bonuses this change would pay) is a sentence of its own.
+                        boolean refused = net.knightsandkings.knk.core.domain.currency.CurrencyException.find(ex) != null;
+                        sender.sendMessage(ChatColor.RED + (refused ? "" : "Failed: ") + describeError(ex));
                         done.complete(false);
                     });
                     return null;
@@ -615,7 +656,32 @@ public final class UserAdminService {
         }
     }
 
+    /**
+     * The API's refusal of a ledger change in words: its message (the API writes whole sentences),
+     * or for {@code AdminDailyCapExceeded} without one, the numbers from its details. Never the raw
+     * response body.
+     */
+    static String describeRefusal(net.knightsandkings.knk.core.domain.currency.CurrencyError error) {
+        String message = error.plainMessage().replace("§", "").trim();
+        if (error.is(net.knightsandkings.knk.core.domain.currency.CurrencyError.ADMIN_DAILY_CAP_EXCEEDED)) {
+            if (!message.isEmpty()) {
+                return message;
+            }
+            Long remaining = error.detailLong("remaining");
+            Long cap = error.detailLong("cap");
+            String currency = error.detailString("currency");
+            return "Daily staff grant limit reached" + (cap != null ? " (" + cap + " " + (currency != null ? currency.toLowerCase(java.util.Locale.ROOT) : "")
+                    + " per 24 hours)" : "") + (remaining != null ? ": " + remaining + " left." : ".");
+        }
+        return message.isEmpty() ? error.code() : message;
+    }
+
     public static String describeError(Throwable ex) {
+        net.knightsandkings.knk.core.domain.currency.CurrencyException refusal =
+                net.knightsandkings.knk.core.domain.currency.CurrencyException.find(ex);
+        if (refusal != null) {
+            return describeRefusal(refusal.error());
+        }
         Throwable cause = ex;
         while (cause != null) {
             if (cause instanceof ApiException apiEx) {

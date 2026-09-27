@@ -98,4 +98,27 @@ class UsersCommandApiBalanceTest {
         assertEquals(1000, change.balanceAfter());
         assertEquals(1000, result.balanceOf(BalanceCurrency.COINS));
     }
+
+    @Test
+    void aRefusal_keepsTheApisCodeAndDetails() {
+        OkHttpClient refusing = new OkHttpClient.Builder().addInterceptor(chain -> new Response.Builder().request(chain.request())
+                .protocol(Protocol.HTTP_1_1).code(422).message("Unprocessable")
+                .body(ResponseBody.create("""
+                    {"error":"AdminDailyCapExceeded","code":"AdminDailyCapExceeded",
+                     "message":"That would pass your daily staff grant limit of 10,000 coins: you granted 9,500 in the last 24 hours, 500 left.",
+                     "details":{"currency":"Coins","cap":10000,"grantedLast24h":9500,"remaining":500,"requested":2000}}
+                    """, MediaType.get("application/json"))).build()).build();
+        UsersCommandApiImpl refusingApi = new UsersCommandApiImpl("http://api.test/api", refusing, new ObjectMapper(),
+                new NoAuthProvider(), executor, false);
+
+        Throwable thrown = org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.CompletionException.class,
+                () -> refusingApi.adjustBalanceById(7, BalanceCurrency.EXPERIENCE, BalanceOperation.ADD, 5000, "promotion", false).join());
+        net.knightsandkings.knk.core.domain.currency.CurrencyException error =
+                net.knightsandkings.knk.core.domain.currency.CurrencyException.find(thrown);
+
+        assertNotNull(error);
+        assertEquals(422, error.httpStatus());
+        assertEquals("AdminDailyCapExceeded", error.error().code());
+        assertEquals(500L, error.error().detailLong("remaining"));
+    }
 }

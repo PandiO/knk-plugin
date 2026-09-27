@@ -488,4 +488,22 @@ class UserManagerMenuFeatureTest {
         reasonAnswers.get(0).accept("too late");
         verify(admin, never()).adjustBalance(any(), any(), anyString(), anyInt(), anyString(), anyString());
     }
+
+    @Test
+    void anXpRaise_isOnlyStagedWithTheCoinAndGemNodesToo() {
+        UserManagerMenuFeature staging = stagingFeature();
+        MenuFeatureRegistries stagingRegistries = ContentFeatures.all(staging);
+        when(admin.requireXpRaise(staff)).thenReturn(false);
+
+        stagingRegistries.actions().execute("users.adjust", actionContext(null), Map.of("userId", "7", "field", "xp", "delta", "100"));
+        assertEquals(null, staging.stagedFor(staff));
+        assertTrue(reasonAnswers.isEmpty());
+
+        stagingRegistries.actions().execute("users.adjust", actionContext(null), Map.of("userId", "7", "field", "xp", "delta", "-100"));
+        assertEquals(-100, staging.stagedFor(staff).delta()); // lowering only needs the XP node
+
+        when(admin.requireXpRaise(staff)).thenReturn(true);
+        stagingRegistries.actions().execute("users.adjust", actionContext(null), Map.of("userId", "7", "field", "xp", "delta", "500"));
+        assertEquals(400, staging.stagedFor(staff).delta());
+    }
 }

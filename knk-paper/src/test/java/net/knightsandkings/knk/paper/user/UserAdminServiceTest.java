@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -98,6 +99,53 @@ class UserAdminServiceTest {
                 .thenReturn(CompletableFuture.completedFuture(new BalanceAdjustmentResult(0, 0, 0, null, List.of(change), false)));
     }
 
+    /** Grants the three nodes an XP raise needs (it can pay title bonuses in coins and gems). */
+    private void mayRaiseXp() {
+        UserAdminService.XP_RAISE_NODES.forEach(node -> when(staff.hasPermission(node)).thenReturn(true));
+    }
+
+    @Test
+    void raisingXp_needsTheCoinAndGemNodesToo_loweringOnlyTheXpNode() {
+        when(staff.hasPermission("knk.admin.user.xp")).thenReturn(true);
+        apiApplies(BalanceCurrency.EXPERIENCE, BalanceOperation.REMOVE, -20, 120);
+
+        assertFalse(service.changeBalance(staff, target, "xp", "add", 50, null).join());
+        assertFalse(service.changeBalance(staff, target, "xp", "set", 500, null).join()); // Steve has 120
+        assertFalse(service.adjustBalance(staff, target, "xp", 10, "Player manager").join());
+        verify(acting, never()).adjustBalanceById(anyInt(), any(), eq(BalanceOperation.ADD), anyLong(), anyString(), anyBoolean());
+        verify(acting, never()).adjustBalanceById(anyInt(), any(), eq(BalanceOperation.SET), anyLong(), anyString(), anyBoolean());
+        verify(staff, org.mockito.Mockito.times(3)).sendMessage(UserAdminService.XP_RAISE_REFUSED);
+
+        assertTrue(service.changeBalance(staff, target, "xp", "remove", 20, null).join());
+        verify(acting).adjustBalanceById(7, BalanceCurrency.EXPERIENCE, BalanceOperation.REMOVE, 20, "/knk user command by Admin", true);
+    }
+
+    @Test
+    void settingXpBelowTheCurrentValue_onlyNeedsTheXpNode() {
+        when(staff.hasPermission("knk.admin.user.xp")).thenReturn(true);
+        apiApplies(BalanceCurrency.EXPERIENCE, BalanceOperation.SET, -70, 120);
+
+        assertTrue(service.changeBalance(staff, target, "xp", "set", 50, null).join());
+
+        verify(acting).adjustBalanceById(7, BalanceCurrency.EXPERIENCE, BalanceOperation.SET, 50, "/knk user command by Admin", true);
+    }
+
+    @Test
+    void theStaffDailyCap_isShownAsTheApisSentence() {
+        mayRaiseXp();
+        when(acting.adjustBalanceById(anyInt(), any(), any(), anyLong(), anyString(), anyBoolean())).thenReturn(CompletableFuture.failedFuture(
+                new net.knightsandkings.knk.core.domain.currency.CurrencyException(new net.knightsandkings.knk.core.domain.currency.CurrencyError(
+                        "AdminDailyCapExceeded", "AdminDailyCapExceeded: That would pass your daily staff grant limit of 10,000 coins: "
+                        + "you granted 9,500 in the last 24 hours, 500 left.", Map.of("remaining", 500, "cap", 10000)), 422, null)));
+
+        assertFalse(service.changeBalance(staff, target, "xp", "add", 5000, null).join());
+
+        verify(staff).sendMessage("§cThat would pass your daily staff grant limit of 10,000 coins: you granted 9,500 in the last 24 hours, 500 left.");
+        assertEquals("Daily staff grant limit reached (10000 coins per 24 hours): 500 left.", UserAdminService.describeRefusal(
+                new net.knightsandkings.knk.core.domain.currency.CurrencyError("AdminDailyCapExceeded", null,
+                        Map.of("remaining", 500, "cap", 10000, "currency", "Coins"))));
+    }
+
     @Test
     void setIsSentAsASetAndTheServersNumbersAreShown() {
         // KNG-21 Phase 2 (audit A6): no delta computed from the cached 250 - the server found 400.
@@ -167,6 +215,7 @@ class UserAdminServiceTest {
     @Test
     void setTitleSetsXpToTheBracketMinimum() {
         TitleBracket knight = new TitleBracket(3, "Knight", "Dame", 300, 40, 0, 0, 0);
+        mayRaiseXp();
         apiApplies(BalanceCurrency.EXPERIENCE, BalanceOperation.SET, 180, 120);
 
         assertTrue(service.setTitle(staff, target, knight).join());
@@ -315,6 +364,7 @@ class UserAdminServiceTest {
         TitleBracket knight = new TitleBracket(3, "Knight", "Dame", 300, 40, 0, 0, 0);
         Player online = mock(Player.class);
         bukkit.when(() -> Bukkit.getPlayer(target.uuid())).thenReturn(online);
+        mayRaiseXp();
         apiApplies(BalanceCurrency.EXPERIENCE, BalanceOperation.SET, 180, 120);
 
         assertTrue(service.setTitle(staff, target, knight).join());

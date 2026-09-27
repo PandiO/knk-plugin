@@ -298,7 +298,10 @@ permissions:
     default: false
 
   knk.admin.user.xp:
-    description: Adjust a player's XP (and, indirectly, title) via /knk user <player> xp set|add|remove
+    description: >-
+      Adjust a player's XP (and, indirectly, title) via /knk user <player> xp set|add|remove and the
+      Player manager. Raising XP can pay title bonuses in coins and gems, so it also needs
+      knk.admin.user.coins and knk.admin.user.gems; lowering it needs only this node.
     default: false
 
   knk.admin.user.group:

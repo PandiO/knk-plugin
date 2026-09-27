@@ -308,6 +308,14 @@ public class CurrencyApiImpl extends BaseApiImpl implements CurrencyApi {
 
     /** A 4xx body {@code {code, message, details}} as a CurrencyException (anything unparseable keeps the status as its code). */
     CurrencyException toCurrencyException(ApiException e) {
+        return toCurrencyException(objectMapper, e);
+    }
+
+    /**
+     * {@link #toCurrencyException(ApiException)} for other clients of ledger-backed routes (e.g.
+     * the staff balance change, PUT /api/users/{id}/balances, which answers with the same body).
+     */
+    static CurrencyException toCurrencyException(ObjectMapper objectMapper, ApiException e) {
         String code = "Http" + e.getStatusCode();
         String message = e.getMessage();
         Map<String, Object> details = null;
