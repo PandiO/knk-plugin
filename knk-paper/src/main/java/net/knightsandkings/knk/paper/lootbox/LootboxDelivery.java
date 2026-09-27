@@ -193,7 +193,8 @@ public final class LootboxDelivery {
             return new Outcome(false, true, null, LootboxDeliveryMethod.REDELIVERED, List.of());
         }
 
-        ItemStack item = prepared.item().clone();
+        // The prepared stack itself goes in (the reel only ever showed copies of it); `shown` is for the messages.
+        ItemStack item = prepared.item();
         ItemStack shown = item.clone();
         LootboxDeliveryMethod method = place(player, item, redelivery ? LootboxDeliveryMethod.REDELIVERED : LootboxDeliveryMethod.INVENTORY);
         handedOver.put(claim.claimId(), method);
