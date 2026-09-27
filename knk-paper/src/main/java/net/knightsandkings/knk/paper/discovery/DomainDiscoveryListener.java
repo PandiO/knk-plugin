@@ -48,6 +48,9 @@ import net.knightsandkings.knk.paper.events.UserDataLoadedEvent;
  *   Moves are only looked at when the player changed block.</li>
  *   <li><b>Join</b>: on {@link UserDataLoadedEvent} (account loaded, loading hold off) the player's
  *   discovered set is loaded and every region they joined inside becomes a JoinInside candidate.</li>
+ *   <li><b>Resync</b> ({@link #resync}): after a staff reset (web app or {@code /knk discovery reset})
+ *   the known set is read again and the regions the player stands in are re-checked, so the reset
+ *   place is discovered again without moving.</li>
  *   <li>Each candidate is <b>confirmed a tick later</b>: the player must still be in that region, so an
  *   entry undone right away (bounced back, teleported out) isn't discovered, while a player running
  *   through a small structure still is.</li>
@@ -135,9 +138,49 @@ public final class DomainDiscoveryListener implements Listener {
         }
     }
 
+    /**
+     * Re-syncs an online player after one of their discoveries was reset (the web app's reset arrives
+     * as a DiscoveryReset player notification, {@code /knk discovery reset} calls it directly): reads
+     * their known set again (off the main thread), replaces the tracker's, then re-checks the regions
+     * they stand in (JoinInside, eligibility and next-tick confirmation as usual), so standing still
+     * inside the reset place discovers it again. A second resync for the same reset (the command's own,
+     * then its notification) finds nothing new to do: the server grants a place at most once. No-op
+     * for a player who isn't tracked.
+     * Main thread.
+     */
+    public void resync(Player player) {
+        UUID uuid = player.getUniqueId();
+        OptionalInt tracked = tracker.userId(uuid);
+        if (tracked.isEmpty()) {
+            return;
+        }
+        int userId = tracked.getAsInt();
+        discoveriesApi.known(userId).whenComplete((known, error) -> runOnMainThread(() -> {
+            if (error != null || known == null) {
+                LOGGER.log(Level.WARNING, "[Discovery] Could not re-read the discoveries of user " + userId
+                        + " after a reset; they count again after a rejoin", error);
+                return;
+            }
+            if (tracker.userId(uuid).orElse(-1) != userId) {
+                return; // quit meanwhile
+            }
+            tracker.replaceKnown(uuid, known);
+            Player online = Bukkit.getPlayer(uuid);
+            if (online != null) {
+                detect(online, online.getLocation(), DiscoverySource.JOIN_INSIDE);
+            }
+        }));
+    }
+
     private void start(Player player, int userId) {
         UUID uuid = player.getUniqueId();
         tracker.startSession(uuid, userId);
+        loadKnown(uuid, userId);
+        detect(player, player.getLocation(), DiscoverySource.JOIN_INSIDE);
+    }
+
+    /** Loads the player's discovered set. */
+    private void loadKnown(UUID uuid, int userId) {
         discoveriesApi.known(userId).whenComplete((known, error) -> runOnMainThread(() -> {
             if (error != null || known == null) {
                 LOGGER.log(Level.WARNING, "[Discovery] Could not load the discoveries of user " + userId
@@ -147,7 +190,6 @@ public final class DomainDiscoveryListener implements Listener {
                 tracker.knownLoaded(uuid, known);
             }
         }));
-        detect(player, player.getLocation(), DiscoverySource.JOIN_INSIDE);
     }
 
     private void detect(Player player, Location location, DiscoverySource source) {

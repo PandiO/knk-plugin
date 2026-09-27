@@ -181,6 +181,7 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.discovery.DiscoveryFlushTask discoveryFlushTask;
     private net.knightsandkings.knk.core.discovery.DiscoveryTracker discoveryTracker;
     private net.knightsandkings.knk.core.discovery.DiscoverySpool discoverySpool;
+    private net.knightsandkings.knk.paper.discovery.DomainDiscoveryListener discoveryListener;
     private net.knightsandkings.knk.paper.menu.content.DiscoveriesMenuFeature discoveriesMenuFeature;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private PermissionsDataAccess permissionsDataAccess;
@@ -591,6 +592,11 @@ public class KnKPlugin extends JavaPlugin {
             this.discoveriesMenuFeature = new net.knightsandkings.knk.paper.menu.content.DiscoveriesMenuFeature(
                 apiClient.getDiscoveriesApi(), cacheManager.getUserCache(), java.time.Clock.systemUTC()
             );
+            // A discovery reset made in the web app: drop the cached menu data and re-sync the online
+            // player's tracking (the same path /knk discovery reset takes, see its afterReset below).
+            if (playerNotificationPoller != null) {
+                playerNotificationPoller.setDiscoveryResetHandler(this::afterDiscoveryReset);
+            }
             // Currency ledger Phase 3: player payments. Name lookups are vanish-safe (VisiblePlayers).
             var currencySettings = net.knightsandkings.knk.paper.currency.CurrencySettings.from(getConfig());
             this.playerCurrencyService = new net.knightsandkings.knk.paper.currency.PlayerCurrencyService(
@@ -947,7 +953,7 @@ public class KnKPlugin extends JavaPlugin {
             this, discoveryTracker, discoveryRecorder, discoveryEffects, clock,
             discoveryConfig.batchWindowTicks(), discoveryConfig.replayIntervalSeconds()
         );
-        net.knightsandkings.knk.paper.discovery.DomainDiscoveryListener discoveryListener =
+        this.discoveryListener =
             new net.knightsandkings.knk.paper.discovery.DomainDiscoveryListener(
                 this, discoveryTracker, discoveryRecorder, apiClient.getDiscoveriesApi(), discoveryEligibility,
                 discoveryFlushTask, clock
@@ -957,6 +963,20 @@ public class KnKPlugin extends JavaPlugin {
         discoveryListener.startOnlinePlayers(uuid -> cacheManager.getUserCache().getByUuid(uuid)
             .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null));
         getLogger().info("Domain discovery started (spool: " + discoverySpool.directory() + ")");
+    }
+
+    /**
+     * After one of an online player's discoveries was reset (web app notification or
+     * {@code /knk discovery reset}): drops their cached discoveries menu data and re-syncs their
+     * discovery tracking so the place is discovered again, even standing still. Main thread.
+     */
+    private void afterDiscoveryReset(org.bukkit.entity.Player player) {
+        if (discoveriesMenuFeature != null) {
+            discoveriesMenuFeature.invalidate(player.getUniqueId());
+        }
+        if (discoveryListener != null) {
+            discoveryListener.resync(player);
+        }
     }
 
     /** Domain discovery's exclusions; null when discovery is disabled. */
@@ -1135,9 +1155,12 @@ public class KnKPlugin extends JavaPlugin {
                         player -> cacheManager.getUserCache().getStale(player.getUniqueId())
                             .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null),
                         (player, node) -> knkPermissible != null && knkPermissible.hasPermission(player, node),
-                        () -> discoveryTracker, () -> discoverySpool, org.bukkit.Bukkit::getPlayer,
+                        () -> discoveryTracker, () -> discoverySpool,
                         uuid -> {
-                            if (discoveriesMenuFeature != null) {
+                            org.bukkit.entity.Player target = org.bukkit.Bukkit.getPlayer(uuid);
+                            if (target != null) {
+                                afterDiscoveryReset(target);
+                            } else if (discoveriesMenuFeature != null) {
                                 discoveriesMenuFeature.invalidate(uuid);
                             }
                         }
