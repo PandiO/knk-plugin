@@ -169,6 +169,8 @@ public final class SiegeService {
     private final List<CommandSender> refreshWaiters = new ArrayList<>();
     private boolean shuttingDown;
     private MenuHooks menuHooks;
+    /** Command label -> primary command name, over the server's command map (for the command filter). */
+    private final java.util.function.UnaryOperator<String> commandAliases;
 
     public SiegeService(
             Plugin plugin,
@@ -189,6 +191,7 @@ public final class SiegeService {
         this.permissions = Objects.requireNonNull(permissions, "permissions");
         this.userCache = Objects.requireNonNull(userCache, "userCache");
         this.random = Objects.requireNonNull(random, "random");
+        this.commandAliases = SiegeCommandAliases.resolver(() -> plugin.getServer().getCommandMap());
     }
 
     /** Phase 8b: set by {@code SiegeMenuBridge}; null keeps every chat fallback. */
@@ -1304,12 +1307,16 @@ public final class SiegeService {
         });
     }
 
-    /** DESIGN §6.9: may this member run this command right now? True for everyone not away in a match. */
+    /**
+     * DESIGN §6.9: may this member run this command right now? True for everyone not away in a match.
+     * Aliases and namespaced forms count as the command they run (SiegeCommandAliases), so every
+     * spelling of an allowed command works - e.g. /tell, /w, /minecraft:msg with /msg on the list.
+     */
     public boolean isCommandAllowed(Player player, String message) {
         Optional<SiegeLobbyRuntime> rt = activeLobbyOf(player.getUniqueId());
         if (rt.isEmpty()) return true;
         if (hasPermission(player, PERMISSION_BYPASS_COMMANDS)) return true;
-        return SiegeCommandFilter.isAllowed(message, rt.get().machine().configuration().allowedCommands());
+        return SiegeCommandFilter.isAllowed(message, rt.get().machine().configuration().allowedCommands(), commandAliases);
     }
 
     /** The allowed-command list for the member's match, for the denial message. */

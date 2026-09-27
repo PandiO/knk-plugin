@@ -19,6 +19,8 @@ dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.10-R0.1-SNAPSHOT")
     compileOnly("com.sk89q.worldedit:worldedit-bukkit:7.2.13")
     compileOnly("com.sk89q.worldguard:worldguard-bukkit:7.0.10")
+    // Log4j core (provided by the server) for the private-message command-log filter (KNG-18 Phase 3)
+    compileOnly("org.apache.logging.log4j:log4j-core:2.24.1")
     
     testImplementation("io.papermc.paper:paper-api:1.21.10-R0.1-SNAPSHOT")
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.0")
@@ -26,6 +28,7 @@ dependencies {
     testImplementation("com.fasterxml.jackson.core:jackson-databind:2.17.2")
     testImplementation("org.mockito:mockito-core:5.5.0")
     testImplementation("org.mockito:mockito-junit-jupiter:5.5.0")
+    testImplementation("org.apache.logging.log4j:log4j-core:2.24.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
