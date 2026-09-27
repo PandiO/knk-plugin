@@ -151,13 +151,14 @@ public class UserAccountListener implements Listener {
     }
     
     /**
-     * Handle player quit - clear cached user data.
+     * Handle player quit - clear cached user data, and take the player out of the join-loading
+     * hold before they are saved (this event fires before the save).
      */
     @EventHandler(priority = EventPriority.MONITOR)
     public void onPlayerQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
         userManager.clearCachedUser(player.getUniqueId());
-        joinLoadingGuard.forget(player.getUniqueId());
+        joinLoadingGuard.forget(player);
         logger.fine("Cleared cache for " + player.getName() + " on quit");
     }
     

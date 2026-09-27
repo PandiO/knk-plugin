@@ -848,6 +848,15 @@ public class KnKPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        // Players still loading their account would otherwise be saved in the hold's ADVENTURE
+        // mode with the invulnerable flag set.
+        if (joinLoadingGuard != null) {
+            try {
+                joinLoadingGuard.releaseAll();
+            } catch (RuntimeException e) {
+                getLogger().log(java.util.logging.Level.SEVERE, "Releasing join-loading holds failed", e);
+            }
+        }
         // Siege first (DESIGN §5.1/§9.2): stops every lobby with SERVER_RESTART, which aborts running
         // matches and restores every member's vault while the players and the API client still exist.
         if (siegeService != null) {
