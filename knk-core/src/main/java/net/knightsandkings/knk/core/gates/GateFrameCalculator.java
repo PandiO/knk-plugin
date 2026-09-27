@@ -2,6 +2,7 @@ package net.knightsandkings.knk.core.gates;
 
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
+import net.knightsandkings.knk.core.util.Polygon2D;
 import net.knightsandkings.knk.core.util.VectorMath;
 import org.bukkit.util.Vector;
 
@@ -390,46 +391,9 @@ public class GateFrameCalculator {
      *                  closed - the last point connects back to the first)
      */
     static boolean pointInPolygon(double u, double v, List<double[]> polygonUV) {
-        if (polygonUV == null || polygonUV.size() < 3) {
-            return false;
-        }
-
-        boolean inside = false;
-        int n = polygonUV.size();
-        for (int i = 0, j = n - 1; i < n; j = i++) {
-            double ui = polygonUV.get(i)[0];
-            double vi = polygonUV.get(i)[1];
-            double uj = polygonUV.get(j)[0];
-            double vj = polygonUV.get(j)[1];
-
-            // On-edge check first (inclusive boundary, within epsilon) - a plain ray-cast alone
-            // would leave this to floating-point luck.
-            if (isOnSegment(u, v, ui, vi, uj, vj)) {
-                return true;
-            }
-
-            boolean straddles = (vi > v) != (vj > v);
-            if (straddles) {
-                double uCrossing = ui + (v - vi) / (vj - vi) * (uj - ui);
-                if (u < uCrossing) {
-                    inside = !inside;
-                }
-            }
-        }
-        return inside;
-    }
-
-    private static boolean isOnSegment(double u, double v, double ui, double vi, double uj, double vj) {
-        double crossProduct = (v - vi) * (uj - ui) - (u - ui) * (vj - vi);
-        if (Math.abs(crossProduct) > BOUNDS_EPSILON * Math.max(1.0, Math.hypot(uj - ui, vj - vi))) {
-            return false;
-        }
-        double dotProduct = (u - ui) * (uj - ui) + (v - vi) * (vj - vi);
-        if (dotProduct < -BOUNDS_EPSILON) {
-            return false;
-        }
-        double squaredLength = (uj - ui) * (uj - ui) + (vj - vi) * (vj - vi);
-        return dotProduct <= squaredLength + BOUNDS_EPSILON;
+        // The ray-casting itself now lives in the Bukkit-free Polygon2D (shared with the road
+        // builder/router); its EPSILON equals BOUNDS_EPSILON, so the inclusive edge is unchanged.
+        return Polygon2D.contains(u, v, polygonUV);
     }
 
     /**
