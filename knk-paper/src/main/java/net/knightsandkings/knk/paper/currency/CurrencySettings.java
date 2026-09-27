@@ -24,6 +24,7 @@ public final class CurrencySettings {
         Map.entry("pay-cancelled", "&7Payment to &e{player} &7cancelled."),
         Map.entry("pay-expired", "&cThat payment request expired - send it again."),
         Map.entry("pay-closed", "&cThat payment request is no longer open."),
+        Map.entry("pay-already-sent", "&7That payment was already sent."),
         Map.entry("pay-no-pending", "&cYou have no payment waiting for confirmation."),
         Map.entry("pay-insufficient", "&cYou only have &6{balance} {currency}&c."),
         Map.entry("pay-cap", "&cDaily limit reached - you can send &6{remaining} &cmore {currency} (resets in {when})."),

@@ -199,6 +199,11 @@ public class PlayerCurrencyService {
             send(sender, "pay-busy");
             return;
         }
+        // The prompt this plugin still shows as open: a replayed answer for it is our own retry
+        // (the first attempt went through, its answer got lost) and still news to the player.
+        // For any other id (a stale [Confirm] clicked again, /pay confirm <old id>) the API only
+        // replays the stored result - nothing was paid now.
+        boolean openHere = id.equals(lastPendingId.get(uuid));
         requireAll(sender, PAY_NODE, null)
             .thenCompose(ignored -> permissions.has(sender, PAY_BYPASS_NODE))
             .thenCompose(bypass -> currencyApi.confirmTransfer(senderId, id, Boolean.TRUE.equals(bypass)))
@@ -207,7 +212,8 @@ public class PlayerCurrencyService {
                 if (ex == null || isPendingGone(ex)) {
                     lastPendingId.remove(uuid, id);
                 }
-                if (ex == null && outcome != null && outcome.completed()) {
+                boolean alreadySent = ex == null && outcome != null && outcome.completed() && outcome.replayed() && !openHere;
+                if (ex == null && outcome != null && outcome.completed() && !alreadySent) {
                     lastPaidAt.put(uuid, clock.instant());
                 }
                 if (!sender.isOnline()) {
@@ -215,6 +221,11 @@ public class PlayerCurrencyService {
                 }
                 if (ex != null) {
                     renderError(sender, ex, BalanceCurrency.COINS, null);
+                } else if (alreadySent) {
+                    if (outcome.senderBalances() != null) {
+                        updateCache(uuid, outcome.senderBalances());
+                    }
+                    send(sender, "pay-already-sent");
                 } else {
                     renderTransfer(sender, outcome);
                 }

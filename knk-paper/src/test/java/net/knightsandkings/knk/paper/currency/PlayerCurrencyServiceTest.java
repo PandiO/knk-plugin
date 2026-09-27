@@ -221,6 +221,48 @@ class PlayerCurrencyServiceTest {
     }
 
     @Test
+    void aStaleConfirm_saysThePaymentWasAlreadySent_notSentAgain() {
+        PendingTransfer pending = new PendingTransfer("01M3FHX1ZDRTAB76K01ZYK0PCZ", "Pending", BalanceCurrency.COINS, 150_000, 0, 2, "bob",
+            Instant.parse("2026-09-26T12:01:00Z"), 60);
+        when(api.transfer(1, 2, BalanceCurrency.COINS, 150_000, false)).thenReturn(CompletableFuture.completedFuture(
+            new TransferOutcome(TransferOutcome.Status.PENDING_CONFIRMATION, null, false, BalanceCurrency.COINS, 150_000, 0, 1, "alice", 2, "bob",
+                new Balances(1, 500_000, 0, 0), pending)));
+        TransferOutcome replay = new TransferOutcome(TransferOutcome.Status.COMPLETED, "01M3", true, BalanceCurrency.COINS, 150_000, 0,
+            1, "alice", 2, "bob", new Balances(1, 350_000, 0, 0), null);
+        when(api.confirmTransfer(1, "01M3FHX1ZDRTAB76K01ZYK0PCZ", false))
+            .thenReturn(CompletableFuture.completedFuture(completed(150_000, 350_000)))
+            .thenReturn(CompletableFuture.completedFuture(replay))
+            .thenReturn(failed(CurrencyError.PENDING_TRANSFER_CLOSED, Map.of()));
+
+        service.pay(alice, "bob", "150000", BalanceCurrency.COINS);
+        service.confirm(alice, "01M3FHX1ZDRTAB76K01ZYK0PCZ");
+        service.confirm(alice, "01M3FHX1ZDRTAB76K01ZYK0PCZ"); // the [Confirm] button clicked again
+        service.confirm(alice, "01M3FHX1ZDRTAB76K01ZYK0PCZ"); // e.g. cancelled: not open any more
+
+        assertTrue(aliceSees.get(1).startsWith("§aSent §6150,000 coins"), aliceSees.get(1));
+        assertEquals("§7That payment was already sent.", aliceSees.get(2));
+        assertEquals("§cThat payment request is no longer open.", aliceSees.get(3));
+    }
+
+    @Test
+    void aReplayedAnswerForTheOpenPrompt_isStillShownAsSent() {
+        // The first attempt went through but its answer was lost; the client's retry gets the replay.
+        PendingTransfer pending = new PendingTransfer("01M3FHX1ZDRTAB76K01ZYK0PCZ", "Pending", BalanceCurrency.COINS, 150_000, 0, 2, "bob",
+            Instant.parse("2026-09-26T12:01:00Z"), 60);
+        when(api.transfer(1, 2, BalanceCurrency.COINS, 150_000, false)).thenReturn(CompletableFuture.completedFuture(
+            new TransferOutcome(TransferOutcome.Status.PENDING_CONFIRMATION, null, false, BalanceCurrency.COINS, 150_000, 0, 1, "alice", 2, "bob",
+                new Balances(1, 500_000, 0, 0), pending)));
+        when(api.confirmTransfer(1, "01M3FHX1ZDRTAB76K01ZYK0PCZ", false)).thenReturn(CompletableFuture.completedFuture(
+            new TransferOutcome(TransferOutcome.Status.COMPLETED, "01M3", true, BalanceCurrency.COINS, 150_000, 0,
+                1, "alice", 2, "bob", new Balances(1, 350_000, 0, 0), null)));
+
+        service.pay(alice, "bob", "150000", BalanceCurrency.COINS);
+        service.confirm(alice, null);
+
+        assertTrue(aliceSees.get(1).startsWith("§aSent §6150,000 coins"), aliceSees.get(1));
+    }
+
+    @Test
     void ledgerLines_sayWhoAndWhy() {
         LedgerLine sent = new LedgerLine(1, "01M3", Instant.parse("2026-09-26T19:08:00Z"), BalanceCurrency.COINS, -1000, 2000, 1000,
             "Transfer", "PLAYER_TRANSFER", "Player transfer", "Player", "alice", null, 2, "bob");
