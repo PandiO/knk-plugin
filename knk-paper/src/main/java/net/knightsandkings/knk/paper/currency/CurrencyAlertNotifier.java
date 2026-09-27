@@ -63,8 +63,8 @@ public final class CurrencyAlertNotifier {
 
         for (Player player : List.copyOf(onlinePlayers.get())) {
             permissions.has(player, PlayerCurrencyService.CURRENCY_ALERTS_NODE)
-                .thenAccept(allowed -> {
-                    if (!Boolean.TRUE.equals(allowed)) {
+                .thenAccept(decision -> {
+                    if (decision != net.knightsandkings.knk.core.domain.permissions.PermissionDecision.ALLOWED) {
                         return;
                     }
                     mainThread.execute(() -> {

@@ -31,8 +31,8 @@ class CurrencyAlertNotifierTest {
     private final Map<Player, Boolean> hasNode = Map.of(staff, true, regular, false);
 
     private final CurrencyAlertNotifier notifier = new CurrencyAlertNotifier(CurrencySettings.defaults(),
-        (player, node) -> CompletableFuture.completedFuture(
-            PlayerCurrencyService.CURRENCY_ALERTS_NODE.equals(node) && hasNode.getOrDefault(player, false)),
+        (player, node) -> CompletableFuture.completedFuture(net.knightsandkings.knk.core.domain.permissions.PermissionDecision.of(
+            PlayerCurrencyService.CURRENCY_ALERTS_NODE.equals(node) && hasNode.getOrDefault(player, false))),
         () -> (Collection<Player>) List.of(staff, regular), Runnable::run);
 
     private static Player player(String name, List<String> into) {

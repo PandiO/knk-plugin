@@ -597,7 +597,7 @@ public class KnKPlugin extends JavaPlugin {
                 playerNotificationPoller.setPaymentReceivedHandler(paymentHandler::handle);
                 // Currency Phase 5: anomaly alerts for online staff with knk.admin.currency.alerts.
                 var alertNotifier = new net.knightsandkings.knk.paper.currency.CurrencyAlertNotifier(
-                    currencySettings, knkPermissible::hasPermissionAsync, org.bukkit.Bukkit::getOnlinePlayers,
+                    currencySettings, knkPermissible::checkAsync, org.bukkit.Bukkit::getOnlinePlayers,
                     MenuService.mainThreadExecutor(this));
                 playerNotificationPoller.setCurrencyAlertHandler(alertNotifier::handle);
             }
