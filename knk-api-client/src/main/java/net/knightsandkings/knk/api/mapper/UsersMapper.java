@@ -185,4 +185,21 @@ public class UsersMapper {
             mapRewardMultipliers(tc.expBonusMultipliers())
         );
     }
+
+    /** A malformed or missing UUID maps to null (a web-only account has none). */
+    public static net.knightsandkings.knk.core.domain.users.UserIgnore mapUserIgnore(
+        net.knightsandkings.knk.api.dto.UserIgnoreDto dto
+    ) {
+        java.util.UUID uuid = null;
+        if (dto.ignoredUuid() != null && !dto.ignoredUuid().isBlank()) {
+            try {
+                uuid = java.util.UUID.fromString(dto.ignoredUuid().trim());
+            } catch (IllegalArgumentException ignored) {
+                // leave null
+            }
+        }
+        return new net.knightsandkings.knk.core.domain.users.UserIgnore(
+            dto.ignoredUserId(), dto.ignoredUsername(), uuid, dto.createdAt()
+        );
+    }
 }

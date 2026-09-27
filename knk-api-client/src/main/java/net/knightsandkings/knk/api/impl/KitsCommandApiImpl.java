@@ -17,7 +17,10 @@ import net.knightsandkings.knk.core.domain.item.KnkKitClaimResult;
 import net.knightsandkings.knk.core.domain.item.KnkKitPurchaseResult;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.KitsCommandApi;
+import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
 
 /**
  * Write/action-side implementation for Kits (docs/specs/kits/IMPLEMENTATION_PLAN.md §4) -
@@ -68,12 +71,21 @@ public class KitsCommandApiImpl extends BaseApiImpl implements KitsCommandApi {
     }
 
     @Override
-    public CompletableFuture<KnkKitClaimResult> giveAsync(int targetUserId, int kitId) {
+    public CompletableFuture<KnkKitClaimResult> giveAsync(Integer actorUserId, int targetUserId, int kitId) {
         return CompletableFuture.supplyAsync(() -> {
             String url = baseUrl + BASE_ENDPOINT + "/" + kitId + "/give";
             try {
                 String bodyJson = objectMapper.writeValueAsString(new GiveKitRequestDto(targetUserId));
-                String responseJson = postJson(url, bodyJson);
+                // The API trusts this header only on a request carrying the plugin's API key
+                // (KNG-22); it replaces the web user's JWT identity as the audited actor.
+                Request.Builder builder = newRequest(url)
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("Accept", "application/json")
+                    .post(RequestBody.create(bodyJson, MediaType.get("application/json")));
+                if (actorUserId != null) {
+                    builder.header(UsersCommandApiImpl.ACTING_USER_HEADER, String.valueOf(actorUserId));
+                }
+                String responseJson = execute(builder.build(), url);
                 KitClaimResultDto dto = parse(responseJson, KitClaimResultDto.class, url);
                 return KitsMapper.toCore(dto);
             } catch (ApiException | IOException e) {

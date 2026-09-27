@@ -109,6 +109,22 @@ class KitGrantFlowTest {
     }
 
     @Test
+    void giveNamesTheSenderAsTheActor() {
+        // KNG-15/22: the API records the staff member from X-Acting-User-Id.
+        Player recipient = mock(Player.class);
+        when(recipient.getName()).thenReturn("Bob");
+        when(recipient.isOnline()).thenReturn(true);
+        when(permissible.hasPermission(player, KitGrantFlow.GIVE_NODE)).thenReturn(true);
+        userCache.put(new net.knightsandkings.knk.core.domain.users.UserSummary(42, "Alice", player.getUniqueId(), null,
+                0, 0, 0, true, false, null, null, null, null, 0, null, null, null, false, null));
+        when(api.giveAsync(42, 9, 7)).thenReturn(CompletableFuture.completedFuture(null));
+
+        flow.give(player, recipient, 9, 7, "Starter").join();
+
+        verify(api).giveAsync(42, 9, 7);
+    }
+
+    @Test
     void userIdResolvesFromTheStaleCacheEntry() {
         assertNull(flow.resolveUserId(player));
         userCache.put(new net.knightsandkings.knk.core.domain.users.UserSummary(42, "Alice", player.getUniqueId(), null,

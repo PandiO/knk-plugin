@@ -3,23 +3,34 @@ api:
   # TODO: Update this to match your backend server
   base-url: "http://localhost:5294/api"
   
-  # Enable debug logging (logs request URLs and latency)
-  debug-logging: true
+  # Enable debug logging (logs every request/response: URL, latency, headers, body). Off by
+  # default: it is noisy. The X-API-Key and Authorization values are redacted either way.
+  debug-logging: false
   
   # Allow untrusted SSL certificates (ONLY for development with self-signed certs)
   allow-untrusted-ssl: true
   
-  # Authentication configuration
+  # Authentication configuration (KNG-22)
+  #
+  # knk-web-api refuses game-server calls to its protected routes (balances, salary, kits,
+  # presence, staff mode, freeze, ranks/permissions, account merge...) unless they carry its
+  # shared key. Set api-key below to the SAME random value as the API's
+  # Security:PluginApiKey (appsettings / environment variable Security__PluginApiKey), e.g.
+  # generated with: openssl rand -hex 32
+  # With the key the API also trusts the in-game staff member this plugin names for
+  # audit-logged changes (X-Acting-User-Id).
+  # The plugin won't start with type apikey and an empty api-key - that's deliberate.
+  # (Development only: the API can be told to skip the check instead, see
+  # Security:AllowUnauthenticatedPluginCalls in knk-web-api - then type none works.)
   auth:
     # Type: none, bearer, apikey
-    type: none
+    type: apikey
     # Bearer token (only used if type=bearer)
     bearer-token: ""
-    # API key (only used if type=apikey). Set the same value as knk-web-api's
-    # Security:PluginApiKey in production: the API then only trusts the in-game staff member
-    # this plugin names for audit-logged changes (X-Acting-User-Id) on requests carrying it.
+    # API key (only used if type=apikey) - must equal knk-web-api's Security:PluginApiKey.
     api-key: ""
-    # API key header name (only used if type=apikey)
+    # API key header name (only used if type=apikey). Keep X-API-Key: that's the header the
+    # API reads.
     api-key-header: "X-API-Key"
   
   # HTTP timeouts (in seconds)
@@ -65,6 +76,40 @@ world-tasks:
   # by the API pushing a notification (e.g. SignalR) the moment a headless task is created,
   # removing the pickup-latency/idle-load trade-off these two settings exist to balance
   headless-poll-max-interval-seconds: 60
+
+# Private messages: /msg, /reply and /socialspy (docs/specs/private-messages/DESIGN.md 3.3.10)
+private-messages:
+  # Longer messages (only possible from the console - the client caps a command at 256) are cut off
+  max-length: 256
+  # Played to the recipient
+  sound:
+    enabled: true
+    volume: 1.0
+    pitch: 1.0
+  # At most max-messages per window-seconds per sender; the same text to the same player again
+  # within duplicate-window-seconds counts as spam. Bypass: knk.msg.bypass.ratelimit
+  rate-limit:
+    max-messages: 5
+    window-seconds: 5
+    duplicate-window-seconds: 10
+  spy:
+    # How often the social spy audience (knk.socialspy / knk.socialspy.exempt holders) is re-checked
+    refresh-seconds: 60
+  log:
+    # plugins/KnightsAndKings/logs/private-messages-YYYY-MM-DD.log
+    local-enabled: true
+    local-retention-days: 30
+    # Server-side log in knk-web-api (30-day retention, staff read it with knk.pmlog.read). Needs
+    # api.auth.type: apikey. Sent every flush-seconds or every 50 messages; if the API is down the
+    # messages wait in memory (up to 1000) and in private-messages-spool.jsonl across a restart.
+    api-enabled: true
+    flush-seconds: 5
+    # Keep "<player> issued server command: /msg ..." lines out of logs/latest.log (the PM log above
+    # is the moderation record, with retention; the server log has none)
+    filter-command-log: true
+  # Route /minecraft:msg|tell|w through /msg and disable /teammsg, /tm and /me for non-ops, so they
+  # can't bypass social spy, the rate limit and the log
+  block-vanilla-commands: true
 
 # In-game moments queued by the web API for writes made outside a plugin command - e.g. the
 # promotion sound/particles/message when an admin grants XP from the web app's player profile

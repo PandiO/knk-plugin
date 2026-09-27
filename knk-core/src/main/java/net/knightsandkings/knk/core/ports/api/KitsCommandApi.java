@@ -22,8 +22,11 @@ public interface KitsCommandApi {
     /**
      * Staff-initiated grant - bypasses gating/cooldown/cost by design (DESIGN.md §0b/§4.1).
      * Backs {@code /kit give}, deliberately not the same call path as {@link #claimAsync}.
+     *
+     * @param actorUserId the staff member's user id, sent as {@code X-Acting-User-Id} so the
+     *                    API's audit entry names them (null = recorded as system)
      */
-    CompletableFuture<KnkKitClaimResult> giveAsync(int targetUserId, int kitId);
+    CompletableFuture<KnkKitClaimResult> giveAsync(Integer actorUserId, int targetUserId, int kitId);
 
     /** Grants every GrantOnFirstJoin kit the user is gated to receive (DESIGN.md §4.4). */
     CompletableFuture<List<KnkKitClaimResult>> grantFirstJoinKitsAsync(int userId);

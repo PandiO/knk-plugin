@@ -108,7 +108,8 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         this.helpSubcommand = new HelpSubcommand(registry);
         
         // Register health
-        HealthCommand healthCommand = new HealthCommand(plugin, healthApi);
+        HealthCommand healthCommand = new HealthCommand(plugin, healthApi,
+                plugin instanceof net.knightsandkings.knk.paper.KnKPlugin knkPlugin ? knkPlugin::privateMessageLogQueueDepth : null);
         registry.register(
                 new CommandMetadata("health", "Check API backend health", "/knk health", "knk.admin.health"),
                 (sender, args) -> healthCommand.onCommand(sender, null, "knk", new String[0])
@@ -365,8 +366,8 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         UserManagementCommand userManagementCommand = new UserManagementCommand(userAdminService);
         registry.register(
                 new CommandMetadata("user", "View or edit a player's coins/gems/XP/rank/permissions",
-                        "/knk user <player> info | coins|gems|xp set|add|remove <amount> [reason] | group add|remove <groupName> [duration] | perm grant|revoke <node> [duration]", null,
-                        List.of("/knk user Steve info", "/knk user Steve coins add 100", "/knk user Steve xp set 50 promoted for good behavior", "/knk user Steve gems remove 10",
+                        "/knk user <player> info | coins|gems set|add|remove <amount> <reason> | xp set|add|remove <amount> [reason] | group add|remove <groupName> [duration] | perm grant|revoke <node> [duration]", null,
+                        List.of("/knk user Steve info", "/knk user Steve coins add 100 event prize", "/knk user Steve xp set 50 promoted for good behavior", "/knk user Steve gems remove 10 refund reversed",
                                 "/knk user Steve group add Royal 2h", "/knk user Steve perm grant knk.mode.staff")),
                 (sender, args) -> userManagementCommand.onCommand(sender, null, "knk", args)
         );

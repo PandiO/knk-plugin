@@ -13,7 +13,8 @@ import java.util.List;
 
 /**
  * The in-match command filter (DESIGN §6.9, fixes N10): while a member is in HUB/IN_PROGRESS only
- * {@code SiegeConfiguration.AllowedCommands} run ({@code /siege} always does). Staff with
+ * {@code SiegeConfiguration.AllowedCommands} run ({@code /siege} always does), under any alias or
+ * namespaced form ({@code /tell}, {@code /minecraft:msg} … when {@code /msg} is listed). Staff with
  * {@code knk.siege.bypass.commands} are exempt. Runs at {@code LOWEST} so a blocked command never
  * reaches another plugin's handler.
  */

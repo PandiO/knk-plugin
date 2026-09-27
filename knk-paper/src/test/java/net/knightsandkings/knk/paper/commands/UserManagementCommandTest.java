@@ -42,6 +42,27 @@ class UserManagementCommandTest {
     }
 
     @Test
+    void coinsAndGemsNeedAReason() {
+        when(service.requireProperty(eq(sender), anyString())).thenReturn(true);
+        UserManagementCommand command = new UserManagementCommand(service);
+
+        command.onCommand(sender, null, "knk", new String[] {"Steve", "coins", "add", "1000"});
+        command.onCommand(sender, null, "knk", new String[] {"Steve", "gems", "remove", "5", " "});
+
+        verify(service, never()).changeBalance(any(), any(), anyString(), anyString(), org.mockito.ArgumentMatchers.anyInt(), any());
+        verify(sender).sendMessage("§cGive a reason: /knk user Steve coins add 1000 <reason...>");
+    }
+
+    @Test
+    void xpKeepsTheOptionalReason() {
+        when(service.requireProperty(sender, "xp")).thenReturn(true);
+
+        new UserManagementCommand(service).onCommand(sender, null, "knk", new String[] {"Steve", "xp", "add", "5"});
+
+        verify(service).changeBalance(sender, steve, "xp", "add", 5, null);
+    }
+
+    @Test
     void groupAndPermCommandsDelegate() {
         when(service.requireProperty(eq(sender), anyString())).thenReturn(true);
         UserManagementCommand command = new UserManagementCommand(service);

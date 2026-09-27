@@ -13,7 +13,8 @@ import net.knightsandkings.knk.paper.commands.support.DurationParser;
 import net.knightsandkings.knk.paper.user.UserAdminService;
 
 /**
- * /knk user &lt;player&gt; info | coins|gems|xp set|add|remove &lt;amount&gt; [reason...]
+ * /knk user &lt;player&gt; info | coins|gems set|add|remove &lt;amount&gt; &lt;reason...&gt;
+ *          | xp set|add|remove &lt;amount&gt; [reason...]
  *          | group add|remove &lt;groupName&gt; [duration] | perm grant|revoke &lt;node&gt; [duration]
  * (developer request, 2026-09-25 - no in-game way to edit a player's rank/XP/coins/gems existed
  * before this; group/perm added in the same-day follow-up round closing the v1 rank-assignment
@@ -44,6 +45,7 @@ import net.knightsandkings.knk.paper.user.UserAdminService;
 public class UserManagementCommand implements CommandExecutor {
     private static final List<String> PROPERTIES = List.of("info", "coins", "gems", "xp", "group", "perm");
     private static final List<String> BALANCE_ACTIONS = List.of("set", "add", "remove");
+    private static final List<String> REASON_REQUIRED = List.of("coins", "gems");
     private static final List<String> GROUP_ACTIONS = List.of("add", "remove");
     private static final List<String> PERM_ACTIONS = List.of("grant", "revoke");
 
@@ -117,10 +119,17 @@ public class UserManagementCommand implements CommandExecutor {
             return;
         }
 
-        // Null when none was typed: UserAdminService.changeBalance fills in the audit default.
+        // Coins and gems need a typed reason (currency DESIGN.md §1.4 A6, KNG-22): it is the
+        // only record of why staff moved money. XP keeps the audit default
+        // UserAdminService.changeBalance fills in when none was typed (null).
         String reason = args.length > 4
-            ? String.join(" ", java.util.Arrays.copyOfRange(args, 4, args.length))
+            ? String.join(" ", java.util.Arrays.copyOfRange(args, 4, args.length)).trim()
             : null;
+        if ((reason == null || reason.isEmpty()) && REASON_REQUIRED.contains(property)) {
+            sender.sendMessage(ChatColor.RED + "Give a reason: /knk user " + targetName + " " + property + " "
+                + action + " " + amount + " <reason...>");
+            return;
+        }
 
         userAdminService.resolveTarget(sender, targetName,
             target -> userAdminService.changeBalance(sender, target, property, action, amount, reason));
@@ -195,7 +204,8 @@ public class UserManagementCommand implements CommandExecutor {
     private void sendUsage(CommandSender sender) {
         sender.sendMessage(ChatColor.YELLOW + "Usage:");
         sender.sendMessage(ChatColor.YELLOW + "  /knk user <player> info");
-        sender.sendMessage(ChatColor.YELLOW + "  /knk user <player> coins|gems|xp set|add|remove <amount> [reason...]");
+        sender.sendMessage(ChatColor.YELLOW + "  /knk user <player> coins|gems set|add|remove <amount> <reason...>");
+        sender.sendMessage(ChatColor.YELLOW + "  /knk user <player> xp set|add|remove <amount> [reason...]");
         sender.sendMessage(ChatColor.YELLOW + "  /knk user <player> group add|remove <groupName> [duration]");
         sender.sendMessage(ChatColor.YELLOW + "  /knk user <player> perm grant|revoke <node> [duration]");
         sender.sendMessage(ChatColor.GRAY + "  duration examples: 2h, 90m, 3d (omit for permanent)");
