@@ -586,7 +586,9 @@ public class KnKPlugin extends JavaPlugin {
                 MenuService.mainThreadExecutor(this), apiClient.getCurrencyApi(), usersDataAccess, cacheManager.getUserCache(),
                 knkPermissible::hasPermissionAsync,
                 new net.knightsandkings.knk.paper.currency.VisiblePlayers(org.bukkit.Bukkit::getPlayerExact, org.bukkit.Bukkit::getOnlinePlayers),
-                currencySettings, java.time.Clock.systemUTC()
+                currencySettings, java.time.Clock.systemUTC(),
+                // The /pay confirmation expiry notice (main thread; cancelled when settled or on quit).
+                (delay, task) -> getServer().getScheduler().runTaskLater(this, task, Math.max(1L, delay.toMillis() / 50L))::cancel
             );
             if (playerNotificationPoller != null) {
                 // "You received N coins from X" - right away when online, else on the next join.
@@ -965,6 +967,10 @@ public class KnKPlugin extends JavaPlugin {
 
         pluginManager.registerEvents(new WorldGuardRegionListener(regionTracker), this);
         pluginManager.registerEvents(new PlayerListener(usersDataAccess, townsDataAccess, this.getCacheManager(), knkPermissible, usersCommandApi, kitsCommandApi, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, ignoreService), this);
+        if (playerCurrencyService != null) {
+            // Drops a leaving player's open /pay confirmation and its expiry notice.
+            pluginManager.registerEvents(playerCurrencyService, this);
+        }
         pluginManager.registerEvents(new UserAccountListener(this, userManager, joinLoadingGuard, config.messages(), getLogger(), playerCurrencyService), this);
         getLogger().info("Registered UserAccountListener for account management");
         pluginManager.registerEvents(new JoinLoadingRestrictionListener(joinLoadingGuard), this);

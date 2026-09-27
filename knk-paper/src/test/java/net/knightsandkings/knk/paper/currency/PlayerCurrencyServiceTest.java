@@ -262,6 +262,101 @@ class PlayerCurrencyServiceTest {
         assertTrue(aliceSees.get(1).startsWith("§aSent §6150,000 coins"), aliceSees.get(1));
     }
 
+    /** A scheduler whose tasks run only when the test says so. */
+    private static final class ManualScheduler implements PlayerCurrencyService.Scheduler {
+        final List<Runnable> due = new ArrayList<>();
+        final List<Duration> delays = new ArrayList<>();
+        int cancelled;
+
+        @Override
+        public Runnable runLater(Duration delay, Runnable task) {
+            delays.add(delay);
+            Runnable[] slot = {task};
+            due.add(() -> {
+                if (slot[0] != null) {
+                    slot[0].run();
+                }
+            });
+            return () -> {
+                slot[0] = null;
+                cancelled++;
+            };
+        }
+
+        void runAll() {
+            new ArrayList<>(due).forEach(Runnable::run);
+        }
+    }
+
+    private PlayerCurrencyService serviceWith(ManualScheduler scheduler) {
+        return new PlayerCurrencyService(Runnable::run, api, usersDataAccess, userCache,
+            (player, node) -> CompletableFuture.completedFuture(nodes.getOrDefault(node, true)),
+            new VisiblePlayers(online::get, () -> (Collection<Player>) online.values()),
+            new CurrencySettings(Map.of(), 0, 10, 8), Clock.fixed(Instant.parse("2026-09-26T12:00:00Z"), ZoneOffset.UTC), scheduler);
+    }
+
+    private void askForConfirmation(int expiresInSeconds) {
+        PendingTransfer pending = new PendingTransfer("01M3FHX1ZDRTAB76K01ZYK0PCZ", "Pending", BalanceCurrency.COINS, 150_000, 0, 2, "bob",
+            Instant.parse("2026-09-26T12:01:00Z"), expiresInSeconds);
+        when(api.transfer(1, 2, BalanceCurrency.COINS, 150_000, false)).thenReturn(CompletableFuture.completedFuture(
+            new TransferOutcome(TransferOutcome.Status.PENDING_CONFIRMATION, null, false, BalanceCurrency.COINS, 150_000, 0, 1, "alice", 2, "bob",
+                new Balances(1, 500_000, 0, 0), pending)));
+    }
+
+    @Test
+    void anUnansweredConfirmation_tellsTheSenderItExpired_afterTheApisWindow() {
+        ManualScheduler scheduler = new ManualScheduler();
+        PlayerCurrencyService withTimer = serviceWith(scheduler);
+        askForConfirmation(45);
+
+        withTimer.pay(alice, "bob", "150000", BalanceCurrency.COINS);
+        assertEquals(List.of(Duration.ofSeconds(46)), scheduler.delays); // the API's 45 s plus a second of grace
+        scheduler.runAll();
+
+        assertEquals("§7Your payment of §6150,000 coins §7to §ebob §7expired — nothing was paid.", aliceSees.get(1));
+        withTimer.confirm(alice, null); // the prompt is gone
+        assertEquals("§cYou have no payment waiting for confirmation.", aliceSees.get(2));
+    }
+
+    @Test
+    void aConfirmedCancelledOrReplacedPrompt_getsNoExpiryNotice() {
+        ManualScheduler scheduler = new ManualScheduler();
+        PlayerCurrencyService withTimer = serviceWith(scheduler);
+        askForConfirmation(60);
+        when(api.confirmTransfer(1, "01M3FHX1ZDRTAB76K01ZYK0PCZ", false))
+            .thenReturn(CompletableFuture.completedFuture(completed(150_000, 350_000)));
+        when(api.cancelTransfer(1, "01M3FHX1ZDRTAB76K01ZYK0PCZ")).thenReturn(CompletableFuture.completedFuture(
+            new PendingTransfer("01M3FHX1ZDRTAB76K01ZYK0PCZ", "Cancelled", BalanceCurrency.COINS, 150_000, 0, 2, "bob", null, 0)));
+
+        withTimer.pay(alice, "bob", "150000", BalanceCurrency.COINS);
+        withTimer.confirm(alice, null);                                  // confirmed
+        withTimer.pay(alice, "bob", "150000", BalanceCurrency.COINS);
+        withTimer.cancel(alice, null);                                   // cancelled
+        withTimer.pay(alice, "bob", "150000", BalanceCurrency.COINS);
+        withTimer.pay(alice, "bob", "150000", BalanceCurrency.COINS);   // replaced by a newer prompt
+        int seen = aliceSees.size();
+        scheduler.runAll();
+
+        assertEquals(seen + 1, aliceSees.size(), aliceSees.toString()); // only the newest prompt's notice
+        assertTrue(aliceSees.get(seen).contains("expired"), aliceSees.get(seen));
+    }
+
+    @Test
+    void aLeavingPlayersPrompt_isDropped() {
+        ManualScheduler scheduler = new ManualScheduler();
+        PlayerCurrencyService withTimer = serviceWith(scheduler);
+        askForConfirmation(60);
+
+        withTimer.pay(alice, "bob", "150000", BalanceCurrency.COINS);
+        org.bukkit.event.player.PlayerQuitEvent quit = mock(org.bukkit.event.player.PlayerQuitEvent.class);
+        when(quit.getPlayer()).thenReturn(alice);
+        withTimer.onQuit(quit);
+        scheduler.runAll();
+
+        assertEquals(1, scheduler.cancelled);
+        assertEquals(1, aliceSees.size()); // just the prompt
+    }
+
     @Test
     void ledgerLines_sayWhoAndWhy() {
         LedgerLine sent = new LedgerLine(1, "01M3", Instant.parse("2026-09-26T19:08:00Z"), BalanceCurrency.COINS, -1000, 2000, 1000,

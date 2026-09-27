@@ -23,6 +23,7 @@ public final class CurrencySettings {
         Map.entry("pay-cancel-button", "&c&l[Cancel]"),
         Map.entry("pay-cancelled", "&7Payment to &e{player} &7cancelled."),
         Map.entry("pay-expired", "&cThat payment request expired - send it again."),
+        Map.entry("pay-confirm-expired", "&7Your payment of &6{amount} {currency} &7to &e{player} &7expired — nothing was paid."),
         Map.entry("pay-closed", "&cThat payment request is no longer open."),
         Map.entry("pay-already-sent", "&7That payment was already sent."),
         Map.entry("pay-no-pending", "&cYou have no payment waiting for confirmation."),

@@ -18,6 +18,10 @@ import java.util.regex.Pattern;
 
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerQuitEvent;
 
 import net.knightsandkings.knk.core.cache.UserCache;
 import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
@@ -55,7 +59,7 @@ import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
  * Name lookups are vanish-safe ({@link VisiblePlayers}): a player the sender can't see is looked up
  * like an offline one, and no answer says whether the other player is online.
  */
-public class PlayerCurrencyService {
+public class PlayerCurrencyService implements Listener {
     private static final Logger LOGGER = Logger.getLogger(PlayerCurrencyService.class.getName());
 
     public static final String PAY_NODE = "knk.pay";
@@ -86,6 +90,17 @@ public class PlayerCurrencyService {
         CompletableFuture<Boolean> has(Player player, String node);
     }
 
+    /** Runs {@code task} on the main thread after {@code delay}; returns what cancels it. */
+    @FunctionalInterface
+    public interface Scheduler {
+        Runnable runLater(Duration delay, Runnable task);
+    }
+
+    /** Pending confirmations live this long when the API doesn't say (its default). */
+    static final int DEFAULT_CONFIRM_SECONDS = 60;
+    /** The expiry notice waits this much past the API's deadline, so a last-second confirm isn't told it expired. */
+    static final Duration EXPIRY_GRACE = Duration.ofSeconds(1);
+
     /** A resolved player: their knk user id and name. */
     record Target(int userId, String username) {
     }
@@ -98,13 +113,28 @@ public class PlayerCurrencyService {
     private final VisiblePlayers visiblePlayers;
     private final CurrencySettings settings;
     private final Clock clock;
+    private final Scheduler scheduler;
 
     private final Set<UUID> inFlight = ConcurrentHashMap.newKeySet();
     private final Map<UUID, Instant> lastPaidAt = new ConcurrentHashMap<>();
     private final Map<UUID, String> lastPendingId = new ConcurrentHashMap<>();
+    /** Cancels the expiry notice of the sender's open prompt ({@link #lastPendingId}). Main thread. */
+    private final Map<UUID, Runnable> expiryNotices = new ConcurrentHashMap<>();
 
     public PlayerCurrencyService(Executor mainThread, CurrencyApi currencyApi, UsersDataAccess usersDataAccess, UserCache userCache,
                                  PermissionCheck permissions, VisiblePlayers visiblePlayers, CurrencySettings settings, Clock clock) {
+        this(mainThread, currencyApi, usersDataAccess, userCache, permissions, visiblePlayers, settings, clock,
+            (delay, task) -> {
+                CompletableFuture<Void> later = CompletableFuture.runAsync(task,
+                    CompletableFuture.delayedExecutor(delay.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS, mainThread));
+                return () -> later.cancel(false);
+            });
+    }
+
+    /** @param scheduler main-thread delayed tasks (the Bukkit scheduler), for the /pay confirmation expiry notice */
+    public PlayerCurrencyService(Executor mainThread, CurrencyApi currencyApi, UsersDataAccess usersDataAccess, UserCache userCache,
+                                 PermissionCheck permissions, VisiblePlayers visiblePlayers, CurrencySettings settings, Clock clock,
+                                 Scheduler scheduler) {
         this.mainThread = mainThread;
         this.currencyApi = currencyApi;
         this.usersDataAccess = usersDataAccess;
@@ -113,6 +143,7 @@ public class PlayerCurrencyService {
         this.visiblePlayers = visiblePlayers;
         this.settings = settings;
         this.clock = clock;
+        this.scheduler = scheduler;
     }
 
     public CurrencySettings settings() {
@@ -210,7 +241,7 @@ public class PlayerCurrencyService {
             .whenComplete((outcome, ex) -> mainThread.execute(() -> {
                 inFlight.remove(uuid);
                 if (ex == null || isPendingGone(ex)) {
-                    lastPendingId.remove(uuid, id);
+                    forgetPrompt(uuid, id);
                 }
                 boolean alreadySent = ex == null && outcome != null && outcome.completed() && outcome.replayed() && !openHere;
                 if (ex == null && outcome != null && outcome.completed() && !alreadySent) {
@@ -247,7 +278,7 @@ public class PlayerCurrencyService {
         UUID uuid = sender.getUniqueId();
         currencyApi.cancelTransfer(senderId, id).whenComplete((pending, ex) -> mainThread.execute(() -> {
             if (ex == null || isPendingGone(ex)) {
-                lastPendingId.remove(uuid, id);
+                forgetPrompt(uuid, id);
             }
             if (!sender.isOnline()) {
                 return;
@@ -692,9 +723,71 @@ public class PlayerCurrencyService {
             return;
         }
         if (sender instanceof Player player) {
-            lastPendingId.put(player.getUniqueId(), pending.publicId());
+            openPrompt(player, pending, outcome.recipientUsername());
         }
         sender.sendMessage(confirmPrompt(outcome, pending));
+    }
+
+    // ===== Open confirmation prompts =====
+
+    /**
+     * Makes {@code pending} the sender's open prompt (replacing any earlier one, whose notice is
+     * dropped) and schedules the expiry notice for when the API's window has passed. Main thread.
+     */
+    private void openPrompt(Player sender, PendingTransfer pending, String recipientFallback) {
+        UUID uuid = sender.getUniqueId();
+        String id = pending.publicId();
+        lastPendingId.put(uuid, id);
+        Runnable previous = expiryNotices.remove(uuid);
+        if (previous != null) {
+            previous.run();
+        }
+        int seconds = pending.expiresInSeconds() > 0 ? pending.expiresInSeconds() : DEFAULT_CONFIRM_SECONDS;
+        String recipient = pending.recipientUsername() != null ? pending.recipientUsername() : recipientFallback;
+        scheduleExpiryNotice(sender, id, pending, recipient, Duration.ofSeconds(seconds).plus(EXPIRY_GRACE));
+    }
+
+    private void scheduleExpiryNotice(Player sender, String id, PendingTransfer pending, String recipient, Duration delay) {
+        UUID uuid = sender.getUniqueId();
+        expiryNotices.put(uuid, scheduler.runLater(delay, () -> {
+            if (!id.equals(lastPendingId.get(uuid))) {
+                return; // confirmed, cancelled or replaced by a newer prompt meanwhile
+            }
+            if (inFlight.contains(uuid)) {
+                // A confirm (or a new /pay) is on its way: its answer decides; look again shortly.
+                scheduleExpiryNotice(sender, id, pending, recipient, EXPIRY_GRACE);
+                return;
+            }
+            expiryNotices.remove(uuid);
+            lastPendingId.remove(uuid, id);
+            if (sender.isOnline()) {
+                send(sender, "pay-confirm-expired",
+                    "amount", CurrencyFormat.amount(pending.amount()),
+                    "currency", CurrencyFormat.name(pending.currency(), pending.amount()),
+                    "player", recipient != null ? recipient : "?");
+            }
+        }));
+    }
+
+    /** The sender's prompt {@code id} is settled (confirmed, cancelled, expired at the API): no notice for it. Main thread. */
+    private void forgetPrompt(UUID uuid, String id) {
+        if (lastPendingId.remove(uuid, id)) {
+            Runnable notice = expiryNotices.remove(uuid);
+            if (notice != null) {
+                notice.run();
+            }
+        }
+    }
+
+    /** Drops a leaving player's open prompt and its expiry notice. */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onQuit(PlayerQuitEvent event) {
+        UUID uuid = event.getPlayer().getUniqueId();
+        lastPendingId.remove(uuid);
+        Runnable notice = expiryNotices.remove(uuid);
+        if (notice != null) {
+            notice.run();
+        }
     }
 
     /** "Send 150,000 coins to Bob? [Confirm] [Cancel] (expires in 60s)" with clickable buttons. */
