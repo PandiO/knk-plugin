@@ -91,16 +91,16 @@ class ThinningTest {
         assertEquals(1, components(m, on));
         assertEquals(2, countDegree(m, on, 1), "two ends");
         assertEquals(0, countDegree(m, on, 3), "no junctions");
-        // The three L-corners (3,0), (3,2), (6,2) go: their two neighbours are diagonal neighbours of
-        // each other through the corner itself. The straight end (0,0) stays; the end (7,4), which
-        // touches the previous corner (6,3) diagonally, is eroded by Zhang-Suen (a known one-cell
-        // loss at a bent path end), so (6,4) becomes the end.
+        // The four L-corners (3,0), (3,2), (6,2), (6,4) go: their two neighbours are diagonal
+        // neighbours of each other through the corner itself. Both ends stay - (7,4) touches the
+        // corner (6,3) diagonally and is exactly the corner end the thinning guard protects.
         String picture = render(m, on, 64, 0, 7, 0, 4);
         assertFalse(on[m.indexOf(3, 64, 0)], picture);
+        assertFalse(on[m.indexOf(6, 64, 4)], picture);
         assertTrue(on[m.indexOf(2, 64, 0)], picture);
         assertTrue(on[m.indexOf(3, 64, 1)], picture);
         assertTrue(on[m.indexOf(0, 64, 0)], picture);
-        assertTrue(on[m.indexOf(6, 64, 4)], picture);
+        assertTrue(on[m.indexOf(7, 64, 4)], picture);
         assertEquals(12 - 4, count(on), picture);
     }
 
@@ -159,10 +159,13 @@ class ThinningTest {
     }
 
     @Test
-    void blockCollapsesToASingleSpan() {
+    void blockCollapsesToAtMostTwoSpans() {
         RoadMask m = mask(new GridFixture().layer(64, "SSS", "SSS", "SSS"), 2, 2, 64);
         boolean[] on = Thinning.thin(m);
-        assertEquals(1, count(on));
+        // One span, or two touching ones (the corner-end guard may keep a last pair); such a blob is
+        // shorter than minSpurLength and yields no edge either way.
+        assertTrue(count(on) >= 1 && count(on) <= 2, render(m, on, 64, 0, 2, 0, 2));
+        assertEquals(1, components(m, on));
     }
 
     @Test

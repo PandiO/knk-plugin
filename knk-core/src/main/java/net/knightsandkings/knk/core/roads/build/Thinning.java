@@ -9,7 +9,9 @@ import java.util.Arrays;
  * a bridge over it or a spiral ramp without any layer handling.
  *
  * <p>P2 … P9 are the mask neighbours N, NE, E, SE, S, SW, W, NW ({@link SpanGrid#N} … {@link SpanGrid#NW}).
- * Both sub-passes run alternately until neither deletes anything. A final pass removes the
+ * Both sub-passes run alternately until neither deletes anything. One guard is added to the
+ * textbook rule: a span with exactly two neighbours that touch each other (a corner end) is kept,
+ * because plain Zhang-Suen eats a 4-connected staircase - a 1-wide diagonal path - from its ends. A final pass removes the
  * "staircase" corners Zhang-Suen is known to leave (Holt's templates), so a diagonal line is a
  * clean diagonal and no span with three skeleton neighbours is left where the road only bends.
  */
@@ -57,6 +59,13 @@ public final class Thinning {
         if (b < 2 || b > 6) {
             return false;
         }
+        if (b == 2 && adjacentPair(bits)) {
+            // A corner end: its two neighbours touch each other (e.g. S and SW). Plain Zhang-Suen
+            // deletes it and then the next cell, eating a 4-connected staircase - a 1-wide diagonal
+            // path - from its ends until nothing is left. Keeping corner ends preserves such paths;
+            // Holt's pass straightens the remaining staircase afterwards.
+            return false;
+        }
         // A(P1): 0→1 transitions around P2..P9,P2.
         int a = 0;
         for (int d = 0; d < SpanGrid.DIRECTIONS; d++) {
@@ -77,6 +86,17 @@ public final class Thinning {
             return !(p2 && p4 && p6) && !(p4 && p6 && p8);
         }
         return !(p2 && p4 && p8) && !(p2 && p6 && p8);
+    }
+
+    /** Exactly two bits set and they are cyclically consecutive directions (45° apart). */
+    private static boolean adjacentPair(int bits) {
+        for (int d = 0; d < SpanGrid.DIRECTIONS; d++) {
+            int pair = (1 << d) | (1 << ((d + 1) & 7));
+            if (bits == pair) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
