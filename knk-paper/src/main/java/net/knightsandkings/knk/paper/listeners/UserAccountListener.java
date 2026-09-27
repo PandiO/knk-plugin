@@ -208,8 +208,9 @@ public class UserAccountListener implements Listener {
         
         player.sendMessage(
             getPrefixComponent()
-                .append(Component.text(messagesConfig.duplicateAccount())
-                    .color(NamedTextColor.YELLOW))
+                .append(LegacyComponentSerializer.legacySection().deserialize(
+                    ChatColor.translateAlternateColorCodes('&', messagesConfig.duplicateAccount()))
+                    .colorIfAbsent(NamedTextColor.YELLOW))
         );
         
         player.sendMessage(
