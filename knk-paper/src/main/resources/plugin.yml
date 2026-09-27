@@ -62,8 +62,9 @@ commands:
   msg:
     description: "Send a private message to another player (rebuild of v1's MessageCommands)"
     usage: "/msg <player> <message>"
-    aliases: [tell, w]
+    aliases: [message, tell, whisper, w, m, pm]
     # No permission gate - matches v1's player-to-player intent (any player may message another).
+    # Works for the console too.
 
   reply:
     description: "Reply to the last player who messaged you"
@@ -71,12 +72,49 @@ commands:
     aliases: [r]
     # No permission gate - same as /msg.
 
+  socialspy:
+    description: "Turn the social spy feed (other players' private messages) on or off"
+    usage: "/socialspy [on|off]"
+    aliases: [spy]
+    # No permission: here - gated on knk.socialspy through KnkPermissible inside SocialSpyCommand.
+
+  ignore:
+    description: "List who you ignore, or ignore/unignore a player (their private messages and chat)"
+    usage: "/ignore [player]"
+    # No permission gate - any player may ignore another. Works for offline players; staff holding
+    # knk.msg.unignorable can't be ignored. The list is stored by knk-web-api.
+
+  unignore:
+    description: "Stop ignoring a player"
+    usage: "/unignore <player>"
+
   kit:
     description: "List, claim, give, and purchase Kits (docs/specs/kits/DESIGN.md §4.3)"
     usage: "/kit list | /kit get <name> | /kit give <player> <name> | /kit purchase <name> | /kit manage ..."
     # No permission: here - each subcommand is gated individually on its own knk.kit.<action>
     # node through KnkPermissible inside KitCommand, same reasoning /knk and /ownermode|/staffmode
     # have none (Bukkit would check its own permission tree before this executor ever ran).
+
+  # Currency ledger Phase 3 (docs/specs/currency-payments/DESIGN.md §3.6). No permission: entry -
+  # each checks its knk.pay / knk.balance / knk.baltop / knk.transactions node through
+  # KnkPermissible inside the executor (same reasoning as /kit); the API decides everything else.
+  pay:
+    description: "Pay another player coins (large amounts ask for confirmation)"
+    usage: "/pay <player> <amount> [coins|gems] | /pay confirm|cancel [id]"
+
+  balance:
+    description: "Show your coins and gems, or another player's"
+    usage: "/balance [player]"
+    aliases: [bal, money]
+
+  baltop:
+    description: "Show the richest players"
+    usage: "/baltop [coins|gems] [page]"
+
+  transactions:
+    description: "Show your coin, gem and XP history, or another player's"
+    usage: "/transactions [player] [coins|gems|xp] [page]"
+    aliases: [tx]
 
   siege:
     description: "Siege minigame: lobbies, join/leave, vote, spawn choice, admin controls (docs/specs/siege-minigame/DESIGN.md §11.1)"
@@ -170,8 +208,10 @@ permissions:
       knk.admin.user.manage.all: true
       knk.admin.user.mode: true
       knk.admin.user.salary: true
+      knk.admin.user.history: true
       knk.admin.tp: true
       knk.admin.discovery: true
+      knk.admin.currency: true
 
   knk.admin.health:
     description: Access to /knk health
@@ -265,7 +305,10 @@ permissions:
     default: false
 
   knk.admin.user.xp:
-    description: Adjust a player's XP (and, indirectly, title) via /knk user <player> xp set|add|remove
+    description: >-
+      Adjust a player's XP (and, indirectly, title) via /knk user <player> xp set|add|remove and the
+      Player manager. Raising XP can pay title bonuses in coins and gems, so it also needs
+      knk.admin.user.coins and knk.admin.user.gems; lowering it needs only this node.
     default: false
 
   knk.admin.user.group:
@@ -284,6 +327,61 @@ permissions:
 
   knk.admin.tp:
     description: Teleport to an online player via /knk tp <player>. Hierarchy-checked (RankHierarchy).
+    default: false
+
+  knk.admin.user.history:
+    description: >-
+      View a player's coin, gem and XP ledger history via /knk user <player> history
+      [coins|gems|xp] [page] (currency ledger, KNG-23). Read-only, so no rank check. Checked
+      through KnkPermissible (in-house grants incl. knk.* / knk.admin.*; ops pass).
+    default: op
+
+  # Currency ledger staff nodes (docs/specs/currency-payments/DESIGN.md §3.8, Phase 4). The same
+  # strings are checked by knk-web-api for the web app's economy pages; in-game they are checked
+  # through KnkPermissible inside /knk currency and the Player manager (in-house grants incl.
+  # wildcards such as knk.* / knk.admin.*; ops pass). default: op mirrors that for Bukkit.
+  knk.admin.currency:
+    description: Umbrella for every knk.admin.currency.* node below.
+    default: op
+    children:
+      knk.admin.currency.history: true
+      knk.admin.currency.reverse: true
+      knk.admin.currency.lock: true
+      knk.admin.currency.policy: true
+      knk.admin.currency.alerts: true
+      knk.admin.currency.unlimited: true
+
+  knk.admin.currency.history:
+    description: >-
+      Read any player's ledger history with /knk currency history <player> (each line shows its
+      transaction id for reversal); on the web, the balance event log and profile balance history.
+    default: op
+
+  knk.admin.currency.reverse:
+    description: >-
+      Reverse a ledger transaction with /knk currency reverse <txId> [--partial] <reason> (reason
+      of at least 10 characters). Never takes a balance below zero; --partial reverses what is left.
+    default: op
+
+  knk.admin.currency.lock:
+    description: Lock or unlock a player's payments with /knk currency lock <player> <reason> / unlock <player>.
+    default: op
+
+  knk.admin.currency.policy:
+    description: Edit the coin/gem policy (transfer limits, gem switch, fee, staff grant cap) in the web app.
+    default: op
+
+  knk.admin.currency.alerts:
+    description: >-
+      Currency anomaly alerts (Phase 5): /knk currency alerts [all] [page] and alerts ack <id>, and
+      an in-game notice when the API raises a new alert (funnel, velocity, large staff grant,
+      reconciliation mismatch...). On the web, the alerts page and the reconciliation run.
+    default: op
+
+  knk.admin.currency.unlimited:
+    description: >-
+      Exempt from the per-staff daily grant cap (CurrencyPolicy.AdminDailyGrantCapPerActor) on
+      coin/gem/XP adjustments. Checked by the API against the acting staff member.
     default: false
 
   knk.tasks:
@@ -405,6 +503,51 @@ permissions:
     description: Clear an online player's inventory with /inventory clear <player> confirm (KNG-9). Rank-checked (RankHierarchy) unless it's your own.
     default: op
 
+  # Currency ledger Phase 3 (docs/specs/currency-payments/DESIGN.md §3.8). Resolved through
+  # KnkPermissible, same caveat as knk.kit.list. The player nodes are granted to the Default group
+  # by knk-web-api migration SeedCurrencyPlayerNodes, so every account has them.
+  knk.pay:
+    description: Pay coins to another player with /pay <player> <amount> (confirm/cancel large payments).
+    default: op
+
+  knk.pay.gems:
+    description: >-
+      Also pay gems with /pay <player> <amount> gems. Gems are premium and not transferable by the
+      API's policy (DESIGN.md §5 Q2) - this node alone doesn't make them transferable.
+    default: false
+
+  knk.pay.bypass:
+    description: >-
+      Staff paying out events: skip the per-payment maximum, daily caps, cooldown and the
+      account-age/title rule for sending (never the balance, the recipient's cap or locks).
+    default: false
+
+  knk.balance:
+    description: See your own coins and gems with /balance.
+    default: op
+
+  knk.balance.others:
+    description: See another player's coins and gems with /balance <player>.
+    default: op
+
+  knk.baltop:
+    description: See the richest players with /baltop.
+    default: op
+
+  knk.baltop.exempt:
+    description: >-
+      Staff: left off /baltop (checked by the API from an exact grant of this node, directly or
+      through a group - a wildcard grant doesn't count).
+    default: false
+
+  knk.transactions:
+    description: See your own coin, gem and XP history with /transactions.
+    default: op
+
+  knk.transactions.others:
+    description: See another player's history with /transactions <player>.
+    default: false
+
   knk.freeze:
     description: >-
       Freeze a player via /freeze <player> <reason> - locks their movement, chat, commands, and
@@ -419,8 +562,42 @@ permissions:
 
   knk.staffchat:
     description: >-
-      Send and receive /staffchat (/sc) broadcasts. Also determines who receives the /msg
-      "social spy" broadcast (every private message is echoed to holders of this node).
+      Send and receive /staffchat (/sc) broadcasts. (No longer drives the /msg social spy - see
+      knk.socialspy.)
+    default: op
+
+  knk.socialspy:
+    description: >-
+      Receive the social spy feed (every private message between two other players) and use
+      /socialspy to turn it on or off. Checked through the in-house permission model.
+    default: op
+
+  knk.socialspy.exempt:
+    description: >-
+      Your private messages (sent or received) are hidden from spies who don't hold this node
+      themselves; you do see such messages. Meant for the owner group.
+    default: op
+
+  knk.msg.bypass.ratelimit:
+    description: No private message rate limit (private-messages.rate-limit in config.yml).
+    default: op
+
+  knk.pmlog.read:
+    description: >-
+      Read players' private messages in knk-web-api's PM log (web app, owner group). Checked by the
+      API; every read is written to the audit log. Listed here for documentation.
+    default: op
+
+  knk.msg.bypass.ignore:
+    description: >-
+      Your private messages reach players who /ignore you (meant for staff). Checked through the
+      in-house permission model.
+    default: op
+
+  knk.msg.unignorable:
+    description: >-
+      Players can't /ignore you (meant for staff, so moderation contact stays possible). Checked by
+      knk-web-api through the in-house permission model.
     default: op
 
   knk.gate.open.*:

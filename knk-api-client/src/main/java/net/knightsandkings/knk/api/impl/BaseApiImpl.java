@@ -22,6 +22,13 @@ public class BaseApiImpl {
     protected static Logger LOGGER = Logger.getLogger(BaseApiImpl.class.getName());
     protected static final int MAX_RESPONSE_SNIPPET_LENGTH = 1500;
 
+    /**
+     * Header making a ledger write safe to retry (currency ledger, KNG-21): a new random value
+     * per player/staff action. OkHttp's retry of the same Request resends the same value, and the
+     * API returns the stored result instead of posting again.
+     */
+    public static final String IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
+
     protected final String baseUrl;
     protected final OkHttpClient httpClient;
     protected final ObjectMapper objectMapper;
@@ -131,6 +138,14 @@ public class BaseApiImpl {
     }
 
     protected String postJson(String url, String json) throws ApiException, IOException {
+        return postJson(url, json, true);
+    }
+
+    /**
+     * @param logBody false for bodies that must never reach the server log even with
+     *                debug-logging on (e.g. private message content, KNG-18)
+     */
+    protected String postJson(String url, String json, boolean logBody) throws ApiException, IOException {
         Request request = newRequest(url)
             .addHeader("Content-Type", "application/json")
             .addHeader("Accept", "application/json")
@@ -138,7 +153,7 @@ public class BaseApiImpl {
             .build();
         if (debugLogging) {
             LOGGER.info("API Request: POST " + url);
-            LOGGER.info("  Body: " + snippet(json));
+            LOGGER.info("  Body: " + (logBody ? snippet(json) : "<" + json.length() + " chars, not logged>"));
         }
         return execute(request, url);
     }

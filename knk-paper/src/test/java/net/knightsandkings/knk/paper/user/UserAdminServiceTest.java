@@ -5,6 +5,9 @@ import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
 import net.knightsandkings.knk.core.domain.permissions.PermissionGroupSummary;
 import net.knightsandkings.knk.core.domain.users.ActiveMode;
 import net.knightsandkings.knk.core.domain.users.BalanceAdjustmentResult;
+import net.knightsandkings.knk.core.domain.users.BalanceChange;
+import net.knightsandkings.knk.core.domain.users.BalanceCurrency;
+import net.knightsandkings.knk.core.domain.users.BalanceOperation;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.domain.users.TitleBracket;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
@@ -20,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -30,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -76,7 +81,7 @@ class UserAdminServiceTest {
         when(users.getByUuidAsync(staffUuid)).thenReturn(CompletableFuture.completedFuture(FetchResult.hit(staffUser)));
         when(users.getByUsernameAsync("Admin")).thenReturn(CompletableFuture.completedFuture(FetchResult.hit(staffUser)));
         when(api.withActor(42)).thenReturn(acting);
-        when(acting.adjustBalancesById(anyInt(), anyInt(), anyInt(), anyInt(), anyString(), anyBoolean()))
+        when(acting.adjustBalanceById(anyInt(), any(), any(), anyLong(), anyString(), anyBoolean()))
                 .thenReturn(CompletableFuture.completedFuture(new BalanceAdjustmentResult(0, 0, 0, null)));
         when(users.refreshAsync(target.uuid()))
                 .thenReturn(CompletableFuture.completedFuture(FetchResult.missFetched(steveWithTier(null, null))));
@@ -87,22 +92,80 @@ class UserAdminServiceTest {
         bukkit.close();
     }
 
+    /** What the API answers: {@code currency} changed by {@code delta} from {@code before}. */
+    private void apiApplies(BalanceCurrency currency, BalanceOperation mode, long delta, long before) {
+        BalanceChange change = new BalanceChange(currency, mode, delta, before, before + delta, "01JTEST", false);
+        when(acting.adjustBalanceById(anyInt(), eq(currency), eq(mode), anyLong(), anyString(), anyBoolean()))
+                .thenReturn(CompletableFuture.completedFuture(new BalanceAdjustmentResult(0, 0, 0, null, List.of(change), false)));
+    }
+
+    /** Grants the three nodes an XP raise needs (it can pay title bonuses in coins and gems). */
+    private void mayRaiseXp() {
+        UserAdminService.XP_RAISE_NODES.forEach(node -> when(staff.hasPermission(node)).thenReturn(true));
+    }
+
     @Test
-    void setIsAComputedDeltaThroughTheActorsApi() {
+    void raisingXp_needsTheCoinAndGemNodesToo_loweringOnlyTheXpNode() {
+        when(staff.hasPermission("knk.admin.user.xp")).thenReturn(true);
+        apiApplies(BalanceCurrency.EXPERIENCE, BalanceOperation.REMOVE, -20, 120);
+
+        assertFalse(service.changeBalance(staff, target, "xp", "add", 50, null).join());
+        assertFalse(service.changeBalance(staff, target, "xp", "set", 500, null).join()); // Steve has 120
+        assertFalse(service.adjustBalance(staff, target, "xp", 10, "Player manager").join());
+        verify(acting, never()).adjustBalanceById(anyInt(), any(), eq(BalanceOperation.ADD), anyLong(), anyString(), anyBoolean());
+        verify(acting, never()).adjustBalanceById(anyInt(), any(), eq(BalanceOperation.SET), anyLong(), anyString(), anyBoolean());
+        verify(staff, org.mockito.Mockito.times(3)).sendMessage(UserAdminService.XP_RAISE_REFUSED);
+
+        assertTrue(service.changeBalance(staff, target, "xp", "remove", 20, null).join());
+        verify(acting).adjustBalanceById(7, BalanceCurrency.EXPERIENCE, BalanceOperation.REMOVE, 20, "/knk user command by Admin", true);
+    }
+
+    @Test
+    void settingXpBelowTheCurrentValue_onlyNeedsTheXpNode() {
+        when(staff.hasPermission("knk.admin.user.xp")).thenReturn(true);
+        apiApplies(BalanceCurrency.EXPERIENCE, BalanceOperation.SET, -70, 120);
+
+        assertTrue(service.changeBalance(staff, target, "xp", "set", 50, null).join());
+
+        verify(acting).adjustBalanceById(7, BalanceCurrency.EXPERIENCE, BalanceOperation.SET, 50, "/knk user command by Admin", true);
+    }
+
+    @Test
+    void theStaffDailyCap_isShownAsTheApisSentence() {
+        mayRaiseXp();
+        when(acting.adjustBalanceById(anyInt(), any(), any(), anyLong(), anyString(), anyBoolean())).thenReturn(CompletableFuture.failedFuture(
+                new net.knightsandkings.knk.core.domain.currency.CurrencyException(new net.knightsandkings.knk.core.domain.currency.CurrencyError(
+                        "AdminDailyCapExceeded", "AdminDailyCapExceeded: That would pass your daily staff grant limit of 10,000 coins: "
+                        + "you granted 9,500 in the last 24 hours, 500 left.", Map.of("remaining", 500, "cap", 10000)), 422, null)));
+
+        assertFalse(service.changeBalance(staff, target, "xp", "add", 5000, null).join());
+
+        verify(staff).sendMessage("§cThat would pass your daily staff grant limit of 10,000 coins: you granted 9,500 in the last 24 hours, 500 left.");
+        assertEquals("Daily staff grant limit reached (10000 coins per 24 hours): 500 left.", UserAdminService.describeRefusal(
+                new net.knightsandkings.knk.core.domain.currency.CurrencyError("AdminDailyCapExceeded", null,
+                        Map.of("remaining", 500, "cap", 10000, "currency", "Coins"))));
+    }
+
+    @Test
+    void setIsSentAsASetAndTheServersNumbersAreShown() {
+        // KNG-21 Phase 2 (audit A6): no delta computed from the cached 250 - the server found 400.
+        apiApplies(BalanceCurrency.COINS, BalanceOperation.SET, 600, 400);
+
         assertTrue(service.changeBalance(staff, target, "coins", "set", 1000, "because").join());
 
-        verify(acting).adjustBalancesById(7, 750, 0, 0, "because", true);
-        verify(staff).sendMessage("§aIncreased Steve's coins by 750 (now 1000).");
+        verify(acting).adjustBalanceById(7, BalanceCurrency.COINS, BalanceOperation.SET, 1000, "because", true);
+        verify(staff).sendMessage("§aIncreased Steve's coins by 600 (now 1000).");
     }
 
     @Test
     void anOnlineTargetIsToldWhoChangedTheirBalanceAndWhy() {
         Player steve = mock(Player.class);
         bukkit.when(() -> Bukkit.getPlayerExact("Steve")).thenReturn(steve);
+        apiApplies(BalanceCurrency.COINS, BalanceOperation.ADD, 500, 250);
 
         assertTrue(service.changeBalance(staff, target, "coins", "add", 500, "event prize").join());
 
-        verify(acting).adjustBalancesById(7, 500, 0, 0, "event prize", false);
+        verify(acting).adjustBalanceById(7, BalanceCurrency.COINS, BalanceOperation.ADD, 500, "event prize", false);
         verify(steve).sendMessage(org.mockito.ArgumentMatchers.<net.kyori.adventure.text.Component>argThat(message ->
                 "Granted by Admin: +500 coins – event prize".equals(
                         net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(message))));
@@ -112,38 +175,52 @@ class UserAdminServiceTest {
     void withoutATypedReasonTheAuditGetsADefaultAndThePlayerNoNote() {
         Player steve = mock(Player.class);
         bukkit.when(() -> Bukkit.getPlayerExact("Steve")).thenReturn(steve);
+        apiApplies(BalanceCurrency.GEMS, BalanceOperation.REMOVE, -3, 5);
 
         assertTrue(service.changeBalance(staff, target, "gems", "remove", 3, null).join());
 
-        verify(acting).adjustBalancesById(7, 0, -3, 0, "/knk user command by Admin", false);
+        verify(acting).adjustBalanceById(7, BalanceCurrency.GEMS, BalanceOperation.REMOVE, 3, "/knk user command by Admin", false);
         verify(steve).sendMessage(org.mockito.ArgumentMatchers.<net.kyori.adventure.text.Component>argThat(message ->
                 "Removed by Admin: -3 gems".equals(
                         net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(message))));
     }
 
     @Test
-    void unchangedValueIsReportedWithoutACall() {
+    void aSetToTheCurrentValueIsReportedFromTheServersAnswer() {
+        apiApplies(BalanceCurrency.COINS, BalanceOperation.SET, 0, 250);
+
         assertFalse(service.changeBalance(staff, target, "coins", "set", 250, "r").join());
 
-        verify(acting, never()).adjustBalancesById(anyInt(), anyInt(), anyInt(), anyInt(), anyString(), anyBoolean());
         verify(staff).sendMessage("§eSteve's coins is already 250.");
     }
 
     @Test
-    void menuStepsAreSignedDeltas() {
+    void menuStepsAreAddsAndRemoves() {
+        apiApplies(BalanceCurrency.GEMS, BalanceOperation.REMOVE, -5, 5);
+
         assertTrue(service.adjustBalance(staff, target, "gems", -10, "Player manager").join());
 
-        verify(acting).adjustBalancesById(7, 0, -10, 0, "Player manager", true);
-        verify(staff).sendMessage("§aDecreased Steve's gems by 10 (now -5).");
+        verify(acting).adjustBalanceById(7, BalanceCurrency.GEMS, BalanceOperation.REMOVE, 10, "Player manager", true);
+        // The server's numbers, not "now -5" from the cached 5.
+        verify(staff).sendMessage("§aDecreased Steve's gems by 5 (now 0).");
     }
 
     @Test
-    void setTitleMovesXpToTheBracketMinimum() {
+    void aZeroStepCallsNothing() {
+        assertFalse(service.adjustBalance(staff, target, "gems", 0, "Player manager").join());
+
+        verify(acting, never()).adjustBalanceById(anyInt(), any(), any(), anyLong(), anyString(), anyBoolean());
+    }
+
+    @Test
+    void setTitleSetsXpToTheBracketMinimum() {
         TitleBracket knight = new TitleBracket(3, "Knight", "Dame", 300, 40, 0, 0, 0);
+        mayRaiseXp();
+        apiApplies(BalanceCurrency.EXPERIENCE, BalanceOperation.SET, 180, 120);
 
         assertTrue(service.setTitle(staff, target, knight).join());
 
-        verify(acting).adjustBalancesById(7, 0, 0, 180, "Title set to Knight by Admin", true);
+        verify(acting).adjustBalanceById(7, BalanceCurrency.EXPERIENCE, BalanceOperation.SET, 300, "Title set to Knight by Admin", true);
     }
 
     @Test
@@ -287,6 +364,8 @@ class UserAdminServiceTest {
         TitleBracket knight = new TitleBracket(3, "Knight", "Dame", 300, 40, 0, 0, 0);
         Player online = mock(Player.class);
         bukkit.when(() -> Bukkit.getPlayer(target.uuid())).thenReturn(online);
+        mayRaiseXp();
+        apiApplies(BalanceCurrency.EXPERIENCE, BalanceOperation.SET, 180, 120);
 
         assertTrue(service.setTitle(staff, target, knight).join());
 

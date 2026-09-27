@@ -15,16 +15,21 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.Plugin;
 
 import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
+import net.knightsandkings.knk.paper.commands.MessageCommand;
+import net.knightsandkings.knk.paper.commands.ReplyCommand;
 import net.knightsandkings.knk.paper.user.AdminFreezeManager;
 
 /**
- * Enforces an admin freeze (movement/chat/commands/damage locked) - rebuild of v1's
+ * Enforces an admin freeze (movement/chat/commands/damage locked; /msg and /r stay open so the
+ * player can answer staff - docs/specs/private-messages/DESIGN.md §3.3.9) - rebuild of v1's
  * FreezeCommands' design-intent comment ("Shouldn't be able to walk, get damage, or run any
  * commands... shouldn't talk"), which was itself a dead no-op stub in v1 with none of this ever
  * actually built. No duel-teleport-block (no duel system exists in v3) and no quit-ban (no ban
  * system exists in v3, developer-confirmed out of scope for this round).
  */
 public class AdminFreezeListener implements Listener {
+    private static final String PLUGIN_NAMESPACE = "knightsandkings:";
+
     private final Plugin plugin;
     private final AdminFreezeManager freezeManager;
     private final UsersDataAccess usersDataAccess;
@@ -77,9 +82,23 @@ public class AdminFreezeListener implements Listener {
     public void onCommand(PlayerCommandPreprocessEvent event) {
         Player player = event.getPlayer();
         if (freezeManager.isFrozen(player.getUniqueId())) {
+            if (isPrivateMessageCommand(event.getMessage())) {
+                // A frozen player may answer staff: /msg and /r pass here, and MessagingService's
+                // FrozenGate only lets them reach knk.freeze holders (v1's design intent).
+                return;
+            }
             event.setCancelled(true);
-            player.sendMessage(ChatColor.RED + "You are frozen and cannot use commands.");
+            player.sendMessage(ChatColor.RED + "You are frozen and cannot use commands. You can still /msg staff.");
         }
+    }
+
+    /** /msg, /reply and their aliases, also in this plugin's namespaced form (knightsandkings:msg). */
+    static boolean isPrivateMessageCommand(String message) {
+        String label = VanillaMessagingBlockListener.label(message);
+        if (label.startsWith(PLUGIN_NAMESPACE)) {
+            label = label.substring(PLUGIN_NAMESPACE.length());
+        }
+        return MessageCommand.LABELS.contains(label) || ReplyCommand.LABELS.contains(label);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)

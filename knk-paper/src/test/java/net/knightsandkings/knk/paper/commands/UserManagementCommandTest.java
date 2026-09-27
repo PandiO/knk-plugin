@@ -63,6 +63,17 @@ class UserManagementCommandTest {
     }
 
     @Test
+    void historyIsCheckedByTheCurrencyService_notTheBukkitNode() {
+        net.knightsandkings.knk.paper.currency.PlayerCurrencyService currency =
+            mock(net.knightsandkings.knk.paper.currency.PlayerCurrencyService.class);
+
+        new UserManagementCommand(service, currency).onCommand(sender, null, "knk", new String[] {"Steve", "history", "2", "gems"});
+
+        verify(service, never()).requireProperty(any(), anyString());
+        verify(currency).staffUserHistory(sender, "Steve", net.knightsandkings.knk.core.domain.users.BalanceCurrency.GEMS, 2);
+    }
+
+    @Test
     void groupAndPermCommandsDelegate() {
         when(service.requireProperty(eq(sender), anyString())).thenReturn(true);
         UserManagementCommand command = new UserManagementCommand(service);

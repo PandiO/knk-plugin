@@ -1,0 +1,242 @@
+package net.knightsandkings.knk.api.dto.currency;
+
+import java.util.List;
+import java.util.Map;
+
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
+/**
+ * JSON shapes of knk-web-api's {@code api/currency} routes (Dtos/CurrencyDtos.cs, currency ledger
+ * KNG-21 Phase 3). Timestamps stay strings here; CurrencyMapper parses them (the API sends UTC,
+ * sometimes without an offset).
+ */
+public final class CurrencyDtos {
+
+    private CurrencyDtos() {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record BalancesDto(
+        @JsonProperty("userId") int userId,
+        @JsonProperty("coins") long coins,
+        @JsonProperty("gems") long gems,
+        @JsonProperty("experiencePoints") long experiencePoints
+    ) {}
+
+    /** Body of POST /api/currency/transfers. */
+    public record CreateTransferDto(
+        @JsonProperty("senderUserId") int senderUserId,
+        @JsonProperty("recipientUserId") int recipientUserId,
+        @JsonProperty("currency") String currency,
+        @JsonProperty("amount") long amount,
+        @JsonProperty("bypassLimits") boolean bypassLimits
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record PendingTransferDto(
+        @JsonProperty("publicId") String publicId,
+        @JsonProperty("status") String status,
+        @JsonProperty("currency") String currency,
+        @JsonProperty("amount") long amount,
+        @JsonProperty("fee") long fee,
+        @JsonProperty("recipientUserId") int recipientUserId,
+        @JsonProperty("recipientUsername") String recipientUsername,
+        @JsonProperty("createdAt") String createdAt,
+        @JsonProperty("expiresAt") String expiresAt,
+        @JsonProperty("expiresInSeconds") int expiresInSeconds
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record TransferResultDto(
+        @JsonProperty("status") String status,
+        @JsonProperty("transactionId") Long transactionId,
+        @JsonProperty("publicId") String publicId,
+        @JsonProperty("replayed") boolean replayed,
+        @JsonProperty("currency") String currency,
+        @JsonProperty("amount") long amount,
+        @JsonProperty("fee") long fee,
+        @JsonProperty("senderUserId") int senderUserId,
+        @JsonProperty("senderUsername") String senderUsername,
+        @JsonProperty("recipientUserId") int recipientUserId,
+        @JsonProperty("recipientUsername") String recipientUsername,
+        @JsonProperty("senderBalances") BalancesDto senderBalances,
+        @JsonProperty("pending") PendingTransferDto pending
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record TransferLimitsDto(
+        @JsonProperty("userId") int userId,
+        @JsonProperty("currency") String currency,
+        @JsonProperty("transferable") boolean transferable,
+        @JsonProperty("minTransfer") long minTransfer,
+        @JsonProperty("maxTransfer") long maxTransfer,
+        @JsonProperty("dailySendCap") long dailySendCap,
+        @JsonProperty("sentLast24h") long sentLast24h,
+        @JsonProperty("remainingToday") long remainingToday,
+        @JsonProperty("confirmThreshold") long confirmThreshold,
+        @JsonProperty("transferFeeBasisPoints") int transferFeeBasisPoints,
+        @JsonProperty("nextTransferAt") String nextTransferAt,
+        @JsonProperty("eligible") boolean eligible,
+        @JsonProperty("minSenderAccountAgeHours") int minSenderAccountAgeHours,
+        @JsonProperty("eligibleFrom") String eligibleFrom,
+        @JsonProperty("requiredTitleName") String requiredTitleName,
+        @JsonProperty("requiredExperience") Integer requiredExperience,
+        @JsonProperty("locked") boolean locked
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record LeaderboardEntryDto(
+        @JsonProperty("rank") int rank,
+        @JsonProperty("userId") int userId,
+        @JsonProperty("username") String username,
+        @JsonProperty("balance") long balance
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record LeaderboardDto(
+        @JsonProperty("currency") String currency,
+        @JsonProperty("page") int page,
+        @JsonProperty("pageSize") int pageSize,
+        @JsonProperty("totalCount") int totalCount,
+        @JsonProperty("entries") List<LeaderboardEntryDto> entries
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record LedgerLineDto(
+        @JsonProperty("entryId") long entryId,
+        @JsonProperty("publicId") String publicId,
+        @JsonProperty("createdAt") String createdAt,
+        @JsonProperty("currency") String currency,
+        @JsonProperty("amount") long amount,
+        @JsonProperty("balanceBefore") long balanceBefore,
+        @JsonProperty("balanceAfter") long balanceAfter,
+        @JsonProperty("kind") String kind,
+        @JsonProperty("reasonCode") String reasonCode,
+        @JsonProperty("reason") String reason,
+        @JsonProperty("initiator") String initiator,
+        @JsonProperty("initiatorUsername") String initiatorUsername,
+        @JsonProperty("initiatorComponent") String initiatorComponent,
+        @JsonProperty("counterpartyUserId") Integer counterpartyUserId,
+        @JsonProperty("counterpartyUsername") String counterpartyUsername
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record LedgerPageDto(
+        @JsonProperty("items") List<LedgerLineDto> items,
+        @JsonProperty("totalCount") int totalCount,
+        @JsonProperty("pageNumber") int pageNumber,
+        @JsonProperty("pageSize") int pageSize
+    ) {}
+
+    /** Payload of a PaymentReceived player notification. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record PaymentNotificationDto(
+        @JsonProperty("amount") long amount,
+        @JsonProperty("currency") String currency,
+        @JsonProperty("fromUserId") int fromUserId,
+        @JsonProperty("fromUsername") String fromUsername,
+        @JsonProperty("transactionPublicId") String transactionPublicId,
+        @JsonProperty("balanceAfter") long balanceAfter
+    ) {}
+
+    /** The API's refusal body: {@code {error, code, message, details}}. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record CurrencyErrorDto(
+        @JsonProperty("error") String error,
+        @JsonProperty("code") String code,
+        @JsonProperty("message") String message,
+        @JsonProperty("details") Map<String, Object> details
+    ) {}
+
+    // ===== Staff routes, api/currency/admin (Phase 4) =====
+
+    /** Body of POST /api/currency/admin/transactions/{publicId}/reverse. */
+    public record ReverseTransactionDto(
+        @JsonProperty("note") String note,
+        @JsonProperty("allowPartial") boolean allowPartial
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record PostedEntryDto(
+        @JsonProperty("userId") int userId,
+        @JsonProperty("currency") String currency,
+        @JsonProperty("operation") String operation,
+        @JsonProperty("amount") long amount,
+        @JsonProperty("balanceBefore") long balanceBefore,
+        @JsonProperty("balanceAfter") long balanceAfter
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record PostingResultDto(
+        @JsonProperty("transactionId") long transactionId,
+        @JsonProperty("publicId") String publicId,
+        @JsonProperty("replayed") boolean replayed,
+        @JsonProperty("reasonCode") String reasonCode,
+        @JsonProperty("entries") List<PostedEntryDto> entries,
+        @JsonProperty("balances") Map<String, BalancesDto> balances
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record ReversalResultDto(
+        @JsonProperty("reversedPublicId") String reversedPublicId,
+        @JsonProperty("posting") PostingResultDto posting,
+        @JsonProperty("partial") boolean partial,
+        // Top-level replay flag, if the API sends one (else posting.replayed): a repeat of an earlier reversal.
+        @JsonProperty("replayed") Boolean replayed
+    ) {}
+
+    /** Body of PUT /api/currency/admin/users/{id}/transfer-lock. */
+    public record SetTransferLockDto(
+        @JsonProperty("reason") String reason
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record TransferLockDto(
+        @JsonProperty("userId") int userId,
+        @JsonProperty("username") String username,
+        @JsonProperty("locked") boolean locked,
+        @JsonProperty("reason") String reason,
+        @JsonProperty("lockedAt") String lockedAt
+    ) {}
+
+    // ===== Currency alerts (Phase 5) =====
+
+    /** GET /api/currency/admin/alerts item. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record CurrencyAlertDto(
+        @JsonProperty("id") long id,
+        @JsonProperty("rule") String rule,
+        @JsonProperty("ruleName") String ruleName,
+        @JsonProperty("severity") String severity,
+        @JsonProperty("summary") String summary,
+        @JsonProperty("userId") Integer userId,
+        @JsonProperty("username") String username,
+        @JsonProperty("transactionPublicId") String transactionPublicId,
+        @JsonProperty("createdAt") String createdAt,
+        @JsonProperty("ackedAt") String ackedAt,
+        @JsonProperty("ackedByUsername") String ackedByUsername
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record CurrencyAlertPageDto(
+        @JsonProperty("items") java.util.List<CurrencyAlertDto> items,
+        @JsonProperty("totalCount") int totalCount,
+        @JsonProperty("pageNumber") int pageNumber,
+        @JsonProperty("pageSize") int pageSize,
+        @JsonProperty("openCount") int openCount
+    ) {}
+
+    /** Payload of a CurrencyAlert player notification. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record CurrencyAlertNotificationDto(
+        @JsonProperty("alertId") long alertId,
+        @JsonProperty("rule") String rule,
+        @JsonProperty("ruleName") String ruleName,
+        @JsonProperty("severity") String severity,
+        @JsonProperty("summary") String summary,
+        @JsonProperty("userId") Integer userId,
+        @JsonProperty("username") String username,
+        @JsonProperty("transfersDisabled") java.util.List<String> transfersDisabled
+    ) {}
+}

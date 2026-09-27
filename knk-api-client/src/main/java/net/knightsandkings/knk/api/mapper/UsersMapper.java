@@ -146,8 +146,18 @@ public class UsersMapper {
     public static net.knightsandkings.knk.core.domain.users.BalanceAdjustmentResult mapBalanceAdjustmentResult(
         net.knightsandkings.knk.api.dto.BalanceAdjustmentResultDto dto
     ) {
+        java.util.List<net.knightsandkings.knk.core.domain.users.BalanceChange> changes = dto.changes() == null
+            ? java.util.List.of()
+            : dto.changes().stream()
+                .map(c -> new net.knightsandkings.knk.core.domain.users.BalanceChange(
+                    net.knightsandkings.knk.core.domain.users.BalanceCurrency.fromWireValue(c.currency()),
+                    net.knightsandkings.knk.core.domain.users.BalanceOperation.forAction(c.mode()),
+                    c.amount(), c.balanceBefore(), c.balanceAfter(), c.transactionPublicId(), c.replayed()))
+                .filter(c -> c.currency() != null)
+                .toList();
         return new net.knightsandkings.knk.core.domain.users.BalanceAdjustmentResult(
-            dto.newCoins(), dto.newGems(), dto.newExperiencePoints(), mapTitleChange(dto.titleChange())
+            dto.newCoins(), dto.newGems(), dto.newExperiencePoints(), mapTitleChange(dto.titleChange()),
+            changes, dto.replayed()
         );
     }
 
@@ -155,7 +165,8 @@ public class UsersMapper {
         net.knightsandkings.knk.api.dto.PlayerNotificationDto dto
     ) {
         return new net.knightsandkings.knk.core.domain.users.PlayerNotification(
-            dto.id(), dto.userId(), dto.uuid(), dto.username(), dto.type(), mapTitleChange(dto.titleChange())
+            dto.id(), dto.userId(), dto.uuid(), dto.username(), dto.type(), mapTitleChange(dto.titleChange()),
+            CurrencyMapper.mapPaymentNotice(dto.payment()), CurrencyMapper.mapAlertNotice(dto.currencyAlert())
         );
     }
 
@@ -183,6 +194,23 @@ public class UsersMapper {
             mapRewardMultipliers(tc.coinBonusMultipliers()),
             mapRewardMultipliers(tc.gemBonusMultipliers()),
             mapRewardMultipliers(tc.expBonusMultipliers())
+        );
+    }
+
+    /** A malformed or missing UUID maps to null (a web-only account has none). */
+    public static net.knightsandkings.knk.core.domain.users.UserIgnore mapUserIgnore(
+        net.knightsandkings.knk.api.dto.UserIgnoreDto dto
+    ) {
+        java.util.UUID uuid = null;
+        if (dto.ignoredUuid() != null && !dto.ignoredUuid().isBlank()) {
+            try {
+                uuid = java.util.UUID.fromString(dto.ignoredUuid().trim());
+            } catch (IllegalArgumentException ignored) {
+                // leave null
+            }
+        }
+        return new net.knightsandkings.knk.core.domain.users.UserIgnore(
+            dto.ignoredUserId(), dto.ignoredUsername(), uuid, dto.createdAt()
         );
     }
 }

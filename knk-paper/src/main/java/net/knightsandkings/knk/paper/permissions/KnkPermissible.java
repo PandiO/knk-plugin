@@ -14,6 +14,7 @@ import net.knightsandkings.knk.core.dataaccess.FetchPolicy;
 import net.knightsandkings.knk.core.dataaccess.FetchResult;
 import net.knightsandkings.knk.core.dataaccess.PermissionsDataAccess;
 import net.knightsandkings.knk.core.domain.permissions.PermissionCheckResult;
+import net.knightsandkings.knk.core.domain.permissions.PermissionDecision;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
 
 /**
@@ -83,23 +84,43 @@ public class KnkPermissible {
 
     /**
      * Async variant for call sites that already run off the main thread, or that want a real,
-     * freshly-resolved answer rather than a cache-only snapshot.
+     * freshly-resolved answer rather than a cache-only snapshot. False both for a real denial and
+     * when the check couldn't be made - use {@link #checkAsync} to tell those apart.
      */
     public CompletableFuture<Boolean> hasPermissionAsync(OfflinePlayer player, String node) {
+        return checkAsync(player, node).thenApply(PermissionDecision::allowed);
+    }
+
+    /**
+     * {@link #hasPermissionAsync} with the reason for a "no": {@link PermissionDecision#DENIED} is a
+     * real answer from the permission model, {@link PermissionDecision#UNAVAILABLE} means it
+     * couldn't be asked - knk-web-api unreachable with nothing cached, or the player's account
+     * never loaded (the API was down when they joined). Callers still refuse on UNAVAILABLE but
+     * should say the service is down rather than "You don't have permission" (currency smoke
+     * test, 2026-09-27). Ops are always ALLOWED. Never completes exceptionally.
+     */
+    public CompletableFuture<PermissionDecision> checkAsync(OfflinePlayer player, String node) {
         if (player.isOp()) {
-            return CompletableFuture.completedFuture(true);
+            return CompletableFuture.completedFuture(PermissionDecision.ALLOWED);
         }
 
         Integer userId = resolveUserId(player.getUniqueId());
         if (userId == null) {
-            return CompletableFuture.completedFuture(false);
+            return CompletableFuture.completedFuture(PermissionDecision.UNAVAILABLE);
         }
 
         return permissionsDataAccess.checkAsync(userId, node)
-            .thenApply(result -> result.value().map(PermissionCheckResult::isAllowed).orElse(false))
+            .thenApply(result -> {
+                PermissionDecision decision = PermissionsDataAccess.decide(result);
+                if (decision == PermissionDecision.UNAVAILABLE) {
+                    LOGGER.log(Level.WARNING, "Permission check failed for user " + userId + ", node " + node,
+                        result != null ? result.error().orElse(null) : null);
+                }
+                return decision;
+            })
             .exceptionally(ex -> {
                 LOGGER.log(Level.WARNING, "Permission check failed for user " + userId + ", node " + node, ex);
-                return false;
+                return PermissionDecision.UNAVAILABLE;
             });
     }
 
