@@ -54,10 +54,14 @@ public class PlayerNotificationPoller {
     private BukkitTask task;
     // Set once UserAdminService exists (it's built after this poller in KnKPlugin).
     private volatile Consumer<Player> rankChangedHandler;
+    // Set once lootboxes are initialized (Phase 5 token items the API issued itself).
+    private volatile Consumer<Player> lootboxTokensHandler;
     // Set once the currency commands exist (currency Phase 3).
     private volatile BiConsumer<Player, PlayerNotification> paymentReceivedHandler;
     // Currency anomaly alerts for online staff (currency Phase 5); not addressed to one player.
     private volatile Consumer<PlayerNotification> currencyAlertHandler;
+    // Other notifications for the game server itself (userId 0), by type: e.g. LootboxWorldChanged.
+    private final java.util.Map<String, Consumer<PlayerNotification>> serverHandlers = new ConcurrentHashMap<>();
     // A discovery reset made outside the plugin's own command (domain discovery, KNG-20).
     private volatile Consumer<Player> discoveryResetHandler;
 
@@ -75,6 +79,11 @@ public class PlayerNotificationPoller {
     /** What to do for a {@link PlayerNotification#TYPE_RANK_CHANGED} whose player is online. */
     public void setRankChangedHandler(Consumer<Player> handler) {
         this.rankChangedHandler = handler;
+    }
+
+    /** What to do for a {@link PlayerNotification#TYPE_LOOTBOX_TOKENS_ISSUED} whose player is online. */
+    public void setLootboxTokensHandler(Consumer<Player> handler) {
+        this.lootboxTokensHandler = handler;
     }
 
     /** What to do for a {@link PlayerNotification#TYPE_PAYMENT_RECEIVED} whose player is online. */
@@ -98,6 +107,19 @@ public class PlayerNotificationPoller {
      */
     public void setCurrencyAlertHandler(Consumer<PlayerNotification> handler) {
         this.currencyAlertHandler = handler;
+    }
+
+    /**
+     * What to do for a notification of {@code type} addressed to the game server rather than a player (userId 0,
+     * e.g. {@link PlayerNotification#TYPE_LOOTBOX_WORLD_CHANGED}). Handed over as soon as anyone is online; without a
+     * handler it stays queued.
+     */
+    public void setServerNotificationHandler(String type, Consumer<PlayerNotification> handler) {
+        if (handler == null) {
+            serverHandlers.remove(type);
+        } else {
+            serverHandlers.put(type, handler);
+        }
     }
 
     public void start() {
@@ -162,6 +184,17 @@ public class PlayerNotificationPoller {
                 toAcknowledge.add(notification.id());
                 continue;
             }
+            Consumer<PlayerNotification> serverHandler = serverHandlers.get(notification.type());
+            if (serverHandler != null) {
+                try {
+                    serverHandler.accept(notification);
+                } catch (RuntimeException e) {
+                    LOGGER.warning("Failed to apply server notification " + notification.id() + " (" + notification.type() + "): " + e.getMessage());
+                }
+                shownIds.add(notification.id());
+                toAcknowledge.add(notification.id());
+                continue;
+            }
             Player player = findOnlinePlayer(notification);
             if (player == null) {
                 continue; // stays queued for their next join
@@ -171,6 +204,8 @@ public class PlayerNotificationPoller {
                     PromotionEffects.show(player, notification.titleChange());
                 } else if (PlayerNotification.TYPE_RANK_CHANGED.equals(notification.type()) && rankChangedHandler != null) {
                     rankChangedHandler.accept(player);
+                } else if (PlayerNotification.TYPE_LOOTBOX_TOKENS_ISSUED.equals(notification.type()) && lootboxTokensHandler != null) {
+                    lootboxTokensHandler.accept(player);
                 } else if (PlayerNotification.TYPE_PAYMENT_RECEIVED.equals(notification.type()) && paymentReceivedHandler != null) {
                     paymentReceivedHandler.accept(player, notification);
                 } else if (PlayerNotification.TYPE_DISCOVERY_RESET.equals(notification.type()) && discoveryResetHandler != null) {

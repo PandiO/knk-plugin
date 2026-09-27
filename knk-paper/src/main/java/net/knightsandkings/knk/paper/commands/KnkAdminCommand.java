@@ -55,6 +55,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public class KnkAdminCommand implements CommandExecutor, TabCompleter {
     private final CommandRegistry registry = new CommandRegistry();
+    private final java.util.Map<String, java.util.function.BiFunction<CommandSender, String[], List<String>>> extraTabCompleters =
+            new java.util.HashMap<>();
     private final HelpSubcommand helpSubcommand;
     /** /knk currency (currency Phase 4); null when the currency service isn't available. */
     private CurrencyAdminCommand currencyAdminCommand;
@@ -411,11 +413,23 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
     }
 
     /**
-     * Adds a subcommand built outside this class (e.g. {@code /knk discovery}, which needs services
-     * wired after this command). Same registry, permission check and help listing as the rest.
+     * Adds a subcommand built outside this class (e.g. {@code /knk discovery} or {@code /knk lootbox}, which need
+     * services wired after this command). Same registry, permission check and help listing as the rest.
      */
     public void registerSubcommand(CommandMetadata metadata, SubcommandExecutor executor) {
+        registerSubcommand(metadata, executor, null);
+    }
+
+    /**
+     * As {@link #registerSubcommand(CommandMetadata, SubcommandExecutor)}, with tab completion: {@code tabCompleter}
+     * gets the arguments after the subcommand name; may be null.
+     */
+    public void registerSubcommand(CommandMetadata metadata, SubcommandExecutor executor,
+                                   java.util.function.BiFunction<CommandSender, String[], List<String>> tabCompleter) {
         registry.register(metadata, executor);
+        if (tabCompleter != null) {
+            extraTabCompleters.put(metadata.name().toLowerCase(Locale.ROOT), tabCompleter);
+        }
     }
 
     @Override
@@ -463,6 +477,10 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                 }
 
                 String root = args[0].toLowerCase(Locale.ROOT);
+                var extra = extraTabCompleters.get(root);
+                if (extra != null) {
+                        return extra.apply(sender, Arrays.copyOfRange(args, 1, args.length));
+                }
                 if ("user".equals(root)) {
                         return completeUserSubcommand(Arrays.copyOfRange(args, 1, args.length));
                 }

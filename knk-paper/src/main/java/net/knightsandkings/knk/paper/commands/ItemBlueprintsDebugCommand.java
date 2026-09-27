@@ -1,6 +1,5 @@
 package net.knightsandkings.knk.paper.commands;
 
-import net.knightsandkings.knk.core.domain.enchantment.CustomEnchantmentLore;
 import net.knightsandkings.knk.api.impl.enchantment.LocalEnchantmentRepositoryImpl;
 import net.knightsandkings.knk.core.dataaccess.EnchantmentDefinitionsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.FetchResult;
@@ -13,23 +12,17 @@ import net.knightsandkings.knk.core.domain.item.KnkItemBlueprint;
 import net.knightsandkings.knk.core.domain.item.KnkItemBlueprintDefaultEnchantment;
 import net.knightsandkings.knk.core.domain.material.KnkMinecraftMaterialRef;
 import net.knightsandkings.knk.core.exception.ApiException;
-import net.knightsandkings.knk.core.ports.enchantment.EnchantmentRepository;
-import net.knightsandkings.knk.paper.enchantbook.EnchantBookItems;
-import net.knightsandkings.knk.paper.mapper.EnchantmentDefinitionBukkitMapper;
-import net.knightsandkings.knk.paper.mapper.ItemBlueprintBukkitMapper;
+import net.knightsandkings.knk.paper.item.BlueprintItemAssembler;
 import net.knightsandkings.knk.paper.utils.DisplayTextFormatter;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
-import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.Plugin;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -42,7 +35,7 @@ public class ItemBlueprintsDebugCommand implements CommandExecutor {
     private final ItemBlueprintsDataAccess itemBlueprintsDataAccess;
     private final MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private final EnchantmentDefinitionsDataAccess enchantmentDefinitionsDataAccess;
-    private final EnchantmentRepository customEnchantmentRepository;
+    private final BlueprintItemAssembler itemAssembler;
 
     public ItemBlueprintsDebugCommand(
             Plugin plugin,
@@ -54,7 +47,7 @@ public class ItemBlueprintsDebugCommand implements CommandExecutor {
         this.itemBlueprintsDataAccess = itemBlueprintsDataAccess;
         this.minecraftMaterialRefsDataAccess = minecraftMaterialRefsDataAccess;
         this.enchantmentDefinitionsDataAccess = enchantmentDefinitionsDataAccess;
-        this.customEnchantmentRepository = new LocalEnchantmentRepositoryImpl();
+        this.itemAssembler = new BlueprintItemAssembler(new LocalEnchantmentRepositoryImpl());
     }
 
     @Override
@@ -224,65 +217,17 @@ public class ItemBlueprintsDebugCommand implements CommandExecutor {
 
         final ItemStack itemStack;
         try {
-            itemStack = ItemBlueprintBukkitMapper.fromBlueprint(payload.blueprint(), payload.materialNamespaceKey());
+            itemStack = itemAssembler.build(payload.blueprint(), payload.materialNamespaceKey());
         } catch (Exception ex) {
             sender.sendMessage(ChatColor.RED + "Failed to map item blueprint to Bukkit item: " + ex.getMessage());
             return;
         }
 
-        int applied = 0;
-        List<String> skipped = new ArrayList<>();
-
-        // A permanent enchantment book (KNG-5) teaches its default enchantment; it must never carry it itself,
-        // not even when the book couldn't be resolved.
-        List<KnkItemBlueprintDefaultEnchantment> defaultEnchantments = EnchantBookItems.isBookBlueprint(payload.blueprint(), itemStack.getType())
-                ? Collections.emptyList()
-                : safeEnchantments(payload.blueprint());
-
-        for (KnkItemBlueprintDefaultEnchantment relation : defaultEnchantments) {
-            if (relation == null || relation.enchantmentDefinitionId() == null) {
-                continue;
-            }
-
-            KnkEnchantmentDefinition definition = payload.enchantmentDefinitions().get(relation.enchantmentDefinitionId());
-            if (definition == null) {
-                definition = EnchantmentDefinitionBukkitMapper.fromDefaultEnchantment(relation);
-            }
-
-            if (Boolean.TRUE.equals(definition.isCustom())) {
-                EnchantmentDefinitionBukkitMapper.CustomEnchantmentResolution customResolution = EnchantmentDefinitionBukkitMapper.toCustom(definition);
-                if (!customResolution.isValid()) {
-                    skipped.add(relation.enchantmentDefinitionId() + " (" + customResolution.error() + ")");
-                    continue;
-                }
-
-                int customLevel = relation.level() != null && relation.level() > 0 ? relation.level() : customResolution.defaultLevel();
-                if (customLevel > customResolution.maxLevel()) {
-                    skipped.add(relation.enchantmentDefinitionId() + " (level " + customLevel + " exceeds max " + customResolution.maxLevel() + ")");
-                    continue;
-                }
-
-                if (applyCustomLoreEnchantment(itemStack, customResolution.enchantmentId(), customLevel)) {
-                    applied++;
-                } else {
-                    skipped.add(relation.enchantmentDefinitionId() + " (failed to apply custom lore enchantment)");
-                }
-
-                continue;
-            }
-
-            EnchantmentDefinitionBukkitMapper.BukkitEnchantmentResolution resolution = EnchantmentDefinitionBukkitMapper.toBukkit(definition);
-            if (!resolution.isValid()) {
-                skipped.add(relation.enchantmentDefinitionId() + " (" + resolution.error() + ")");
-                continue;
-            }
-
-            int level = relation.level() != null && relation.level() > 0 ? relation.level() : resolution.defaultLevel();
-            itemStack.addUnsafeEnchantment(resolution.enchantment(), level);
-            applied++;
-        }
-
-        reorderLoreEnchantmentsFirst(itemStack);
+        BlueprintItemAssembler.Result assembled = itemAssembler.enchant(itemStack, payload.blueprint(),
+                BlueprintItemAssembler.defaultEnchantments(payload.blueprint(), payload.enchantmentDefinitions()),
+                BlueprintItemAssembler.Options.DEFAULTS);
+        int applied = assembled.applied();
+        List<String> skipped = assembled.skipped();
 
         Map<Integer, ItemStack> overflow = targetPlayer.getInventory().addItem(itemStack);
         if (!overflow.isEmpty()) {
@@ -297,56 +242,6 @@ public class ItemBlueprintsDebugCommand implements CommandExecutor {
         if (!skipped.isEmpty()) {
             sender.sendMessage(ChatColor.YELLOW + "Skipped enchantments: " + String.join(", ", skipped));
         }
-    }
-
-    private boolean applyCustomLoreEnchantment(ItemStack itemStack, String enchantmentId, int level) {
-        if (itemStack == null || itemStack.getType().isAir()) {
-            return false;
-        }
-
-        ItemMeta itemMeta = itemStack.getItemMeta();
-        List<String> lore = itemMeta != null && itemMeta.hasLore() ? itemMeta.getLore() : List.of();
-        List<String> updatedLore = customEnchantmentRepository.applyEnchantment(lore, enchantmentId, level).join();
-
-        if (itemMeta == null) {
-            itemMeta = plugin.getServer().getItemFactory().getItemMeta(itemStack.getType());
-        }
-
-        if (itemMeta == null) {
-            return false;
-        }
-
-        itemMeta.setLore(updatedLore);
-        itemStack.setItemMeta(itemMeta);
-        return true;
-    }
-
-    private void reorderLoreEnchantmentsFirst(ItemStack itemStack) {
-        if (itemStack == null || itemStack.getType().isAir()) {
-            return;
-        }
-
-        ItemMeta itemMeta = itemStack.getItemMeta();
-        List<String> lore = itemMeta != null && itemMeta.hasLore() ? itemMeta.getLore() : List.of();
-        List<String> reorderedLore = reorderLoreEnchantmentsFirst(lore);
-        if (reorderedLore.equals(lore)) {
-            return;
-        }
-
-        if (itemMeta == null) {
-            itemMeta = plugin.getServer().getItemFactory().getItemMeta(itemStack.getType());
-        }
-
-        if (itemMeta == null) {
-            return;
-        }
-
-        itemMeta.setLore(reorderedLore);
-        itemStack.setItemMeta(itemMeta);
-    }
-
-    private List<String> reorderLoreEnchantmentsFirst(List<String> loreLines) {
-        return CustomEnchantmentLore.enchantmentsFirst(customEnchantmentRepository, loreLines);
     }
 
     private CompletableFuture<String> resolveMaterialNamespaceKey(KnkItemBlueprint blueprint) {

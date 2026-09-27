@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.kit;
 
+import net.knightsandkings.knk.api.impl.enchantment.LocalEnchantmentRepositoryImpl;
 import net.knightsandkings.knk.core.dataaccess.FetchResult;
 import net.knightsandkings.knk.core.dataaccess.ItemBlueprintsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
@@ -7,6 +8,7 @@ import net.knightsandkings.knk.core.domain.item.KnkItemBlueprint;
 import net.knightsandkings.knk.core.domain.item.KnkKitClaimResult;
 import net.knightsandkings.knk.core.domain.item.KnkKitContent;
 import net.knightsandkings.knk.core.domain.material.KnkMinecraftMaterialRef;
+import net.knightsandkings.knk.paper.item.BlueprintItemAssembler;
 import net.knightsandkings.knk.paper.mapper.ItemBlueprintBukkitMapper;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
@@ -15,6 +17,7 @@ import org.bukkit.inventory.PlayerInventory;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Level;
@@ -45,16 +48,18 @@ import java.util.logging.Logger;
  * {@code Bukkit.getScheduler().runTask}) before calling {@link #place}, the same split
  * {@code ItemBlueprintsDebugCommand#handleGive} already uses for a single item.
  * <p>
- * Deliberately does not apply {@code ItemBlueprint.DefaultEnchantments} the way
- * {@code /knk itemblueprints give} does - docs/specs/kits/IMPLEMENTATION_PLAN.md §4 scopes
- * Phase 4's item-building to "build each ItemStack via the existing mapper" only. Flagged, not
- * silently assumed: if full parity with {@code /knk itemblueprints give} (default enchantments
- * applied) turns out to matter for Kit contents, that enchantment-application logic would need
- * extracting out of {@code ItemBlueprintsDebugCommand} into a shared helper as a follow-up.
+ * Items are built by {@link BlueprintItemAssembler} (docs/specs/lootboxes/IMPLEMENTATION_PLAN.md
+ * Phase 0), so kit items carry their blueprint's default enchantments the way
+ * {@code /knk itemblueprints give} applies them. Kits don't fetch the full enchantment
+ * definitions: each one is built from the blueprint row's denormalized fields, as permanent
+ * enchantment books do. One that can't be resolved on this server is logged and left off; the
+ * item is still granted.
  */
 public final class KitGrantPlacer {
 
     private static final Logger LOGGER = Logger.getLogger(KitGrantPlacer.class.getName());
+
+    private static final BlueprintItemAssembler ITEM_ASSEMBLER = new BlueprintItemAssembler(new LocalEnchantmentRepositoryImpl());
 
     private KitGrantPlacer() {
     }
@@ -164,10 +169,20 @@ public final class KitGrantPlacer {
 
         final ItemStack itemStack;
         try {
-            itemStack = ItemBlueprintBukkitMapper.fromBlueprint(blueprint, materialNamespaceKey);
+            itemStack = ITEM_ASSEMBLER.build(blueprint, materialNamespaceKey);
         } catch (Exception ex) {
             LOGGER.log(Level.WARNING, "KitGrantPlacer: failed to map ItemBlueprint id=" + blueprint.id() + " to a Bukkit item", ex);
             return null;
+        }
+
+        try {
+            BlueprintItemAssembler.Result assembled = ITEM_ASSEMBLER.enchant(itemStack, blueprint,
+                    BlueprintItemAssembler.defaultEnchantments(blueprint, Map.of()), BlueprintItemAssembler.Options.DEFAULTS);
+            if (!assembled.skipped().isEmpty()) {
+                LOGGER.warning("KitGrantPlacer: ItemBlueprint id=" + blueprint.id() + " skipped enchantments: " + String.join(", ", assembled.skipped()));
+            }
+        } catch (Exception ex) {
+            LOGGER.log(Level.WARNING, "KitGrantPlacer: failed to enchant ItemBlueprint id=" + blueprint.id() + ", granting it as built", ex);
         }
 
         int maxStackSize = blueprint.maxStackSize() != null && blueprint.maxStackSize() > 0

@@ -13,5 +13,6 @@ public record PlayerNotificationDto(
     @JsonProperty("type") String type,
     @JsonProperty("titleChange") TitleChangeResultDto titleChange,
     @JsonProperty("payment") net.knightsandkings.knk.api.dto.currency.CurrencyDtos.PaymentNotificationDto payment,
-    @JsonProperty("currencyAlert") net.knightsandkings.knk.api.dto.currency.CurrencyDtos.CurrencyAlertNotificationDto currencyAlert
+    @JsonProperty("currencyAlert") net.knightsandkings.knk.api.dto.currency.CurrencyDtos.CurrencyAlertNotificationDto currencyAlert,
+    @JsonProperty("lootboxWorldChanged") net.knightsandkings.knk.api.dto.LootboxDtos.WorldChangedNotificationDto lootboxWorldChanged
 ) {}

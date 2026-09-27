@@ -166,7 +166,8 @@ public class UsersMapper {
     ) {
         return new net.knightsandkings.knk.core.domain.users.PlayerNotification(
             dto.id(), dto.userId(), dto.uuid(), dto.username(), dto.type(), mapTitleChange(dto.titleChange()),
-            CurrencyMapper.mapPaymentNotice(dto.payment()), CurrencyMapper.mapAlertNotice(dto.currencyAlert())
+            CurrencyMapper.mapPaymentNotice(dto.payment()), CurrencyMapper.mapAlertNotice(dto.currencyAlert()),
+            LootboxMapper.toCore(dto.lootboxWorldChanged())
         );
     }
 

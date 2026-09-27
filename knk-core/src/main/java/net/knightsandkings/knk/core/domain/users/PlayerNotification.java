@@ -13,17 +13,25 @@ public record PlayerNotification(
     String type, // see TYPE_TITLE_CHANGED
     TitleChangeResult titleChange, // set when type is TYPE_TITLE_CHANGED
     net.knightsandkings.knk.core.domain.currency.PaymentNotice payment, // set when type is TYPE_PAYMENT_RECEIVED
-    net.knightsandkings.knk.core.domain.currency.CurrencyAlertNotice currencyAlert // set when type is TYPE_CURRENCY_ALERT
+    net.knightsandkings.knk.core.domain.currency.CurrencyAlertNotice currencyAlert, // set when type is TYPE_CURRENCY_ALERT
+    net.knightsandkings.knk.core.lootbox.KnkLootboxWorldChange lootboxWorldChanged // set when type is TYPE_LOOTBOX_WORLD_CHANGED
 ) {
+    /** Without a lootbox world change - every type before TYPE_LOOTBOX_WORLD_CHANGED. */
+    public PlayerNotification(long id, int userId, String uuid, String username, String type, TitleChangeResult titleChange,
+                              net.knightsandkings.knk.core.domain.currency.PaymentNotice payment,
+                              net.knightsandkings.knk.core.domain.currency.CurrencyAlertNotice currencyAlert) {
+        this(id, userId, uuid, username, type, titleChange, payment, currencyAlert, null);
+    }
+
     /** Without a payment - every type before TYPE_PAYMENT_RECEIVED. */
     public PlayerNotification(long id, int userId, String uuid, String username, String type, TitleChangeResult titleChange) {
-        this(id, userId, uuid, username, type, titleChange, null, null);
+        this(id, userId, uuid, username, type, titleChange, null, null, null);
     }
 
     /** Without a currency alert - every type before TYPE_CURRENCY_ALERT. */
     public PlayerNotification(long id, int userId, String uuid, String username, String type, TitleChangeResult titleChange,
                               net.knightsandkings.knk.core.domain.currency.PaymentNotice payment) {
-        this(id, userId, uuid, username, type, titleChange, payment, null);
+        this(id, userId, uuid, username, type, titleChange, payment, null, null);
     }
 
     public static final String TYPE_TITLE_CHANGED = "TitleChanged";
@@ -33,6 +41,11 @@ public record PlayerNotification(
      * their chat/tab-list rank.
      */
     public static final String TYPE_RANK_CHANGED = "RankChanged";
+    /**
+     * The API issued lootbox token items to the player itself (a premium tier or kit grant rule,
+     * docs/specs/lootboxes/IMPLEMENTATION_PLAN.md Phase 5). No payload: fetch and hand over their undelivered tokens.
+     */
+    public static final String TYPE_LOOTBOX_TOKENS_ISSUED = "LootboxTokensIssued";
     /**
      * Another player paid this one (/pay, currency ledger KNG-21 Phase 3). Payload in
      * {@link #payment()}. Queued for every completed payment, so an offline recipient hears
@@ -45,6 +58,12 @@ public record PlayerNotification(
      * {@link #currencyAlert()}.
      */
     public static final String TYPE_CURRENCY_ALERT = "CurrencyAlert";
+    /**
+     * Lootbox changes made outside the game (a web despawn or area delete, a token revoke; docs/specs/lootboxes/
+     * DESIGN.md §3.9) for the game server - not addressed to one player (userId 0). Payload in
+     * {@link #lootboxWorldChanged()}: the boxes to take down and the token items to remove, at once.
+     */
+    public static final String TYPE_LOOTBOX_WORLD_CHANGED = "LootboxWorldChanged";
     /**
      * One of this player's domain discoveries was reset (web admin player profile, or
      * {@code /knk discovery reset}). No payload the plugin needs: it re-reads the player's whole

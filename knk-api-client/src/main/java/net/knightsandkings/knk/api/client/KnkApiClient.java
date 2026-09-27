@@ -132,6 +132,8 @@ public class KnkApiClient {
     private final KitsQueryApi kitsQueryApi;
     private final net.knightsandkings.knk.core.ports.api.CategoriesQueryApi categoriesQueryApi;
     private final KitsCommandApi kitsCommandApi;
+    private final net.knightsandkings.knk.core.ports.api.LootboxesQueryApi lootboxesQueryApi;
+    private final net.knightsandkings.knk.core.ports.api.LootboxesCommandApi lootboxesCommandApi;
     private final CurrencyApi currencyApi;
 
     private KnkApiClient(
@@ -185,6 +187,8 @@ public class KnkApiClient {
         this.kitsCommandApi = new KitsCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.currencyApi = new net.knightsandkings.knk.api.impl.CurrencyApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.categoriesQueryApi = new net.knightsandkings.knk.api.impl.CategoriesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.lootboxesQueryApi = new net.knightsandkings.knk.api.impl.LootboxesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.lootboxesCommandApi = new net.knightsandkings.knk.api.impl.LootboxesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
     }
     
     public HealthApi getHealthApi() {
@@ -218,6 +222,16 @@ public class KnkApiClient {
 
     public KitsCommandApi getKitsCommandApi() {
         return kitsCommandApi;
+    }
+
+    /** Lootboxes Phase 3: runtime config, active boxes, pending claims, odds. */
+    public net.knightsandkings.knk.core.ports.api.LootboxesQueryApi getLootboxesQueryApi() {
+        return lootboxesQueryApi;
+    }
+
+    /** Lootboxes Phase 3: spawn, claim, deliver, admin give, in-game areas. */
+    public net.knightsandkings.knk.core.ports.api.LootboxesCommandApi getLootboxesCommandApi() {
+        return lootboxesCommandApi;
     }
 
     /** Menu follow-up 2026-09-26: {@code GET /api/Categories} (catalogue category filter). */
