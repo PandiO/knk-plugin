@@ -22,7 +22,10 @@ import static org.mockito.Mockito.when;
 class WorldGuardCombatSafezonesTest {
 
     private final RegionDomainResolver resolver = new RegionDomainResolver();
-    private final Location location = new Location(mock(World.class), 10, 64, 10);
+    // Location only holds its World through a WeakReference and getWorld() throws "World unloaded" once
+    // it's cleared, so keep the mock strongly reachable here - otherwise any GC mid-test fails the test.
+    private final World world = mock(World.class);
+    private final Location location = new Location(world, 10, 64, 10);
     private final Player attacker = mock(Player.class);
     private final Player victim = mock(Player.class);
 
