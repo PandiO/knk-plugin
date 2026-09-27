@@ -1220,7 +1220,8 @@ public final class SiegeService {
         return rt == null ? 1.0 : rt.machine().configuration().headshotMultiplier();
     }
 
-    private static boolean isInOwnSafeZone(Player player, SiegeMatch match) {
+    /** Package-private for {@code SiegeSafeZoneTest}. */
+    static boolean isInOwnSafeZone(Player player, SiegeMatch match) {
         KnkSiegeTeam team = match.teamOf(player.getUniqueId()).orElse(null);
         if (team == null) return false;
         Location at = player.getLocation();

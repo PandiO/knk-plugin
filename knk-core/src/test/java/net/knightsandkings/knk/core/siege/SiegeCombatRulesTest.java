@@ -62,6 +62,36 @@ class SiegeCombatRulesTest {
         assertEquals(Outcome.DENY_ATTACKER_SAFE, SiegeCombatRules.decide(safeAttacker, in(1, 1), alliances));
     }
 
+    /**
+     * KNG-28: the full matrix - defender or attacker as damager, each side in or out of its own safe
+     * zone - denies every hit that involves a safe zone, the same way for both roles. A player in the
+     * enemy team's safe zone is not in their own ({@code inOwnSafeZone} false), so that's the "out" row.
+     */
+    @Test
+    void safeZonesDenyTheSameWayWhicheverRoleHits() {
+        int defenders = 1;
+        int attackers = 2;
+        for (int damagerTeam : new int[]{defenders, attackers}) {
+            int victimTeam = damagerTeam == defenders ? attackers : defenders;
+            for (boolean damagerSafe : new boolean[]{false, true}) {
+                for (boolean victimSafe : new boolean[]{false, true}) {
+                    Outcome expected = victimSafe ? Outcome.DENY_VICTIM_SAFE
+                            : damagerSafe ? Outcome.DENY_ATTACKER_SAFE : Outcome.ALLOW;
+                    Outcome actual = SiegeCombatRules.decide(new Combatant(1, true, damagerTeam, damagerSafe),
+                            new Combatant(1, true, victimTeam, victimSafe), alliances);
+                    assertEquals(expected, actual, "team " + damagerTeam + " (safe=" + damagerSafe + ") hits team "
+                            + victimTeam + " (safe=" + victimSafe + ")");
+                }
+            }
+        }
+    }
+
+    @Test
+    void anAllyInTheirSafeZoneIsStillJustAnAlly() {
+        assertEquals(Outcome.DENY_ALLY, SiegeCombatRules.decide(in(1, 2), new Combatant(1, true, 3, true), alliances));
+        assertEquals(Outcome.DENY_ALLY, SiegeCombatRules.decide(new Combatant(1, true, 2, true), in(1, 3), alliances));
+    }
+
     @Test
     void noFightingInTheHub() {
         Combatant hub = new Combatant(1, false, -1, false);
