@@ -6,6 +6,7 @@ import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import org.bukkit.util.Vector;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -101,6 +102,138 @@ class GateManagerTest {
     @Test
     void closedFootprintOfAnUnknownGateIsEmpty() {
         assertEquals(List.of(), new GateManager().closedFootprint(42));
+    }
+
+    // === GateStateListener (R4) ===
+
+    @Test
+    void stateListenerFiresOnceWhenAGateStartsOpening() {
+        GateManager manager = new GateManager();
+        manager.cacheGate(closedGateWithOneBlock(1));
+        List<Integer> fired = new ArrayList<>();
+        manager.addStateListener(fired::add);
+
+        assertTrue(manager.openGate(1));
+
+        assertEquals(List.of(1), fired);
+        assertEquals(AnimationState.OPENING, manager.getGate(1).getCurrentState());
+    }
+
+    @Test
+    void stateListenerDoesNotFireWhenOpeningIsRefused() {
+        GateManager manager = new GateManager();
+        CachedGateDoor gate = closedGateWithOneBlock(1);
+        gate.setCurrentState(AnimationState.OPEN);
+        manager.cacheGate(gate);
+        List<Integer> fired = new ArrayList<>();
+        manager.addStateListener(fired::add);
+
+        assertFalse(manager.openGate(1), "already open");
+        assertFalse(manager.openGate(99), "unknown gate");
+
+        assertEquals(List.of(), fired);
+    }
+
+    @Test
+    void stateListenerFiresOnceWhenAGateStartsClosing() {
+        GateManager manager = new GateManager();
+        CachedGateDoor gate = closedGateWithOneBlock(1);
+        gate.setCurrentState(AnimationState.OPEN);
+        gate.setCurrentFrame(gate.getAnimationDurationTicks());
+        manager.cacheGate(gate);
+        List<Integer> fired = new ArrayList<>();
+        manager.addStateListener(fired::add);
+
+        assertTrue(manager.closeGate(1));
+
+        assertEquals(List.of(1), fired);
+        assertEquals(AnimationState.CLOSING, manager.getGate(1).getCurrentState());
+    }
+
+    @Test
+    void stateListenerFiresOnceOnAnimationCompletion() {
+        GateManager manager = new GateManager();
+        manager.cacheGate(closedGateWithOneBlock(1));
+        List<Integer> fired = new ArrayList<>();
+        manager.addStateListener(fired::add);
+
+        manager.notifyAnimationCompleted(1, AnimationState.OPEN);
+
+        assertEquals(List.of(1), fired);
+    }
+
+    @Test
+    void stateListenerFiresOnceOnForcedState() {
+        GateManager manager = new GateManager();
+        manager.cacheGate(closedGateWithOneBlock(1));
+        List<Integer> fired = new ArrayList<>();
+        manager.addStateListener(fired::add);
+
+        manager.forceGateState(1, true);
+        manager.forceGateState(99, true); // unknown gate: nothing to report
+
+        assertEquals(List.of(1), fired);
+        assertEquals(AnimationState.OPEN, manager.getGate(1).getCurrentState());
+    }
+
+    @Test
+    void stateListenerFiresOnceWhenAGateIsCachedOrReCached() {
+        GateManager manager = new GateManager();
+        List<Integer> fired = new ArrayList<>();
+        manager.addStateListener(fired::add);
+
+        manager.cacheGate(closedGateWithOneBlock(1));
+        manager.cacheGate(closedGateWithOneBlockAt(1, new Vector(200, 64, 200)));
+        manager.cacheGate(null);
+
+        assertEquals(List.of(1, 1), fired);
+    }
+
+    @Test
+    void theOneShotCompletionCallbackStillFiresOnceAndIsRemoved() {
+        GateManager manager = new GateManager();
+        manager.cacheGate(closedGateWithOneBlock(1));
+        List<AnimationState> callbackStates = new ArrayList<>();
+        List<Integer> listenerFired = new ArrayList<>();
+        manager.setAnimationCompletionCallback(1, callbackStates::add);
+        manager.addStateListener(listenerFired::add);
+
+        manager.notifyAnimationCompleted(1, AnimationState.CLOSED);
+        manager.notifyAnimationCompleted(1, AnimationState.OPEN);
+
+        assertEquals(List.of(AnimationState.CLOSED), callbackStates, "one-shot: consumed by the first completion");
+        assertEquals(List.of(1, 1), listenerFired, "multicast: every completion");
+    }
+
+    @Test
+    void removedStateListenerNoLongerFiresAndDuplicatesRegisterOnce() {
+        GateManager manager = new GateManager();
+        manager.cacheGate(closedGateWithOneBlock(1));
+        List<Integer> fired = new ArrayList<>();
+        GateStateListener listener = fired::add;
+        manager.addStateListener(listener);
+        manager.addStateListener(listener);
+
+        manager.fireStateChanged(1);
+        manager.removeStateListener(listener);
+        manager.fireStateChanged(1);
+
+        assertEquals(List.of(1), fired);
+    }
+
+    @Test
+    void aThrowingStateListenerDoesNotStopTheOthers() {
+        GateManager manager = new GateManager();
+        manager.cacheGate(closedGateWithOneBlock(1));
+        List<Integer> fired = new ArrayList<>();
+        manager.addStateListener(id -> {
+            throw new IllegalStateException("boom");
+        });
+        manager.addStateListener(fired::add);
+
+        assertDoesNotThrow(() -> manager.forceGateState(1, false));
+
+        assertEquals(List.of(1), fired);
     }
 
     private static CachedGateDoor closedGateWithOneBlock(int id) {
