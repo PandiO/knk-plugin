@@ -320,15 +320,27 @@ lootboxes:
     max-attempts-per-tick: 4       # random columns tried per area per try; ungenerated chunks are skipped
     forbidden-ground: [WATER, LAVA, MAGMA_BLOCK, CACTUS, POWDER_SNOW]
   display:
+    # What a world box looks like: token = the token item you pick up by clicking it (token.material below);
+    # type = the type's display material from the web app (its category icon).
+    model: token
     label: true                    # floating "<colour><Grade> <Category> Lootbox ★★★" label
     rotate: true
     particles-radius: 15           # gold particles + a quiet chime every 4 s to players this close (0 = off)
     grade-colors: { "1": "&9", "2": "&9", "3": "&b", "4": "&b", "5": "&d", "6": "&6", "7": "&6", "8": "&c", "9": "&c", "10": "&4" }
-  # Lootbox token items (right-click to open; issued by /knk lootbox token, premium tiers and kits). An item is a token
-  # only by its knightsandkings:knk_lootbox_token tag, never by material or name. Pick something that isn't a fuel,
-  # a crafting ingredient or otherwise usable; placing and crafting with a token are blocked anyway.
+  # Lootbox token items (right-click to open; picked up from world boxes, issued by /knk lootbox token, premium tiers
+  # and kits). An item is a token only by its knightsandkings:knk_lootbox_token tag, never by material or name. Pick
+  # something that isn't a fuel, a crafting ingredient or otherwise usable; placing and crafting with a token are
+  # blocked anyway.
   token:
     material: ENDER_CHEST
+  # Opening a token (right-click): a "wheel of fortune" menu whose middle row slows down and stops on the item the API
+  # already rolled; the item goes into the inventory when it stops (or at once when the menu is closed early).
+  opening:
+    style: wheel                   # wheel | instant (give the item straight away)
+    reel-steps: 32                 # items that scroll past the marker
+    slowest-step-ticks: 8          # the last step's delay; the reel starts at 1 tick per step and eases out
+    show-result-ticks: 50          # how long the menu stays open on the result
+    public-effects: true           # particles and sounds at the player that others nearby see and hear
 cache:
   # Global time-to-live for cached API responses (in seconds)
   # After this duration, cached data is considered stale and will be refetched

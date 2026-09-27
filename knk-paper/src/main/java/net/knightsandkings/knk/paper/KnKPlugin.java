@@ -183,6 +183,7 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.commands.LootboxAdminCommand lootboxAdminCommand;
     private net.knightsandkings.knk.paper.commands.LootboxCommand lootboxCommand;
     private net.knightsandkings.knk.paper.lootbox.LootboxTokenDelivery lootboxTokenDelivery;
+    private net.knightsandkings.knk.paper.lootbox.LootboxOpening lootboxOpening;
     private net.knightsandkings.knk.paper.discovery.DiscoveryEligibility discoveryEligibility;
     private net.knightsandkings.knk.paper.discovery.DiscoveryFlushTask discoveryFlushTask;
     private net.knightsandkings.knk.core.discovery.DiscoveryTracker discoveryTracker;
@@ -904,6 +905,9 @@ public class KnKPlugin extends JavaPlugin {
         if (salaryPayoutScheduler != null) {
             salaryPayoutScheduler.stop();
         }
+        if (lootboxOpening != null) {
+            lootboxOpening.finishAll(); // items on a spinning reel are handed over before the stop
+        }
         if (lootboxSpawnScheduler != null) {
             lootboxSpawnScheduler.stop();
         }
@@ -1353,6 +1357,9 @@ public class KnKPlugin extends JavaPlugin {
             java.time.Clock clock = java.time.Clock.systemUTC();
             java.util.function.BiPredicate<org.bukkit.entity.Player, String> permission =
                 (player, node) -> knkPermissible.hasPermission(player, node);
+            // Asked before refusing when nothing is cached yet (a first click right after joining).
+            java.util.function.BiFunction<org.bukkit.entity.Player, String, java.util.concurrent.CompletableFuture<Boolean>> freshPermission =
+                (player, node) -> knkPermissible.hasPermissionAsync(player, node);
             java.util.function.Function<org.bukkit.entity.Player, Integer> userIdOf = player -> cacheManager.getUserCache()
                 .getStale(player.getUniqueId()).map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null);
             // Siege (hub or match): the player's inventory is the siege one and is replaced afterwards, so no claims,
@@ -1376,18 +1383,23 @@ public class KnKPlugin extends JavaPlugin {
                 this::siegeArenaRegionIds);
 
             var pluginManager = getServer().getPluginManager();
+            // Phase 5: lootbox token items (open, hand over, keep out of placing/crafting). A world box is picked up
+            // as one (smoke test 2026-09-27, DESIGN.md §3.8) and every token opens on the reel (§3.9).
+            var tokenDelivery = new net.knightsandkings.knk.paper.lootbox.LootboxTokenDelivery(
+                mainThread, queryApi, commandApi, runtime::settings, userIdOf);
+            var opening = new net.knightsandkings.knk.paper.lootbox.LootboxOpening(
+                this, delivery, announcer, queryApi, runtime::settings, runtime::config,
+                () -> java.util.concurrent.ThreadLocalRandom.current().nextDouble());
+            pluginManager.registerEvents(opening, this);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxInteractListener(
-                runtime, new net.knightsandkings.knk.core.lootbox.ClaimGuard(), commandApi, delivery, announcer,
-                permission, modeService::getActiveMode, inSiege, userIdOf, mainThread), this);
+                runtime, new net.knightsandkings.knk.core.lootbox.ClaimGuard(), commandApi, tokenDelivery, announcer,
+                permission, freshPermission, modeService::getActiveMode, inSiege, userIdOf, mainThread), this);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxChunkListener(runtime), this);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxJoinListener(
                 this, queryApi, delivery, userIdOf, mainThread), this);
-            // Phase 5: lootbox token items (open, hand over, keep out of placing/crafting).
-            var tokenDelivery = new net.knightsandkings.knk.paper.lootbox.LootboxTokenDelivery(
-                mainThread, queryApi, commandApi, runtime::settings, userIdOf);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxTokenListener(
-                this, runtime, new net.knightsandkings.knk.core.lootbox.TokenOpenGuard(), commandApi, delivery, tokenDelivery,
-                announcer, permission, modeService::getActiveMode, inSiege, userIdOf, mainThread), this);
+                this, runtime, new net.knightsandkings.knk.core.lootbox.TokenOpenGuard(), commandApi, opening, tokenDelivery,
+                permission, freshPermission, modeService::getActiveMode, inSiege, userIdOf, mainThread), this);
             if (playerNotificationPoller != null) {
                 // Held back during a siege; the next join or LootboxTokensIssued notification hands them over.
                 playerNotificationPoller.setLootboxTokensHandler(player -> {
@@ -1395,6 +1407,11 @@ public class KnKPlugin extends JavaPlugin {
                         tokenDelivery.deliverUndelivered(player);
                     }
                 });
+                // Web despawns / area deletes and token revokes, applied within seconds (DESIGN.md §3.9).
+                var worldSync = new net.knightsandkings.knk.paper.lootbox.LootboxWorldSync(
+                    runtime::gone, org.bukkit.Bukkit::getOnlinePlayers);
+                playerNotificationPoller.setServerNotificationHandler(
+                    net.knightsandkings.knk.core.domain.users.PlayerNotification.TYPE_LOOTBOX_WORLD_CHANGED, worldSync::handle);
             }
 
             var areaCommand = new net.knightsandkings.knk.paper.commands.LootboxAreaCommand(
@@ -1406,19 +1423,25 @@ public class KnKPlugin extends JavaPlugin {
                 () -> {
                     reloadConfig();
                     runtime.reloadSettings();
+                    opening.clearCaches();
                     scheduler.start();
                 },
                 mainThread,
                 tokenDelivery,
                 inSiege);
+            this.lootboxAdminCommand.setOpening(opening);
+            this.lootboxAdminCommand.setOnlinePlayerNames(() -> org.bukkit.Bukkit.getOnlinePlayers().stream()
+                .map(org.bukkit.entity.Player::getName).sorted(String.CASE_INSENSITIVE_ORDER).toList());
             this.lootboxCommand = new net.knightsandkings.knk.paper.commands.LootboxCommand(
                 runtime::config, queryApi, permission, mainThread);
+            this.lootboxCommand.setFreshPermission(freshPermission);
 
             runtime.start();
             scheduler.start();
             this.lootboxRuntime = runtime;
             this.lootboxSpawnScheduler = scheduler;
             this.lootboxTokenDelivery = tokenDelivery;
+            this.lootboxOpening = opening;
             getLogger().info("Lootboxes initialized (enabled=" + runtime.settings().enabled() + ")");
         } catch (Exception e) {
             getLogger().log(java.util.logging.Level.SEVERE, "Lootboxes failed to initialize; they stay off", e);

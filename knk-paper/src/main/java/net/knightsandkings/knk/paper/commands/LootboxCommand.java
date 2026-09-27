@@ -16,7 +16,9 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.function.BiFunction;
 import java.util.function.BiPredicate;
 import java.util.function.Supplier;
 import java.util.logging.Logger;
@@ -36,6 +38,8 @@ public final class LootboxCommand implements TabExecutor {
     private final LootboxesQueryApi queryApi;
     private final BiPredicate<Player, String> permission;
     private final Executor mainThread;
+    // Asked when the cached check says no (nothing cached yet, e.g. right after joining); null = trust the cache.
+    private BiFunction<Player, String, CompletableFuture<Boolean>> freshPermission;
 
     public LootboxCommand(Supplier<KnkLootboxRuntimeConfig> config, LootboxesQueryApi queryApi,
                           BiPredicate<Player, String> permission, Executor mainThread) {
@@ -43,6 +47,11 @@ public final class LootboxCommand implements TabExecutor {
         this.queryApi = queryApi;
         this.permission = permission;
         this.mainThread = mainThread;
+    }
+
+    /** A fresh (API) permission check used before refusing on a cold cache (smoke test 2026-09-27, G1). */
+    public void setFreshPermission(BiFunction<Player, String, CompletableFuture<Boolean>> freshPermission) {
+        this.freshPermission = freshPermission;
     }
 
     @Override
@@ -75,9 +84,26 @@ public final class LootboxCommand implements TabExecutor {
 
     private void odds(Player player, String[] args) {
         if (!permission.test(player, ODDS_NODE)) {
-            player.sendMessage(ChatColor.RED + "You don't have permission to do that.");
+            if (freshPermission == null) {
+                player.sendMessage(ChatColor.RED + "You don't have permission to do that.");
+                return;
+            }
+            freshPermission.apply(player, ODDS_NODE).whenComplete((allowed, ex) -> mainThread.execute(() -> {
+                if (!player.isOnline()) {
+                    return;
+                }
+                if (ex == null && Boolean.TRUE.equals(allowed)) {
+                    showOdds(player, args);
+                } else {
+                    player.sendMessage(ChatColor.RED + "You don't have permission to do that.");
+                }
+            }));
             return;
         }
+        showOdds(player, args);
+    }
+
+    private void showOdds(Player player, String[] args) {
         if (args.length == 0) {
             player.sendMessage(ChatColor.YELLOW + "Usage: /lootbox odds <category> [stars]");
             return;

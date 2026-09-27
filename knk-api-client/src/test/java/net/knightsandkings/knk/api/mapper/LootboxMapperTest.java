@@ -159,4 +159,62 @@ public class LootboxMapperTest {
         assertEquals(9, token.issuedToUserId());
         assertEquals("Legendary Weapons Lootbox", token.boxLabel());
     }
+
+    @Test
+    void aPickupResult_carriesTheTokenItem() throws Exception {
+        String json = """
+                {"replay": false, "spawnId": 12, "lootboxToken": {"id": 70, "token": "00000000-0000-0000-0000-0000000070ce",
+                 "lootboxTypeId": 3, "lootboxTypeName": "Weapons Lootbox", "categoryName": "Weapons", "boxStars": 5,
+                 "boxLabel": "Legendary Weapons Lootbox", "status": "Issued", "reason": "WorldPickup", "issuedToUserId": 9,
+                 "sourceSpawnId": 12}}
+                """;
+
+        var pickup = LootboxMapper.toCore(mapper.readValue(json, LootboxDtos.PickupResultDto.class));
+
+        assertFalse(pickup.replay());
+        assertEquals(12, pickup.spawnId());
+        assertEquals(UUID.fromString("00000000-0000-0000-0000-0000000070ce"), pickup.token().token());
+        assertEquals(KnkLootboxToken.REASON_WORLD_PICKUP, pickup.token().reason());
+        assertEquals(5, pickup.token().boxStars());
+    }
+
+    @Test
+    void tokenStatuses_mapByToken() throws Exception {
+        String json = """
+                [{"token": "00000000-0000-0000-0000-0000000000a1", "status": "Revoked"},
+                 {"token": "00000000-0000-0000-0000-0000000000a2", "status": "Issued"}]
+                """;
+
+        var statuses = LootboxMapper.toStatuses(mapper.readValue(json, new TypeReference<List<LootboxDtos.TokenStatusDto>>() {}));
+
+        assertEquals("Revoked", statuses.get(UUID.fromString("00000000-0000-0000-0000-0000000000a1")));
+        assertEquals("Issued", statuses.get(UUID.fromString("00000000-0000-0000-0000-0000000000a2")));
+    }
+
+    @Test
+    void aWorldChangedNotification_mapsItsPayload() throws Exception {
+        String json = """
+                {"id": 5, "userId": 0, "uuid": null, "username": "", "type": "LootboxWorldChanged",
+                 "lootboxWorldChanged": {"removedSpawnIds": [12, 13], "revokedTokens": ["00000000-0000-0000-0000-0000000000a1"]}}
+                """;
+
+        var notification = UsersMapper.mapPlayerNotification(mapper.readValue(json, net.knightsandkings.knk.api.dto.PlayerNotificationDto.class));
+
+        assertEquals(List.of(12, 13), notification.lootboxWorldChanged().removedSpawnIds());
+        assertEquals(List.of(UUID.fromString("00000000-0000-0000-0000-0000000000a1")), notification.lootboxWorldChanged().revokedTokens());
+    }
+
+    @Test
+    void oddsItems_carryTheirBlueprintIds() throws Exception {
+        String json = """
+                {"lootboxTypeId": 3, "lootboxTypeName": "Weapons Lootbox", "boxStars": 5, "normalRollPercent": 99.5,
+                 "itemGrades": [], "items": [{"itemBlueprintId": 77, "name": "Golemheart Sword", "stars": 5, "percent": 18.7}],
+                 "specials": [{"itemBlueprintId": 90, "name": "Flaming Samurai", "percent": 0.05}]}
+                """;
+
+        var odds = LootboxMapper.toCore(mapper.readValue(json, LootboxDtos.OddsDto.class));
+
+        assertEquals(77, odds.items().get(0).itemBlueprintId());
+        assertEquals(90, odds.specials().get(0).itemBlueprintId());
+    }
 }

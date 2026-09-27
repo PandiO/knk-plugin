@@ -7,16 +7,21 @@ import net.knightsandkings.knk.core.lootbox.KnkLootboxClaimEnchantment;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxClaimResult;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxGrade;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxOdds;
+import net.knightsandkings.knk.core.lootbox.KnkLootboxPickup;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxRuntimeConfig;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxSpawn;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxToken;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxType;
+import net.knightsandkings.knk.core.lootbox.KnkLootboxWorldChange;
 
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.function.Function;
 
 /** Lootbox runtime DTOs to the knk-core records (docs/specs/lootboxes/DESIGN.md §3.3). Null-safe on lists. */
@@ -100,6 +105,30 @@ public final class LootboxMapper {
                 dto.boxStars(), dto.boxLabel(), dto.status(), dto.reason(), dto.issuedToUserId());
     }
 
+    public static KnkLootboxPickup toCore(LootboxDtos.PickupResultDto dto) {
+        if (dto == null || dto.lootboxToken() == null) {
+            return null;
+        }
+        return new KnkLootboxPickup(dto.replay(), dto.spawnId(), toCore(dto.lootboxToken()));
+    }
+
+    public static KnkLootboxWorldChange toCore(LootboxDtos.WorldChangedNotificationDto dto) {
+        return dto == null ? null : new KnkLootboxWorldChange(dto.removedSpawnIds(), dto.revokedTokens());
+    }
+
+    /** Token → status; entries without a token are dropped. */
+    public static Map<UUID, String> toStatuses(List<LootboxDtos.TokenStatusDto> dtos) {
+        Map<UUID, String> statuses = new LinkedHashMap<>();
+        if (dtos != null) {
+            for (LootboxDtos.TokenStatusDto dto : dtos) {
+                if (dto != null && dto.token() != null) {
+                    statuses.put(dto.token(), dto.status());
+                }
+            }
+        }
+        return statuses;
+    }
+
     public static List<KnkLootboxToken> toTokens(List<LootboxDtos.TokenDto> dtos) {
         return map(dtos, LootboxMapper::toCore);
     }
@@ -117,8 +146,8 @@ public final class LootboxMapper {
         }
         return new KnkLootboxOdds(dto.lootboxTypeId(), dto.lootboxTypeName(), dto.boxStars(), dto.normalRollPercent(),
                 map(dto.itemGrades(), g -> new KnkLootboxOdds.Grade(g.name(), g.stars(), g.percent(), g.itemCount())),
-                map(dto.items(), i -> new KnkLootboxOdds.Item(i.name(), i.stars(), i.percent())),
-                map(dto.specials(), s -> new KnkLootboxOdds.Special(s.name(), s.percent())));
+                map(dto.items(), i -> new KnkLootboxOdds.Item(i.name(), i.stars(), i.percent(), i.itemBlueprintId())),
+                map(dto.specials(), s -> new KnkLootboxOdds.Special(s.name(), s.percent(), s.itemBlueprintId())));
     }
 
     static List<String> splitCsv(String csv) {

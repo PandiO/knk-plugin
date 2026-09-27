@@ -21,6 +21,9 @@ import java.util.stream.Collectors;
  * @param gradeColors         box stars → legacy colour code for the label
  * @param tokenMaterial       material name of lootbox token items (Phase 5); not a fuel, a crafting ingredient or
  *                            anything usable, and its identity is the PDC token, never the material or name
+ * @param tokenModel          {@code display.model: token} shows a world box as the token item it becomes when picked
+ *                            up (DESIGN.md §3.8); {@code type} shows the type's display material (its category icon)
+ * @param opening             how a token opens (DESIGN.md §3.9)
  */
 public record LootboxSettings(
         boolean enabled,
@@ -36,8 +39,19 @@ public record LootboxSettings(
         boolean rotate,
         int particlesRadius,
         Map<Integer, String> gradeColors,
-        String tokenMaterial
+        String tokenMaterial,
+        boolean tokenModel,
+        Opening opening
 ) {
+    /**
+     * {@code opening:} - {@code style: wheel} spins a reel in a chest menu that stops on the rolled item (the item
+     * goes into the inventory when it stops, or at once when the menu is closed early); {@code instant} gives it
+     * straight away. {@code publicEffects}: particles and sounds at the player that others nearby see and hear.
+     */
+    public record Opening(boolean wheel, int reelSteps, int slowestStepTicks, int showResultTicks, boolean publicEffects) {
+        public static final Opening DEFAULT = new Opening(true, 32, 8, 50, true);
+    }
+
     public static final String DEFAULT_TOKEN_MATERIAL = "ENDER_CHEST";
     static final List<String> DEFAULT_FORBIDDEN_GROUND = List.of("WATER", "LAVA", "MAGMA_BLOCK", "CACTUS", "POWDER_SNOW");
 
@@ -48,6 +62,7 @@ public record LootboxSettings(
         forbiddenGround = forbiddenGround == null ? Set.of() : Set.copyOf(forbiddenGround);
         gradeColors = gradeColors == null ? Map.of() : Map.copyOf(gradeColors);
         tokenMaterial = tokenMaterial == null || tokenMaterial.isBlank() ? DEFAULT_TOKEN_MATERIAL : tokenMaterial.trim().toUpperCase(Locale.ROOT);
+        opening = opening == null ? Opening.DEFAULT : opening;
     }
 
     public static LootboxSettings defaults() {
@@ -58,7 +73,7 @@ public record LootboxSettings(
     public static LootboxSettings from(ConfigurationSection section) {
         if (section == null) {
             return new LootboxSettings(true, "default", 60, 20, 5, true, false, 4,
-                    Set.copyOf(DEFAULT_FORBIDDEN_GROUND), true, true, 15, DEFAULT_GRADE_COLORS, DEFAULT_TOKEN_MATERIAL);
+                    Set.copyOf(DEFAULT_FORBIDDEN_GROUND), true, true, 15, DEFAULT_GRADE_COLORS, DEFAULT_TOKEN_MATERIAL, true, Opening.DEFAULT);
         }
 
         List<String> ground = section.isList("surface.forbidden-ground")
@@ -93,7 +108,14 @@ public record LootboxSettings(
                 section.getBoolean("display.rotate", true),
                 Math.max(0, section.getInt("display.particles-radius", 15)),
                 colors,
-                section.getString("token.material", DEFAULT_TOKEN_MATERIAL));
+                section.getString("token.material", DEFAULT_TOKEN_MATERIAL),
+                !"type".equalsIgnoreCase(section.getString("display.model", "token").trim()),
+                new Opening(
+                        !"instant".equalsIgnoreCase(section.getString("opening.style", "wheel").trim()),
+                        Math.max(5, Math.min(200, section.getInt("opening.reel-steps", Opening.DEFAULT.reelSteps()))),
+                        Math.max(1, Math.min(40, section.getInt("opening.slowest-step-ticks", Opening.DEFAULT.slowestStepTicks()))),
+                        Math.max(0, Math.min(200, section.getInt("opening.show-result-ticks", Opening.DEFAULT.showResultTicks()))),
+                        section.getBoolean("opening.public-effects", Opening.DEFAULT.publicEffects())));
     }
 
     /** The label colour for a box of {@code stars} (white when unconfigured). */

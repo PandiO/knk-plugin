@@ -73,4 +73,9 @@ public record KnkLootboxRuntimeConfig(
     private static String normalize(String value) {
         return value == null ? "" : value.trim().replace('_', ' ').toLowerCase(Locale.ROOT);
     }
+
+    /** The highest box grade the API knows (its Grade table, ★10 today); 5 when the config lists no grades. */
+    public int maxBoxStars() {
+        return grades.stream().mapToInt(KnkLootboxGrade::stars).max().orElse(5);
+    }
 }

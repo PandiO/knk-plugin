@@ -12,6 +12,10 @@ public final class LootboxMessages {
 
     public static final String INVENTORY_FULL = ChatColor.RED + "Your inventory is full — make room to open this lootbox.";
     public static final String STUCK = ChatColor.RED + "The lootbox is stuck — try again in a moment.";
+    /** The box was opened (its result is stored) but the item couldn't be handed over now. */
+    public static final String STUCK_ITEM = ChatColor.YELLOW + "Your lootbox item couldn't be handed over right now - it arrives when you next join.";
+    public static final String TOKEN_REVOKED_REMOVED = ChatColor.RED + "A lootbox you held was revoked by staff and has been removed.";
+    public static final String TOKEN_OPENED_ELSEWHERE_REMOVED = ChatColor.RED + "A copy of a lootbox that was already opened has crumbled away.";
     public static final String TOO_FAR = ChatColor.RED + "Get closer to open this lootbox.";
     public static final String NO_LINE_OF_SIGHT = ChatColor.RED + "You can't reach this lootbox from there.";
     public static final String NO_PERMISSION = ChatColor.RED + "You can't open lootboxes.";
@@ -31,7 +35,8 @@ public final class LootboxMessages {
         if (rejected.isDailyLimit()) {
             String count = rejected.limit() != null ? String.valueOf(rejected.limit()) : "your";
             boolean perType = LootboxRejectedException.SCOPE_TYPE.equalsIgnoreCase(rejected.scope());
-            return ChatColor.RED + "You've opened " + count + " " + (perType && categoryName != null ? categoryName + " " : "")
+            return ChatColor.RED + "You've " + (rejected.isPickupLimit() ? "picked up " : "opened ") + count + " "
+                    + (perType && categoryName != null ? categoryName + " " : "")
                     + "lootboxes today — the limit resets at 00:00 UTC.";
         }
         String code = rejected.code() == null ? "" : rejected.code();

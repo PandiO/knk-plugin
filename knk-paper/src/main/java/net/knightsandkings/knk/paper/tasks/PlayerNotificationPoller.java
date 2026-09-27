@@ -60,6 +60,8 @@ public class PlayerNotificationPoller {
     private volatile BiConsumer<Player, PlayerNotification> paymentReceivedHandler;
     // Currency anomaly alerts for online staff (currency Phase 5); not addressed to one player.
     private volatile Consumer<PlayerNotification> currencyAlertHandler;
+    // Other notifications for the game server itself (userId 0), by type: e.g. LootboxWorldChanged.
+    private final java.util.Map<String, Consumer<PlayerNotification>> serverHandlers = new ConcurrentHashMap<>();
     // A discovery reset made outside the plugin's own command (domain discovery, KNG-20).
     private volatile Consumer<Player> discoveryResetHandler;
 
@@ -105,6 +107,19 @@ public class PlayerNotificationPoller {
      */
     public void setCurrencyAlertHandler(Consumer<PlayerNotification> handler) {
         this.currencyAlertHandler = handler;
+    }
+
+    /**
+     * What to do for a notification of {@code type} addressed to the game server rather than a player (userId 0,
+     * e.g. {@link PlayerNotification#TYPE_LOOTBOX_WORLD_CHANGED}). Handed over as soon as anyone is online; without a
+     * handler it stays queued.
+     */
+    public void setServerNotificationHandler(String type, Consumer<PlayerNotification> handler) {
+        if (handler == null) {
+            serverHandlers.remove(type);
+        } else {
+            serverHandlers.put(type, handler);
+        }
     }
 
     public void start() {
@@ -164,6 +179,17 @@ public class PlayerNotificationPoller {
                     handler.accept(notification);
                 } catch (RuntimeException e) {
                     LOGGER.warning("Failed to show currency alert notification " + notification.id() + ": " + e.getMessage());
+                }
+                shownIds.add(notification.id());
+                toAcknowledge.add(notification.id());
+                continue;
+            }
+            Consumer<PlayerNotification> serverHandler = serverHandlers.get(notification.type());
+            if (serverHandler != null) {
+                try {
+                    serverHandler.accept(notification);
+                } catch (RuntimeException e) {
+                    LOGGER.warning("Failed to apply server notification " + notification.id() + " (" + notification.type() + "): " + e.getMessage());
                 }
                 shownIds.add(notification.id());
                 toAcknowledge.add(notification.id());

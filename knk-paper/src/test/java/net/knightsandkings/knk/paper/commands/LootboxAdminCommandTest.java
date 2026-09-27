@@ -220,4 +220,15 @@ class LootboxAdminCommandTest {
 
         verify(api).adminGive(eq(42), eq(9), eq(3), eq(5), anyString());
     }
+
+    @Test
+    void tabComplete_suggestsOnlinePlayersForGiveAndToken() {
+        granted.add("knk.lootbox.admin.give");
+        granted.add("knk.lootbox.admin.token");
+        command.setOnlinePlayerNames(() -> List.of("Alex", "Steve", "steveo"));
+
+        assertEquals(List.of("Steve", "steveo"), command.tabComplete(admin, new String[]{"give", "st"}));
+        assertEquals(List.of("Alex", "Steve", "steveo"), command.tabComplete(admin, new String[]{"token", ""}));
+        assertEquals(List.of("weapons"), command.tabComplete(admin, new String[]{"give", "Steve", "w"}));
+    }
 }

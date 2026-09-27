@@ -209,6 +209,34 @@ public final class LootboxDtos {
     ) {
     }
 
+    // ===== POST api/LootboxSpawns/{id}/pickup (DESIGN.md §3.8) =====
+
+    public record PickupRequestDto(
+            @JsonProperty("token") UUID token,
+            @JsonProperty("userId") int userId
+    ) {
+    }
+
+    public record PickupResultDto(
+            @JsonProperty("replay") boolean replay,
+            @JsonProperty("spawnId") int spawnId,
+            @JsonProperty("lootboxToken") TokenDto lootboxToken
+    ) {
+    }
+
+    // ===== POST api/LootboxTokens/status =====
+
+    public record TokenStatusRequestDto(
+            @JsonProperty("tokens") List<UUID> tokens
+    ) {
+    }
+
+    public record TokenStatusDto(
+            @JsonProperty("token") UUID token,
+            @JsonProperty("status") String status
+    ) {
+    }
+
     public record TokensDeliveredRequestDto(
             @JsonProperty("userId") int userId,
             @JsonProperty("tokens") List<UUID> tokens
@@ -273,6 +301,7 @@ public final class LootboxDtos {
     }
 
     public record ItemOddsDto(
+            @JsonProperty("itemBlueprintId") Integer itemBlueprintId,
             @JsonProperty("name") String name,
             @JsonProperty("stars") int stars,
             @JsonProperty("percent") double percent
@@ -280,8 +309,17 @@ public final class LootboxDtos {
     }
 
     public record SpecialOddsDto(
+            @JsonProperty("itemBlueprintId") Integer itemBlueprintId,
             @JsonProperty("name") String name,
             @JsonProperty("percent") double percent
+    ) {
+    }
+
+    // ===== LootboxWorldChanged player notification payload (DESIGN.md §3.9) =====
+
+    public record WorldChangedNotificationDto(
+            @JsonProperty("removedSpawnIds") List<Integer> removedSpawnIds,
+            @JsonProperty("revokedTokens") List<UUID> revokedTokens
     ) {
     }
 

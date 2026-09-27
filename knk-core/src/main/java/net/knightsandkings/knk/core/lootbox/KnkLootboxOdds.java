@@ -24,9 +24,16 @@ public record KnkLootboxOdds(
     public record Grade(String name, int stars, double percent, Integer itemCount) {
     }
 
-    public record Item(String name, int stars, double percent) {
+    /** {@code itemBlueprintId} lets the opening reel show the real item; null from older APIs. */
+    public record Item(String name, int stars, double percent, Integer itemBlueprintId) {
+        public Item(String name, int stars, double percent) {
+            this(name, stars, percent, null);
+        }
     }
 
-    public record Special(String name, double percent) {
+    public record Special(String name, double percent, Integer itemBlueprintId) {
+        public Special(String name, double percent) {
+            this(name, percent, null);
+        }
     }
 }

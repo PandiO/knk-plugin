@@ -3,6 +3,7 @@ package net.knightsandkings.knk.core.ports.api;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxArea;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxAreaDeleteResult;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxClaimResult;
+import net.knightsandkings.knk.core.lootbox.KnkLootboxPickup;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxSpawn;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxToken;
 import net.knightsandkings.knk.core.lootbox.LootboxDeliveryMethod;
@@ -32,6 +33,13 @@ public interface LootboxesCommandApi {
 
     /** {@code POST api/LootboxSpawns/{id}/claim}: rolls once; the same key replays the stored result. */
     CompletableFuture<KnkLootboxClaimResult> claim(int spawnId, UUID token, int userId, String idempotencyKey);
+
+    /**
+     * {@code POST api/LootboxSpawns/{id}/pickup} (DESIGN.md §3.8): the player takes the box as a token item. The same
+     * player again gets their token back ({@code replay}). 409 AlreadyClaimed|Expired|Removed|TokenMismatch|Disabled|
+     * Frozen|UserInactive; 429 DailyPickupLimit.
+     */
+    CompletableFuture<KnkLootboxPickup> pickup(int spawnId, UUID token, int userId);
 
     /** {@code POST api/LootboxClaims/{id}/delivered}: idempotent. */
     CompletableFuture<Void> markDelivered(int claimId, LootboxDeliveryMethod method, String note, Integer userId);

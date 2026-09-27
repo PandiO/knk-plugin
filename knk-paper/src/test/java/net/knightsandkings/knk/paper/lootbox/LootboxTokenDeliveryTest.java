@@ -122,4 +122,47 @@ class LootboxTokenDeliveryTest {
         verify(inventory).setItem(2, null);
         verify(inventory, never()).setItem(eq(1), any());
     }
+
+    @Test
+    void theJoinScan_removesRevokedAndOpenedCopies_andLeavesTheRest() {
+        UUID revoked = UUID.randomUUID();
+        UUID opened = UUID.randomUUID();
+        ItemStack live = token(held, 1);
+        ItemStack revokedCopy = token(revoked, 1);
+        ItemStack openedCopy = token(opened, 2);
+        ItemStack unknownCopy = token(fresh, 1);
+        when(inventory.getContents()).thenReturn(new ItemStack[]{live, revokedCopy, openedCopy});
+        when(enderChest.getContents()).thenReturn(new ItemStack[]{unknownCopy});
+        when(queryApi.getTokenStatuses(anyList())).thenReturn(CompletableFuture.completedFuture(java.util.Map.of(
+                held, "Issued", revoked, "Revoked", opened, "Redeemed", fresh, "Unknown")));
+
+        delivery.removeDeadCopies(player);
+
+        verify(inventory).setItem(1, null);
+        verify(inventory).setItem(2, null);
+        verify(inventory, never()).setItem(eq(0), any());
+        verify(enderChest, never()).setItem(anyInt(), any());
+        verify(player).sendMessage(org.mockito.ArgumentMatchers.contains("revoked by staff"));
+        verify(player).sendMessage(org.mockito.ArgumentMatchers.contains("already opened"));
+    }
+
+    @Test
+    void theJoinScan_withNoTokens_asksNothing() {
+        when(inventory.getContents()).thenReturn(new ItemStack[0]);
+
+        delivery.removeDeadCopies(player);
+
+        verify(queryApi, never()).getTokenStatuses(anyList());
+    }
+
+    @Test
+    void aRevokedToken_isAlsoTakenFromTheEnderChest() {
+        ItemStack stored = token(held, 1);
+        when(inventory.getContents()).thenReturn(new ItemStack[0]);
+        when(enderChest.getContents()).thenReturn(new ItemStack[]{stored});
+
+        assertTrue(LootboxTokenDelivery.removeDead(player, held, "Revoked"));
+
+        verify(enderChest).setItem(0, null);
+    }
 }

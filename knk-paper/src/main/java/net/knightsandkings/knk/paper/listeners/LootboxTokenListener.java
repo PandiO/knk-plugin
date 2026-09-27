@@ -5,9 +5,9 @@ import net.knightsandkings.knk.core.lootbox.KnkLootboxClaimResult;
 import net.knightsandkings.knk.core.lootbox.LootboxRejectedException;
 import net.knightsandkings.knk.core.lootbox.TokenOpenGuard;
 import net.knightsandkings.knk.core.ports.api.LootboxesCommandApi;
-import net.knightsandkings.knk.paper.lootbox.LootboxAnnouncer;
 import net.knightsandkings.knk.paper.lootbox.LootboxDelivery;
 import net.knightsandkings.knk.paper.lootbox.LootboxMessages;
+import net.knightsandkings.knk.paper.lootbox.LootboxOpening;
 import net.knightsandkings.knk.paper.lootbox.LootboxRuntime;
 import net.knightsandkings.knk.paper.lootbox.LootboxSettings;
 import net.knightsandkings.knk.paper.lootbox.LootboxTokenDelivery;
@@ -28,7 +28,9 @@ import org.bukkit.plugin.Plugin;
 
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.function.BiFunction;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -41,9 +43,11 @@ import java.util.logging.Logger;
  * so an anvil rename made a free box). Same checks as a world box: {@code knk.lootbox.open}, not in staff/owner mode or a siege,
  * a loaded account, room for the item (the token's own slot counts when it is the last one), and one open in flight per
  * token and player. The API consumes the token in the claim transaction; only after its 200 is one copy taken from the
- * inventory and the item delivered. A token the API reports as opened or revoked is dead: every copy is removed.
+ * inventory and the item shown on the opening reel and handed over ({@link LootboxOpening}, DESIGN.md §3.9). A token the
+ * API reports as opened or revoked is dead: every copy is removed.
  * <p>
- * Also keeps tokens out of block placement and crafting, and hands over undelivered tokens shortly after a join.
+ * Also keeps tokens out of block placement and crafting, and shortly after a join hands over undelivered tokens and
+ * removes held copies that were revoked or opened while the player was away (DESIGN.md §3.9).
  */
 public final class LootboxTokenListener implements Listener {
 
@@ -51,16 +55,17 @@ public final class LootboxTokenListener implements Listener {
     private static final long JOIN_DELAY_TICKS = 80L; // after LootboxJoinListener's pending claims
 
     /** Why a click did or didn't start an open (for tests). */
-    public enum Attempt { NOT_A_TOKEN, NO_PERMISSION, STAFF_MODE, IN_SIEGE, NO_ACCOUNT, INVENTORY_FULL, IN_FLIGHT, OPENING }
+    public enum Attempt { NOT_A_TOKEN, NO_PERMISSION, CHECKING_PERMISSION, STAFF_MODE, IN_SIEGE, NO_ACCOUNT, INVENTORY_FULL, IN_FLIGHT, OPENING }
 
     private final Plugin plugin;
     private final LootboxRuntime runtime;
     private final TokenOpenGuard guard;
     private final LootboxesCommandApi commandApi;
-    private final LootboxDelivery delivery;
+    private final LootboxOpening opening;
     private final LootboxTokenDelivery tokens;
-    private final LootboxAnnouncer announcer;
     private final BiPredicate<Player, String> permission;
+    // Asked when the cached check says no (nothing cached yet); null = trust the cache.
+    private final BiFunction<Player, String, CompletableFuture<Boolean>> freshPermission;
     private final Function<Player, ActiveMode> modeOf;
     private final Predicate<UUID> inSiege;
     private final Function<Player, Integer> userIdOf;
@@ -71,10 +76,10 @@ public final class LootboxTokenListener implements Listener {
             LootboxRuntime runtime,
             TokenOpenGuard guard,
             LootboxesCommandApi commandApi,
-            LootboxDelivery delivery,
+            LootboxOpening opening,
             LootboxTokenDelivery tokens,
-            LootboxAnnouncer announcer,
             BiPredicate<Player, String> permission,
+            BiFunction<Player, String, CompletableFuture<Boolean>> freshPermission,
             Function<Player, ActiveMode> modeOf,
             Predicate<UUID> inSiege,
             Function<Player, Integer> userIdOf,
@@ -84,10 +89,10 @@ public final class LootboxTokenListener implements Listener {
         this.runtime = runtime;
         this.guard = guard;
         this.commandApi = commandApi;
-        this.delivery = delivery;
+        this.opening = opening;
         this.tokens = tokens;
-        this.announcer = announcer;
         this.permission = permission;
+        this.freshPermission = freshPermission;
         this.modeOf = modeOf;
         this.inSiege = inSiege;
         this.userIdOf = userIdOf;
@@ -136,19 +141,37 @@ public final class LootboxTokenListener implements Listener {
             Player player = Bukkit.getPlayer(uuid);
             if (player != null) {
                 tokens.deliverUndelivered(player);
+                tokens.removeDeadCopies(player);
             }
         }, JOIN_DELAY_TICKS);
     }
 
     /** Main thread. Runs the checks and, when they pass, sends the redeem. */
     public Attempt attemptOpen(Player player, UUID token, ItemStack item) {
+        return attemptOpen(player, token, item, false);
+    }
+
+    private Attempt attemptOpen(Player player, UUID token, ItemStack item, boolean permissionChecked) {
         if (token == null) {
             return Attempt.NOT_A_TOKEN;
         }
         LootboxSettings settings = runtime.settings();
-        if (!permission.test(player, "knk.lootbox.open")) {
-            player.sendMessage(LootboxMessages.NO_PERMISSION);
-            return Attempt.NO_PERMISSION;
+        if (!permissionChecked && !permission.test(player, LootboxInteractListener.OPEN_NODE)) {
+            if (freshPermission == null) {
+                player.sendMessage(LootboxMessages.NO_PERMISSION);
+                return Attempt.NO_PERMISSION;
+            }
+            freshPermission.apply(player, LootboxInteractListener.OPEN_NODE).whenComplete((allowed, ex) -> mainThread.execute(() -> {
+                if (!player.isOnline()) {
+                    return;
+                }
+                if (ex == null && Boolean.TRUE.equals(allowed)) {
+                    attemptOpen(player, token, item, true);
+                } else {
+                    player.sendMessage(LootboxMessages.NO_PERMISSION);
+                }
+            }));
+            return Attempt.CHECKING_PERMISSION;
         }
         ActiveMode mode = modeOf.apply(player);
         if (!settings.staffModeCanClaim() && mode != null && mode != ActiveMode.NONE) {
@@ -196,13 +219,7 @@ public final class LootboxTokenListener implements Listener {
         if (claim == null || claim.isDelivered()) {
             return; // A replay of an open that already reached the player.
         }
-        delivery.deliver(player, claim, false).thenAccept(outcome -> {
-            if (outcome.given() && player.isOnline()) {
-                announcer.opened(player, claim, outcome.item(), runtime.settings(), runtime.config());
-            } else if (!outcome.given() && !outcome.alreadyHeld() && player.isOnline()) {
-                player.sendMessage(LootboxMessages.STUCK);
-            }
-        });
+        opening.open(player, claim, null);
     }
 
     private void onRejected(Player player, UUID token, Throwable ex) {

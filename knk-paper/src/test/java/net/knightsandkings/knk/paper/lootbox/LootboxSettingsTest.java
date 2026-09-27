@@ -55,4 +55,22 @@ class LootboxSettingsTest {
         assertEquals("&dLegendary Weapons Lootbox ★★★★★", LootboxSettings.defaults().coloredLabel("Legendary Weapons Lootbox", 5));
         assertEquals("&9Lootbox ★", LootboxSettings.defaults().coloredLabel(null, 1));
     }
+
+    @Test
+    void openingAndModel_defaultToTheWheelAndTheTokenLook_andCanBeChanged() {
+        LootboxSettings defaults = LootboxSettings.defaults();
+        assertEquals(LootboxSettings.Opening.DEFAULT, defaults.opening());
+        assertEquals(true, defaults.tokenModel());
+
+        MemoryConfiguration config = new MemoryConfiguration();
+        config.set("display.model", "type");
+        config.set("opening.style", "instant");
+        config.set("opening.reel-steps", 1000);
+        config.set("opening.slowest-step-ticks", 0);
+        config.set("opening.public-effects", false);
+        LootboxSettings changed = LootboxSettings.from(config);
+
+        assertEquals(false, changed.tokenModel());
+        assertEquals(new LootboxSettings.Opening(false, 200, 1, 50, false), changed.opening());
+    }
 }

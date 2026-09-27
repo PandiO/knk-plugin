@@ -9,14 +9,17 @@ import net.knightsandkings.knk.paper.mapper.LootboxTokenTag;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.ItemMeta;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -193,9 +196,19 @@ public final class LootboxTokenDelivery {
         return true;
     }
 
-    /** Main thread: removes every copy of a spent (opened elsewhere, revoked) token from the inventory; returns how many items. */
+    /**
+     * Main thread: removes every copy of a spent (opened elsewhere, revoked) token from the inventory and the ender
+     * chest; returns how many items.
+     */
     public static int removeAll(Player player, UUID token) {
-        PlayerInventory inventory = player.getInventory();
+        int removed = removeFrom(player.getInventory(), token);
+        if (player.getEnderChest() != null) {
+            removed += removeFrom(player.getEnderChest(), token);
+        }
+        return removed;
+    }
+
+    private static int removeFrom(Inventory inventory, UUID token) {
         ItemStack[] contents = inventory.getContents();
         int removed = 0;
         for (int i = 0; i < contents.length; i++) {
@@ -205,6 +218,60 @@ public final class LootboxTokenDelivery {
             }
         }
         return removed;
+    }
+
+    /** Every token id in the player's inventory and ender chest. */
+    public static Set<UUID> heldTokens(Player player) {
+        Set<UUID> held = new LinkedHashSet<>();
+        collect(player.getInventory().getContents(), held);
+        if (player.getEnderChest() != null) {
+            collect(player.getEnderChest().getContents(), held);
+        }
+        return held;
+    }
+
+    private static void collect(ItemStack[] contents, Set<UUID> into) {
+        for (ItemStack item : contents) {
+            LootboxTokenTag.read(item).ifPresent(into::add);
+        }
+    }
+
+    /**
+     * Main thread: the join scan (DESIGN.md §3.9). Asks the API about every token the player holds and removes the
+     * revoked ones and copies of ones already opened, telling the player. A token the API doesn't know is left alone
+     * (a misconfigured API must not eat items); an unreachable API changes nothing.
+     */
+    public void removeDeadCopies(Player player) {
+        Set<UUID> held = heldTokens(player);
+        if (held.isEmpty()) {
+            return;
+        }
+        queryApi.getTokenStatuses(List.copyOf(held)).whenComplete((statuses, ex) -> mainThread.execute(() -> {
+            if (ex != null || statuses == null || !player.isOnline()) {
+                if (ex != null) {
+                    LOGGER.warning("Could not check " + player.getName() + "'s lootbox tokens: " + LootboxRejectedException.unwrap(ex).getMessage());
+                }
+                return;
+            }
+            for (Map.Entry<UUID, String> entry : statuses.entrySet()) {
+                removeDead(player, entry.getKey(), entry.getValue());
+            }
+        }));
+    }
+
+    /** Main thread: removes {@code token}'s copies when {@code status} says it is dead; true when something was removed. */
+    public static boolean removeDead(Player player, UUID token, String status) {
+        boolean revoked = KnkLootboxToken.STATUS_REVOKED.equalsIgnoreCase(status);
+        boolean opened = KnkLootboxToken.STATUS_REDEEMED.equalsIgnoreCase(status);
+        if (!revoked && !opened) {
+            return false;
+        }
+        int removed = removeAll(player, token);
+        if (removed > 0) {
+            player.sendMessage(revoked ? LootboxMessages.TOKEN_REVOKED_REMOVED : LootboxMessages.TOKEN_OPENED_ELSEWHERE_REMOVED);
+            LOGGER.info("Lootbox token " + token + " (" + status + "): removed " + removed + " copies from " + player.getName());
+        }
+        return removed > 0;
     }
 
     /** Confirms, retrying twice (10 s, 20 s); an unconfirmed token is fetched again on the next join and only confirmed. */

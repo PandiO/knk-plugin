@@ -114,7 +114,7 @@ public final class LootboxPresenter {
         String token = spawn.token().toString();
         Location base = new Location(world, spawn.x() + 0.5, spawn.y(), spawn.z() + 0.5);
 
-        ItemStack model = new ItemStack(displayMaterial(type));
+        ItemStack model = new ItemStack(displayMaterial(type, current));
         ItemDisplay display = world.spawn(base.clone().add(0, 0.5, 0), ItemDisplay.class, entity -> {
             tag(entity, token);
             entity.setItemStack(model);
@@ -226,7 +226,17 @@ public final class LootboxPresenter {
         entity.getPersistentDataContainer().set(TOKEN_KEY, PersistentDataType.STRING, token);
     }
 
-    private static Material displayMaterial(KnkLootboxType type) {
+    /**
+     * The box's model: by default the token item it turns into when picked up (DESIGN.md §3.8, {@code display.model:
+     * token}), else the type's display material (its category icon), else a chest.
+     */
+    static Material displayMaterial(KnkLootboxType type, LootboxSettings settings) {
+        if (settings != null && settings.tokenModel()) {
+            Material token = Material.matchMaterial(settings.tokenMaterial());
+            if (token != null && token.isItem() && !token.isAir()) {
+                return token;
+            }
+        }
         Material material = type == null || type.displayMaterialKey() == null ? null : Material.matchMaterial(type.displayMaterialKey());
         return material != null && material.isItem() && !material.isAir() ? material : Material.CHEST;
     }

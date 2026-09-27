@@ -119,29 +119,64 @@ public final class LootboxDelivery {
     }
 
     /**
+     * The claim's item, built and not handed over yet (the opening reel shows it first, DESIGN.md §3.9).
+     * {@code skipped} lists enchantments the item couldn't take (logged and sent as the delivery note).
+     */
+    public record Prepared(KnkLootboxClaimResult claim, ItemStack item, List<String> skipped) {
+        public Prepared {
+            skipped = skipped == null ? List.of() : List.copyOf(skipped);
+        }
+    }
+
+    /**
      * Builds, gives and confirms {@code claim} for {@code player}. The future completes on the main thread; with a
      * failed outcome (blueprint gone, player left) the claim stays unconfirmed and comes back through {@code pending}.
      */
     public CompletableFuture<Outcome> deliver(Player player, KnkLootboxClaimResult claim, boolean redelivery) {
-        CompletableFuture<Outcome> done = new CompletableFuture<>();
+        return prepare(claim).thenApply(prepared -> {
+            if (prepared == null) {
+                return Outcome.failed();
+            }
+            try {
+                return handOver(player, prepared, redelivery);
+            } catch (Exception e) {
+                LOGGER.log(Level.SEVERE, "Lootbox claim " + claim.claimId() + ": delivery failed; left for redelivery", e);
+                return Outcome.failed();
+            }
+        });
+    }
+
+    /**
+     * Resolves and builds the claim's item without giving it. Completes on the main thread; null when the blueprint
+     * can't be resolved (the claim stays unconfirmed and is redelivered on the next join).
+     */
+    public CompletableFuture<Prepared> prepare(KnkLootboxClaimResult claim) {
+        CompletableFuture<Prepared> done = new CompletableFuture<>();
         resolve(claim).whenComplete((resolved, ex) -> mainThread.execute(() -> {
             try {
                 if (ex != null || resolved == null) {
                     LOGGER.log(Level.SEVERE, "Lootbox claim " + claim.claimId() + ": could not resolve blueprint "
                             + claim.itemBlueprintId() + "; left for redelivery", ex);
-                    done.complete(Outcome.failed());
+                    done.complete(null);
                     return;
                 }
-                done.complete(giveNow(player, claim, resolved, redelivery));
+                List<String> skipped = new ArrayList<>();
+                ItemStack item = build(resolved.blueprint(), resolved.materialKey(), claim, resolved.definitions(), skipped);
+                done.complete(new Prepared(claim, item, skipped));
             } catch (Exception e) {
-                LOGGER.log(Level.SEVERE, "Lootbox claim " + claim.claimId() + ": delivery failed; left for redelivery", e);
-                done.complete(Outcome.failed());
+                LOGGER.log(Level.SEVERE, "Lootbox claim " + claim.claimId() + ": building the item failed; left for redelivery", e);
+                done.complete(null);
             }
         }));
         return done;
     }
 
-    private Outcome giveNow(Player player, KnkLootboxClaimResult claim, Resolved resolved, boolean redelivery) {
+    /**
+     * Main thread: gives a prepared item and confirms it, unless this server handed the claim over already or (a
+     * redelivery) the player still holds its instance. Failed when the player is offline.
+     */
+    public Outcome handOver(Player player, Prepared prepared, boolean redelivery) {
+        KnkLootboxClaimResult claim = prepared.claim();
         if (!player.isOnline()) {
             return Outcome.failed();
         }
@@ -158,20 +193,52 @@ public final class LootboxDelivery {
             return new Outcome(false, true, null, LootboxDeliveryMethod.REDELIVERED, List.of());
         }
 
-        List<String> skipped = new ArrayList<>();
-        ItemStack item = build(resolved.blueprint(), resolved.materialKey(), claim, resolved.definitions(), skipped);
+        ItemStack item = prepared.item().clone();
         ItemStack shown = item.clone();
         LootboxDeliveryMethod method = place(player, item, redelivery ? LootboxDeliveryMethod.REDELIVERED : LootboxDeliveryMethod.INVENTORY);
         handedOver.put(claim.claimId(), method);
 
         String note = null;
-        if (!skipped.isEmpty()) {
-            note = "enchantments the item couldn't take: " + String.join(", ", skipped);
+        if (!prepared.skipped().isEmpty()) {
+            note = "enchantments the item couldn't take: " + String.join(", ", prepared.skipped());
             LOGGER.warning("Lootbox claim " + claim.claimId() + " (blueprint " + claim.itemBlueprintId() + ", instance "
                     + claim.itemInstanceId() + "): " + note);
         }
         acknowledge(claim, method, note);
-        return new Outcome(true, false, shown, method, List.copyOf(skipped));
+        return new Outcome(true, false, shown, method, prepared.skipped());
+    }
+
+    /**
+     * A look-alike of a pool item for the opening reel: the blueprint's material, name, lore and grade line; no
+     * enchantments, no instance tag. Completes on the main thread; null when it can't be resolved.
+     */
+    public CompletableFuture<ItemStack> preview(int itemBlueprintId) {
+        CompletableFuture<ItemStack> done = new CompletableFuture<>();
+        blueprints.getByIdAsync(itemBlueprintId).thenCompose(result -> {
+            KnkItemBlueprint blueprint = result != null ? result.value().orElse(null) : null;
+            if (blueprint == null) {
+                return CompletableFuture.<Map.Entry<KnkItemBlueprint, String>>completedFuture(null);
+            }
+            return KitGrantPlacer.resolveMaterialNamespaceKey(blueprint, materials)
+                    .thenApply(key -> key == null || key.isBlank() ? null : Map.entry(blueprint, key));
+        }).whenComplete((resolved, ex) -> mainThread.execute(() -> {
+            if (ex != null || resolved == null) {
+                done.complete(null);
+                return;
+            }
+            try {
+                ItemStack item = assembler.build(resolved.getKey(), resolved.getValue());
+                done.complete(item);
+            } catch (Exception e) {
+                done.complete(null);
+            }
+        }));
+        return done;
+    }
+
+    /** Whether this server already gave the claim (a replay or pending read must not show a second reel). */
+    public boolean wasHandedOver(int claimId) {
+        return handedOver.containsKey(claimId);
     }
 
     /** Main thread: the built item, enchanted and tagged, with the claim's quantity. */

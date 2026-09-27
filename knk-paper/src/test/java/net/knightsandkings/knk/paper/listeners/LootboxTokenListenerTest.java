@@ -6,8 +6,7 @@ import net.knightsandkings.knk.core.lootbox.KnkLootboxRuntimeConfig;
 import net.knightsandkings.knk.core.lootbox.LootboxRejectedException;
 import net.knightsandkings.knk.core.lootbox.TokenOpenGuard;
 import net.knightsandkings.knk.core.ports.api.LootboxesCommandApi;
-import net.knightsandkings.knk.paper.lootbox.LootboxAnnouncer;
-import net.knightsandkings.knk.paper.lootbox.LootboxDelivery;
+import net.knightsandkings.knk.paper.lootbox.LootboxOpening;
 import net.knightsandkings.knk.paper.lootbox.LootboxRuntime;
 import net.knightsandkings.knk.paper.lootbox.LootboxSettings;
 import net.knightsandkings.knk.paper.lootbox.LootboxTokenDelivery;
@@ -49,7 +48,7 @@ class LootboxTokenListenerTest {
 
     private final LootboxRuntime runtime = mock(LootboxRuntime.class);
     private final LootboxesCommandApi api = mock(LootboxesCommandApi.class);
-    private final LootboxDelivery delivery = mock(LootboxDelivery.class);
+    private final LootboxOpening opening = mock(LootboxOpening.class);
     private final Player player = mock(Player.class);
     private final PlayerInventory inventory = mock(PlayerInventory.class);
     private final UUID playerId = UUID.randomUUID();
@@ -73,9 +72,8 @@ class LootboxTokenListenerTest {
         when(inventory.getContents()).thenReturn(new ItemStack[]{held});
         when(inventory.getHeldItemSlot()).thenReturn(0);
 
-        listener = new LootboxTokenListener(mock(Plugin.class), runtime, new TokenOpenGuard(), api, delivery,
-                mock(LootboxTokenDelivery.class), mock(LootboxAnnouncer.class),
-                (p, node) -> allowed, p -> mode, id -> inSiege, p -> userId, Runnable::run);
+        listener = new LootboxTokenListener(mock(Plugin.class), runtime, new TokenOpenGuard(), api, opening,
+                mock(LootboxTokenDelivery.class), (p, node) -> allowed, null, p -> mode, id -> inSiege, p -> userId, Runnable::run);
     }
 
     private static KnkLootboxClaimResult claim(boolean delivered) {
@@ -164,15 +162,14 @@ class LootboxTokenListenerTest {
     }
 
     @Test
-    void opened_takesOneCopy_thenDelivers() {
+    void opened_takesOneCopy_thenShowsTheOpening() {
         KnkLootboxClaimResult claim = claim(false);
         answer(CompletableFuture.completedFuture(claim));
-        when(delivery.deliver(player, claim, false)).thenReturn(new CompletableFuture<>());
 
         listener.attemptOpen(player, TOKEN, held);
 
         verify(inventory).setItem(0, null);
-        verify(delivery).deliver(eq(player), eq(claim), eq(false));
+        verify(opening).open(player, claim, null);
     }
 
     @Test
@@ -181,7 +178,7 @@ class LootboxTokenListenerTest {
 
         listener.attemptOpen(player, TOKEN, held);
 
-        verify(delivery, never()).deliver(any(), any(), eq(false));
+        verify(opening, never()).open(any(), any(), any());
     }
 
     @Test
@@ -195,7 +192,7 @@ class LootboxTokenListenerTest {
         verify(inventory).setItem(0, null);
         verify(inventory).setItem(1, null);
         verify(player).sendMessage(contains("already opened"));
-        verifyNoInteractions(delivery);
+        verifyNoInteractions(opening);
     }
 
     @Test

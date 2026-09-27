@@ -24,6 +24,8 @@ public final class LootboxAnnouncer {
     static final String DEFAULT_DROP_TEMPLATE = "&6{player} &efound {item} &ein a {box}!";
     static final String DEFAULT_SPAWN_TEMPLATE = "&eA {box} &eappeared in &6{area}&e!";
     static final String OPENED_TEMPLATE = "&aYou opened a {box} &aand found {item}&a!";
+    static final String GIFT_OPENED_TEMPLATE = "&a{staff} &agave you a {box} &a- it held {item}&a!";
+    static final String PICKED_UP_TEMPLATE = "&aYou picked up a {box}&a! &7Right-click it to open.";
 
     private static final LegacyComponentSerializer LEGACY = LegacyComponentSerializer.legacyAmpersand();
 
@@ -35,15 +37,34 @@ public final class LootboxAnnouncer {
 
     /** The finder's line, a chest-open sound, and for an announced drop the broadcast and a toast sound. */
     public void opened(Player finder, KnkLootboxClaimResult claim, ItemStack item, LootboxSettings settings, KnkLootboxRuntimeConfig config) {
+        opened(finder, claim, item, settings, config, null);
+    }
+
+    /**
+     * As {@link #opened(Player, KnkLootboxClaimResult, ItemStack, LootboxSettings, KnkLootboxRuntimeConfig)}; with
+     * {@code giftedBy} (a staff give, {@code /knk lootbox give}) the line says who gave it.
+     */
+    public void opened(Player finder, KnkLootboxClaimResult claim, ItemStack item, LootboxSettings settings, KnkLootboxRuntimeConfig config,
+                       String giftedBy) {
         String box = settings.coloredLabel(claim.boxLabel(), claim.boxStars());
         Component itemText = itemName(item, claim);
-        finder.sendMessage(render(OPENED_TEMPLATE, Map.of("{box}", box), itemText));
+        if (giftedBy != null && !giftedBy.isBlank()) {
+            finder.sendMessage(render(GIFT_OPENED_TEMPLATE, Map.of("{box}", box, "{staff}", giftedBy), itemText));
+        } else {
+            finder.sendMessage(render(OPENED_TEMPLATE, Map.of("{box}", box), itemText));
+        }
         finder.playSound(finder.getLocation(), Sound.BLOCK_CHEST_OPEN, 0.8f, 1.0f);
         if (claim.announce()) {
             broadcaster.accept(render(templateOr(config.dropAnnouncementTemplate(), DEFAULT_DROP_TEMPLATE),
                     Map.of("{player}", finder.getName(), "{box}", box), itemText));
             finder.playSound(finder.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 0.8f, 1.0f);
         }
+    }
+
+    /** A world box picked up as a token item (DESIGN.md §3.8): the finder's line and a pickup sound. */
+    public void pickedUp(Player finder, String boxLabel, int boxStars, LootboxSettings settings) {
+        finder.sendMessage(render(PICKED_UP_TEMPLATE, Map.of("{box}", settings.coloredLabel(boxLabel, boxStars)), null));
+        finder.playSound(finder.getLocation(), Sound.ENTITY_ITEM_PICKUP, 0.8f, 0.9f);
     }
 
     /** A spawn broadcast, for boxes of at least {@code announceSpawnMinBoxStars} (off while boxes are ★1-5 by default). */

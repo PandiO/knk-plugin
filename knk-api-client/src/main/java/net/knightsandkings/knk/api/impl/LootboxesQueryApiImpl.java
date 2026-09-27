@@ -12,10 +12,15 @@ import net.knightsandkings.knk.core.lootbox.KnkLootboxRuntimeConfig;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxSpawn;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxToken;
 import net.knightsandkings.knk.core.ports.api.LootboxesQueryApi;
+import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
@@ -89,6 +94,27 @@ public class LootboxesQueryApiImpl extends BaseApiImpl implements LootboxesQuery
                 return LootboxMapper.toCore(parse(get(url), LootboxDtos.OddsDto.class, url));
             } catch (ApiException | IOException e) {
                 throw new RuntimeException("Failed to read the odds of lootbox type " + lootboxTypeId, e);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<Map<UUID, String>> getTokenStatuses(List<UUID> tokens) {
+        return CompletableFuture.supplyAsync(() -> {
+            if (tokens == null || tokens.isEmpty()) {
+                return Map.<UUID, String>of();
+            }
+            String url = baseUrl + "/LootboxTokens/status";
+            try {
+                String json = objectMapper.writeValueAsString(new LootboxDtos.TokenStatusRequestDto(List.copyOf(tokens)));
+                Request request = newRequest(url)
+                        .addHeader("Content-Type", "application/json")
+                        .addHeader("Accept", "application/json")
+                        .post(RequestBody.create(json, MediaType.get("application/json")))
+                        .build();
+                return LootboxMapper.toStatuses(parse(execute(request, url), new TypeReference<List<LootboxDtos.TokenStatusDto>>() {}, url));
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to read the status of " + tokens.size() + " lootbox token(s)", e);
             }
         }, executor);
     }

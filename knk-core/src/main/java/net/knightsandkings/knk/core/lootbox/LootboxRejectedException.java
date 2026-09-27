@@ -29,6 +29,8 @@ public class LootboxRejectedException extends RuntimeException {
     public static final String REVOKED = "Revoked";
     // 429
     public static final String DAILY_LIMIT = "DailyLimit";
+    /** 429 on a world-box pickup (DESIGN.md §3.8): the daily cap counts pickups as well as opens. */
+    public static final String DAILY_PICKUP_LIMIT = "DailyPickupLimit";
     public static final String SCOPE_TYPE = "Type";
 
     private final int statusCode;
@@ -75,7 +77,12 @@ public class LootboxRejectedException extends RuntimeException {
     }
 
     public boolean isDailyLimit() {
-        return statusCode == 429 || is(DAILY_LIMIT);
+        return statusCode == 429 || is(DAILY_LIMIT) || is(DAILY_PICKUP_LIMIT);
+    }
+
+    /** The daily cap refused a world-box pickup (rather than an open). */
+    public boolean isPickupLimit() {
+        return is(DAILY_PICKUP_LIMIT);
     }
 
     /** The rejection somewhere in a future's failure chain, or null when the failure is something else. */

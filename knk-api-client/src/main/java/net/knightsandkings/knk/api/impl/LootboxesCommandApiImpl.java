@@ -8,6 +8,7 @@ import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxArea;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxAreaDeleteResult;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxClaimResult;
+import net.knightsandkings.knk.core.lootbox.KnkLootboxPickup;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxSpawn;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxToken;
 import net.knightsandkings.knk.core.lootbox.LootboxDeliveryMethod;
@@ -75,6 +76,15 @@ public class LootboxesCommandApiImpl extends BaseApiImpl implements LootboxesCom
             String url = baseUrl + "/LootboxSpawns/" + spawnId + "/claim";
             LootboxDtos.ClaimRequestDto body = new LootboxDtos.ClaimRequestDto(token, userId, idempotencyKey);
             return LootboxMapper.toCore(post(url, body, null, LootboxDtos.ClaimResultDto.class, "claim lootbox " + spawnId));
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<KnkLootboxPickup> pickup(int spawnId, UUID token, int userId) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + "/LootboxSpawns/" + spawnId + "/pickup";
+            LootboxDtos.PickupRequestDto body = new LootboxDtos.PickupRequestDto(token, userId);
+            return LootboxMapper.toCore(post(url, body, null, LootboxDtos.PickupResultDto.class, "pick up lootbox " + spawnId));
         }, executor);
     }
 

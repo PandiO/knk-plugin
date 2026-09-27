@@ -7,6 +7,8 @@ import net.knightsandkings.knk.core.lootbox.KnkLootboxSpawn;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxToken;
 
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -28,4 +30,10 @@ public interface LootboxesQueryApi {
 
     /** {@code GET api/LootboxTypes/{id}/odds?boxStars=}; null stars = the type's highest box grade. */
     CompletableFuture<KnkLootboxOdds> getOdds(int lootboxTypeId, Integer boxStars);
+
+    /**
+     * {@code POST api/LootboxTokens/status}: what became of these token items, by token (Issued | Redeemed | Revoked |
+     * Unknown). The join scan removes revoked and already-opened copies.
+     */
+    CompletableFuture<Map<UUID, String>> getTokenStatuses(List<UUID> tokens);
 }

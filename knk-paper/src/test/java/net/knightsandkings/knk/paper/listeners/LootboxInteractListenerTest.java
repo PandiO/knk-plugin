@@ -3,15 +3,16 @@ package net.knightsandkings.knk.paper.listeners;
 import net.knightsandkings.knk.core.domain.users.ActiveMode;
 import net.knightsandkings.knk.core.lootbox.ActiveLootboxCache;
 import net.knightsandkings.knk.core.lootbox.ClaimGuard;
-import net.knightsandkings.knk.core.lootbox.KnkLootboxClaimResult;
+import net.knightsandkings.knk.core.lootbox.KnkLootboxPickup;
+import net.knightsandkings.knk.core.lootbox.KnkLootboxToken;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxSpawn;
 import net.knightsandkings.knk.core.lootbox.LootboxRejectedException;
 import net.knightsandkings.knk.core.ports.api.LootboxesCommandApi;
 import net.knightsandkings.knk.paper.lootbox.LootboxAnnouncer;
-import net.knightsandkings.knk.paper.lootbox.LootboxDelivery;
 import net.knightsandkings.knk.paper.lootbox.LootboxPresenter;
 import net.knightsandkings.knk.paper.lootbox.LootboxRuntime;
 import net.knightsandkings.knk.paper.lootbox.LootboxSettings;
+import net.knightsandkings.knk.paper.lootbox.LootboxTokenDelivery;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxRuntimeConfig;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -25,6 +26,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -33,7 +35,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -43,8 +44,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Lootboxes Phase 3: the checks before a claim (permission, staff mode, distance, account, free slot, in-flight guard)
- * and what a refusal does.
+ * Lootboxes Phase 3 + smoke test 2026-09-27 (DESIGN.md §3.8): the checks before a pickup (permission, staff mode,
+ * distance, account, free slot, in-flight guard), the pickup handing over a token item, and what a refusal does.
  */
 class LootboxInteractListenerTest {
 
@@ -53,7 +54,8 @@ class LootboxInteractListenerTest {
     private final LootboxRuntime runtime = mock(LootboxRuntime.class);
     private final ActiveLootboxCache cache = new ActiveLootboxCache();
     private final LootboxesCommandApi api = mock(LootboxesCommandApi.class);
-    private final LootboxDelivery delivery = mock(LootboxDelivery.class);
+    private final LootboxTokenDelivery tokens = mock(LootboxTokenDelivery.class);
+    private final LootboxAnnouncer announcer = mock(LootboxAnnouncer.class);
     private final World world = mock(World.class);
     private final Player player = mock(Player.class);
     private final PlayerInventory inventory = mock(PlayerInventory.class);
@@ -61,6 +63,7 @@ class LootboxInteractListenerTest {
     private final UUID playerId = UUID.randomUUID();
 
     private boolean allowed = true;
+    private CompletableFuture<Boolean> fresh = CompletableFuture.completedFuture(false);
     private ActiveMode mode = ActiveMode.NONE;
     private boolean inSiege;
     private Integer userId = 9;
@@ -89,31 +92,74 @@ class LootboxInteractListenerTest {
         when(hitbox.getPersistentDataContainer()).thenReturn(pdc);
         when(player.hasLineOfSight(hitbox)).thenReturn(true);
 
-        listener = new LootboxInteractListener(runtime, new ClaimGuard(), api, delivery, mock(LootboxAnnouncer.class),
-                (p, node) -> allowed, p -> mode, id -> inSiege, p -> userId, Runnable::run);
+        listener = new LootboxInteractListener(runtime, new ClaimGuard(), api, tokens, announcer,
+                (p, node) -> allowed, (p, node) -> fresh, p -> mode, id -> inSiege, p -> userId, Runnable::run);
     }
 
     private void standAt(double x, double y, double z) {
         when(player.getLocation()).thenReturn(new Location(world, x, y, z));
     }
 
+    private static KnkLootboxToken tokenItem() {
+        return new KnkLootboxToken(70, UUID.fromString("00000000-0000-0000-0000-0000000070ce"), 3, "Weapons Lootbox", "Weapons", 5,
+                "Legendary Weapons Lootbox", "Issued", KnkLootboxToken.REASON_WORLD_PICKUP, 9);
+    }
+
     @Test
-    void aGoodClick_claimsWithTheTokenAndTheIdempotencyKey() {
-        when(api.claim(anyInt(), any(), anyInt(), anyString())).thenReturn(new CompletableFuture<>());
+    void aGoodClick_picksTheBoxUpWithItsToken() {
+        when(api.pickup(anyInt(), any(), anyInt())).thenReturn(new CompletableFuture<>());
 
         assertEquals(LootboxInteractListener.Attempt.CLAIMING, listener.attemptOpen(player, hitbox));
 
-        verify(api).claim(12, TOKEN, 9, TOKEN + ":9");
+        verify(api).pickup(12, TOKEN, 9);
+    }
+
+    @Test
+    void aPickup_handsOverTheTokenItem_andTakesTheBoxDown() {
+        KnkLootboxToken item = tokenItem();
+        when(api.pickup(anyInt(), any(), anyInt())).thenReturn(CompletableFuture.completedFuture(new KnkLootboxPickup(false, 12, item)));
+        when(player.isOnline()).thenReturn(true);
+
+        listener.attemptOpen(player, hitbox);
+
+        verify(runtime).gone(12);
+        verify(tokens).give(player, 9, List.of(item));
+        verify(announcer).pickedUp(eq(player), eq("Legendary Weapons Lootbox"), eq(5), any());
+    }
+
+    @Test
+    void aColdPermissionCache_asksTheApiBeforeRefusing() {
+        allowed = false;
+        fresh = CompletableFuture.completedFuture(true);
+        when(player.isOnline()).thenReturn(true);
+        when(api.pickup(anyInt(), any(), anyInt())).thenReturn(new CompletableFuture<>());
+
+        assertEquals(LootboxInteractListener.Attempt.CHECKING_PERMISSION, listener.attemptOpen(player, hitbox));
+
+        verify(api).pickup(12, TOKEN, 9);
+        verify(player, never()).sendMessage(contains("can't open"));
+    }
+
+    @Test
+    void aRealDenial_isRefusedAfterTheApiSaysNo() {
+        allowed = false;
+        fresh = CompletableFuture.completedFuture(false);
+        when(player.isOnline()).thenReturn(true);
+
+        listener.attemptOpen(player, hitbox);
+
+        verify(player).sendMessage(contains("can't open"));
+        verify(api, never()).pickup(anyInt(), any(), anyInt());
     }
 
     @Test
     void aSecondClickWhileInFlight_isIgnored() {
-        when(api.claim(anyInt(), any(), anyInt(), anyString())).thenReturn(new CompletableFuture<>());
+        when(api.pickup(anyInt(), any(), anyInt())).thenReturn(new CompletableFuture<>());
 
         listener.attemptOpen(player, hitbox);
         assertEquals(LootboxInteractListener.Attempt.IN_FLIGHT, listener.attemptOpen(player, hitbox));
 
-        verify(api, times(1)).claim(anyInt(), any(), anyInt(), anyString());
+        verify(api, times(1)).pickup(anyInt(), any(), anyInt());
     }
 
     @Test
@@ -121,7 +167,7 @@ class LootboxInteractListenerTest {
         mode = ActiveMode.STAFF;
 
         assertEquals(LootboxInteractListener.Attempt.STAFF_MODE, listener.attemptOpen(player, hitbox));
-        verify(api, never()).claim(anyInt(), any(), anyInt(), anyString());
+        verify(api, never()).pickup(anyInt(), any(), anyInt());
     }
 
     @Test
@@ -130,7 +176,7 @@ class LootboxInteractListenerTest {
 
         assertEquals(LootboxInteractListener.Attempt.IN_SIEGE, listener.attemptOpen(player, hitbox));
         verify(player).sendMessage(contains("during a siege"));
-        verify(api, never()).claim(anyInt(), any(), anyInt(), anyString());
+        verify(api, never()).pickup(anyInt(), any(), anyInt());
     }
 
     @Test
@@ -147,21 +193,7 @@ class LootboxInteractListenerTest {
 
         assertEquals(LootboxInteractListener.Attempt.NO_LINE_OF_SIGHT, listener.attemptOpen(player, hitbox));
         verify(player).sendMessage(contains("can't reach"));
-        verify(api, never()).claim(anyInt(), any(), anyInt(), anyString());
-    }
-
-    @Test
-    void aReplayOfAClaimAlreadyHandedOver_isNotStuck() {
-        KnkLootboxClaimResult claim = new KnkLootboxClaimResult(41, true, 9, 12, 3, 5, "Legendary Weapons Lootbox", 5L, 77,
-                "Steel Sword", 3, 3, 1, false, null, false, null, null);
-        when(api.claim(anyInt(), any(), anyInt(), anyString())).thenReturn(CompletableFuture.completedFuture(claim));
-        when(player.isOnline()).thenReturn(true);
-        when(delivery.deliver(player, claim, false)).thenReturn(CompletableFuture.completedFuture(
-                new LootboxDelivery.Outcome(false, true, null, null, java.util.List.of())));
-
-        listener.attemptOpen(player, hitbox);
-
-        verify(player, never()).sendMessage(contains("stuck"));
+        verify(api, never()).pickup(anyInt(), any(), anyInt());
     }
 
     @Test
@@ -179,17 +211,14 @@ class LootboxInteractListenerTest {
 
         assertEquals(LootboxInteractListener.Attempt.INVENTORY_FULL, listener.attemptOpen(player, hitbox));
         verify(player).sendMessage(contains("inventory is full"));
-        verify(api, never()).claim(anyInt(), any(), anyInt(), anyString());
+        verify(api, never()).pickup(anyInt(), any(), anyInt());
     }
 
     @Test
-    void noPermission_orNoAccount_isRefused() {
-        allowed = false;
-        assertEquals(LootboxInteractListener.Attempt.NO_PERMISSION, listener.attemptOpen(player, hitbox));
-        allowed = true;
+    void noAccount_isRefused() {
         userId = null;
         assertEquals(LootboxInteractListener.Attempt.NO_ACCOUNT, listener.attemptOpen(player, hitbox));
-        verify(api, never()).claim(anyInt(), any(), anyInt(), anyString());
+        verify(api, never()).pickup(anyInt(), any(), anyInt());
     }
 
     @Test
@@ -202,7 +231,7 @@ class LootboxInteractListenerTest {
 
     @Test
     void someoneElseFirst_takesTheBoxDown_andReleasesTheGuard() {
-        when(api.claim(anyInt(), any(), anyInt(), anyString())).thenReturn(CompletableFuture.failedFuture(
+        when(api.pickup(anyInt(), any(), anyInt())).thenReturn(CompletableFuture.failedFuture(
                 new LootboxRejectedException(409, LootboxRejectedException.ALREADY_CLAIMED, "x", null, null, null)));
 
         listener.attemptOpen(player, hitbox);
@@ -212,37 +241,24 @@ class LootboxInteractListenerTest {
     }
 
     @Test
-    void dailyLimit_saysWhenItResets_andKeepsTheBox() {
-        when(api.claim(anyInt(), any(), anyInt(), anyString())).thenReturn(CompletableFuture.failedFuture(
-                new LootboxRejectedException(429, "DailyLimit", "x", "Global", 10, Instant.parse("2026-09-27T00:00:00Z"))));
+    void dailyPickupLimit_saysWhenItResets_andKeepsTheBox() {
+        when(api.pickup(anyInt(), any(), anyInt())).thenReturn(CompletableFuture.failedFuture(
+                new LootboxRejectedException(429, "DailyPickupLimit", "x", "Global", 10, Instant.parse("2026-09-27T00:00:00Z"))));
 
         listener.attemptOpen(player, hitbox);
 
-        verify(player).sendMessage(contains("You've opened 10 lootboxes today — the limit resets at 00:00 UTC."));
+        verify(player).sendMessage(contains("You've picked up 10 lootboxes today — the limit resets at 00:00 UTC."));
         verify(runtime, never()).gone(anyInt());
     }
 
     @Test
     void apiDown_saysStuck() {
-        when(api.claim(anyInt(), any(), anyInt(), anyString())).thenReturn(CompletableFuture.failedFuture(new RuntimeException("down")));
+        when(api.pickup(anyInt(), any(), anyInt())).thenReturn(CompletableFuture.failedFuture(new RuntimeException("down")));
 
         listener.attemptOpen(player, hitbox);
 
         verify(player).sendMessage(contains("stuck"));
         verify(runtime, never()).gone(anyInt());
-    }
-
-    @Test
-    void aClaim_isDelivered() {
-        KnkLootboxClaimResult claim = new KnkLootboxClaimResult(41, false, 9, 12, 3, 5, "Legendary Weapons Lootbox", 5L, 77,
-                "Steel Sword", 3, 3, 1, false, null, false, null, null);
-        when(api.claim(anyInt(), any(), anyInt(), anyString())).thenReturn(CompletableFuture.completedFuture(claim));
-        when(delivery.deliver(player, claim, false)).thenReturn(new CompletableFuture<>());
-
-        listener.attemptOpen(player, hitbox);
-
-        verify(runtime).gone(12);
-        verify(delivery).deliver(eq(player), eq(claim), eq(false));
     }
 
     @Test

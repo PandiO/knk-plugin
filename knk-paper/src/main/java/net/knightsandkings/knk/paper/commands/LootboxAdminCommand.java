@@ -8,6 +8,7 @@ import net.knightsandkings.knk.core.lootbox.LootboxRejectedException;
 import net.knightsandkings.knk.core.ports.api.LootboxesCommandApi;
 import net.knightsandkings.knk.paper.lootbox.LootboxAnnouncer;
 import net.knightsandkings.knk.paper.lootbox.LootboxDelivery;
+import net.knightsandkings.knk.paper.lootbox.LootboxOpening;
 import net.knightsandkings.knk.paper.lootbox.LootboxRuntime;
 import net.knightsandkings.knk.paper.lootbox.LootboxTokenDelivery;
 import org.bukkit.ChatColor;
@@ -19,6 +20,7 @@ import org.bukkit.entity.Player;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -28,6 +30,7 @@ import java.util.concurrent.Executor;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 /**
  * {@code /knk lootbox} (docs/specs/lootboxes/DESIGN.md §3.4, D18): the admin side, registered in
@@ -57,6 +60,10 @@ public final class LootboxAdminCommand {
     private final Executor mainThread;
     private final LootboxTokenDelivery tokens;
     private final Predicate<UUID> inSiege;
+    // The opening reel for /knk lootbox give (DESIGN.md §3.9); null = hand the item over at once.
+    private LootboxOpening opening;
+    // Online player names for tab completion (the target of give/token).
+    private Supplier<? extends Collection<String>> onlinePlayerNames = List::of;
 
     public LootboxAdminCommand(
             LootboxRuntime runtime,
@@ -100,6 +107,16 @@ public final class LootboxAdminCommand {
         this.onlinePlayer = onlinePlayer;
         this.reload = reload;
         this.mainThread = mainThread;
+    }
+
+    /** The opening reel for {@code give}: the target watches their gift open (DESIGN.md §3.9). */
+    public void setOpening(LootboxOpening opening) {
+        this.opening = opening;
+    }
+
+    /** Online player names, suggested for {@code give}/{@code token}'s player argument. */
+    public void setOnlinePlayerNames(Supplier<? extends Collection<String>> names) {
+        this.onlinePlayerNames = names != null ? names : List::of;
     }
 
     public static String usage() {
@@ -317,16 +334,25 @@ public final class LootboxAdminCommand {
                     + " left - it is delivered on their next join.");
             return;
         }
+        String box = ChatColor.translateAlternateColorCodes('&', runtime.settings().coloredLabel(claim.boxLabel(), claim.boxStars()));
+        String staff = sender instanceof Player player ? player.getName() : "The server";
+        String done = ChatColor.GREEN + "Gave " + target.getName() + " a " + box + ChatColor.GREEN + " (claim #" + claim.claimId()
+                + (claim.itemInstanceId() != null ? ", item instance " + claim.itemInstanceId() : "") + ").";
+        if (opening != null) {
+            // The target sees who gave it and watches it open; the item arrives when the reel stops.
+            target.sendMessage(ChatColor.GREEN + staff + " gave you a " + box + ChatColor.GREEN + " - opening it now!");
+            opening.open(target, claim, staff);
+            sender.sendMessage(done);
+            return;
+        }
         delivery.deliver(target, claim, false).thenAccept(outcome -> {
             if (!outcome.given()) {
                 sender.sendMessage(ChatColor.YELLOW + "Rolled claim #" + claim.claimId()
                         + " but couldn't hand it over now; it is delivered on " + target.getName() + "'s next join.");
                 return;
             }
-            announcer.opened(target, claim, outcome.item(), runtime.settings(), runtime.config());
-            sender.sendMessage(ChatColor.GREEN + "Gave " + target.getName() + " a " + ChatColor.translateAlternateColorCodes('&',
-                    runtime.settings().coloredLabel(claim.boxLabel(), claim.boxStars())) + ChatColor.GREEN + " (claim #" + claim.claimId()
-                    + (claim.itemInstanceId() != null ? ", item instance " + claim.itemInstanceId() : "") + ").");
+            announcer.opened(target, claim, outcome.item(), runtime.settings(), runtime.config(), staff);
+            sender.sendMessage(done);
         });
     }
 
@@ -380,9 +406,11 @@ public final class LootboxAdminCommand {
                     }
                     int given = tokens.give(target, targetUserId, issued);
                     KnkLootboxToken first = issued.get(0);
-                    target.sendMessage(ChatColor.GREEN + "You received " + issued.size() + "x "
+                    String staff = sender instanceof Player player ? player.getName() : "The server";
+                    target.sendMessage(ChatColor.GREEN + staff + " gave you " + issued.size() + "x "
                             + ChatColor.translateAlternateColorCodes('&', runtime.settings().coloredLabel(first.boxLabel(), first.boxStars()))
                             + ChatColor.GREEN + " - right-click to open.");
+                    target.playSound(target.getLocation(), org.bukkit.Sound.ENTITY_ITEM_PICKUP, 0.8f, 0.9f);
                     sender.sendMessage(ChatColor.GREEN + "Gave " + target.getName() + " " + given + " lootbox token(s) (ids "
                             + issued.stream().map(t -> String.valueOf(t.id())).reduce((a, b) -> a + ", " + b).orElse("") + ").");
                 }));
@@ -438,8 +466,9 @@ public final class LootboxAdminCommand {
             sender.sendMessage(ChatColor.RED + "No enabled lootbox type for \"" + category + "\".");
             return null;
         }
-        if (stars != null && (stars < 1 || stars > 5)) {
-            sender.sendMessage(ChatColor.RED + "Box stars are 1-5.");
+        int maxStars = runtime.config().maxBoxStars();
+        if (stars != null && (stars < 1 || stars > maxStars)) {
+            sender.sendMessage(ChatColor.RED + "Box stars are 1-" + maxStars + ".");
             return null;
         }
         return new TypeAndStars(type.get(), stars);
@@ -481,6 +510,9 @@ public final class LootboxAdminCommand {
                 .toList();
         if ("spawn".equals(sub) && args.length == 2) {
             return LootboxCommand.filter(categories, args[1]);
+        }
+        if (("give".equals(sub) || "token".equals(sub)) && args.length == 2) {
+            return LootboxCommand.filter(List.copyOf(onlinePlayerNames.get()), args[1]);
         }
         if (("give".equals(sub) || "token".equals(sub)) && args.length == 3) {
             return LootboxCommand.filter(categories, args[2]);
