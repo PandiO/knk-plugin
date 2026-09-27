@@ -112,7 +112,9 @@ public final class CurrencyMapper {
                 }
             });
         }
-        return new ReversalOutcome(dto.reversedPublicId(), posting.publicId(), posting.replayed(), dto.partial(), legs, balances);
+        // Either flag marks a replay: never shown as a fresh reversal.
+        boolean replayed = posting.replayed() || Boolean.TRUE.equals(dto.replayed());
+        return new ReversalOutcome(dto.reversedPublicId(), posting.publicId(), replayed, dto.partial(), legs, balances);
     }
 
     public static TransferLock mapLock(CurrencyDtos.TransferLockDto dto) {

@@ -26,6 +26,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import net.knightsandkings.knk.api.auth.NoAuthProvider;
 import net.knightsandkings.knk.api.dto.PlayerNotificationDto;
 import net.knightsandkings.knk.api.mapper.UsersMapper;
+import net.knightsandkings.knk.core.domain.currency.AlreadyReversed;
 import net.knightsandkings.knk.core.domain.currency.CurrencyAlert;
 import net.knightsandkings.knk.core.domain.currency.CurrencyAlertPage;
 import net.knightsandkings.knk.core.domain.currency.CurrencyError;
@@ -264,6 +265,33 @@ class CurrencyApiImplTest {
             () -> api.reverseTransaction(42, "01M3", "Paid twice by a bug", false).join()));
         assertTrue(error.error().is("AlreadyReversed"));
         assertEquals(1, seen.size());
+    }
+
+    @Test
+    void reverse_alreadyReversed_carriesWhoReversedItAndWhen() {
+        CurrencyApiImpl api = api(n -> json(409, """
+            {"error":"AlreadyReversed","message":"Transaction 01M3 was already reversed.",
+             "details":{"reversalTransactionPublicId":"01M4","reversedAt":"2026-09-27T10:15:00Z","reversedByUserId":42,
+                        "reversedByUsername":"Owner"}}
+            """));
+        CurrencyException error = CurrencyException.find(assertThrows(CompletionException.class,
+            () -> api.reverseTransaction(42, "01M3", "Paid twice by a bug", false).join()));
+
+        assertEquals(409, error.httpStatus());
+        AlreadyReversed info = AlreadyReversed.from(error.error());
+        assertEquals("01M4", info.reversalPublicId());
+        assertEquals(Instant.parse("2026-09-27T10:15:00Z"), info.reversedAt());
+        assertEquals("Owner", info.reversedBy());
+    }
+
+    @Test
+    void reverse_aTopLevelReplayFlag_marksTheOutcomeReplayed() {
+        ReversalOutcome outcome = api(n -> json(200, """
+            {"reversedPublicId":"01M3","partial":false,"replayed":true,
+             "posting":{"transactionId":9,"publicId":"01M4","replayed":false,"reasonCode":"REVERSAL","entries":[],"balances":{}}}
+            """)).reverseTransaction(42, "01M3", "Paid twice by a bug", false).join();
+
+        assertTrue(outcome.replayed());
     }
 
     @Test

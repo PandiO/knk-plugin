@@ -450,6 +450,30 @@ class PlayerCurrencyServiceTest {
     }
 
     @Test
+    void staffReverse_ofAnAlreadyReversedTransaction_saysWhenAndByWhom() {
+        when(api.reverseTransaction(anyInt(), anyString(), anyString(), anyBoolean())).thenReturn(CompletableFuture.failedFuture(
+            new CurrencyException(new CurrencyError("AlreadyReversed", "AlreadyReversed: Transaction 01M3 was already reversed.", Map.of(
+                "reversalTransactionPublicId", "01M4", "reversedAt", "2026-09-27T10:15:00Z", "reversedByUserId", 42,
+                "reversedByUsername", "Owner")), 409, null)));
+
+        service.staffReverse(alice, "01M3", "Paid twice by a bug", false);
+
+        assertEquals("§eTransaction §601M3§e was already reversed on §f2026-09-27 10:15 UTC§e by §fOwner§e (reversal §601M4§e).",
+            aliceSees.get(0));
+        assertEquals(1, aliceSees.size());
+    }
+
+    @Test
+    void staffReverse_aReplayedAnswer_isNeverShownAsAFreshReversal() {
+        when(api.reverseTransaction(1, "01M3", "Paid twice by a bug", false)).thenReturn(CompletableFuture.completedFuture(
+            new ReversalOutcome("01M3", "01M4", true, false, List.of(new ReversalOutcome.Leg(2, BalanceCurrency.COINS, -60, 0)), Map.of())));
+
+        service.staffReverse(alice, "01M3", "Paid twice by a bug", false);
+
+        assertEquals(List.of("§7Transaction §e01M3§7 was already reversed (reversal §e01M4§7) - nothing changed now."), aliceSees);
+    }
+
+    @Test
     void staffReverse_refusalShowsTheServersMessage() {
         when(api.reverseTransaction(anyInt(), anyString(), anyString(), anyBoolean())).thenReturn(CompletableFuture.failedFuture(
             new CurrencyException(new CurrencyError("AlreadyReversed", "AlreadyReversed: Transaction 01M3 was already reversed by 01M4.", Map.of()), 409, null)));

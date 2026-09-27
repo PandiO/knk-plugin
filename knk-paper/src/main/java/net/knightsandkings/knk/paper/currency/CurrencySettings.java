@@ -60,7 +60,8 @@ public final class CurrencySettings {
         // Staff: /knk currency (Phase 4)
         Map.entry("reverse-done", "&aReversed &e{tx}&a (reversal &e{reversal}&a)."),
         Map.entry("reverse-partial", "&eReversed what was left of &6{tx}&e (reversal &6{reversal}&e) - the player had spent part of it."),
-        Map.entry("reverse-replayed", "&7{tx} was already reversed by this request (&e{reversal}&7)."),
+        Map.entry("reverse-replayed", "&7Transaction &e{tx}&7 was already reversed (reversal &e{reversal}&7) - nothing changed now."),
+        Map.entry("reverse-already", "&eTransaction &6{tx}&e was already reversed on &f{date}&e by &f{name}&e (reversal &6{reversal}&e)."),
         Map.entry("reverse-leg", "&7  {user}: {change} &8-> &f{balance}"),
         Map.entry("reverse-note-short", "&cSay why in at least {min} characters."),
         Map.entry("lock-done", "&aLocked &e{player}&a's payments: &f{reason}"),

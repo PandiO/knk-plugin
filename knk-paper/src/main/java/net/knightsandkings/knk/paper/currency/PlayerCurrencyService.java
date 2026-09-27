@@ -25,6 +25,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 
 import net.knightsandkings.knk.core.cache.UserCache;
 import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
+import net.knightsandkings.knk.core.domain.currency.AlreadyReversed;
 import net.knightsandkings.knk.core.domain.currency.AmountParser;
 import net.knightsandkings.knk.core.domain.currency.Balances;
 import net.knightsandkings.knk.core.domain.currency.CurrencyAlert;
@@ -83,6 +84,7 @@ public class PlayerCurrencyService implements Listener {
     public static final int MIN_STAFF_NOTE_LENGTH = 10;
 
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneOffset.UTC);
+    private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm 'UTC'").withZone(ZoneOffset.UTC);
     private static final Pattern BUTTON = Pattern.compile("\\{(confirm|cancel)}");
     private static final LegacyComponentSerializer LEGACY = LegacyComponentSerializer.legacySection();
     private static final int MAX_REASON_LENGTH = 40;
@@ -543,7 +545,13 @@ public class PlayerCurrencyService implements Listener {
             .thenCompose(ignored -> currencyApi.reverseTransaction(actor, id, trimmed, allowPartial))
             .whenComplete((outcome, ex) -> mainThread.execute(() -> {
                 if (ex != null) {
-                    renderError(viewer, ex, BalanceCurrency.COINS, null);
+                    AlreadyReversed already = alreadyReversed(ex);
+                    if (already != null) {
+                        send(viewer, "reverse-already", "tx", id, "date", already.reversedAt() != null ? DATE.format(already.reversedAt()) : "?",
+                            "name", already.reversedBy(), "reversal", already.reversalPublicId());
+                    } else {
+                        renderError(viewer, ex, BalanceCurrency.COINS, null);
+                    }
                     return;
                 }
                 renderReversal(viewer, outcome);
@@ -556,7 +564,12 @@ public class PlayerCurrencyService implements Listener {
             return;
         }
         outcome.balances().forEach(this::updateCacheByUserId);
-        send(viewer, outcome.replayed() ? "reverse-replayed" : outcome.partial() ? "reverse-partial" : "reverse-done",
+        if (outcome.replayed()) {
+            // A repeat of an earlier reversal: nothing moved now, so no success line and no legs.
+            send(viewer, "reverse-replayed", "tx", outcome.reversedPublicId(), "reversal", outcome.reversalPublicId());
+            return;
+        }
+        send(viewer, outcome.partial() ? "reverse-partial" : "reverse-done",
             "tx", outcome.reversedPublicId(), "reversal", outcome.reversalPublicId());
         for (ReversalOutcome.Leg leg : outcome.legs()) {
             String color = leg.amount() > 0 ? "§a" : leg.amount() < 0 ? "§c" : "§7";
@@ -982,6 +995,11 @@ public class PlayerCurrencyService implements Listener {
         if (balances != null) {
             userCache.updateBalances(uuid, balances.coins(), balances.gems());
         }
+    }
+
+    private static AlreadyReversed alreadyReversed(Throwable ex) {
+        CurrencyException error = CurrencyException.find(ex);
+        return error == null ? null : AlreadyReversed.from(error.error());
     }
 
     private static boolean isPendingGone(Throwable ex) {

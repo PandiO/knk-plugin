@@ -30,6 +30,10 @@ public record CurrencyError(String code, String message, Map<String, Object> det
     public static final String PENDING_TRANSFER_EXPIRED = "PendingTransferExpired";
     public static final String PENDING_TRANSFER_CLOSED = "PendingTransferClosed";
     public static final String USER_NOT_FOUND = "UserNotFound";
+    /** {@code /knk currency reverse} of a transaction reversed before (409; see {@link AlreadyReversed}). */
+    public static final String ALREADY_REVERSED = "AlreadyReversed";
+    /** A staff change (or the title bonus it triggers) over the staff member's rolling 24 h grant cap (422). */
+    public static final String ADMIN_DAILY_CAP_EXCEEDED = "AdminDailyCapExceeded";
 
     public CurrencyError {
         // Not Map.copyOf: JSON details may hold nulls (e.g. "eligibleFrom": null).

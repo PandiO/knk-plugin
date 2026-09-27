@@ -181,7 +181,9 @@ public final class CurrencyDtos {
     public record ReversalResultDto(
         @JsonProperty("reversedPublicId") String reversedPublicId,
         @JsonProperty("posting") PostingResultDto posting,
-        @JsonProperty("partial") boolean partial
+        @JsonProperty("partial") boolean partial,
+        // Top-level replay flag, if the API sends one (else posting.replayed): a repeat of an earlier reversal.
+        @JsonProperty("replayed") Boolean replayed
     ) {}
 
     /** Body of PUT /api/currency/admin/users/{id}/transfer-lock. */
