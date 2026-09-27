@@ -44,7 +44,8 @@ import net.knightsandkings.knk.paper.user.UserAdminService;
  * <p>
  * {@code history} (currency ledger Phase 3, KNG-23) lists the player's ledger lines - every change
  * to their coins, gems or XP with before/after balance, reason and initiator - on node
- * knk.admin.user.history; read-only, so no rank check.
+ * knk.admin.user.history, checked through KnkPermissible like /knk currency (smoke test
+ * 2026-09-27: the Bukkit node refused an op owner holding knk.*); read-only, so no rank check.
  * <p>
  * All of that logic lives in {@link UserAdminService} (InventoryMenu content port CP8) - the same
  * methods the in-game Player manager calls; this class only parses arguments.
@@ -92,6 +93,13 @@ public class UserManagementCommand implements CommandExecutor {
             return true;
         }
 
+        if (property.equals("history")) {
+            // Checked through KnkPermissible inside the currency service (in-house grants such as
+            // knk.* / knk.admin.*, ops pass), not requireProperty's Bukkit node.
+            handleHistory(sender, targetName, args);
+            return true;
+        }
+
         if (!userAdminService.requireProperty(sender, property)) {
             return true;
         }
@@ -102,10 +110,6 @@ public class UserManagementCommand implements CommandExecutor {
         }
         if (property.equals("perm")) {
             handlePerm(sender, targetName, args);
-            return true;
-        }
-        if (property.equals("history")) {
-            handleHistory(sender, targetName, args);
             return true;
         }
         handleBalance(sender, targetName, property, args);
@@ -220,9 +224,7 @@ public class UserManagementCommand implements CommandExecutor {
                 return;
             }
         }
-        BalanceCurrency currency = filter;
-        int pageNumber = page;
-        userAdminService.resolveTarget(sender, targetName, target -> currencyService.staffHistory(sender, target, currency, pageNumber));
+        currencyService.staffUserHistory(sender, targetName, filter, page);
     }
 
     /** resolveTarget already delivers onFound on the main thread, so this sends directly. */

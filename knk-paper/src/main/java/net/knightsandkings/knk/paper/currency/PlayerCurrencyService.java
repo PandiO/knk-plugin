@@ -71,6 +71,8 @@ public class PlayerCurrencyService implements Listener {
     public static final String BALTOP_NODE = "knk.baltop";
     public static final String TRANSACTIONS_NODE = "knk.transactions";
     public static final String TRANSACTIONS_OTHERS_NODE = "knk.transactions.others";
+    /** {@code /knk user <player> history} (KNG-23). */
+    public static final String USER_HISTORY_NODE = "knk.admin.user.history";
     /** Staff (currency DESIGN.md §3.8), the same strings the API checks for web callers. */
     public static final String CURRENCY_HISTORY_NODE = "knk.admin.currency.history";
     public static final String CURRENCY_REVERSE_NODE = "knk.admin.currency.reverse";
@@ -436,14 +438,13 @@ public class PlayerCurrencyService implements Listener {
                     result != null ? result.getValue() : null, ex)));
     }
 
-    /** {@code /knk user <player> history [coins|gems|xp] [page]} - the caller checked the staff node. Main thread. */
-    public void staffHistory(CommandSender viewer, UserSummary target, BalanceCurrency filter, int page) {
-        if (target.id() == null) {
-            send(viewer, "pay-unknown-player", "player", target.username());
-            return;
-        }
-        currencyApi.getTransactions(target.id(), filter, page, settings.transactionsPageSize())
-            .whenComplete((ledger, ex) -> mainThread.execute(() -> renderLedger(viewer, target.username(), filter, ledger, ex, true)));
+    /**
+     * {@code /knk user <player> history [coins|gems|xp] [page]}: gated on {@link #USER_HISTORY_NODE}
+     * through KnkPermissible (in-house grants incl. wildcards; ops pass), like /knk currency - not
+     * the Bukkit node, which neither ops nor in-house grants hold. Main thread.
+     */
+    public void staffUserHistory(CommandSender viewer, String targetName, BalanceCurrency filter, int page) {
+        staffHistory(viewer, USER_HISTORY_NODE, targetName, filter, page);
     }
 
     private void renderLedger(CommandSender viewer, String username, BalanceCurrency filter, LedgerPage ledger, Throwable ex) {
@@ -503,8 +504,12 @@ public class PlayerCurrencyService implements Listener {
 
     /** {@code /knk currency history <player> [coins|gems|xp] [page]}. Main thread. */
     public void staffHistory(CommandSender viewer, String targetName, BalanceCurrency filter, int page) {
+        staffHistory(viewer, CURRENCY_HISTORY_NODE, targetName, filter, page);
+    }
+
+    private void staffHistory(CommandSender viewer, String node, String targetName, BalanceCurrency filter, int page) {
         CompletableFuture<Target> target = resolve(viewer, targetName);
-        requireAll(viewer, CURRENCY_HISTORY_NODE, null)
+        requireAll(viewer, node, null)
             .thenCompose(ignored -> target)
             .thenCompose(found -> {
                 if (found == null) {

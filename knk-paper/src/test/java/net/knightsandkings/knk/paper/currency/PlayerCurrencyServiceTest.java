@@ -436,6 +436,20 @@ class PlayerCurrencyServiceTest {
     }
 
     @Test
+    void staffUserHistory_isGatedOnTheUserHistoryNode_throughThePermissionCheck() {
+        nodes.put(PlayerCurrencyService.USER_HISTORY_NODE, false);
+        service.staffUserHistory(alice, "bob", null, 1);
+        assertEquals("§cYou don't have permission to do that.", aliceSees.get(0));
+        verify(api, never()).getTransactions(anyInt(), any(), anyInt(), anyInt());
+
+        nodes.put(PlayerCurrencyService.USER_HISTORY_NODE, true);
+        when(api.getTransactions(2, BalanceCurrency.COINS, 1, 8)).thenReturn(CompletableFuture.completedFuture(
+            new net.knightsandkings.knk.core.domain.currency.LedgerPage(List.of(), 0, 1, 8)));
+        service.staffUserHistory(alice, "bob", BalanceCurrency.COINS, 1);
+        verify(api).getTransactions(2, BalanceCurrency.COINS, 1, 8);
+    }
+
+    @Test
     void staffReverse_refusalShowsTheServersMessage() {
         when(api.reverseTransaction(anyInt(), anyString(), anyString(), anyBoolean())).thenReturn(CompletableFuture.failedFuture(
             new CurrencyException(new CurrencyError("AlreadyReversed", "AlreadyReversed: Transaction 01M3 was already reversed by 01M4.", Map.of()), 409, null)));
