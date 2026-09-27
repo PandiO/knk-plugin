@@ -7,6 +7,8 @@ import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Zombie;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 
 import java.util.Set;
@@ -29,6 +31,12 @@ class WorldGuardCombatSafezonesTest {
         resolver.registerDomain(domain("town_oakhaven", "Town"));
         resolver.registerDomain(domain("district_market", "District"));
         resolver.registerDomain(domain("gate_north", "gate"));
+    }
+
+    // TEMP (flake repro): force a full GC after construction, before each test body runs.
+    @BeforeEach
+    void forceGc() {
+        System.gc();
     }
 
     private static DomainSnapshot domain(String regionId, String type) {
@@ -74,7 +82,7 @@ class WorldGuardCombatSafezonesTest {
         assertFalse(safezones(new RegionsAt(Set.of("town_oakhaven"), null)).isProtected(attacker, zombie));
     }
 
-    @Test
+    @RepeatedTest(50) // TEMP (flake repro)
     void anExemptedPairIsNotProtected() {
         WorldGuardCombatSafezones siegeAware = new WorldGuardCombatSafezones(resolver,
                 (a, v) -> a == attacker && v == victim, loc -> new RegionsAt(Set.of("town_oakhaven"), null));
