@@ -1,0 +1,633 @@
+package net.knightsandkings.knk.core.roads.build;
+
+import net.knightsandkings.knk.core.domain.roads.RoadMaterialRole;
+import net.knightsandkings.knk.core.domain.roads.RoadNodeKind;
+import net.knightsandkings.knk.core.roads.build.MaskBuilder.Seed;
+import net.knightsandkings.knk.core.roads.build.NodeMatcher.PreviousEdge;
+import net.knightsandkings.knk.core.roads.build.NodeMatcher.PreviousGraph;
+import net.knightsandkings.knk.core.roads.build.NodeMatcher.PreviousNode;
+import net.knightsandkings.knk.core.roads.build.ProfileSet.Profile;
+import net.knightsandkings.knk.core.roads.build.SkeletonGraph.Anchor;
+import net.knightsandkings.knk.core.roads.build.TileBuildResult.Edge;
+import net.knightsandkings.knk.core.roads.build.TileBuildResult.Node;
+import net.knightsandkings.knk.core.roads.build.TileBuilder.TileRequest;
+import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.OptionalInt;
+import java.util.Set;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * The plan's golden tests (Phase 2c "Test fixtures"): every scenario asserts node kinds and count,
+ * edge count, edge lengths ±1 and that no stray spur is left. Tiles are 64 blocks with a 8-block
+ * margin unless a test says otherwise; all fixtures fit in tile (0, 0).
+ */
+class TileBuilderTest {
+    private static final BuildParameters PARAMS = BuildParameters.defaults().withTile(64, 8);
+    private final TileBuilder builder = new TileBuilder();
+
+    private static TileRequest request(GridFixture f, Seed... seeds) {
+        return request(f, PARAMS, GridFixture.profiles(), List.of(), PreviousGraph.EMPTY, seeds);
+    }
+
+    private static TileRequest request(GridFixture f, BuildParameters params, ProfileSet profiles, List<Anchor> anchors,
+                                       PreviousGraph previous, Seed... seeds) {
+        return new TileRequest("world", 0, 0, params, List.of(seeds), profiles, f, anchors, previous);
+    }
+
+    private static GridFixture wideRoad(int x0, int z0, int length, int width, int y) {
+        GridFixture f = new GridFixture();
+        for (int z = 0; z < width; z++) {
+            f.layer(x0, y, z0 + z, "S".repeat(length));
+        }
+        return f;
+    }
+
+    private static Node onlyNode(TileBuildResult r, RoadNodeKind kind) {
+        List<Node> nodes = r.nodes(kind);
+        assertEquals(1, nodes.size(), "one " + kind + " in " + r.nodes());
+        return nodes.get(0);
+    }
+
+    private static Edge onlyEdge(TileBuildResult r) {
+        assertEquals(1, r.edges().size(), "one edge in " + r.edges());
+        return r.edges().get(0);
+    }
+
+    /** Every edge satisfies the API contract: ends on its nodes, length ≥ chord, no cross-tile edges. */
+    private static void assertContract(TileBuildResult r, TileRequest req) {
+        Set<String> keys = new java.util.HashSet<>();
+        for (Node n : r.nodes()) {
+            assertTrue(keys.add(n.key()), "unique key " + n.key());
+            assertFalse(n.key().startsWith("id:"));
+            assertTrue(req.tile().contains(n.x(), n.z()), "node inside the tile: " + n);
+            if (n.kind() == RoadNodeKind.BOUNDARY) {
+                assertTrue(n.x() == req.tile().minX() || n.x() == req.tile().maxX()
+                    || n.z() == req.tile().minZ() || n.z() == req.tile().maxZ(), "boundary node on a border cell: " + n);
+            }
+        }
+        Set<String> pairs = new java.util.HashSet<>();
+        for (Edge e : r.edges()) {
+            Node from = r.node(e.fromKey()).orElseThrow();
+            Node to = r.node(e.toKey()).orElseThrow();
+            assertNotEquals(from.key(), to.key(), "no loops");
+            assertTrue(pairs.add(from.key().compareTo(to.key()) < 0 ? from.key() + "|" + to.key() : to.key() + "|" + from.key()),
+                "unique node pair " + e.fromKey() + "-" + e.toKey());
+            int[] first = e.geometry().get(0);
+            int[] last = e.geometry().get(e.geometry().size() - 1);
+            assertEquals(0.0, dist(first, from), 1e-9, "geometry starts on its node");
+            assertEquals(0.0, dist(last, to), 1e-9, "geometry ends on its node");
+            assertTrue(e.length() >= e.chord() - 1e-9, "length >= straight line");
+            assertTrue(e.avgWidth() >= 1);
+            assertEquals(List.of(), e.domainIds());
+            assertEquals(List.of(), e.regionIds());
+        }
+        assertEquals(TileBuilder.BUILDER_VERSION, r.builderVersion());
+    }
+
+    private static double dist(int[] p, Node n) {
+        double dx = p[0] - n.x();
+        double dy = p[1] - n.y();
+        double dz = p[2] - n.z();
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    private static String describe(TileBuildResult r) {
+        StringBuilder sb = new StringBuilder("\nnodes:\n");
+        for (Node n : r.nodes()) sb.append("  ").append(n).append('\n');
+        sb.append("edges:\n");
+        for (Edge e : r.edges()) {
+            sb.append("  ").append(e.fromKey()).append("->").append(e.toKey()).append(" len=")
+                .append(String.format("%.2f", e.length())).append(" width=").append(String.format("%.1f", e.avgWidth()))
+                .append(" profile=").append(e.profileId()).append(" gates=").append(e.gateDoorIds())
+                .append(" geometry=").append(e.geometry().size()).append(" points\n");
+        }
+        sb.append("warnings: ").append(r.warningTexts()).append('\n');
+        return sb.toString();
+    }
+
+    // ---------------------------------------------------------------------------------------------
+
+    @Test
+    void meanderingOneWidePath() {
+        GridFixture f = new GridFixture().layer(2, 64, 2,
+            "GGGGGG......",
+            ".....G......",
+            ".....G......",
+            ".....GGGGGG.",
+            "..........G.",
+            "..........G.",
+            "..........GG");
+        TileRequest req = request(f, new Seed(2, 65, 2));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        assertEquals(2, r.nodes().size(), d);
+        assertEquals(2, r.nodes(RoadNodeKind.ENDPOINT).size(), d);
+        Edge e = onlyEdge(r);
+        // 18 cells; three L-corners cut into diagonals: 17 - 3·(2 - √2)
+        assertEquals(17 - 3 * (2 - Math.sqrt(2)), e.length(), 1.0, d);
+        assertEquals(OptionalInt.of(2), e.profileId(), "gravel path" + d);
+        assertEquals(1.0, e.avgWidth(), 1e-9, d);
+        assertTrue(e.geometry().size() >= 4 && e.geometry().size() <= 8, "RDP keeps the bends: " + d);
+        assertEquals(18, r.cellCount());
+        assertEquals(1, r.levelCount());
+        assertTrue(r.warnings().isEmpty(), d);
+    }
+
+    @Test
+    void fiveWideRoadBecomesASingleCentreline() {
+        GridFixture f = wideRoad(4, 10, 30, 5, 64);
+        TileRequest req = request(f, new Seed(10, 65, 12));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        assertEquals(2, r.nodes(RoadNodeKind.ENDPOINT).size(), d);
+        assertEquals(2, r.nodes().size(), d);
+        Edge e = onlyEdge(r);
+        assertEquals(29.0, e.length(), 1.0, d);
+        assertEquals(2, e.geometry().size(), "a straight line" + d);
+        assertEquals(12, e.geometry().get(0)[2], "middle row");
+        assertEquals(5.0, e.avgWidth(), 0.5, d);
+        assertEquals(OptionalInt.of(1), e.profileId(), d);
+        assertEquals(150, r.cellCount());
+    }
+
+    @Test
+    void tJunction() {
+        GridFixture f = wideRoad(4, 4, 40, 5, 64);
+        for (int z = 9; z < 30; z++) f.layer(21, 64, z, "SSSSS");
+        TileRequest req = request(f, new Seed(5, 65, 6));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        Node j = onlyNode(r, RoadNodeKind.JUNCTION);
+        assertEquals(3, r.nodes(RoadNodeKind.ENDPOINT).size(), d);
+        assertEquals(3, r.edges().size(), d);
+        assertTrue(Math.abs(j.x() - 23) <= 1 && j.z() >= 6 && j.z() <= 7, "junction at the crossing: " + j + d);
+        for (Edge e : r.edges()) {
+            assertTrue(e.fromKey().equals(j.key()) || e.toKey().equals(j.key()), "every edge touches the junction" + d);
+        }
+        Map<String, Double> byFarEnd = new HashMap<>();
+        for (Edge e : r.edges()) {
+            Node far = r.node(e.fromKey().equals(j.key()) ? e.toKey() : e.fromKey()).orElseThrow();
+            byFarEnd.put(far.x() + "," + far.z(), e.length());
+        }
+        assertEquals(19.0, byFarEnd.get("4,6"), 1.5, "west arm" + d);
+        assertEquals(20.0, byFarEnd.get("43,6"), 1.5, "east arm" + d);
+        assertEquals(23.0, byFarEnd.get("23,29"), 1.5, "south arm" + d);
+    }
+
+    @Test
+    void xJunction() {
+        GridFixture f = wideRoad(2, 22, 50, 5, 64);
+        for (int z = 2; z < 52; z++) {
+            if (z < 22 || z >= 27) f.layer(24, 64, z, "SSSSS");
+        }
+        TileRequest req = request(f, new Seed(3, 65, 24));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        Node j = onlyNode(r, RoadNodeKind.JUNCTION);
+        assertEquals(26, j.x(), d);
+        assertEquals(24, j.z(), d);
+        assertEquals(4, r.nodes(RoadNodeKind.ENDPOINT).size(), d);
+        assertEquals(4, r.edges().size(), d);
+        Map<String, Double> byFarEnd = new HashMap<>();
+        for (Edge e : r.edges()) {
+            assertEquals(2, e.geometry().size(), "straight arms" + d);
+            Node far = r.node(e.fromKey().equals(j.key()) ? e.toKey() : e.fromKey()).orElseThrow();
+            byFarEnd.put(far.x() + "," + far.z(), e.length());
+        }
+        assertEquals(24.0, byFarEnd.get("2,24"), 1.0, "west arm" + d);
+        assertEquals(25.0, byFarEnd.get("51,24"), 1.0, "east arm" + d);
+        assertEquals(22.0, byFarEnd.get("26,2"), 1.0, "north arm" + d);
+        assertEquals(27.0, byFarEnd.get("26,51"), 1.0, "south arm" + d);
+    }
+
+    @Test
+    void fiveWayJunctionOfPaths() {
+        // W, E, N, S arms of 1-wide gravel from (20,20) plus a staircase NE arm from the E arm.
+        GridFixture f = new GridFixture();
+        for (int x = 4; x <= 36; x++) f.block(x, 64, 20, GridFixture.GRAVEL);
+        for (int z = 4; z <= 36; z++) f.block(20, 64, z, GridFixture.GRAVEL);
+        for (int k = 0; k < 8; k++) {
+            f.block(22 + k, 64, 19 - k, GridFixture.GRAVEL);
+            f.block(22 + k, 64, 18 - k, GridFixture.GRAVEL);
+        }
+        TileRequest req = request(f, new Seed(4, 65, 20));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        Node j = onlyNode(r, RoadNodeKind.JUNCTION);
+        assertTrue(Math.abs(j.x() - 20) <= 3 && Math.abs(j.z() - 20) <= 3, "one junction near (20,20): " + j + d);
+        assertEquals(5, r.nodes(RoadNodeKind.ENDPOINT).size(), d);
+        assertEquals(5, r.edges().size(), d);
+    }
+
+    @Test
+    void plazaWithFourExitsIsOneJunction() {
+        // 15×15 plaza (x,z 20..34) with 3-wide exits of 16 cells on all four sides.
+        GridFixture f = new GridFixture();
+        for (int z = 20; z <= 34; z++) f.layer(20, 64, z, "S".repeat(15));
+        for (int z = 26; z <= 28; z++) {
+            f.layer(4, 64, z, "S".repeat(16));
+            f.layer(35, 64, z, "S".repeat(16));
+        }
+        for (int z = 4; z < 20; z++) f.layer(26, 64, z, "SSS");
+        for (int z = 35; z < 51; z++) f.layer(26, 64, z, "SSS");
+        TileRequest req = request(f, new Seed(27, 65, 27));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        Node plaza = onlyNode(r, RoadNodeKind.JUNCTION);
+        assertEquals(27, plaza.x(), d);
+        assertEquals(27, plaza.z(), d);
+        assertEquals(4, r.nodes(RoadNodeKind.ENDPOINT).size(), d);
+        assertEquals(4, r.edges().size(), d);
+        for (Edge e : r.edges()) {
+            assertEquals(23.0, e.length(), 1.5, "centre to exit end" + d);
+        }
+    }
+
+    @Test
+    void stairsUpAHill() {
+        // 3-wide stone road: flat at y 64 (x 4..13), stairs rising one block per step (x 14..19, y 65..70),
+        // flat at y 70 (x 20..29).
+        GridFixture f = new GridFixture();
+        for (int z = 10; z < 13; z++) {
+            f.layer(4, 64, z, "S".repeat(10));
+            for (int k = 0; k < 6; k++) f.block(14 + k, 65 + k, z, GridFixture.STAIRS);
+            f.layer(20, 70, z, "S".repeat(10));
+        }
+        TileRequest req = request(f, new Seed(5, 65, 11));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        assertEquals(2, r.nodes(RoadNodeKind.ENDPOINT).size(), d);
+        Edge e = onlyEdge(r);
+        // 10 flat + 6 diagonal steps (√2 each... one block up per block forward) + 10 flat = 25 + 6√2 - adjustments
+        assertEquals(19 + 6 * Math.sqrt(2), e.length(), 1.0, d);
+        assertEquals(64, e.geometry().get(0)[1], d);
+        assertEquals(70, e.geometry().get(e.geometry().size() - 1)[1], d);
+        assertTrue(e.geometry().size() >= 4, "RDP keeps the foot and the top of the stairs" + d);
+        assertEquals(1, r.levelCount());
+    }
+
+    @Test
+    void tunnelUnderARoadStaysSeparate() {
+        GridFixture f = wideRoad(4, 20, 40, 3, 70);           // road at y 70, x 4..43, z 20..22
+        for (int z = 4; z < 44; z++) f.layer(20, 64, z, "SSS"); // tunnel at y 64 crossing under it
+        for (int z = 4; z < 44; z++) f.layer(20, 67, z, "XXX"); // tunnel ceiling
+        TileRequest req = request(f, new Seed(5, 71, 21), new Seed(21, 65, 5));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        assertEquals(0, r.nodes(RoadNodeKind.JUNCTION).size(), "no junction between the levels" + d);
+        assertEquals(4, r.nodes(RoadNodeKind.ENDPOINT).size(), d);
+        assertEquals(2, r.edges().size(), d);
+        assertEquals(2, r.levelCount());
+        for (Edge e : r.edges()) {
+            assertEquals(39.0, e.length(), 1.0, d);
+            assertEquals(e.geometry().get(0)[1], e.geometry().get(1)[1], "each edge stays on its level");
+        }
+    }
+
+    @Test
+    void bridgeOverARoadStaysSeparate() {
+        GridFixture f = wideRoad(4, 20, 40, 3, 64);           // road at y 64
+        for (int z = 4; z < 44; z++) f.layer(20, 68, z, "SSS"); // bridge deck at y 68: 65-67 free below it
+        TileRequest req = request(f, new Seed(5, 65, 21), new Seed(21, 69, 5));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        assertEquals(0, r.nodes(RoadNodeKind.JUNCTION).size(), d);
+        assertEquals(4, r.nodes(RoadNodeKind.ENDPOINT).size(), d);
+        assertEquals(2, r.edges().size(), d);
+        assertTrue(r.edges().stream().anyMatch(e -> e.geometry().get(0)[1] == 64), d);
+        assertTrue(r.edges().stream().anyMatch(e -> e.geometry().get(0)[1] == 68), d);
+    }
+
+    @Test
+    void twoStackedStreets() {
+        GridFixture f = wideRoad(4, 10, 40, 5, 64);
+        for (int z = 10; z < 15; z++) f.layer(4, 71, z, "S".repeat(40));
+        TileRequest req = request(f, new Seed(10, 65, 12), new Seed(10, 72, 12));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        assertEquals(4, r.nodes(RoadNodeKind.ENDPOINT).size(), d);
+        assertEquals(2, r.edges().size(), d);
+        assertEquals(2, r.levelCount());
+        for (Edge e : r.edges()) {
+            assertEquals(39.0, e.length(), 1.0, d);
+        }
+        assertEquals(400, r.cellCount());
+    }
+
+    @Test
+    void spiralRamp() {
+        // A 2-wide ramp around a 6×6 core (x,z 20..25), one block up every 2 cells, going round twice.
+        GridFixture f = new GridFixture();
+        int[][] path = spiralCells();
+        int y = 64;
+        for (int i = 0; i < path.length; i++) {
+            if (i > 0 && i % 2 == 0) y++;
+            f.block(path[i][0], y, path[i][1], GridFixture.STONE_BRICKS);
+            f.block(path[i][0] + path[i][2], y, path[i][1] + path[i][3], GridFixture.STONE_BRICKS); // second lane
+        }
+        TileRequest req = request(f, new Seed(path[0][0], 65, path[0][1]));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        assertEquals(2, r.nodes(RoadNodeKind.ENDPOINT).size(), d);
+        assertEquals(0, r.nodes(RoadNodeKind.JUNCTION).size(), d);
+        Edge e = onlyEdge(r);
+        int top = Math.max(e.geometry().get(0)[1], e.geometry().get(e.geometry().size() - 1)[1]);
+        int bottom = Math.min(e.geometry().get(0)[1], e.geometry().get(e.geometry().size() - 1)[1]);
+        assertEquals(64, bottom, d);
+        assertTrue(top >= 64 + (path.length - 1) / 2 - 1, "climbs the whole ramp" + d);
+        assertTrue(e.length() >= path.length - 4 && e.length() <= path.length + 6, "walks the ramp: " + e.length() + d);
+        assertTrue(r.levelCount() >= 2, "the ramp stacks over itself" + d);
+    }
+
+    /** Outer-lane cells of a square spiral around x,z 20..25 with the inward offset of the second lane. */
+    private static int[][] spiralCells() {
+        List<int[]> cells = new ArrayList<>();
+        // Ring around the core: x 18..27, z 18..27 (outer lane), second lane one cell inwards.
+        int x = 18, z = 27;
+        for (; z > 18; z--) cells.add(new int[] {x, z, 1, 0});        // west side going north
+        for (; x < 27; x++) cells.add(new int[] {x, z, 0, 1});        // north side going east
+        for (; z < 27; z++) cells.add(new int[] {x, z, -1, 0});       // east side going south
+        for (; x > 18; x--) cells.add(new int[] {x, z, 0, -1});       // south side going west
+        // Second lap (the ramp passes over its start).
+        for (; z > 18; z--) cells.add(new int[] {x, z, 1, 0});
+        for (; x < 27; x++) cells.add(new int[] {x, z, 0, 1});
+        return cells.toArray(new int[0][]);
+    }
+
+    @Test
+    void mixedProfilesGiveOneContinuousEdgeWithTheDominantProfile() {
+        GridFixture f = new GridFixture().layer(4, 64, 10, "G".repeat(10) + "S".repeat(20));
+        TileRequest req = request(f, new Seed(4, 65, 10));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        assertEquals(2, r.nodes(RoadNodeKind.ENDPOINT).size(), d);
+        Edge e = onlyEdge(r);
+        assertEquals(29.0, e.length(), 1e-9, d);
+        assertEquals(OptionalInt.of(1), e.profileId(), "20 stone bricks beat 10 gravel" + d);
+
+        GridFixture g = new GridFixture().layer(4, 64, 10, "G".repeat(20) + "S".repeat(10));
+        assertEquals(OptionalInt.of(2), onlyEdge(builder.build(request(g, new Seed(4, 65, 10)), g)).profileId());
+    }
+
+    @Test
+    void cobblestoneCourtyardNextToACobblestoneKerbIsHeldByAmbiguousReach() {
+        // 3-wide stone-brick road (z 10..12), cobblestone kerb (z 13), cobblestone courtyard (z 14..25).
+        GridFixture f = new GridFixture();
+        for (int z = 10; z < 13; z++) f.layer(4, 64, z, "S".repeat(30));
+        for (int z = 13; z < 26; z++) f.layer(4, 64, z, "c".repeat(30));
+        TileRequest req = request(f, new Seed(5, 65, 11));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        assertEquals(2, r.nodes(RoadNodeKind.ENDPOINT).size(), d);
+        Edge e = onlyEdge(r);
+        assertEquals(29.0, e.length(), 1.0, d);
+        // 3 road rows + kerb + 2 more courtyard rows within reach 3 = 6 rows; the rest of the courtyard is out.
+        assertEquals(6 * 30, r.cellCount(), d);
+        int centreZ = e.geometry().get(0)[2];
+        assertTrue(centreZ >= 11 && centreZ <= 13, "centreline within the road/kerb band: " + centreZ + d);
+        assertEquals(OptionalInt.of(1), e.profileId(), d);
+    }
+
+    @Test
+    void gapOfTwoAirBlocksGivesTwoComponentsAndNoEdgeAcross() {
+        GridFixture f = new GridFixture().layer(4, 64, 10, "S".repeat(14) + ".." + "S".repeat(14));
+        TileRequest req = request(f, new Seed(4, 65, 10), new Seed(30, 65, 10));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        assertEquals(4, r.nodes(RoadNodeKind.ENDPOINT).size(), d);
+        assertEquals(2, r.edges().size(), d);
+        for (Edge e : r.edges()) {
+            assertEquals(13.0, e.length(), 1e-9, d);
+        }
+        // Positions 17 and 18 are the gap: no node or geometry point there.
+        for (Node n : r.nodes()) {
+            assertTrue(n.x() != 18 && n.x() != 19, d);
+        }
+    }
+
+    @Test
+    void closedGateOnTheRoadGivesAnEdgeWithGateDoorIds() {
+        GridFixture f = wideRoad(4, 10, 30, 3, 64).gate(42, 18, 64, 10, 2).gate(42, 18, 64, 11, 2).gate(42, 18, 64, 12, 2);
+        TileRequest req = request(f, new Seed(5, 65, 11));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        assertEquals(2, r.nodes(RoadNodeKind.ENDPOINT).size(), "the closed gate does not split the road" + d);
+        Edge e = onlyEdge(r);
+        assertEquals(List.of(42), e.gateDoorIds(), d);
+        assertEquals(29.0, e.length(), 1e-9, d);
+
+        // Without the gate cells the closed door blocks the road: two pieces, no gate ids.
+        SpanGrid ignored = new SpanGrid(f, GridFixture.profiles(), GateCells.NONE);
+        TileRequest without = new TileRequest("world", 0, 0, PARAMS, List.of(new Seed(5, 65, 11), new Seed(30, 65, 11)),
+            GridFixture.profiles(), GateCells.NONE, List.of(), PreviousGraph.EMPTY);
+        TileBuildResult r2 = builder.build(without, f);
+        assertEquals(2, r2.edges().size(), describe(r2));
+        assertTrue(r2.edges().stream().allMatch(x -> x.gateDoorIds().isEmpty()));
+        assertTrue(ignored.isSpan(5, 64, 11));
+    }
+
+    @Test
+    void tileBorderCrossingGivesBoundaryNodes() {
+        // Road from x -6 to x 70 through tile 0 (x 0..63, margin 8).
+        GridFixture f = new GridFixture();
+        for (int z = 20; z < 23; z++) f.layer(-6, 64, z, "S".repeat(77));
+        TileRequest req = request(f, new Seed(30, 65, 21));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        assertEquals(2, r.nodes(RoadNodeKind.BOUNDARY).size(), d);
+        assertEquals(2, r.nodes().size(), d);
+        assertTrue(r.nodes().stream().anyMatch(n -> n.x() == 0 && n.z() == 21), d);
+        assertTrue(r.nodes().stream().anyMatch(n -> n.x() == 63 && n.z() == 21), d);
+        Edge e = onlyEdge(r);
+        assertEquals(63.0, e.length(), 1e-9, d);
+        assertEquals(3 * 77, r.cellCount(), "the whole road (x -6..70) lies within tile + margin (x -8..71)");
+    }
+
+    @Test
+    void roadEndingInsideTheTileAndLeavingOnTheOtherSide() {
+        GridFixture f = new GridFixture().layer(10, 64, 30, "G".repeat(70));
+        TileRequest req = request(f, new Seed(10, 65, 30));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        assertEquals(1, r.nodes(RoadNodeKind.ENDPOINT).size(), d);
+        assertEquals(1, r.nodes(RoadNodeKind.BOUNDARY).size(), d);
+        assertEquals(53.0, onlyEdge(r).length(), 1e-9, d);
+    }
+
+    @Test
+    void neighbourTileSeesTheSameRoadFromItsSide() {
+        GridFixture f = new GridFixture();
+        for (int z = 20; z < 23; z++) f.layer(-6, 64, z, "S".repeat(77));
+        TileRequest req = new TileRequest("world", 1, 0, PARAMS, List.of(new Seed(66, 65, 21)), GridFixture.profiles(), f,
+            List.of(), PreviousGraph.EMPTY);
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        assertEquals(1, r.nodes(RoadNodeKind.BOUNDARY).size(), d);
+        assertTrue(r.nodes().stream().anyMatch(n -> n.x() == 64 && n.z() == 21), "on tile 1's west border" + d);
+        assertEquals(1, r.nodes(RoadNodeKind.ENDPOINT).size(), d);
+        assertEquals(6.0, onlyEdge(r).length(), 1e-9, d);
+    }
+
+    @Test
+    void rebuildWithOneBlockChangedKeepsAllOtherExistingIds() {
+        GridFixture f = wideRoad(4, 4, 40, 5, 64);
+        for (int z = 9; z < 40; z++) f.layer(21, 64, z, "SSSSS");
+        for (int z = 20; z < 23; z++) f.layer(26, 64, z, "S".repeat(20)); // side street off the stem
+        TileRequest first = request(f, new Seed(5, 65, 6));
+        TileBuildResult before = builder.build(first, f);
+        assertContract(before, first);
+        assertEquals(2, before.nodes(RoadNodeKind.JUNCTION).size(), describe(before));
+
+        // Pretend the API stored it: ids 100+ for nodes, 200+ for edges.
+        List<PreviousNode> nodes = new ArrayList<>();
+        Map<String, Integer> idByKey = new HashMap<>();
+        for (int i = 0; i < before.nodes().size(); i++) {
+            Node n = before.nodes().get(i);
+            idByKey.put(n.key(), 100 + i);
+            nodes.add(new PreviousNode(100 + i, n.x(), n.y(), n.z(), n.kind(), false));
+        }
+        List<PreviousEdge> edges = new ArrayList<>();
+        for (int i = 0; i < before.edges().size(); i++) {
+            Edge e = before.edges().get(i);
+            edges.add(new PreviousEdge(200 + i, idByKey.get(e.fromKey()), idByKey.get(e.toKey()), e.geometry()));
+        }
+        PreviousGraph previous = new PreviousGraph(nodes, edges);
+
+        // One block changes far from every node: a kerb block becomes grass at the road's edge.
+        f.block(12, 64, 4, GridFixture.GRASS);
+        TileRequest second = request(f, PARAMS, GridFixture.profiles(), List.of(), previous, new Seed(5, 65, 6));
+        TileBuildResult after = builder.build(second, f);
+        String d = describe(before) + describe(after);
+
+        assertContract(after, second);
+        assertEquals(before.nodes().size(), after.nodes().size(), d);
+        assertEquals(before.edges().size(), after.edges().size(), d);
+        for (Node n : after.nodes()) {
+            assertTrue(n.existingId().isPresent(), "every node matched: " + n + d);
+        }
+        assertEquals(before.nodes().size(), after.nodes().stream().map(n -> n.existingId().getAsInt()).distinct().count(), d);
+        for (Edge e : after.edges()) {
+            assertTrue(e.existingId().isPresent(), "every edge matched: " + e.fromKey() + "-" + e.toKey() + d);
+        }
+        assertEquals(before.cellCount() - 1, after.cellCount());
+    }
+
+    @Test
+    void lockedPreviousNodeKeepsItsPosition() {
+        GridFixture f = new GridFixture().layer(4, 64, 10, "G".repeat(30));
+        PreviousGraph previous = new PreviousGraph(List.of(new PreviousNode(7, 5, 64, 11, RoadNodeKind.ENDPOINT, true)), List.of());
+        TileBuildResult r = builder.build(request(f, PARAMS, GridFixture.profiles(), List.of(), previous, new Seed(4, 65, 10)), f);
+
+        Node locked = r.nodes().stream().filter(n -> n.existingId().equals(OptionalInt.of(7))).findFirst().orElseThrow();
+        assertEquals(5, locked.x());
+        assertEquals(11, locked.z(), "the locked node did not move");
+        Edge e = onlyEdge(r);
+        int[] end = e.fromKey().equals(locked.key()) ? e.geometry().get(0) : e.geometry().get(e.geometry().size() - 1);
+        assertEquals(11, end[2], "geometry follows the node");
+    }
+
+    @Test
+    void anchorsAppearAsAnchorNodesWithTheirIds() {
+        GridFixture f = new GridFixture().layer(4, 64, 10, "G".repeat(30));
+        TileRequest req = request(f, PARAMS, GridFixture.profiles(), List.of(new Anchor(55, 18, 65, 10)), PreviousGraph.EMPTY,
+            new Seed(4, 65, 10));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        Node anchor = onlyNode(r, RoadNodeKind.ANCHOR);
+        assertEquals(OptionalInt.of(55), anchor.existingId(), d);
+        assertEquals(65, anchor.y(), "the admin's position is kept" + d);
+        assertEquals(2, r.edges().size(), d);
+        assertTrue(r.edges().stream().allMatch(e -> e.fromKey().equals(anchor.key()) || e.toKey().equals(anchor.key())), d);
+    }
+
+    @Test
+    void warningsAreCollectedFromEveryStage() {
+        GridFixture f = new GridFixture().layer(4, 64, 10, "G".repeat(30));
+        TileRequest req = request(f, PARAMS.withMaxCells(10), GridFixture.profiles(), List.of(new Anchor(1, 50, 64, 50)),
+            PreviousGraph.EMPTY, new Seed(4, 65, 10), new Seed(60, 65, 60));
+        TileBuildResult r = builder.build(req, f);
+
+        List<String> texts = r.warningTexts();
+        assertEquals(3, texts.size(), texts.toString());
+        assertTrue(texts.stream().anyMatch(t -> t.startsWith(MaskBuilder.WARN_SEED_UNMATCHED)), texts.toString());
+        assertTrue(texts.stream().anyMatch(t -> t.startsWith(MaskBuilder.WARN_CELL_CAP)), texts.toString());
+        assertTrue(texts.stream().anyMatch(t -> t.startsWith(SkeletonGraph.WARN_ANCHOR_OFF_ROAD)), texts.toString());
+        assertEquals(10, r.cellCount());
+    }
+
+    @Test
+    void emptyWorldBuildsAnEmptyTile() {
+        GridFixture f = new GridFixture();
+        TileRequest req = request(f, new Seed(4, 65, 10));
+        TileBuildResult r = builder.build(req, f);
+        assertEquals(0, r.nodes().size());
+        assertEquals(0, r.edges().size());
+        assertEquals(0, r.cellCount());
+        assertEquals(0, r.levelCount());
+        assertEquals(1, r.warnings().size());
+    }
+
+    @Test
+    void scopedProfileOnlyBuildsInsideItsTown() {
+        Profile scoped = new Profile(9, "Kardenna", true, 1, 5, Set.of(42), List.of(
+            GridFixture.mat(GridFixture.DIRT_PATH, RoadMaterialRole.SURFACE, false, 1.0)));
+        GridFixture f = new GridFixture().layer(4, 64, 10, "D".repeat(0));
+        for (int x = 4; x < 34; x++) f.block(x, 64, 10, GridFixture.DIRT_PATH);
+        ScopeLookup town = (x, z) -> x < 20 ? OptionalInt.of(42) : OptionalInt.empty();
+        ProfileSet profiles = new ProfileSet(List.of(GridFixture.townRoad(), scoped), town);
+        TileRequest req = request(f, PARAMS, profiles, List.of(), PreviousGraph.EMPTY, new Seed(4, 65, 10));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertEquals(16, r.cellCount(), "x 4..19 only" + d);
+        assertEquals(15.0, onlyEdge(r).length(), 1e-9, d);
+        assertEquals(OptionalInt.of(9), onlyEdge(r).profileId(), d);
+    }
+}

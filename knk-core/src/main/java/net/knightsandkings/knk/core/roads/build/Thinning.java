@@ -59,14 +59,14 @@ public final class Thinning {
         if (b < 2 || b > 6) {
             return false;
         }
-        if (b == 2 && adjacentPair(bits)) {
+        if (b == 2 && (adjacentPair(bits) || neighboursLinked(mask, on, i, bits))) {
             // A corner end: its two neighbours touch each other (e.g. S and SW). Plain Zhang-Suen
             // deletes it and then the next cell, eating a 4-connected staircase - a 1-wide diagonal
             // path - from its ends until nothing is left. Keeping corner ends preserves such paths;
             // Holt's pass straightens the remaining staircase afterwards.
             return false;
         }
-        // A(P1): 0→1 transitions around P2..P9,P2.
+        // A(P1): 0→1 transitions around P2..P9,P2 - the textbook "one arc of neighbours" test.
         int a = 0;
         for (int d = 0; d < SpanGrid.DIRECTIONS; d++) {
             int here = (bits >> d) & 1;
@@ -76,6 +76,13 @@ public final class Thinning {
             }
         }
         if (a != 1) {
+            return false;
+        }
+        // The ring order assumes a flat grid: two ring-adjacent neighbours are taken to touch. On a
+        // span grid they may sit at heights that do not link (a ramp's upper lane beside its lower
+        // cells), so the arc is also checked on the real links: the neighbours must stay one
+        // connected group without p.
+        if (!neighboursStayConnected(mask, on, i)) {
             return false;
         }
         boolean p2 = (bits & (1 << SpanGrid.N)) != 0;
@@ -99,6 +106,69 @@ public final class Thinning {
         return false;
     }
 
+    /** With exactly two skeleton neighbours (the set bits): whether those two are linked to each other. */
+    private static boolean neighboursLinked(RoadMask mask, boolean[] on, int i, int bits) {
+        int first = RoadMask.NONE;
+        int second = RoadMask.NONE;
+        for (int d = 0; d < SpanGrid.DIRECTIONS; d++) {
+            if ((bits & (1 << d)) != 0) {
+                int nb = mask.neighbour(i, d);
+                if (first == RoadMask.NONE) {
+                    first = nb;
+                } else {
+                    second = nb;
+                }
+            }
+        }
+        return first != RoadMask.NONE && second != RoadMask.NONE && linked(mask, first, second);
+    }
+
+    /**
+     * Whether the skeleton neighbours of span {@code i} form one group when connected only through
+     * their direct mask links (i.e. removing {@code i} cannot split them). True for 0 or 1 neighbours.
+     */
+    static boolean neighboursStayConnected(RoadMask mask, boolean[] on, int i) {
+        int[] nbs = new int[SpanGrid.DIRECTIONS];
+        int count = 0;
+        for (int d = 0; d < SpanGrid.DIRECTIONS; d++) {
+            int nb = mask.neighbour(i, d);
+            if (nb != RoadMask.NONE && on[nb]) {
+                nbs[count++] = nb;
+            }
+        }
+        if (count <= 1) {
+            return true;
+        }
+        int[] group = new int[count];
+        for (int k = 0; k < count; k++) {
+            group[k] = k;
+        }
+        for (int a = 0; a < count; a++) {
+            for (int b = a + 1; b < count; b++) {
+                if (linked(mask, nbs[a], nbs[b])) {
+                    int ga = root(group, a);
+                    int gb = root(group, b);
+                    if (ga != gb) {
+                        group[Math.max(ga, gb)] = Math.min(ga, gb);
+                    }
+                }
+            }
+        }
+        for (int k = 1; k < count; k++) {
+            if (root(group, k) != root(group, 0)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static int root(int[] group, int k) {
+        while (group[k] != k) {
+            k = group[k];
+        }
+        return k;
+    }
+
     /**
      * Holt's staircase removal (Holt, Stewart, Clint &amp; Perrott 1987), the standard post-pass for
      * Zhang-Suen: a skeleton span is a redundant staircase corner when it matches one of the two
@@ -109,7 +179,9 @@ public final class Thinning {
      *   south pass: S &amp;&amp; ( (E &amp;&amp; !SE &amp;&amp; !NW &amp;&amp; (!W || !N)) || (W &amp;&amp; !SW &amp;&amp; !NE &amp;&amp; (!E || !N)) )
      * </pre>
      * Applied sequentially on the current skeleton and repeated until nothing changes, so a
-     * staircase becomes a clean diagonal without moving its ends.
+     * staircase becomes a clean diagonal without moving its ends. As in the main passes, a span is
+     * only removed when its skeleton neighbours stay linked without it (the templates assume a flat
+     * grid; the span grid is not one everywhere).
      */
     static void removeStaircaseCorners(RoadMask mask, boolean[] on) {
         boolean changed = true;
@@ -117,7 +189,7 @@ public final class Thinning {
             changed = false;
             for (int pass = 0; pass < 2; pass++) {
                 for (int i = 0; i < on.length; i++) {
-                    if (on[i] && staircaseCorner(mask, on, i, pass == 0)) {
+                    if (on[i] && staircaseCorner(mask, on, i, pass == 0) && neighboursStayConnected(mask, on, i)) {
                         on[i] = false;
                         changed = true;
                     }

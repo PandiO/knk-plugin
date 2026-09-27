@@ -5,6 +5,7 @@ import net.knightsandkings.knk.core.util.BlockKey;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -176,7 +177,7 @@ public final class MaskBuilder {
             return all;
         }
         int[] distance = new int[n];
-        java.util.Arrays.fill(distance, -1);
+        Arrays.fill(distance, -1);
         int[] queue = new int[n];
         int head = 0;
         int tail = 0;

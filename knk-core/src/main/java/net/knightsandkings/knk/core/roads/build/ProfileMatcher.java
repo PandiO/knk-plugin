@@ -34,15 +34,11 @@ public final class ProfileMatcher {
      */
     public Map<String, Integer> histogram(RoadMask mask, int[] dt, int[] chain) {
         boolean[] seen = new boolean[mask.size()];
-        int[] depth = new int[mask.size()];
-        ArrayDeque<Integer> queue = new ArrayDeque<>();
         Map<String, Integer> counts = new TreeMap<>();
         for (int span : chain) {
             int radius = Math.max(0, dt[span] - 1);
             if (!seen[span]) {
                 seen[span] = true;
-                depth[span] = 0;
-                queue.add(span);
                 counts.merge(mask.floor(span), 1, Integer::sum);
             }
             // Local BFS per chain span, bounded by its own radius; spans already counted are not
@@ -72,7 +68,6 @@ public final class ProfileMatcher {
                 }
             }
         }
-        queue.clear();
         return counts;
     }
 
