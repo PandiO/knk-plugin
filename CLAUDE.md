@@ -79,3 +79,8 @@ confirmed no `pom.xml` anywhere in the repo. Targets Paper API
   `GateRegionDataFormat`) build on it for gate-structure and world-task
   region tracking.
 - Target Minecraft version: 1.21.10 (Paper).
+- Tests: never build a `Location` around an inline `mock(World.class)`.
+  `Location` holds its world only through a `WeakReference` and
+  `getWorld()` throws `IllegalArgumentException("World unloaded")` once it's
+  collected, so the test flakes on GC timing. Keep the mocked `World` in a
+  field (see `WorldGuardCombatSafezonesTest`).
