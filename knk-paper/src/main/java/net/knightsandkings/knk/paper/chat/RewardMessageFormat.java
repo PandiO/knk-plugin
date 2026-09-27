@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
+import net.knightsandkings.knk.core.domain.discovery.DiscoveryGrant;
+import net.knightsandkings.knk.core.domain.discovery.DiscoveryGrantResult;
 import net.knightsandkings.knk.core.domain.users.RewardMultiplier;
 import net.knightsandkings.knk.core.domain.users.SalaryPayoutResult;
 import net.knightsandkings.knk.core.domain.users.TitleChangeResult;
@@ -136,11 +138,39 @@ public final class RewardMessageFormat {
     }
 
     private static void addBonus(List<Component> lines, Currency currency, int base, List<RewardMultiplier> multipliers, int granted) {
+        addReward(lines, "Title bonus", currency, base, multipliers, granted);
+    }
+
+    /**
+     * A discovered place's rewards (KNG-20), shown under its "You discovered …" line: one line per
+     * currency that paid anything, e.g. {@code   Reward: 2,600 ×1.2 Royal = +3,120 coins}. Every place
+     * in one grant shares the result's multipliers.
+     */
+    public static List<Component> discovery(DiscoveryGrant grant, DiscoveryGrantResult result) {
+        List<Component> lines = new ArrayList<>();
+        addReward(lines, "  Reward", Currency.COINS, grant.coinsBase(), result.coinMultipliers(), grant.coins());
+        addReward(lines, "  Reward", Currency.GEMS, grant.gemsBase(), result.gemMultipliers(), grant.gems());
+        addReward(lines, "  Reward", Currency.XP, grant.expBase(), result.expMultipliers(), grant.exp());
+        return lines;
+    }
+
+    /** The totals of a discovery grant (the summary after discoveries made while the API was down). */
+    public static List<Component> discoveryTotals(DiscoveryGrantResult result) {
+        List<Component> lines = new ArrayList<>();
+        addReward(lines, "  Total", Currency.COINS, result.totalCoinsBase(), result.coinMultipliers(), result.totalCoins());
+        addReward(lines, "  Total", Currency.GEMS, result.totalGemsBase(), result.gemMultipliers(), result.totalGems());
+        addReward(lines, "  Total", Currency.XP, result.totalExpBase(), result.expMultipliers(), result.totalExp());
+        return lines;
+    }
+
+    /** A reward line when it paid anything; just the total when the API sent no base (older API). */
+    private static void addReward(List<Component> lines, String reason, Currency currency, int base,
+                                  List<RewardMultiplier> multipliers, int granted) {
         if (granted <= 0) {
             return;
         }
         boolean hasBreakdown = base > 0;
-        lines.add(line("Title bonus", currency, hasBreakdown ? base : granted, hasBreakdown ? multipliers : List.of(), granted));
+        lines.add(line(reason, currency, hasBreakdown ? base : granted, hasBreakdown ? multipliers : List.of(), granted));
     }
 
     private static Component multiplierLabel(RewardMultiplier multiplier) {

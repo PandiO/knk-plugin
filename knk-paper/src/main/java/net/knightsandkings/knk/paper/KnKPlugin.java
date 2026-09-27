@@ -183,6 +183,12 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.commands.LootboxAdminCommand lootboxAdminCommand;
     private net.knightsandkings.knk.paper.commands.LootboxCommand lootboxCommand;
     private net.knightsandkings.knk.paper.lootbox.LootboxTokenDelivery lootboxTokenDelivery;
+    private net.knightsandkings.knk.paper.discovery.DiscoveryEligibility discoveryEligibility;
+    private net.knightsandkings.knk.paper.discovery.DiscoveryFlushTask discoveryFlushTask;
+    private net.knightsandkings.knk.core.discovery.DiscoveryTracker discoveryTracker;
+    private net.knightsandkings.knk.core.discovery.DiscoverySpool discoverySpool;
+    private net.knightsandkings.knk.paper.discovery.DomainDiscoveryListener discoveryListener;
+    private net.knightsandkings.knk.paper.menu.content.DiscoveriesMenuFeature discoveriesMenuFeature;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private PermissionsDataAccess permissionsDataAccess;
     private KnkPermissible knkPermissible;
@@ -582,9 +588,20 @@ public class KnKPlugin extends JavaPlugin {
             );
             getServer().getPluginManager().registerEvents(salaryPayoutScheduler, this);
             salaryPayoutScheduler.start();
+            startDomainDiscovery();
             // Rank changes made outside the plugin (web app, expiring temporary rank) show right away.
             if (playerNotificationPoller != null) {
                 playerNotificationPoller.setRankChangedHandler(userAdminService::resyncDisplay);
+            }
+            // Domain discovery (KNG-20): registered even with discovery.enabled false - the hub's
+            // Discoveries tile reads its root, and the menu still lists past discoveries.
+            this.discoveriesMenuFeature = new net.knightsandkings.knk.paper.menu.content.DiscoveriesMenuFeature(
+                apiClient.getDiscoveriesApi(), cacheManager.getUserCache(), java.time.Clock.systemUTC()
+            );
+            // A discovery reset made in the web app: drop the cached menu data and re-sync the online
+            // player's tracking (the same path /knk discovery reset takes, see its afterReset below).
+            if (playerNotificationPoller != null) {
+                playerNotificationPoller.setDiscoveryResetHandler(this::afterDiscoveryReset);
             }
             // Currency ledger Phase 3: player payments. Name lookups are vanish-safe (VisiblePlayers).
             var currencySettings = net.knightsandkings.knk.paper.currency.CurrencySettings.from(getConfig());
@@ -629,6 +646,7 @@ public class KnKPlugin extends JavaPlugin {
                 new net.knightsandkings.knk.paper.menu.content.UserManagerMenuFeature(
                     userAdminService, usersQueryApi, cacheManager.getUserCache(), titleBracketsDataAccess,
                     permissionGroupsDataAccess, org.bukkit.Bukkit::getOnlinePlayers, this::askStaffReason),
+                discoveriesMenuFeature,
                 // Siege Phase 8b: the siege menus. SiegeService is created later (initializeSiege),
                 // so the feature looks it up on every call.
                 new net.knightsandkings.knk.paper.siege.SiegeMenuFeature(() -> siegeService)
@@ -839,6 +857,15 @@ public class KnKPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        // Players still loading their account would otherwise be saved in the hold's ADVENTURE
+        // mode with the invulnerable flag set.
+        if (joinLoadingGuard != null) {
+            try {
+                joinLoadingGuard.releaseAll();
+            } catch (RuntimeException e) {
+                getLogger().log(java.util.logging.Level.SEVERE, "Releasing join-loading holds failed", e);
+            }
+        }
         // Siege first (DESIGN §5.1/§9.2): stops every lobby with SERVER_RESTART, which aborts running
         // matches and restores every member's vault while the players and the API client still exist.
         if (siegeService != null) {
@@ -883,6 +910,11 @@ public class KnKPlugin extends JavaPlugin {
         if (lootboxRuntime != null) {
             lootboxRuntime.stop(); // removes the (non-persistent) box entities
         }
+        if (discoveryFlushTask != null) {
+            // Unsent candidates and grants still in flight go to the spool, replayed on the next start.
+            discoveryFlushTask.stop();
+            discoveryFlushTask.spoolEverything();
+        }
         if (cacheManager != null) {
             getLogger().info("Logging final cache metrics...");
             cacheManager.logMetrics();
@@ -906,6 +938,83 @@ public class KnKPlugin extends JavaPlugin {
             privateMessageCommandLogFilter.uninstall();
         }
         getLogger().info("KnightsAndKings Plugin Disabled!");
+    }
+
+    /**
+     * Domain discovery (KNG-20, docs/specs/domain-discovery DESIGN.md §3.6): first entry into a Town,
+     * District or Structure is granted by the API once, with sound, particles and the reward lines.
+     * Needs the user cache, mode/freeze/loading state and the scoreboard refresher, so it starts after
+     * the salary scheduler.
+     */
+    private void startDomainDiscovery() {
+        KnkConfig.DiscoveryConfig discoveryConfig = config.discovery();
+        if (!discoveryConfig.enabled()) {
+            getLogger().info("Domain discovery disabled (discovery.enabled: false)");
+            return;
+        }
+        java.time.Clock clock = java.time.Clock.systemUTC();
+        this.discoveryEligibility = new net.knightsandkings.knk.paper.discovery.DiscoveryEligibility(
+            true, joinLoadingGuard::isLoading, modeService::getActiveMode, adminFreezeManager::isFrozen,
+            discoveryConfig.excludedGameModes(), discoveryConfig.excludeSiegeParticipants()
+        );
+        // Siege members discover nothing (discovery.exclude-siege-participants). siegeService is
+        // created later (initializeSiege), so the check reads it on every call.
+        discoveryEligibility.setSiegeParticipantCheck(
+            net.knightsandkings.knk.paper.discovery.DiscoveryEligibility.siegeParticipants(() -> siegeService));
+        this.discoveryTracker =
+            new net.knightsandkings.knk.core.discovery.DiscoveryTracker(discoveryConfig.maxRequestsPerMinute());
+        this.discoverySpool = new net.knightsandkings.knk.core.discovery.DiscoverySpool(
+            new java.io.File(getDataFolder(), discoveryConfig.spoolDirectory()).toPath(), getLogger()
+        );
+        // A player who joined while the API was down has no user id: the recorder looks it up by UUID
+        // before sending (null = no such user, a failure = still unreachable).
+        net.knightsandkings.knk.core.discovery.DiscoveryRecorder discoveryRecorder = new net.knightsandkings.knk.core.discovery.DiscoveryRecorder(
+            apiClient.getDiscoveriesApi(), net.knightsandkings.knk.core.dataaccess.RetryPolicy.defaultPolicy(), discoverySpool, getLogger(),
+            uuid -> usersQueryApi.getByUuid(uuid).thenApply(summary -> {
+                if (summary == null) {
+                    return java.util.Optional.<Integer>empty();
+                }
+                cacheManager.getUserCache().put(summary);
+                return java.util.Optional.ofNullable(summary.id());
+            })
+        );
+        net.knightsandkings.knk.paper.discovery.DiscoveryEffects discoveryEffects = new net.knightsandkings.knk.paper.discovery.DiscoveryEffects(
+            this, discoveryConfig, usersDataAccess,
+            (player, summary) -> net.knightsandkings.knk.paper.utils.ScoreboardUtil.setScoreboard(List.of(player), knkPermissible, summary)
+        );
+        this.discoveryFlushTask = new net.knightsandkings.knk.paper.discovery.DiscoveryFlushTask(
+            this, discoveryTracker, discoveryRecorder, discoveryEffects, clock,
+            discoveryConfig.batchWindowTicks(), discoveryConfig.replayIntervalSeconds()
+        );
+        this.discoveryListener =
+            new net.knightsandkings.knk.paper.discovery.DomainDiscoveryListener(
+                this, discoveryTracker, discoveryRecorder, apiClient.getDiscoveriesApi(), discoveryEligibility,
+                discoveryFlushTask, clock
+            );
+        getServer().getPluginManager().registerEvents(discoveryListener, this);
+        discoveryFlushTask.start();
+        discoveryListener.startOnlinePlayers(uuid -> cacheManager.getUserCache().getByUuid(uuid)
+            .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null));
+        getLogger().info("Domain discovery started (spool: " + discoverySpool.directory() + ")");
+    }
+
+    /**
+     * After one of an online player's discoveries was reset (web app notification or
+     * {@code /knk discovery reset}): drops their cached discoveries menu data and re-syncs their
+     * discovery tracking so the place is discovered again, even standing still. Main thread.
+     */
+    private void afterDiscoveryReset(org.bukkit.entity.Player player) {
+        if (discoveriesMenuFeature != null) {
+            discoveriesMenuFeature.invalidate(player.getUniqueId());
+        }
+        if (discoveryListener != null) {
+            discoveryListener.resync(player);
+        }
+    }
+
+    /** Domain discovery's exclusions; null when discovery is disabled. */
+    public net.knightsandkings.knk.paper.discovery.DiscoveryEligibility getDiscoveryEligibility() {
+        return discoveryEligibility;
     }
 
     /**
@@ -1084,6 +1193,27 @@ public class KnKPlugin extends JavaPlugin {
                     lootboxAdmin::execute,
                     lootboxAdmin::tabComplete);
             }
+            if (userAdminService != null) {
+                // Domain discovery (KNG-20): /knk discovery list|reset|status, node knk.admin.discovery.
+                knkAdminCommand.registerSubcommand(
+                    net.knightsandkings.knk.paper.commands.DiscoveryAdminCommand.metadata(),
+                    new net.knightsandkings.knk.paper.commands.DiscoveryAdminCommand(
+                        apiClient.getDiscoveriesApi(), userAdminService, MenuService.mainThreadExecutor(this),
+                        player -> cacheManager.getUserCache().getStale(player.getUniqueId())
+                            .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null),
+                        (player, node) -> knkPermissible != null && knkPermissible.hasPermission(player, node),
+                        () -> discoveryTracker, () -> discoverySpool,
+                        uuid -> {
+                            org.bukkit.entity.Player target = org.bukkit.Bukkit.getPlayer(uuid);
+                            if (target != null) {
+                                afterDiscoveryReset(target);
+                            } else if (discoveriesMenuFeature != null) {
+                                discoveriesMenuFeature.invalidate(uuid);
+                            }
+                        }
+                    )
+                );
+            }
             knkCommand.setExecutor(knkAdminCommand);
             knkCommand.setTabCompleter(knkAdminCommand);
             getLogger().info("Registered /knk admin command");
@@ -1133,6 +1263,8 @@ public class KnKPlugin extends JavaPlugin {
 
         // Content port CP1: /menu opens the InventoryMenu hub (docs/specs/inventory-menu/CONTENT_PORT_PLAN.md §3).
         registerSimpleCommand("menu", new net.knightsandkings.knk.paper.commands.MenuCommand(() -> menuService));
+        // Domain discovery (KNG-20): /discoveries (/disc) opens discoveries.main.
+        registerSimpleCommand("discoveries", new net.knightsandkings.knk.paper.commands.DiscoveriesCommand(() -> menuService));
 
         // Currency ledger Phase 3 (docs/specs/currency-payments/DESIGN.md §3.6).
         if (playerCurrencyService != null) {

@@ -413,8 +413,16 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
     }
 
     /**
-     * Registers a subcommand built after this command (lootboxes Phase 3: {@code /knk lootbox}, whose runtime is wired
-     * later in {@code KnKPlugin}). {@code tabCompleter} gets the arguments after the subcommand name; may be null.
+     * Adds a subcommand built outside this class (e.g. {@code /knk discovery} or {@code /knk lootbox}, which need
+     * services wired after this command). Same registry, permission check and help listing as the rest.
+     */
+    public void registerSubcommand(CommandMetadata metadata, SubcommandExecutor executor) {
+        registerSubcommand(metadata, executor, null);
+    }
+
+    /**
+     * As {@link #registerSubcommand(CommandMetadata, SubcommandExecutor)}, with tab completion: {@code tabCompleter}
+     * gets the arguments after the subcommand name; may be null.
      */
     public void registerSubcommand(CommandMetadata metadata, SubcommandExecutor executor,
                                    java.util.function.BiFunction<CommandSender, String[], List<String>> tabCompleter) {

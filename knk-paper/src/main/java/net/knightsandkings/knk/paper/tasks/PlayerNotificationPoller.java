@@ -24,7 +24,9 @@ import net.knightsandkings.knk.paper.commands.support.PromotionEffects;
  * join when they were offline; Phase 5: currency anomaly alerts for online staff) -
  * a promotion/demotion from an XP change made through the web admin's player profile page, and a
  * rank change made outside the plugin (web app, or a temporary rank expiring), which re-reads the
- * player so chat and the tab list show the new rank within one poll. Without this, that path only ever showed a banner in the browser: the API returned the
+ * player so chat and the tab list show the new rank within one poll, and a domain discovery reset,
+ * which re-syncs the player's discovery tracking so the reset place counts again right away.
+ * Without this, that path only ever showed a banner in the browser: the API returned the
  * TitleChangeResult to the web app and the server never heard about it, so the online player got
  * the rewards but none of PromotionEffects' sound/particles/message. (/knk user ... xp worked
  * because the plugin was the caller and showed the effects straight from the response.)
@@ -58,6 +60,8 @@ public class PlayerNotificationPoller {
     private volatile BiConsumer<Player, PlayerNotification> paymentReceivedHandler;
     // Currency anomaly alerts for online staff (currency Phase 5); not addressed to one player.
     private volatile Consumer<PlayerNotification> currencyAlertHandler;
+    // A discovery reset made outside the plugin's own command (domain discovery, KNG-20).
+    private volatile Consumer<Player> discoveryResetHandler;
 
     public PlayerNotificationPoller(PlayerNotificationsApi notificationsApi, Plugin plugin) {
         this(notificationsApi, plugin,
@@ -83,6 +87,15 @@ public class PlayerNotificationPoller {
     /** What to do for a {@link PlayerNotification#TYPE_PAYMENT_RECEIVED} whose player is online. */
     public void setPaymentReceivedHandler(BiConsumer<Player, PlayerNotification> handler) {
         this.paymentReceivedHandler = handler;
+    }
+
+    /**
+     * What to do for a {@link PlayerNotification#TYPE_DISCOVERY_RESET} whose player is online: re-sync
+     * their discovery tracking. An offline player's stays queued and is acknowledged on their join
+     * (harmless: the known set is loaded fresh then anyway).
+     */
+    public void setDiscoveryResetHandler(Consumer<Player> handler) {
+        this.discoveryResetHandler = handler;
     }
 
     /**
@@ -169,6 +182,8 @@ public class PlayerNotificationPoller {
                     lootboxTokensHandler.accept(player);
                 } else if (PlayerNotification.TYPE_PAYMENT_RECEIVED.equals(notification.type()) && paymentReceivedHandler != null) {
                     paymentReceivedHandler.accept(player, notification);
+                } else if (PlayerNotification.TYPE_DISCOVERY_RESET.equals(notification.type()) && discoveryResetHandler != null) {
+                    discoveryResetHandler.accept(player);
                 }
             } catch (RuntimeException e) {
                 // Acknowledged anyway: retrying a notification that throws would only repeat

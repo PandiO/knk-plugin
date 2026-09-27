@@ -50,4 +50,10 @@ public record PlayerNotification(
      * {@link #currencyAlert()}.
      */
     public static final String TYPE_CURRENCY_ALERT = "CurrencyAlert";
+    /**
+     * One of this player's domain discoveries was reset (web admin player profile, or
+     * {@code /knk discovery reset}). No payload the plugin needs: it re-reads the player's whole
+     * known set and re-checks where they stand, so the reset place can be discovered again.
+     */
+    public static final String TYPE_DISCOVERY_RESET = "DiscoveryReset";
 }
