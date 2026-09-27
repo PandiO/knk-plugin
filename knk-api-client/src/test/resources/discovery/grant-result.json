@@ -1,0 +1,27 @@
+{
+  "granted": [
+    {"domainId": 1, "wgRegionId": "town_rivia", "name": "Rivia", "domainType": "Town", "parentName": null,
+     "source": "Ancestor", "coins": 3120, "gems": 6, "exp": 60, "coinsBase": 2600, "gemsBase": 5, "expBase": 50},
+    {"domainId": 4, "wgRegionId": "district_market", "name": "Market", "domainType": "District", "parentName": "Rivia",
+     "source": "RegionEnter", "coins": 0, "gems": 0, "exp": 12, "coinsBase": 0, "gemsBase": 0, "expBase": 10}
+  ],
+  "alreadyDiscovered": [9],
+  "skipped": [{"key": "spawn", "reason": "NotADomain"}, {"key": "gate_north", "reason": "RateLimited"}],
+  "totalCoins": 3120, "totalGems": 6, "totalExp": 72,
+  "totalCoinsBase": 2600, "totalGemsBase": 5, "totalExpBase": 60,
+  "coinMultipliers": [
+    {"source": "personal", "value": 1.0, "permissionGroupId": null, "name": null, "isPremiumTier": false, "chatPrimaryColor": null, "chatSecondaryColor": null},
+    {"source": "rank", "value": 1.2, "permissionGroupId": 20, "name": "Royal", "isPremiumTier": true, "chatPrimaryColor": "&6", "chatSecondaryColor": "&e"}
+  ],
+  "gemMultipliers": [{"source": "personal", "value": 1.2}],
+  "expMultipliers": [{"source": "personal", "value": 1.2}],
+  "titleBracketId": 3,
+  "newCoins": 10120, "newGems": 26, "newExperiencePoints": 2572,
+  "titleChange": {
+    "direction": "promotion", "fromTitleBracketId": 3, "fromTitleName": "Yeoman", "toTitleBracketId": 4, "toTitleName": "Reeve",
+    "crossedTitles": [{"titleBracketId": 4, "titleName": "Reeve"}],
+    "coinBonusGranted": 500, "gemBonusGranted": 0, "expBonusGranted": 0,
+    "coinBonusBase": 500, "gemBonusBase": 0, "expBonusBase": 0,
+    "coinBonusMultipliers": [], "gemBonusMultipliers": [], "expBonusMultipliers": []
+  }
+}

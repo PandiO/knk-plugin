@@ -1510,6 +1510,16 @@ public final class SiegeService {
         return locks.lobbyOfPlayer(playerId).map(lobbies::get).filter(rt -> rt.isMember(playerId));
     }
 
+    /**
+     * Domain discovery's siege exclusion (domain-discovery DESIGN.md §3.6, D7): a member of a lobby
+     * at the hub, playing, or waiting to be restored after the match ({@link SiegePhase#blocksDiscovery}).
+     * Members queued in matchmaking still discover. They discover the place on their next visit after
+     * leaving the lobby.
+     */
+    public boolean isParticipant(UUID playerId) {
+        return lobbyOf(playerId).filter(rt -> rt.phase().blocksDiscovery()).isPresent();
+    }
+
     /** The lobby when the player is snapshotted and away (HUB or IN_PROGRESS: filter, guards, lockdown). */
     public Optional<SiegeLobbyRuntime> activeLobbyOf(UUID playerId) {
         return lobbyOf(playerId).filter(rt -> rt.phase().isMatchActive());

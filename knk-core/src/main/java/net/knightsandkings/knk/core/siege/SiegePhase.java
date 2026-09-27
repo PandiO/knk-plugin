@@ -32,6 +32,15 @@ public enum SiegePhase {
         return this == HUB || this == IN_PROGRESS;
     }
 
+    /**
+     * Members discover no domains (domain-discovery DESIGN.md §3.6): from the hub teleport until they
+     * are restored after the match. Queued members (MATCHMAKING) are still in the normal world and
+     * keep discovering (developer decision 2026-09-27).
+     */
+    public boolean blocksDiscovery() {
+        return this == HUB || this == IN_PROGRESS || this == ENDING || this == COOLDOWN;
+    }
+
     /** No match is being prepared or played: new configuration may be applied (DESIGN §5.1). */
     public boolean isBetweenMatches() {
         return this == DISABLED || this == COOLDOWN;

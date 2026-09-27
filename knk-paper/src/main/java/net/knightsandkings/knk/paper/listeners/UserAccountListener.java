@@ -17,6 +17,7 @@ import org.bukkit.plugin.Plugin;
 import net.knightsandkings.knk.paper.config.KnkConfig;
 import net.knightsandkings.knk.paper.currency.CurrencySettings;
 import net.knightsandkings.knk.paper.currency.PlayerCurrencyService;
+import net.knightsandkings.knk.paper.events.UserDataLoadedEvent;
 import net.knightsandkings.knk.paper.user.JoinLoadingGuard;
 import net.knightsandkings.knk.paper.user.PlayerUserData;
 import net.knightsandkings.knk.paper.user.UserManager;
@@ -143,6 +144,10 @@ public class UserAccountListener implements Listener {
                         .color(NamedTextColor.YELLOW))
             );
         }
+
+        // The account is known and the loading hold is off: features that need the user id at
+        // join (e.g. domain discovery of the region they joined in) start here.
+        Bukkit.getPluginManager().callEvent(new UserDataLoadedEvent(online, userData));
     }
     
     /**
