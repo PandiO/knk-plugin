@@ -511,6 +511,9 @@ public class KnKPlugin extends JavaPlugin {
             );
             this.permissionsDataAccess = dataAccessFactory.createPermissionsDataAccess(permissionsApi);
             this.knkPermissible = new KnkPermissible(cacheManager.getUserCache(), permissionsDataAccess);
+            // A grant or group change made in the web app shows in game within the 30 s cache time;
+            // /knk cache refresh applies it at once.
+            cacheManager.registerRefreshHook("permissions", permissionsDataAccess::invalidateAll);
             this.joinLoadingGuard = new JoinLoadingGuard(this, knkPermissible);
             this.modeService = new ModeService(this, knkPermissible, cacheManager.getUserCache(), usersCommandApi);
             this.adminFreezeManager = new net.knightsandkings.knk.paper.user.AdminFreezeManager();

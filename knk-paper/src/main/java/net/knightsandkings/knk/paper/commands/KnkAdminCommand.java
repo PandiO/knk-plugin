@@ -122,10 +122,11 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         // Register cache command
         if (cacheManager != null) {
             registry.register(
-                new CommandMetadata("cache", "View cache statistics and health, or drop cached settings", "/knk cache [refresh]", "knk.admin.cache",
+                new CommandMetadata("cache", "View cache statistics and health, or drop cached settings", "/knk cache [refresh|reload]", "knk.admin.cache",
                         List.of("/knk cache", "/knk cache refresh")),
                 (sender, args) -> {
-                    if (args.length > 0 && args[0].equalsIgnoreCase("refresh")) {
+                    // "reload" is what staff tend to type (smoke test 2026-09-28); same thing.
+                    if (args.length > 0 && (args[0].equalsIgnoreCase("refresh") || args[0].equalsIgnoreCase("reload"))) {
                         // Caches kept outside the CacheManager, e.g. the /spawn destination (teleport Phase 4).
                         List<String> refreshed = cacheManager.runRefreshHooks();
                         sender.sendMessage(ChatColor.GREEN + (refreshed.isEmpty()
