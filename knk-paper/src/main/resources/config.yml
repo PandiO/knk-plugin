@@ -117,6 +117,44 @@ player-notifications:
   # How often the plugin polls the API for them (skipped while no players are online)
   poll-interval-seconds: 2
 
+# Teleport engine (docs/specs/teleport/DESIGN.md §3.11, knk-workspace). Staff teleports (/tp,
+# /tphere, /knk tp) are instant and skip warmup, cooldown, combat tag and the safe-spot check; the
+# settings below apply to player teleports (/tpa, /tpahere, /spawn, /warp; /back in a later phase).
+teleport:
+  # Seconds a player waits before teleporting; moving to another block or taking damage cancels it
+  warmup-seconds: 5            # v1 default
+  # Warmup for holders of knk.teleport.warmup.short (granted to the Noble premium tier and up)
+  warmup-short-seconds: 3      # v1 premium
+  # Seconds after a player teleport before the same kind of teleport can be used again
+  cooldown-seconds: 30
+  # A PvP hit (dealt or taken) blocks player teleports for this long
+  combat-tag-seconds: 10       # v1 Main.combat
+  # How far (blocks) to look for a safe spot around an unsafe destination before refusing
+  safe-search-radius: 3
+  # Player teleport requests: /tpa (knk.teleport.request) and /tpahere (knk.teleport.request.here)
+  request:
+    # Seconds the target has to accept
+    expire-seconds: 30         # v1
+    # Seconds between two requests from the same player (knk.teleport.bypass.cooldown skips it)
+    cooldown-seconds: 10
+    # Pending requests one player can have; the oldest is dropped past this
+    max-incoming: 5
+    # Coins a request costs the requester (0 = free). Charged by the web API when the teleport
+    # happens (after the warmup) and refunded if it then fails.
+    price-coins: 0             # v1 intended 10000, never charged
+  # /warp <destination> and /warps (knk.teleport.warp): Towns, Districts and Structures staff
+  # enabled as destinations in the web app. The web API checks the title / premium tier /
+  # discovery requirements and takes the gem price after the warmup.
+  destinations:
+    # Seconds a player's destination list (names, prices, locks) is cached
+    cache-seconds: 60
+  # /back (knk.teleport.back, meant for Dragon Blood): back to where you last died, once per death.
+  # Warmup, cooldown, combat tag and the safe-spot check apply; a siege death gives no /back.
+  back:
+    enabled: true
+    # Seconds after a death during which /back can be started
+    expire-seconds: 300        # developer decision Q5: 5 minutes
+
 # Domain discovery (Linear KNG-20, knk-workspace docs/specs/domain-discovery/DESIGN.md §3.6):
 # the first time a player enters a Town, District or Structure it is recorded and rewarded once.
 # knk-web-api decides everything that matters (which regions are domains, the amounts, the

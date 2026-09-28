@@ -8,6 +8,8 @@ import java.util.stream.Collectors;
 
 import org.bukkit.GameMode;
 
+import net.knightsandkings.knk.core.teleport.TeleportSettings;
+
 /**
  * Plugin configuration loaded from config.yml.
  */
@@ -17,17 +19,24 @@ public record KnkConfig(
     AccountConfig account,
     MessagesConfig messages,
     PrivateMessagesConfig privateMessages,
+    TeleportSettings teleport,
     DiscoveryConfig discovery
 ) {
-    /** Without private-messages and discovery sections: their defaults. */
-    public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages) {
-        this(api, cache, account, messages, PrivateMessagesConfig.defaults(), DiscoveryConfig.defaults());
+    public KnkConfig {
+        // No teleport: block (e.g. an older config.yml) means the DESIGN §3.11 defaults.
+        teleport = teleport != null ? teleport : TeleportSettings.defaults();
     }
 
-    /** Without a discovery section: its defaults. */
+    /** Without private-messages, teleport and discovery sections: their defaults. */
+    public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages) {
+        this(api, cache, account, messages, PrivateMessagesConfig.defaults(), TeleportSettings.defaults(),
+            DiscoveryConfig.defaults());
+    }
+
+    /** Without teleport and discovery sections: their defaults. */
     public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
                      PrivateMessagesConfig privateMessages) {
-        this(api, cache, account, messages, privateMessages, DiscoveryConfig.defaults());
+        this(api, cache, account, messages, privateMessages, TeleportSettings.defaults(), DiscoveryConfig.defaults());
     }
 
     public record ApiConfig(

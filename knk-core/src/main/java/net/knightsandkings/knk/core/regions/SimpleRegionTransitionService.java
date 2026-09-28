@@ -120,6 +120,16 @@ public class SimpleRegionTransitionService implements RegionTransitionService {
         return decision;
     }
 
+    @Override
+    public RegionTransitionDecision previewAccess(Set<String> oldRegionIds, Set<String> newRegionIds) {
+        Objects.requireNonNull(oldRegionIds, "oldRegionIds");
+        Objects.requireNonNull(newRegionIds, "newRegionIds");
+        EnteredLeftSnapshot transition = computeTransition(
+            regionResolver.resolveRegions(oldRegionIds), regionResolver.resolveRegions(newRegionIds));
+        RegionTransitionDecision entryDeny = checkEntryDenials(transition);
+        return entryDeny != null ? entryDeny : checkExitDenials(transition);
+    }
+
     /**
      * Compute which entities are entered and which are left.
      */

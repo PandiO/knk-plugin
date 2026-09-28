@@ -3,6 +3,10 @@ package net.knightsandkings.knk.paper.config;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 
+import net.knightsandkings.knk.core.teleport.TeleportBackSettings;
+import net.knightsandkings.knk.core.teleport.TeleportRequestSettings;
+import net.knightsandkings.knk.core.teleport.TeleportSettings;
+
 /**
  * Loads and parses plugin configuration from config.yml.
  */
@@ -103,12 +107,57 @@ public class ConfigLoader {
         
         KnkConfig knkConfig = new KnkConfig(apiConfig, cacheConfig, accountConfig, messagesConfig,
             loadPrivateMessages(config.getConfigurationSection("private-messages")),
+            loadTeleportSettings(config.getConfigurationSection("teleport")),
             loadDiscovery(config.getConfigurationSection("discovery")));
         knkConfig.validate();
         
         return knkConfig;
     }
     
+    /** The teleport: block (docs/specs/teleport/DESIGN.md §3.11); missing keys fall back to the defaults. */
+    static TeleportSettings loadTeleportSettings(ConfigurationSection section) {
+        TeleportSettings defaults = TeleportSettings.defaults();
+        if (section == null) {
+            return defaults;
+        }
+        return new TeleportSettings(
+            section.getInt("warmup-seconds", defaults.warmupSeconds()),
+            section.getInt("warmup-short-seconds", defaults.warmupShortSeconds()),
+            section.getInt("cooldown-seconds", defaults.cooldownSeconds()),
+            section.getInt("combat-tag-seconds", defaults.combatTagSeconds()),
+            section.getInt("safe-search-radius", defaults.safeSearchRadius()),
+            loadTeleportRequestSettings(section.getConfigurationSection("request")),
+            section.getInt("destinations.cache-seconds", defaults.destinationsCacheSeconds()),
+            loadTeleportBackSettings(section.getConfigurationSection("back"))
+        );
+    }
+
+    /** teleport.back (DESIGN §3.11, Phase 7); missing keys fall back to the defaults. */
+    static TeleportBackSettings loadTeleportBackSettings(ConfigurationSection section) {
+        TeleportBackSettings defaults = TeleportBackSettings.defaults();
+        if (section == null) {
+            return defaults;
+        }
+        return new TeleportBackSettings(
+            section.getBoolean("enabled", defaults.enabled()),
+            section.getInt("expire-seconds", defaults.expireSeconds())
+        );
+    }
+
+    /** teleport.request (DESIGN §3.5/§3.11, Phase 3); missing keys fall back to the defaults. */
+    static TeleportRequestSettings loadTeleportRequestSettings(ConfigurationSection section) {
+        TeleportRequestSettings defaults = TeleportRequestSettings.defaults();
+        if (section == null) {
+            return defaults;
+        }
+        return new TeleportRequestSettings(
+            section.getInt("expire-seconds", defaults.expireSeconds()),
+            section.getInt("cooldown-seconds", defaults.cooldownSeconds()),
+            section.getInt("max-incoming", defaults.maxIncoming()),
+            section.getInt("price-coins", defaults.priceCoins())
+        );
+    }
+
     /** Domain discovery; every key has a default, so a missing section means "on, with defaults". */
     static KnkConfig.DiscoveryConfig loadDiscovery(ConfigurationSection section) {
         KnkConfig.DiscoveryConfig defaults = KnkConfig.DiscoveryConfig.defaults();

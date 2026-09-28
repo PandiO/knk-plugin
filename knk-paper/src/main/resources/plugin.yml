@@ -173,6 +173,63 @@ commands:
     usage: "/inventory open <player> | /inventory clear <player> confirm"
     aliases: [inv, invsee]
 
+  # Teleport commands (docs/specs/teleport/DESIGN.md §3.2, KNG-17). Declaring tp here makes the bare
+  # /tp label resolve to this plugin (developer decision 2026-09-26); vanilla stays reachable as
+  # /minecraft:tp. No permission: entries - the knk.teleport.* nodes are checked through
+  # KnkPermissible inside StaffTeleportCommand (same reasoning as /kit and /fly).
+  tp:
+    description: "Staff teleport: to a player, a player to a player, or to coordinates"
+    usage: "/tp <player> [-s] | /tp <player> <target> [-s] | /tp <x> <y> <z> [world] [yaw pitch]"
+
+  tphere:
+    description: "Staff teleport: bring a player to you"
+    usage: "/tphere <player> [-s]"
+
+  # Player teleport requests (DESIGN.md §3.5, Phase 3). Nodes checked in TeleportRequestCommand.
+  tpa:
+    description: "Ask to teleport to a player (or /tpa accept|deny [player])"
+    usage: "/tpa <player> | /tpa accept|deny [player]"
+
+  tpahere:
+    description: "Ask a player to teleport to you"
+    usage: "/tpahere <player>"
+
+  tpaccept:
+    description: "Accept a teleport request (the newest, or the named player's)"
+    usage: "/tpaccept [player]"
+    aliases: [tpyes]
+
+  tpdeny:
+    description: "Deny a teleport request (the newest, or the named player's)"
+    usage: "/tpdeny [player]"
+    aliases: [tpno]
+
+  tpcancel:
+    description: "Withdraw your teleport request, or stop your running teleport"
+    usage: "/tpcancel"
+
+  # Server spawn (DESIGN.md §3.6, Phase 4) - the spawn set on the web-app Game Settings page, else
+  # the main world's spawn. Nodes checked in SpawnCommand.
+  spawn:
+    description: "Teleport to the server spawn, or send a player there"
+    usage: "/spawn | /spawn <player> [-s]"
+
+  # Domain teleports (DESIGN.md §3.7, Phase 5) - Towns/Districts/Structures enabled as destinations
+  # in the web app. Nodes checked in WarpCommand; the web API checks requirements and the price.
+  warp:
+    description: "Open the teleport menu, teleport to a town, district or structure, or send a player there"
+    usage: "/warp | /warp <destination> | /warp list | /warp <destination> <player> [-s]"
+    aliases: [point]
+
+  warps:
+    description: "List the places you can teleport to with /warp"
+    usage: "/warps"
+
+  # Back to where you died (DESIGN.md Phase 7, developer decision Q5) - death location only, for a few
+  # minutes, never after a siege death. Node checked in BackCommand.
+  back:
+    description: "Teleport back to where you last died (for a few minutes after the death)"
+    usage: "/back"
   lootbox:
     description: "Lootboxes: help, and what a box can give (docs/specs/lootboxes/DESIGN.md §3.4)"
     usage: "/lootbox | /lootbox odds <category> [stars]"
@@ -225,7 +282,7 @@ permissions:
     default: false
 
   knk.admin.cache:
-    description: Access to /knk cache
+    description: Access to /knk cache (statistics) and /knk cache refresh (drops cached settings such as the /spawn destination)
     default: false
 
   knk.admin.clans:
@@ -333,7 +390,9 @@ permissions:
     default: false
 
   knk.admin.tp:
-    description: Teleport to an online player via /knk tp <player>. Hierarchy-checked (RankHierarchy).
+    description: >-
+      Teleport to an online player via /knk tp <player> [-s] (alias of /tp <player>, which also
+      accepts this node next to knk.teleport.staff). Hierarchy-checked (RankHierarchy).
     default: false
 
   knk.admin.user.history:
@@ -730,6 +789,84 @@ permissions:
     description: Allows reloading custom enchantment config with /ce reload
     default: op
 
+  # Teleports (docs/specs/teleport/DESIGN.md §3.3, KNG-17). Resolved through KnkPermissible, same
+  # caveat as knk.kit.list (ops pass via the op bypass; non-ops need a real grant or group membership).
+  knk.teleport.staff:
+    description: >-
+      /tp <player> and /tp <x> <y> <z> - instant, rank-checked staff teleports (no warmup, cost,
+      cooldown or safe-spot check; freeze/region/siege guards still apply). knk.admin.tp is still
+      accepted for /tp <player> and /knk tp.
+    default: op
+
+  knk.teleport.staff.others:
+    description: Move other players - /tp <player> <target>, /tphere <player>, /spawn <player> and /warp <destination> <player>. You must outrank everyone involved.
+    default: op
+
+  knk.teleport.staff.silent:
+    description: The -s flag on staff teleports - no message to the moved or visited player. Vanished staff are always silent.
+    default: op
+
+  knk.teleport.request:
+    description: >-
+      /tpa <player> - ask to teleport to a player; they accept or deny, then you warm up and go.
+      Meant for the Default group. Answering (/tpaccept, /tpdeny) needs no node.
+    default: op
+
+  knk.teleport.request.here:
+    description: /tpahere <player> - ask a player to teleport to you. Meant for the Dragon Blood premium tier.
+    default: op
+
+  knk.teleport.spawn:
+    description: >-
+      /spawn - teleport to the server spawn (set on the web-app Game Settings page, else the main
+      world's spawn). Free; warmup, cooldown and combat tag apply. Meant for the Default group.
+    default: op
+
+  knk.teleport.warp:
+    description: >-
+      /warp <destination> (/point) and /warps - teleport to a Town, District or Structure enabled as a
+      destination. Warmup, cooldown and combat tag apply; the web API checks the destination's title,
+      premium tier and discovery requirements and takes its gem price after the warmup. Meant for the
+      Default group.
+    default: op
+
+  knk.teleport.back:
+    description: >-
+      /back - return to where you last died, within teleport.back.expire-seconds (5 min) of the death,
+      once per death. Warmup, cooldown, combat tag and the safe-spot check apply; a siege death gives no
+      /back. Meant for the Dragon Blood premium tier.
+    default: op
+
+  knk.teleport.bypass.requirements:
+    description: /warp ignores destinations' title, premium tier and discovery requirements.
+    default: op
+
+  knk.teleport.bypass.cost:
+    description: /warp is free (no gem price).
+    default: op
+
+  knk.teleport.warmup.short:
+    description: Player teleports wait teleport.warmup-short-seconds (3 s) instead of warmup-seconds (5 s). Meant for the Noble premium tier and up.
+    default: op
+
+  knk.teleport.bypass.warmup:
+    description: Player teleports happen without a warmup.
+    default: op
+
+  knk.teleport.bypass.cooldown:
+    description: No cooldown after player teleports, and none between teleport requests.
+    default: op
+
+  knk.teleport.bypass.combat:
+    description: Player teleports are allowed while combat-tagged.
+    default: op
+
+  knk.region.bypass:
+    description: >-
+      Walk and teleport into domains with AllowEntry off and out of domains with AllowExit off. A
+      staff teleport of another player carries the staff member's bypass (e.g. putting someone in a jail).
+    default: op
+
   # Siege minigame (docs/specs/siege-minigame/DESIGN.md §11.1). Checked through KnkPermissible, like
   # the kit nodes: these declarations are documentation, an op short-circuits to allowed, and a
   # non-op needs a PermissionGrant/group membership. DESIGN §11.1: no Bukkit default beyond
@@ -759,7 +896,7 @@ permissions:
     default: false
 
   knk.siege.bypass.commands:
-    description: Run any command while in a siege match (bypasses SiegeConfiguration.AllowedCommands, DESIGN §6.9)
+    description: Run any command while in a siege match (bypasses SiegeConfiguration.AllowedCommands, DESIGN §6.9), and teleport yourself out of it (/tp, /spawn, /warp, /tpa, /back). Staff still can't move another member - /siege admin kick first.
     default: false
 
   knk.menu:

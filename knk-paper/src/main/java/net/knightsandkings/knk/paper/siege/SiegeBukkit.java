@@ -9,6 +9,8 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.entity.Player;
+import org.bukkit.event.player.PlayerTeleportEvent.TeleportCause;
 
 import java.util.Locale;
 import java.util.Optional;
@@ -28,6 +30,16 @@ public final class SiegeBukkit {
         return Optional.of(new Location(world, location.x(), location.y(), location.z(),
                 location.yaw() != null ? location.yaw() : 0f,
                 location.pitch() != null ? location.pitch() : 0f));
+    }
+
+    /**
+     * A siege-initiated teleport (hub, match start, spawn pick, vault restore). Deliberately cause
+     * {@code PLUGIN} and outside the teleport engine (docs/specs/teleport/DESIGN.md §3.1): the engine's
+     * guards, {@link SiegeTeleportRestriction} among them, only judge player and staff teleports
+     * (cause {@code COMMAND}), so the siege can always move its own members.
+     */
+    public static boolean teleport(Player player, Location location) {
+        return player.teleport(location, TeleportCause.PLUGIN);
     }
 
     /**

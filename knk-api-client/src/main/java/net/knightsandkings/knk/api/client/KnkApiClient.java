@@ -132,6 +132,8 @@ public class KnkApiClient {
     private final KitsQueryApi kitsQueryApi;
     private final net.knightsandkings.knk.core.ports.api.CategoriesQueryApi categoriesQueryApi;
     private final KitsCommandApi kitsCommandApi;
+    private final net.knightsandkings.knk.core.ports.api.GameSettingsQueryApi gameSettingsQueryApi;
+    private final net.knightsandkings.knk.api.impl.TeleportDestinationsApiImpl teleportDestinationsApi;
     private final net.knightsandkings.knk.core.ports.api.LootboxesQueryApi lootboxesQueryApi;
     private final net.knightsandkings.knk.core.ports.api.LootboxesCommandApi lootboxesCommandApi;
     private final CurrencyApi currencyApi;
@@ -187,6 +189,8 @@ public class KnkApiClient {
         this.kitsCommandApi = new KitsCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.currencyApi = new net.knightsandkings.knk.api.impl.CurrencyApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.categoriesQueryApi = new net.knightsandkings.knk.api.impl.CategoriesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.gameSettingsQueryApi = new net.knightsandkings.knk.api.impl.GameSettingsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.teleportDestinationsApi = new net.knightsandkings.knk.api.impl.TeleportDestinationsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.lootboxesQueryApi = new net.knightsandkings.knk.api.impl.LootboxesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.lootboxesCommandApi = new net.knightsandkings.knk.api.impl.LootboxesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
     }
@@ -237,6 +241,21 @@ public class KnkApiClient {
     /** Menu follow-up 2026-09-26: {@code GET /api/Categories} (catalogue category filter). */
     public net.knightsandkings.knk.core.ports.api.CategoriesQueryApi getCategoriesQueryApi() {
         return categoriesQueryApi;
+    }
+
+    /** Teleport Phase 4 ({@code /spawn}): {@code GET /api/GameSettings}. */
+    public net.knightsandkings.knk.core.ports.api.GameSettingsQueryApi getGameSettingsQueryApi() {
+        return gameSettingsQueryApi;
+    }
+
+    /** Teleport Phase 5 ({@code /warp}): {@code GET /api/teleport-destinations?userId=}. */
+    public net.knightsandkings.knk.core.ports.api.TeleportDestinationsQueryApi getTeleportDestinationsQueryApi() {
+        return teleportDestinationsApi;
+    }
+
+    /** Teleport Phase 5: warp charges, /tpa fees and refunds ({@code POST /api/teleport-destinations/...}). */
+    public net.knightsandkings.knk.core.ports.api.TeleportDestinationsCommandApi getTeleportDestinationsCommandApi() {
+        return teleportDestinationsApi;
     }
 
     /** InventoryMenu content port CP3: {@code GET /api/title-brackets}. */
