@@ -17,11 +17,8 @@ import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
-import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import net.kyori.adventure.text.Component;
 import com.sk89q.worldguard.WorldGuard;
-import com.sk89q.worldguard.protection.ApplicableRegionSet;
-import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import com.sk89q.worldguard.protection.regions.RegionContainer;
 import com.sk89q.worldguard.protection.regions.RegionQuery;
 
@@ -45,6 +42,7 @@ import net.knightsandkings.knk.paper.utils.ColorOptions;
 public class WorldGuardRegionTracker {
     private final RegionContainer regionContainer;
     private final RegionQuery regionQuery;
+    private final RegionIds regionIds;
     private final RegionTransitionService transitionService;
     private final RegionDomainResolver regionResolver;
     private final Executor lookupExecutor;
@@ -61,6 +59,7 @@ public class WorldGuardRegionTracker {
     public WorldGuardRegionTracker(RegionTransitionService transitionService, RegionDomainResolver regionResolver, Executor lookupExecutor, Plugin plugin, Logger logger, boolean enableConsoleLogging) {
         this.regionContainer = WorldGuard.getInstance().getPlatform().getRegionContainer();
         this.regionQuery = regionContainer.createQuery();
+        this.regionIds = new RegionIds(regionQuery);
         this.transitionService = transitionService;
         this.regionResolver = regionResolver;
         this.lookupExecutor = lookupExecutor;
@@ -200,20 +199,17 @@ public class WorldGuardRegionTracker {
         return decision;
     }
 
+    /** The region ids at a location (R8: delegates to {@link RegionIds#at}). */
     private Set<String> getRegionNamesAt(Location bukkitLocation) {
         if (bukkitLocation == null || bukkitLocation.getWorld() == null) {
             return Collections.emptySet();
         }
+        return regionIds.at(bukkitLocation);
+    }
 
-        com.sk89q.worldedit.util.Location wgLoc = BukkitAdapter.adapt(bukkitLocation);
-        ApplicableRegionSet set = regionQuery.getApplicableRegions(wgLoc);
-
-        Set<String> names = new HashSet<>();
-        for (ProtectedRegion region : set) {
-            names.add(region.getId());
-        }
-        
-        return names;
+    /** The shared region-id lookup, for the road builder and navigation (R8). */
+    public RegionIds regionIds() {
+        return regionIds;
     }
 
     /**
