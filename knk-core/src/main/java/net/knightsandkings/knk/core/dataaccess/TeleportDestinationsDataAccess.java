@@ -20,6 +20,9 @@ import net.knightsandkings.knk.core.ports.api.TeleportDestinationsQueryApi;
  */
 public class TeleportDestinationsDataAccess {
 
+    /** How old a list /warp, /warps and the warp menu accept; tab completion uses the full cache time. */
+    public static final Duration PLAYER_READ_MAX_AGE = Duration.ofSeconds(5);
+
     private final TeleportDestinationsQueryApi queryApi;
     private final Clock clock;
     private final Map<Integer, CachedList<KnkTeleportDestination>> lists = new ConcurrentHashMap<>();
@@ -37,7 +40,20 @@ public class TeleportDestinationsDataAccess {
 
     /** The player's destinations, Towns first (the server's order). */
     public CompletableFuture<List<KnkTeleportDestination>> listAsync(int userId) {
-        return lists.computeIfAbsent(userId, id -> new CachedList<>(() -> queryApi.listForUser(id), ttl, clock)).getAsync();
+        return cachedList(userId).getAsync();
+    }
+
+    /**
+     * The player's destinations, fetched again when the cached list is older than {@code maxAge}:
+     * for /warp, /warps and the warp menu, so a title, premium tier or discovery the player just
+     * got shows up without waiting out the cache time (smoke test 2026-09-28).
+     */
+    public CompletableFuture<List<KnkTeleportDestination>> listAsync(int userId, Duration maxAge) {
+        return cachedList(userId).getAsync(maxAge);
+    }
+
+    private CachedList<KnkTeleportDestination> cachedList(int userId) {
+        return lists.computeIfAbsent(userId, id -> new CachedList<>(() -> queryApi.listForUser(id), ttl, clock));
     }
 
     /** The player's cached list (possibly stale), else empty. Never does I/O - for tab completion. */

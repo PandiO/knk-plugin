@@ -205,6 +205,42 @@ class WarpCommandTest {
     }
 
     @Test
+    void aPartOfANameSuggestsThePlaceWithoutWarping() {
+        granted.add(TeleportNodes.WARP);
+
+        run(alice, "Kar");
+
+        verify(alice).sendMessage(contains("Did you mean: Kardenna?"));
+        verify(teleportService, never()).start(any());
+    }
+
+    @Test
+    void multiWordPlacesWorkForPlayersAndStaff() {
+        KnkTeleportDestination residential = destination(9, "Residential District", "Structure", true, null, null);
+        list = List.of(kardenna, residential);
+        granted.add(TeleportNodes.WARP);
+        granted.add(TeleportNodes.STAFF_OTHERS);
+
+        run(alice, "Residential", "District");
+        assertEquals("Residential District", startedPlan().destinationLabel());
+
+        run(alice, "residential", "district", "Bob");
+        verify(alice).sendMessage(contains("Sent Bob to Residential District."));
+    }
+
+    @Test
+    void multiWordPlacesTabCompleteWordByWord_ThenThePlayer() {
+        KnkTeleportDestination residential = destination(9, "Residential District", "Structure", true, null, null);
+        list = List.of(kardenna, residential);
+        granted.add(TeleportNodes.WARP);
+        command.onTabComplete(alice, mock(Command.class), "warp", new String[] {""}); // loads the list
+
+        assertEquals(List.of("Residential"), command.onTabComplete(alice, mock(Command.class), "warp", new String[] {"res"}));
+        assertEquals(List.of("District"), command.onTabComplete(alice, mock(Command.class), "warp", new String[] {"Residential", ""}));
+        assertEquals(List.of("Bob"), command.onTabComplete(alice, mock(Command.class), "warp", new String[] {"Residential", "District", "b"}));
+    }
+
+    @Test
     void staffSendAPlayerFreeAndInstant() {
         granted.add(TeleportNodes.STAFF_OTHERS);
 

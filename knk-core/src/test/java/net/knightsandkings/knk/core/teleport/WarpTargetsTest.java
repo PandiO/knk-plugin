@@ -54,10 +54,37 @@ class WarpTargetsTest {
     }
 
     @Test
-    void completionUsesTheTypeFormForSharedNamesAndSkipsNamesWithSpaces() {
-        assertEquals(List.of("Kardenna", "town:Market", "district:Market"), WarpTargets.complete(all, ""));
+    void completionUsesTheTypeFormForSharedNames() {
+        assertEquals(List.of("Kardenna", "town:Market", "district:Market", "New"), WarpTargets.complete(all, ""));
         assertEquals(List.of("Kardenna"), WarpTargets.complete(all, "ka"));
         assertEquals(List.of("district:Market"), WarpTargets.complete(all, "dis"));
         assertEquals(List.of("town:Market", "district:Market"), WarpTargets.complete(all, "MAR"));
+    }
+
+    @Test
+    void multiWordNamesCompleteOneWordAtATime() {
+        KnkTeleportDestination residential = open(5, "Residential District", "Structure");
+        List<KnkTeleportDestination> places = List.of(kardenna, newHaven, residential);
+
+        assertEquals(List.of("Residential"), WarpTargets.complete(places, List.of("res")));
+        assertEquals(List.of("District"), WarpTargets.complete(places, List.of("Residential", "")));
+        assertEquals(List.of("District"), WarpTargets.complete(places, List.of("residential", "d")));
+        assertEquals(List.of(), WarpTargets.complete(places, List.of("Kardenna", "")), "a one-word name has no second word");
+    }
+
+    @Test
+    void spacingDoesntMatter() {
+        KnkTeleportDestination residential = open(5, "Residential  District ", "Structure");
+
+        assertSame(residential, WarpTargets.resolve(List.of(residential), " residential district").destination());
+        assertSame(newHaven, WarpTargets.resolve(all, "New   Haven").destination());
+    }
+
+    @Test
+    void suggestionsAreThePlacesStartingWithWhatWasTyped() {
+        assertEquals(List.of(newHaven), WarpTargets.suggestions(all, "new"));
+        assertEquals(List.of(marketTown, marketDistrict), WarpTargets.suggestions(all, "mar"));
+        assertEquals(List.of(marketDistrict), WarpTargets.suggestions(all, "district:mar"));
+        assertEquals(List.of(), WarpTargets.suggestions(all, "zz"));
     }
 }

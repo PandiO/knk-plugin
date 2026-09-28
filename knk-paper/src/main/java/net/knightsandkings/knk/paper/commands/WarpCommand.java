@@ -321,7 +321,10 @@ public class WarpCommand implements TabExecutor {
                 + String.join(", ", match.choices().stream().map(KnkTeleportDestination::qualifiedName).toList())
                 + ". Use one of those.");
         } else {
-            viewer.sendMessage(ChatColor.RED + "No teleport destination named '" + name + "'. /warps lists them.");
+            List<String> close = WarpTargets.suggestions(list, name).stream()
+                .limit(5).map(KnkTeleportDestination::name).distinct().toList();
+            viewer.sendMessage(ChatColor.RED + "No teleport destination named '" + name + "'."
+                + (close.isEmpty() ? " /warps lists them." : " Did you mean: " + String.join(", ", close) + "?"));
         }
         return null;
     }
@@ -339,7 +342,7 @@ public class WarpCommand implements TabExecutor {
                     return CompletableFuture.completedFuture(null);
                 }
                 knownUserIds.put(id, userId);
-                return deps.destinations().listAsync(userId);
+                return deps.destinations().listAsync(userId, TeleportDestinationsDataAccess.PLAYER_READ_MAX_AGE);
             });
         } catch (RuntimeException ex) {
             loaded = CompletableFuture.failedFuture(ex);
@@ -407,29 +410,36 @@ public class WarpCommand implements TabExecutor {
         if (form == Form.LIST || args.length == 0) {
             return Collections.emptyList();
         }
-        if (args.length == 1) {
-            List<String> out = new ArrayList<>();
-            if ("list".startsWith(args[0].toLowerCase(Locale.ROOT))) {
-                out.add("list");
+        List<String> words = Arrays.asList(args);
+        List<String> out = new ArrayList<>();
+        if (args.length == 1 && "list".startsWith(args[0].toLowerCase(Locale.ROOT))) {
+            out.add("list");
+        }
+        // Place names, one word per argument ("Residential" then "District").
+        List<KnkTeleportDestination> known = List.of();
+        if (sender instanceof Player player) {
+            Integer userId = knownUserIds.get(player.getUniqueId());
+            if (userId != null) {
+                known = deps.destinations().cachedOrEmpty(userId);
+                out.addAll(WarpTargets.complete(known, words));
+                deps.destinations().listAsync(userId); // refresh in the background when stale
+            } else {
+                prefetch(player);
             }
-            if (sender instanceof Player player) {
-                Integer userId = knownUserIds.get(player.getUniqueId());
-                if (userId != null) {
-                    out.addAll(WarpTargets.complete(deps.destinations().cachedOrEmpty(userId), args[0]));
-                    deps.destinations().listAsync(userId); // refresh in the background when stale
-                } else {
-                    prefetch(player);
-                }
+        }
+        if (args.length >= 2) {
+            String current = args[args.length - 1];
+            // Staff form: /warp <place> <player> [-s] - the player once the words before name a place
+            // (the console can't tab-complete places, so it gets player names after the first word).
+            String before = String.join(" ", words.subList(0, args.length - 1));
+            if (!(sender instanceof Player) || WarpTargets.resolve(known, before).found()) {
+                out.addAll(deps.targets().complete(sender, current));
+            } else if (args.length >= 3 && "-s".startsWith(current.toLowerCase(Locale.ROOT))
+                    && WarpTargets.resolve(known, String.join(" ", words.subList(0, args.length - 2))).found()) {
+                out.add("-s");
             }
-            return out;
         }
-        if (args.length == 2) {
-            return deps.targets().complete(sender, args[1]);
-        }
-        if (args.length == 3 && "-s".startsWith(args[2].toLowerCase(Locale.ROOT))) {
-            return List.of("-s");
-        }
-        return Collections.emptyList();
+        return out;
     }
 
     /** Look the player up and load their list, so the next tab press can complete. */

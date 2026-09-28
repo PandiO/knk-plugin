@@ -149,7 +149,7 @@ public final class TeleportMenuFeature implements MenuFeature {
                 }
                 // So the cached list is dropped when the player leaves (WarpCommand.forget).
                 t.warps().rememberUserId(uuid, userId);
-                return t.destinations().listAsync(userId);
+                return t.destinations().listAsync(userId, TeleportDestinationsDataAccess.PLAYER_READ_MAX_AGE);
             });
             access = access(t, player);
         } catch (RuntimeException e) {

@@ -68,6 +68,22 @@ class TeleportDestinationsDataAccessTest {
     }
 
     @Test
+    void aPlayerReadRefetchesAListOlderThanItsMaxAge() {
+        access.listAsync(7).join();
+        clock.now = clock.now.plusSeconds(3);
+        access.listAsync(7, TeleportDestinationsDataAccess.PLAYER_READ_MAX_AGE).join();
+        assertEquals(List.of(7), calls, "3 s old is fresh enough");
+
+        clock.now = clock.now.plusSeconds(3);
+        access.listAsync(7, TeleportDestinationsDataAccess.PLAYER_READ_MAX_AGE).join();
+        assertEquals(List.of(7, 7), calls, "6 s old is fetched again (a new title or tier shows up)");
+
+        clock.now = clock.now.plusSeconds(30);
+        access.listAsync(7).join();
+        assertEquals(List.of(7, 7), calls, "tab completion keeps the full cache time");
+    }
+
+    @Test
     void cachedOrEmptyNeverFetches() {
         assertTrue(access.cachedOrEmpty(7).isEmpty());
         assertTrue(calls.isEmpty());

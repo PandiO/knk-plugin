@@ -29,9 +29,19 @@ public final class CachedList<T> {
         this.clock = clock;
     }
 
-    public synchronized CompletableFuture<List<T>> getAsync() {
+    public CompletableFuture<List<T>> getAsync() {
+        return getAsync(ttl);
+    }
+
+    /**
+     * Like {@link #getAsync()}, but a cached list older than {@code maxAge} (or than the ttl, if that
+     * is shorter) is fetched again - for reads a player just asked for, where a minute-old answer
+     * would be visibly stale.
+     */
+    public synchronized CompletableFuture<List<T>> getAsync(Duration maxAge) {
         List<T> current = cached;
-        if (current != null && clock.millis() - cachedAtMillis < ttl.toMillis()) {
+        long freshFor = Math.min(ttl.toMillis(), maxAge.toMillis());
+        if (current != null && clock.millis() - cachedAtMillis < freshFor) {
             return CompletableFuture.completedFuture(current);
         }
         if (inFlight != null) {
