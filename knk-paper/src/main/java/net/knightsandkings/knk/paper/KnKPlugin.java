@@ -219,6 +219,19 @@ public class KnKPlugin extends JavaPlugin {
     private GateDoorsApi gateDoorsApi;
     private GateDoorRegionCaptureHandler gateDoorRegionCaptureHandler;
     private GateManager gateManager;
+    // Road navigation (KNG-27, Phase 3). regionDomainResolver / regionTracker were locals of onEnable
+    // before; the road builder (domain tagging) and navigation read them, so they are fields now (R7, R8).
+    private RegionDomainResolver regionDomainResolver;
+    private WorldGuardRegionTracker regionTracker;
+    private net.knightsandkings.knk.core.dataaccess.LocationsDataAccess locationsDataAccess;
+    private net.knightsandkings.knk.core.dataaccess.StreetsDataAccess streetsDataAccess;
+    private net.knightsandkings.knk.core.dataaccess.DistrictsDataAccess districtsDataAccess;
+    private net.knightsandkings.knk.core.dataaccess.StructuresDataAccess structuresDataAccess;
+    private net.knightsandkings.knk.paper.roads.RoadNetworkCache roadNetworkCache;
+    private net.knightsandkings.knk.paper.roads.RoadDirtyTracker roadDirtyTracker;
+    private net.knightsandkings.knk.paper.roads.RoadBuildQueue roadBuildQueue;
+    private net.knightsandkings.knk.paper.roads.RoadSurveyService roadSurveyService;
+    private net.knightsandkings.knk.paper.roads.RoadOverlayRenderer roadOverlayRenderer;
     private GateStateSyncTask gateStateSyncTask;
     private GateDisplayManager gateDisplayManager;
     private DistrictGateLoader districtGateLoader;
@@ -693,7 +706,7 @@ public class KnKPlugin extends JavaPlugin {
             // Create domain resolver for mapping WG region IDs to domain entities. Built before the
             // enchantment runtime, whose Town/District combat safezones (KNG-11) read it; the
             // constructor does no I/O.
-            RegionDomainResolver regionDomainResolver = new RegionDomainResolver(
+            this.regionDomainResolver = new RegionDomainResolver(
                 townsQueryApi,
                 districtsQueryApi,
                 structuresQueryApi,
@@ -752,7 +765,7 @@ public class KnKPlugin extends JavaPlugin {
             );
             
             // Wire tracker and listener
-            WorldGuardRegionTracker regionTracker = new WorldGuardRegionTracker(
+            this.regionTracker = new WorldGuardRegionTracker(
                 regionTransitionService,
                 regionDomainResolver,
                 regionLookupExecutor,
@@ -830,6 +843,9 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().info("Region transition service initialized with domain resolver and gate control");
 
             initializeSiege();
+
+            // Road navigation (KNG-27) Phase 3: the admin side (survey, build, review); /navigate follows in Phase 4.
+            initializeRoads();
 
             getLogger().info("KnightsAndKings Plugin Enabled!");
             
@@ -913,6 +929,28 @@ public class KnKPlugin extends JavaPlugin {
         }
         if (lootboxRuntime != null) {
             lootboxRuntime.stop(); // removes the (non-persistent) box entities
+        }
+        // Road navigation (KNG-27): running surveys are discarded (nothing to spool), the build queue
+        // stops (progress lives in the API's BuiltAt), the dirty tracker flushes once synchronously
+        // when the API is reachable - all before apiClient.shutdown() below.
+        if (roadSurveyService != null) {
+            roadSurveyService.shutdown();
+        }
+        if (roadBuildQueue != null) {
+            roadBuildQueue.stop();
+        }
+        if (roadOverlayRenderer != null) {
+            roadOverlayRenderer.clear();
+        }
+        if (roadNetworkCache != null) {
+            roadNetworkCache.stop();
+        }
+        if (roadDirtyTracker != null) {
+            try {
+                roadDirtyTracker.stop();
+            } catch (RuntimeException e) {
+                getLogger().log(java.util.logging.Level.WARNING, "Road dirty-tracker shutdown flush failed", e);
+            }
         }
         if (discoveryFlushTask != null) {
             // Unsent candidates and grants still in flight go to the spool, replayed on the next start.
@@ -1014,6 +1052,87 @@ public class KnKPlugin extends JavaPlugin {
         if (discoveryListener != null) {
             discoveryListener.resync(player);
         }
+    }
+
+    /**
+     * Road navigation (KNG-27, docs/specs/navigation/DESIGN.md §4, §5, §7; plan Phase 3): the network cache,
+     * the dirty tracker, the build queue, the survey service and the overlay. Only when
+     * {@code navigation.enabled}; {@code /knk road} is registered regardless and answers "disabled" otherwise.
+     * Runs after {@code initializeSiege()} because the build job reads the gate manager's closed footprints
+     * and the survey/build code reads the region tracker's WorldGuard query (R8).
+     *
+     * <p>Note: {@code cacheManager} is constructed twice in onEnable (once early, once after the API client);
+     * the road code uses the field as it is here, after the second construction. Not fixed in this phase.
+     */
+    private void initializeRoads() {
+        net.knightsandkings.knk.paper.config.NavigationConfig navigation = config.navigation();
+        if (!navigation.enabled()) {
+            getLogger().info("Road navigation disabled (navigation.enabled: false)");
+            return;
+        }
+        java.util.concurrent.Executor mainThread = MenuService.mainThreadExecutor(this);
+        // R18: the four data accesses were never constructed on trunk; one instance each, as fields.
+        if (locationsDataAccess == null) {
+            locationsDataAccess = dataAccessFactory.createLocationsDataAccess(config.cache().ttl(), locationsQueryApi);
+        }
+        if (streetsDataAccess == null) {
+            // CacheManager has no street cache (streets were never read by the plugin before): one here.
+            streetsDataAccess = dataAccessFactory.createStreetsDataAccess(
+                new net.knightsandkings.knk.core.cache.StreetCache(config.cache().ttl()), streetsQueryApi);
+        }
+        if (districtsDataAccess == null) {
+            districtsDataAccess = dataAccessFactory.createDistrictsDataAccess(cacheManager.getDistrictCache(), districtsQueryApi);
+        }
+        if (structuresDataAccess == null) {
+            structuresDataAccess = dataAccessFactory.createStructuresDataAccess(cacheManager.getStructureCache(), structuresQueryApi);
+        }
+
+        var queryApi = apiClient.getRoadNetworkQueryApi();
+        var commandApi = apiClient.getRoadNetworkCommandApi();
+        java.nio.file.Path roadsDirectory = new java.io.File(getDataFolder(), "roads").toPath();
+        this.roadNetworkCache = new net.knightsandkings.knk.paper.roads.RoadNetworkCache(
+            this, queryApi, roadsDirectory, regionDomainResolver, mainThread);
+
+        var dirtyTiles = new net.knightsandkings.knk.paper.roads.DirtyTiles();
+        this.roadDirtyTracker = new net.knightsandkings.knk.paper.roads.RoadDirtyTracker(
+            this, commandApi, dirtyTiles, () -> apiClient != null);
+        // The dirty tracker's "does this block matter" needs the profile materials and the road cells of the
+        // current snapshot; both follow every snapshot swap.
+        roadNetworkCache.addListener(world -> {
+            dirtyTiles.setRoadMaterials(roadNetworkCache.roadMaterialNames());
+            dirtyTiles.setRoadCells(net.knightsandkings.knk.paper.roads.DirtyTiles.RoadCells.of(roadNetworkCache.snapshot(world)));
+        });
+
+        this.roadOverlayRenderer = new net.knightsandkings.knk.paper.roads.RoadOverlayRenderer(this, roadNetworkCache::snapshot);
+
+        var regionIds = regionTracker.regionIds();
+        this.roadBuildQueue = new net.knightsandkings.knk.paper.roads.RoadBuildQueue(
+            this, navigation, queryApi, commandApi, roadNetworkCache, gateManager, regionIds, regionDomainResolver,
+            mainThread, net.knightsandkings.knk.paper.utils.TickBudget.server());
+        this.roadSurveyService = new net.knightsandkings.knk.paper.roads.RoadSurveyService(
+            this, navigation, queryApi, commandApi, roadNetworkCache, regionIds, mainThread,
+            player -> cacheManager.getUserCache().getStale(player.getUniqueId())
+                .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null));
+
+        roadNetworkCache.start();
+        roadDirtyTracker.start();
+        roadBuildQueue.start();
+        roadSurveyService.start();
+        getLogger().info("Road navigation (admin side) initialized: /knk road, tile cache at " + roadsDirectory);
+    }
+
+    /** The road network cache (null while navigation is disabled); Phase 4's /navigate reads it. */
+    public net.knightsandkings.knk.paper.roads.RoadNetworkCache getRoadNetworkCache() {
+        return roadNetworkCache;
+    }
+
+    /** The WorldGuard region tracker (R8: its {@code regionIds()} is the shared region lookup). */
+    public WorldGuardRegionTracker getRegionTracker() {
+        return regionTracker;
+    }
+
+    public RegionDomainResolver getRegionDomainResolver() {
+        return regionDomainResolver;
     }
 
     /** Domain discovery's exclusions; null when discovery is disabled. */
@@ -1218,6 +1337,16 @@ public class KnKPlugin extends JavaPlugin {
                     )
                 );
             }
+            // Road navigation (KNG-27): /knk road …, node knk.admin.road. registerCommands() runs before
+            // initializeRoads(), so every service is read lazily; a null one means navigation is disabled.
+            var roadAdmin = new net.knightsandkings.knk.paper.roads.RoadAdminCommand(
+                apiClient.getRoadNetworkQueryApi(), apiClient.getRoadNetworkCommandApi(), streetsQueryApi,
+                MenuService.mainThreadExecutor(this),
+                (player, node) -> knkPermissible != null && knkPermissible.hasPermission(player, node),
+                () -> roadNetworkCache, () -> roadDirtyTracker, () -> roadOverlayRenderer,
+                () -> roadSurveyService, () -> roadBuildQueue);
+            knkAdminCommand.registerSubcommand(
+                net.knightsandkings.knk.paper.roads.RoadAdminCommand.metadata(), roadAdmin, roadAdmin::complete);
             knkCommand.setExecutor(knkAdminCommand);
             knkCommand.setTabCompleter(knkAdminCommand);
             getLogger().info("Registered /knk admin command");
