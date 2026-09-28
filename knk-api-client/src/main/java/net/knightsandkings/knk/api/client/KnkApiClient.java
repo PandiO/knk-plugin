@@ -20,6 +20,8 @@ import net.knightsandkings.knk.api.impl.UsersQueryApiImpl;
 import net.knightsandkings.knk.api.impl.UsersCommandApiImpl;
 import net.knightsandkings.knk.api.impl.PlayerNotificationsApiImpl;
 import net.knightsandkings.knk.api.impl.DiscoveriesApiImpl;
+import net.knightsandkings.knk.api.impl.RoadNetworkCommandApiImpl;
+import net.knightsandkings.knk.api.impl.RoadNetworkQueryApiImpl;
 import net.knightsandkings.knk.api.impl.UserIgnoresApiImpl;
 import net.knightsandkings.knk.api.impl.PrivateMessageLogApiImpl;
 import net.knightsandkings.knk.api.impl.UserAccountApiImpl;
@@ -54,6 +56,8 @@ import net.knightsandkings.knk.core.ports.api.UsersQueryApi;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.core.ports.api.PlayerNotificationsApi;
 import net.knightsandkings.knk.core.ports.api.DiscoveriesApi;
+import net.knightsandkings.knk.core.ports.api.RoadNetworkCommandApi;
+import net.knightsandkings.knk.core.ports.api.RoadNetworkQueryApi;
 import net.knightsandkings.knk.core.ports.api.UserIgnoresApi;
 import net.knightsandkings.knk.core.ports.api.PrivateMessageLogApi;
 import net.knightsandkings.knk.core.ports.api.UserAccountApi;
@@ -135,6 +139,8 @@ public class KnkApiClient {
     private final net.knightsandkings.knk.core.ports.api.LootboxesQueryApi lootboxesQueryApi;
     private final net.knightsandkings.knk.core.ports.api.LootboxesCommandApi lootboxesCommandApi;
     private final CurrencyApi currencyApi;
+    private final RoadNetworkQueryApi roadNetworkQueryApi;
+    private final RoadNetworkCommandApi roadNetworkCommandApi;
 
     private KnkApiClient(
         String baseUrl,
@@ -189,6 +195,8 @@ public class KnkApiClient {
         this.categoriesQueryApi = new net.knightsandkings.knk.api.impl.CategoriesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.lootboxesQueryApi = new net.knightsandkings.knk.api.impl.LootboxesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.lootboxesCommandApi = new net.knightsandkings.knk.api.impl.LootboxesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.roadNetworkQueryApi = new RoadNetworkQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.roadNetworkCommandApi = new RoadNetworkCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
     }
     
     public HealthApi getHealthApi() {
@@ -279,6 +287,16 @@ public class KnkApiClient {
     /** Domain discovery (KNG-20): {@code api/users/{userId}/discoveries}. */
     public DiscoveriesApi getDiscoveriesApi() {
         return discoveriesApi;
+    }
+
+    /** Road navigation reads (KNG-27): tiles, conditional tile graphs, meta, profiles, surveys, seeds, edge search. */
+    public RoadNetworkQueryApi getRoadNetworkQueryApi() {
+        return roadNetworkQueryApi;
+    }
+
+    /** Road navigation writes (KNG-27): build upload, dirty marks, profiles, surveys, seeds, node/edge review. */
+    public RoadNetworkCommandApi getRoadNetworkCommandApi() {
+        return roadNetworkCommandApi;
     }
 
     /** KNG-18 Phase 2: players' ignore lists. */
