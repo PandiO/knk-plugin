@@ -19,8 +19,11 @@ import java.util.Optional;
  *                    destination
  * @param componentId connected-component id computed by the API (DESIGN §5.8); routing refuses
  *                    fast when start and goal differ
+ * @param locked      an admin locked the node's position (Phase 1 decision 7): the builder must
+ *                    keep it where it is ({@code NodeMatcher.PreviousNode.locked}). Phase 2e added
+ *                    this field from the API's {@code RoadNodeDto}; the router ignores it
  */
-public record RoadNode(int id, int x, int y, int z, RoadNodeKind kind, String name, int componentId) {
+public record RoadNode(int id, int x, int y, int z, RoadNodeKind kind, String name, int componentId, boolean locked) {
 
     public RoadNode {
         if (id < 0) {
@@ -30,6 +33,11 @@ public record RoadNode(int id, int x, int y, int z, RoadNodeKind kind, String na
         if (name != null && name.isBlank()) {
             name = null;
         }
+    }
+
+    /** An unlocked node (what the router and its fixtures build). */
+    public RoadNode(int id, int x, int y, int z, RoadNodeKind kind, String name, int componentId) {
+        this(id, x, y, z, kind, name, componentId, false);
     }
 
     /** The name, when the node has one. */
