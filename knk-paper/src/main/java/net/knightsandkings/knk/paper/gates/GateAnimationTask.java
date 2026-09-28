@@ -527,6 +527,7 @@ public class GateAnimationTask extends BukkitRunnable {
                 LOGGER.warning("[GateAnimation] Gate '" + gate.getName() + "' (ID: " + gate.getId()
                     + ") is JAMMED - an obstruction is blocking its door blocks.");
                 persistGateState(gate);
+                gateManager.fireStateChanged(gate.getId()); // R4: a jammed door blocks navigation
             }
         } else {
             jamTickCounters.remove(gate.getId());
@@ -536,6 +537,7 @@ public class GateAnimationTask extends BukkitRunnable {
                 LOGGER.info("[GateAnimation] Gate '" + gate.getName() + "' (ID: " + gate.getId()
                     + ") is no longer jammed - resuming animation.");
                 persistGateState(gate);
+                gateManager.fireStateChanged(gate.getId()); // R4
             }
         }
     }
