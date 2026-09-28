@@ -103,7 +103,8 @@ public class ConfigLoader {
         
         KnkConfig knkConfig = new KnkConfig(apiConfig, cacheConfig, accountConfig, messagesConfig,
             loadPrivateMessages(config.getConfigurationSection("private-messages")),
-            loadDiscovery(config.getConfigurationSection("discovery")));
+            loadDiscovery(config.getConfigurationSection("discovery")),
+            loadNavigation(config.getConfigurationSection("navigation")));
         knkConfig.validate();
         
         return knkConfig;
@@ -149,6 +150,71 @@ public class ConfigLoader {
             effectsConfig,
             messagesConfig
         );
+    }
+
+    /**
+     * Road navigation (KNG-27, DESIGN §4); every key has a default, so a missing section means "on, with
+     * defaults". Validation happens in {@link KnkConfig#validate()} / {@link NavigationConfig#validate()}.
+     */
+    static NavigationConfig loadNavigation(ConfigurationSection section) {
+        NavigationConfig defaults = NavigationConfig.defaults();
+        if (section == null) {
+            return defaults;
+        }
+        java.util.Map<String, Double> classCost = null;
+        ConfigurationSection costSection = section.getConfigurationSection("class-cost");
+        if (costSection != null) {
+            classCost = new java.util.LinkedHashMap<>();
+            for (String key : costSection.getKeys(false)) {
+                classCost.put(key, costSection.isSet(key) ? costSection.getDouble(key) : null);
+            }
+        }
+        java.util.List<String> overlays = section.contains("overlay-materials")
+            ? section.getStringList("overlay-materials")
+            : defaults.overlayMaterials();
+
+        NavigationConfig.TrailConfig trailDefaults = defaults.trail();
+        NavigationConfig.TrailConfig trail = new NavigationConfig.TrailConfig(
+            section.getInt("trail-length", trailDefaults.length()),
+            section.getInt("trail-period-ticks", trailDefaults.periodTicks()),
+            section.getString("trail-particle", trailDefaults.particle()),
+            section.getString("trail-color", trailDefaults.color()));
+
+        NavigationConfig.SurveyConfig surveyDefaults = defaults.survey();
+        ConfigurationSection survey = section.getConfigurationSection("survey");
+        NavigationConfig.SurveyConfig surveyConfig = survey == null ? surveyDefaults
+            : new NavigationConfig.SurveyConfig(
+                survey.getInt("sample-period-ticks", surveyDefaults.samplePeriodTicks()),
+                survey.getInt("cross-section-half-width", surveyDefaults.crossSectionHalfWidth()),
+                survey.getInt("breadcrumb-seed-spacing", surveyDefaults.breadcrumbSeedSpacing()));
+
+        NavigationConfig.BuilderConfig builderDefaults = defaults.builder();
+        ConfigurationSection builder = section.getConfigurationSection("builder");
+        NavigationConfig.BuilderConfig builderConfig = builder == null ? builderDefaults
+            : new NavigationConfig.BuilderConfig(
+                builder.getInt("tile-size", builderDefaults.tileSize()),
+                builder.getInt("tile-margin", builderDefaults.tileMargin()),
+                builder.getInt("max-cells-per-tile", builderDefaults.maxCellsPerTile()),
+                builder.getInt("snapshot-chunks-per-tick", builderDefaults.snapshotChunksPerTick()),
+                builder.getInt("junction-cluster-radius", builderDefaults.junctionClusterRadius()),
+                builder.getInt("min-spur-length", builderDefaults.minSpurLength()),
+                builder.getInt("ambiguous-reach", builderDefaults.ambiguousReach()));
+
+        return new NavigationConfig(
+            section.getBoolean("enabled", defaults.enabled()),
+            NavigationConfig.parseClassCost(classCost),
+            overlays,
+            section.getBoolean("seed-from-domains", defaults.seedFromDomains()),
+            section.getDouble("max-snap-distance", defaults.maxSnapDistance()),
+            section.getDouble("snap-vertical-weight", defaults.snapVerticalWeight()),
+            trail,
+            section.getDouble("reroute-distance", defaults.rerouteDistance()),
+            section.getInt("reroute-after-ticks", defaults.rerouteAfterTicks()),
+            section.getDouble("arrive-distance", defaults.arriveDistance()),
+            section.getInt("max-session-minutes", defaults.maxSessionMinutes()),
+            section.getDouble("sprint-speed", defaults.sprintSpeed()),
+            surveyConfig,
+            builderConfig);
     }
 
     /** private-messages: every key falls back to {@link KnkConfig.PrivateMessagesConfig#defaults()}. */

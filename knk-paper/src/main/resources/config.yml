@@ -157,6 +157,45 @@ discovery:
     # Shown instead when discoveries made while the API was down are granted later
     replay-summary: "&bWhile the server was busy you discovered &a{count}&b place(s):"
 
+# Road navigation (KNG-27, docs/specs/navigation/DESIGN.md §4). Road materials live in the API's road
+# profiles (learned by /knk road survey, edited in the web app), not here. Every key has a default.
+navigation:
+  enabled: true
+  # Routing cost per road class; lower is preferred
+  class-cost: { Main: 0.9, Road: 1.0, Path: 1.15 }
+  # Thin blocks that may lie ON a road (the road cell is the block beneath); *_SUFFIX patterns allowed
+  overlay-materials: [SNOW, "*_CARPET", "*_PRESSURE_PLATE", RAIL, POWERED_RAIL, LEAF_LITTER, PINK_PETALS]
+  # Every Domain Location within 8 blocks of a road cell seeds the build
+  seed-from-domains: true
+  # Hard limit: player and destination must be this close to a road
+  max-snap-distance: 48
+  # 1 block of height counts as this many when snapping (a bridge vs the road below it)
+  snap-vertical-weight: 4
+  trail-length: 30
+  trail-period-ticks: 10
+  trail-particle: DUST
+  trail-color: "#E8C66A"
+  reroute-distance: 8
+  reroute-after-ticks: 40
+  arrive-distance: 4
+  max-session-minutes: 30
+  # Blocks per second for the ETA ("3 min = 1000 blocks")
+  sprint-speed: 5.6
+  survey:
+    sample-period-ticks: 4
+    cross-section-half-width: 7
+    breadcrumb-seed-spacing: 32
+  builder:
+    tile-size: 512
+    tile-margin: 32
+    max-cells-per-tile: 250000
+    # Chunks extracted per tick on the main thread while a tile is captured (fewer under lag)
+    snapshot-chunks-per-tick: 4
+    junction-cluster-radius: 3
+    min-spur-length: 4
+    # An ambiguous material (cobblestone, planks) only counts within this many cells of a sure road cell
+    ambiguous-reach: 3
+
 # Player payments (currency ledger Phase 3, docs/specs/currency-payments/DESIGN.md §3.6). Every
 # limit that matters (min/max, daily caps, cooldown, confirmation threshold, who may send) lives in
 # the API's currency policy; these only shape the in-game experience.

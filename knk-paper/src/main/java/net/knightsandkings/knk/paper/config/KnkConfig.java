@@ -17,17 +17,25 @@ public record KnkConfig(
     AccountConfig account,
     MessagesConfig messages,
     PrivateMessagesConfig privateMessages,
-    DiscoveryConfig discovery
+    DiscoveryConfig discovery,
+    NavigationConfig navigation
 ) {
-    /** Without private-messages and discovery sections: their defaults. */
+    /** Without private-messages, discovery and navigation sections: their defaults. */
     public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages) {
-        this(api, cache, account, messages, PrivateMessagesConfig.defaults(), DiscoveryConfig.defaults());
+        this(api, cache, account, messages, PrivateMessagesConfig.defaults(), DiscoveryConfig.defaults(),
+            NavigationConfig.defaults());
     }
 
-    /** Without a discovery section: its defaults. */
+    /** Without discovery and navigation sections: their defaults. */
     public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
                      PrivateMessagesConfig privateMessages) {
-        this(api, cache, account, messages, privateMessages, DiscoveryConfig.defaults());
+        this(api, cache, account, messages, privateMessages, DiscoveryConfig.defaults(), NavigationConfig.defaults());
+    }
+
+    /** Without a navigation section: its defaults (road navigation, KNG-27). */
+    public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
+                     PrivateMessagesConfig privateMessages, DiscoveryConfig discovery) {
+        this(api, cache, account, messages, privateMessages, discovery, NavigationConfig.defaults());
     }
 
     public record ApiConfig(
@@ -118,6 +126,10 @@ public record KnkConfig(
             throw new IllegalArgumentException("discovery configuration is required");
         }
         discovery.validate();
+        if (navigation == null) {
+            throw new IllegalArgumentException("navigation configuration is required");
+        }
+        navigation.validate();
     }
     
     public record CacheConfig(
