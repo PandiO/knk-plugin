@@ -3,24 +3,12 @@
 ## Global project context
 @../../docs/ai-agents/GLOBAL_AGENT_INSTRUCTIONS.md
 
-If the import above didn't load (e.g. this repo isn't checked out inside a
-`knk-workspace` checkout at `Repository/knk-plugin` on this machine — that's
-the current layout, but it may differ on other machines), here are the
-essentials it contains:
-
-- Knights and Kings V3 = `knk-web-app` (React/TS) + `knk-web-api`
-  (ASP.NET Core) + `knk-plugin` (Spigot/Paper), one shared MySQL DB. Most
-  features span all three repos.
-- Current priority: reach MVP, siege minigame is the headline feature.
-- The developer works on this evenings/weekends around a full-time job —
-  don't require synchronous mid-week decisions; leave sessions in a clean,
-  resumable state with clear handoff notes.
-- Multiple sessions often run in parallel across repos on the same feature.
-  Check and update `knk-workspace/docs/ACTIVE_SESSIONS.md` before and after
-  working, and scope your claim by feature, not just by repo.
-- Docs live in `knk-workspace` under `vision/ architecture/ guides/
-  ai-agents/ specs/ backlog/ reports/ archive/` — don't scatter new docs
-  elsewhere.
+Read `AGENTS.md` and the current `knk-workspace/docs/ACTIVE_SESSIONS.md`
+before editing. The import above is Claude Code syntax for the nested
+`knk-workspace/Repository/knk-plugin` layout. If it does not resolve, locate
+the shared file in the workspace or open it from knk-workspace's current
+default branch. Do not rely on a dated handoff without checking the current
+branches, issue, plan and tracker.
 
 ## Repo-specific conventions (knk-plugin)
 
@@ -31,7 +19,9 @@ confirmed no `pom.xml` anywhere in the repo. Targets Paper API
 `1.21.10-R0.1-SNAPSHOT`.
 
 **Common commands:**
-- Build all modules: `./gradlew build`
+- Build all modules without copying the jar to the configured dev server:
+  `./gradlew build -x deployToDevServer`. The normal `./gradlew build`
+  depends on `deployToDevServer` in `knk-paper/build.gradle.kts`.
 - Test all modules: `./gradlew test` (integration tests tagged
   `integration`/`requires-bukkit` are excluded by default in `knk-paper`)
 - Build + deploy the plugin jar to the local dev server:
@@ -50,25 +40,23 @@ confirmed no `pom.xml` anywhere in the repo. Targets Paper API
 - Gate structures (relevant to the current siege-minigame/gate work):
   `gates/`
 - Config: `src/main/resources/config.yml`, `plugin.yml`
-- No dedicated `gui/`/`menus/` package exists yet — searched for
-  Menu/Gui-named classes and found none. Inventory menus (see
-  `docs/specs/inventory-menu` in `knk-workspace`) don't appear to be
-  implemented in V3 yet.
-- REST client, DTOs, and auth live in the `knk-api-client` module under
-  `net/knightsandkings/knk/api/` (auth: `api/auth/BearerAuthProvider.java`)
+- Inventory menu runtime lives in `knk-paper/.../paper/menu/`, with feature
+  implementations in `menu/content/` and reusable logic in `knk-core`.
+- REST client, DTOs, and auth live in `knk-api-client` under
+  `net/knightsandkings/knk/api/` (including `api/auth/`).
 
 **Conventions:**
-- Talks to `knk-web-api` via direct REST calls from `knk-api-client`,
-  authenticated with a JWT bearer token (`BearerAuthProvider`), matching
-  the API's JWT setup — no polling/webhook indirection found.
-- No local/legacy flat-file or embedded-DB storage remains:
-  `dataaccess/DataAccessFactory.java` builds cache-first gateways
-  (`FetchPolicy.CACHE_FIRST` by default, per-entity configurable, TTL +
-  retry from `config.yml`) backed entirely by the REST API for every entity
-  type it wires up (Users, Towns, Districts, Structures, Streets,
-  Locations, EnchantmentDefinitions, ItemBlueprints,
-  MinecraftMaterialRefs, Domains, Health) — this confirms the V2→V3
-  storage migration is complete for those entities.
+- Talks to `knk-web-api` via `knk-api-client` REST calls. The auth provider
+  configured by `api.auth.type` can be `apikey` (`ApiKeyAuthProvider`) or
+  `bearer` (`BearerAuthProvider`); protected game-server writes require the
+  configured plugin service key (`Security:PluginApiKey`) unless the API's
+  explicit development bypass applies. `PlayerNotificationPoller` polls
+  the API for player notifications; consult the actual endpoint attributes
+  when changing authentication.
+- `dataaccess/DataAccessFactory.java` builds REST-backed, cache-first
+  gateways (`FetchPolicy.CACHE_FIRST` by default, per-entity configurable).
+  The plugin also uses local files for runtime state such as siege recovery;
+  inspect the owning feature before assuming all storage is remote.
 - WorldGuard/WorldEdit are actively used, not V1/V2 leftovers — confirmed
   by the developer and by call sites: `WorldGuardIntegration.java`
   (`integration/`) wraps WorldGuard's `RegionManager`/`RegionContainer` and
