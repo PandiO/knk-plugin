@@ -105,6 +105,19 @@ class UserAdminServiceTest {
     }
 
     @Test
+    void resolveTarget_tellsAnUnreachableApiApartFromAnUnknownPlayer() {
+        when(users.getByUsernameAsync("Steve")).thenReturn(CompletableFuture.completedFuture(
+            FetchResult.error(new RuntimeException("connection refused"))));
+        when(users.getByUsernameAsync("Nobody")).thenReturn(CompletableFuture.completedFuture(FetchResult.notFound()));
+
+        service.resolveTarget(staff, "Steve", found -> { throw new AssertionError("not found"); });
+        service.resolveTarget(staff, "Nobody", found -> { throw new AssertionError("not found"); });
+
+        verify(staff).sendMessage(org.mockito.ArgumentMatchers.contains("Can't look up 'Steve' right now"));
+        verify(staff).sendMessage(org.mockito.ArgumentMatchers.contains("No player found named 'Nobody'"));
+    }
+
+    @Test
     void raisingXp_needsTheCoinAndGemNodesToo_loweringOnlyTheXpNode() {
         when(staff.hasPermission("knk.admin.user.xp")).thenReturn(true);
         apiApplies(BalanceCurrency.EXPERIENCE, BalanceOperation.REMOVE, -20, 120);

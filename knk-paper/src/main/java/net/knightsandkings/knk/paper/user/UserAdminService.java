@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.user;
 
+import net.knightsandkings.knk.core.dataaccess.FetchStatus;
 import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
 import net.knightsandkings.knk.core.domain.permissions.PermissionGroupSummary;
 import net.knightsandkings.knk.core.domain.users.ActiveMode;
@@ -140,6 +141,12 @@ public final class UserAdminService {
      */
     public void resolveTarget(CommandSender sender, String targetName, Consumer<UserSummary> onFound) {
         usersDataAccess.getByUsernameAsync(targetName).thenAccept(result -> mainThread.execute(() -> {
+            if (result.status() == FetchStatus.ERROR) {
+                // The API couldn't be asked - not the same as "no such player" (teleport smoke test K1).
+                sender.sendMessage(ChatColor.RED + "Can't look up '" + targetName
+                    + "' right now (the KnK service is unreachable) - try again in a moment.");
+                return;
+            }
             if (!result.isSuccess() || result.value().isEmpty()) {
                 sender.sendMessage(ChatColor.RED + "No player found named '" + targetName + "'.");
                 return;
