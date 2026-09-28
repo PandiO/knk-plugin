@@ -15,6 +15,7 @@ import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 
 import net.knightsandkings.knk.core.teleport.TeleportCooldowns;
+import net.knightsandkings.knk.core.teleport.TeleportDenial;
 import net.knightsandkings.knk.core.teleport.TeleportKind;
 import net.knightsandkings.knk.core.teleport.TeleportOutcome;
 import net.knightsandkings.knk.core.teleport.TeleportRequestBook;
@@ -161,9 +162,7 @@ public class TeleportRequestService {
                 return;
             }
             if (denial.isPresent()) {
-                requester.sendMessage(ChatColor.RED + (direction == Direction.TO_TARGET
-                    ? denial.get().message()
-                    : target.getName() + " can't teleport to you right now."));
+                requester.sendMessage(ChatColor.RED + refusal(denial.get(), direction, target));
                 return;
             }
             store(requester, target, direction, bypassCooldown);
@@ -213,9 +212,36 @@ public class TeleportRequestService {
         }
     }
 
-    private static String sentMessage(Player target, int expireSeconds) {
-        return ChatColor.GREEN + "Request sent to " + target.getName() + ". It expires in " + expireSeconds
-            + " s. " + ChatColor.GRAY + "/tpcancel to withdraw.";
+    /**
+     * Why a request can't be sent. For /tpa the requester is the one who would move, so the engine's
+     * reason is theirs to read. For /tpahere the target would move and the reason is about them
+     * (frozen, in combat, on cooldown...), so only a siege match - public anyway, /tpa says it too -
+     * is named; anything else stays "can't teleport to you right now".
+     */
+    static String refusal(TeleportDenial denial, Direction direction, Player target) {
+        if (direction == Direction.TO_TARGET) {
+            return denial.message();
+        }
+        if (TeleportDenial.SIEGE.equals(denial.code())) {
+            return target.getName() + " is in a siege match.";
+        }
+        return target.getName() + " can't teleport to you right now.";
+    }
+
+    /** "Request sent to X. It expires in N s. [Cancel]" - the button runs /tpcancel. */
+    static Component sentMessage(Player target, int expireSeconds) {
+        return Component.text()
+            .append(Component.text("Request sent to " + target.getName() + ". It expires in " + expireSeconds + " s. ",
+                NamedTextColor.GREEN))
+            .append(cancelButton())
+            .build();
+    }
+
+    /** A clickable [Cancel] that withdraws the player's outgoing request (runs /tpcancel). */
+    static Component cancelButton() {
+        return Component.text("[Cancel]", NamedTextColor.GRAY, TextDecoration.BOLD)
+            .clickEvent(ClickEvent.runCommand("/tpcancel"))
+            .hoverEvent(HoverEvent.showText(Component.text("Withdraw your teleport request", NamedTextColor.GRAY)));
     }
 
     /**
@@ -474,8 +500,8 @@ public class TeleportRequestService {
         }
         for (Pending request : pending) {
             if (!request.incoming()) {
-                player.sendMessage(ChatColor.GRAY + "Your teleport request to " + request.otherName() + " expires in "
-                    + request.secondsLeft() + " s. /tpcancel to withdraw.");
+                player.sendMessage(Component.text("Your teleport request to " + request.otherName() + " expires in "
+                    + request.secondsLeft() + " s. ", NamedTextColor.GRAY).append(cancelButton()));
             }
         }
     }

@@ -123,6 +123,10 @@ class TeleportRequestServiceTest {
         verify(player, never()).teleportAsync(any(Location.class), any(TeleportCause.class));
     }
 
+    private static String plain(Component component) {
+        return net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(component);
+    }
+
     private static List<String> clickCommands(Component component) {
         List<String> commands = new ArrayList<>();
         if (component.clickEvent() != null) {
@@ -143,7 +147,10 @@ class TeleportRequestServiceTest {
         ArgumentCaptor<Component> notice = ArgumentCaptor.forClass(Component.class);
         verify(bob).sendMessage(notice.capture());
         assertEquals(List.of("/tpaccept Alice 1", "/tpdeny Alice 1"), clickCommands(notice.getValue()));
-        verify(alice).sendMessage(contains("Request sent to Bob. It expires in 30 s."));
+        ArgumentCaptor<Component> sent = ArgumentCaptor.forClass(Component.class);
+        verify(alice).sendMessage(sent.capture());
+        assertTrue(plain(sent.getValue()).startsWith("Request sent to Bob. It expires in 30 s."), plain(sent.getValue()));
+        assertEquals(List.of("/tpcancel"), clickCommands(sent.getValue()), "[Cancel] withdraws the request");
         neverTeleported(alice);
     }
 
@@ -226,6 +233,26 @@ class TeleportRequestServiceTest {
     }
 
     @Test
+    void tpahereNamesASiegeMatchButNotTheTargetsOtherReasons() {
+        Set<UUID> inSiege = new HashSet<>();
+        Set<UUID> frozen = new HashSet<>();
+        engine.registerRestriction(check -> inSiege.contains(check.subject().getUniqueId())
+            ? Optional.of(TeleportDenial.of(TeleportDenial.SIEGE, "You can't teleport during a siege."))
+            : Optional.empty());
+        engine.registerRestriction(new FreezeTeleportRestriction(frozen::contains));
+
+        inSiege.add(bob.getUniqueId());
+        requests.send(alice, bob, Direction.TO_REQUESTER);
+        verify(alice).sendMessage(contains("Bob is in a siege match."));
+
+        inSiege.clear();
+        frozen.add(bob.getUniqueId());
+        requests.send(alice, bob, Direction.TO_REQUESTER);
+        verify(alice).sendMessage(contains("Bob can't teleport to you right now."));
+        verify(alice, never()).sendMessage(contains("frozen"));
+    }
+
+    @Test
     void frozenDuringTheWarmupStopsTheTeleport() {
         Set<UUID> frozen = new HashSet<>();
         engine.registerRestriction(new FreezeTeleportRestriction(frozen::contains));
@@ -304,7 +331,9 @@ class TeleportRequestServiceTest {
 
         requests.send(alice, bob, Direction.TO_TARGET);
 
-        verify(alice).sendMessage(contains("Request sent to Bob."));
+        ArgumentCaptor<Component> sent = ArgumentCaptor.forClass(Component.class);
+        verify(alice).sendMessage(sent.capture());
+        assertTrue(plain(sent.getValue()).startsWith("Request sent to Bob."), "same line as a real send");
         verify(bob, never()).sendMessage(any(Component.class));
         assertTrue(requests.pendingRequesterNames(bob).isEmpty());
     }
@@ -375,7 +404,10 @@ class TeleportRequestServiceTest {
         requests.send(alice, bob, Direction.TO_TARGET);
 
         verify(alice).sendMessage(contains("/tpaccept Bob"));
-        verify(bob, never()).sendMessage(any(Component.class));
+        // Bob only got his own "Request sent" line, no request notice from Alice.
+        ArgumentCaptor<Component> toBob = ArgumentCaptor.forClass(Component.class);
+        verify(bob).sendMessage(toBob.capture());
+        assertTrue(plain(toBob.getValue()).startsWith("Request sent to Alice."), plain(toBob.getValue()));
     }
 
     @Test
