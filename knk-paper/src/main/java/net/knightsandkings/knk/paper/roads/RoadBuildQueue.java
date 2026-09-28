@@ -186,7 +186,7 @@ public final class RoadBuildQueue {
         CompletableFuture<List<RoadSeed>> seedsF = queryApi.seeds(world);
         CompletableFuture<List<RoadSeedLocation>> locationsF = config.seedFromDomains()
             ? queryApi.seedLocations(world, cx - half, cz - half, cx + half, cz + half)
-            : CompletableFuture.completedFuture(List.of());
+            : CompletableFuture.<List<RoadSeedLocation>>completedFuture(List.of());
         CompletableFuture.allOf(tilesF, seedsF, locationsF).whenComplete((v, ex) -> mainThread.execute(() -> {
             if (RoadAdminCommand.failed(sender, "list the world's tiles and seeds", ex)) {
                 return;

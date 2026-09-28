@@ -121,7 +121,8 @@ public final class RoadSurveySession {
                 lastFloorZ = bz;
             }
         }
-        if (samples.size() >= MIN_SAMPLES_FOR_ESTIMATE && tick - lastEstimateTick >= LIVE_ESTIMATE_PERIOD_TICKS) {
+        if (samples.size() >= MIN_SAMPLES_FOR_ESTIMATE
+                && (lastEstimateTick == Long.MIN_VALUE || tick - lastEstimateTick >= LIVE_ESTIMATE_PERIOD_TICKS)) {
             lastEstimateTick = tick;
             try {
                 liveEstimate = new ProfileLearner().learn(SurveyStats.of(samples));

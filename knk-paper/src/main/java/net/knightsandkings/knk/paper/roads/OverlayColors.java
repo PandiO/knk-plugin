@@ -24,7 +24,7 @@ public final class OverlayColors {
     public static final int ANCHOR = 0xFF4081;
     public static final int NAMED_NODE = 0x69F0AE;
 
-    /** Distinct, saturated street hues; a street keeps its colour across sessions (hash of its id). */
+    /** Distinct, saturated street hues; a street keeps its colour across sessions (a stride over its id). */
     private static final int[] STREET_PALETTE = {
         0x2979FF, 0x00C853, 0xFFD600, 0xD500F9, 0x00B8D4, 0xFF6D00, 0x64DD17, 0xF50057,
         0x3D5AFE, 0x1DE9B6, 0xC6FF00, 0xAA00FF, 0x0091EA, 0xFFAB00, 0x76FF03, 0xFF1744
@@ -50,11 +50,9 @@ public final class OverlayColors {
         return street(edge.streetId().getAsInt());
     }
 
-    /** A stable colour for a street id. */
+    /** A stable colour for a street id; neighbouring ids (streets created together) get different hues. */
     public static int street(int streetId) {
-        int h = streetId * 0x9E3779B1;
-        h ^= h >>> 15;
-        return STREET_PALETTE[Math.floorMod(h, STREET_PALETTE.length)];
+        return STREET_PALETTE[Math.floorMod(streetId * 7, STREET_PALETTE.length)];
     }
 
     public static int node(RoadNodeKind kind, boolean named) {

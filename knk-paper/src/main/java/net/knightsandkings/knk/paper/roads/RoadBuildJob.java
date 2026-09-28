@@ -181,7 +181,7 @@ public final class RoadBuildJob {
         CompletableFuture<List<RoadSeedLocation>> locationsF = config.seedFromDomains()
             ? queryApi.seedLocations(key.world(), region.minX() - DOMAIN_SEED_REACH, region.minZ() - DOMAIN_SEED_REACH,
                 region.maxX() + DOMAIN_SEED_REACH, region.maxZ() + DOMAIN_SEED_REACH)
-            : CompletableFuture.completedFuture(List.of());
+            : CompletableFuture.<List<RoadSeedLocation>>completedFuture(List.of());
         CompletableFuture<Optional<RoadTileGraph>> previousF = previousGraph();
 
         CompletableFuture.allOf(profilesF, seedsF, surveysF, locationsF, previousF).whenComplete((v, ex) -> mainThread.execute(() -> {
