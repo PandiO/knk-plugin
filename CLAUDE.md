@@ -49,6 +49,10 @@ confirmed no `pom.xml` anywhere in the repo. Targets Paper API
 - HTTP/API integration glue: `http/`, `integration/`
 - Gate structures (relevant to the current siege-minigame/gate work):
   `gates/`
+- Managed WorldGuard regions (parent/priority/category flags + startup repair):
+  policy and reconciler in `knk-core/.../core/regions/managed/`, WorldGuard adapter and
+  wiring in `regions/managed/`, `/knk regions repair` in `commands/RegionsAdminCommand.java`;
+  see `docs/architecture/managed-worldguard-regions.md` in `knk-workspace`
 - Config: `src/main/resources/config.yml`, `plugin.yml`
 - No dedicated `gui/`/`menus/` package exists yet — searched for
   Menu/Gui-named classes and found none. Inventory menus (see

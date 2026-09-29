@@ -250,6 +250,7 @@ permissions:
     children:
       knk.admin.health: true
       knk.admin.cache: true
+      knk.admin.regions: true
       knk.admin.clans: true
       knk.admin.towns: true
       knk.admin.town: true
@@ -279,6 +280,10 @@ permissions:
 
   knk.admin.health:
     description: Access to /knk health
+    default: false
+
+  knk.admin.regions:
+    description: Access to /knk regions repair (re-applies the managed WorldGuard parent, priority and flags to every Knights and Kings region)
     default: false
 
   knk.admin.cache:

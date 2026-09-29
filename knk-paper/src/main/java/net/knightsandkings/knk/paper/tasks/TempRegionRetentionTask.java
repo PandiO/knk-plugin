@@ -11,6 +11,7 @@ import org.bukkit.scheduler.BukkitTask;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Predicate;
 import java.util.logging.Logger;
 
 /**
@@ -32,11 +33,21 @@ public class TempRegionRetentionTask {
     
     private final Plugin plugin;
     private final long retentionMillis;
+    private final Predicate<String> protectedRegion;
     private BukkitTask task;
 
     public TempRegionRetentionTask(Plugin plugin, long retentionDays) {
+        this(plugin, retentionDays, regionId -> false);
+    }
+
+    /**
+     * @param protectedRegion regions that must never be deleted even while still under a temp name: Town and Structure
+     *                        creation does not rename the region, so a domain can legitimately live in one for good
+     */
+    public TempRegionRetentionTask(Plugin plugin, long retentionDays, Predicate<String> protectedRegion) {
         this.plugin = plugin;
         this.retentionMillis = retentionDays * 24 * 60 * 60 * 1000;
+        this.protectedRegion = protectedRegion != null ? protectedRegion : regionId -> false;
     }
 
     /**
@@ -85,6 +96,10 @@ public class TempRegionRetentionTask {
                 // Find all temp regions older than retention period
                 for (ProtectedRegion region : regionManager.getRegions().values()) {
                     if (region.getId().startsWith(TEMP_REGION_PREFIX)) {
+                        if (protectedRegion.test(region.getId())) {
+                            LOGGER.fine("Keeping temp-named region backing a domain: " + region.getId());
+                            continue;
+                        }
                         // Check region age using creation timestamp flag
                         String timestampStr = region.getFlag(CREATION_TIMESTAMP);
                         
