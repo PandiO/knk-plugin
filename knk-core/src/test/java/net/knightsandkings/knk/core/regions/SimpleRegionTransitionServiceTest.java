@@ -215,6 +215,27 @@ class SimpleRegionTransitionServiceTest {
         assertEquals("Cinix", reported.get(0).iterator().next().name());
     }
 
+    // === previewAccess (KNG-17's teleport check, road navigation plan R6 follow-up) ===
+
+    @Test
+    void previewAccessAppliesTheSameEntryAndExitRulesWithoutSideEffects() {
+        register(town(1, "Cinix", "town_cinix", false, true));
+        register(town(2, "Kardenna", "town_kardenna", true, false));
+        List<Set<DomainSnapshot>> reported = new ArrayList<>();
+        SimpleRegionTransitionService service = new SimpleRegionTransitionService(resolver, null, reported::add);
+
+        RegionTransitionDecision entry = service.previewAccess(Set.of(), Set.of("town_cinix"));
+        RegionTransitionDecision exit = service.previewAccess(Set.of("town_kardenna"), Set.of());
+        RegionTransitionDecision allowed = service.previewAccess(Set.of(), Set.of("town_kardenna"));
+
+        assertEquals(RegionTransitionType.ENTER, entry.getType());
+        assertEquals(Optional.of("You are not allowed to enter Cinix."), entry.getMessage());
+        assertEquals(RegionTransitionType.EXIT, exit.getType());
+        assertEquals(Optional.of("You are not allowed to leave Kardenna."), exit.getMessage());
+        assertEquals(null, allowed, "allowed = null, as the teleport engine expects");
+        assertTrue(reported.isEmpty(), "a preview never reports entered domains");
+    }
+
     // === Fixtures ===
 
     private void register(DomainSnapshot domain) {

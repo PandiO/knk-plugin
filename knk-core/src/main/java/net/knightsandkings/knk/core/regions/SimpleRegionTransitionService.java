@@ -122,6 +122,15 @@ public class SimpleRegionTransitionService implements RegionTransitionService {
         return decision;
     }
 
+    /**
+     * {@inheritDoc}
+     * <p>
+     * The rules are {@link DomainAccessEvaluator}'s (road navigation plan §2 R6): the same instance
+     * the border check uses decides here, so the teleport engine's up-front refusal, the region
+     * listener and the road router can never disagree. Bypasses ({@code knk.region.bypass}) are the
+     * caller's: {@code WorldGuardRegionTracker.bypassesDenials} for teleports and the tracker's
+     * re-validation, and the same predicate as {@code DomainAvailability}'s bypass for navigation.
+     */
     @Override
     public RegionTransitionDecision previewAccess(Set<String> oldRegionIds, Set<String> newRegionIds) {
         Objects.requireNonNull(oldRegionIds, "oldRegionIds");
