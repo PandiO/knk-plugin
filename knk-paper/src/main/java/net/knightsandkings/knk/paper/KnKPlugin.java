@@ -260,6 +260,8 @@ public class KnKPlugin extends JavaPlugin {
     /** What the teleport menu uses; set once the teleport engine started (after the menu registries lock). */
     private volatile net.knightsandkings.knk.paper.menu.content.TeleportMenuFeature.Teleports teleportMenuParts;
     private SiegeService siegeService;
+    /** The siege gate lockdowns (Phase 7a); read-only for road navigation (KNG-27 plan R24). Null without the gate system. */
+    private net.knightsandkings.knk.paper.siege.SiegeGateController siegeGates;
     private net.knightsandkings.knk.core.siege.SiegeMatchRecorder siegeMatchRecorder;
     /** Kept for the siege gate controller (Phase 7a), which respawns doors a match destroyed. */
     private HealthSystem gateHealthSystem;
@@ -2077,6 +2079,7 @@ public class KnKPlugin extends JavaPlugin {
         if (gateManager != null && gateHealthSystem != null) {
             var siegeGates = new net.knightsandkings.knk.paper.siege.SiegeGateController(
                 this, gateManager, gateHealthSystem, apiClient.getSiegeGatesCommandApi());
+            this.siegeGates = siegeGates;
             siegeService.addObserver(siegeGates);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeGateListener(siegeGates, gateManager), this);
             siegeGates.recoverOnStartup();
@@ -2108,6 +2111,11 @@ public class KnKPlugin extends JavaPlugin {
 
     public SiegeService getSiegeService() {
         return siegeService;
+    }
+
+    /** The siege gate controller (read-only use: locked gates, non-member carry rule); null when siege or gates didn't start. */
+    public net.knightsandkings.knk.paper.siege.SiegeGateController getSiegeGates() {
+        return siegeGates;
     }
 
     /**
