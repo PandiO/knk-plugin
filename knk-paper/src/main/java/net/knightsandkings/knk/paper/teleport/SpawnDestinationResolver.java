@@ -17,6 +17,7 @@ import net.knightsandkings.knk.core.dataaccess.LocationsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.StructuresDataAccess;
 import net.knightsandkings.knk.core.dataaccess.TownsDataAccess;
 import net.knightsandkings.knk.core.domain.location.KnkLocation;
+import net.knightsandkings.knk.core.navigation.DomainLocationResolver;
 import net.knightsandkings.knk.core.ports.api.GameSettingsQueryApi;
 import net.knightsandkings.knk.core.teleport.SpawnPoint;
 import net.knightsandkings.knk.core.teleport.SpawnPointResolver;
@@ -57,22 +58,17 @@ public class SpawnDestinationResolver {
         Objects.requireNonNull(districts, "districts must not be null");
         Objects.requireNonNull(structures, "structures must not be null");
         SpawnPointResolver.LocationLookup locationById = id -> value(locations.getByIdAsync(id, LOOKUP_POLICY));
+        // R20 (road navigation): a domain's own Location is resolved by the shared DomainLocationResolver.
+        DomainLocationResolver domains = new DomainLocationResolver(locationById,
+            id -> value(towns.getByIdAsync(id, LOOKUP_POLICY)),
+            id -> value(districts.getByIdAsync(id, LOOKUP_POLICY)),
+            id -> value(structures.getByIdAsync(id, LOOKUP_POLICY)));
         SpawnPointResolver points = new SpawnPointResolver(
             gameSettings::get,
             locationById,
-            id -> value(towns.getByIdAsync(id, LOOKUP_POLICY)).thenCompose(town -> town
-                .map(t -> ownLocation(t.location() == null ? null : new KnkLocation(t.location().id(), t.location().name(),
-                    t.location().x(), t.location().y(), t.location().z(), t.location().yaw(), t.location().pitch(),
-                    t.location().world()), t.locationId(), locationById))
-                .orElse(CompletableFuture.completedFuture(Optional.empty()))),
-            id -> value(districts.getByIdAsync(id, LOOKUP_POLICY)).thenCompose(district -> district
-                .map(d -> ownLocation(d.location() == null ? null : new KnkLocation(d.location().id(), d.location().name(),
-                    d.location().x(), d.location().y(), d.location().z(), d.location().yaw(), d.location().pitch(),
-                    d.location().world()), d.locationId(), locationById))
-                .orElse(CompletableFuture.completedFuture(Optional.empty()))),
-            id -> value(structures.getByIdAsync(id, LOOKUP_POLICY)).thenCompose(structure -> structure
-                .map(s -> ownLocation(null, s.locationId(), locationById))
-                .orElse(CompletableFuture.completedFuture(Optional.empty()))),
+            domains::townLocation,
+            domains::districtLocation,
+            domains::structureLocation,
             System::currentTimeMillis,
             SpawnPointResolver.DEFAULT_TTL);
         return new SpawnDestinationResolver(points, worldByName, mainWorld);
@@ -109,17 +105,5 @@ public class SpawnDestinationResolver {
 
     private static <T> CompletableFuture<Optional<T>> value(CompletableFuture<FetchResult<T>> fetch) {
         return fetch.thenApply(result -> result != null ? result.value() : Optional.<T>empty());
-    }
-
-    /** A domain's embedded Location when the API included it, else its {@code locationId} looked up. */
-    private static CompletableFuture<Optional<KnkLocation>> ownLocation(KnkLocation embedded, Integer locationId,
-                                                                        SpawnPointResolver.LocationLookup locations) {
-        if (embedded != null && embedded.world() != null) {
-            return CompletableFuture.completedFuture(Optional.of(embedded));
-        }
-        if (locationId == null || locationId <= 0) {
-            return CompletableFuture.completedFuture(Optional.empty());
-        }
-        return locations.find(locationId);
     }
 }
