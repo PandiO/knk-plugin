@@ -84,6 +84,13 @@ public class WorldGuardRegionListener implements Listener {
         LOGGER.info("[KnK Listener] " + player.getName() + " decision: allowed=" + decision.isMovementAllowed() + 
                     ", message=" + decision.getMessage().orElse("(none)"));
         
+        if (!decision.isMovementAllowed() && tracker.bypassesDenials(player)) {
+            // knk.region.bypass (docs/specs/teleport/DESIGN.md §4 D11): staff walk and teleport
+            // through closed domains; a staff teleport of another player carries the staff
+            // member's bypass (TeleportService.hasInFlightBypass, wired in KnKPlugin).
+            LOGGER.info("[KnK Listener] " + player.getName() + " movement denial BYPASSED (knk.region.bypass)");
+            return;
+        }
         if (!decision.isMovementAllowed()) {
             // Movement denied: send deny message in RED and cancel the event
             LOGGER.info("[KnK Listener] " + player.getName() + " movement CANCELLED");

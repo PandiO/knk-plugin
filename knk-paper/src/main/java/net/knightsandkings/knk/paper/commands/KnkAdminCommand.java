@@ -17,7 +17,6 @@ import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
 import net.knightsandkings.knk.core.ports.api.PermissionGroupsQueryApi;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
-import net.knightsandkings.knk.paper.commands.support.RankHierarchy;
 import net.knightsandkings.knk.paper.modes.ModeService;
 import net.knightsandkings.knk.api.GateStructuresApi;
 import net.knightsandkings.knk.api.GateDoorsApi;
@@ -96,7 +95,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
             UsersCommandApi usersCommandApi,
             UsersDataAccess usersDataAccess,
             PermissionGroupsQueryApi permissionGroupsQueryApi,
-            RankHierarchy rankHierarchy,
+            StaffTeleportCommand staffTeleportCommand,
             ModeService modeService,
             DistrictGateLoader districtGateLoader,
             GateDoorRegionCaptureHandler gateDoorRegionCaptureHandler,
@@ -123,8 +122,18 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         // Register cache command
         if (cacheManager != null) {
             registry.register(
-                new CommandMetadata("cache", "View cache statistics and health", "/knk cache", "knk.admin.cache"),
+                new CommandMetadata("cache", "View cache statistics and health, or drop cached settings", "/knk cache [refresh|reload]", "knk.admin.cache",
+                        List.of("/knk cache", "/knk cache refresh")),
                 (sender, args) -> {
+                    // "reload" is what staff tend to type (smoke test 2026-09-28); same thing.
+                    if (args.length > 0 && (args[0].equalsIgnoreCase("refresh") || args[0].equalsIgnoreCase("reload"))) {
+                        // Caches kept outside the CacheManager, e.g. the /spawn destination (teleport Phase 4).
+                        List<String> refreshed = cacheManager.runRefreshHooks();
+                        sender.sendMessage(ChatColor.GREEN + (refreshed.isEmpty()
+                                ? "Nothing to refresh."
+                                : "Refreshed: " + String.join(", ", refreshed) + "."));
+                        return true;
+                    }
                     sender.sendMessage(ChatColor.translateAlternateColorCodes('§', cacheManager.getHealthSummary()));
                     return true;
                 }
@@ -391,14 +400,16 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
             );
         }
 
-        // Register teleport-to-player (developer request, same round as group/perm/freeze/
-        // staffchat/msg - rebuild of the one real, working part of v1's PlayerTeleportCommand).
-        TeleportToPlayerCommand teleportToPlayerCommand = new TeleportToPlayerCommand(plugin, usersDataAccess, rankHierarchy);
-        registry.register(
-                new CommandMetadata("tp", "Teleport to an online player", "/knk tp <player>", "knk.admin.tp",
-                        List.of("/knk tp Steve")),
-                (sender, args) -> teleportToPlayerCommand.onCommand(sender, args)
-        );
+        // /knk tp <player> [-s]: alias of /tp <player> (docs/specs/teleport/DESIGN.md §4 D1), kept
+        // on its original knk.admin.tp node. Not registered when the teleport engine didn't start.
+        if (staffTeleportCommand != null) {
+            TeleportToPlayerCommand teleportToPlayerCommand = new TeleportToPlayerCommand(staffTeleportCommand);
+            registry.register(
+                    new CommandMetadata("tp", "Teleport to an online player (same as /tp <player>)", "/knk tp <player> [-s]", "knk.admin.tp",
+                            List.of("/knk tp Steve", "/knk tp Steve -s")),
+                    (sender, args) -> teleportToPlayerCommand.onCommand(sender, args)
+            );
+        }
 
         // Register help
         registry.register(

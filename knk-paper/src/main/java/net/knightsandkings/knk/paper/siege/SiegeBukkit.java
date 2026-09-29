@@ -8,6 +8,8 @@ import net.knightsandkings.knk.paper.utils.KnkLocations;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Location;
+import org.bukkit.entity.Player;
+import org.bukkit.event.player.PlayerTeleportEvent.TeleportCause;
 
 import java.util.Locale;
 import java.util.Optional;
@@ -19,6 +21,16 @@ public final class SiegeBukkit {
     /** A runtime-config location in a loaded world, or empty (delegates to {@link KnkLocations#toLocation}, R10). */
     public static Optional<Location> toLocation(KnkLocation location) {
         return KnkLocations.toLocation(location);
+    }
+
+    /**
+     * A siege-initiated teleport (hub, match start, spawn pick, vault restore). Deliberately cause
+     * {@code PLUGIN} and outside the teleport engine (docs/specs/teleport/DESIGN.md §3.1): the engine's
+     * guards, {@link SiegeTeleportRestriction} among them, only judge player and staff teleports
+     * (cause {@code COMMAND}), so the siege can always move its own members.
+     */
+    public static boolean teleport(Player player, Location location) {
+        return player.teleport(location, TeleportCause.PLUGIN);
     }
 
     /**

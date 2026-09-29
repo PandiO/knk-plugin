@@ -117,6 +117,44 @@ player-notifications:
   # How often the plugin polls the API for them (skipped while no players are online)
   poll-interval-seconds: 2
 
+# Teleport engine (docs/specs/teleport/DESIGN.md §3.11, knk-workspace). Staff teleports (/tp,
+# /tphere, /knk tp) are instant and skip warmup, cooldown, combat tag and the safe-spot check; the
+# settings below apply to player teleports (/tpa, /tpahere, /spawn, /warp; /back in a later phase).
+teleport:
+  # Seconds a player waits before teleporting; moving to another block or taking damage cancels it
+  warmup-seconds: 5            # v1 default
+  # Warmup for holders of knk.teleport.warmup.short (granted to the Noble premium tier and up)
+  warmup-short-seconds: 3      # v1 premium
+  # Seconds after a player teleport before the same kind of teleport can be used again
+  cooldown-seconds: 30
+  # A PvP hit (dealt or taken) blocks player teleports for this long
+  combat-tag-seconds: 10       # v1 Main.combat
+  # How far (blocks) to look for a safe spot around an unsafe destination before refusing
+  safe-search-radius: 3
+  # Player teleport requests: /tpa (knk.teleport.request) and /tpahere (knk.teleport.request.here)
+  request:
+    # Seconds the target has to accept
+    expire-seconds: 30         # v1
+    # Seconds between two requests from the same player (knk.teleport.bypass.cooldown skips it)
+    cooldown-seconds: 10
+    # Pending requests one player can have; the oldest is dropped past this
+    max-incoming: 5
+    # Coins a request costs the requester (0 = free). Charged by the web API when the teleport
+    # happens (after the warmup) and refunded if it then fails.
+    price-coins: 0             # v1 intended 10000, never charged
+  # /warp <destination> and /warps (knk.teleport.warp): Towns, Districts and Structures staff
+  # enabled as destinations in the web app. The web API checks the title / premium tier /
+  # discovery requirements and takes the gem price after the warmup.
+  destinations:
+    # Seconds a player's destination list (names, prices, locks) is cached
+    cache-seconds: 60
+  # /back (knk.teleport.back, meant for Dragon Blood): back to where you last died, once per death.
+  # Warmup, cooldown, combat tag and the safe-spot check apply; a siege death gives no /back.
+  back:
+    enabled: true
+    # Seconds after a death during which /back can be started
+    expire-seconds: 300        # developer decision Q5: 5 minutes
+
 # Domain discovery (Linear KNG-20, knk-workspace docs/specs/domain-discovery/DESIGN.md §3.6):
 # the first time a player enters a Town, District or Structure it is recorded and rewarded once.
 # knk-web-api decides everything that matters (which regions are domains, the amounts, the
@@ -380,6 +418,36 @@ lootboxes:
     slowest-step-ticks: 8          # the last step's delay; the reel starts at 1 tick per step and eases out
     show-result-ticks: 50          # how long the menu stays open on the result
     public-effects: true           # particles and sounds at the player that others nearby see and hear
+# Managed WorldGuard regions (docs/architecture/managed-worldguard-regions.md in knk-workspace).
+# Knights and Kings gives every Town/District/Structure/Gate region its parent, priority and category flags when the region
+# is created, and re-checks all of them at each startup. It only ever touches those three things; owners, members and
+# every other flag (greetings, custom ones) stay as they are, and no region is created or deleted.
+regions:
+  managed:
+    startup-repair:
+      enabled: true
+      delay-ticks: 100            # wait after enable so WorldGuard has loaded its regions
+      attempts: 3                 # the API may still be starting; each attempt is retry-delay-seconds apart
+      retry-delay-seconds: 30
+      page-size: 100              # rows per API request while reading Towns, Districts and Structures
+    # v1's resource structure (property_47, wood farm) let anyone break blocks in it, limited to logs by a custom
+    # allow-blocks flag WorldGuard does not have. Turning this on sets block-break=allow on RESOURCE_PRODUCTION regions
+    # WITHOUT that restriction, so leave it off until a v3 block filter exists.
+    resource-production-block-break: false
+    # Apply v1's __global__ flags (build deny, pvp allow, ...). Changes what is buildable across the whole world.
+    manage-global-region: false
+    # Per-region corrections, by WorldGuard region id. Use them to say what a Structure is (the API has no House/Property
+    # subtype yet), to record an exact v1 priority, or to add a one-off flag. Flags here are only set while absent.
+    #   kinds: town, district, structure, house, property, resource_production, room, gate, arena, battleground
+    overrides: {}
+    #  domain_47:
+    #    kind: resource_production
+    #    priority: 35
+    #    flags: { block-break: allow }
+    # Regions with no v3 domain (arenas, battlegrounds) that should still get a parent, priority and flags.
+    extra-regions: []
+    #  - { region: arena_2, kind: arena, parent: district_2 }
+    #  - { region: arena_2-battleground, kind: battleground, parent: arena_2 }
 cache:
   # Global time-to-live for cached API responses (in seconds)
   # After this duration, cached data is considered stale and will be refetched

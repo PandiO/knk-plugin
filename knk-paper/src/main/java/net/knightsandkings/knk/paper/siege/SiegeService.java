@@ -480,7 +480,7 @@ public final class SiegeService {
                 removeMember(rt, id, LeaveCause.SNAPSHOT_FAILED, false);
                 continue;
             }
-            hub.ifPresent(player::teleport);
+            hub.ifPresent(location -> SiegeBukkit.teleport(player, location));
             player.sendMessage(SiegeMessages.info("You are at the hub of " + scenarioName(scenario)
                     + ". Your inventory and position are saved and will be restored after the siege."));
         }
@@ -530,7 +530,7 @@ public final class SiegeService {
             if (team == null) continue;
             SiegeSpawnOptions.resolveRespawn(team, match.board(), null)
                     .flatMap(o -> SiegeBukkit.toLocation(o.location()))
-                    .ifPresent(player::teleport);
+                    .ifPresent(location -> SiegeBukkit.teleport(player, location));
             player.showTitle(Title.title(Component.text("The siege begins!", NamedTextColor.GOLD),
                     Component.text("You fight for ", SiegeMessages.INFO).append(SiegeBukkit.teamComponent(team))));
             player.sendMessage(SiegeMessages.info("The match lasts " + SiegeMessages.duration(e.durationSeconds())
@@ -1122,7 +1122,7 @@ public final class SiegeService {
         if (match.consumeSpawnPick(player.getUniqueId()) && !player.isDead()) {
             Optional<Location> target = SiegeBukkit.toLocation(option.get().location());
             if (target.isPresent()) {
-                player.teleport(target.get());
+                SiegeBukkit.teleport(player, target.get());
                 player.sendActionBar(Component.text("You have spawned at " + name, SiegeMessages.INFO));
                 return Reply.ok(SiegeMessages.good("You spawned at " + name + "; you will respawn here too."));
             }

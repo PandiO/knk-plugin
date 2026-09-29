@@ -53,6 +53,21 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
     private final Map<Player, TaskContext> activeTasksByPlayer = new HashMap<>();
 
     /**
+     * Told when a temporary region became its final name, so the category's parent, priority and flags can be applied
+     * to it straight away (the managed-region creation path). Null until the plugin wires it.
+     */
+    @FunctionalInterface
+    public interface RegionFinalizer {
+        void finalized(String regionId, String domainType, String parentRegionId);
+    }
+
+    private volatile RegionFinalizer regionFinalizer;
+
+    public void setRegionFinalizer(RegionFinalizer regionFinalizer) {
+        this.regionFinalizer = regionFinalizer;
+    }
+
+    /**
      * Internal context for tracking task state
      */
     private static class TaskContext {
@@ -588,6 +603,29 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      * @return true if successful, false otherwise
      */
     public boolean renameRegion(String oldRegionId, String newRegionId) {
+        return renameRegion(oldRegionId, newRegionId, null, null);
+    }
+
+    /**
+     * As {@link #renameRegion(String, String)}; when it succeeds and a {@link RegionFinalizer} is wired, also applies the
+     * managed-region policy for a domain of {@code domainType} (null = unknown, left to the startup repair) whose parent
+     * region is {@code parentRegionId}.
+     */
+    public boolean renameRegion(String oldRegionId, String newRegionId, String domainType, String parentRegionId) {
+        boolean renamed = renameRegionInternal(oldRegionId, newRegionId);
+        RegionFinalizer finalizer = regionFinalizer;
+        if (renamed && finalizer != null && domainType != null && !domainType.isBlank()) {
+            try {
+                finalizer.finalized(newRegionId, domainType, parentRegionId);
+            } catch (Exception e) {
+                // The rename itself succeeded; the startup repair will still set the region up.
+                LOGGER.warning("Managed-region setup of " + newRegionId + " failed: " + e.getMessage());
+            }
+        }
+        return renamed;
+    }
+
+    private boolean renameRegionInternal(String oldRegionId, String newRegionId) {
         if (oldRegionId == null || oldRegionId.trim().isEmpty() || 
             newRegionId == null || newRegionId.trim().isEmpty()) {
             LOGGER.warning("Cannot rename region: oldRegionId or newRegionId is null/empty");
@@ -655,8 +693,10 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 return false;
             }
             
-            // Copy properties from old region
+            // Copy properties from old region (owners and members too: a rename must not strip player ownership)
             newRegion.setPriority(region.getPriority());
+            newRegion.setOwners(region.getOwners());
+            newRegion.setMembers(region.getMembers());
             
             // Copy flags
             for (Flag<?> flag : region.getFlags().keySet()) {

@@ -119,6 +119,7 @@ import net.knightsandkings.knk.paper.modes.ModeService;
 import net.knightsandkings.knk.paper.permissions.KnkPermissible;
 import net.knightsandkings.knk.paper.regions.CombatSafezoneCheck;
 import net.knightsandkings.knk.paper.regions.WorldGuardRegionTracker;
+import net.knightsandkings.knk.paper.regions.managed.ManagedRegionsBootstrap;
 import net.knightsandkings.knk.paper.regions.WorldGuardCombatSafezones;
 import net.knightsandkings.knk.paper.integration.WorldGuardIntegration;
 import net.knightsandkings.knk.paper.tasks.TempRegionRetentionTask;
@@ -245,6 +246,19 @@ public class KnKPlugin extends JavaPlugin {
     private EnchantmentBootstrap.EnchantmentRuntime enchantmentRuntime;
     private ExecutorService regionLookupExecutor;
     private TempRegionRetentionTask tempRegionRetentionTask;
+    private ManagedRegionsBootstrap managedRegions;
+    private net.knightsandkings.knk.paper.teleport.TeleportService teleportService;
+    private net.knightsandkings.knk.paper.commands.StaffTeleportCommand staffTeleportCommand;
+    private net.knightsandkings.knk.paper.teleport.TeleportRequestService teleportRequestService;
+    private net.knightsandkings.knk.paper.commands.TeleportRequestCommand teleportRequestCommand;
+    private net.knightsandkings.knk.paper.teleport.SpawnDestinationResolver spawnDestinationResolver;
+    private net.knightsandkings.knk.paper.commands.SpawnCommand spawnCommand;
+    private net.knightsandkings.knk.core.dataaccess.TeleportDestinationsDataAccess teleportDestinationsDataAccess;
+    private net.knightsandkings.knk.paper.commands.WarpCommand warpCommand;
+    private net.knightsandkings.knk.paper.teleport.BackService backService;
+    private net.knightsandkings.knk.paper.commands.BackCommand backCommand;
+    /** What the teleport menu uses; set once the teleport engine started (after the menu registries lock). */
+    private volatile net.knightsandkings.knk.paper.menu.content.TeleportMenuFeature.Teleports teleportMenuParts;
     private SiegeService siegeService;
     private net.knightsandkings.knk.core.siege.SiegeMatchRecorder siegeMatchRecorder;
     /** Kept for the siege gate controller (Phase 7a), which respawns doors a match destroyed. */
@@ -427,6 +441,14 @@ public class KnKPlugin extends JavaPlugin {
             // Register WgRegionId handler
             WgRegionIdTaskHandler wgRegionIdHandler = new WgRegionIdTaskHandler(worldTasksApi, this);
             worldTaskHandlerRegistry.registerHandler(wgRegionIdHandler);
+
+            // Managed WorldGuard regions: parent + priority + category flags for Town/District/Structure/Gate regions,
+            // applied when a world task's region gets its final name and repaired at every startup
+            // (docs/architecture/managed-worldguard-regions.md).
+            this.managedRegions = new ManagedRegionsBootstrap(this, ManagedRegionsBootstrap.readConfig(this),
+                townsQueryApi, districtsQueryApi, structuresQueryApi, domainCatalogQueryApi);
+            wgRegionIdHandler.setRegionFinalizer(managedRegions::finalizeNewRegion);
+            managedRegions.scheduleStartupRepair();
             
             // Register Location handler
             LocationTaskHandler locationHandler = new LocationTaskHandler(worldTasksApi, this);
@@ -467,7 +489,7 @@ public class KnKPlugin extends JavaPlugin {
             regionHttpServer.start();
 
             // Start temp region retention task (14 day retention policy)
-            tempRegionRetentionTask = new TempRegionRetentionTask(this, 14);
+            tempRegionRetentionTask = new TempRegionRetentionTask(this, 14, managedRegions::protectsFromCleanup);
             tempRegionRetentionTask.start();
 
             // Start headless WorldTask poller (webapp-initiated tasks that need no player)
@@ -512,6 +534,9 @@ public class KnKPlugin extends JavaPlugin {
             );
             this.permissionsDataAccess = dataAccessFactory.createPermissionsDataAccess(permissionsApi);
             this.knkPermissible = new KnkPermissible(cacheManager.getUserCache(), permissionsDataAccess);
+            // A grant or group change made in the web app shows in game within the 30 s cache time;
+            // /knk cache refresh applies it at once.
+            cacheManager.registerRefreshHook("permissions", permissionsDataAccess::invalidateAll);
             this.joinLoadingGuard = new JoinLoadingGuard(this, knkPermissible);
             this.modeService = new ModeService(this, knkPermissible, cacheManager.getUserCache(), usersCommandApi);
             this.adminFreezeManager = new net.knightsandkings.knk.paper.user.AdminFreezeManager();
@@ -661,6 +686,8 @@ public class KnKPlugin extends JavaPlugin {
                     userAdminService, usersQueryApi, cacheManager.getUserCache(), titleBracketsDataAccess,
                     permissionGroupsDataAccess, org.bukkit.Bukkit::getOnlinePlayers, this::askStaffReason),
                 discoveriesMenuFeature,
+                // Teleport menu (KNG-17 Phase 6): the engine starts later in onEnable, hence the supplier.
+                new net.knightsandkings.knk.paper.menu.content.TeleportMenuFeature(() -> teleportMenuParts),
                 // Siege Phase 8b: the siege menus. SiegeService is created later (initializeSiege),
                 // so the feature looks it up on every call.
                 new net.knightsandkings.knk.paper.siege.SiegeMenuFeature(() -> siegeService)
@@ -725,6 +752,10 @@ public class KnKPlugin extends JavaPlugin {
                 (attacker, victim) -> siegeService != null && siegeService.allowsCombat(attacker, victim)));
             getLogger().info("Registered custom enchantment runtime listeners and /ce command");
 
+            // Teleport engine + staff teleports (docs/specs/teleport, Phase 1) - before the commands,
+            // /knk tp delegates to /tp.
+            initializeTeleports();
+
             // Lootboxes Phase 3: world boxes, claims and delivery; commands registered in registerCommands().
             initializeLootboxes();
 
@@ -774,6 +805,7 @@ public class KnKPlugin extends JavaPlugin {
                 true  // Enable console logging; set to false to disable
             );
             registerEvents(regionTracker);
+            wireTeleportRegionGuards(regionTracker);
 
             HealthSystem healthSystem = new HealthSystem(gateDoorsApi, this, gateDisplayManager, gateManager);
             this.gateHealthSystem = healthSystem;
@@ -917,6 +949,20 @@ public class KnKPlugin extends JavaPlugin {
         }
         if (tempRegionRetentionTask != null) {
             tempRegionRetentionTask.stop();
+        }
+        if (teleportService != null) {
+            teleportService.cancelAll(net.knightsandkings.knk.core.teleport.WarmupCancelReason.SHUTDOWN);
+            // Paid teleports caught between their charge and the teleport: refund them (or void their
+            // keys) while the API client still runs - bounded, so a dead API can't hang the shutdown.
+            try {
+                teleportService.abandonOpenCharges("the server shut down").get(5, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (java.util.concurrent.TimeoutException e) {
+                getLogger().warning("Teleport charges still being refunded at shutdown - see the [KnK Teleport] refund warnings");
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (java.util.concurrent.ExecutionException e) {
+                getLogger().log(java.util.logging.Level.WARNING, "Refunding open teleport charges at shutdown failed", e);
+            }
         }
         if (salaryPayoutScheduler != null) {
             salaryPayoutScheduler.stop();
@@ -1071,21 +1117,7 @@ public class KnKPlugin extends JavaPlugin {
             return;
         }
         java.util.concurrent.Executor mainThread = MenuService.mainThreadExecutor(this);
-        // R18: the four data accesses were never constructed on trunk; one instance each, as fields.
-        if (locationsDataAccess == null) {
-            locationsDataAccess = dataAccessFactory.createLocationsDataAccess(config.cache().ttl(), locationsQueryApi);
-        }
-        if (streetsDataAccess == null) {
-            // CacheManager has no street cache (streets were never read by the plugin before): one here.
-            streetsDataAccess = dataAccessFactory.createStreetsDataAccess(
-                new net.knightsandkings.knk.core.cache.StreetCache(config.cache().ttl()), streetsQueryApi);
-        }
-        if (districtsDataAccess == null) {
-            districtsDataAccess = dataAccessFactory.createDistrictsDataAccess(cacheManager.getDistrictCache(), districtsQueryApi);
-        }
-        if (structuresDataAccess == null) {
-            structuresDataAccess = dataAccessFactory.createStructuresDataAccess(cacheManager.getStructureCache(), structuresQueryApi);
-        }
+        ensureDomainDataAccesses();
 
         var queryApi = apiClient.getRoadNetworkQueryApi();
         var commandApi = apiClient.getRoadNetworkCommandApi();
@@ -1119,6 +1151,28 @@ public class KnKPlugin extends JavaPlugin {
         roadBuildQueue.start();
         roadSurveyService.start();
         getLogger().info("Road navigation (admin side) initialized: /knk road, tile cache at " + roadsDirectory);
+    }
+
+    /**
+     * R18 (road navigation plan §2): the Location/Street/District/Structure data accesses were never
+     * constructed on trunk before KNG-17 and KNG-27; both build them here, once, as fields - /spawn
+     * (KNG-17) and the road code share them. Safe to call more than once.
+     */
+    private void ensureDomainDataAccesses() {
+        if (locationsDataAccess == null) {
+            locationsDataAccess = dataAccessFactory.createLocationsDataAccess(config.cache().ttl(), locationsQueryApi);
+        }
+        if (streetsDataAccess == null) {
+            // CacheManager has no street cache (streets were never read by the plugin before): one here.
+            streetsDataAccess = dataAccessFactory.createStreetsDataAccess(
+                new net.knightsandkings.knk.core.cache.StreetCache(config.cache().ttl()), streetsQueryApi);
+        }
+        if (districtsDataAccess == null) {
+            districtsDataAccess = dataAccessFactory.createDistrictsDataAccess(cacheManager.getDistrictCache(), districtsQueryApi);
+        }
+        if (structuresDataAccess == null) {
+            structuresDataAccess = dataAccessFactory.createStructuresDataAccess(cacheManager.getStructureCache(), structuresQueryApi);
+        }
     }
 
     /** The road network cache (null while navigation is disabled); Phase 4's /navigate reads it. */
@@ -1292,7 +1346,7 @@ public class KnKPlugin extends JavaPlugin {
                 usersCommandApi,
                 usersDataAccess,
                 apiClient.getPermissionGroupsQueryApi(),
-                rankHierarchy,
+                staffTeleportCommand,
                 modeService,
                 districtGateLoader,
                 gateDoorRegionCaptureHandler,
@@ -1302,6 +1356,11 @@ public class KnKPlugin extends JavaPlugin {
                 userAdminService,
                 playerCurrencyService
             );
+            if (managedRegions != null) {
+                knkAdminCommand.registerSubcommand(
+                    net.knightsandkings.knk.paper.commands.RegionsAdminCommand.metadata(),
+                    new net.knightsandkings.knk.paper.commands.RegionsAdminCommand(managedRegions, this)::execute);
+            }
             if (lootboxAdminCommand != null) {
                 var lootboxAdmin = lootboxAdminCommand;
                 knkAdminCommand.registerSubcommand(
@@ -1410,6 +1469,264 @@ public class KnKPlugin extends JavaPlugin {
         }
 
         registerPlayerCommands();
+
+        if (staffTeleportCommand != null) {
+            registerTabCommand("tp", staffTeleportCommand);
+            registerTabCommand("tphere", staffTeleportCommand.withForm(
+                net.knightsandkings.knk.paper.commands.StaffTeleportCommand.Form.TPHERE));
+        } else {
+            getLogger().warning("/tp and /tphere not registered - the teleport engine failed to initialize");
+        }
+        if (teleportRequestCommand != null) {
+            registerTabCommand("tpa", teleportRequestCommand);
+            registerTabCommand("tpahere", teleportRequestCommand.withForm(
+                net.knightsandkings.knk.paper.commands.TeleportRequestCommand.Form.TPAHERE));
+            registerTabCommand("tpaccept", teleportRequestCommand.withForm(
+                net.knightsandkings.knk.paper.commands.TeleportRequestCommand.Form.ACCEPT));
+            registerTabCommand("tpdeny", teleportRequestCommand.withForm(
+                net.knightsandkings.knk.paper.commands.TeleportRequestCommand.Form.DENY));
+            registerTabCommand("tpcancel", teleportRequestCommand.withForm(
+                net.knightsandkings.knk.paper.commands.TeleportRequestCommand.Form.CANCEL));
+        } else {
+            getLogger().warning("/tpa, /tpahere, /tpaccept, /tpdeny, /tpcancel not registered - the teleport engine failed to initialize");
+        }
+        if (spawnCommand != null) {
+            registerTabCommand("spawn", spawnCommand);
+        } else {
+            getLogger().warning("/spawn not registered - the teleport engine or the spawn lookup failed to initialize");
+        }
+        if (warpCommand != null) {
+            registerTabCommand("warp", warpCommand);
+            registerTabCommand("warps", warpCommand.withForm(net.knightsandkings.knk.paper.commands.WarpCommand.Form.LIST));
+        } else {
+            getLogger().warning("/warp and /warps not registered - the teleport engine or the API client failed to initialize");
+        }
+        if (backCommand != null) {
+            registerTabCommand("back", backCommand);
+        } else {
+            getLogger().warning("/back not registered - the teleport engine failed to initialize");
+        }
+    }
+
+    /**
+     * Teleport engine (docs/specs/teleport/DESIGN.md §3.4), the staff teleport commands (Phase 1) and
+     * player teleport requests (Phase 3). Siege guards plug in later through {@link #registerTeleportRestriction}.
+     */
+    private void initializeTeleports() {
+        if (knkPermissible == null || userAdminService == null || modeService == null || adminFreezeManager == null) {
+            getLogger().warning("Teleport engine not started - permissions/user services failed to initialize");
+            return;
+        }
+        java.util.concurrent.Executor mainThread = MenuService.mainThreadExecutor(this);
+        this.teleportService = new net.knightsandkings.knk.paper.teleport.TeleportService(
+            mainThread, knkPermissible::hasPermissionAsync, config.teleport(), System::currentTimeMillis,
+            net.knightsandkings.knk.paper.teleport.BukkitBlockProbe::new
+        );
+        teleportService.registerRestriction(
+            new net.knightsandkings.knk.paper.teleport.FreezeTeleportRestriction(adminFreezeManager::isFrozen));
+        if (usersCommandApi != null && usersDataAccess != null) {
+            // Phase 2: every staff teleport also lands in the web API's audit log (DESIGN.md §3.10).
+            teleportService.setAuditor(new net.knightsandkings.knk.paper.teleport.TeleportAuditor(usersCommandApi,
+                uuid -> usersDataAccess.getByUuidAsync(uuid).thenApply(result ->
+                    result != null && result.isSuccess() && result.value().isPresent() ? result.value().get().id() : null)));
+        } else {
+            getLogger().warning("Staff teleports won't be audited - the users API isn't available");
+        }
+        var targets = new net.knightsandkings.knk.paper.teleport.VisibleTargetResolver(
+            org.bukkit.Bukkit::getPlayerExact, org.bukkit.Bukkit::getOnlinePlayers, modeService::isVanished);
+        // Phase 3: /tpa, /tpahere and their answers (DESIGN.md §3.5).
+        this.teleportRequestService = new net.knightsandkings.knk.paper.teleport.TeleportRequestService(
+            teleportService, mainThread, knkPermissible::hasPermissionAsync, targets, org.bukkit.Bukkit::getPlayer);
+        // Phase 5: warp gem prices and /tpa coin fees are charged by the web API (DESIGN.md §3.5/§3.7).
+        net.knightsandkings.knk.paper.teleport.TeleportCharges charges = createTeleportCharges();
+        teleportRequestService.setCharges(charges);
+        // Private messages' ignore list (KNG-18): a player you /ignore can't /tpa or /tpahere you.
+        if (ignoreService != null) {
+            teleportRequestService.setIgnoreCheck(ignoreService::ignores);
+        }
+        if (config.teleport().request().isPaid() && charges == null) {
+            getLogger().warning("teleport.request.price-coins is " + config.teleport().request().priceCoins()
+                + " but the API client isn't available to charge it, so /tpa and /tpahere will be refused.");
+        }
+        // Phase 7: /back to the last death (developer decision Q5); siege deaths are excluded through
+        // registerBackDeathExclusion.
+        this.backService = new net.knightsandkings.knk.paper.teleport.BackService(
+            teleportService, mainThread, knkPermissible::hasPermissionAsync, org.bukkit.Bukkit::getWorld);
+        getServer().getScheduler().runTaskTimer(this, () -> {
+            teleportService.tick(adminFreezeManager::isFrozen);
+            teleportRequestService.tick();
+            backService.purgeExpired();
+        }, 5L, 5L);
+
+        var pluginManager = getServer().getPluginManager();
+        var warmupListener = new net.knightsandkings.knk.paper.listeners.TeleportWarmupListener(
+            teleportService, teleportRequestService);
+        pluginManager.registerEvents(warmupListener, this);
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.CombatTagListener(teleportService), this);
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.BackDeathListener(backService), this);
+
+        var support = new net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport(
+            knkPermissible, mainThread, org.bukkit.Bukkit::getPlayerExact, org.bukkit.Bukkit::getOnlinePlayers
+        );
+        // Same rank check as /freeze, /inventory and /knk user (console and knk.admin.user.manage.all pass).
+        net.knightsandkings.knk.paper.commands.support.TargetRankCheck rankCheck = (sender, targetName, onAllowed) ->
+            userAdminService.resolveTarget(sender, targetName, summary ->
+                userAdminService.withRankCheck(sender, summary, api -> onAllowed.accept(summary), () -> { }));
+        this.teleportRequestCommand = new net.knightsandkings.knk.paper.commands.TeleportRequestCommand(
+            net.knightsandkings.knk.paper.commands.TeleportRequestCommand.Form.TPA, support, targets, teleportRequestService);
+        this.staffTeleportCommand = new net.knightsandkings.knk.paper.commands.StaffTeleportCommand(
+            net.knightsandkings.knk.paper.commands.StaffTeleportCommand.Form.TP, support, rankCheck, targets, teleportService,
+            modeService::isVanished, org.bukkit.Bukkit::getWorld,
+            () -> org.bukkit.Bukkit.getWorlds().stream().map(org.bukkit.World::getName).toList()
+        );
+        // Phase 4: /spawn (DESIGN.md §3.6).
+        this.spawnCommand = createSpawnCommand(support, rankCheck, targets);
+        // Phase 5: /warp, /warps (DESIGN.md §3.7).
+        this.warpCommand = createWarpCommand(support, rankCheck, targets, charges);
+        if (warpCommand != null) {
+            // Each player's cached destination list and user id go when they leave.
+            warmupListener.addQuitHook(warpCommand::forget);
+        }
+        // Phase 7: /back.
+        this.backCommand = new net.knightsandkings.knk.paper.commands.BackCommand(support, backService);
+        // Phase 6: the teleport menu (teleport.destinations) runs the same /warp, /spawn and request paths,
+        // and a bare /warp opens it (the chat list while the menu isn't available).
+        this.teleportMenuParts = new net.knightsandkings.knk.paper.menu.content.TeleportMenuFeature.Teleports(
+            teleportService, teleportDestinationsDataAccess, usersDataAccess != null ? teleportUserIdLookup() : null,
+            knkPermissible::hasPermissionAsync, warpCommand, spawnCommand, teleportRequestService);
+        if (warpCommand != null) {
+            warpCommand.setMenuOpener(player -> {
+                MenuService menus = menuService;
+                String key = net.knightsandkings.knk.paper.menu.content.TeleportMenuFeature.MENU_KEY;
+                if (menus == null || !menus.isMenuAvailable(key)) {
+                    return false;
+                }
+                menus.openMenu(player, key);
+                return true;
+            });
+        }
+        getLogger().info("Teleport engine initialized (warmup " + config.teleport().warmupSeconds() + "s / "
+            + config.teleport().warmupShortSeconds() + "s, cooldown " + config.teleport().cooldownSeconds() + "s)");
+    }
+
+    /**
+     * {@code /spawn} (docs/specs/teleport/DESIGN.md §3.6): the spawn set on the web-app Game Settings
+     * page ({@code GET /api/GameSettings}), resolved through the Location/Town/District/Structure
+     * gateways and cached 5 min ({@code /knk cache refresh} drops it). Null when the API client or the
+     * caches didn't start. The join/respawn listeners still choose their own spot.
+     */
+    private net.knightsandkings.knk.paper.commands.SpawnCommand createSpawnCommand(
+            net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport support,
+            net.knightsandkings.knk.paper.commands.support.TargetRankCheck rankCheck,
+            net.knightsandkings.knk.paper.teleport.VisibleTargetResolver targets) {
+        if (apiClient == null || cacheManager == null || dataAccessFactory == null || townsDataAccess == null
+                || locationsQueryApi == null || districtsQueryApi == null || structuresQueryApi == null) {
+            getLogger().warning("/spawn not available - the API client or caches failed to initialize");
+            return null;
+        }
+        // R18 (road navigation): one instance of each domain data access, shared with /navigate.
+        ensureDomainDataAccesses();
+        this.spawnDestinationResolver = net.knightsandkings.knk.paper.teleport.SpawnDestinationResolver.create(
+            apiClient.getGameSettingsQueryApi(),
+            locationsDataAccess,
+            townsDataAccess,
+            districtsDataAccess,
+            structuresDataAccess,
+            org.bukkit.Bukkit::getWorld,
+            () -> org.bukkit.Bukkit.getWorlds().isEmpty() ? null : org.bukkit.Bukkit.getWorlds().get(0)
+        );
+        cacheManager.registerRefreshHook("spawn destination", spawnDestinationResolver::invalidate);
+        return new net.knightsandkings.knk.paper.commands.SpawnCommand(
+            support, rankCheck, targets, teleportService, spawnDestinationResolver, modeService::isVanished);
+    }
+
+    /**
+     * Charges for paid teleports (docs/specs/teleport/DESIGN.md §3.7.3): the web API's
+     * api/teleport-destinations charge/refund routes with retry-safe idempotency keys. Null when the
+     * API client or the user lookup isn't available.
+     */
+    private net.knightsandkings.knk.paper.teleport.TeleportCharges createTeleportCharges() {
+        if (apiClient == null || usersDataAccess == null) {
+            return null;
+        }
+        return new net.knightsandkings.knk.paper.teleport.TeleportCharges(
+            new net.knightsandkings.knk.core.teleport.TeleportCharger(apiClient.getTeleportDestinationsCommandApi()),
+            teleportUserIdLookup(), org.bukkit.Bukkit::getWorld, org.bukkit.Bukkit::getPlayer);
+    }
+
+    /** A player's knk user id through the users cache; null when they have no account or the lookup failed. */
+    private net.knightsandkings.knk.paper.teleport.TeleportAuditor.UserIdLookup teleportUserIdLookup() {
+        return uuid -> usersDataAccess.getByUuidAsync(uuid).thenApply(result ->
+            result != null && result.isSuccess() && result.value().isPresent() ? result.value().get().id() : null);
+    }
+
+    /**
+     * {@code /warp} and {@code /warps} (docs/specs/teleport/DESIGN.md §3.7): each player's destination
+     * list from {@code GET /api/teleport-destinations}, cached {@code teleport.destinations.cache-seconds}
+     * and dropped by {@code /knk cache refresh} and after a charge. Null without the API client.
+     */
+    private net.knightsandkings.knk.paper.commands.WarpCommand createWarpCommand(
+            net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport support,
+            net.knightsandkings.knk.paper.commands.support.TargetRankCheck rankCheck,
+            net.knightsandkings.knk.paper.teleport.VisibleTargetResolver targets,
+            net.knightsandkings.knk.paper.teleport.TeleportCharges charges) {
+        if (charges == null || cacheManager == null) {
+            getLogger().warning("/warp not available - the API client or caches failed to initialize");
+            return null;
+        }
+        this.teleportDestinationsDataAccess = new net.knightsandkings.knk.core.dataaccess.TeleportDestinationsDataAccess(
+            apiClient.getTeleportDestinationsQueryApi(),
+            java.time.Duration.ofSeconds(config.teleport().destinationsCacheSeconds()));
+        charges.setOnCharged(teleportDestinationsDataAccess::invalidate);
+        cacheManager.registerRefreshHook("warp destinations", teleportDestinationsDataAccess::invalidateAll);
+        return new net.knightsandkings.knk.paper.commands.WarpCommand(
+            net.knightsandkings.knk.paper.commands.WarpCommand.Form.WARP,
+            new net.knightsandkings.knk.paper.commands.WarpCommand.Deps(support, rankCheck, targets, teleportService,
+                teleportDestinationsDataAccess, charges, teleportUserIdLookup(), knkPermissible::hasPermissionAsync,
+                org.bukkit.Bukkit::getWorld, modeService::isVanished));
+    }
+
+    /**
+     * AllowEntry/AllowExit on teleports: the engine refuses up front (same verdict as the region
+     * listener), and holders of knk.region.bypass - or a player moved by a staff member who holds it -
+     * pass the listener (docs/specs/teleport/DESIGN.md §4 D11).
+     */
+    private void wireTeleportRegionGuards(WorldGuardRegionTracker regionTracker) {
+        String bypassNode = net.knightsandkings.knk.paper.teleport.TeleportNodes.REGION_BYPASS;
+        regionTracker.setDenialBypass(player ->
+            (knkPermissible != null && knkPermissible.hasPermission(player, bypassNode))
+                || (teleportService != null && teleportService.hasInFlightBypass(player.getUniqueId(), bypassNode)));
+        if (teleportService != null) {
+            teleportService.registerRestriction(
+                new net.knightsandkings.knk.paper.teleport.RegionTeleportRestriction(regionTracker::previewAccess));
+        }
+    }
+
+    /**
+     * Add a teleport guard (docs/specs/teleport/DESIGN.md §4 D9) - how the siege minigame blocks
+     * teleports of match members ({@code SiegeTeleportRestriction}, registered in initializeSiege)
+     * without the teleport engine depending on the siege code. No-op when the teleport engine didn't start.
+     */
+    public void registerTeleportRestriction(net.knightsandkings.knk.paper.teleport.TeleportRestriction restriction) {
+        if (teleportService != null) {
+            teleportService.registerRestriction(restriction);
+        }
+    }
+
+    /**
+     * Keep some deaths from giving a {@code /back} (docs/specs/teleport Phase 7, developer decision Q5:
+     * not after a siege death) - initializeSiege registers
+     * {@code SiegeTeleportRestriction.backDeathExclusion()} here, next to the siege teleport
+     * restriction. No-op when the teleport engine didn't start.
+     */
+    public void registerBackDeathExclusion(net.knightsandkings.knk.paper.teleport.BackDeathExclusion exclusion) {
+        if (backService != null) {
+            backService.registerDeathExclusion(exclusion);
+        }
+    }
+
+    public net.knightsandkings.knk.paper.teleport.TeleportService getTeleportService() {
+        return teleportService;
     }
 
     /** KNG-18 Phase 2: /ignore [player] and /unignore <player> (docs/specs/private-messages/DESIGN.md §3.3.5). */
@@ -1777,6 +2094,13 @@ public class KnKPlugin extends JavaPlugin {
         // Hourly salary and rank refreshes reset scoreboards; siege members keep their match board.
         net.knightsandkings.knk.paper.utils.ScoreboardUtil.setKeepOwnScoreboard(
             p -> siegeService.activeLobbyOf(p.getUniqueId()).isPresent());
+
+        // Teleport guards (docs/specs/teleport/DESIGN.md §4 D8/D9): no /tp, /tpa, /spawn, /warp, menu warp
+        // or /back moves a member while away in a siege, and a match death gives no /back. The siege's
+        // own teleports bypass the engine (SiegeBukkit.teleport, cause PLUGIN).
+        var siegeTeleports = net.knightsandkings.knk.paper.siege.SiegeTeleportRestriction.of(siegeService);
+        registerTeleportRestriction(siegeTeleports);
+        registerBackDeathExclusion(siegeTeleports.backDeathExclusion());
 
         siegeService.start();
         getLogger().info("Siege runtime initialized");

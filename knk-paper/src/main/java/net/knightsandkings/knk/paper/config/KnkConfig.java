@@ -8,6 +8,8 @@ import java.util.stream.Collectors;
 
 import org.bukkit.GameMode;
 
+import net.knightsandkings.knk.core.teleport.TeleportSettings;
+
 /**
  * Plugin configuration loaded from config.yml.
  */
@@ -17,25 +19,40 @@ public record KnkConfig(
     AccountConfig account,
     MessagesConfig messages,
     PrivateMessagesConfig privateMessages,
+    TeleportSettings teleport,
     DiscoveryConfig discovery,
     NavigationConfig navigation
 ) {
-    /** Without private-messages, discovery and navigation sections: their defaults. */
+    public KnkConfig {
+        // No teleport: block (e.g. an older config.yml) means the DESIGN §3.11 defaults.
+        teleport = teleport != null ? teleport : TeleportSettings.defaults();
+        navigation = navigation != null ? navigation : NavigationConfig.defaults();
+    }
+
+    /** Without private-messages, teleport, discovery and navigation sections: their defaults. */
     public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages) {
-        this(api, cache, account, messages, PrivateMessagesConfig.defaults(), DiscoveryConfig.defaults(),
+        this(api, cache, account, messages, PrivateMessagesConfig.defaults(), TeleportSettings.defaults(),
+            DiscoveryConfig.defaults(), NavigationConfig.defaults());
+    }
+
+    /** Without teleport, discovery and navigation sections: their defaults. */
+    public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
+                     PrivateMessagesConfig privateMessages) {
+        this(api, cache, account, messages, privateMessages, TeleportSettings.defaults(), DiscoveryConfig.defaults(),
             NavigationConfig.defaults());
     }
 
-    /** Without discovery and navigation sections: their defaults. */
+    /** Without teleport and navigation sections: their defaults (road navigation Phase 3's older form). */
     public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
-                     PrivateMessagesConfig privateMessages) {
-        this(api, cache, account, messages, privateMessages, DiscoveryConfig.defaults(), NavigationConfig.defaults());
+                     PrivateMessagesConfig privateMessages, DiscoveryConfig discovery) {
+        this(api, cache, account, messages, privateMessages, TeleportSettings.defaults(), discovery,
+            NavigationConfig.defaults());
     }
 
     /** Without a navigation section: its defaults (road navigation, KNG-27). */
     public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
-                     PrivateMessagesConfig privateMessages, DiscoveryConfig discovery) {
-        this(api, cache, account, messages, privateMessages, discovery, NavigationConfig.defaults());
+                     PrivateMessagesConfig privateMessages, TeleportSettings teleport, DiscoveryConfig discovery) {
+        this(api, cache, account, messages, privateMessages, teleport, discovery, NavigationConfig.defaults());
     }
 
     public record ApiConfig(

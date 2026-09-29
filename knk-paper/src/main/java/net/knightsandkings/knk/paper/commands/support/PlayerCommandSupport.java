@@ -5,6 +5,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -76,6 +77,47 @@ public final class PlayerCommandSupport {
                         sender.sendMessage(UNAVAILABLE_MESSAGE);
                     }
                 }));
+    }
+
+    /**
+     * Like {@link #whenAllowed}, but holding any one of {@code nodes} is enough (e.g. a new node and
+     * the legacy node it replaces). Refused as "can't be checked" only when no node was allowed and
+     * at least one check couldn't be made.
+     */
+    public void whenAnyAllowed(CommandSender sender, List<String> nodes, Runnable onAllowed) {
+        if (!(sender instanceof Player player)) {
+            onAllowed.run();
+            return;
+        }
+        CompletableFuture<PermissionDecision> any = CompletableFuture.completedFuture(PermissionDecision.DENIED);
+        for (String node : nodes) {
+            CompletableFuture<PermissionDecision> check = knkPermissible.checkAsync(player, node)
+                    .exceptionally(ex -> {
+                        LOGGER.log(Level.WARNING, "Permission check failed for " + player.getName() + ", node " + node, ex);
+                        return PermissionDecision.UNAVAILABLE;
+                    });
+            any = any.thenCombine(check, PlayerCommandSupport::either);
+        }
+        any.thenAccept(decision -> mainThread.execute(() -> {
+            if (decision == PermissionDecision.ALLOWED) {
+                onAllowed.run();
+            } else if (decision == PermissionDecision.DENIED) {
+                sender.sendMessage(ChatColor.RED + "You don't have permission to do that.");
+            } else {
+                sender.sendMessage(UNAVAILABLE_MESSAGE);
+            }
+        }));
+    }
+
+    /** ALLOWED if either is; else UNAVAILABLE if either couldn't be checked; else DENIED. */
+    private static PermissionDecision either(PermissionDecision a, PermissionDecision b) {
+        if (a == PermissionDecision.ALLOWED || b == PermissionDecision.ALLOWED) {
+            return PermissionDecision.ALLOWED;
+        }
+        if (a == PermissionDecision.UNAVAILABLE || b == PermissionDecision.UNAVAILABLE) {
+            return PermissionDecision.UNAVAILABLE;
+        }
+        return PermissionDecision.DENIED;
     }
 
     /** The sender as a player, or null after telling a non-player sender the command is player-only. */

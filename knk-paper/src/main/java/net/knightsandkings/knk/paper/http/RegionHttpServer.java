@@ -20,7 +20,9 @@ import java.util.logging.Logger;
 /**
  * Minimal HTTP server to expose region management endpoints for the Web API.
  * Supports:
- * - POST /Regions/rename?oldRegionId=...&newRegionId=...
+ * - POST /Regions/rename?oldRegionId=...&newRegionId=...[&domainType=...][&parentRegionId=...]
+ *   (domainType/parentRegionId are optional: when given, the renamed region also gets its managed-region parent,
+ *   priority and flags - see {@code regions.managed})
  * - GET /api/regions/{regionId}/contains-location?x=...&z=...&allowBoundary=false
  * - GET /api/regions/{parentRegionId}/contains-region/{childRegionId}?requireFullContainment=true
  */
@@ -69,6 +71,8 @@ public class RegionHttpServer {
             Map<String, String> query = parseQuery(exchange.getRequestURI());
             String oldRegionId = query.get("oldRegionId");
             String newRegionId = query.get("newRegionId");
+            String domainType = query.get("domainType");
+            String parentRegionId = query.get("parentRegionId");
 
             if (oldRegionId == null || newRegionId == null || oldRegionId.isBlank() || newRegionId.isBlank()) {
                 send(exchange, 400, "oldRegionId and newRegionId are required");
@@ -77,7 +81,7 @@ public class RegionHttpServer {
 
             // Run rename on main thread to keep WorldGuard safe
             plugin.getServer().getScheduler().callSyncMethod(plugin, () -> {
-                boolean result = handler.renameRegion(oldRegionId, newRegionId);
+                boolean result = handler.renameRegion(oldRegionId, newRegionId, domainType, parentRegionId);
                 try {
                     send(exchange, 200, Boolean.toString(result));
                 } catch (IOException e) {
