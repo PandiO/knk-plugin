@@ -17,10 +17,18 @@ public final class GatePassThroughRules {
 
     /** A gate admin passes any door; anyone else needs the door to allow pass-through and the use node. */
     public static boolean canPass(Player player, CachedGateDoor gate) {
-        if (isAdmin(player)) {
+        return canPass(isAdmin(player), player.hasPermission(USE_NODE), gate);
+    }
+
+    /**
+     * The same rule with the player's two nodes read beforehand (road navigation: the router reads
+     * them once on the main thread and judges every door of the network off it).
+     */
+    public static boolean canPass(boolean admin, boolean useNode, CachedGateDoor gate) {
+        if (admin) {
             return true;
         }
-        return gate.isEffectivelyAllowPassThrough() && player.hasPermission(USE_NODE);
+        return gate.isEffectivelyAllowPassThrough() && useNode;
     }
 
     public static boolean isAdmin(Player player) {
