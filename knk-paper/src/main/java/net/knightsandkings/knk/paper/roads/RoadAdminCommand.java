@@ -213,9 +213,14 @@ public class RoadAdminCommand implements SubcommandExecutor {
         return Collections.emptyList();
     }
 
+    /** Options starting with what was typed, ignoring case and the opening quote of a quoted name. */
     private static List<String> prefix(List<String> options, String typed) {
-        String lower = typed.toLowerCase(Locale.ROOT);
-        return options.stream().filter(o -> o.toLowerCase(Locale.ROOT).startsWith(lower)).sorted().toList();
+        String lower = openQuoteStripped(typed).toLowerCase(Locale.ROOT);
+        return options.stream().filter(o -> openQuoteStripped(o).toLowerCase(Locale.ROOT).startsWith(lower)).sorted().toList();
+    }
+
+    private static String openQuoteStripped(String word) {
+        return word.startsWith("\"") ? word.substring(1) : word;
     }
 
     private List<String> profileNames() {

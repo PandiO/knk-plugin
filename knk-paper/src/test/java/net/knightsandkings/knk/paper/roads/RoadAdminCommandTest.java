@@ -108,7 +108,7 @@ class RoadAdminCommandTest {
         assertEquals(List.of("start", "stop"), command.complete(player, new String[] {"survey", "st"}));
         assertEquals(List.of("\"Kardenna main street\""), command.complete(player, new String[] {"survey", "start", "Kar"}));
         assertEquals(List.of("Trail"), command.complete(player, new String[] {"profile", "show", "tr"}));
-        assertEquals(List.of("cost", "close"), command.complete(player, new String[] {"edge", "set", "12", "c"}));
+        assertEquals(List.of("close", "cost"), command.complete(player, new String[] {"edge", "set", "12", "c"}));
         assertEquals(List.of("Accent"), command.complete(player, new String[] {"profile", "role", "1", "STONE", "a"}));
         assertEquals(List.of(), command.complete(player, new String[] {"reload", "x"}));
     }
