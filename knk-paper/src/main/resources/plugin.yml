@@ -230,6 +230,14 @@ commands:
   back:
     description: "Teleport back to where you last died (for a few minutes after the death)"
     usage: "/back"
+
+  # Road navigation (KNG-27, docs/specs/navigation/DESIGN.md §6.1, Phase 4): a particle trail and HUD
+  # along the road network to a Location, Town/District/Structure, street or named road node.
+  # Node knk.navigate (default true) checked in NavigateCommand.
+  navigate:
+    description: "Guide yourself along the roads to a place, town, district, structure, street or road node"
+    usage: "/navigate <destination> [spawn|region] | /navigate stop | /navigate"
+    aliases: [nav]
   lootbox:
     description: "Lootboxes: help, and what a box can give (docs/specs/lootboxes/DESIGN.md §3.4)"
     usage: "/lootbox | /lootbox odds <category> [stars]"

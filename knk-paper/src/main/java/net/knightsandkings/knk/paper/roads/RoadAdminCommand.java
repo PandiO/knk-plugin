@@ -84,6 +84,9 @@ public class RoadAdminCommand implements SubcommandExecutor {
     private final Supplier<RoadOverlayRenderer> overlay;
     private final Supplier<RoadSurveyService> surveys;
     private final Supplier<RoadBuildQueue> builds;
+    /** Phase 4: {@code why} needs /navigate's service and catalogue; both null until navigation started. */
+    private volatile Supplier<net.knightsandkings.knk.paper.navigation.NavigationService> navigation = () -> null;
+    private volatile Supplier<net.knightsandkings.knk.paper.navigation.NavigationDestinations> destinations = () -> null;
 
     public RoadAdminCommand(RoadNetworkQueryApi queryApi, RoadNetworkCommandApi commandApi, StreetsQueryApi streetsQueryApi,
                             Executor mainThread, BiPredicate<Player, String> knkPermission,
@@ -138,7 +141,7 @@ public class RoadAdminCommand implements SubcommandExecutor {
                 case "tiles" -> tiles(sender, rest);
                 case "reload" -> reload(sender);
                 case "status" -> status(sender);
-                case "why" -> sender.sendMessage(RoadMessages.info("/knk road why arrives with /navigate (Phase 4)."));
+                case "why" -> why(sender, rest);
                 case "goto" -> gotoBlock(sender, rest);
                 default -> sender.sendMessage(RoadMessages.usage(USAGE));
             }
@@ -165,6 +168,18 @@ public class RoadAdminCommand implements SubcommandExecutor {
         }
         String root = args[0].toLowerCase(Locale.ROOT);
         String last = args[args.length - 1];
+        if ("why".equals(root)) {
+            net.knightsandkings.knk.paper.navigation.NavigationDestinations catalogue = destinations.get();
+            if (catalogue == null || !(sender instanceof Player player)) {
+                return Collections.emptyList();
+            }
+            List<String> out = new ArrayList<>(catalogue.complete(Arrays.asList(args).subList(1, args.length),
+                player.getWorld().getName()));
+            if (args.length >= 3 && "--as".startsWith(last.toLowerCase(Locale.ROOT)) && !out.contains("--as")) {
+                out.add("--as");
+            }
+            return out;
+        }
         if (args.length == 2) {
             return switch (root) {
                 case "survey" -> prefix(List.of("start", "stop", "cancel", "save", "merge", "discard"), last);
@@ -1012,6 +1027,71 @@ public class RoadAdminCommand implements SubcommandExecutor {
                 sender.sendMessage(RoadMessages.good("Reloaded every world."));
             }
         }));
+    }
+
+    /** Wires {@code /knk road why} to /navigate (Phase 4); read lazily, so it may be called any time. */
+    public void setNavigation(Supplier<net.knightsandkings.knk.paper.navigation.NavigationService> navigation,
+                              Supplier<net.knightsandkings.knk.paper.navigation.NavigationDestinations> destinations) {
+        this.navigation = navigation == null ? () -> null : navigation;
+        this.destinations = destinations == null ? () -> null : destinations;
+    }
+
+    /**
+     * {@code /knk road why <destination> [--as <player>]} (DESIGN §7): the route the admin - or
+     * {@code --as} player - would get, listing every gate and domain verdict along it.
+     */
+    private void why(CommandSender sender, String[] args) {
+        net.knightsandkings.knk.paper.navigation.NavigationService service = navigation.get();
+        net.knightsandkings.knk.paper.navigation.NavigationDestinations catalogue = destinations.get();
+        if (service == null || catalogue == null) {
+            sender.sendMessage(RoadMessages.bad("/navigate is not running (navigation.enabled: false or the road cache failed)."));
+            return;
+        }
+        List<String> words = new ArrayList<>(Arrays.asList(args));
+        Player as = sender instanceof Player p ? p : null;
+        int asIndex = words.indexOf("--as");
+        if (asIndex >= 0) {
+            if (asIndex + 1 >= words.size()) {
+                sender.sendMessage(RoadMessages.usage("/knk road why <destination> [--as <player>]"));
+                return;
+            }
+            as = Bukkit.getPlayerExact(words.get(asIndex + 1));
+            if (as == null) {
+                sender.sendMessage(RoadMessages.bad("Player " + words.get(asIndex + 1) + " is not online."));
+                return;
+            }
+            words.subList(asIndex, asIndex + 2).clear();
+        }
+        if (words.isEmpty()) {
+            sender.sendMessage(RoadMessages.usage("/knk road why <destination> [--as <player>]"));
+            return;
+        }
+        if (as == null) {
+            sender.sendMessage(RoadMessages.bad("From the console, name the player: /knk road why <destination> --as <player>"));
+            return;
+        }
+        Player player = as;
+        String input = unquote(String.join(" ", words));
+        var resolution = catalogue.resolve(input, player.getWorld().getName());
+        if (resolution.ambiguous()) {
+            sender.sendMessage(RoadMessages.warn("Several places are called \"" + input + "\": "
+                + String.join(", ", resolution.choiceNames())));
+            return;
+        }
+        if (!resolution.found()) {
+            sender.sendMessage(RoadMessages.bad("No place called \"" + input + "\" was found."));
+            return;
+        }
+        catalogue.locate(resolution.target(), net.knightsandkings.knk.paper.navigation.NavigationDestinations.Mode.DEFAULT,
+                player.getWorld().getName())
+            .whenComplete((located, ex) -> mainThread.execute(() -> {
+                if (ex != null || located == null || !located.ok()) {
+                    sender.sendMessage(RoadMessages.bad("Could not locate " + resolution.target().name()
+                        + (located != null && located.failure() != null ? " (" + located.failure() + ")" : "") + "."));
+                    return;
+                }
+                service.explain(player, located.destination(), sender::sendMessage);
+            }));
     }
 
     private void status(CommandSender sender) {
