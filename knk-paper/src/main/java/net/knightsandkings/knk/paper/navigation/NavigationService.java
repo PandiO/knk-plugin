@@ -16,7 +16,6 @@ import java.util.logging.Logger;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
-import org.bukkit.Sound;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
 import org.bukkit.plugin.Plugin;
@@ -116,6 +115,9 @@ public final class NavigationService implements SiegeMatchObserver {
     public static final double TELEPORT_END_DISTANCE = 16;
     /** Every street edge is sampled this often to find its point nearest the player. */
     static final double STREET_SAMPLE_SPACING = 2;
+    /** Arrival chime (DESIGN §6.4), as an Adventure sound so no Bukkit registry is touched. */
+    static final net.kyori.adventure.sound.Sound ARRIVAL_SOUND = net.kyori.adventure.sound.Sound.sound(
+        net.kyori.adventure.key.Key.key("entity.player.levelup"), net.kyori.adventure.sound.Sound.Source.PLAYER, 0.7f, 1.4f);
 
     private final Deps deps;
     private final RouterParameters routerParameters;
@@ -639,11 +641,7 @@ public final class NavigationService implements SiegeMatchObserver {
         a.generation++;
         deps.hud().hide(a.player);
         a.player.sendMessage(NavigationMessages.arrived(a.destination.name()));
-        try {
-            a.player.playSound(a.player.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 0.7f, 1.4f);
-        } catch (RuntimeException ignored) {
-            // a mocked player in tests, or a client without the sound
-        }
+        a.player.playSound(ARRIVAL_SOUND);
         deps.events().accept(new NavigationArriveEvent(a.player, a.destination.name()));
     }
 

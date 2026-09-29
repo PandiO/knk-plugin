@@ -100,8 +100,8 @@ public final class TrailRenderer {
 
     /**
      * The route polyline sampled every {@code spacing} blocks from {@code along} for {@code length}
-     * blocks (floor coordinates, centred in the block), ending with the route's end point when the
-     * window reaches it. Empty when the route is empty.
+     * blocks (floor coordinates shifted to the block centre), ending with the window's last point.
+     * Empty when the route is empty.
      */
     public static List<double[]> trailPoints(Route route, double along, double length, double spacing) {
         List<double[]> out = new ArrayList<>();
@@ -147,8 +147,9 @@ public final class TrailRenderer {
         return out;
     }
 
+    /** Polyline points are floor-block coordinates: shift into the block's centre without quantising the spacing. */
     static double[] centre(double[] p) {
-        return new double[] {Math.floor(p[0]) + 0.5, p[1], Math.floor(p[2]) + 0.5};
+        return new double[] {p[0] + 0.5, p[1], p[2] + 0.5};
     }
 
     static double distance(double[] a, double[] b) {
