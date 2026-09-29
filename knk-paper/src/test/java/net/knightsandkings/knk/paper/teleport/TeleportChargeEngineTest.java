@@ -4,7 +4,7 @@ import net.knightsandkings.knk.core.domain.teleport.KnkTeleportDestination;
 import net.knightsandkings.knk.core.domain.teleport.TeleportChargeResult;
 import net.knightsandkings.knk.core.domain.teleport.TeleportRefundResult;
 import net.knightsandkings.knk.core.ports.api.TeleportDestinationsCommandApi;
-import net.knightsandkings.knk.core.teleport.BlockProbe;
+import net.knightsandkings.knk.core.util.BlockProbe;
 import net.knightsandkings.knk.core.teleport.TeleportCharger;
 import net.knightsandkings.knk.core.teleport.TeleportOutcome;
 import net.knightsandkings.knk.core.teleport.TeleportRequestBook.Direction;
