@@ -11,8 +11,10 @@ import net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot;
  * WorldGuard's {@code pvp} flag at that spot is explicitly {@code allow}.
  * <p>
  * The override is the WorldGuard flag itself (e.g. {@code /rg flag <town-region> pvp allow}), not a
- * new Knights and Kings field: KNG-12 is making Town/District regions carry {@code pvp=deny} by
- * default, so the same flag then decides both vanilla PvP and custom-enchantment effects. The flag is
+ * new Knights and Kings field: Town regions carry {@code pvp=deny} by default and Districts inherit it through their
+ * parent link (KNG-12; {@code core/regions/managed/ManagedRegionPolicy}, set at creation and repaired at every startup;
+ * {@code pvp} is only ever seeded, so an admin's {@code allow} survives), so the same flag decides both vanilla PvP and
+ * custom-enchantment effects. The flag is
  * read the way WorldGuard resolves it (region priority, parent inheritance), so an arena region inside
  * a town with {@code pvp allow} is a combat zone.
  * <p>

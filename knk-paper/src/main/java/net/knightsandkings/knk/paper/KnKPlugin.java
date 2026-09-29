@@ -119,6 +119,7 @@ import net.knightsandkings.knk.paper.modes.ModeService;
 import net.knightsandkings.knk.paper.permissions.KnkPermissible;
 import net.knightsandkings.knk.paper.regions.CombatSafezoneCheck;
 import net.knightsandkings.knk.paper.regions.WorldGuardRegionTracker;
+import net.knightsandkings.knk.paper.regions.managed.ManagedRegionsBootstrap;
 import net.knightsandkings.knk.paper.regions.WorldGuardCombatSafezones;
 import net.knightsandkings.knk.paper.integration.WorldGuardIntegration;
 import net.knightsandkings.knk.paper.tasks.TempRegionRetentionTask;
@@ -232,6 +233,7 @@ public class KnKPlugin extends JavaPlugin {
     private EnchantmentBootstrap.EnchantmentRuntime enchantmentRuntime;
     private ExecutorService regionLookupExecutor;
     private TempRegionRetentionTask tempRegionRetentionTask;
+    private ManagedRegionsBootstrap managedRegions;
     private net.knightsandkings.knk.paper.teleport.TeleportService teleportService;
     private net.knightsandkings.knk.paper.commands.StaffTeleportCommand staffTeleportCommand;
     private net.knightsandkings.knk.paper.teleport.TeleportRequestService teleportRequestService;
@@ -426,6 +428,14 @@ public class KnKPlugin extends JavaPlugin {
             // Register WgRegionId handler
             WgRegionIdTaskHandler wgRegionIdHandler = new WgRegionIdTaskHandler(worldTasksApi, this);
             worldTaskHandlerRegistry.registerHandler(wgRegionIdHandler);
+
+            // Managed WorldGuard regions: parent + priority + category flags for Town/District/Structure/Gate regions,
+            // applied when a world task's region gets its final name and repaired at every startup
+            // (docs/architecture/managed-worldguard-regions.md).
+            this.managedRegions = new ManagedRegionsBootstrap(this, ManagedRegionsBootstrap.readConfig(this),
+                townsQueryApi, districtsQueryApi, structuresQueryApi, domainCatalogQueryApi);
+            wgRegionIdHandler.setRegionFinalizer(managedRegions::finalizeNewRegion);
+            managedRegions.scheduleStartupRepair();
             
             // Register Location handler
             LocationTaskHandler locationHandler = new LocationTaskHandler(worldTasksApi, this);
@@ -466,7 +476,7 @@ public class KnKPlugin extends JavaPlugin {
             regionHttpServer.start();
 
             // Start temp region retention task (14 day retention policy)
-            tempRegionRetentionTask = new TempRegionRetentionTask(this, 14);
+            tempRegionRetentionTask = new TempRegionRetentionTask(this, 14, managedRegions::protectsFromCleanup);
             tempRegionRetentionTask.start();
 
             // Start headless WorldTask poller (webapp-initiated tasks that need no player)
@@ -1219,6 +1229,11 @@ public class KnKPlugin extends JavaPlugin {
                 userAdminService,
                 playerCurrencyService
             );
+            if (managedRegions != null) {
+                knkAdminCommand.registerSubcommand(
+                    net.knightsandkings.knk.paper.commands.RegionsAdminCommand.metadata(),
+                    new net.knightsandkings.knk.paper.commands.RegionsAdminCommand(managedRegions, this)::execute);
+            }
             if (lootboxAdminCommand != null) {
                 var lootboxAdmin = lootboxAdminCommand;
                 knkAdminCommand.registerSubcommand(

@@ -379,6 +379,36 @@ lootboxes:
     slowest-step-ticks: 8          # the last step's delay; the reel starts at 1 tick per step and eases out
     show-result-ticks: 50          # how long the menu stays open on the result
     public-effects: true           # particles and sounds at the player that others nearby see and hear
+# Managed WorldGuard regions (docs/architecture/managed-worldguard-regions.md in knk-workspace).
+# Knights and Kings gives every Town/District/Structure/Gate region its parent, priority and category flags when the region
+# is created, and re-checks all of them at each startup. It only ever touches those three things; owners, members and
+# every other flag (greetings, custom ones) stay as they are, and no region is created or deleted.
+regions:
+  managed:
+    startup-repair:
+      enabled: true
+      delay-ticks: 100            # wait after enable so WorldGuard has loaded its regions
+      attempts: 3                 # the API may still be starting; each attempt is retry-delay-seconds apart
+      retry-delay-seconds: 30
+      page-size: 100              # rows per API request while reading Towns, Districts and Structures
+    # v1's resource structure (property_47, wood farm) let anyone break blocks in it, limited to logs by a custom
+    # allow-blocks flag WorldGuard does not have. Turning this on sets block-break=allow on RESOURCE_PRODUCTION regions
+    # WITHOUT that restriction, so leave it off until a v3 block filter exists.
+    resource-production-block-break: false
+    # Apply v1's __global__ flags (build deny, pvp allow, ...). Changes what is buildable across the whole world.
+    manage-global-region: false
+    # Per-region corrections, by WorldGuard region id. Use them to say what a Structure is (the API has no House/Property
+    # subtype yet), to record an exact v1 priority, or to add a one-off flag. Flags here are only set while absent.
+    #   kinds: town, district, structure, house, property, resource_production, room, gate, arena, battleground
+    overrides: {}
+    #  domain_47:
+    #    kind: resource_production
+    #    priority: 35
+    #    flags: { block-break: allow }
+    # Regions with no v3 domain (arenas, battlegrounds) that should still get a parent, priority and flags.
+    extra-regions: []
+    #  - { region: arena_2, kind: arena, parent: district_2 }
+    #  - { region: arena_2-battleground, kind: battleground, parent: arena_2 }
 cache:
   # Global time-to-live for cached API responses (in seconds)
   # After this duration, cached data is considered stale and will be refetched
