@@ -30,6 +30,10 @@ import java.util.function.Predicate;
  *
  * <p>Names are compared exactly as {@code Material.name()} spells them (upper case). Overlay patterns
  * may start with {@code *} (config style: {@code *_CARPET}).
+ *
+ * <p>The static walk helpers at the end ({@link #isWalkFloor}, {@link #isHandOpenableDoor},
+ * {@link #isWater}) serve the last-mile walk search (KNG-51 {@code LAST_MILE_PATHFINDING.md} §4); they
+ * do not change what is passable or solid for the builder.
  */
 public final class PassabilityRules {
 
@@ -166,5 +170,58 @@ public final class PassabilityRules {
     /** A stair or slab block (by name), which a player steps onto without jumping. */
     public static boolean isStairOrSlab(String material) {
         return material.endsWith("_STAIRS") || material.endsWith("_SLAB");
+    }
+
+    // ===== walk search (KNG-51 LAST_MILE_PATHFINDING.md §4) =====
+
+    /**
+     * Name suffixes of blocks that are never a walk floor: a 1.5-high collision box (fences, walls,
+     * fence gates) or too thin to stand on (panes). They are already non-passable for the cell above,
+     * so they correctly block movement; this keeps the search from "standing" on top of them.
+     */
+    public static final List<String> NEVER_FLOOR_SUFFIXES = List.of("_FENCE", "_WALL", "_FENCE_GATE", "_PANE");
+
+    /** Exact names that are never a walk floor: iron bars, and the redstone-only iron door and trapdoor. */
+    public static final Set<String> NEVER_FLOOR_MATERIALS = Set.of("IRON_BARS", "IRON_DOOR", "IRON_TRAPDOOR");
+
+    /** Water by name: a cell whose feet block is water is a wading cell (§4). Waterlogged blocks are not visible by name. */
+    public static final Set<String> WATER_MATERIALS = Set.of("WATER", "BUBBLE_COLUMN");
+
+    /** A block a mover can never stand on, whatever its collision box (fences, walls, panes, iron bars/doors). */
+    public static boolean isNeverFloor(String material) {
+        Objects.requireNonNull(material, "material");
+        if (NEVER_FLOOR_MATERIALS.contains(material)) {
+            return true;
+        }
+        for (String suffix : NEVER_FLOOR_SUFFIXES) {
+            if (material.endsWith(suffix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * A door or fence gate a hand opens (every {@code *_DOOR} except the iron door, every
+     * {@code *_FENCE_GATE}): walkable only where the mover may interact (§6). Trapdoors are not
+     * entries in v1.
+     */
+    public static boolean isHandOpenableDoor(String material) {
+        Objects.requireNonNull(material, "material");
+        return (material.endsWith("_DOOR") && !material.equals("IRON_DOOR")) || material.endsWith("_FENCE_GATE");
+    }
+
+    /**
+     * Whether a solid block can carry a walk cell: not a never-floor block and not a door (a door's
+     * blocks are walked through, never stood on). The road builder does not use this — its floors are
+     * road materials.
+     */
+    public static boolean isWalkFloor(String material) {
+        return !isNeverFloor(material) && !isHandOpenableDoor(material);
+    }
+
+    /** Water (or a bubble column) by name. */
+    public static boolean isWater(String material) {
+        return WATER_MATERIALS.contains(Objects.requireNonNull(material, "material"));
     }
 }

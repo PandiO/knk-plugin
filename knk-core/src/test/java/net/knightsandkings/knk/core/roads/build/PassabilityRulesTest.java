@@ -123,4 +123,48 @@ class PassabilityRulesTest {
             assertTrue(PassabilityRules.DEFAULT_OVERLAY_PATTERNS.contains(fromDesign), fromDesign);
         }
     }
+
+    // ===== walk search additions (KNG-51 §4) =====
+
+    @Test
+    void fencesWallsPanesBarsAndIronDoorsAreNeverAFloor() {
+        for (String never : List.of("OAK_FENCE", "NETHER_BRICK_FENCE", "COBBLESTONE_WALL", "STONE_BRICK_WALL",
+            "OAK_FENCE_GATE", "GLASS_PANE", "RED_STAINED_GLASS_PANE", "IRON_BARS", "IRON_DOOR", "IRON_TRAPDOOR")) {
+            assertTrue(PassabilityRules.isNeverFloor(never), never);
+            assertFalse(PassabilityRules.isWalkFloor(never), never);
+        }
+        for (String floor : List.of("STONE", "GRASS_BLOCK", "OAK_PLANKS", "STONE_BRICK_SLAB", "OAK_STAIRS",
+            "OAK_TRAPDOOR", "WALL_TORCH", "REDSTONE_WALL_TORCH")) {
+            assertFalse(PassabilityRules.isNeverFloor(floor), floor);
+        }
+        assertTrue(PassabilityRules.isWalkFloor("STONE"));
+    }
+
+    @Test
+    void handOpenableDoorsAreWoodenAndCopperDoorsAndFenceGatesButNotIronOrTrapdoors() {
+        for (String door : List.of("OAK_DOOR", "SPRUCE_DOOR", "CRIMSON_DOOR", "COPPER_DOOR", "WAXED_COPPER_DOOR",
+            "OAK_FENCE_GATE", "BAMBOO_FENCE_GATE")) {
+            assertTrue(PassabilityRules.isHandOpenableDoor(door), door);
+            assertFalse(PassabilityRules.isWalkFloor(door), door + " is walked through, not on");
+        }
+        for (String not : List.of("IRON_DOOR", "OAK_TRAPDOOR", "IRON_TRAPDOOR", "OAK_FENCE", "STONE")) {
+            assertFalse(PassabilityRules.isHandOpenableDoor(not), not);
+        }
+    }
+
+    @Test
+    void waterIsRecognisedByName() {
+        assertTrue(PassabilityRules.isWater("WATER"));
+        assertTrue(PassabilityRules.isWater("BUBBLE_COLUMN"));
+        assertFalse(PassabilityRules.isWater("LAVA"));
+        assertFalse(PassabilityRules.isWater("ICE"));
+    }
+
+    @Test
+    void theWalkAdditionsLeaveTheBuildersPassabilityAlone() {
+        // a fence is still solid and a door still collidable for the road builder: §4 adds walk rules, not new passability
+        assertTrue(rules.isSolid("OAK_FENCE"));
+        assertTrue(rules.isSolid("OAK_DOOR"));
+        assertTrue(rules.isPassable("LADDER"));
+    }
 }
