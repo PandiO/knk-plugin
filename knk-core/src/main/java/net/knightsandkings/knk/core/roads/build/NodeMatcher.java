@@ -17,7 +17,8 @@ import java.util.OptionalInt;
  * a matched node reports the old id as {@code existingId} and a {@code Locked} node keeps its old
  * position. An edge keeps its id when both its nodes matched the nodes of a previous edge and its
  * polyline stays within {@link BuildParameters#edgeMatchDistance()} of the old one. Anchor nodes are
- * matched by their anchor id, never by position.
+ * matched by their anchor id, never by position. A locked node still unmatched after that takes the
+ * nearest remaining candidate within {@link BuildParameters#lockedNodeReach()}.
  */
 public final class NodeMatcher {
 
@@ -106,6 +107,34 @@ public final class NodeMatcher {
                 }
             }
         }
+        assignNearestFirst(pairs, result, used, previous);
+
+        // Second pass (smoke test fix plan 5.5 item 6): a locked node is admin cleanup - a merge moved
+        // it, or the builder's junction re-centred (a plaza) - so it claims the nearest remaining
+        // candidate within lockedNodeReach instead of a new node appearing next to it.
+        double reach = params.lockedNodeReach();
+        List<double[]> lockedPairs = new ArrayList<>();
+        for (int i = 0; i < candidates.size(); i++) {
+            if (result[i] != UNMATCHED) {
+                continue;
+            }
+            Candidate c = candidates.get(i);
+            for (int j = 0; j < previous.nodes().size(); j++) {
+                PreviousNode p = previous.nodes().get(j);
+                if (used[j] || !p.locked() || p.kind() == RoadNodeKind.ANCHOR || p.kind() == RoadNodeKind.BOUNDARY) {
+                    continue;
+                }
+                double d = distance(c.x(), c.y(), c.z(), p.x(), p.y(), p.z());
+                if (d <= reach) {
+                    lockedPairs.add(new double[] {d, i, j});
+                }
+            }
+        }
+        assignNearestFirst(lockedPairs, result, used, previous);
+        return result;
+    }
+
+    private static void assignNearestFirst(List<double[]> pairs, int[] result, boolean[] used, PreviousGraph previous) {
         pairs.sort(Comparator.<double[]>comparingDouble(p -> p[0])
             .thenComparingDouble(p -> p[1]).thenComparingDouble(p -> p[2]));
         for (double[] pair : pairs) {
@@ -116,7 +145,6 @@ public final class NodeMatcher {
                 used[j] = true;
             }
         }
-        return result;
     }
 
     /**

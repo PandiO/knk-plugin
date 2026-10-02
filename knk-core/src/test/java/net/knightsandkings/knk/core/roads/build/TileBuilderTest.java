@@ -571,6 +571,84 @@ class TileBuilderTest {
         assertEquals(11, end[2], "geometry follows the node");
     }
 
+    /**
+     * Fix plan 5.5 item 6: the builder makes two junctions 5 blocks apart (a side path south at x 15,
+     * one north at x 20 - farther apart than junction-cluster-radius). The admin merged them into
+     * the west one (#100, locked; #101 is gone). Two rebuilds - the second after a block changed -
+     * must keep one junction, #100, with all four arms.
+     */
+    private static GridFixture twoCloseForks(boolean brokenBlock) {
+        GridFixture f = new GridFixture().layer(4, 64, 20, "G".repeat(40));   // main path z 20, x 4..43
+        for (int z = 21; z <= 40; z++) f.block(15, 64, z, GridFixture.GRAVEL); // south arm at x 15
+        for (int z = 2; z <= 19; z++) f.block(20, 64, z, GridFixture.GRAVEL);  // north arm at x 20
+        if (brokenBlock) {
+            f.clear(43, 64, 20); // the main path loses its last block in the east
+        }
+        return f;
+    }
+
+    @Test
+    void aMergedJunctionStaysMergedAcrossRebuilds() {
+        TileBuildResult fresh = builder.build(request(twoCloseForks(false), new Seed(4, 65, 20)), twoCloseForks(false));
+        assertEquals(2, fresh.nodes(RoadNodeKind.JUNCTION).size(), "the builder alone makes two" + describe(fresh));
+
+        PreviousGraph merged = new PreviousGraph(List.of(new PreviousNode(100, 15, 64, 20, RoadNodeKind.JUNCTION, true)), List.of());
+        for (boolean broken : new boolean[] {false, true}) {
+            GridFixture f = twoCloseForks(broken);
+            TileRequest req = request(f, PARAMS, GridFixture.profiles(), List.of(), merged, new Seed(4, 65, 20));
+            TileBuildResult r = builder.build(req, f);
+            String d = describe(r);
+
+            assertContract(r, req);
+            Node junction = onlyNode(r, RoadNodeKind.JUNCTION);
+            assertEquals(OptionalInt.of(100), junction.existingId(), d);
+            assertEquals(15, junction.x(), d);
+            assertEquals(20, junction.z(), d);
+            assertEquals(4, r.edges().size(), "west, east, south and north arms" + d);
+            assertTrue(r.edges().stream().allMatch(e -> e.fromKey().equals(junction.key()) || e.toKey().equals(junction.key())), d);
+        }
+    }
+
+    @Test
+    void aLockedJunctionClaimsTheBuildersJunctionBeyondTheNormalMatchDistance() {
+        // The admin locked the junction where they wanted it, 5 blocks along the south arm (a plaza's
+        // re-centred junction looks the same): the rebuild's junction takes its id and position
+        // instead of a new junction appearing next to it.
+        GridFixture f = new GridFixture().layer(4, 64, 20, "G".repeat(40));
+        for (int z = 21; z <= 40; z++) f.block(15, 64, z, GridFixture.GRAVEL);
+        PreviousGraph previous = new PreviousGraph(List.of(new PreviousNode(200, 15, 64, 25, RoadNodeKind.JUNCTION, true)), List.of());
+        TileRequest req = request(f, PARAMS, GridFixture.profiles(), List.of(), previous, new Seed(4, 65, 20));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        Node junction = onlyNode(r, RoadNodeKind.JUNCTION);
+        assertEquals(OptionalInt.of(200), junction.existingId(), d);
+        assertEquals(25, junction.z(), "the locked position" + d);
+
+        TileBuildResult unlocked = builder.build(request(f, PARAMS, GridFixture.profiles(), List.of(),
+            new PreviousGraph(List.of(new PreviousNode(200, 15, 64, 25, RoadNodeKind.JUNCTION, false)), List.of()),
+            new Seed(4, 65, 20)), f);
+        assertTrue(onlyNode(unlocked, RoadNodeKind.JUNCTION).existingId().isEmpty(), "unlocked: only within 3 blocks" + describe(unlocked));
+    }
+
+    @Test
+    void anUnlockedNeighbourAndAFarJunctionAreNotMerged() {
+        // Only unmatched nodes merge: a junction the admin left alone (#101, matched) stays, and so does
+        // one farther than locked-node-reach.
+        GridFixture f = twoCloseForks(false);
+        PreviousGraph previous = new PreviousGraph(List.of(
+            new PreviousNode(100, 15, 64, 20, RoadNodeKind.JUNCTION, true),
+            new PreviousNode(101, 20, 64, 20, RoadNodeKind.JUNCTION, false)), List.of());
+        TileBuildResult r = builder.build(request(f, PARAMS, GridFixture.profiles(), List.of(), previous, new Seed(4, 65, 20)), f);
+        assertEquals(2, r.nodes(RoadNodeKind.JUNCTION).size(), describe(r));
+
+        TileBuildResult shortReach = builder.build(request(f, PARAMS.withLockedNodeReach(4), GridFixture.profiles(), List.of(),
+            new PreviousGraph(List.of(new PreviousNode(100, 15, 64, 20, RoadNodeKind.JUNCTION, true)), List.of()),
+            new Seed(4, 65, 20)), f);
+        assertEquals(2, shortReach.nodes(RoadNodeKind.JUNCTION).size(), "5 blocks apart, reach 4" + describe(shortReach));
+    }
+
     @Test
     void anchorsAppearAsAnchorNodesWithTheirIds() {
         GridFixture f = new GridFixture().layer(4, 64, 10, "G".repeat(30));

@@ -27,10 +27,16 @@ package net.knightsandkings.knk.core.roads.build;
  *                              clearance, so the edge band of an irregular plaza (corners, bumps,
  *                              lamp posts) joins the plaza junction ({@code plaza-growth}; smoke test
  *                              fix plan 5.5 item 5)
+ * @param lockedNodeReach       a node an admin locked (edited, merged into, recorded through) claims
+ *                              the builder's nodes within this distance: the nearest one takes its id
+ *                              (beyond {@code nodeMatchDistance}), and an unmatched Junction or
+ *                              Endpoint joined to it by a chain this short merges into it, so the
+ *                              cleanup survives a rebuild ({@code locked-node-reach}; fix plan 5.5 item 6)
  */
 public record BuildParameters(int tileSize, int tileMargin, int maxCellsPerTile, int junctionClusterRadius,
                               int minSpurLength, int ambiguousReach, double rdpEpsilon, int seedSnapRadius,
-                              double nodeMatchDistance, double edgeMatchDistance, int plazaGrowth) {
+                              double nodeMatchDistance, double edgeMatchDistance, int plazaGrowth,
+                              double lockedNodeReach) {
 
     public static final int DEFAULT_TILE_SIZE = 512;
     public static final int DEFAULT_TILE_MARGIN = 32;
@@ -43,6 +49,7 @@ public record BuildParameters(int tileSize, int tileMargin, int maxCellsPerTile,
     public static final double DEFAULT_NODE_MATCH_DISTANCE = 3.0;
     public static final double DEFAULT_EDGE_MATCH_DISTANCE = 2.0;
     public static final int DEFAULT_PLAZA_GROWTH = 2;
+    public static final double DEFAULT_LOCKED_NODE_REACH = 8.0;
 
     public BuildParameters {
         if (tileSize < 1) throw new IllegalArgumentException("tileSize must be >= 1");
@@ -56,6 +63,7 @@ public record BuildParameters(int tileSize, int tileMargin, int maxCellsPerTile,
         if (!(nodeMatchDistance >= 0)) throw new IllegalArgumentException("nodeMatchDistance must be >= 0");
         if (!(edgeMatchDistance >= 0)) throw new IllegalArgumentException("edgeMatchDistance must be >= 0");
         if (plazaGrowth < 0) throw new IllegalArgumentException("plazaGrowth must be >= 0");
+        if (!(lockedNodeReach >= 0)) throw new IllegalArgumentException("lockedNodeReach must be >= 0");
     }
 
     /** The DESIGN §4 defaults. */
@@ -63,36 +71,42 @@ public record BuildParameters(int tileSize, int tileMargin, int maxCellsPerTile,
         return new BuildParameters(DEFAULT_TILE_SIZE, DEFAULT_TILE_MARGIN, DEFAULT_MAX_CELLS_PER_TILE,
             DEFAULT_JUNCTION_CLUSTER_RADIUS, DEFAULT_MIN_SPUR_LENGTH, DEFAULT_AMBIGUOUS_REACH,
             DEFAULT_RDP_EPSILON, DEFAULT_SEED_SNAP_RADIUS, DEFAULT_NODE_MATCH_DISTANCE,
-            DEFAULT_EDGE_MATCH_DISTANCE, DEFAULT_PLAZA_GROWTH);
+            DEFAULT_EDGE_MATCH_DISTANCE, DEFAULT_PLAZA_GROWTH, DEFAULT_LOCKED_NODE_REACH);
     }
 
     /** The defaults with another tile size and margin (tests build small tiles). */
     public BuildParameters withTile(int size, int margin) {
         return new BuildParameters(size, margin, maxCellsPerTile, junctionClusterRadius, minSpurLength,
-            ambiguousReach, rdpEpsilon, seedSnapRadius, nodeMatchDistance, edgeMatchDistance, plazaGrowth);
+            ambiguousReach, rdpEpsilon, seedSnapRadius, nodeMatchDistance, edgeMatchDistance, plazaGrowth, lockedNodeReach);
     }
 
     /** The same parameters with another cell cap. */
     public BuildParameters withMaxCells(int maxCells) {
         return new BuildParameters(tileSize, tileMargin, maxCells, junctionClusterRadius, minSpurLength,
-            ambiguousReach, rdpEpsilon, seedSnapRadius, nodeMatchDistance, edgeMatchDistance, plazaGrowth);
+            ambiguousReach, rdpEpsilon, seedSnapRadius, nodeMatchDistance, edgeMatchDistance, plazaGrowth, lockedNodeReach);
     }
 
     /** The same parameters with another ambiguity reach. */
     public BuildParameters withAmbiguousReach(int reach) {
         return new BuildParameters(tileSize, tileMargin, maxCellsPerTile, junctionClusterRadius, minSpurLength,
-            reach, rdpEpsilon, seedSnapRadius, nodeMatchDistance, edgeMatchDistance, plazaGrowth);
+            reach, rdpEpsilon, seedSnapRadius, nodeMatchDistance, edgeMatchDistance, plazaGrowth, lockedNodeReach);
     }
 
     /** The same parameters with other junction/spur rules. */
     public BuildParameters withGraphRules(int clusterRadius, int minSpur) {
         return new BuildParameters(tileSize, tileMargin, maxCellsPerTile, clusterRadius, minSpur,
-            ambiguousReach, rdpEpsilon, seedSnapRadius, nodeMatchDistance, edgeMatchDistance, plazaGrowth);
+            ambiguousReach, rdpEpsilon, seedSnapRadius, nodeMatchDistance, edgeMatchDistance, plazaGrowth, lockedNodeReach);
     }
 
     /** The same parameters with another plaza growth. */
     public BuildParameters withPlazaGrowth(int growth) {
         return new BuildParameters(tileSize, tileMargin, maxCellsPerTile, junctionClusterRadius, minSpurLength,
-            ambiguousReach, rdpEpsilon, seedSnapRadius, nodeMatchDistance, edgeMatchDistance, growth);
+            ambiguousReach, rdpEpsilon, seedSnapRadius, nodeMatchDistance, edgeMatchDistance, growth, lockedNodeReach);
+    }
+
+    /** The same parameters with another locked-node reach. */
+    public BuildParameters withLockedNodeReach(double reach) {
+        return new BuildParameters(tileSize, tileMargin, maxCellsPerTile, junctionClusterRadius, minSpurLength,
+            ambiguousReach, rdpEpsilon, seedSnapRadius, nodeMatchDistance, edgeMatchDistance, plazaGrowth, reach);
     }
 }

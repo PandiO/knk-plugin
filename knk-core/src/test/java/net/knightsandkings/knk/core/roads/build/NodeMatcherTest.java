@@ -52,6 +52,20 @@ class NodeMatcherTest {
     }
 
     @Test
+    void aLockedNodeClaimsTheNearestLeftoverCandidateWithinItsReach() {
+        PreviousNode locked = new PreviousNode(1, 0, 64, 0, RoadNodeKind.JUNCTION, true);
+        PreviousGraph previous = new PreviousGraph(List.of(locked, prev(2, 30, 64, 0)), List.of());
+        int[] ids = matcher.matchNodes(List.of(at(7, 64, 0), at(5, 64, 0), at(31, 64, 0)), previous);
+        assertArrayEquals(new int[] {NodeMatcher.UNMATCHED, 1, 2}, ids, "5 blocks: beyond 3, within the locked reach (8)");
+        assertArrayEquals(new int[] {NodeMatcher.UNMATCHED}, matcher.matchNodes(List.of(at(9, 64, 0)), previous), "beyond 8");
+        assertArrayEquals(new int[] {NodeMatcher.UNMATCHED},
+            matcher.matchNodes(List.of(at(5, 64, 0)), new PreviousGraph(List.of(prev(1, 0, 64, 0)), List.of())), "unlocked: 3 only");
+        PreviousNode lockedBoundary = new PreviousNode(3, 0, 64, 0, RoadNodeKind.BOUNDARY, true);
+        assertArrayEquals(new int[] {NodeMatcher.UNMATCHED},
+            matcher.matchNodes(List.of(at(5, 64, 0)), new PreviousGraph(List.of(lockedBoundary), List.of())), "a Boundary stays on its border");
+    }
+
+    @Test
     void anchorsMatchByIdAndAreNeverMatchedByPosition() {
         PreviousNode anchor = new PreviousNode(50, 5, 64, 5, RoadNodeKind.ANCHOR, true);
         PreviousGraph previous = new PreviousGraph(List.of(anchor, prev(2, 9, 64, 9)), List.of());

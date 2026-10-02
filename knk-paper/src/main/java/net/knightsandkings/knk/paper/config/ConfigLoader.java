@@ -248,7 +248,8 @@ public class ConfigLoader {
                 builder.getInt("junction-cluster-radius", builderDefaults.junctionClusterRadius()),
                 builder.getInt("min-spur-length", builderDefaults.minSpurLength()),
                 builder.getInt("ambiguous-reach", builderDefaults.ambiguousReach()),
-                builder.getInt("plaza-growth", builderDefaults.plazaGrowth()));
+                builder.getInt("plaza-growth", builderDefaults.plazaGrowth()),
+                builder.getDouble("locked-node-reach", builderDefaults.lockedNodeReach()));
 
         return new NavigationConfig(
             section.getBoolean("enabled", defaults.enabled()),

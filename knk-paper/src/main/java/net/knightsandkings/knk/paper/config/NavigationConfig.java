@@ -120,11 +120,14 @@ public record NavigationConfig(
      * @param minSpurLength         shorter dead-end spurs are pruned
      * @param ambiguousReach        an ambiguous material only counts within this many cells of a sure road cell
      * @param plazaGrowth           a plaza reaches this many cells beyond its wide core (fix plan 5.5 item 5)
+     * @param lockedNodeReach       a locked node absorbs the builder's nodes this close (fix plan 5.5 item 6)
      */
     public record BuilderConfig(int tileSize, int tileMargin, int maxCellsPerTile, int snapshotChunksPerTick,
-                                int junctionClusterRadius, int minSpurLength, int ambiguousReach, int plazaGrowth) {
+                                int junctionClusterRadius, int minSpurLength, int ambiguousReach, int plazaGrowth,
+                                double lockedNodeReach) {
         public static BuilderConfig defaults() {
-            return new BuilderConfig(512, 32, 250_000, 4, 3, 4, 3, BuildParameters.DEFAULT_PLAZA_GROWTH);
+            return new BuilderConfig(512, 32, 250_000, 4, 3, 4, 3, BuildParameters.DEFAULT_PLAZA_GROWTH,
+                BuildParameters.DEFAULT_LOCKED_NODE_REACH);
         }
 
         public void validate() {
@@ -152,6 +155,9 @@ public record NavigationConfig(
             if (plazaGrowth < 0) {
                 throw new IllegalArgumentException("navigation.builder.plaza-growth must not be negative (got: " + plazaGrowth + ")");
             }
+            if (!(lockedNodeReach >= 0)) {
+                throw new IllegalArgumentException("navigation.builder.locked-node-reach must not be negative (got: " + lockedNodeReach + ")");
+            }
         }
 
         /** The knk-core builder parameters (the ones not in config keep the builder's defaults). */
@@ -161,7 +167,8 @@ public record NavigationConfig(
                 .withMaxCells(maxCellsPerTile)
                 .withAmbiguousReach(ambiguousReach)
                 .withGraphRules(junctionClusterRadius, minSpurLength)
-                .withPlazaGrowth(plazaGrowth);
+                .withPlazaGrowth(plazaGrowth)
+                .withLockedNodeReach(lockedNodeReach);
         }
     }
 

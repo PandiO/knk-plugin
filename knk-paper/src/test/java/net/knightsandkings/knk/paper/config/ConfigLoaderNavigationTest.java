@@ -50,7 +50,7 @@ class ConfigLoaderNavigationTest {
         assertEquals(30, navigation.maxSessionMinutes());
         assertEquals(5.6, navigation.sprintSpeed(), 0.0001);
         assertEquals(new NavigationConfig.SurveyConfig(4, 7, 32), navigation.survey());
-        assertEquals(new NavigationConfig.BuilderConfig(512, 32, 250_000, 4, 3, 4, 3, 2), navigation.builder());
+        assertEquals(new NavigationConfig.BuilderConfig(512, 32, 250_000, 4, 3, 4, 3, 2, 8.0), navigation.builder());
     }
 
     @Test

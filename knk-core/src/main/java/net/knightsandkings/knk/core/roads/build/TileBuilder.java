@@ -11,8 +11,10 @@ import net.knightsandkings.knk.core.roads.build.TileBuildResult.Edge;
 import net.knightsandkings.knk.core.roads.build.TileBuildResult.Node;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalInt;
 import java.util.Set;
@@ -94,8 +96,8 @@ public final class TileBuilder {
             candidates.add(new NodeMatcher.Candidate(node.x(), node.y(), node.z(), node.anchorId()));
         }
         int[] existing = matcher.matchNodes(candidates, request.previousGraph());
-        List<Node> nodes = new ArrayList<>();
         int[][] positions = new int[graph.nodes().size()][];
+        boolean[] locked = new boolean[graph.nodes().size()];
         for (SkeletonGraph.Node node : graph.nodes()) {
             int i = node.id();
             int[] pos = {node.x(), node.y(), node.z()};
@@ -103,27 +105,115 @@ public final class TileBuilder {
                 PreviousNode previous = request.previousGraph().node(existing[i]);
                 if (previous != null && previous.locked() && request.tile().contains(previous.x(), previous.z())) {
                     pos = new int[] {previous.x(), previous.y(), previous.z()};
+                    locked[i] = true;
                 }
             }
             positions[i] = pos;
+        }
+        int[] into = mergeIntoLockedNodes(graph, existing, locked, positions, mask, params.lockedNodeReach());
+        List<Node> nodes = new ArrayList<>();
+        for (SkeletonGraph.Node node : graph.nodes()) {
+            int i = node.id();
+            if (into[i] != i) {
+                continue;
+            }
+            int[] pos = positions[i];
             nodes.add(new Node(key(i), existing[i] == NodeMatcher.UNMATCHED ? OptionalInt.empty() : OptionalInt.of(existing[i]),
                 pos[0], pos[1], pos[2], node.kind()));
         }
 
         ProfileMatcher profileMatcher = new ProfileMatcher(request.profiles());
-        List<Edge> edges = new ArrayList<>();
+        Map<Long, Edge> edgesByPair = new LinkedHashMap<>();
         for (Chain chain : graph.chains()) {
-            List<int[]> polyline = polyline(mask, chain, positions[chain.from()], positions[chain.to()]);
+            int from = into[chain.from()];
+            int to = into[chain.to()];
+            if (from == to) {
+                continue; // the chain between a duplicate and the locked node it merged into
+            }
+            List<int[]> polyline = polyline(mask, chain, positions[from], positions[to]);
             double length = Rdp.length(polyline);
+            long pair = ((long) Math.min(from, to) << 32) | Math.max(from, to);
+            Edge kept = edgesByPair.get(pair);
+            if (kept != null && kept.length() <= length) {
+                continue; // a merge left two chains between the same nodes: keep the shorter (API unique pair)
+            }
             List<int[]> geometry = Rdp.simplify(polyline, params.rdpEpsilon());
             double avgWidth = averageWidth(dt, chain.spans());
             OptionalInt profileId = profileMatcher.match(mask, dt, chain.spans());
             List<Integer> doors = gateDoors(mask, chain.spans());
-            OptionalInt edgeId = matcher.matchEdge(existing[chain.from()], existing[chain.to()], geometry, request.previousGraph());
-            edges.add(new Edge(edgeId, key(chain.from()), key(chain.to()), geometry, length, avgWidth, profileId,
+            OptionalInt edgeId = matcher.matchEdge(existing[from], existing[to], geometry, request.previousGraph());
+            edgesByPair.put(pair, new Edge(edgeId, key(from), key(to), geometry, length, avgWidth, profileId,
                 doors, List.of(), List.of()));
         }
-        return new TileBuildResult(BUILDER_VERSION, mask.size(), mask.levelCount(), nodes, edges, warnings);
+        return new TileBuildResult(BUILDER_VERSION, mask.size(), mask.levelCount(), nodes,
+            new ArrayList<>(edgesByPair.values()), warnings);
+    }
+
+    /**
+     * Locked nodes as exclusion zones (smoke test fix plan 5.5 item 6): an admin merged two junctions
+     * into one, or locked the one junction a fragmented plaza should be, and the rebuild must not
+     * bring the duplicates back. A node that matched no previous node, is a Junction or Endpoint (a
+     * Boundary stays for stitching, an Anchor is the admin's own) and is joined by a chain no longer
+     * than {@code reach} to a node standing on a locked node - with its own position within
+     * {@code reach} of that locked position - merges into it; its other chains then start at the
+     * locked node. Repeats until nothing changes.
+     *
+     * @return per node, the node it is emitted as (itself, or the locked node it merged into)
+     */
+    static int[] mergeIntoLockedNodes(SkeletonGraph.Result graph, int[] existing, boolean[] locked, int[][] positions,
+                                      RoadMask mask, double reach) {
+        int count = graph.nodes().size();
+        int[] into = new int[count];
+        for (int i = 0; i < count; i++) {
+            into[i] = i;
+        }
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            for (Chain chain : graph.chains()) {
+                int a = into[chain.from()];
+                int b = into[chain.to()];
+                if (a == b || chainLength(mask, chain) > reach) {
+                    continue;
+                }
+                int keep = locked[a] && absorbable(graph, existing, b) ? a : locked[b] && absorbable(graph, existing, a) ? b : -1;
+                if (keep < 0) {
+                    continue;
+                }
+                int gone = keep == a ? b : a;
+                if (distance(positions[keep], positions[gone]) > reach) {
+                    continue;
+                }
+                for (int i = 0; i < count; i++) {
+                    if (into[i] == gone) {
+                        into[i] = keep;
+                    }
+                }
+                changed = true;
+            }
+        }
+        return into;
+    }
+
+    private static boolean absorbable(SkeletonGraph.Result graph, int[] existing, int node) {
+        RoadNodeKind kind = graph.nodes().get(node).kind();
+        return existing[node] == NodeMatcher.UNMATCHED && (kind == RoadNodeKind.JUNCTION || kind == RoadNodeKind.ENDPOINT);
+    }
+
+    private static double chainLength(RoadMask mask, Chain chain) {
+        double length = 0;
+        int[] spans = chain.spans();
+        for (int k = 1; k < spans.length; k++) {
+            length += mask.distance(spans[k - 1], spans[k]);
+        }
+        return length;
+    }
+
+    private static double distance(int[] a, int[] b) {
+        double dx = a[0] - b[0];
+        double dy = a[1] - b[1];
+        double dz = a[2] - b[2];
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
 
     static String key(int nodeIndex) {

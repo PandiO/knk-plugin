@@ -236,6 +236,9 @@ navigation:
     # A plaza (wider than its profile's width-max) reaches this many cells beyond its wide core, so
     # the corners and bumps of an irregular square join its one junction instead of forking into more
     plaza-growth: 2
+    # A node an admin locked (edited, merged into, recorded through) absorbs rebuilt junctions and
+    # dead ends within this many blocks, so manual cleanup survives a rebuild
+    locked-node-reach: 8.0
 
 # Player payments (currency ledger Phase 3, docs/specs/currency-payments/DESIGN.md §3.6). Every
 # limit that matters (min/max, daily caps, cooldown, confirmation threshold, who may send) lives in
