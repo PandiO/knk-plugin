@@ -6,8 +6,6 @@ import net.knightsandkings.knk.core.util.BlockKey;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.PriorityQueue;
 
 import static net.knightsandkings.knk.core.roads.walk.WalkGrid.DX;
@@ -63,8 +61,11 @@ public final class WalkSearch implements WalkPathfinder {
      * walls, panes, doors or climbables), door and climbable blocks passable.
      */
     public static WalkGrid gridFor(WalkTerrain terrain, MovementProfile profile) {
-        WalkCells cells = terrain.cells();
-        return new WalkGrid(terrain.surface(), terrain.gates(), cells, profile.headroom(),
+        return gridFor(terrain.surface(), terrain.cells(), terrain, profile);
+    }
+
+    private static WalkGrid gridFor(SurfaceGrid surface, WalkCells cells, WalkTerrain terrain, MovementProfile profile) {
+        return new WalkGrid(surface, terrain.gates(), cells, profile.headroom(),
             (grid, x, y, z) -> !cells.isClimbable(x, y, z) && !cells.isDoor(x, y, z)
                 && PassabilityRules.isWalkFloor(grid.floorMaterial(x, y, z)));
     }
@@ -93,7 +94,7 @@ public final class WalkSearch implements WalkPathfinder {
         private final MovementProfile profile;
         private final CellAccess access;
         private final WalkGrid grid;
-        private final Map<Long, Node> nodes = new HashMap<>();
+        private final LongMap<Node> nodes = new LongMap<>(1024);
         private final PriorityQueue<Entry> open = new PriorityQueue<>((a, b) -> {
             int c = Double.compare(a.f, b.f);
             if (c != 0) {
@@ -109,11 +110,12 @@ public final class WalkSearch implements WalkPathfinder {
 
         Run(WalkRequest request) {
             this.request = request;
-            this.surface = request.terrain().surface();
-            this.cells = request.terrain().cells();
+            MemoSurface memo = new MemoSurface(request.terrain().surface(), request.terrain().cells());
+            this.surface = memo;
+            this.cells = memo.cells();
             this.profile = request.profile();
             this.access = request.access();
-            this.grid = gridFor(request.terrain(), profile);
+            this.grid = gridFor(surface, cells, request.terrain(), profile);
         }
 
         WalkResult run() {
