@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.navigation;
 
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -82,15 +83,25 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
     @Override
     public AccessPolicy policyFor(Player player, RoadNetworkSnapshot snapshot) {
         Set<String> currentRegions = regionIds.at(player.getLocation());
+        Set<Integer> doorIds = new HashSet<>();
+        for (RoadEdge edge : snapshot.edges()) {
+            doorIds.addAll(edge.gateDoorIds());
+        }
+        return CompositeAccessPolicy.of(new StaticFlagsAvailability(), gateAvailability(player, doorIds),
+            new DomainAvailability(evaluator, this::domainByRegionId, currentRegions, bypass.test(player)));
+    }
+
+    /**
+     * Main thread: the router's gate rule for {@code doorIds}, each door read once from the gate cache
+     * and the siege controller — the policy's gate part, shared with the walk search's gate cells
+     * (KNG-51 §6). The result can be used from any thread.
+     */
+    public GateAvailability gateAvailability(Player player, Collection<Integer> doorIds) {
         boolean admin = GatePassThroughRules.isAdmin(player);
         boolean use = player.hasPermission(GatePassThroughRules.USE_NODE);
         SiegeGateController siege = siegeGates.get();
         Map<Integer, GateView> gates = new HashMap<>();
         Map<Integer, Boolean> passable = new HashMap<>();
-        Set<Integer> doorIds = new HashSet<>();
-        for (RoadEdge edge : snapshot.edges()) {
-            doorIds.addAll(edge.gateDoorIds());
-        }
         for (int doorId : doorIds) {
             CachedGateDoor door = gateManager.getGate(doorId);
             if (door == null) {
@@ -104,13 +115,26 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
         }
         GateAvailability.GateState gateState = doorId -> Optional.ofNullable(gates.get(doorId));
         GateAvailability.PassRule passRule = doorId -> passable.getOrDefault(doorId, false);
-        DomainAvailability.DomainLookup lookup = this::domainByRegionId;
-        return CompositeAccessPolicy.of(new StaticFlagsAvailability(), new GateAvailability(gateState, passRule),
-            new DomainAvailability(evaluator, lookup, currentRegions, bypass.test(player)));
+        return new GateAvailability(gateState, passRule);
+    }
+
+    /** Whether the player ignores domain entry/exit denials ({@code knk.region.bypass}). */
+    public boolean bypasses(Player player) {
+        return bypass.test(player);
+    }
+
+    /** The shared entry/exit rule (R6). */
+    public DomainAccessEvaluator evaluator() {
+        return evaluator;
+    }
+
+    /** The WorldGuard regions the player stands in now (R8). */
+    public Set<String> regionsAt(Player player) {
+        return regionIds.at(player.getLocation());
     }
 
     /** The domain of a region: the cache, else the API (any thread; blocks briefly off the main thread). */
-    Optional<DomainSnapshot> domainByRegionId(String regionId) {
+    public Optional<DomainSnapshot> domainByRegionId(String regionId) {
         Optional<DomainSnapshot> cached = resolver.getDomainByRegionIdNoRefresh(regionId);
         if (cached.isPresent()) {
             return cached;
