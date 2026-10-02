@@ -66,16 +66,31 @@ public final class WalkGrid {
 
     private final SurfaceGrid grid;
     private final GateCells gates;
+    private final WalkCells cells;
     private final int headroom;
     private final FloorTest floor;
 
     /**
+     * The road builder's view: no doors or climbables ({@link WalkCells#NONE}).
+     *
      * @param headroom passable blocks a cell needs above its floor (a player: 2)
      * @param floor    which floors carry cells
      */
     public WalkGrid(SurfaceGrid grid, GateCells gates, int headroom, FloorTest floor) {
+        this(grid, gates, WalkCells.NONE, headroom, floor);
+    }
+
+    /**
+     * The walk search's view: door and climbable blocks ({@link WalkCells}) also count as passable,
+     * like gate footprints — whether a mover may pass a door is the cell's access verdict.
+     *
+     * @param headroom passable blocks a cell needs above its floor ({@link MovementProfile#headroom})
+     * @param floor    which floors carry cells
+     */
+    public WalkGrid(SurfaceGrid grid, GateCells gates, WalkCells cells, int headroom, FloorTest floor) {
         this.grid = Objects.requireNonNull(grid, "grid");
         this.gates = Objects.requireNonNull(gates, "gates");
+        this.cells = Objects.requireNonNull(cells, "cells");
         this.floor = Objects.requireNonNull(floor, "floor");
         if (headroom < 1) {
             throw new IllegalArgumentException("headroom must be at least 1: " + headroom);
@@ -101,9 +116,13 @@ public final class WalkGrid {
         return headroom;
     }
 
-    /** A block a mover can move through: passable in the world, or part of a gate door's closed footprint. */
+    /**
+     * A block a mover can move through: passable in the world, part of a gate door's closed footprint,
+     * or (walk view only) a hand-openable door or a climbable.
+     */
     public boolean isPassable(int x, int y, int z) {
-        return grid.isPassable(x, y, z) || gates.doorAt(x, y, z).isPresent();
+        return grid.isPassable(x, y, z) || gates.doorAt(x, y, z).isPresent()
+            || cells.isDoor(x, y, z) || cells.isClimbable(x, y, z);
     }
 
     /** Whether the floor block {@code (x, y, z)} is a cell. */
