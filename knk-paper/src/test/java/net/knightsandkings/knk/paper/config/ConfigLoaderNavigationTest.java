@@ -54,6 +54,19 @@ class ConfigLoaderNavigationTest {
     }
 
     @Test
+    void theBundledConfigSpellsOutEveryWalkKey() throws Exception {
+        YamlConfiguration yaml = bundledConfig();
+        var walk = yaml.getConfigurationSection("navigation.walk");
+
+        assertNotNull(walk, "config.yml has a navigation.walk block (KNG-51 §9)");
+        assertEquals(java.util.Set.of("enabled", "max-expansions", "max-length-factor", "max-length", "max-drop",
+            "drop-penalty", "capture-margin", "chunk-ttl-seconds", "recompute-distance", "max-concurrent-searches",
+            "climbables"), walk.getKeys(false));
+        assertEquals(new NavigationConfig.WalkConfig(true, 20_000, 1.75, 96, 3, 10, 16, 10, 6, 2, List.of("LADDER")),
+            ConfigLoader.load(yaml).navigation().walk());
+    }
+
+    @Test
     void aMissingSectionMeansOnWithDefaults() {
         assertEquals(NavigationConfig.defaults(), ConfigLoader.loadNavigation(null));
     }

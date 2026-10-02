@@ -1169,6 +1169,10 @@ public class RoadAdminCommand implements SubcommandExecutor {
         if (service != null) {
             sender.sendMessage(RoadMessages.field("surveys", service.activeCount() + " walking"));
         }
+        net.knightsandkings.knk.paper.navigation.NavigationService nav = navigation.get();
+        if (nav != null) {
+            sender.sendMessage(RoadMessages.field("walk paths", nav.walkStatus()));
+        }
     }
 
     private void gotoBlock(CommandSender sender, String[] args) {

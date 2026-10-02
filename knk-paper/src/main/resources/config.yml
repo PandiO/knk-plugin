@@ -239,6 +239,29 @@ navigation:
     # A node an admin locked (edited, merged into, recorded through) absorbs rebuilt junctions and
     # dead ends within this many blocks, so manual cleanup survives a rebuild
     locked-node-reach: 8.0
+  # Walkable last-mile paths (KNG-51, docs/specs/navigation/LAST_MILE_PATHFINDING.md §9): direct mode
+  # (a target within max-snap-distance, and the last leg after a road's end) follows a path a player
+  # can walk instead of a straight line through terrain. No path found -> the straight line.
+  walk:
+    # false = straight lines exactly as before (the kill switch)
+    enabled: true
+    # Cells one search may expand, and the longest path it may return (factor x the straight distance, capped)
+    max-expansions: 20000
+    max-length-factor: 1.75
+    max-length: 96
+    # Deepest drop taken (3 = no fall damage) and the extra cost per block dropped (drops only when needed)
+    max-drop: 3
+    drop-penalty: 10
+    # Blocks captured around the player->target box (also up and down); loaded chunks only
+    capture-margin: 16
+    # A captured chunk is reused this long; a path is also recomputed after this age
+    chunk-ttl-seconds: 10
+    # The path is recomputed when the player strays this far from it
+    recompute-distance: 6
+    # Walk searches running at once, server-wide (their own threads)
+    max-concurrent-searches: 2
+    # Materials climbed like a ladder
+    climbables: [LADDER]
 
 # Player payments (currency ledger Phase 3, docs/specs/currency-payments/DESIGN.md §3.6). Every
 # limit that matters (min/max, daily caps, cooldown, confirmation threshold, who may send) lives in

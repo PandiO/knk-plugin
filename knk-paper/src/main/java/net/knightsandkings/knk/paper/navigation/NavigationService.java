@@ -1,16 +1,19 @@
 package net.knightsandkings.knk.paper.navigation;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -51,6 +54,10 @@ import net.knightsandkings.knk.core.roads.route.RouteResult;
 import net.knightsandkings.knk.core.roads.route.RouterParameters;
 import net.knightsandkings.knk.core.roads.route.SnapPoint;
 import net.knightsandkings.knk.core.roads.route.Snapper;
+import net.knightsandkings.knk.core.roads.walk.WalkGoal;
+import net.knightsandkings.knk.core.roads.walk.WalkPathfinder;
+import net.knightsandkings.knk.core.roads.walk.WalkRequest;
+import net.knightsandkings.knk.core.roads.walk.WalkResult;
 import net.knightsandkings.knk.paper.config.NavigationConfig;
 import net.knightsandkings.knk.paper.events.NavigationArriveEvent;
 import net.knightsandkings.knk.paper.events.NavigationEndEvent;
@@ -73,7 +80,10 @@ import net.kyori.adventure.text.Component;
  * gets a straight trail and no road; a routed session whose road ends short of the real target
  * switches to it on arrival at the road's end (the last off-road leg). A region destination
  * prefers the road ({@link #regionGoals}). Direct mode has its own periodic re-check
- * ({@link #recheckDirect}).
+ * ({@link #recheckDirect}). With {@code navigation.walk.enabled} and the {@link Walk} ports, a direct
+ * leg follows a walkable path instead of the straight line (KNG-51 {@code LAST_MILE_PATHFINDING.md}
+ * §7): the straight line is drawn at once, a walk path is captured and searched off the main thread
+ * and adopted when it arrives; no path keeps the straight line ({@link DirectLeg}).
  *
  * <p>All state lives on the main thread; the routing thread only ever sees an immutable snapshot,
  * a policy built on the main thread and the request, and posts its result back.
@@ -86,11 +96,43 @@ public final class NavigationService implements SiegeMatchObserver {
         AccessPolicy policyFor(Player player, RoadNetworkSnapshot snapshot);
     }
 
-    /** Everything the service needs, so tests can fake the server. */
+    /**
+     * KNG-51 port: the world side of a walk leg (paper: {@code navigation.walk.WalkLegPreparer} - chunk
+     * capture and the player's gate, door and domain access), so tests can fake it.
+     */
+    public interface WalkPreparer {
+        /**
+         * Main thread: captures the terrain around the leg from the player's {@code feet} (x, y, z) to
+         * {@code target} (a floor point) and decides the player's access. The future completes on the
+         * main thread - with null when no walk search is possible (an unloaded chunk, a box too large),
+         * which keeps the straight line. The supplier runs on the walk executor (domain lookups may
+         * block there) and builds the request. The caller may cancel the future.
+         */
+        CompletableFuture<Supplier<WalkRequest>> prepare(Player player, double[] feet, double[] target, WalkGoal goal);
+
+        /** Capture counters for {@code /knk road status}; empty when there is nothing to say. */
+        default String describe() {
+            return "";
+        }
+    }
+
+    /**
+     * KNG-51: what a walk leg needs - the capture, the search and the executor it runs on (bounded:
+     * {@code max-concurrent-searches} threads). Absent ({@code null} in {@link Deps}) = straight lines only.
+     */
+    public record Walk(WalkPreparer preparer, WalkPathfinder pathfinder, Executor searches) {
+        public Walk {
+            Objects.requireNonNull(preparer, "preparer");
+            Objects.requireNonNull(pathfinder, "pathfinder");
+            Objects.requireNonNull(searches, "searches");
+        }
+    }
+
+    /** Everything the service needs, so tests can fake the server. {@code walk} may be null (no walk paths). */
     public record Deps(Plugin plugin, NavigationConfig config, Function<String, RoadNetworkSnapshot> snapshots,
                        PolicyFactory policies, RegionShapes regionShapes, NavigationEligibility eligibility,
                        NavigationHud hud, TrailRenderer trail, Executor mainThread, Executor routing, LongSupplier tick,
-                       Consumer<Event> events, Logger logger) {
+                       Consumer<Event> events, Logger logger, Walk walk) {
         public Deps {
             Objects.requireNonNull(config, "config");
             Objects.requireNonNull(snapshots, "snapshots");
@@ -104,6 +146,15 @@ public final class NavigationService implements SiegeMatchObserver {
             Objects.requireNonNull(tick, "tick");
             Objects.requireNonNull(events, "events");
             logger = logger == null ? Logger.getLogger(NavigationService.class.getName()) : logger;
+        }
+
+        /** Without walk paths (straight direct-mode lines, as before KNG-51). */
+        public Deps(Plugin plugin, NavigationConfig config, Function<String, RoadNetworkSnapshot> snapshots,
+                    PolicyFactory policies, RegionShapes regionShapes, NavigationEligibility eligibility,
+                    NavigationHud hud, TrailRenderer trail, Executor mainThread, Executor routing, LongSupplier tick,
+                    Consumer<Event> events, Logger logger) {
+            this(plugin, config, snapshots, policies, regionShapes, eligibility, hud, trail, mainThread, routing, tick,
+                events, logger, null);
         }
     }
 
@@ -130,8 +181,15 @@ public final class NavigationService implements SiegeMatchObserver {
     private final RouterParameters routerParameters;
     private final SessionParameters sessionParameters;
     private final EtaEstimator eta;
+    /** The HUD arrow of a walking leg points this far ahead along the path. */
+    static final double WALK_ARROW_AHEAD = 4;
+
     private final Map<UUID, Active> active = new HashMap<>();
+    private final long[] walkCounts = new long[WalkCount.values().length];
     private BukkitTask ticker;
+
+    /** Walk request outcomes, for {@code /knk road status}. */
+    enum WalkCount { REQUESTED, FOUND, NO_PATH, FALLBACK, NOT_CAPTURED, FAILED }
 
     /** One player's navigation: the core session plus what the runtime adds. */
     final class Active {
@@ -172,16 +230,59 @@ public final class NavigationService implements SiegeMatchObserver {
      * {@link Active}; replaced, never reused, when direct mode starts again.
      */
     static final class DirectLeg {
+        /**
+         * PENDING: a walk path is being computed, the straight line is drawn meanwhile; WALKING: the
+         * trail follows {@link #path}; FALLBACK: no walk path (none found, not capturable, or walk paths
+         * off) - today's straight line.
+         */
+        enum Status { PENDING, WALKING, FALLBACK }
+
         /** The leg's target as a floor point (re-derived by {@link #recheckDirect} for regions and streets). */
         double[] target;
-        /** Distance at the last (re)draw, for the HUD's progress. */
+        /** Remaining distance at the last (re)draw, for the HUD's progress. */
         double total;
-        /** The closest the player has come to the target since it was (re)drawn. */
+        /** The least remaining distance ({@link #remainingOf}) since the leg was (re)drawn: "heading away" is measured from it. */
         double best;
         long lastRecalcTick = Long.MIN_VALUE;
+        Status status = Status.FALLBACK;
+        /** The walk path as floor points (WALKING only). */
+        List<double[]> path;
+        /** The target the last walk request was made for. */
+        double[] requestedTarget;
+        /** Tick of the last walk request (the path's age counts from it). */
+        long computedTick;
+        /** Walk request generation: a result for an older one is dropped. */
+        int generation;
+        boolean inFlight;
+        /** A gate or availability change since the last request: recompute at the next re-check. */
+        boolean stale;
+        CompletableFuture<?> capture;
 
         DirectLeg(double[] target) {
             this.target = target;
+        }
+
+        boolean walking() {
+            return status == Status.WALKING && path != null;
+        }
+
+        /** Remaining distance from a floor position: along the walk path (plus the gap to it) when walking, else straight. */
+        double remainingOf(double x, double floorY, double z) {
+            if (!walking()) {
+                return distance(x, floorY, z, target);
+            }
+            double[] at = TrailRenderer.project(path, new double[] {x, floorY, z});
+            return TrailRenderer.polylineLength(path) - at[0] + at[1];
+        }
+
+        /** Drops the request in flight (its result will be ignored) and cancels a pending capture. */
+        void cancelWalk() {
+            generation++;
+            inFlight = false;
+            if (capture != null) {
+                capture.cancel(false);
+                capture = null;
+            }
         }
     }
 
@@ -317,6 +418,7 @@ public final class NavigationService implements SiegeMatchObserver {
         Active previous = active.remove(player.getUniqueId());
         if (previous != null) {
             previous.generation++;
+            dropLeg(previous);
             deps.hud().hide(player);
         }
         long now = deps.tick().getAsLong();
@@ -500,6 +602,7 @@ public final class NavigationService implements SiegeMatchObserver {
     // ==================== direct mode ====================
 
     private void startDirect(Active a) {
+        dropLeg(a);
         DirectLeg leg = new DirectLeg(a.target);
         a.leg = leg;
         Location feet = a.player.getLocation();
@@ -509,23 +612,41 @@ public final class NavigationService implements SiegeMatchObserver {
         a.player.sendMessage(NavigationMessages.startedDirect(a.destination.name(), leg.total));
         deps.trail().drawDirect(a.player, leg.target);
         deps.hud().update(a.player, a.destination.name(), leg.total, 0);
+        if (walkEnabled()) {
+            leg.status = DirectLeg.Status.PENDING; // the straight line stays until a path arrives
+            requestWalk(a, leg, deps.tick().getAsLong());
+        }
     }
 
     private void tickDirect(Active a, long now) {
         DirectLeg leg = a.leg;
         Location feet = a.player.getLocation();
-        double d = distance(feet.getX(), feet.getY() - 1, feet.getZ(), leg.target);
+        double x = feet.getX(), floorY = feet.getY() - 1, z = feet.getZ();
+        double d = distance(x, floorY, z, leg.target);
         if (d <= sessionParameters.arriveDistance() || insideRegion(a, feet)) {
             arrive(a);
             return;
         }
-        leg.best = Math.min(leg.best, d);
+        double remaining = leg.remainingOf(x, floorY, z);
+        leg.best = Math.min(leg.best, remaining);
         if ((now - a.startedTick) % deps.trail().periodTicks() == 0) {
-            deps.trail().drawDirect(a.player, leg.target);
+            drawLeg(a, leg);
         }
         if ((now - a.startedTick) % HUD_TICKS == 0) {
-            deps.hud().update(a.player, a.destination.name(), d, 1 - Math.min(1, d / leg.total));
-            deps.hud().arrowTowards(a.player, leg.target[0], leg.target[2]);
+            deps.hud().update(a.player, a.destination.name(), remaining, 1 - Math.min(1, remaining / leg.total));
+            double[] towards = leg.walking()
+                ? TrailRenderer.pointAt(leg.path, TrailRenderer.project(leg.path, new double[] {x, floorY, z})[0] + WALK_ARROW_AHEAD)
+                : leg.target;
+            deps.hud().arrowTowards(a.player, towards[0], towards[2]);
+        }
+    }
+
+    /** The leg's trail: the walk path when there is one, else the straight line. */
+    private void drawLeg(Active a, DirectLeg leg) {
+        if (leg.walking()) {
+            deps.trail().drawPath(a.player, leg.path);
+        } else {
+            deps.trail().drawDirect(a.player, leg.target);
         }
     }
 
@@ -542,14 +663,16 @@ public final class NavigationService implements SiegeMatchObserver {
         DirectLeg leg = a.leg;
         Location feet = a.player.getLocation();
         double x = feet.getX(), floorY = feet.getY() - 1, z = feet.getZ();
-        double d = distance(x, floorY, z, leg.target);
-        if (d <= leg.best + sessionParameters.rerouteDistance()) {
-            return;
-        }
-        if (leg.lastRecalcTick != Long.MIN_VALUE && now - leg.lastRecalcTick < sessionParameters.rerouteMinIntervalTicks()) {
+        double d = leg.remainingOf(x, floorY, z);
+        if (d <= leg.best + sessionParameters.rerouteDistance()
+            || leg.lastRecalcTick != Long.MIN_VALUE && now - leg.lastRecalcTick < sessionParameters.rerouteMinIntervalTicks()) {
+            recheckWalk(a, leg, now, x, floorY, z);
             return;
         }
         leg.lastRecalcTick = now;
+        leg.cancelWalk();
+        leg.path = null;
+        leg.status = DirectLeg.Status.FALLBACK;
         leg.target = directTarget(a, leg, x, floorY, z);
         double fresh = distance(x, floorY, z, leg.target);
         leg.total = Math.max(1, fresh);
@@ -559,6 +682,179 @@ public final class NavigationService implements SiegeMatchObserver {
         deps.trail().drawDirect(a.player, leg.target);
         deps.hud().update(a.player, a.destination.name(), fresh, 0);
         deps.hud().arrowTowards(a.player, leg.target[0], leg.target[2]);
+        if (walkEnabled()) {
+            leg.status = DirectLeg.Status.PENDING;
+            requestWalk(a, leg, now);
+        }
+    }
+
+    // ==================== walk paths (KNG-51 LAST_MILE_PATHFINDING.md §5, §7, §8) ====================
+
+    private boolean walkEnabled() {
+        return deps.walk() != null && deps.config().walk().enabled();
+    }
+
+    /** The walk path's maximum age before a re-check recomputes it (player-placed blocks, §7). */
+    private long walkMaxAgeTicks() {
+        return Math.max(RECHECK_TICKS, deps.config().walk().chunkTtlSeconds() * 20L);
+    }
+
+    /**
+     * Part of the direct re-check (never per tick, never while a request is in flight): recompute
+     * the walk path when the player is more than {@code recompute-distance} from it, the target
+     * moved, a gate or availability change touched the leg, or the path (or the last failed attempt)
+     * is older than {@link #walkMaxAgeTicks}.
+     */
+    private void recheckWalk(Active a, DirectLeg leg, long now, double x, double floorY, double z) {
+        if (!walkEnabled() || leg.inFlight) {
+            return;
+        }
+        boolean recompute = leg.stale
+            || !Arrays.equals(leg.requestedTarget, leg.target)
+            || now - leg.computedTick >= walkMaxAgeTicks()
+            || leg.walking() && TrailRenderer.project(leg.path, new double[] {x, floorY, z})[1] > deps.config().walk().recomputeDistance();
+        if (recompute) {
+            requestWalk(a, leg, now);
+        }
+    }
+
+    /**
+     * Requests a walk path for the leg - one in flight per leg (= per player): capture and access on
+     * the main thread, the search on the walk executor, the result back on the main thread and
+     * dropped when the leg or its request generation moved on (like {@link #computeRoute}/{@link #deliver}).
+     */
+    private void requestWalk(Active a, DirectLeg leg, long now) {
+        if (leg.inFlight) {
+            return;
+        }
+        leg.inFlight = true;
+        leg.stale = false;
+        leg.computedTick = now;
+        leg.requestedTarget = leg.target;
+        int generation = ++leg.generation;
+        walkCounts[WalkCount.REQUESTED.ordinal()]++;
+        Walk walk = deps.walk();
+        Location feet = a.player.getLocation();
+        double[] target = leg.target;
+        CompletableFuture<Supplier<WalkRequest>> capture;
+        try {
+            capture = walk.preparer().prepare(a.player, new double[] {feet.getX(), feet.getY(), feet.getZ()}, target,
+                walkGoal(a, target));
+        } catch (RuntimeException e) {
+            deps.logger().log(Level.WARNING, "[Navigation] Walk capture failed for " + a.player.getName(), e);
+            walkDelivered(a, leg, generation, null, WalkCount.FAILED);
+            return;
+        }
+        leg.capture = capture;
+        capture.whenComplete((request, error) -> {
+            if (!walkCurrent(a, leg, generation)) {
+                return;
+            }
+            leg.capture = null;
+            if (error != null || request == null) {
+                walkDelivered(a, leg, generation, null, error != null ? WalkCount.FAILED : WalkCount.NOT_CAPTURED);
+                return;
+            }
+            try {
+                walk.searches().execute(() -> {
+                    WalkResult result;
+                    try {
+                        result = walk.pathfinder().find(request.get());
+                    } catch (RuntimeException e) {
+                        deps.logger().log(Level.WARNING, "[Navigation] Walk search failed for " + a.player.getName(), e);
+                        result = null; // FALLBACK (decision L3-8)
+                    }
+                    WalkResult delivered = result;
+                    deps.mainThread().execute(() -> walkDelivered(a, leg, generation, delivered, null));
+                });
+            } catch (java.util.concurrent.RejectedExecutionException e) {
+                walkDelivered(a, leg, generation, null, WalkCount.FAILED); // shutting down
+            }
+        });
+    }
+
+    /** A region is reached at its edge (arrival is WorldGuard containment) or within arrive-distance of the target. */
+    private WalkGoal walkGoal(Active a, double[] target) {
+        WalkGoal near = WalkGoal.within(target[0], target[1], target[2], sessionParameters.arriveDistance());
+        if (a.region == null || a.destination.kind() != Destination.Kind.REGION) {
+            return near;
+        }
+        RegionShape region = a.region;
+        return (x, floorY, z) -> near.reached(x, floorY, z) || region.containsFloor(x, floorY, z);
+    }
+
+    private boolean walkCurrent(Active a, DirectLeg leg, int generation) {
+        return active.get(a.player.getUniqueId()) == a && a.leg == leg && leg.generation == generation;
+    }
+
+    /**
+     * Main thread: a walk result (null = none: not captured, failed) for a still-current request.
+     * FOUND → WALKING, the trail switches to the path at once; anything else → FALLBACK, today's
+     * straight line (NO_PATH and FALLBACK alike, decision §11-5: no partial paths).
+     */
+    private void walkDelivered(Active a, DirectLeg leg, int generation, WalkResult result, WalkCount failure) {
+        if (!walkCurrent(a, leg, generation)) {
+            return;
+        }
+        leg.inFlight = false;
+        leg.capture = null;
+        WalkCount count = failure != null ? failure : switch (result == null ? WalkResult.Status.FALLBACK : result.status()) {
+            case FOUND -> WalkCount.FOUND;
+            case NO_PATH -> WalkCount.NO_PATH;
+            case FALLBACK -> result == null ? WalkCount.FAILED : WalkCount.FALLBACK;
+        };
+        walkCounts[count.ordinal()]++;
+        if (deps.logger().isLoggable(Level.FINE)) {
+            deps.logger().fine("[Navigation] Walk path for " + a.player.getName() + ": " + count
+                + (result == null ? "" : " (" + result.reason() + ", " + result.expansions() + " cells)"));
+        }
+        boolean wasWalking = leg.walking();
+        if (result != null && result.isFound()) {
+            leg.path = result.path().orElseThrow().points();
+            leg.status = DirectLeg.Status.WALKING;
+            Location feet = a.player.getLocation();
+            double remaining = leg.remainingOf(feet.getX(), feet.getY() - 1, feet.getZ());
+            leg.best = remaining;
+            if (!wasWalking) {
+                leg.total = Math.max(1, remaining);
+            }
+            deps.trail().drawPath(a.player, leg.path);
+            return;
+        }
+        leg.path = null;
+        leg.status = DirectLeg.Status.FALLBACK;
+        if (wasWalking) {
+            Location feet = a.player.getLocation();
+            leg.best = distance(feet.getX(), feet.getY() - 1, feet.getZ(), leg.target);
+            deps.trail().drawDirect(a.player, leg.target);
+        }
+    }
+
+    /** Ends the session's direct leg: a walk request in flight is dropped, its capture cancelled. */
+    private static void dropLeg(Active a) {
+        if (a.leg != null) {
+            a.leg.cancelWalk();
+        }
+    }
+
+    /** One line for {@code /knk road status}: walk paths on/off, request outcomes, capture counters. */
+    public String walkStatus() {
+        if (!walkEnabled()) {
+            return deps.walk() == null ? "off (straight lines)" : "off (navigation.walk.enabled: false)";
+        }
+        int walking = 0;
+        int inFlight = 0;
+        for (Active a : active.values()) {
+            if (a.leg != null) {
+                walking += a.leg.walking() ? 1 : 0;
+                inFlight += a.leg.inFlight ? 1 : 0;
+            }
+        }
+        String counts = "requested " + walkCounts[WalkCount.REQUESTED.ordinal()] + ", found " + walkCounts[WalkCount.FOUND.ordinal()]
+            + ", no path " + walkCounts[WalkCount.NO_PATH.ordinal()] + ", budget " + walkCounts[WalkCount.FALLBACK.ordinal()]
+            + ", not captured " + walkCounts[WalkCount.NOT_CAPTURED.ordinal()] + ", failed " + walkCounts[WalkCount.FAILED.ordinal()];
+        String capture = deps.walk().preparer().describe();
+        return "on; " + walking + " walking, " + inFlight + " computing; " + counts + (capture.isEmpty() ? "" : "; " + capture);
     }
 
     /** The direct-mode target for a player at this floor position. */
@@ -775,6 +1071,7 @@ public final class NavigationService implements SiegeMatchObserver {
     private void arrive(Active a) {
         active.remove(a.player.getUniqueId());
         a.generation++;
+        dropLeg(a);
         deps.hud().hide(a.player);
         a.player.sendMessage(NavigationMessages.arrived(a.destination.name()));
         a.player.playSound(ARRIVAL_SOUND);
@@ -797,6 +1094,7 @@ public final class NavigationService implements SiegeMatchObserver {
             return;
         }
         a.generation++;
+        dropLeg(a);
         deps.hud().hide(a.player);
         if (message && a.player.isOnline()) {
             a.player.sendMessage(NavigationMessages.ended(reason, a.destination.name()));
@@ -834,7 +1132,11 @@ public final class NavigationService implements SiegeMatchObserver {
     public void onGateChanged(int doorId) {
         long now = deps.tick().getAsLong();
         for (Active a : new ArrayList<>(active.values())) {
-            if (a.direct() || a.session == null) {
+            if (a.direct()) {
+                a.leg.stale = true; // the walk path is recomputed at the next re-check (KNG-51 §7)
+                continue;
+            }
+            if (a.session == null) {
                 continue;
             }
             boolean onRoute = a.route().map(r -> r.steps().stream().anyMatch(s -> s.edge().gateDoorIds().contains(doorId))).orElse(false)
@@ -852,7 +1154,11 @@ public final class NavigationService implements SiegeMatchObserver {
     public void onAvailabilityChanged() {
         long now = deps.tick().getAsLong();
         for (Active a : new ArrayList<>(active.values())) {
-            if (a.direct() || a.session == null) {
+            if (a.direct()) {
+                a.leg.stale = true;
+                continue;
+            }
+            if (a.session == null) {
                 continue;
             }
             a.lastRecheckTick = now;
@@ -1024,7 +1330,7 @@ public final class NavigationService implements SiegeMatchObserver {
     private double remaining(Active a) {
         if (a.direct()) {
             Location feet = a.player.getLocation();
-            return distance(feet.getX(), feet.getY() - 1, feet.getZ(), a.leg.target);
+            return a.leg.remainingOf(feet.getX(), feet.getY() - 1, feet.getZ());
         }
         return a.session == null ? 0 : a.session.remainingBlocks();
     }
@@ -1043,5 +1349,11 @@ public final class NavigationService implements SiegeMatchObserver {
     boolean isDirect(UUID playerId) {
         Active a = active.get(playerId);
         return a != null && a.direct();
+    }
+
+    /** For the tests: the player's direct leg, if any. */
+    Optional<DirectLeg> legOf(UUID playerId) {
+        Active a = active.get(playerId);
+        return a == null ? Optional.empty() : Optional.ofNullable(a.leg);
     }
 }

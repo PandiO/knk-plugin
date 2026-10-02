@@ -179,11 +179,10 @@ public record NavigationConfig(
 
     /**
      * Last-mile walkable paths (KNG-51 {@code LAST_MILE_PATHFINDING.md} §9, {@code navigation.walk.*}).
-     * Phase B reads the capture and search keys; {@code enabled} and {@code recompute-distance} are
-     * wired into navigation by Phase C (until then direct mode draws today's straight line whatever
-     * {@code enabled} says).
+     * {@code enabled: false} starts none of the walk services: direct mode draws straight lines exactly
+     * as before KNG-51 (the kill switch).
      *
-     * @param enabled               walkable trails on; false = today's straight lines (the kill switch, Phase C)
+     * @param enabled               walkable trails on; false = today's straight lines (the kill switch)
      * @param maxExpansions         cells one search may expand
      * @param maxLengthFactor       a path may be at most this many times the straight distance
      * @param maxLength             and never longer than this many blocks
@@ -191,7 +190,7 @@ public record NavigationConfig(
      * @param dropPenalty           extra cost per block dropped
      * @param captureMargin         blocks captured around the start→target box (also up and down)
      * @param chunkTtlSeconds       a captured chunk is reused this long
-     * @param recomputeDistance     off-path distance that recomputes the path (Phase C)
+     * @param recomputeDistance     off-path distance that recomputes the path
      * @param maxConcurrentSearches walk searches running at once, server-wide
      * @param climbables            material names climbed like a ladder
      */
@@ -278,6 +277,13 @@ public record NavigationConfig(
     public static NavigationConfig defaults() {
         return new NavigationConfig(true, RouterParameters.defaultClassCost(), DEFAULT_OVERLAY_MATERIALS, true,
             48, 4, TrailConfig.defaults(), 8, 40, 4, 30, 5.6, SurveyConfig.defaults(), BuilderConfig.defaults());
+    }
+
+    /** This config with another {@code walk:} block. */
+    public NavigationConfig withWalk(WalkConfig walk) {
+        return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
+            snapVerticalWeight, trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
+            survey, builder, walk);
     }
 
     /** {@code class-cost} keys as the API spells them ({@code Main}, {@code Road}, {@code Path}), any case. */

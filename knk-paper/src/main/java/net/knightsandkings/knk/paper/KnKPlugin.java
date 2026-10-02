@@ -233,6 +233,9 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.navigation.NavigationService navigationService;
     private net.knightsandkings.knk.paper.navigation.NavigationDestinations navigationDestinations;
     private java.util.concurrent.ExecutorService navigationRouting;
+    // KNG-51 walkable last-mile paths; null while navigation.walk.enabled is false.
+    private net.knightsandkings.knk.paper.navigation.walk.WalkSnapshotService walkSnapshots;
+    private java.util.concurrent.ExecutorService walkSearches;
     private net.knightsandkings.knk.paper.roads.RoadDirtyTracker roadDirtyTracker;
     private net.knightsandkings.knk.paper.roads.RoadBuildQueue roadBuildQueue;
     private net.knightsandkings.knk.paper.roads.RoadSurveyService roadSurveyService;
@@ -992,6 +995,12 @@ public class KnKPlugin extends JavaPlugin {
         if (navigationRouting != null) {
             navigationRouting.shutdownNow();
         }
+        if (walkSnapshots != null) {
+            walkSnapshots.stop();
+        }
+        if (walkSearches != null) {
+            walkSearches.shutdownNow();
+        }
         if (roadSurveyService != null) {
             roadSurveyService.shutdown();
         }
@@ -1206,6 +1215,7 @@ public class KnKPlugin extends JavaPlugin {
             t.setDaemon(true);
             return t;
         });
+        net.knightsandkings.knk.paper.navigation.NavigationService.Walk walk = initializeWalkPaths(navigation, access);
         var hud = new net.knightsandkings.knk.paper.navigation.NavigationHud(
             new net.knightsandkings.knk.core.roads.route.EtaEstimator(navigation.sessionParameters().sprintSpeed()));
         var trail = new net.knightsandkings.knk.paper.navigation.TrailRenderer(navigation.trail(),
@@ -1215,7 +1225,7 @@ public class KnKPlugin extends JavaPlugin {
                 this, navigation, roadNetworkCache::snapshot, access,
                 new net.knightsandkings.knk.paper.navigation.WorldGuardRegionShapes(), eligibility, hud, trail,
                 mainThread, navigationRouting, () -> (long) org.bukkit.Bukkit.getCurrentTick(),
-                event -> getServer().getPluginManager().callEvent(event), getLogger()));
+                event -> getServer().getPluginManager().callEvent(event), getLogger(), walk));
 
         // Live changes (DESIGN §6.7, plan D13): gate state (R4, fired on any thread), siege lockdowns (R24),
         // domain cache refreshes and network snapshot swaps all re-check the active routes on the main thread.
@@ -1229,6 +1239,36 @@ public class KnKPlugin extends JavaPlugin {
             new net.knightsandkings.knk.paper.navigation.NavigationListener(navigationService), this);
         navigationService.start();
         getLogger().info("Road navigation (/navigate) initialized");
+    }
+
+    /**
+     * KNG-51 (docs/specs/navigation/LAST_MILE_PATHFINDING.md §3, §8): walkable paths for direct mode -
+     * the shared chunk capture (main thread, tick budget, TTL cache), the player's gate/door/region
+     * access and one stateless search on its own executor of {@code max-concurrent-searches} threads
+     * (not the road router's single thread: a walk search may wait for domain lookups). Null - straight
+     * lines, exactly as before KNG-51 - when {@code navigation.walk.enabled} is false (the kill switch).
+     */
+    private net.knightsandkings.knk.paper.navigation.NavigationService.Walk initializeWalkPaths(
+            net.knightsandkings.knk.paper.config.NavigationConfig navigation,
+            net.knightsandkings.knk.paper.navigation.NavigationAccess access) {
+        if (!navigation.walk().enabled()) {
+            getLogger().info("Walkable navigation paths disabled (navigation.walk.enabled: false) - direct mode draws straight lines");
+            return null;
+        }
+        this.walkSnapshots = new net.knightsandkings.knk.paper.navigation.walk.WalkSnapshotService(
+            navigation.passabilityRules(net.knightsandkings.knk.paper.roads.ChunkSnapshotSurfaceGrid.bukkitCollidable()),
+            navigation.walk(), net.knightsandkings.knk.paper.utils.TickBudget.server(), System::currentTimeMillis);
+        walkSnapshots.start(this);
+        java.util.concurrent.atomic.AtomicInteger walkThreads = new java.util.concurrent.atomic.AtomicInteger();
+        this.walkSearches = Executors.newFixedThreadPool(navigation.walk().maxConcurrentSearches(), r -> {
+            Thread t = new Thread(r, "knk-navigation-walk-" + walkThreads.incrementAndGet());
+            t.setDaemon(true);
+            return t;
+        });
+        var preparer = net.knightsandkings.knk.paper.navigation.walk.WalkLegPreparer.server(walkSnapshots,
+            net.knightsandkings.knk.paper.navigation.walk.WorldGuardWalkAccess.factory(access), navigation.walk(), gateManager);
+        return new net.knightsandkings.knk.paper.navigation.NavigationService.Walk(preparer,
+            new net.knightsandkings.knk.core.roads.walk.WalkSearch(), walkSearches);
     }
 
     /**
