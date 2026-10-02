@@ -93,6 +93,59 @@ class TrailRendererTest {
             anyDouble(), anyDouble(), anyDouble(), anyDouble(), any());
     }
 
+    /** An L-shaped walk path: (0.5, 64, 0.5) → 10 blocks north → 20 blocks east (KNG-51 floor points). */
+    private static List<double[]> lPath() {
+        return List.of(new double[] {0.5, 64, 0.5}, new double[] {0.5, 64, 10.5}, new double[] {20.5, 64, 10.5});
+    }
+
+    @Test
+    void projectFindsTheNearestPointAndHowFarAlongItIs() {
+        double[] at = TrailRenderer.project(lPath(), new double[] {3.5, 64, 5.5});
+        assertEquals(5, at[0], 1e-9, "5 blocks along the first segment");
+        assertEquals(3, at[1], 1e-9, "3 blocks beside it");
+
+        double[] corner = TrailRenderer.project(lPath(), new double[] {10.5, 64, 12.5});
+        assertEquals(20, corner[0], 1e-9, "10 north + 10 east");
+        assertEquals(2, corner[1], 1e-9);
+
+        assertEquals(0, TrailRenderer.project(List.of(new double[] {1, 2, 3}), new double[] {1, 2, 3})[1], 1e-9);
+        assertEquals(30, TrailRenderer.polylineLength(lPath()), 1e-9);
+        assertEquals(5.5, TrailRenderer.pointAt(lPath(), 15)[0], 1e-9, "5 blocks past the corner");
+        assertEquals(20.5, TrailRenderer.pointAt(lPath(), 99)[0], 1e-9, "clamped to the end");
+    }
+
+    @Test
+    void aPathWindowStartsAtThePlayersProjectionAndFollowsTheCorner() {
+        List<double[]> window = TrailRenderer.pathWindow(lPath(), new double[] {2.5, 64, 6.5}, 12, 3);
+
+        assertEquals(5, window.size(), "6, 9, 12, 15 along and the window's end at 18");
+        assertEquals(0.5, window.get(0)[0], 1e-9);
+        assertEquals(6.5, window.get(0)[2], 1e-9, "from the projection, not the path's start");
+        assertEquals(2.5, window.get(2)[0], 1e-9, "12 along = 2 blocks past the corner");
+        assertEquals(10.5, window.get(2)[2], 1e-9);
+        assertEquals(8.5, window.get(4)[0], 1e-9, "18 along");
+        assertEquals(64, window.get(4)[1], 1e-9, "floor y kept - the points are floor cells already");
+
+        List<double[]> nearTheEnd = TrailRenderer.pathWindow(lPath(), new double[] {19.5, 64, 10.5}, 12, 3);
+        assertEquals(20.5, nearTheEnd.get(nearTheEnd.size() - 1)[0], 1e-9, "never past the path's end");
+        assertTrue(TrailRenderer.pathWindow(List.of(), new double[] {0, 0, 0}, 12, 3).isEmpty());
+    }
+
+    @Test
+    void drawPathUsesTheLegColourWithoutWorldReads() {
+        World world = mock(World.class);
+        Player viewer = mock(Player.class);
+        when(viewer.getWorld()).thenReturn(world);
+        when(viewer.getLocation()).thenReturn(new Location(world, 0.5, 65, 0.5));
+        TrailRenderer renderer = new TrailRenderer(NavigationConfig.TrailConfig.defaults(), new TickBudget(() -> 20.0));
+
+        renderer.drawPath(viewer, lPath());
+
+        verify(viewer, atLeast(10)).spawnParticle(eq(Particle.DUST), anyDouble(), eq(64 + TrailRenderer.LIFT), anyDouble(),
+            anyInt(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any());
+        verify(world, never()).getBlockAt(anyInt(), anyInt(), anyInt());
+    }
+
     @Test
     void unknownParticleNamesFallBackToDust() {
         assertEquals(Particle.DUST, TrailRenderer.particleOf("nonsense"));

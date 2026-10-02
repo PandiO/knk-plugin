@@ -86,6 +86,23 @@ public final class TrailRenderer {
         drawLeg(viewer, new double[] {feet.getX(), feet.getY() - 1, feet.getZ()}, target);
     }
 
+    /**
+     * Direct mode with a walk path (KNG-51 {@code LAST_MILE_PATHFINDING.md} §7): the next
+     * {@code trail-length} blocks of {@code floorPoints} from the player's projection onto it (half
+     * length under lag), in the leg colour and spacing. The points are floor cells already
+     * ({@code WalkPath.points()}: block centre, floor y), so no world reads. Main thread.
+     */
+    public void drawPath(Player viewer, List<double[]> floorPoints) {
+        double length = budget.isLagging() ? Math.max(4, config.length() / 2.0) : config.length();
+        Location feet = viewer.getLocation();
+        List<double[]> window = pathWindow(floorPoints, new double[] {feet.getX(), feet.getY() - 1, feet.getZ()},
+            length, LEG_SPACING);
+        if (window.isEmpty()) {
+            return;
+        }
+        ParticleDraw.polyline(viewer, lifted(window), LEG_SPACING, particle, legData);
+    }
+
     private void drawLeg(Player viewer, double[] from, double[] to) {
         List<double[]> points = legPoints(from, to, LEG_SPACING);
         List<Vector> lifted = new ArrayList<>(points.size());
@@ -116,6 +133,79 @@ public final class TrailRenderer {
         }
         out.add(centre(route.pointAt(stop)));
         return out;
+    }
+
+    /**
+     * A floor-point polyline (a walk path) sampled every {@code spacing} blocks for {@code length}
+     * blocks from the point nearest {@code from} ({@link #project}), ending with the window's last
+     * point. Empty for an empty polyline.
+     */
+    public static List<double[]> pathWindow(List<double[]> points, double[] from, double length, double spacing) {
+        List<double[]> out = new ArrayList<>();
+        if (points == null || points.isEmpty() || spacing <= 0) {
+            return out;
+        }
+        double total = polylineLength(points);
+        double start = project(points, from)[0];
+        double stop = Math.min(total, start + length);
+        for (double a = start; a < stop; a += spacing) {
+            out.add(pointAt(points, a));
+        }
+        out.add(pointAt(points, stop));
+        return out;
+    }
+
+    /**
+     * The point of the polyline nearest {@code p} (3D): {@code {along, distance}} — how far along the
+     * polyline it lies and how far {@code p} is from it. A single point projects onto itself.
+     */
+    public static double[] project(List<double[]> points, double[] p) {
+        double bestAlong = 0;
+        double best = distance(points.get(0), p);
+        double along = 0;
+        for (int i = 1; i < points.size(); i++) {
+            double[] a = points.get(i - 1);
+            double[] b = points.get(i);
+            double segment = distance(a, b);
+            if (segment > 1e-9) {
+                double t = ((p[0] - a[0]) * (b[0] - a[0]) + (p[1] - a[1]) * (b[1] - a[1]) + (p[2] - a[2]) * (b[2] - a[2]))
+                    / (segment * segment);
+                t = Math.max(0, Math.min(1, t));
+                double[] q = {a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t};
+                double d = distance(q, p);
+                if (d < best) {
+                    best = d;
+                    bestAlong = along + segment * t;
+                }
+            }
+            along += segment;
+        }
+        return new double[] {bestAlong, best};
+    }
+
+    /** The point {@code along} blocks along the polyline (clamped to its ends). */
+    public static double[] pointAt(List<double[]> points, double along) {
+        double walked = 0;
+        for (int i = 1; i < points.size(); i++) {
+            double[] a = points.get(i - 1);
+            double[] b = points.get(i);
+            double segment = distance(a, b);
+            if (segment > 1e-9 && walked + segment >= along) {
+                double t = Math.max(0, (along - walked) / segment);
+                return new double[] {a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t};
+            }
+            walked += segment;
+        }
+        return points.get(points.size() - 1).clone();
+    }
+
+    /** Total 3D length of a polyline. */
+    public static double polylineLength(List<double[]> points) {
+        double total = 0;
+        for (int i = 1; i < points.size(); i++) {
+            total += distance(points.get(i - 1), points.get(i));
+        }
+        return total;
     }
 
     /** {@code from} to {@code to} in a straight line, one point every {@code spacing} blocks, both ends included. */
