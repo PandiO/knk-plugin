@@ -50,6 +50,20 @@ class CrossSectionSamplerTest {
     }
 
     @Test
+    void theFloorBlockForAPlayersFeetIsTheBlockTheyStandOn() {
+        road();
+        world.set(5, 61, 10, "SNOW");
+        world.set(7, 60, 10, "DIRT_PATH");
+        world.set(8, 60, 10, "STONE_BRICK_SLAB");
+
+        assertEquals(60, sampler.floorY(world, 6, 61.0, 10), "on full bricks (feet 61.0) the bricks, not the block under them");
+        assertEquals(60, sampler.floorY(world, 7, 60.9375, 10), "on a dirt path (15/16 high)");
+        assertEquals(60, sampler.floorY(world, 8, 60.5, 10), "on a bottom slab");
+        assertEquals(60, sampler.floorY(world, 5, 61.125, 10), "on a snow layer: the block under it");
+        assertEquals(69, sampler.floorY(world, 6, 70.4, 10), "mid-air (a ladder): the block under the feet block");
+    }
+
+    @Test
     void crossSectionRunsPerpendicularAndStopsAtWalls() {
         road();
         CrossSectionSampler.Floor centre = sampler.floorUnder(world, 10, 61, 10).orElseThrow();

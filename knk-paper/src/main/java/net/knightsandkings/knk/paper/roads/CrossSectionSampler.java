@@ -40,6 +40,17 @@ public final class CrossSectionSampler {
     }
 
     /**
+     * The floor block (the network's y convention: a player standing there has feet at {@code y + 1})
+     * for a player whose feet are at {@code feetY}: what {@link #floorUnder} finds from
+     * {@code floor(feetY − ε)} - a full block, a slab, a dirt path or the block under a carpet/snow
+     * layer - else, mid-air (climbing a ladder, a jump), the block under the feet block.
+     */
+    public int floorY(Blocks blocks, int x, double feetY, int z) {
+        int standY = (int) Math.floor(feetY - 0.001);
+        return floorUnder(blocks, x, standY, z).map(Floor::y).orElse((int) Math.floor(feetY) - 1);
+    }
+
+    /**
      * The floor the admin stands on: the block under the feet, or the block under an overlay there.
      * {@code feetY} is the feet block ({@code floor(y − ε)}). Empty when there is no solid floor within 2
      * blocks below (the admin is mid-air).

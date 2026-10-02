@@ -69,10 +69,12 @@ public final class RoadSurveyService implements Listener {
     /** A {@code /knk road record} walk: floor blocks in order. */
     static final class Recording {
         final String world;
+        final CrossSectionSampler sampler;
         final List<int[]> points = new ArrayList<>();
 
-        Recording(String world) {
+        Recording(String world, CrossSectionSampler sampler) {
             this.world = world;
+            this.sampler = sampler;
         }
     }
 
@@ -176,7 +178,12 @@ public final class RoadSurveyService implements Listener {
                 continue;
             }
             Location at = player.getLocation();
-            int[] floor = {at.getBlockX(), (int) Math.floor(at.getY() - 0.001) - 1, at.getBlockZ()};
+            World world = player.getWorld();
+            // The floor block the admin walks on (smoke test 2026-10-02: floor(y − ε) − 1 put every recorded
+            // point one block into the road, so the overlay drew recordings through the road blocks).
+            int floorY = entry.getValue().sampler.floorY((x, y, z) -> world.getBlockAt(x, y, z).getType().name(),
+                at.getBlockX(), at.getY(), at.getBlockZ());
+            int[] floor = {at.getBlockX(), floorY, at.getBlockZ()};
             List<int[]> points = entry.getValue().points;
             if (points.isEmpty() || distance(points.get(points.size() - 1), floor) >= 1) {
                 points.add(floor);
@@ -471,7 +478,8 @@ public final class RoadSurveyService implements Listener {
             player.sendMessage(RoadMessages.warn("Already recording: /knk road record stop [street] | cancel."));
             return;
         }
-        recordings.put(id, new Recording(player.getWorld().getName()));
+        recordings.put(id, new Recording(player.getWorld().getName(), new CrossSectionSampler(rules,
+            player.getWorld().getMinHeight(), player.getWorld().getMaxHeight(), config.survey().crossSectionHalfWidth())));
         player.sendMessage(RoadMessages.good("Recording a stretch from here - walk (or climb) to its end, then /knk road record stop [street]. "
             + "The recorded edge survives rebuilds and may be vertical (a ladder, a water lift)."));
     }
