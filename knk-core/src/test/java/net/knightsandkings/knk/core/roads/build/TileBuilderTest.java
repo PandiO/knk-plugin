@@ -685,6 +685,77 @@ class TileBuilderTest {
         assertEquals(3, r.edges().size(), describe(r));
     }
 
+    // ---- two-arm junctions (smoke test 2026-10-02, junction #3615) ----
+
+    private static SkeletonGraph.Result threeNodes(RoadNodeKind middle) {
+        return new SkeletonGraph.Result(List.of(
+            new SkeletonGraph.Node(0, 0, 64, 0, RoadNodeKind.ENDPOINT, OptionalInt.empty(), 0),
+            new SkeletonGraph.Node(1, 10, 64, 0, middle, OptionalInt.empty(), 10),
+            new SkeletonGraph.Node(2, 20, 64, 0, RoadNodeKind.BOUNDARY, OptionalInt.empty(), 20)), List.of(), List.of());
+    }
+
+    private static TileBuilder.Run run(int from, int to, int x0, int x1, int span0) {
+        List<int[]> polyline = new ArrayList<>();
+        int step = x1 >= x0 ? 1 : -1;
+        int[] spans = new int[Math.abs(x1 - x0) + 1];
+        for (int x = x0, k = 0; ; x += step, k++) {
+            polyline.add(new int[] {x, 64, 0});
+            spans[k] = span0 + k * step;
+            if (x == x1) break;
+        }
+        return new TileBuilder.Run(from, to, polyline, spans);
+    }
+
+    private static Map<Long, TileBuilder.Run> runs(TileBuilder.Run... runs) {
+        Map<Long, TileBuilder.Run> map = new java.util.LinkedHashMap<>();
+        for (TileBuilder.Run r : runs) map.put(TileBuilder.pairKey(r.from(), r.to()), r);
+        return map;
+    }
+
+    @Test
+    void aJunctionLeftWithTwoArmsIsJoinedIntoOneEdge() {
+        // A(0) -> J(10) and B(20) -> J(10): the second run points the other way, like a real build can.
+        Map<Long, TileBuilder.Run> runs = runs(run(0, 1, 0, 10, 0), run(2, 1, 20, 10, 20));
+        Set<Integer> gone = TileBuilder.dissolveTwoArmJunctions(runs, threeNodes(RoadNodeKind.JUNCTION),
+            new int[] {-1, 3615, -1}, new boolean[3], PreviousGraph.EMPTY);
+
+        assertEquals(Set.of(1), gone);
+        assertEquals(1, runs.size());
+        TileBuilder.Run joined = runs.values().iterator().next();
+        assertEquals(java.util.Set.of(0, 2), java.util.Set.of(joined.from(), joined.to()));
+        assertEquals(21, joined.polyline().size(), "x 0..20, the joint once");
+        assertEquals(20, joined.length(), 1e-9);
+        for (int k = 1; k < joined.polyline().size(); k++) {
+            assertEquals(1, Math.abs(joined.polyline().get(k)[0] - joined.polyline().get(k - 1)[0]), "continuous");
+        }
+        assertEquals(22, joined.spans().length);
+    }
+
+    @Test
+    void aTwoArmJunctionStaysWhenLockedOrOnASplitLoopOrWithAThirdPreviousEdge() {
+        Map<Long, TileBuilder.Run> runs = runs(run(0, 1, 0, 10, 0), run(1, 2, 10, 20, 10));
+        assertTrue(TileBuilder.dissolveTwoArmJunctions(runs, threeNodes(RoadNodeKind.JUNCTION), new int[] {-1, 7, -1},
+            new boolean[] {false, true, false}, PreviousGraph.EMPTY).isEmpty(), "locked by an admin");
+        assertTrue(TileBuilder.dissolveTwoArmJunctions(runs, threeNodes(RoadNodeKind.ANCHOR), new int[] {-1, -1, -1},
+            new boolean[3], PreviousGraph.EMPTY).isEmpty(), "only Junctions");
+
+        PreviousGraph withRecording = new PreviousGraph(List.of(), List.of(
+            new PreviousEdge(1, 7, 8, List.of(new int[] {0, 64, 0}, new int[] {10, 64, 0})),
+            new PreviousEdge(2, 7, 9, List.of(new int[] {10, 64, 0}, new int[] {20, 64, 0})),
+            new PreviousEdge(3, 7, 10, List.of(new int[] {10, 64, 0}, new int[] {10, 64, 30}))));
+        assertTrue(TileBuilder.dissolveTwoArmJunctions(runs, threeNodes(RoadNodeKind.JUNCTION), new int[] {-1, 7, -1},
+            new boolean[3], withRecording).isEmpty(), "three edges last time: a recorded edge may end there");
+
+        // A loop split into three: joining any split point would make a second run between the others.
+        Map<Long, TileBuilder.Run> loop = runs(run(0, 1, 0, 10, 0), run(1, 2, 10, 20, 10), run(2, 0, 20, 0, 20));
+        SkeletonGraph.Result triangle = new SkeletonGraph.Result(List.of(
+            new SkeletonGraph.Node(0, 0, 64, 0, RoadNodeKind.JUNCTION, OptionalInt.empty(), 0),
+            new SkeletonGraph.Node(1, 10, 64, 0, RoadNodeKind.JUNCTION, OptionalInt.empty(), 10),
+            new SkeletonGraph.Node(2, 20, 64, 0, RoadNodeKind.JUNCTION, OptionalInt.empty(), 20)), List.of(), List.of());
+        assertTrue(TileBuilder.dissolveTwoArmJunctions(loop, triangle, new int[] {-1, -1, -1}, new boolean[3], PreviousGraph.EMPTY).isEmpty());
+        assertEquals(3, loop.size());
+    }
+
     @Test
     void anUnlockedNeighbourAndAFarJunctionAreNotMerged() {
         // Only unmatched nodes merge: a junction the admin left alone (#101, matched) stays, and so does

@@ -118,19 +118,8 @@ public final class TileBuilder {
             positions[i] = pos;
         }
         int[] into = mergeIntoLockedNodes(graph, existing, locked, positions, mask, params.lockedNodeReach());
-        List<Node> nodes = new ArrayList<>();
-        for (SkeletonGraph.Node node : graph.nodes()) {
-            int i = node.id();
-            if (into[i] != i) {
-                continue;
-            }
-            int[] pos = positions[i];
-            nodes.add(new Node(key(i), existing[i] == NodeMatcher.UNMATCHED ? OptionalInt.empty() : OptionalInt.of(existing[i]),
-                pos[0], pos[1], pos[2], node.kind()));
-        }
 
-        ProfileMatcher profileMatcher = new ProfileMatcher(request.profiles());
-        Map<Long, Edge> edgesByPair = new LinkedHashMap<>();
+        Map<Long, Run> runsByPair = new LinkedHashMap<>();
         for (Chain chain : graph.chains()) {
             int from = into[chain.from()];
             int to = into[chain.to()];
@@ -138,22 +127,144 @@ public final class TileBuilder {
                 continue; // the chain between a duplicate and the locked node it merged into
             }
             List<int[]> polyline = polyline(mask, chain, positions[from], positions[to]);
-            double length = Rdp.length(polyline);
-            long pair = ((long) Math.min(from, to) << 32) | Math.max(from, to);
-            Edge kept = edgesByPair.get(pair);
-            if (kept != null && kept.length() <= length) {
+            Run run = new Run(from, to, polyline, chain.spans());
+            Run kept = runsByPair.get(pairKey(from, to));
+            if (kept != null && kept.length() <= run.length()) {
                 continue; // a merge left two chains between the same nodes: keep the shorter (API unique pair)
             }
-            List<int[]> geometry = Rdp.simplify(polyline, params.rdpEpsilon());
-            double avgWidth = averageWidth(dt, chain.spans());
-            OptionalInt profileId = profileMatcher.match(mask, dt, chain.spans());
-            List<Integer> doors = gateDoors(mask, chain.spans());
-            OptionalInt edgeId = matcher.matchEdge(existing[from], existing[to], geometry, request.previousGraph());
-            edgesByPair.put(pair, new Edge(edgeId, key(from), key(to), geometry, length, avgWidth, profileId,
+            runsByPair.put(pairKey(from, to), run);
+        }
+        Set<Integer> dissolved = dissolveTwoArmJunctions(runsByPair, graph, existing, locked, request.previousGraph());
+
+        List<Node> nodes = new ArrayList<>();
+        for (SkeletonGraph.Node node : graph.nodes()) {
+            int i = node.id();
+            if (into[i] != i || dissolved.contains(i)) {
+                continue;
+            }
+            int[] pos = positions[i];
+            nodes.add(new Node(key(i), existing[i] == NodeMatcher.UNMATCHED ? OptionalInt.empty() : OptionalInt.of(existing[i]),
+                pos[0], pos[1], pos[2], node.kind()));
+        }
+        ProfileMatcher profileMatcher = new ProfileMatcher(request.profiles());
+        List<Edge> edges = new ArrayList<>();
+        for (Run run : runsByPair.values()) {
+            List<int[]> geometry = Rdp.simplify(run.polyline(), params.rdpEpsilon());
+            double avgWidth = averageWidth(dt, run.spans());
+            OptionalInt profileId = profileMatcher.match(mask, dt, run.spans());
+            List<Integer> doors = gateDoors(mask, run.spans());
+            OptionalInt edgeId = matcher.matchEdge(existing[run.from()], existing[run.to()], geometry, request.previousGraph());
+            edges.add(new Edge(edgeId, key(run.from()), key(run.to()), geometry, run.length(), avgWidth, profileId,
                 doors, List.of(), List.of()));
         }
-        return new TileBuildResult(BUILDER_VERSION, mask.size(), mask.levelCount(), nodes,
-            new ArrayList<>(edgesByPair.values()), warnings);
+        return new TileBuildResult(BUILDER_VERSION, mask.size(), mask.levelCount(), nodes, edges, warnings);
+    }
+
+    /** One edge before simplification: its node indices, the closed polyline and the mask spans, oriented from → to. */
+    record Run(int from, int to, List<int[]> polyline, int[] spans) {
+        double length() {
+            return Rdp.length(polyline);
+        }
+
+        int other(int node) {
+            return node == from ? to : from;
+        }
+
+        /** The polyline ending at {@code node}. */
+        List<int[]> polylineTowards(int node) {
+            if (node == to) {
+                return polyline;
+            }
+            List<int[]> reversed = new ArrayList<>(polyline);
+            java.util.Collections.reverse(reversed);
+            return reversed;
+        }
+
+        int[] spansTowards(int node) {
+            if (node == to) {
+                return spans;
+            }
+            int[] reversed = new int[spans.length];
+            for (int k = 0; k < spans.length; k++) {
+                reversed[k] = spans[spans.length - 1 - k];
+            }
+            return reversed;
+        }
+    }
+
+    static long pairKey(int a, int b) {
+        return ((long) Math.min(a, b) << 32) | Math.max(a, b);
+    }
+
+    /**
+     * Smoke test 2026-10-02: a junction in a straight road with only two edges (#3615). Steps after the
+     * spur pruning can leave a Junction with two arms - the loop/parallel split, the tile-border cut, an
+     * arm merged into a locked node - and a two-arm junction is no junction. Each such node is joined
+     * away: its two runs become one. It stays when it is locked (an admin's), when joining would make a
+     * loop or a second run between the same two nodes (the API's unique pair), or when its previous build
+     * gave it three or more edges (a recorded edge the builder can't see may end there). Repeats until
+     * nothing changes.
+     *
+     * @return the joined-away node indices (not emitted)
+     */
+    static Set<Integer> dissolveTwoArmJunctions(Map<Long, Run> runs, SkeletonGraph.Result graph, int[] existing,
+                                                boolean[] locked, PreviousGraph previous) {
+        Set<Integer> dissolved = new java.util.HashSet<>();
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            Map<Integer, List<Run>> byNode = new java.util.TreeMap<>();
+            for (Run run : runs.values()) {
+                byNode.computeIfAbsent(run.from(), k -> new ArrayList<>()).add(run);
+                byNode.computeIfAbsent(run.to(), k -> new ArrayList<>()).add(run);
+            }
+            for (Map.Entry<Integer, List<Run>> entry : byNode.entrySet()) {
+                int n = entry.getKey();
+                List<Run> arms = entry.getValue();
+                if (arms.size() != 2 || locked[n] || graph.nodes().get(n).kind() != RoadNodeKind.JUNCTION
+                    || previousDegree(previous, existing[n]) >= 3) {
+                    continue;
+                }
+                Run first = arms.get(0);
+                Run second = arms.get(1);
+                int a = first.other(n);
+                int b = second.other(n);
+                if (a == b || runs.containsKey(pairKey(a, b))) {
+                    continue;
+                }
+                List<int[]> polyline = new ArrayList<>(first.polylineTowards(n));
+                List<int[]> tail = second.polylineTowards(n);
+                for (int k = tail.size() - 2; k >= 0; k--) {
+                    polyline.add(tail.get(k));
+                }
+                int[] head = first.spansTowards(n);
+                int[] rest = second.spansTowards(n);
+                int[] spans = java.util.Arrays.copyOf(head, head.length + rest.length);
+                for (int k = 0; k < rest.length; k++) {
+                    spans[head.length + k] = rest[rest.length - 1 - k];
+                }
+                runs.remove(pairKey(n, a));
+                runs.remove(pairKey(n, b));
+                runs.put(pairKey(a, b), new Run(a, b, polyline, spans));
+                dissolved.add(n);
+                changed = true;
+                break; // byNode is stale now
+            }
+        }
+        return dissolved;
+    }
+
+    private static int previousDegree(PreviousGraph previous, int previousId) {
+        if (previousId == NodeMatcher.UNMATCHED) {
+            return 0;
+        }
+        int degree = 0;
+        for (NodeMatcher.PreviousEdge edge : previous.edges()) {
+            if (edge.fromNodeId() == previousId || edge.toNodeId() == previousId) {
+                degree++;
+            }
+        }
+        return degree;
     }
 
     /**
