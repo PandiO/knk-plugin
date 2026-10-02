@@ -1,9 +1,11 @@
 package net.knightsandkings.knk.paper.roads;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalInt;
+import java.util.Set;
 
 import org.bukkit.util.Vector;
 
@@ -48,6 +50,34 @@ public final class GateCellsIndex implements GateCells {
 
     public int size() {
         return doorByCell.size();
+    }
+
+    /**
+     * The doors with a footprint block inside the box (inclusive bounds) — the gates a walk search
+     * there can meet (KNG-51 §6).
+     */
+    public Set<Integer> doorIdsWithin(int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
+        Set<Integer> ids = new HashSet<>();
+        doorByCell.forEach((key, id) -> {
+            int x = BlockKey.x(key);
+            int y = BlockKey.y(key);
+            int z = BlockKey.z(key);
+            if (x >= minX && x <= maxX && y >= minY && y <= maxY && z >= minZ && z <= maxZ) {
+                ids.add(id);
+            }
+        });
+        return ids;
+    }
+
+    /** Same footprints, same doors (the walk capture cache drops a world's chunks when its gates changed). */
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof GateCellsIndex other && doorByCell.equals(other.doorByCell);
+    }
+
+    @Override
+    public int hashCode() {
+        return doorByCell.hashCode();
     }
 
     @Override

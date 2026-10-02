@@ -83,6 +83,43 @@ class ConfigLoaderNavigationTest {
     }
 
     @Test
+    void walkKeysDefaultToTheDesignAndOverride() {
+        NavigationConfig.WalkConfig defaults = ConfigLoader.loadNavigation(null).walk();
+        assertEquals(new NavigationConfig.WalkConfig(true, 20_000, 1.75, 96, 3, 10, 16, 10, 6, 2, List.of("LADDER")),
+            defaults, "KNG-51 §9 defaults");
+        assertEquals(net.knightsandkings.knk.core.roads.walk.MovementProfile.PLAYER, defaults.profile());
+        assertEquals(net.knightsandkings.knk.core.roads.walk.WalkBudget.DEFAULTS, defaults.budget());
+
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("navigation.walk.max-drop", 2);
+        yaml.set("navigation.walk.drop-penalty", 4.5);
+        yaml.set("navigation.walk.capture-margin", 8);
+        yaml.set("navigation.walk.chunk-ttl-seconds", 30);
+        yaml.set("navigation.walk.max-expansions", 5000);
+        yaml.set("navigation.walk.climbables", List.of("ladder", "VINE"));
+        NavigationConfig.WalkConfig walk = ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation")).walk();
+        walk.validate();
+
+        assertEquals(2, walk.profile().maxDrop());
+        assertEquals(4.5, walk.profile().dropPenalty(), 0.0001);
+        assertEquals(java.util.Set.of("LADDER", "VINE"), walk.profile().climbables());
+        assertEquals(5000, walk.budget().maxExpansions());
+        assertEquals(96, walk.budget().maxLength(), 0.0001, "unset keys keep their defaults");
+        assertEquals(8, walk.captureMargin());
+        assertEquals(30, walk.chunkTtlSeconds());
+        assertEquals(2, walk.maxConcurrentSearches());
+
+        YamlConfiguration bad = new YamlConfiguration();
+        bad.set("navigation.walk.max-length-factor", 0.5);
+        assertThrows(IllegalArgumentException.class,
+            () -> ConfigLoader.loadNavigation(bad.getConfigurationSection("navigation")).validate());
+        YamlConfiguration blank = new YamlConfiguration();
+        blank.set("navigation.walk.climbables", List.of(" "));
+        assertThrows(IllegalArgumentException.class,
+            () -> ConfigLoader.loadNavigation(blank.getConfigurationSection("navigation")).validate());
+    }
+
+    @Test
     void badValuesAreConfigErrors() {
         YamlConfiguration unknownClass = new YamlConfiguration();
         unknownClass.set("navigation.class-cost.Highway", 1.0);

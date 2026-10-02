@@ -251,6 +251,22 @@ public class ConfigLoader {
                 builder.getInt("plaza-growth", builderDefaults.plazaGrowth()),
                 builder.getDouble("locked-node-reach", builderDefaults.lockedNodeReach()));
 
+        NavigationConfig.WalkConfig walkDefaults = defaults.walk();
+        ConfigurationSection walk = section.getConfigurationSection("walk");
+        NavigationConfig.WalkConfig walkConfig = walk == null ? walkDefaults
+            : new NavigationConfig.WalkConfig(
+                walk.getBoolean("enabled", walkDefaults.enabled()),
+                walk.getInt("max-expansions", walkDefaults.maxExpansions()),
+                walk.getDouble("max-length-factor", walkDefaults.maxLengthFactor()),
+                walk.getDouble("max-length", walkDefaults.maxLength()),
+                walk.getInt("max-drop", walkDefaults.maxDrop()),
+                walk.getDouble("drop-penalty", walkDefaults.dropPenalty()),
+                walk.getInt("capture-margin", walkDefaults.captureMargin()),
+                walk.getInt("chunk-ttl-seconds", walkDefaults.chunkTtlSeconds()),
+                walk.getDouble("recompute-distance", walkDefaults.recomputeDistance()),
+                walk.getInt("max-concurrent-searches", walkDefaults.maxConcurrentSearches()),
+                walk.contains("climbables") ? walk.getStringList("climbables") : walkDefaults.climbables());
+
         return new NavigationConfig(
             section.getBoolean("enabled", defaults.enabled()),
             NavigationConfig.parseClassCost(classCost),
@@ -265,7 +281,8 @@ public class ConfigLoader {
             section.getInt("max-session-minutes", defaults.maxSessionMinutes()),
             section.getDouble("sprint-speed", defaults.sprintSpeed()),
             surveyConfig,
-            builderConfig);
+            builderConfig,
+            walkConfig);
     }
 
     /** private-messages: every key falls back to {@link KnkConfig.PrivateMessagesConfig#defaults()}. */

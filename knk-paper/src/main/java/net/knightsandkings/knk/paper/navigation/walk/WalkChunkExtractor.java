@@ -109,7 +109,14 @@ public final class WalkChunkExtractor {
      */
     public WalkChunk extract(SpanExtractor.BlockSource chunk, int chunkX, int chunkZ, int fromSection, int toSection,
                              java.util.function.IntPredicate emptySection, long capturedAt) {
+        return extract(chunk, chunkX, chunkZ, fromSection, toSection, emptySection, gates, capturedAt);
+    }
+
+    /** As {@link #extract(SpanExtractor.BlockSource, int, int, int, int, java.util.function.IntPredicate, long)} with the gate cells of this request. */
+    public WalkChunk extract(SpanExtractor.BlockSource chunk, int chunkX, int chunkZ, int fromSection, int toSection,
+                             java.util.function.IntPredicate emptySection, GateCells gates, long capturedAt) {
         Objects.requireNonNull(chunk, "chunk");
+        GateCells gateCells = gates == null ? GateCells.NONE : gates;
         int from = Math.max(fromSection, minSection());
         int to = Math.min(toSection, maxSection());
         if (from > to) {
@@ -174,7 +181,7 @@ public final class WalkChunkExtractor {
                     int above = y + 1 <= highY ? flagsAt(sections, uniform, from, x, y + 1, z)
                         : flagsOf(material(chunk, lx, y + 1, lz));
                     boolean walkPassable = (above & (WalkChunk.PASSABLE | WalkChunk.DOOR | WalkChunk.CLIMBABLE)) != 0
-                        || gates.doorAt(x, y + 1, z).isPresent();
+                        || gateCells.doorAt(x, y + 1, z).isPresent();
                     if (!walkPassable) {
                         continue;
                     }

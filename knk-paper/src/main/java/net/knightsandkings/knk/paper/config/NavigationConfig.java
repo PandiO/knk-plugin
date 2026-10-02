@@ -4,12 +4,15 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 import net.knightsandkings.knk.core.domain.roads.RoadClass;
 import net.knightsandkings.knk.core.navigation.SessionParameters;
 import net.knightsandkings.knk.core.roads.build.BuildParameters;
 import net.knightsandkings.knk.core.roads.build.PassabilityRules;
 import net.knightsandkings.knk.core.roads.route.RouterParameters;
+import net.knightsandkings.knk.core.roads.walk.MovementProfile;
+import net.knightsandkings.knk.core.roads.walk.WalkBudget;
 
 /**
  * The {@code navigation:} block of config.yml (road navigation, docs/specs/navigation/DESIGN.md §4,
@@ -35,6 +38,7 @@ import net.knightsandkings.knk.core.roads.route.RouterParameters;
  * @param sprintSpeed        blocks per second for the ETA
  * @param survey             survey-walk sampling
  * @param builder            tile builder parameters
+ * @param walk               last-mile walkable paths (KNG-51, {@code navigation.walk.*})
  */
 public record NavigationConfig(
     boolean enabled,
@@ -50,7 +54,8 @@ public record NavigationConfig(
     int maxSessionMinutes,
     double sprintSpeed,
     SurveyConfig survey,
-    BuilderConfig builder
+    BuilderConfig builder,
+    WalkConfig walk
 ) {
     /** Design default for {@code overlay-materials} (DESIGN §4). */
     public static final List<String> DEFAULT_OVERLAY_MATERIALS = List.of(
@@ -172,12 +177,102 @@ public record NavigationConfig(
         }
     }
 
+    /**
+     * Last-mile walkable paths (KNG-51 {@code LAST_MILE_PATHFINDING.md} §9, {@code navigation.walk.*}).
+     * Phase B reads the capture and search keys; {@code enabled} and {@code recompute-distance} are
+     * wired into navigation by Phase C (until then direct mode draws today's straight line whatever
+     * {@code enabled} says).
+     *
+     * @param enabled               walkable trails on; false = today's straight lines (the kill switch, Phase C)
+     * @param maxExpansions         cells one search may expand
+     * @param maxLengthFactor       a path may be at most this many times the straight distance
+     * @param maxLength             and never longer than this many blocks
+     * @param maxDrop               deepest drop taken (3 = no fall damage)
+     * @param dropPenalty           extra cost per block dropped
+     * @param captureMargin         blocks captured around the start→target box (also up and down)
+     * @param chunkTtlSeconds       a captured chunk is reused this long
+     * @param recomputeDistance     off-path distance that recomputes the path (Phase C)
+     * @param maxConcurrentSearches walk searches running at once, server-wide
+     * @param climbables            material names climbed like a ladder
+     */
+    public record WalkConfig(boolean enabled, int maxExpansions, double maxLengthFactor, double maxLength,
+                             int maxDrop, double dropPenalty, int captureMargin, int chunkTtlSeconds,
+                             double recomputeDistance, int maxConcurrentSearches, List<String> climbables) {
+        public WalkConfig {
+            climbables = climbables == null ? List.of("LADDER") : climbables.stream()
+                .map(name -> name == null ? "" : name.trim().toUpperCase(Locale.ROOT))
+                .toList();
+        }
+
+        public static WalkConfig defaults() {
+            return new WalkConfig(true, WalkBudget.DEFAULTS.maxExpansions(), WalkBudget.DEFAULTS.maxLengthFactor(),
+                WalkBudget.DEFAULTS.maxLength(), MovementProfile.PLAYER.maxDrop(), MovementProfile.PLAYER.dropPenalty(),
+                16, 10, 6, 2, List.of("LADDER"));
+        }
+
+        public void validate() {
+            if (maxExpansions < 1) {
+                throw new IllegalArgumentException("navigation.walk.max-expansions must be at least 1 (got: " + maxExpansions + ")");
+            }
+            if (!(maxLengthFactor >= 1)) {
+                throw new IllegalArgumentException("navigation.walk.max-length-factor must be at least 1 (got: " + maxLengthFactor + ")");
+            }
+            if (!(maxLength > 0)) {
+                throw new IllegalArgumentException("navigation.walk.max-length must be positive (got: " + maxLength + ")");
+            }
+            if (maxDrop < 0) {
+                throw new IllegalArgumentException("navigation.walk.max-drop must not be negative (got: " + maxDrop + ")");
+            }
+            if (!(dropPenalty >= 0) || Double.isInfinite(dropPenalty)) {
+                throw new IllegalArgumentException("navigation.walk.drop-penalty must be a number >= 0 (got: " + dropPenalty + ")");
+            }
+            if (captureMargin < 0 || captureMargin > 64) {
+                throw new IllegalArgumentException("navigation.walk.capture-margin must be 0..64 (got: " + captureMargin + ")");
+            }
+            if (chunkTtlSeconds < 0) {
+                throw new IllegalArgumentException("navigation.walk.chunk-ttl-seconds must not be negative (got: " + chunkTtlSeconds + ")");
+            }
+            if (!(recomputeDistance > 0)) {
+                throw new IllegalArgumentException("navigation.walk.recompute-distance must be positive (got: " + recomputeDistance + ")");
+            }
+            if (maxConcurrentSearches < 1) {
+                throw new IllegalArgumentException("navigation.walk.max-concurrent-searches must be at least 1 (got: " + maxConcurrentSearches + ")");
+            }
+            for (String name : climbables) {
+                if (name.isEmpty()) {
+                    throw new IllegalArgumentException("navigation.walk.climbables must not contain blank entries");
+                }
+            }
+        }
+
+        /** The player's {@link MovementProfile} with this config's drops and climbables. */
+        public MovementProfile profile() {
+            return MovementProfile.PLAYER.withDrops(maxDrop, dropPenalty).withClimbables(Set.copyOf(climbables));
+        }
+
+        /** The search budget (snap radii keep the core defaults: start 2, goal 3). */
+        public WalkBudget budget() {
+            return new WalkBudget(maxExpansions, maxLengthFactor, maxLength, WalkBudget.DEFAULTS.startSnap(),
+                WalkBudget.DEFAULTS.goalSnap());
+        }
+    }
+
     public NavigationConfig {
         classCost = classCost == null || classCost.isEmpty() ? RouterParameters.defaultClassCost() : Map.copyOf(classCost);
         overlayMaterials = overlayMaterials == null ? DEFAULT_OVERLAY_MATERIALS : List.copyOf(overlayMaterials);
         trail = trail == null ? TrailConfig.defaults() : trail;
         survey = survey == null ? SurveyConfig.defaults() : survey;
         builder = builder == null ? BuilderConfig.defaults() : builder;
+        walk = walk == null ? WalkConfig.defaults() : walk;
+    }
+
+    /** Without a {@code walk:} block (callers from before KNG-51): the walk defaults. */
+    public NavigationConfig(boolean enabled, Map<RoadClass, Double> classCost, List<String> overlayMaterials,
+                            boolean seedFromDomains, double maxSnapDistance, double snapVerticalWeight, TrailConfig trail,
+                            double rerouteDistance, int rerouteAfterTicks, double arriveDistance, int maxSessionMinutes,
+                            double sprintSpeed, SurveyConfig survey, BuilderConfig builder) {
+        this(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance, snapVerticalWeight, trail,
+            rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed, survey, builder, null);
     }
 
     public static NavigationConfig defaults() {
@@ -241,6 +336,7 @@ public record NavigationConfig(
         trail.validate();
         survey.validate();
         builder.validate();
+        walk.validate();
     }
 
     /** Snapping and class costs for the router (Phases 2d/4). */
