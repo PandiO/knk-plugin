@@ -66,6 +66,23 @@ class NodeMatcherTest {
     }
 
     @Test
+    void aBoundaryCandidateNeverTakesALockedInnerNode() {
+        Candidate border = new Candidate(1418, 48, -513, OptionalInt.empty(), RoadNodeKind.BOUNDARY);
+        PreviousNode brink = new PreviousNode(7, 1418, 48, -520, RoadNodeKind.JUNCTION, true);
+        assertArrayEquals(new int[] {NodeMatcher.UNMATCHED},
+            matcher.matchNodes(List.of(border), new PreviousGraph(List.of(brink), List.of())), "7 blocks: the locked pass");
+        PreviousNode close = new PreviousNode(7, 1418, 48, -515, RoadNodeKind.JUNCTION, true);
+        assertArrayEquals(new int[] {NodeMatcher.UNMATCHED},
+            matcher.matchNodes(List.of(border), new PreviousGraph(List.of(close), List.of())), "2 blocks: the normal pass");
+        PreviousNode lockedBoundary = new PreviousNode(8, 1417, 48, -513, RoadNodeKind.BOUNDARY, true);
+        assertArrayEquals(new int[] {8},
+            matcher.matchNodes(List.of(border), new PreviousGraph(List.of(lockedBoundary), List.of())), "a locked Boundary still matches");
+        assertArrayEquals(new int[] {7},
+            matcher.matchNodes(List.of(new Candidate(1418, 48, -514, OptionalInt.empty(), RoadNodeKind.JUNCTION)),
+                new PreviousGraph(List.of(brink), List.of())), "a junction candidate still claims it");
+    }
+
+    @Test
     void anchorsMatchByIdAndAreNeverMatchedByPosition() {
         PreviousNode anchor = new PreviousNode(50, 5, 64, 5, RoadNodeKind.ANCHOR, true);
         PreviousGraph previous = new PreviousGraph(List.of(anchor, prev(2, 9, 64, 9)), List.of());

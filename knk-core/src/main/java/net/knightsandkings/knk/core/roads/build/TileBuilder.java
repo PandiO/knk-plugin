@@ -93,7 +93,7 @@ public final class TileBuilder {
         NodeMatcher matcher = new NodeMatcher(params);
         List<NodeMatcher.Candidate> candidates = new ArrayList<>();
         for (SkeletonGraph.Node node : graph.nodes()) {
-            candidates.add(new NodeMatcher.Candidate(node.x(), node.y(), node.z(), node.anchorId()));
+            candidates.add(new NodeMatcher.Candidate(node.x(), node.y(), node.z(), node.anchorId(), node.kind()));
         }
         int[] existing = matcher.matchNodes(candidates, request.previousGraph());
         int[][] positions = new int[graph.nodes().size()][];
@@ -103,7 +103,8 @@ public final class TileBuilder {
             int[] pos = {node.x(), node.y(), node.z()};
             if (existing[i] != NodeMatcher.UNMATCHED) {
                 PreviousNode previous = request.previousGraph().node(existing[i]);
-                if (previous != null && previous.locked() && request.tile().contains(previous.x(), previous.z())) {
+                boolean keepsBorder = node.kind() != RoadNodeKind.BOUNDARY || onBorder(request.tile(), previous);
+                if (previous != null && previous.locked() && request.tile().contains(previous.x(), previous.z()) && keepsBorder) {
                     pos = new int[] {previous.x(), previous.y(), previous.z()};
                     locked[i] = true;
                 }
@@ -214,6 +215,10 @@ public final class TileBuilder {
         double dy = a[1] - b[1];
         double dz = a[2] - b[2];
         return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    private static boolean onBorder(Region tile, PreviousNode node) {
+        return node != null && (node.x() == tile.minX() || node.x() == tile.maxX() || node.z() == tile.minZ() || node.z() == tile.maxZ());
     }
 
     static String key(int nodeIndex) {

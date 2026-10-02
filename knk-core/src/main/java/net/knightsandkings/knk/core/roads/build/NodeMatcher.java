@@ -53,8 +53,11 @@ public final class NodeMatcher {
         }
     }
 
-    /** A new node's position, for matching. */
-    public record Candidate(int x, int y, int z, OptionalInt anchorId) {
+    /** A new node's position and kind (null = unknown), for matching. */
+    public record Candidate(int x, int y, int z, OptionalInt anchorId, RoadNodeKind kind) {
+        public Candidate(int x, int y, int z, OptionalInt anchorId) {
+            this(x, y, z, anchorId, null);
+        }
     }
 
     /** No previous node matched. */
@@ -98,7 +101,7 @@ public final class NodeMatcher {
             Candidate c = candidates.get(i);
             for (int j = 0; j < previous.nodes().size(); j++) {
                 PreviousNode p = previous.nodes().get(j);
-                if (used[j] || p.kind() == RoadNodeKind.ANCHOR) {
+                if (used[j] || p.kind() == RoadNodeKind.ANCHOR || !compatible(c, p)) {
                     continue;
                 }
                 double d = distance(c.x(), c.y(), c.z(), p.x(), p.y(), p.z());
@@ -121,7 +124,8 @@ public final class NodeMatcher {
             Candidate c = candidates.get(i);
             for (int j = 0; j < previous.nodes().size(); j++) {
                 PreviousNode p = previous.nodes().get(j);
-                if (used[j] || !p.locked() || p.kind() == RoadNodeKind.ANCHOR || p.kind() == RoadNodeKind.BOUNDARY) {
+                if (used[j] || !p.locked() || p.kind() == RoadNodeKind.ANCHOR || p.kind() == RoadNodeKind.BOUNDARY
+                    || !compatible(c, p)) {
                     continue;
                 }
                 double d = distance(c.x(), c.y(), c.z(), p.x(), p.y(), p.z());
@@ -132,6 +136,16 @@ public final class NodeMatcher {
         }
         assignNearestFirst(lockedPairs, result, used, previous);
         return result;
+    }
+
+    /**
+     * A Boundary candidate must stay on the tile border, but a locked node keeps its position: a
+     * Boundary candidate never takes a locked non-Boundary node's id (smoke test 2026-10-02: the
+     * border node of tile 2,-2 took locked junction #7 "Brink", 7 blocks inside, and the API refused
+     * the tile).
+     */
+    private static boolean compatible(Candidate c, PreviousNode p) {
+        return c.kind() != RoadNodeKind.BOUNDARY || !p.locked() || p.kind() == RoadNodeKind.BOUNDARY;
     }
 
     private static void assignNearestFirst(List<double[]> pairs, int[] result, boolean[] used, PreviousGraph previous) {

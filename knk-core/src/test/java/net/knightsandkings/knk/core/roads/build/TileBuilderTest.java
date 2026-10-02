@@ -633,6 +633,23 @@ class TileBuilderTest {
     }
 
     @Test
+    void aBorderNodeNeverMovesOntoALockedJunctionInsideTheTile() {
+        // Smoke test 2026-10-02, tile 2,-2: locked junction "Brink" 7 blocks inside the border; the road
+        // leaves the tile next to it. The Boundary node must stay on the border (the API refuses it
+        // anywhere else), not take Brink's id and position.
+        GridFixture f = new GridFixture().layer(40, 64, 10, "G".repeat(36)); // x 40..75, tile 0..63
+        PreviousGraph previous = new PreviousGraph(List.of(new PreviousNode(7, 56, 64, 10, RoadNodeKind.JUNCTION, true)), List.of());
+        TileRequest req = request(f, PARAMS, GridFixture.profiles(), List.of(), previous, new Seed(40, 65, 10));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        Node border = onlyNode(r, RoadNodeKind.BOUNDARY);
+        assertEquals(63, border.x(), d);
+        assertTrue(border.existingId().isEmpty(), d);
+    }
+
+    @Test
     void anUnlockedNeighbourAndAFarJunctionAreNotMerged() {
         // Only unmatched nodes merge: a junction the admin left alone (#101, matched) stays, and so does
         // one farther than locked-node-reach.
