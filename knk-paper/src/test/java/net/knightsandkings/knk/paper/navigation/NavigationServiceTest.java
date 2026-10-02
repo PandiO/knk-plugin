@@ -354,6 +354,26 @@ class NavigationServiceTest {
     }
 
     @Test
+    void theLastLegAfterTheRoadsEndUsesTheDirectReCheck() {
+        Destination yard = Destination.region("Mill Yard", NavigationTestNetwork.WORLD, MILL_YARD_REGION);
+        service.navigate(player, yard);
+        moveTo(20.5, 65, 0.5);
+        ticks(1);
+        assertTrue(service.isDirect(playerId), "the last off-road leg");
+
+        moveTo(20.5, 65, -20.5); // back past the road's end, away from the yard
+        ticks(NavigationService.RECHECK_TICKS);
+
+        assertTrue(service.isDirect(playerId));
+        assertTrue(messages().stream().anyMatch(m -> m.contains("You're heading away from Mill Yard - recalculating.")));
+        ArgumentCaptor<double[]> target = ArgumentCaptor.forClass(double[].class);
+        verify(trail, atLeastOnce()).drawDirect(any(), target.capture());
+        double[] last = target.getValue();
+        assertEquals(20.5, last[0], 1e-6, "the yard's closest point to where the player is now");
+        assertEquals(20, last[2], 1e-6);
+    }
+
+    @Test
     void aPlayerInTheRegionsLastBlockColumnIsAlreadyThere() {
         moveTo(210.7, 65, 200.5); // block 210 is inside the cuboid 190..210, though 210.7 > 210
 
