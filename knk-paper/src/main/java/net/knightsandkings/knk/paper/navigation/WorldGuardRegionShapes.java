@@ -58,7 +58,8 @@ public final class WorldGuardRegionShapes implements RegionShapes {
         return Optional.of(region);
     }
 
-    static RegionShape toShape(ProtectedRegion region) {
+    /** A WorldGuard region as a Bukkit-free shape (also the walk search's denied regions, KNG-51 §6). */
+    public static RegionShape toShape(ProtectedRegion region) {
         int minY = region.getMinimumPoint().getBlockY();
         int maxY = region.getMaximumPoint().getBlockY();
         if (region instanceof ProtectedPolygonalRegion polygon) {
