@@ -41,7 +41,11 @@ public final class RoadOverlayRenderer {
     public static final int LEVEL_RANGE = 8;
     public static final double PARTICLE_LIFT = 1.1;
     public static final double EDGE_SPACING = 1.0;
-    public static final double LOOK_DISTANCE = 12;
+    /** A node pillar or edge counts as looked at when the view ray passes this close (blocks). */
+    public static final double RAY_TOLERANCE = 1.5;
+    static final double RAY_STEP = 0.5;
+    /** Heights above a node's floor block where its pillar is tested against the view ray. */
+    private static final double[] PILLAR_SAMPLES = {PARTICLE_LIFT, PARTICLE_LIFT + 1, PARTICLE_LIFT + 2};
 
     /** One admin's overlay settings. */
     public record View(int radius, boolean allLevels) {
@@ -149,7 +153,7 @@ public final class RoadOverlayRenderer {
             ParticleDraw.pillar(viewer, new Vector(node.x() + 0.5, node.y() + PARTICLE_LIFT, node.z() + 0.5),
                 node.isDestination() ? 3.0 : 2.0, 0.5, Particle.DUST, new Particle.DustOptions(Color.fromRGB(rgb), 1.2f));
         }
-        lookedAt(viewer, snapshot).ifPresent(text -> viewer.sendActionBar(Component.text(text, RoadMessages.HIGHLIGHT)));
+        lookedAt(viewer, snapshot, view).ifPresent(text -> viewer.sendActionBar(Component.text(text, RoadMessages.HIGHLIGHT)));
     }
 
     /** Edges with at least one geometry point within the view's radius (and level range unless {@code all}). */
@@ -190,45 +194,94 @@ public final class RoadOverlayRenderer {
         return points;
     }
 
-    /** The node or edge under the point {@link #LOOK_DISTANCE} blocks along the admin's view direction. */
-    private Optional<String> lookedAt(Player viewer, RoadNetworkSnapshot snapshot) {
+    /** The node or edge the admin looks at (smoke test finding G), see {@link #describeLookedAt}. */
+    private Optional<String> lookedAt(Player viewer, RoadNetworkSnapshot snapshot, View view) {
         Location eye = viewer.getEyeLocation();
         Vector dir = eye.getDirection();
-        double px = eye.getX() + dir.getX() * LOOK_DISTANCE;
-        double py = eye.getY() + dir.getY() * LOOK_DISTANCE;
-        double pz = eye.getZ() + dir.getZ() * LOOK_DISTANCE;
-        return describeAt(snapshot, px, py, pz);
+        Location feet = viewer.getLocation();
+        return describeLookedAt(snapshot, new double[] {eye.getX(), eye.getY(), eye.getZ()},
+            new double[] {dir.getX(), dir.getY(), dir.getZ()}, new double[] {feet.getX(), feet.getY(), feet.getZ()},
+            view.radius());
     }
 
-    /** Package-private for tests: the label for the network element nearest to a point (within 4 blocks), if any. */
-    static Optional<String> describeAt(RoadNetworkSnapshot snapshot, double px, double py, double pz) {
-        RoadNode nearest = null;
-        double best = 3.0;
-        for (RoadNode node : snapshot.nodes()) {
-            double d = node.distanceTo(px, py - 1, pz);
-            if (d < best) {
-                best = d;
-                nearest = node;
+    /**
+     * Package-private for tests: what the action bar names (smoke test finding G - it used to test one
+     * point exactly {@code LOOK_DISTANCE} blocks along the view, so nodes nearer or farther, or seen
+     * from above, were never named). In order: the node whose pillar passes closest to the view ray
+     * (within {@link #RAY_TOLERANCE}, up to {@code maxDistance} ahead; nearer wins a tie); else the
+     * first edge the ray passes over; else the node the {@code here} commands act on (nearest the
+     * feet within {@link RoadAdminCommand#HERE_DISTANCE}), marked "(here)".
+     *
+     * @param eye  eye position
+     * @param dir  view direction (any length)
+     * @param feet feet position
+     */
+    static Optional<String> describeLookedAt(RoadNetworkSnapshot snapshot, double[] eye, double[] dir, double[] feet,
+                                            double maxDistance) {
+        double norm = Math.sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+        if (norm > 0) {
+            double[] d = {dir[0] / norm, dir[1] / norm, dir[2] / norm};
+            RoadNode best = null;
+            double bestOff = RAY_TOLERANCE;
+            double bestAlong = Double.MAX_VALUE;
+            for (RoadNode node : snapshot.nodes()) {
+                for (double lift : PILLAR_SAMPLES) {
+                    double[] q = {node.x() + 0.5, node.y() + lift, node.z() + 0.5};
+                    double along = (q[0] - eye[0]) * d[0] + (q[1] - eye[1]) * d[1] + (q[2] - eye[2]) * d[2];
+                    if (along < 0 || along > maxDistance) {
+                        continue;
+                    }
+                    double ox = q[0] - (eye[0] + d[0] * along);
+                    double oy = q[1] - (eye[1] + d[1] * along);
+                    double oz = q[2] - (eye[2] + d[2] * along);
+                    double off = Math.sqrt(ox * ox + oy * oy + oz * oz);
+                    if (off < bestOff - 1e-9 || (Math.abs(off - bestOff) <= 1e-9 && along < bestAlong)) {
+                        bestOff = off;
+                        bestAlong = along;
+                        best = node;
+                    }
+                }
+            }
+            if (best != null) {
+                return Optional.of(nodeLabel(best));
+            }
+            for (double along = 1; along <= maxDistance; along += RAY_STEP) {
+                double x = eye[0] + d[0] * along - 0.5;
+                double y = eye[1] + d[1] * along - PARTICLE_LIFT;
+                double z = eye[2] + d[2] * along - 0.5;
+                Optional<SnapPoint> snap = Snapper.snap(snapshot, x, y, z, RAY_TOLERANCE, 1.0);
+                if (snap.isPresent()) {
+                    return Optional.of(edgeLabel(snapshot, snapshot.requireEdge(snap.get().edgeId())));
+                }
             }
         }
-        if (nearest != null) {
-            return Optional.of("Node #" + nearest.id() + " " + nearest.kind().apiName().toLowerCase()
-                + nearest.nameOptional().map(n -> " \"" + n + "\"").orElse("")
-                + (nearest.locked() ? " (locked)" : ""));
+        RoadNode here = null;
+        double hereDistance = RoadAdminCommand.HERE_DISTANCE;
+        for (RoadNode node : snapshot.nodes()) {
+            double distance = node.distanceTo(feet[0] - 0.5, feet[1] - 1, feet[2] - 0.5);
+            if (distance < hereDistance) {
+                hereDistance = distance;
+                here = node;
+            }
         }
-        Optional<SnapPoint> snap = Snapper.snap(snapshot, px, py - 1, pz, 4.0, 2.0);
-        if (snap.isEmpty()) {
-            return Optional.empty();
-        }
-        RoadEdge edge = snapshot.requireEdge(snap.get().edgeId());
+        return here == null ? Optional.empty() : Optional.of(nodeLabel(here) + " (here)");
+    }
+
+    static String nodeLabel(RoadNode node) {
+        return "Node #" + node.id() + " " + node.kind().apiName().toLowerCase()
+            + node.nameOptional().map(n -> " \"" + n + "\"").orElse("")
+            + (node.locked() ? " (locked)" : "");
+    }
+
+    static String edgeLabel(RoadNetworkSnapshot snapshot, RoadEdge edge) {
         StringBuilder text = new StringBuilder("Edge #").append(edge.id());
         snapshot.streetOf(edge).ifPresentOrElse(s -> text.append(" ").append(s), () -> text.append(" (unlabelled)"));
         snapshot.roadClass(edge).ifPresent(c -> text.append(" · ").append(c.apiName()));
         text.append(" · ").append(RoadMessages.distance(edge.length()));
-        OverlayColors.status(edge).ifPresent(s -> text.append(" · ").append(s));
+        OverlayColors.status(edge).ifPresent(st -> text.append(" · ").append(st));
         if (!edge.gateDoorIds().isEmpty()) {
             text.append(" · gate ").append(edge.gateDoorIds());
         }
-        return Optional.of(text.toString());
+        return text.toString();
     }
 }
