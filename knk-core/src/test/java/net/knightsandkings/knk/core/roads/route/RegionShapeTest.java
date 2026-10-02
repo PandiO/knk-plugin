@@ -29,6 +29,16 @@ class RegionShapeTest {
     }
 
     @Test
+    void aPlayerCountsByTheBlockTheirFeetAreIn() {
+        assertTrue(cuboid.containsFeet(120.7, 64, 200), "block 120 is the box's last column");
+        assertFalse(cuboid.contains(120.7, 64, 200), "geometrically past the edge");
+        assertTrue(cuboid.containsFeet(100.5, 70.5, 200.5), "feet on a slab in the band's top block");
+        assertFalse(cuboid.containsFeet(121.0, 64, 200));
+        assertFalse(cuboid.containsFeet(100.5, 71, 200.5));
+        assertTrue(triangle.containsFeet(49.9, 65, 50.3), "block (49, 50) touches the hypotenuse");
+    }
+
+    @Test
     void polygonUsesPolygon2D() {
         assertTrue(triangle.containsColumn(10, 10));
         assertTrue(triangle.containsColumn(50, 50), "on the hypotenuse counts as inside");

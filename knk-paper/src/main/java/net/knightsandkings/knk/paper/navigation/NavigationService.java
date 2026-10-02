@@ -71,7 +71,9 @@ import net.kyori.adventure.text.Component;
  *
  * <p><b>Direct mode</b> (DESIGN §6.2): a target within {@code max-snap-distance} of the player
  * gets a straight trail and no road; a routed session whose road ends short of the real target
- * switches to it on arrival at the road's end (the last off-road leg).
+ * switches to it on arrival at the road's end (the last off-road leg). A region destination
+ * prefers the road ({@link #regionGoals}). Direct mode has its own periodic re-check
+ * ({@link #recheckDirect}).
  *
  * <p>All state lives on the main thread; the routing thread only ever sees an immutable snapshot,
  * a policy built on the main thread and the request, and posts its result back.
@@ -113,6 +115,11 @@ public final class NavigationService implements SiegeMatchObserver {
     public static final double MANEUVER_ANNOUNCE_DISTANCE = 20;
     /** A teleport farther than this ends the session (DESIGN §6.4). */
     public static final double TELEPORT_END_DISTANCE = 16;
+    /**
+     * A region at most this far away is walked to straight (direct mode) even when a road is nearer:
+     * a few steps don't justify a detour to where the road enters it (fix plan 5.5 item 2).
+     */
+    static final double REGION_DIRECT_DISTANCE = 8;
     /** Every street edge is sampled this often to find its point nearest the player. */
     static final double STREET_SAMPLE_SPACING = 2;
     /** Arrival chime (DESIGN §6.4), as an Adventure sound so no Bukkit registry is touched. */
@@ -139,6 +146,9 @@ public final class NavigationService implements SiegeMatchObserver {
         RegionShape region;
         boolean direct;
         double directTotal;
+        /** Direct mode: the closest the player has come to the target since it was (re)drawn. */
+        double directBest;
+        long lastDirectRecalcTick = Long.MIN_VALUE;
         int generation;
         int announcedManeuvers;
         boolean hintShown;
@@ -348,37 +358,19 @@ public final class NavigationService implements SiegeMatchObserver {
                     return Goals.refused(NavigationMessages.noLocation(destination.name()));
                 }
                 RegionShape region = shape.get();
-                if (region.containsFloor(px, pFloorY, pz)) {
+                // First, before any goal or mode decision (fix plan 5.5 item 4), with WorldGuard's answer.
+                if (insideRegion(destination, region, feet)) {
                     return Goals.already();
                 }
-                if (region.distanceFromFloor(px, pFloorY, pz) <= maxSnap) {
-                    return new Goals(List.of(), region.closestPointFromFloor(px, pFloorY, pz), region, true, null, false);
-                }
-                List<SnapPoint> goals = RegionClosestPoint.goals(region, snapshot);
-                if (goals.isEmpty()) {
-                    return Goals.refused(NavigationMessages.destinationTooFar(destination.name()));
-                }
-                return new Goals(goals, null, region, false, null, false);
+                return regionGoals(destination, region, snapshot, snapper, px, pFloorY, pz);
             }
             case STREET -> {
-                List<SnapPoint> goals = new ArrayList<>();
-                SnapPoint nearest = null;
-                double nearestDistance = Double.POSITIVE_INFINITY;
-                for (RoadEdge edge : snapshot.edges()) {
-                    if (edge.streetId().isEmpty() || edge.streetId().getAsInt() != destination.streetId()) {
-                        continue;
-                    }
-                    SnapPoint onEdge = nearestOnEdge(snapshot, edge, px, pFloorY, pz);
-                    goals.add(onEdge);
-                    double d = distance(px, pFloorY, pz, onEdge.point());
-                    if (d < nearestDistance) {
-                        nearestDistance = d;
-                        nearest = onEdge;
-                    }
-                }
+                List<SnapPoint> goals = streetPoints(snapshot, destination.streetId(), px, pFloorY, pz);
+                SnapPoint nearest = nearest(goals, px, pFloorY, pz);
                 if (nearest == null) {
                     return Goals.refused(NavigationMessages.noLocation(destination.name()));
                 }
+                double nearestDistance = distance(px, pFloorY, pz, nearest.point());
                 if (nearestDistance <= sessionParameters.arriveDistance()) {
                     return Goals.already();
                 }
@@ -389,6 +381,79 @@ public final class NavigationService implements SiegeMatchObserver {
             }
             default -> throw new IllegalStateException("unhandled " + destination.kind());
         }
+    }
+
+    /**
+     * A region is reached along the roads, like a Location (fix plan 5.5 item 2, DESIGN §6.3): the
+     * goals are where a road enters the region - multi-goal A* picks the one nearest <i>by road</i>
+     * - or, when no road enters it, the road's nearest approach followed by a short straight last
+     * leg (at most max-snap). A straight line to the region's edge (direct mode) only when no road
+     * helps: the region is within {@link #REGION_DIRECT_DISTANCE} blocks, no nearer than the
+     * nearest road, or no road comes within max-snap of it while the region does.
+     */
+    Goals regionGoals(Destination destination, RegionShape region, RoadNetworkSnapshot snapshot, Snapper snapper,
+                      double px, double pFloorY, double pz) {
+        double maxSnap = routerParameters.maxSnapDistance();
+        List<SnapPoint> goals = RegionClosestPoint.crossings(region, snapshot);
+        double[] lastLeg = null;
+        if (goals.isEmpty()) {
+            Optional<SnapPoint> approach = RegionClosestPoint.closest(region, snapshot);
+            if (approach.isPresent()) {
+                double[] p = approach.get().point();
+                if (region.distanceFromFloor(p[0], p[1], p[2]) <= maxSnap) {
+                    goals = List.of(approach.get());
+                    lastLeg = region.closestPointFromFloor(p[0], p[1], p[2]);
+                }
+            }
+        }
+        double toRegion = region.distanceFromFloor(px, pFloorY, pz);
+        Optional<SnapPoint> start = snapper.snapFloor(px, pFloorY, pz);
+        boolean roadHelps = !goals.isEmpty() && start.isPresent()
+            && toRegion > REGION_DIRECT_DISTANCE && toRegion > start.get().distance();
+        if (roadHelps) {
+            return new Goals(goals, lastLeg, region, false, null, false);
+        }
+        if (toRegion <= maxSnap) {
+            return new Goals(List.of(), region.closestPointFromFloor(px, pFloorY, pz), region, true, null, false);
+        }
+        if (goals.isEmpty()) {
+            return Goals.refused(NavigationMessages.destinationTooFar(destination.name()));
+        }
+        return new Goals(goals, lastLeg, region, false, null, false); // computeRoute: "too far from a road"
+    }
+
+    /** Whether the player's feet are inside the destination region (WorldGuard's answer on the server). */
+    private boolean insideRegion(Destination destination, RegionShape region, Location feet) {
+        return deps.regionShapes().containsFeet(destination.world(), destination.regionId(), region,
+            feet.getX(), feet.getY(), feet.getZ());
+    }
+
+    private boolean insideRegion(Active a, Location feet) {
+        return a.region != null && a.destination.kind() == Destination.Kind.REGION && insideRegion(a.destination, a.region, feet);
+    }
+
+    /** For every edge labelled {@code streetId}, its point nearest the floor position. */
+    static List<SnapPoint> streetPoints(RoadNetworkSnapshot snapshot, int streetId, double x, double floorY, double z) {
+        List<SnapPoint> points = new ArrayList<>();
+        for (RoadEdge edge : snapshot.edges()) {
+            if (edge.streetId().isPresent() && edge.streetId().getAsInt() == streetId) {
+                points.add(nearestOnEdge(snapshot, edge, x, floorY, z));
+            }
+        }
+        return points;
+    }
+
+    private static SnapPoint nearest(List<SnapPoint> points, double x, double floorY, double z) {
+        SnapPoint nearest = null;
+        double nearestDistance = Double.POSITIVE_INFINITY;
+        for (SnapPoint p : points) {
+            double d = distance(x, floorY, z, p.point());
+            if (d < nearestDistance) {
+                nearestDistance = d;
+                nearest = p;
+            }
+        }
+        return nearest;
     }
 
     /** The point of {@code edge} nearest the player, sampled every {@link #STREET_SAMPLE_SPACING} blocks. */
@@ -417,7 +482,9 @@ public final class NavigationService implements SiegeMatchObserver {
     private void startDirect(Active a) {
         a.direct = true;
         Location feet = a.player.getLocation();
-        a.directTotal = Math.max(1, distance(feet.getX(), feet.getY() - 1, feet.getZ(), a.target));
+        double d = distance(feet.getX(), feet.getY() - 1, feet.getZ(), a.target);
+        a.directTotal = Math.max(1, d);
+        a.directBest = d;
         a.player.sendMessage(NavigationMessages.startedDirect(a.destination.name(), a.directTotal));
         deps.trail().drawDirect(a.player, a.target);
         deps.hud().update(a.player, a.destination.name(), a.directTotal, 0);
@@ -426,10 +493,11 @@ public final class NavigationService implements SiegeMatchObserver {
     private void tickDirect(Active a, long now) {
         Location feet = a.player.getLocation();
         double d = distance(feet.getX(), feet.getY() - 1, feet.getZ(), a.target);
-        if (d <= sessionParameters.arriveDistance() || (a.region != null && a.region.containsFloor(feet.getX(), feet.getY() - 1, feet.getZ()))) {
+        if (d <= sessionParameters.arriveDistance() || insideRegion(a, feet)) {
             arrive(a);
             return;
         }
+        a.directBest = Math.min(a.directBest, d);
         if ((now - a.startedTick) % deps.trail().periodTicks() == 0) {
             deps.trail().drawDirect(a.player, a.target);
         }
@@ -437,6 +505,49 @@ public final class NavigationService implements SiegeMatchObserver {
             deps.hud().update(a.player, a.destination.name(), d, 1 - Math.min(1, d / a.directTotal));
             deps.hud().arrowTowards(a.player, a.target[0], a.target[2]);
         }
+    }
+
+    /**
+     * Direct mode's own periodic re-check (fix plan 5.5 item 3), on the routed re-check's cadence
+     * ({@link #RECHECK_TICKS}; also for the last off-road leg after a road's end). A player who
+     * walks away - more than {@code reroute-distance} farther from the target than their closest
+     * approach - gets "heading away - recalculating", a target re-derived from where they stand (a
+     * region's closest point, a street's nearest point; a Location stays put), a redrawn trail and a
+     * reset HUD; at most once per {@code reroute-min-interval}. Direct mode is not promoted to a
+     * routed session here (plan decision): {@code /navigate} again does that.
+     */
+    void recheckDirect(Active a, long now) {
+        Location feet = a.player.getLocation();
+        double x = feet.getX(), floorY = feet.getY() - 1, z = feet.getZ();
+        double d = distance(x, floorY, z, a.target);
+        if (d <= a.directBest + sessionParameters.rerouteDistance()) {
+            return;
+        }
+        if (a.lastDirectRecalcTick != Long.MIN_VALUE && now - a.lastDirectRecalcTick < sessionParameters.rerouteMinIntervalTicks()) {
+            return;
+        }
+        a.lastDirectRecalcTick = now;
+        a.target = directTarget(a, x, floorY, z);
+        double fresh = distance(x, floorY, z, a.target);
+        a.directTotal = Math.max(1, fresh);
+        a.directBest = fresh;
+        a.player.sendMessage(NavigationMessages.directRecalculating(a.destination.name()));
+        deps.events().accept(new NavigationRerouteEvent(a.player, a.destination.name(), RouteReason.OFF_ROUTE, "direct"));
+        deps.trail().drawDirect(a.player, a.target);
+        deps.hud().update(a.player, a.destination.name(), fresh, 0);
+        deps.hud().arrowTowards(a.player, a.target[0], a.target[2]);
+    }
+
+    /** The direct-mode target for a player at this floor position. */
+    private double[] directTarget(Active a, double x, double floorY, double z) {
+        return switch (a.destination.kind()) {
+            case REGION -> a.region == null ? a.target : a.region.closestPointFromFloor(x, floorY, z);
+            case STREET -> {
+                SnapPoint nearest = nearest(streetPoints(a.snapshot, a.destination.streetId(), x, floorY, z), x, floorY, z);
+                yield nearest == null ? a.target : nearest.point();
+            }
+            default -> a.target;
+        };
     }
 
     // ==================== ticking ====================
@@ -479,11 +590,13 @@ public final class NavigationService implements SiegeMatchObserver {
                 end(a, EndReason.TIMEOUT);
                 return;
             }
-            if (!a.direct) {
+            if (a.direct) {
+                recheckDirect(a, now);
+            } else {
                 recheck(a, now);
-                if (active.get(a.player.getUniqueId()) != a) {
-                    return;
-                }
+            }
+            if (active.get(a.player.getUniqueId()) != a) {
+                return;
             }
         }
         if (a.direct) {
@@ -495,7 +608,7 @@ public final class NavigationService implements SiegeMatchObserver {
             return;
         }
         Location feet = a.player.getLocation();
-        if (a.region != null && a.region.containsFloor(feet.getX(), feet.getY() - 1, feet.getZ())) {
+        if (insideRegion(a, feet)) {
             arrive(a);
             return;
         }
@@ -750,8 +863,9 @@ public final class NavigationService implements SiegeMatchObserver {
             }
             a.snapshot = snapshot;
             a.goals = goals.goals();
+            a.target = goals.target();
+            a.region = goals.region();
             if (goals.direct()) {
-                a.target = goals.target();
                 a.session = null;
                 startDirect(a);
                 continue;
@@ -833,8 +947,9 @@ public final class NavigationService implements SiegeMatchObserver {
             return;
         }
         if (goals.direct()) {
-            out.accept(NavigationMessages.whyResult("Direct mode: the target is within "
-                + (int) routerParameters.maxSnapDistance() + " blocks, no road is used.", true));
+            out.accept(NavigationMessages.whyResult(destination.kind() == Destination.Kind.REGION
+                ? "Direct mode: the region's edge is a few steps away or nearer than any road, no road is used."
+                : "Direct mode: the target is within " + (int) routerParameters.maxSnapDistance() + " blocks, no road is used.", true));
             return;
         }
         Location feet = as.getLocation();

@@ -84,6 +84,16 @@ public final class RegionShape {
         return y >= minY && y <= maxY && containsColumn(x, z);
     }
 
+    /**
+     * Whether a <b>player</b> with feet at {@code (x, y, z)} is inside, by the block the feet are in
+     * - WorldGuard's rule: a player at {@code x = 120.7} stands in block 120, inside a region whose
+     * max x is 120, and feet on a slab at {@code y = 70.5} stand in block 70. {@link #contains}
+     * stays geometric for network points (the road/region crossings are bisected on it).
+     */
+    public boolean containsFeet(double x, double y, double z) {
+        return contains(Math.floor(x), Math.floor(y), Math.floor(z));
+    }
+
     /** Whether a network point (floor block, feet at {@code floorY + 1}) is inside. */
     public boolean containsFloor(double x, double floorY, double z) {
         return contains(x, floorY + 1, z);

@@ -201,6 +201,11 @@ public final class NavigationMessages {
         return info("You left the road - recalculating.");
     }
 
+    /** Direct mode's drift signal (no road to leave): "You're heading away from the Well - recalculating." */
+    public static Component directRecalculating(String name) {
+        return info("You're heading away from " + name + " - recalculating.");
+    }
+
     /** "The North Gate opened - shorter route found." */
     public static Component shorterRoute() {
         return good("A shorter route opened - following it now.");

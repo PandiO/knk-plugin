@@ -57,6 +57,9 @@ import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
  */
 class NavigationServiceTest {
 
+    /** A yard 20 blocks off Main Street that no road enters (its nearest road point is (20, 64, 0)). */
+    private static final String MILL_YARD_REGION = "mill_yard";
+
     private final NavigationTestNetwork network = new NavigationTestNetwork();
     private final AtomicLong tick = new AtomicLong(100);
     private final AtomicBoolean inSiege = new AtomicBoolean();
@@ -92,8 +95,11 @@ class NavigationServiceTest {
             return CompositeAccessPolicy.of(new StaticFlagsAvailability(), new GateAvailability(gates, doorId -> false),
                 new DomainAvailability(new DomainAccessEvaluator(), lookup, Set.of(), false));
         };
-        RegionShapes shapes = (w, id) -> NavigationTestNetwork.CASTLE_REGION.equals(id)
-            ? Optional.of(RegionShape.cuboid(190, 60, 190, 210, 80, 210)) : Optional.empty();
+        RegionShapes shapes = (w, id) -> switch (id) {
+            case NavigationTestNetwork.CASTLE_REGION -> Optional.of(RegionShape.cuboid(190, 60, 190, 210, 80, 210));
+            case MILL_YARD_REGION -> Optional.of(RegionShape.cuboid(20, 60, 20, 40, 80, 40));
+            default -> Optional.empty();
+        };
         NavigationEligibility eligibility = new NavigationEligibility(uuid -> false, uuid -> false, uuid -> inSiege.get());
         service = new NavigationService(new NavigationService.Deps(null, NavigationConfig.defaults(),
             w -> network.snapshot, policies, shapes, eligibility, hud, trail, Runnable::run, Runnable::run, tick::get,
@@ -291,6 +297,150 @@ class NavigationServiceTest {
         double[] end = session.route().orElseThrow().end().point();
         assertEquals(200, end[0], 1e-6);
         assertTrue(end[2] >= 189 && end[2] <= 191, "the route ends where the castle edge crosses the region border, got z=" + end[2]);
+    }
+
+    private Destination castleRegion() {
+        return Destination.region("Kardenna Castle", NavigationTestNetwork.WORLD, NavigationTestNetwork.CASTLE_REGION);
+    }
+
+    @Test
+    void aRegionWithinDirectRangeStillFollowsTheRoadIntoIt() {
+        // 40 blocks from the castle region's edge (direct range), 15 from the castle road
+        moveTo(215.5, 65, 150.5);
+
+        service.navigate(player, castleRegion());
+
+        assertFalse(service.isDirect(playerId), "fix plan 5.5 item 2: the road, not a straight line through terrain");
+        double[] end = service.sessionOf(playerId).orElseThrow().route().orElseThrow().end().point();
+        assertEquals(200, end[0], 1e-6);
+        assertTrue(end[2] >= 189 && end[2] <= 191, "ends where the road enters the region, got z=" + end[2]);
+    }
+
+    @Test
+    void aRegionNearerThanAnyRoadIsWalkedToStraight() {
+        moveTo(180.5, 65, 195.5); // 10 blocks west of the castle region, 20 from the castle road
+
+        service.navigate(player, castleRegion());
+
+        assertTrue(service.isDirect(playerId));
+        verify(trail).drawDirect(any(), any());
+
+        moveTo(190.5, 65, 195.5);
+        ticks(1);
+
+        assertFalse(service.isNavigating(playerId));
+        assertTrue(messages().stream().anyMatch(m -> m.contains("You have arrived at Kardenna Castle")));
+    }
+
+    @Test
+    void aRegionNoRoadEntersIsReachedByRoadThenAShortLastLeg() {
+        Destination yard = Destination.region("Mill Yard", NavigationTestNetwork.WORLD, MILL_YARD_REGION);
+
+        service.navigate(player, yard); // 28 blocks from the yard: direct range, but the road gets closer
+
+        assertFalse(service.isDirect(playerId));
+        double[] end = service.sessionOf(playerId).orElseThrow().route().orElseThrow().end().point();
+        assertEquals(20, end[0], 1e-6, "the road's nearest approach to the yard");
+        assertEquals(0, end[2], 1e-6);
+
+        moveTo(20.5, 65, 0.5);
+        ticks(1);
+        assertTrue(service.isDirect(playerId), "the last off-road leg");
+
+        moveTo(25.5, 65, 25.5);
+        ticks(1);
+        assertFalse(service.isNavigating(playerId));
+        assertTrue(messages().stream().anyMatch(m -> m.contains("You have arrived at Mill Yard")));
+    }
+
+    @Test
+    void aPlayerInTheRegionsLastBlockColumnIsAlreadyThere() {
+        moveTo(210.7, 65, 200.5); // block 210 is inside the cuboid 190..210, though 210.7 > 210
+
+        service.navigate(player, castleRegion());
+
+        assertFalse(service.isNavigating(playerId));
+        assertTrue(messages().get(0).contains("already in Kardenna Castle"));
+    }
+
+    @Test
+    void theAlreadyThereCheckUsesTheServersRegionContainment() {
+        RegionShapes worldGuardSaysInside = new RegionShapes() {
+            @Override
+            public Optional<RegionShape> shape(String w, String id) {
+                return Optional.of(RegionShape.cuboid(190, 60, 190, 210, 80, 210));
+            }
+
+            @Override
+            public boolean containsFeet(String w, String id, RegionShape shape, double x, double y, double z) {
+                return true; // e.g. WorldGuard's polygon test on a region the shape copy disagrees with
+            }
+        };
+        NavigationService withWorldGuard = new NavigationService(new NavigationService.Deps(null, NavigationConfig.defaults(),
+            w -> network.snapshot, (p, s) -> net.knightsandkings.knk.core.roads.route.AccessPolicy.ALL_OPEN,
+            worldGuardSaysInside, new NavigationEligibility(u -> false, u -> false, u -> false), hud, trail,
+            Runnable::run, Runnable::run, tick::get, events::add, null));
+
+        withWorldGuard.navigate(player, castleRegion());
+
+        assertFalse(withWorldGuard.isNavigating(playerId));
+        assertTrue(messages().get(0).contains("already in Kardenna Castle"));
+    }
+
+    @Test
+    void directModeRecalculatesWhenThePlayerWalksAway() {
+        service.navigate(player, Destination.point("Well", NavigationTestNetwork.WORLD, 20.5, 65, 0.5));
+        assertTrue(service.isDirect(playerId));
+        ticks(NavigationService.RECHECK_TICKS);
+        assertTrue(messages().stream().noneMatch(m -> m.contains("heading away")), "standing still is no drift");
+
+        moveTo(-20.5, 65, 0.5); // 41 blocks away, 21 farther than the start
+        ticks(NavigationService.RECHECK_TICKS);
+
+        assertTrue(service.isNavigating(playerId));
+        assertTrue(service.isDirect(playerId));
+        assertTrue(messages().stream().anyMatch(m -> m.contains("You're heading away from Well - recalculating.")));
+        NavigationRerouteEvent reroute = (NavigationRerouteEvent) events.stream()
+            .filter(e -> e instanceof NavigationRerouteEvent).findFirst().orElseThrow();
+        assertEquals(RouteReason.OFF_ROUTE, reroute.getReason());
+        verify(trail, atLeastOnce()).drawDirect(any(), any());
+
+        long recalculations = messages().stream().filter(m -> m.contains("heading away")).count();
+        ticks(NavigationService.RECHECK_TICKS);
+        assertEquals(recalculations, messages().stream().filter(m -> m.contains("heading away")).count(),
+            "no new drift while the player stays where the target was re-derived from");
+
+        moveTo(19.5, 65, 0.5);
+        ticks(1);
+        assertFalse(service.isNavigating(playerId), "still arrives normally");
+    }
+
+    @Test
+    void directModeToARegionReAimsAtItsClosestPointAfterDrifting() {
+        moveTo(180.5, 65, 195.5);
+        service.navigate(player, castleRegion());
+        assertTrue(service.isDirect(playerId));
+
+        moveTo(170.5, 65, 230.5); // walked off to the north-west, 20+ blocks from the castle's corner
+        ticks(NavigationService.RECHECK_TICKS);
+
+        assertTrue(messages().stream().anyMatch(m -> m.contains("heading away from Kardenna Castle")));
+        ArgumentCaptor<double[]> target = ArgumentCaptor.forClass(double[].class);
+        verify(trail, atLeastOnce()).drawDirect(any(), target.capture());
+        double[] last = target.getValue();
+        assertEquals(190, last[0], 1e-6, "the region's closest point to where the player is now");
+        assertEquals(210, last[2], 1e-6);
+    }
+
+    @Test
+    void aRoutedSessionStillSaysYouLeftTheRoad() {
+        service.navigate(player, cinixKeep());
+
+        moveTo(50.5, 65, 20.5); // 20 blocks off Main Street
+        ticks(net.knightsandkings.knk.core.navigation.SessionParameters.DEFAULT_REROUTE_AFTER_TICKS + 5);
+
+        assertTrue(messages().stream().anyMatch(m -> m.contains("You left the road - recalculating.")));
+        assertTrue(service.isNavigating(playerId));
     }
 
     @Test
