@@ -11,6 +11,10 @@ import static org.mockito.Mockito.when;
 import java.util.List;
 import java.util.Optional;
 
+import net.knightsandkings.knk.core.domain.roads.RoadNode;
+import net.knightsandkings.knk.core.domain.roads.RoadNodeKind;
+import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
+
 import net.knightsandkings.knk.core.domain.roads.RoadClass;
 import net.knightsandkings.knk.core.domain.roads.RoadProfile;
 import net.knightsandkings.knk.core.ports.api.RoadNetworkCommandApi;
@@ -111,6 +115,36 @@ class RoadAdminCommandTest {
         assertEquals(List.of("close", "cost"), command.complete(player, new String[] {"edge", "set", "12", "c"}));
         assertEquals(List.of("Accent"), command.complete(player, new String[] {"profile", "role", "1", "STONE", "a"}));
         assertEquals(List.of(), command.complete(player, new String[] {"reload", "x"}));
+    }
+
+    @Test
+    void nodePruneAndUnpruneTakeAnIdOrTheRightNodeHere() {
+        when(player.hasPermission(RoadAdminCommand.NODE)).thenReturn(true);
+        org.bukkit.World world = mock(org.bukkit.World.class);
+        when(world.getName()).thenReturn("world");
+        when(player.getWorld()).thenReturn(world);
+        when(player.getLocation()).thenReturn(new org.bukkit.Location(world, 10.5, 65, 10.5));
+        // A junction under the player, a dead end 3 blocks away, a tombstone 4 blocks away.
+        RoadNetworkSnapshot snapshot = RoadNetworkSnapshot.builder("world")
+            .addNode(new RoadNode(1, 10, 64, 10, RoadNodeKind.JUNCTION, null, 1))
+            .addNode(new RoadNode(2, 13, 64, 10, RoadNodeKind.ENDPOINT, null, 1))
+            .addNode(new RoadNode(3, 10, 64, 14, RoadNodeKind.PRUNED, null, 3, true))
+            .build();
+        when(cache.snapshot("world")).thenReturn(snapshot);
+        when(commandApi.pruneNode(org.mockito.ArgumentMatchers.anyInt()))
+            .thenReturn(java.util.concurrent.CompletableFuture.completedFuture(new RoadNode(2, 13, 64, 10, RoadNodeKind.PRUNED, null, 2, true)));
+        when(commandApi.unpruneNode(org.mockito.ArgumentMatchers.anyInt()))
+            .thenReturn(java.util.concurrent.CompletableFuture.completedFuture(true));
+
+        command.execute(player, new String[] {"node", "prune"});
+        verify(commandApi).pruneNode(2);
+        command.execute(player, new String[] {"node", "prune", "77"});
+        verify(commandApi).pruneNode(77);
+        command.execute(player, new String[] {"node", "unprune"});
+        verify(commandApi).unpruneNode(3);
+
+        assertEquals(Optional.of(1), RoadAdminCommand.nodeHere(snapshot, player).map(RoadNode::id), "the other commands never pick a tombstone");
+        assertEquals(List.of("prune"), command.complete(player, new String[] {"node", "pr"}));
     }
 
     @Test

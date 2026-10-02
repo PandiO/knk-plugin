@@ -41,6 +41,9 @@ import java.util.Set;
  *       {@code max(minSpurLength, the chain's own median width)} is removed, shortest first; a junction
  *       left with two chains dissolves into one chain, one left with a single chain becomes an
  *       Endpoint. Isolated Endpoint–Endpoint chains shorter than {@code minSpurLength} go too.</li>
+ *   <li><b>Pruned arms</b>: for each admin tombstone (a Pruned node of the previous build), the
+ *       nearest dead end within {@code lockedNodeReach} is removed like a spur - its chain goes, and a
+ *       junction left with two chains dissolves.</li>
  *   <li><b>Loops and parallel chains</b> get a Junction inserted midway so every edge has a distinct
  *       node pair (the API's unique-pair rule).</li>
  *   <li><b>Tile border</b> (D7): chains are cut where they leave the tile; the last span inside is a
@@ -57,6 +60,10 @@ public final class SkeletonGraph {
 
     /** An admin Anchor node of this tile (kind Anchor, Manual + Locked on the API side). */
     public record Anchor(int id, int x, int y, int z) {
+    }
+
+    /** Where an admin pruned a dead end (a Pruned tombstone of the previous build). */
+    public record Pruned(int id, int x, int y, int z) {
     }
 
     /**
@@ -146,7 +153,13 @@ public final class SkeletonGraph {
 
     /** Extract nodes and chains; call once. */
     public Result extract(List<Anchor> anchors) {
+        return extract(anchors, List.of());
+    }
+
+    /** Extract nodes and chains, leaving out the dead ends an admin pruned; call once. */
+    public Result extract(List<Anchor> anchors, List<Pruned> pruned) {
         Objects.requireNonNull(anchors, "anchors");
+        Objects.requireNonNull(pruned, "pruned");
         int n = mask.size();
         nodeOf = new int[n];
         Arrays.fill(nodeOf, -1);
@@ -167,6 +180,7 @@ public final class SkeletonGraph {
         traceChains(degree);
         extendEndpoints();
         pruneSpurs();
+        removePrunedArms(pruned);
         splitLoopsAndParallels();
         cutAtTileBorder();
         return emit();
@@ -739,6 +753,56 @@ public final class SkeletonGraph {
             }
             removeChain(spur);
         }
+    }
+
+    /**
+     * Smoke test 2026-10-02: an admin pruned a dead end ({@code /knk road node prune}). The nearest
+     * Endpoint with one chain within {@code lockedNodeReach} of each tombstone loses that chain, the
+     * way a spur does; nearest pairs first, each endpoint and each tombstone used once.
+     */
+    private void removePrunedArms(List<Pruned> pruned) {
+        if (pruned.isEmpty()) {
+            return;
+        }
+        double reach = params.lockedNodeReach();
+        List<double[]> pairs = new ArrayList<>(); // {distance, tombstone index, node id}
+        for (int t = 0; t < pruned.size(); t++) {
+            Pruned p = pruned.get(t);
+            for (int id = 0; id < nodes.size(); id++) {
+                WorkNode node = nodes.get(id);
+                if (!node.alive || node.kind != RoadNodeKind.ENDPOINT) {
+                    continue;
+                }
+                double d = Math.sqrt(distanceSquared(node, p.x(), p.y(), p.z()));
+                if (d <= reach) {
+                    pairs.add(new double[] {d, t, id});
+                }
+            }
+        }
+        pairs.sort((a, b) -> a[0] != b[0] ? Double.compare(a[0], b[0])
+            : a[1] != b[1] ? Double.compare(a[1], b[1]) : Double.compare(a[2], b[2]));
+        boolean[] usedTombstone = new boolean[pruned.size()];
+        for (double[] pair : pairs) {
+            int t = (int) pair[1];
+            WorkNode node = nodes.get((int) pair[2]);
+            if (usedTombstone[t] || !node.alive || node.kind != RoadNodeKind.ENDPOINT || node.aliveChains(chains) != 1) {
+                continue;
+            }
+            for (int chainId : node.chainIds) {
+                if (chains.get(chainId).alive) {
+                    removeChain(chainId);
+                    break;
+                }
+            }
+            usedTombstone[t] = true;
+        }
+    }
+
+    private static double distanceSquared(WorkNode node, int x, int y, int z) {
+        double dx = node.x - x;
+        double dy = node.y - y;
+        double dz = node.z - z;
+        return dx * dx + dy * dy + dz * dz;
     }
 
     /** The length below which a chain is a spur, or -1 when the chain can never be one. */

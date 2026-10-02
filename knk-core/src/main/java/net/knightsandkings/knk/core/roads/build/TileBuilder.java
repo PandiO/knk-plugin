@@ -85,8 +85,14 @@ public final class TileBuilder {
 
         int[] dt = DistanceTransform.compute(mask);
         boolean[] skeleton = Thinning.thin(mask);
+        List<SkeletonGraph.Pruned> pruned = new ArrayList<>();
+        for (PreviousNode node : request.previousGraph().nodes()) {
+            if (node.kind() == RoadNodeKind.PRUNED) {
+                pruned.add(new SkeletonGraph.Pruned(node.id(), node.x(), node.y(), node.z()));
+            }
+        }
         SkeletonGraph.Result graph = new SkeletonGraph(mask, skeleton, dt, params, request.profiles(), request.tile())
-            .extract(request.anchors());
+            .extract(request.anchors(), pruned);
         warnings.addAll(graph.warnings());
 
         // Stable ids and positions.

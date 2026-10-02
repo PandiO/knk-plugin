@@ -23,6 +23,7 @@ public final class OverlayColors {
     public static final int BOUNDARY = 0x8D6E63;
     public static final int ANCHOR = 0xFF4081;
     public static final int NAMED_NODE = 0x69F0AE;
+    public static final int PRUNED = 0x5D4037;
 
     /** Distinct, saturated street hues; a street keeps its colour across sessions (a stride over its id). */
     private static final int[] STREET_PALETTE = {
@@ -64,6 +65,7 @@ public final class OverlayColors {
             case ENDPOINT -> ENDPOINT;
             case BOUNDARY -> BOUNDARY;
             case ANCHOR -> ANCHOR;
+            case PRUNED -> PRUNED;
         };
     }
 

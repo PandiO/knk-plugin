@@ -72,6 +72,12 @@ public interface RoadNetworkCommandApi {
     /** {@code POST api/road-nodes/merge}: moves {@code mergeNodeId}'s edges onto {@code keepNodeId} and deletes it. */
     CompletableFuture<RoadNode> mergeNodes(int keepNodeId, int mergeNodeId);
 
+    /** {@code POST api/road-nodes/{id}/prune}: removes an endpoint's dead end and leaves a Pruned tombstone. */
+    CompletableFuture<RoadNode> pruneNode(int id);
+
+    /** {@code DELETE api/road-nodes/{id}/prune}: deletes a Pruned tombstone; true on 204, false on 404. */
+    CompletableFuture<Boolean> unpruneNode(int id);
+
     /** {@code POST api/road-edges} (201): an admin-walked Recorded edge (Phase 1 decision 8). */
     CompletableFuture<RoadEdge> recordEdge(RoadEdgeRecord edge);
 

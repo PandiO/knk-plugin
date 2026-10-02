@@ -83,6 +83,15 @@ class NodeMatcherTest {
     }
 
     @Test
+    void aPrunedTombstoneIsNeverMatched() {
+        PreviousNode tombstone = new PreviousNode(9, 0, 64, 0, RoadNodeKind.PRUNED, true);
+        assertArrayEquals(new int[] {NodeMatcher.UNMATCHED},
+            matcher.matchNodes(List.of(at(0, 64, 0)), new PreviousGraph(List.of(tombstone), List.of())), "not even on its own block");
+        assertEquals(RoadNodeKind.PRUNED, RoadNodeKind.fromApiName("Pruned"));
+        assertEquals("Pruned", RoadNodeKind.PRUNED.apiName());
+    }
+
+    @Test
     void anchorsMatchByIdAndAreNeverMatchedByPosition() {
         PreviousNode anchor = new PreviousNode(50, 5, 64, 5, RoadNodeKind.ANCHOR, true);
         PreviousGraph previous = new PreviousGraph(List.of(anchor, prev(2, 9, 64, 9)), List.of());

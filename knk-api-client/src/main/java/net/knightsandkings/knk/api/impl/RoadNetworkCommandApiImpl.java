@@ -243,6 +243,23 @@ public class RoadNetworkCommandApiImpl extends BaseApiImpl implements RoadNetwor
     }
 
     @Override
+    public CompletableFuture<RoadNode> pruneNode(int id) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + NODES_ENDPOINT + "/" + id + "/prune";
+            try {
+                return RoadMapper.mapNode(parse(postJson(url, "{}"), RoadNodeDto.class, url));
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to prune road node " + id, e);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<Boolean> unpruneNode(int id) {
+        return deleteOrNotFound(baseUrl + NODES_ENDPOINT + "/" + id + "/prune", () -> "pruned road node " + id);
+    }
+
+    @Override
     public CompletableFuture<RoadEdge> recordEdge(RoadEdgeRecord edge) {
         return CompletableFuture.supplyAsync(() -> {
             String url = baseUrl + EDGES_ENDPOINT;

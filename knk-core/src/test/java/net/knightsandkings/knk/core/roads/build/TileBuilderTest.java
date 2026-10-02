@@ -649,6 +649,42 @@ class TileBuilderTest {
         assertTrue(border.existingId().isEmpty(), d);
     }
 
+    /** A path along z = 20 (x 4..43) with a 20-block dead end south at x = 15 (end at z = 40). */
+    private static GridFixture pathWithSpur() {
+        GridFixture f = new GridFixture().layer(4, 64, 20, "G".repeat(40));
+        for (int z = 21; z <= 40; z++) f.block(15, 64, z, GridFixture.GRAVEL);
+        return f;
+    }
+
+    @Test
+    void aPrunedDeadEndIsLeftOutAndItsJunctionDissolves() {
+        GridFixture f = pathWithSpur();
+        TileBuildResult plain = builder.build(request(f, new Seed(4, 65, 20)), f);
+        assertEquals(1, plain.nodes(RoadNodeKind.JUNCTION).size(), describe(plain));
+        assertEquals(3, plain.edges().size(), describe(plain));
+
+        // The admin pruned the dead end's endpoint; the tombstone is a few blocks off the rebuilt end.
+        PreviousGraph previous = new PreviousGraph(List.of(new PreviousNode(300, 15, 64, 37, RoadNodeKind.PRUNED, true)), List.of());
+        TileRequest req = request(f, PARAMS, GridFixture.profiles(), List.of(), previous, new Seed(4, 65, 20));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        assertEquals(0, r.nodes(RoadNodeKind.JUNCTION).size(), "the junction is left with two arms and dissolves" + d);
+        assertEquals(2, r.nodes(RoadNodeKind.ENDPOINT).size(), d);
+        assertEquals(1, r.edges().size(), "one edge along the path" + d);
+        assertTrue(r.nodes().stream().noneMatch(n -> n.existingId().equals(OptionalInt.of(300))), "the tombstone is never emitted" + d);
+    }
+
+    @Test
+    void aTombstoneFartherThanTheReachChangesNothing() {
+        GridFixture f = pathWithSpur();
+        PreviousGraph previous = new PreviousGraph(List.of(new PreviousNode(300, 15, 64, 52, RoadNodeKind.PRUNED, true)), List.of());
+        TileBuildResult r = builder.build(request(f, PARAMS, GridFixture.profiles(), List.of(), previous, new Seed(4, 65, 20)), f);
+        assertEquals(1, r.nodes(RoadNodeKind.JUNCTION).size(), "12 blocks from the dead end, reach 8" + describe(r));
+        assertEquals(3, r.edges().size(), describe(r));
+    }
+
     @Test
     void anUnlockedNeighbourAndAFarJunctionAreNotMerged() {
         // Only unmatched nodes merge: a junction the admin left alone (#101, matched) stays, and so does
