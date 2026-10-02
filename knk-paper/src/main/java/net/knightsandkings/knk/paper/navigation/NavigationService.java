@@ -144,11 +144,8 @@ public final class NavigationService implements SiegeMatchObserver {
         /** The real target as a floor point (null for a region: the road's end is the arrival). */
         double[] target;
         RegionShape region;
-        boolean direct;
-        double directTotal;
-        /** Direct mode: the closest the player has come to the target since it was (re)drawn. */
-        double directBest;
-        long lastDirectRecalcTick = Long.MIN_VALUE;
+        /** Direct mode's leg (DESIGN §6.2, KNG-51 §7); null while the session follows the road. */
+        DirectLeg leg;
         int generation;
         int announcedManeuvers;
         boolean hintShown;
@@ -162,6 +159,29 @@ public final class NavigationService implements SiegeMatchObserver {
 
         Optional<Route> route() {
             return session == null ? Optional.empty() : session.route();
+        }
+
+        boolean direct() {
+            return leg != null;
+        }
+    }
+
+    /**
+     * Direct mode's state (KNG-51 {@code LAST_MILE_PATHFINDING.md} §7): the off-road leg to the
+     * target, for a nearby target and for the last leg after a road's end alike. Owned by
+     * {@link Active}; replaced, never reused, when direct mode starts again.
+     */
+    static final class DirectLeg {
+        /** The leg's target as a floor point (re-derived by {@link #recheckDirect} for regions and streets). */
+        double[] target;
+        /** Distance at the last (re)draw, for the HUD's progress. */
+        double total;
+        /** The closest the player has come to the target since it was (re)drawn. */
+        double best;
+        long lastRecalcTick = Long.MIN_VALUE;
+
+        DirectLeg(double[] target) {
+            this.target = target;
         }
     }
 
@@ -480,30 +500,32 @@ public final class NavigationService implements SiegeMatchObserver {
     // ==================== direct mode ====================
 
     private void startDirect(Active a) {
-        a.direct = true;
+        DirectLeg leg = new DirectLeg(a.target);
+        a.leg = leg;
         Location feet = a.player.getLocation();
-        double d = distance(feet.getX(), feet.getY() - 1, feet.getZ(), a.target);
-        a.directTotal = Math.max(1, d);
-        a.directBest = d;
-        a.player.sendMessage(NavigationMessages.startedDirect(a.destination.name(), a.directTotal));
-        deps.trail().drawDirect(a.player, a.target);
-        deps.hud().update(a.player, a.destination.name(), a.directTotal, 0);
+        double d = distance(feet.getX(), feet.getY() - 1, feet.getZ(), leg.target);
+        leg.total = Math.max(1, d);
+        leg.best = d;
+        a.player.sendMessage(NavigationMessages.startedDirect(a.destination.name(), leg.total));
+        deps.trail().drawDirect(a.player, leg.target);
+        deps.hud().update(a.player, a.destination.name(), leg.total, 0);
     }
 
     private void tickDirect(Active a, long now) {
+        DirectLeg leg = a.leg;
         Location feet = a.player.getLocation();
-        double d = distance(feet.getX(), feet.getY() - 1, feet.getZ(), a.target);
+        double d = distance(feet.getX(), feet.getY() - 1, feet.getZ(), leg.target);
         if (d <= sessionParameters.arriveDistance() || insideRegion(a, feet)) {
             arrive(a);
             return;
         }
-        a.directBest = Math.min(a.directBest, d);
+        leg.best = Math.min(leg.best, d);
         if ((now - a.startedTick) % deps.trail().periodTicks() == 0) {
-            deps.trail().drawDirect(a.player, a.target);
+            deps.trail().drawDirect(a.player, leg.target);
         }
         if ((now - a.startedTick) % HUD_TICKS == 0) {
-            deps.hud().update(a.player, a.destination.name(), d, 1 - Math.min(1, d / a.directTotal));
-            deps.hud().arrowTowards(a.player, a.target[0], a.target[2]);
+            deps.hud().update(a.player, a.destination.name(), d, 1 - Math.min(1, d / leg.total));
+            deps.hud().arrowTowards(a.player, leg.target[0], leg.target[2]);
         }
     }
 
@@ -517,36 +539,37 @@ public final class NavigationService implements SiegeMatchObserver {
      * routed session here (plan decision): {@code /navigate} again does that.
      */
     void recheckDirect(Active a, long now) {
+        DirectLeg leg = a.leg;
         Location feet = a.player.getLocation();
         double x = feet.getX(), floorY = feet.getY() - 1, z = feet.getZ();
-        double d = distance(x, floorY, z, a.target);
-        if (d <= a.directBest + sessionParameters.rerouteDistance()) {
+        double d = distance(x, floorY, z, leg.target);
+        if (d <= leg.best + sessionParameters.rerouteDistance()) {
             return;
         }
-        if (a.lastDirectRecalcTick != Long.MIN_VALUE && now - a.lastDirectRecalcTick < sessionParameters.rerouteMinIntervalTicks()) {
+        if (leg.lastRecalcTick != Long.MIN_VALUE && now - leg.lastRecalcTick < sessionParameters.rerouteMinIntervalTicks()) {
             return;
         }
-        a.lastDirectRecalcTick = now;
-        a.target = directTarget(a, x, floorY, z);
-        double fresh = distance(x, floorY, z, a.target);
-        a.directTotal = Math.max(1, fresh);
-        a.directBest = fresh;
+        leg.lastRecalcTick = now;
+        leg.target = directTarget(a, leg, x, floorY, z);
+        double fresh = distance(x, floorY, z, leg.target);
+        leg.total = Math.max(1, fresh);
+        leg.best = fresh;
         a.player.sendMessage(NavigationMessages.directRecalculating(a.destination.name()));
         deps.events().accept(new NavigationRerouteEvent(a.player, a.destination.name(), RouteReason.OFF_ROUTE, "direct"));
-        deps.trail().drawDirect(a.player, a.target);
+        deps.trail().drawDirect(a.player, leg.target);
         deps.hud().update(a.player, a.destination.name(), fresh, 0);
-        deps.hud().arrowTowards(a.player, a.target[0], a.target[2]);
+        deps.hud().arrowTowards(a.player, leg.target[0], leg.target[2]);
     }
 
     /** The direct-mode target for a player at this floor position. */
-    private double[] directTarget(Active a, double x, double floorY, double z) {
+    private double[] directTarget(Active a, DirectLeg leg, double x, double floorY, double z) {
         return switch (a.destination.kind()) {
-            case REGION -> a.region == null ? a.target : a.region.closestPointFromFloor(x, floorY, z);
+            case REGION -> a.region == null ? leg.target : a.region.closestPointFromFloor(x, floorY, z);
             case STREET -> {
                 SnapPoint nearest = nearest(streetPoints(a.snapshot, a.destination.streetId(), x, floorY, z), x, floorY, z);
-                yield nearest == null ? a.target : nearest.point();
+                yield nearest == null ? leg.target : nearest.point();
             }
-            default -> a.target;
+            default -> leg.target;
         };
     }
 
@@ -586,11 +609,11 @@ public final class NavigationService implements SiegeMatchObserver {
                 end(a, EndReason.SIEGE);
                 return;
             }
-            if (!a.direct && now - a.startedTick >= sessionParameters.maxSessionTicks()) {
+            if (!a.direct() && now - a.startedTick >= sessionParameters.maxSessionTicks()) {
                 end(a, EndReason.TIMEOUT);
                 return;
             }
-            if (a.direct) {
+            if (a.direct()) {
                 recheckDirect(a, now);
             } else {
                 recheck(a, now);
@@ -599,7 +622,7 @@ public final class NavigationService implements SiegeMatchObserver {
                 return;
             }
         }
-        if (a.direct) {
+        if (a.direct()) {
             if (now - a.startedTick >= sessionParameters.maxSessionTicks()) {
                 end(a, EndReason.TIMEOUT);
                 return;
@@ -811,7 +834,7 @@ public final class NavigationService implements SiegeMatchObserver {
     public void onGateChanged(int doorId) {
         long now = deps.tick().getAsLong();
         for (Active a : new ArrayList<>(active.values())) {
-            if (a.direct || a.session == null) {
+            if (a.direct() || a.session == null) {
                 continue;
             }
             boolean onRoute = a.route().map(r -> r.steps().stream().anyMatch(s -> s.edge().gateDoorIds().contains(doorId))).orElse(false)
@@ -829,7 +852,7 @@ public final class NavigationService implements SiegeMatchObserver {
     public void onAvailabilityChanged() {
         long now = deps.tick().getAsLong();
         for (Active a : new ArrayList<>(active.values())) {
-            if (a.direct || a.session == null) {
+            if (a.direct() || a.session == null) {
                 continue;
             }
             a.lastRecheckTick = now;
@@ -845,7 +868,7 @@ public final class NavigationService implements SiegeMatchObserver {
         RoadNetworkSnapshot snapshot = deps.snapshots().apply(world);
         long now = deps.tick().getAsLong();
         for (Active a : new ArrayList<>(active.values())) {
-            if (!a.destination.world().equalsIgnoreCase(world) || a.direct || a.session == null) {
+            if (!a.destination.world().equalsIgnoreCase(world) || a.direct() || a.session == null) {
                 continue;
             }
             if (snapshot == null || snapshot.isEmpty()) {
@@ -999,9 +1022,9 @@ public final class NavigationService implements SiegeMatchObserver {
     // ==================== helpers ====================
 
     private double remaining(Active a) {
-        if (a.direct) {
+        if (a.direct()) {
             Location feet = a.player.getLocation();
-            return distance(feet.getX(), feet.getY() - 1, feet.getZ(), a.target);
+            return distance(feet.getX(), feet.getY() - 1, feet.getZ(), a.leg.target);
         }
         return a.session == null ? 0 : a.session.remainingBlocks();
     }
@@ -1019,6 +1042,6 @@ public final class NavigationService implements SiegeMatchObserver {
 
     boolean isDirect(UUID playerId) {
         Active a = active.get(playerId);
-        return a != null && a.direct;
+        return a != null && a.direct();
     }
 }
