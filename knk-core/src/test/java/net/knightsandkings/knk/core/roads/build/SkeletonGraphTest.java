@@ -209,6 +209,140 @@ class SkeletonGraphTest {
         }
     }
 
+    /**
+     * Smoke test fix plan 5.5 item 5 (finding C): a ~21-wide square with an irregular outline - chipped
+     * corners, an alcove, two bumps - a lamp post near its west edge and a planter near a corner, and
+     * three 5-wide exits. The skeleton forks toward every corner and bump in the 3-4 block band along
+     * the edge, outside the plaza's wide core; all of it must be the one plaza junction.
+     */
+    static GridFixture irregularPlaza() {
+        return new GridFixture().layer(64,
+            "..................SSSSS.......................",
+            "..................SSSSS.......................",
+            "..................SSSSS.......................",
+            "..................SSSSS.......................",
+            "..................SSSSS.......................",
+            "..................SSSSS.......................",
+            "..................SSSSS.......................",
+            "..................SSSSS.......................",
+            "..................SSSSS...SSS.................",
+            "..................SSSSS...SSS.................",
+            "............SSSSSSSSSSSSSSSSSSS...............",
+            "...........SSSSSSSSSSSSSSSSSSSS...............",
+            "..........SSSSSSSSSSSSSSSSSSSSS...............",
+            "..........SSSSSSSSSSSSSSSSS..SS...............",
+            "........SSSSSSSSSSSSSSSSSSS..SS...............",
+            "........SSSSSSSSSSSSSSSSSSSSSSS...............",
+            "........SSSSSSSSSSSSSSSSSSSSSSS...............",
+            "..........SSSSSSSSSSSSSSSSSSSSS...............",
+            "..........SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
+            "..........SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
+            "..........SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
+            "..........SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
+            "..........SS.SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
+            "..........SSSSSSSSSSSSSSSSSSSSS...............",
+            "..........SSSSSSSSSSSSSSSSSSSSS...............",
+            "..........SSSSSSSSSSSSSSSSSSSSS...............",
+            "..........SSSSSSSSSSSSSSSSSSSSS...............",
+            "..........SSSSSSSSSSSSSSSSSSSSS...............",
+            "..........SSSSSSSSSSSSSSSSSSSSS...............",
+            "..........SSSSSSSSSSSSSSSSSSSS................",
+            "..........SSSSSSSSSSSSSSSSSSS.................",
+            "............SS....SSSSS.......................",
+            "............SS....SSSSS.......................",
+            "..................SSSSS.......................",
+            "..................SSSSS.......................",
+            "..................SSSSS.......................",
+            "..................SSSSS.......................",
+            "..................SSSSS.......................",
+            "..................SSSSS.......................",
+            "..................SSSSS.......................",
+            "..................SSSSS.......................",
+            "..................SSSSS.......................",
+            "..................SSSSS.......................",
+            "..................SSSSS.......................",
+            "..................SSSSS.......................",
+            "..................SSSSS.......................");
+    }
+
+    @Test
+    void anIrregularPlazaWithObstaclesIsOneJunction() {
+        Extraction e = extract(irregularPlaza(), 45, 45, 64);
+        String picture = e.picture(64, 45, 45);
+        assertEquals(1, e.count(RoadNodeKind.JUNCTION), picture);
+        assertEquals(3, e.count(RoadNodeKind.ENDPOINT), picture);
+        assertEquals(3, e.result().chains().size(), picture);
+        Node plaza = e.result().nodes().stream().filter(n -> n.kind() == RoadNodeKind.JUNCTION).findFirst().orElseThrow();
+        assertTrue(plaza.x() >= 15 && plaza.x() <= 25 && plaza.z() >= 15 && plaza.z() <= 25, "near the square's middle: " + plaza);
+        for (Chain c : e.result().chains()) {
+            assertTrue(c.from() == plaza.id() || c.to() == plaza.id(), picture);
+        }
+    }
+
+    @Test
+    void withoutPlazaGrowthTheIrregularPlazaStillFragments() {
+        // The tunable is what fixes it (and can be tuned per server): the strict core alone forks.
+        Extraction e = extract(irregularPlaza(), 45, 45, EVERYWHERE, PARAMS.withPlazaGrowth(0).withGraphRules(0, 0), List.of(), 64);
+        assertTrue(e.count(RoadNodeKind.JUNCTION) > 1, e.picture(64, 45, 45));
+    }
+
+    @Test
+    void aForkRightAtAPlazasEdgeMergesIntoThePlazaJunction() {
+        // Fix plan 5.5 item 5: a junction candidate within junction-cluster-radius of a plaza (reached
+        // along the skeleton, not through the plaza) is part of the plaza's junction, not a second one.
+        GridFixture f = new GridFixture().layer(64,
+            "...........SSS................",
+            "...........SSS................",
+            "...........SSS................",
+            "...........SSS................",
+            "...........SSS................",
+            "...........SSS................",
+            "...........SSS................",
+            "...........SSS................",
+            "...........SSS................",
+            "...........SSS................",
+            "...........SSS................",
+            "...........SSSGGGGGGGGGGGGGG..",
+            "...........SSS................",
+            "...........SSS................",
+            "...........SSS................",
+            ".....SSSSSSSSSSSSSSS..........",
+            ".....SSSSSSSSSSSSSSS..........",
+            ".....SSSSSSSSSSSSSSS..........",
+            ".....SSSSSSSSSSSSSSS..........",
+            ".....SSSSSSSSSSSSSSS..........",
+            ".....SSSSSSSSSSSSSSS..........",
+            ".....SSSSSSSSSSSSSSS..........",
+            ".....SSSSSSSSSSSSSSS..........",
+            ".....SSSSSSSSSSSSSSS..........",
+            ".....SSSSSSSSSSSSSSS..........",
+            ".....SSSSSSSSSSSSSSS..........",
+            ".....SSSSSSSSSSSSSSS..........",
+            ".....SSSSSSSSSSSSSSS..........",
+            ".....SSSSSSSSSSSSSSS..........",
+            ".....SSSSSSSSSSSSSSS..........",
+            "...........SSS................",
+            "...........SSS................",
+            "...........SSS................",
+            "...........SSS................",
+            "...........SSS................",
+            "...........SSS................",
+            "...........SSS................",
+            "...........SSS................",
+            "...........SSS................",
+            "...........SSS................");
+        BuildParameters params = PARAMS.withPlazaGrowth(0).withGraphRules(5, PARAMS.minSpurLength());
+        Extraction e = extract(f, 29, 39, EVERYWHERE, params, List.of(), 64);
+        String picture = e.picture(64, 29, 39);
+        assertEquals(1, e.count(RoadNodeKind.JUNCTION), picture);
+        assertEquals(3, e.count(RoadNodeKind.ENDPOINT), picture);
+        assertEquals(3, e.result().chains().size(), picture);
+
+        Extraction separate = extract(f, 29, 39, EVERYWHERE, params.withGraphRules(1, PARAMS.minSpurLength()), List.of(), 64);
+        assertEquals(2, separate.count(RoadNodeKind.JUNCTION), "farther than the radius: its own junction\n"
+            + separate.picture(64, 29, 39));
+    }
+
     @Test
     void shortSpursAtAJunctionArePrunedLongArmsStay() {
         // A 1-wide path with a 2-cell stub (spur) and a 6-cell branch; every real arm is longer
@@ -351,6 +485,59 @@ class SkeletonGraphTest {
         assertTrue(r.nodes().stream().anyMatch(n -> n.x() == 15 && n.z() == 5));
         assertEquals(1, r.chains().size());
         assertEquals(16, r.chains().get(0).spans().length);
+    }
+
+    @Test
+    void aPlazaStraddlingTheTileBorderGetsItsBoundaryNodeOnTheBorder() {
+        // Smoke test finding B: a plaza whose centre lies west of the tile (x -9..3, centre x -3) owns
+        // skeleton spans inside the tile; the chain leaving it east starts at such a member span. The
+        // Boundary node must sit on the border column x = 0 (the API rejects one anywhere else).
+        GridFixture f = new GridFixture();
+        for (int z = 2; z <= 14; z++) {
+            f.layer(-9, 64, z, "S".repeat(13));          // plaza x -9..3
+        }
+        f.layer(4, 64, 7, "S".repeat(26));                // 3-wide road east x 4..29, z 7..9
+        f.layer(4, 64, 8, "S".repeat(26));
+        f.layer(4, 64, 9, "S".repeat(26));
+        Region tile = Region.tile(0, 0, 16);
+        SpanGrid grid = f.spanGrid();
+        java.util.List<Long> keys = new java.util.ArrayList<>();
+        for (int x = -9; x <= 29; x++) {
+            for (int z = 0; z <= 16; z++) {
+                if (grid.isSpan(x, 64, z)) keys.add(net.knightsandkings.knk.core.util.BlockKey.pack(x, 64, z));
+            }
+        }
+        RoadMask mask = RoadMask.of(grid, keys.stream().mapToLong(Long::longValue).toArray());
+        int[] dt = DistanceTransform.compute(mask);
+        boolean[] skeleton = Thinning.thin(mask);
+        Result r = new SkeletonGraph(mask, skeleton, dt, PARAMS, GridFixture.profiles(), tile).extract(List.of());
+
+        String picture = r.nodes() + "\n" + r.chains();
+        List<Node> boundaries = r.nodes().stream().filter(n -> n.kind() == RoadNodeKind.BOUNDARY).toList();
+        assertEquals(2, boundaries.size(), picture);
+        for (Node b : boundaries) {
+            assertTrue(b.x() == tile.minX() || b.x() == tile.maxX() || b.z() == tile.minZ() || b.z() == tile.maxZ(),
+                "Boundary node off the tile border: " + b + "\n" + picture);
+        }
+        Node ours = boundaries.stream().filter(n -> n.x() == 0).findFirst().orElseThrow(() -> new AssertionError(picture));
+        for (Chain c : r.chains()) {
+            for (int k = 1; k < c.spans().length; k++) {
+                assertTrue(mask.distance(c.spans()[k - 1], c.spans()[k]) < 1.5, "chain steps are neighbours: " + picture);
+            }
+        }
+
+        // The tile west of it owns the plaza junction: its chain toward this tile ends in a Boundary
+        // node on x = -1 next to ours, so the API's stitch rule (Chebyshev <= 1, |dy| <= 1) joins them.
+        Region west = Region.tile(-1, 0, 16);
+        int[] dt2 = DistanceTransform.compute(mask);
+        boolean[] skeleton2 = Thinning.thin(mask);
+        Result w = new SkeletonGraph(mask, skeleton2, dt2, PARAMS, GridFixture.profiles(), west).extract(List.of());
+        String westPicture = w.nodes() + "\n" + w.chains();
+        assertEquals(1, w.nodes().stream().filter(n -> n.kind() == RoadNodeKind.JUNCTION).count(), westPicture);
+        Node theirs = w.nodes().stream().filter(n -> n.kind() == RoadNodeKind.BOUNDARY && n.x() == -1).findFirst()
+            .orElseThrow(() -> new AssertionError("no Boundary on x = -1: " + westPicture));
+        assertTrue(Math.abs(theirs.z() - ours.z()) <= 1 && Math.abs(theirs.y() - ours.y()) <= 1,
+            "stitchable: " + theirs + " / " + ours);
     }
 
     @Test

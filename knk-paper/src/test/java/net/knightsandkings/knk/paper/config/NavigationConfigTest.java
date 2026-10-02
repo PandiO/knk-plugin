@@ -43,10 +43,11 @@ class NavigationConfigTest {
         assertThrows(IllegalArgumentException.class, () -> new NavigationConfig(true, d.classCost(), d.overlayMaterials(), true, 0, 4,
             d.trail(), 8, 40, 4, 30, 5.6, d.survey(), d.builder()).validate());
         assertThrows(IllegalArgumentException.class, () -> new NavigationConfig.TrailConfig(30, 10, "DUST", "gold").validate());
-        assertThrows(IllegalArgumentException.class, () -> new NavigationConfig.BuilderConfig(500, 32, 250_000, 4, 3, 4, 3).validate());
+        assertThrows(IllegalArgumentException.class, () -> new NavigationConfig.BuilderConfig(500, 32, 250_000, 4, 3, 4, 3, 2).validate());
+        assertThrows(IllegalArgumentException.class, () -> new NavigationConfig.BuilderConfig(512, 32, 250_000, 4, 3, 4, 3, -1).validate());
         assertThrows(IllegalArgumentException.class, () -> new NavigationConfig.SurveyConfig(4, 9, 32).validate());
         assertThrows(IllegalArgumentException.class, () -> new NavigationConfig.SurveyConfig(0, 7, 32).validate());
-        new NavigationConfig.BuilderConfig(256, 0, 1000, 1, 0, 0, 0).validate();
+        new NavigationConfig.BuilderConfig(256, 0, 1000, 1, 0, 0, 0, 0).validate();
     }
 
     @Test

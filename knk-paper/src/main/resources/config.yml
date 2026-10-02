@@ -233,6 +233,9 @@ navigation:
     min-spur-length: 4
     # An ambiguous material (cobblestone, planks) only counts within this many cells of a sure road cell
     ambiguous-reach: 3
+    # A plaza (wider than its profile's width-max) reaches this many cells beyond its wide core, so
+    # the corners and bumps of an irregular square join its one junction instead of forking into more
+    plaza-growth: 2
 
 # Player payments (currency ledger Phase 3, docs/specs/currency-payments/DESIGN.md §3.6). Every
 # limit that matters (min/max, daily caps, cooldown, confirmation threshold, who may send) lives in

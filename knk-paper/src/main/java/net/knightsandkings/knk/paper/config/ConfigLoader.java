@@ -247,7 +247,8 @@ public class ConfigLoader {
                 builder.getInt("snapshot-chunks-per-tick", builderDefaults.snapshotChunksPerTick()),
                 builder.getInt("junction-cluster-radius", builderDefaults.junctionClusterRadius()),
                 builder.getInt("min-spur-length", builderDefaults.minSpurLength()),
-                builder.getInt("ambiguous-reach", builderDefaults.ambiguousReach()));
+                builder.getInt("ambiguous-reach", builderDefaults.ambiguousReach()),
+                builder.getInt("plaza-growth", builderDefaults.plazaGrowth()));
 
         return new NavigationConfig(
             section.getBoolean("enabled", defaults.enabled()),

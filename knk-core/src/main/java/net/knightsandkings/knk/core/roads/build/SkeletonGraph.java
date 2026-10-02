@@ -23,11 +23,14 @@ import java.util.Set;
  *       2 = along the road, ≥ 3 = junction candidate.</li>
  *   <li><b>Plazas</b> (step 4, done first so the cluster step sees them): mask spans whose local width
  *       ({@code 2·dt − 1}) exceeds the {@code widthMax} of every applicable profile listing their
- *       floor material form plaza groups; each group with skeleton spans becomes one Junction at
- *       its widest span, and every skeleton span inside it belongs to that junction.</li>
+ *       floor material are a plaza's core; its footprint is every span within the core's own
+ *       clearance plus {@code plazaGrowth} (so the edge band of an irregular plaza is included).
+ *       Each footprint group with skeleton spans becomes one Junction at its widest core span, and
+ *       every skeleton span inside it belongs to that junction.</li>
  *   <li><b>Cluster</b> junction candidates that are within {@code junctionClusterRadius} skeleton
  *       steps of each other into one Junction at the candidate nearest the cluster's centroid; the
- *       skeleton spans on the short paths between them belong to the junction too.</li>
+ *       skeleton spans on the short paths between them belong to the junction too. A cluster that
+ *       reaches a plaza within the radius (without walking through it) joins that plaza's junction.</li>
  *   <li><b>Anchors</b>: an admin anchor within {@code nodeMatchDistance} of a skeleton span turns
  *       that span (or the node already there) into an Anchor node; chains are split there.</li>
  *   <li><b>Chains</b>: maximal runs of non-node skeleton spans between two node spans.</li>
@@ -41,8 +44,10 @@ import java.util.Set;
  *   <li><b>Loops and parallel chains</b> get a Junction inserted midway so every edge has a distinct
  *       node pair (the API's unique-pair rule).</li>
  *   <li><b>Tile border</b> (D7): chains are cut where they leave the tile; the last span inside is a
- *       Boundary node (an Endpoint there becomes Boundary; another node keeps its kind). Nodes and
- *       chain parts outside the tile are dropped — the neighbour tile builds them.</li>
+ *       Boundary node (an Endpoint there becomes Boundary; another node keeps its kind). A chain of
+ *       a plaza / cluster straddling the border is first extended through the node to its centre,
+ *       so the cut is on the border on both sides. Nodes and chain parts outside the tile are
+ *       dropped — the neighbour tile builds them.</li>
  * </ol>
  *
  * Node positions are span floor positions, except Anchor nodes (the admin's position) — the chain
@@ -77,7 +82,12 @@ public final class SkeletonGraph {
     public static final String WARN_ANCHOR_OFF_ROAD = "Anchor is not within reach of the road centreline";
     public static final String WARN_ANCHOR_DUPLICATE = "Second anchor on the same centreline span ignored";
 
+    public static final String WARN_BORDER_NODE_UNREACHABLE =
+        "A chain of a junction straddling the tile border could not be joined to the junction; dropped";
+
     private static final int MAX_SPLIT_ROUNDS = 8;
+    /** How far {@link #bridgedToNodes} walks from a straddling node's member span to its centre. */
+    private static final int NODE_PATH_MAX_STEPS = 64;
 
     private final RoadMask mask;
     private final boolean[] skeleton;
@@ -90,6 +100,8 @@ public final class SkeletonGraph {
     private final List<WorkNode> nodes = new ArrayList<>();
     private final List<WorkChain> chains = new ArrayList<>();
     private final List<BuildWarning> warnings = new ArrayList<>();
+    /** Junctions made by {@link #collapsePlazas}; a junction cluster next to one merges into it. */
+    private final Set<Integer> plazaNodes = new HashSet<>();
 
     private static final class WorkNode {
         int span;
@@ -187,11 +199,17 @@ public final class SkeletonGraph {
 
     private void collapsePlazas(int[] degree) {
         int n = mask.size();
-        boolean[] plaza = new boolean[n];
+        boolean[] core = new boolean[n];
+        boolean anyCore = false;
         for (int i = 0; i < n; i++) {
             OptionalInt widthMax = profiles.maxWidthMax(mask.floor(i), mask.x(i), mask.z(i));
-            plaza[i] = widthMax.isPresent() && DistanceTransform.width(dt[i]) > widthMax.getAsInt();
+            core[i] = widthMax.isPresent() && DistanceTransform.width(dt[i]) > widthMax.getAsInt();
+            anyCore |= core[i];
         }
+        if (!anyCore) {
+            return;
+        }
+        boolean[] plaza = plazaFootprint(core);
         boolean[] seen = new boolean[n];
         int[] queue = new int[n];
         for (int start = 0; start < n; start++) {
@@ -223,19 +241,26 @@ public final class SkeletonGraph {
             if (skeletonSpans.isEmpty()) {
                 continue;
             }
+            // Position from the core only, so growing the footprint never moves the junction.
+            List<Integer> coreSpans = new ArrayList<>();
+            for (int i : group) {
+                if (core[i]) {
+                    coreSpans.add(i);
+                }
+            }
             double cx = 0;
             double cy = 0;
             double cz = 0;
-            for (int i : group) {
+            for (int i : coreSpans) {
                 cx += mask.x(i);
                 cy += mask.y(i);
                 cz += mask.z(i);
             }
-            cx /= group.size();
-            cy /= group.size();
-            cz /= group.size();
+            cx /= coreSpans.size();
+            cy /= coreSpans.size();
+            cz /= coreSpans.size();
             int centre = -1;
-            for (int i : group) {
+            for (int i : coreSpans) {
                 if (centre < 0 || dt[i] > dt[centre]
                     || (dt[i] == dt[centre] && distanceTo(i, cx, cy, cz) < distanceTo(centre, cx, cy, cz))) {
                     centre = i;
@@ -243,6 +268,7 @@ public final class SkeletonGraph {
             }
             // The junction sits on the widest span even if the skeleton does not pass through it.
             int node = newNode(centre, RoadNodeKind.JUNCTION);
+            plazaNodes.add(node);
             for (int i : skeletonSpans) {
                 nodeOf[i] = node;
             }
@@ -251,6 +277,58 @@ public final class SkeletonGraph {
                 degree[i] = Math.min(degree[i], 2);
             }
         }
+    }
+
+    /**
+     * The plaza's footprint (smoke test fix plan 5.5 item 5): every mask span within reach of a core
+     * span - the core span's own clearance ({@code dt − 1} steps: its inscribed square is all road)
+     * plus {@code plazaGrowth} more. The 3-4 block band along an irregular outline (corners, bumps,
+     * the ring around a lamp post or planter) then belongs to the plaza instead of forking into
+     * junctions of its own. Bucket queue on the remaining budget, each span settled once with its
+     * largest budget: linear in the spans.
+     */
+    private boolean[] plazaFootprint(boolean[] core) {
+        int n = mask.size();
+        int[] budget = new int[n];
+        Arrays.fill(budget, -1);
+        int maxBudget = 0;
+        for (int i = 0; i < n; i++) {
+            if (core[i]) {
+                budget[i] = dt[i] - 1 + params.plazaGrowth();
+                maxBudget = Math.max(maxBudget, budget[i]);
+            }
+        }
+        List<ArrayDeque<Integer>> buckets = new ArrayList<>(maxBudget + 1);
+        for (int b = 0; b <= maxBudget; b++) {
+            buckets.add(new ArrayDeque<>());
+        }
+        for (int i = 0; i < n; i++) {
+            if (core[i]) {
+                buckets.get(budget[i]).add(i);
+            }
+        }
+        boolean[] footprint = new boolean[n];
+        for (int b = maxBudget; b >= 0; b--) {
+            ArrayDeque<Integer> bucket = buckets.get(b);
+            while (!bucket.isEmpty()) {
+                int i = bucket.poll();
+                if (footprint[i] || budget[i] != b) {
+                    continue;
+                }
+                footprint[i] = true;
+                if (b == 0) {
+                    continue;
+                }
+                for (int d = 0; d < SpanGrid.DIRECTIONS; d++) {
+                    int nb = mask.neighbour(i, d);
+                    if (nb != RoadMask.NONE && !footprint[nb] && budget[nb] < b - 1) {
+                        budget[nb] = b - 1;
+                        buckets.get(b - 1).add(nb);
+                    }
+                }
+            }
+        }
+        return footprint;
     }
 
     private double distanceTo(int i, double x, double y, double z) {
@@ -280,6 +358,10 @@ public final class SkeletonGraph {
         }
         // Spans on a short skeleton path between two candidates, keyed by one of the candidates.
         List<int[]> absorbed = new ArrayList<>();
+        // A candidate within the radius of a plaza (reached on the skeleton, never walked through):
+        // the nearest plaza node and the spans of the path to it (fix plan 5.5 item 5).
+        Map<Integer, int[]> plazaOf = new HashMap<>();
+        Map<Integer, List<Integer>> plazaPath = new HashMap<>();
         int radius = params.junctionClusterRadius();
         int[] dist = new int[n];
         int[] via = new int[n];
@@ -300,6 +382,16 @@ public final class SkeletonGraph {
                         continue;
                     }
                     if (nodeOf[nb] >= 0) {
+                        int reached = dist[i] + 1;
+                        int[] known = plazaOf.get(c);
+                        if (plazaNodes.contains(nodeOf[nb]) && (known == null || reached < known[1])) {
+                            plazaOf.put(c, new int[] {nodeOf[nb], reached});
+                            List<Integer> path = new ArrayList<>();
+                            for (int s = i; s != c && s != -1; s = via[s]) {
+                                path.add(s);
+                            }
+                            plazaPath.put(c, path);
+                        }
                         continue; // a plaza junction or an endpoint: never walked through
                     }
                     dist[nb] = dist[i] + 1;
@@ -322,6 +414,28 @@ public final class SkeletonGraph {
         Map<Integer, Integer> nodeOfRoot = new HashMap<>();
         for (Map.Entry<Integer, List<Integer>> e : clusters.entrySet()) {
             List<Integer> members = e.getValue();
+            int nearestMember = -1;
+            for (int c : members) {
+                int[] attached = plazaOf.get(c);
+                if (attached != null && (nearestMember < 0 || attached[1] < plazaOf.get(nearestMember)[1]
+                    || (attached[1] == plazaOf.get(nearestMember)[1] && c < nearestMember))) {
+                    nearestMember = c;
+                }
+            }
+            if (nearestMember >= 0) {
+                // The cluster forks right at a plaza's edge: it is part of that plaza's junction.
+                int plaza = plazaOf.get(nearestMember)[0];
+                nodeOfRoot.put(e.getKey(), plaza);
+                for (int i : members) {
+                    nodeOf[i] = plaza;
+                }
+                for (int span : plazaPath.get(nearestMember)) {
+                    if (nodeOf[span] < 0) {
+                        nodeOf[span] = plaza;
+                    }
+                }
+                continue;
+            }
             double cx = 0;
             double cy = 0;
             double cz = 0;
@@ -855,9 +969,15 @@ public final class SkeletonGraph {
             if (!chain.alive) {
                 continue;
             }
-            int[] spans = chain.spans;
             boolean fromInside = nodeInside(chain.from);
             boolean toInside = nodeInside(chain.to);
+            int[] spans = bridgedToNodes(chain, fromInside, toInside);
+            if (spans == null) {
+                chain.alive = false;
+                int[] at = chain.spans;
+                warnings.add(new BuildWarning(WARN_BORDER_NODE_UNREACHABLE, mask.x(at[0]), mask.y(at[0]), mask.z(at[0])));
+                continue;
+            }
             boolean allInside = fromInside && toInside;
             for (int span : spans) {
                 if (!inside(span)) {
@@ -903,8 +1023,120 @@ public final class SkeletonGraph {
         }
     }
 
+    /**
+     * Smoke test finding B: a plaza or junction cluster is one node over many spans, and a chain
+     * starts at the member span next to its road. When the node's centre and that member span lie on
+     * opposite sides of the tile border, the chain is extended through the node to its centre span
+     * first, so the cut below lands on the border: here a Boundary node on the border column (not
+     * at a member span deep in the tile, which the API rejects), and in the neighbour tile the node's
+     * own chain up to its side of the border, so the two Boundary nodes stitch.
+     *
+     * @return the chain's spans, extended where needed; null when a node's centre is unreachable
+     */
+    private int[] bridgedToNodes(WorkChain chain, boolean fromInside, boolean toInside) {
+        int[] spans = chain.spans;
+        int first = spans[0];
+        int last = spans[spans.length - 1];
+        if (fromInside != inside(first)) {
+            int[] path = maskPath(nodes.get(chain.from).span, first);
+            if (path == null) {
+                return null;
+            }
+            spans = concat(Arrays.copyOf(path, path.length - 1), RoadMask.NONE, spans);
+        }
+        if (toInside != inside(last)) {
+            int[] path = maskPath(last, nodes.get(chain.to).span);
+            if (path == null) {
+                return null;
+            }
+            spans = concat(spans, RoadMask.NONE, Arrays.copyOfRange(path, 1, path.length));
+        }
+        return spans;
+    }
+
+    /**
+     * Mask spans from {@code a} to {@code b}, both included: the straight line when the mask has it
+     * (deterministic, so two neighbouring tiles' builds cross their shared border at the same span),
+     * else a shortest mask path; null when neither stays within {@link #NODE_PATH_MAX_STEPS} steps.
+     */
+    private int[] maskPath(int a, int b) {
+        if (a == b) {
+            return new int[] {a};
+        }
+        int[] line = straightPath(a, b);
+        return line != null ? line : shortestPath(a, b);
+    }
+
+    private int[] straightPath(int a, int b) {
+        int x0 = mask.x(a);
+        int z0 = mask.z(a);
+        int steps = Math.max(Math.abs(mask.x(b) - x0), Math.abs(mask.z(b) - z0));
+        if (steps == 0 || steps > NODE_PATH_MAX_STEPS) {
+            return null;
+        }
+        int[] out = new int[steps + 1];
+        out[0] = a;
+        int cur = a;
+        for (int k = 1; k <= steps; k++) {
+            int tx = x0 + (int) Math.round((double) (mask.x(b) - x0) * k / steps);
+            int tz = z0 + (int) Math.round((double) (mask.z(b) - z0) * k / steps);
+            int dir = direction(tx - mask.x(cur), tz - mask.z(cur));
+            int next = dir < 0 ? RoadMask.NONE : mask.neighbour(cur, dir);
+            if (next == RoadMask.NONE) {
+                return null;
+            }
+            out[k] = next;
+            cur = next;
+        }
+        return cur == b ? out : null;
+    }
+
+    private static int direction(int dx, int dz) {
+        for (int d = 0; d < SpanGrid.DIRECTIONS; d++) {
+            if (SpanGrid.DX[d] == dx && SpanGrid.DZ[d] == dz) {
+                return d;
+            }
+        }
+        return -1;
+    }
+
+    private int[] shortestPath(int a, int b) {
+        Map<Integer, Integer> cameFrom = new HashMap<>();
+        Map<Integer, Integer> depth = new HashMap<>();
+        ArrayDeque<Integer> queue = new ArrayDeque<>();
+        cameFrom.put(a, -1);
+        depth.put(a, 0);
+        queue.add(a);
+        while (!queue.isEmpty()) {
+            int i = queue.poll();
+            if (i == b) {
+                List<Integer> path = new ArrayList<>();
+                for (int s = b; s != -1; s = cameFrom.get(s)) {
+                    path.add(s);
+                }
+                Collections.reverse(path);
+                return path.stream().mapToInt(Integer::intValue).toArray();
+            }
+            if (depth.get(i) >= NODE_PATH_MAX_STEPS) {
+                continue;
+            }
+            for (int d = 0; d < SpanGrid.DIRECTIONS; d++) {
+                int nb = mask.neighbour(i, d);
+                if (nb != RoadMask.NONE && !cameFrom.containsKey(nb)) {
+                    cameFrom.put(nb, i);
+                    depth.put(nb, depth.get(i) + 1);
+                    queue.add(nb);
+                }
+            }
+        }
+        return null;
+    }
+
     private int boundaryNode(int span, Map<Integer, Integer> boundaryBySpan) {
-        if (nodeOf[span] >= 0 && nodes.get(nodeOf[span]).alive && nodeInside(nodeOf[span])) {
+        // A node standing on this span is reused; a mere member span of a plaza / cluster (the node
+        // stands elsewhere) gets a Boundary node of its own, or the cut would loop back to the node.
+        if (nodeOf[span] >= 0 && nodes.get(nodeOf[span]).span == span && nodes.get(nodeOf[span]).alive
+            && nodeInside(nodeOf[span])) {
             WorkNode node = nodes.get(nodeOf[span]);
             if (node.kind == RoadNodeKind.ENDPOINT) {
                 node.kind = RoadNodeKind.BOUNDARY;

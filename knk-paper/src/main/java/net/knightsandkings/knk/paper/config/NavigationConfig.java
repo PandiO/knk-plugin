@@ -119,11 +119,12 @@ public record NavigationConfig(
      * @param junctionClusterRadius junction cells closer than this merge
      * @param minSpurLength         shorter dead-end spurs are pruned
      * @param ambiguousReach        an ambiguous material only counts within this many cells of a sure road cell
+     * @param plazaGrowth           a plaza reaches this many cells beyond its wide core (fix plan 5.5 item 5)
      */
     public record BuilderConfig(int tileSize, int tileMargin, int maxCellsPerTile, int snapshotChunksPerTick,
-                                int junctionClusterRadius, int minSpurLength, int ambiguousReach) {
+                                int junctionClusterRadius, int minSpurLength, int ambiguousReach, int plazaGrowth) {
         public static BuilderConfig defaults() {
-            return new BuilderConfig(512, 32, 250_000, 4, 3, 4, 3);
+            return new BuilderConfig(512, 32, 250_000, 4, 3, 4, 3, BuildParameters.DEFAULT_PLAZA_GROWTH);
         }
 
         public void validate() {
@@ -148,6 +149,9 @@ public record NavigationConfig(
             if (ambiguousReach < 0) {
                 throw new IllegalArgumentException("navigation.builder.ambiguous-reach must not be negative (got: " + ambiguousReach + ")");
             }
+            if (plazaGrowth < 0) {
+                throw new IllegalArgumentException("navigation.builder.plaza-growth must not be negative (got: " + plazaGrowth + ")");
+            }
         }
 
         /** The knk-core builder parameters (the ones not in config keep the builder's defaults). */
@@ -156,7 +160,8 @@ public record NavigationConfig(
                 .withTile(tileSize, tileMargin)
                 .withMaxCells(maxCellsPerTile)
                 .withAmbiguousReach(ambiguousReach)
-                .withGraphRules(junctionClusterRadius, minSpurLength);
+                .withGraphRules(junctionClusterRadius, minSpurLength)
+                .withPlazaGrowth(plazaGrowth);
         }
     }
 
