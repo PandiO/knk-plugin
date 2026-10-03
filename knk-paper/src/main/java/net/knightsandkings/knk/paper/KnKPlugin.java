@@ -1294,9 +1294,21 @@ public class KnKPlugin extends JavaPlugin {
         registerModeCommand("ownermode", ActiveMode.OWNER);
         registerModeCommand("staffmode", ActiveMode.STAFF);
 
-        registerSimpleCommand("freeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(userAdminService, true));
-        registerSimpleCommand("unfreeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(userAdminService, false));
-        registerSimpleCommand("staffchat", new net.knightsandkings.knk.paper.commands.StaffChatCommand());
+        // KNG-24: gated on their in-house node in the executor, not by plugin.yml's permission:
+        // (Bukkit never sees in-house grants, so non-op staff got "Unknown or incomplete command").
+        var commandPermissions = net.knightsandkings.knk.paper.commands.support.CommandPermissions.of(
+            knkPermissible, MenuService.mainThreadExecutor(this));
+        var gatedCommandVisibility = new net.knightsandkings.knk.paper.listeners.GatedCommandVisibilityListener(
+            commandPermissions, MenuService.mainThreadExecutor(this));
+        registerGatedCommand("freeze", "knk.freeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(userAdminService, true),
+            commandPermissions, gatedCommandVisibility);
+        registerGatedCommand("unfreeze", "knk.unfreeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(userAdminService, false),
+            commandPermissions, gatedCommandVisibility);
+        registerGatedCommand("staffchat", net.knightsandkings.knk.paper.commands.StaffChatCommand.NODE,
+            new net.knightsandkings.knk.paper.commands.StaffChatCommand(commandPermissions::hasAsync,
+                MenuService.mainThreadExecutor(this), org.bukkit.Bukkit::getOnlinePlayers),
+            commandPermissions, gatedCommandVisibility);
+        getServer().getPluginManager().registerEvents(gatedCommandVisibility, this);
         registerTabCommand("msg", new net.knightsandkings.knk.paper.commands.MessageCommand(messagingService, visiblePlayers));
         registerTabCommand("reply", new net.knightsandkings.knk.paper.commands.ReplyCommand(messagingService));
         registerTabCommand("socialspy", new net.knightsandkings.knk.paper.commands.SocialSpyCommand(
@@ -1797,6 +1809,22 @@ public class KnKPlugin extends JavaPlugin {
             pluginCommand.setExecutor(executor);
             pluginCommand.setTabCompleter(executor);
             getLogger().info("Registered /" + name + " command");
+        } else {
+            getLogger().warning("Failed to register /" + name + " command - not defined in plugin.yml?");
+        }
+    }
+
+    /** A command gated on {@code node} through KnkPermissible and hidden from players lacking it (KNG-24). */
+    private void registerGatedCommand(String name, String node, org.bukkit.command.CommandExecutor executor,
+                                      net.knightsandkings.knk.paper.commands.support.CommandPermissions permissions,
+                                      net.knightsandkings.knk.paper.listeners.GatedCommandVisibilityListener visibility) {
+        PluginCommand pluginCommand = getCommand(name);
+        if (pluginCommand != null) {
+            var gated = new net.knightsandkings.knk.paper.commands.support.PermissionGatedCommand(node, executor, permissions);
+            pluginCommand.setExecutor(gated);
+            pluginCommand.setTabCompleter(gated);
+            visibility.gate(pluginCommand, node);
+            getLogger().info("Registered /" + name + " command (gated on " + node + ")");
         } else {
             getLogger().warning("Failed to register /" + name + " command - not defined in plugin.yml?");
         }
