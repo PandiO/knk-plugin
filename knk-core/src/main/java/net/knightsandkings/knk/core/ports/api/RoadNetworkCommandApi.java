@@ -1,8 +1,10 @@
 package net.knightsandkings.knk.core.ports.api;
 
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 import net.knightsandkings.knk.core.domain.roads.RoadEdge;
+import net.knightsandkings.knk.core.domain.roads.RoadEdgePruneResult;
 import net.knightsandkings.knk.core.domain.roads.RoadEdgeRecord;
 import net.knightsandkings.knk.core.domain.roads.RoadEdgeUpdate;
 import net.knightsandkings.knk.core.domain.roads.RoadEdgeUpdateResult;
@@ -75,8 +77,14 @@ public interface RoadNetworkCommandApi {
     /** {@code POST api/road-nodes/{id}/prune}: removes an endpoint's dead end and leaves a Pruned tombstone. */
     CompletableFuture<RoadNode> pruneNode(int id);
 
-    /** {@code DELETE api/road-nodes/{id}/prune}: deletes a Pruned tombstone; true on 204, false on 404. */
+    /** {@code DELETE api/road-nodes/{id}/prune}: deletes a Pruned or PrunedEdge tombstone; true on 204, false on 404. */
     CompletableFuture<Boolean> unpruneNode(int id);
+
+    /**
+     * {@code POST api/road-edges/prune}: removes detected edges for good (one transaction) - each leaves a
+     * PrunedEdge tombstone the builder respects; junctions and dead ends left without edges are deleted.
+     */
+    CompletableFuture<RoadEdgePruneResult> pruneEdges(List<Integer> edgeIds);
 
     /** {@code POST api/road-edges} (201): an admin-walked Recorded edge (Phase 1 decision 8). */
     CompletableFuture<RoadEdge> recordEdge(RoadEdgeRecord edge);

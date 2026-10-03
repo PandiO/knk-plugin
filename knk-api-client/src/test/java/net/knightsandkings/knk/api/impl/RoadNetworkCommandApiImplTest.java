@@ -33,6 +33,7 @@ import net.knightsandkings.knk.core.domain.roads.RoadBreadcrumbPoint;
 import net.knightsandkings.knk.core.domain.roads.RoadClass;
 import net.knightsandkings.knk.core.domain.roads.RoadEdge;
 import net.knightsandkings.knk.core.domain.roads.RoadEdgeFlag;
+import net.knightsandkings.knk.core.domain.roads.RoadEdgePruneResult;
 import net.knightsandkings.knk.core.domain.roads.RoadEdgeRecord;
 import net.knightsandkings.knk.core.domain.roads.RoadEdgeSource;
 import net.knightsandkings.knk.core.domain.roads.RoadEdgeUpdate;
@@ -318,5 +319,13 @@ class RoadNetworkCommandApiImplTest {
         api.updateEdge(12, RoadEdgeUpdate.flags(Set.of(RoadEdgeFlag.CLOSED))).join();
         assertEquals("Closed", body(2).get("flags").get(0).asText());
         assertFalse(body(2).has("streetId"));
+
+        responseJson = "{\"tombstones\":[" + NODE_JSON.replace("\"Anchor\"", "\"PrunedEdge\"") + "],\"deletedNodeIds\":[2]}";
+        RoadEdgePruneResult pruned = api.pruneEdges(List.of(12, 13)).join();
+        assertEquals("POST", seen.get(3).method());
+        assertEquals("http://api.test/api/road-edges/prune", seen.get(3).url().toString());
+        assertEquals(13, body(3).get("edgeIds").get(1).asInt());
+        assertEquals(RoadNodeKind.PRUNED_EDGE, pruned.tombstones().get(0).kind());
+        assertEquals(List.of(2), pruned.deletedNodeIds());
     }
 }

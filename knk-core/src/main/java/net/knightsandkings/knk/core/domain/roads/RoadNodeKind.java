@@ -17,16 +17,36 @@ public enum RoadNodeKind {
      * A tombstone: an admin pruned the dead end that ended here ({@code /knk road node prune}). It has
      * no edges; the builder leaves the arm ending near it out of every later build until it is unpruned.
      */
-    PRUNED;
+    PRUNED,
+    /**
+     * A tombstone on the middle of a pruned edge ({@code /knk road edge prune}, or a junction's edges
+     * with {@code /knk road node prune}). It has no edges; the builder leaves the chain passing nearest
+     * it out of every later build until it is unpruned.
+     */
+    PRUNED_EDGE;
 
-    /** The name the web-api uses ({@code Junction}, {@code Endpoint}, {@code Boundary}, {@code Anchor}, {@code Pruned}). */
+    /** Whether this is a tombstone ({@link #PRUNED} or {@link #PRUNED_EDGE}): no edges, never matched or routed. */
+    public boolean isTombstone() {
+        return this == PRUNED || this == PRUNED_EDGE;
+    }
+
+    /** The name the web-api uses ({@code Junction}, {@code Endpoint}, ..., {@code Pruned}, {@code PrunedEdge}). */
     public String apiName() {
-        String lower = name().toLowerCase();
-        return Character.toUpperCase(lower.charAt(0)) + lower.substring(1);
+        StringBuilder out = new StringBuilder();
+        for (String word : name().toLowerCase().split("_")) {
+            out.append(Character.toUpperCase(word.charAt(0))).append(word.substring(1));
+        }
+        return out.toString();
     }
 
     /** Inverse of {@link #apiName()}; case-insensitive. */
     public static RoadNodeKind fromApiName(String apiName) {
-        return valueOf(apiName.trim().toUpperCase());
+        String wanted = apiName.trim();
+        for (RoadNodeKind kind : values()) {
+            if (kind.apiName().equalsIgnoreCase(wanted)) {
+                return kind;
+            }
+        }
+        throw new IllegalArgumentException("Unknown road node kind '" + apiName + "'");
     }
 }

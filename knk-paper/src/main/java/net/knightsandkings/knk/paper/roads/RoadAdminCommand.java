@@ -190,7 +190,7 @@ public class RoadAdminCommand implements SubcommandExecutor {
                 case "show" -> prefix(List.of("16", "32", "48", "96", "all"), last);
                 case "node" -> prefix(List.of("name", "unname", "merge", "anchor", "lock", "unlock", "prune", "unprune"), last);
                 case "record" -> prefix(List.of("start", "stop", "cancel"), last);
-                case "edge" -> prefix(List.of("set", "delete"), last);
+                case "edge" -> prefix(List.of("set", "delete", "prune"), last);
                 case "street" -> prefix(streetNames(sender), last);
                 default -> Collections.emptyList();
             };
@@ -772,22 +772,30 @@ public class RoadAdminCommand implements SubcommandExecutor {
             }
             case "prune" -> {
                 Integer id = args.length > 1 ? parseInt(args[1]) : null;
+                boolean confirmed = args.length > 2 && "confirm".equalsIgnoreCase(args[2]);
                 if (id == null) {
-                    Optional<RoadNode> end = nodeHere(snapshot, player, RoadNodeKind.ENDPOINT);
-                    if (end.isEmpty()) {
-                        sender.sendMessage(RoadMessages.bad("No endpoint within " + (int) HERE_DISTANCE + " blocks - stand at the dead end or give its id."));
+                    // A dead end nearby wins (as before); otherwise the junction nearby (confirmed first).
+                    Optional<RoadNode> near = nodeHere(snapshot, player, RoadNodeKind.ENDPOINT)
+                        .or(() -> nodeHere(snapshot, player, RoadNodeKind.JUNCTION));
+                    if (near.isEmpty()) {
+                        sender.sendMessage(RoadMessages.bad("No endpoint or junction within " + (int) HERE_DISTANCE + " blocks - stand at it or give its id."));
                         return;
                     }
-                    id = end.get().id();
+                    id = near.get().id();
                 }
                 int target = id;
+                Optional<RoadNode> known = snapshot.node(target);
+                if (known.isPresent() && known.get().kind() == RoadNodeKind.JUNCTION) {
+                    pruneJunction(player, snapshot, known.get(), confirmed);
+                    return;
+                }
                 commandApi.pruneNode(target).whenComplete((n, ex) -> done(sender, "prune the node", ex,
                     "Node #" + target + " pruned: its dead end is gone and stays out of later builds (/knk road node unprune " + target + " to undo).", player));
             }
             case "unprune" -> {
                 Integer id = args.length > 1 ? parseInt(args[1]) : null;
                 if (id == null) {
-                    Optional<RoadNode> tombstone = nodeHere(snapshot, player, RoadNodeKind.PRUNED);
+                    Optional<RoadNode> tombstone = nodeHereMatching(snapshot, player, RoadNodeKind::isTombstone);
                     if (tombstone.isEmpty()) {
                         sender.sendMessage(RoadMessages.bad("No pruned node within " + (int) HERE_DISTANCE + " blocks - give its id."));
                         return;
@@ -803,12 +811,67 @@ public class RoadAdminCommand implements SubcommandExecutor {
                         sender.sendMessage(RoadMessages.bad("No pruned node #" + target + "."));
                         return;
                     }
-                    sender.sendMessage(RoadMessages.good("Node #" + target + " unpruned: the next build of its tile brings the dead end back."));
+                    sender.sendMessage(RoadMessages.good("Node #" + target + " unpruned: the next build of its tile brings the dead end or edge back."));
                     refreshTiles(player.getWorld().getName());
                 }));
             }
             default -> sender.sendMessage(RoadMessages.usage("/knk road node name <name> | unname | merge <keep> <merge> | anchor [name] | lock|unlock [id] | prune|unprune [id]"));
         }
+    }
+
+    /**
+     * Smoke test 2026-10-03: a junction the builder keeps re-detecting (a plaza's corners, a loop round a
+     * fountain) goes for good by pruning its detected edges - each leaves a PrunedEdge tombstone the
+     * builder respects. This cuts any road through the junction, so the edges are listed first and only
+     * {@code /knk road node prune <id> confirm} prunes them. Recorded and stitch edges stay (they are not
+     * the builder's); a named junction is refused (its name would stay on a node without edges).
+     */
+    private void pruneJunction(Player player, RoadNetworkSnapshot snapshot, RoadNode junction, boolean confirmed) {
+        if (junction.nameOptional().isPresent()) {
+            player.sendMessage(RoadMessages.bad("Junction #" + junction.id() + " is named \"" + junction.nameOptional().get()
+                + "\" - /knk road node unname it first."));
+            return;
+        }
+        List<RoadEdge> edges = snapshot.edgesAt(junction.id());
+        List<Integer> detected = edges.stream()
+            .filter(e -> e.source() == net.knightsandkings.knk.core.domain.roads.RoadEdgeSource.DETECTED)
+            .map(RoadEdge::id).toList();
+        List<Integer> kept = edges.stream().map(RoadEdge::id).filter(id -> !detected.contains(id)).toList();
+        if (detected.isEmpty()) {
+            player.sendMessage(RoadMessages.bad("Junction #" + junction.id() + " has no detected edges to prune"
+                + (kept.isEmpty() ? "." : " (recorded/stitch edges " + ids(kept) + " are yours - delete those).")));
+            return;
+        }
+        if (!confirmed) {
+            StringBuilder list = new StringBuilder();
+            for (RoadEdge e : edges) {
+                if (detected.contains(e.id())) {
+                    int other = e.fromNodeId() == junction.id() ? e.toNodeId() : e.fromNodeId();
+                    list.append(list.isEmpty() ? "" : ", ").append("#").append(e.id()).append(" (")
+                        .append(RoadMessages.distance(e.length())).append(" to node #").append(other).append(")");
+                }
+            }
+            player.sendMessage(RoadMessages.warn("Prune junction #" + junction.id() + "? Its detected edges " + list
+                + " go for good and stay out of later builds - a road through it is cut."
+                + (kept.isEmpty() ? "" : " Recorded/stitch edges " + ids(kept) + " stay.")));
+            player.sendMessage(RoadMessages.prefixed(RoadMessages.command("[Confirm]", "/knk road node prune " + junction.id() + " confirm")
+                .append(Component.text(" or prune single edges: /knk road edge prune <id|here>", RoadMessages.INFO))));
+            return;
+        }
+        commandApi.pruneEdges(detected).whenComplete((result, ex) -> mainThread.execute(() -> {
+            if (failed(player, "prune junction #" + junction.id(), ex)) {
+                return;
+            }
+            player.sendMessage(RoadMessages.good("Junction #" + junction.id() + ": edges " + ids(detected) + " pruned"
+                + (result.deletedNodeIds().contains(junction.id()) ? " and the junction removed" : "")
+                + "; they stay out of later builds. Undo one with /knk road node unprune <id> on tombstone "
+                + ids(result.tombstones().stream().map(RoadNode::id).toList()) + "."));
+            refreshTiles(player.getWorld().getName());
+        }));
+    }
+
+    static String ids(List<Integer> ids) {
+        return ids.stream().map(id -> "#" + id).collect(java.util.stream.Collectors.joining(", "));
     }
 
     private void withNodeHere(CommandSender sender, RoadNetworkSnapshot snapshot, Player player, java.util.function.Consumer<RoadNode> then) {
@@ -825,13 +888,18 @@ public class RoadAdminCommand implements SubcommandExecutor {
         return nodeHere(snapshot, player, null);
     }
 
-    /** Like {@link #nodeHere(RoadNetworkSnapshot, Player)}, only nodes of {@code kind} (null: any but pruned). */
+    /** Like {@link #nodeHere(RoadNetworkSnapshot, Player)}, only nodes of {@code kind} (null: any but a tombstone). */
     static Optional<RoadNode> nodeHere(RoadNetworkSnapshot snapshot, Player player, RoadNodeKind kind) {
+        return nodeHereMatching(snapshot, player, kind == null ? k -> !k.isTombstone() : k -> k == kind);
+    }
+
+    /** The nearest node within {@link #HERE_DISTANCE} of the player's feet whose kind passes {@code accept}. */
+    static Optional<RoadNode> nodeHereMatching(RoadNetworkSnapshot snapshot, Player player, java.util.function.Predicate<RoadNodeKind> accept) {
         Location at = player.getLocation();
         RoadNode best = null;
         double bestDistance = HERE_DISTANCE;
         for (RoadNode node : snapshot.nodes()) {
-            if (kind == null ? node.kind() == RoadNodeKind.PRUNED : node.kind() != kind) {
+            if (!accept.test(node.kind())) {
                 continue;
             }
             double d = node.distanceTo(at.getX() - 0.5, at.getY() - 1, at.getZ() - 0.5);
@@ -852,6 +920,44 @@ public class RoadAdminCommand implements SubcommandExecutor {
 
     // ===== edge =====
 
+    /** {@code /knk road edge prune <id|here>}: a detected edge goes for good (a PrunedEdge tombstone). */
+    private void pruneEdge(CommandSender sender, String[] args) {
+        Player player = sender instanceof Player p ? p : null;
+        Integer id;
+        if (args.length < 2 || "here".equalsIgnoreCase(args[1])) {
+            if (player == null) {
+                sender.sendMessage(RoadMessages.usage("/knk road edge prune <id>"));
+                return;
+            }
+            Optional<RoadEdge> here = edgeHere(cache.get().snapshot(player.getWorld().getName()), player);
+            if (here.isEmpty()) {
+                sender.sendMessage(RoadMessages.bad("No edge here (within " + (int) HERE_DISTANCE + " blocks) - give an edge id."));
+                return;
+            }
+            id = here.get().id();
+        } else {
+            id = parseInt(args[1]);
+            if (id == null) {
+                sender.sendMessage(RoadMessages.usage("/knk road edge prune <id|here>"));
+                return;
+            }
+        }
+        int target = id;
+        commandApi.pruneEdges(List.of(target)).whenComplete((result, ex) -> mainThread.execute(() -> {
+            if (failed(sender, "prune edge #" + target, ex)) {
+                return;
+            }
+            String tombstone = result.tombstones().isEmpty() ? "<id>" : String.valueOf(result.tombstones().get(0).id());
+            sender.sendMessage(RoadMessages.good("Edge #" + target + " pruned: it stays out of later builds"
+                + (result.deletedNodeIds().isEmpty() ? "" : "; nodes " + ids(result.deletedNodeIds()) + " were left without edges and are gone")
+                + ". Undo: /knk road node unprune " + tombstone + "."));
+            String world = worldOf(sender);
+            if (world != null) {
+                refreshTiles(world);
+            }
+        }));
+    }
+
     private void edge(CommandSender sender, String[] args) {
         String action = args.length > 0 ? args[0].toLowerCase(Locale.ROOT) : "";
         if ("delete".equals(action)) {
@@ -864,7 +970,7 @@ public class RoadAdminCommand implements SubcommandExecutor {
                 if (failed(sender, "delete edge #" + id, ex)) {
                     return;
                 }
-                sender.sendMessage(Boolean.TRUE.equals(ok) ? RoadMessages.good("Edge #" + id + " deleted (a Detected edge comes back on the next build; use close or nogps for those).")
+                sender.sendMessage(Boolean.TRUE.equals(ok) ? RoadMessages.good("Edge #" + id + " deleted (a detected edge comes back on the next build - /knk road edge prune keeps it out).")
                     : RoadMessages.warn("Edge #" + id + " did not exist."));
                 String world = worldOf(sender);
                 if (world != null) {
@@ -873,8 +979,13 @@ public class RoadAdminCommand implements SubcommandExecutor {
             }));
             return;
         }
+        if ("prune".equals(action)) {
+            pruneEdge(sender, args);
+            return;
+        }
         if (!"set".equals(action) || args.length < 3) {
-            sender.sendMessage(RoadMessages.usage("/knk road edge set <id|here> cost <x> | oneway [on|off] | nogps [on|off] | close | open | profile <id> | unlabel"));
+            sender.sendMessage(RoadMessages.usage("/knk road edge set <id|here> cost <x> | oneway [on|off] | nogps [on|off] | close | open | profile <id> | unlabel"
+                + " | prune <id|here> | delete <id>"));
             return;
         }
         Player player = sender instanceof Player p ? p : null;

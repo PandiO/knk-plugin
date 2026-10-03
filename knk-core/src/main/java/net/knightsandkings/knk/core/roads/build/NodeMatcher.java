@@ -18,9 +18,8 @@ import java.util.OptionalInt;
  * position. An edge keeps its id when both its nodes matched the nodes of a previous edge and its
  * polyline stays within {@link BuildParameters#edgeMatchDistance()} of the old one. Anchor nodes are
  * matched by their anchor id, never by position. A locked node still unmatched after that takes the
- * nearest remaining candidate within {@link BuildParameters#lockedNodeReach()}. Pruned tombstones are
- * never matched (the builder leaves their arm out instead, see {@link SkeletonGraph}). Pruned tombstones are
- * never matched (the builder leaves their arm out instead, see {@link SkeletonGraph}).
+ * nearest remaining candidate within {@link BuildParameters#lockedNodeReach()}. Tombstones (Pruned,
+ * PrunedEdge) are never matched (the builder leaves their arm or chain out instead, see {@link SkeletonGraph}).
  */
 public final class NodeMatcher {
 
@@ -103,7 +102,7 @@ public final class NodeMatcher {
             Candidate c = candidates.get(i);
             for (int j = 0; j < previous.nodes().size(); j++) {
                 PreviousNode p = previous.nodes().get(j);
-                if (used[j] || p.kind() == RoadNodeKind.ANCHOR || p.kind() == RoadNodeKind.PRUNED || !compatible(c, p)) {
+                if (used[j] || p.kind() == RoadNodeKind.ANCHOR || p.kind().isTombstone() || !compatible(c, p)) {
                     continue;
                 }
                 double d = distance(c.x(), c.y(), c.z(), p.x(), p.y(), p.z());
@@ -127,7 +126,7 @@ public final class NodeMatcher {
             for (int j = 0; j < previous.nodes().size(); j++) {
                 PreviousNode p = previous.nodes().get(j);
                 if (used[j] || !p.locked() || p.kind() == RoadNodeKind.ANCHOR || p.kind() == RoadNodeKind.BOUNDARY
-                    || p.kind() == RoadNodeKind.PRUNED || !compatible(c, p)) {
+                    || p.kind().isTombstone() || !compatible(c, p)) {
                     continue;
                 }
                 double d = distance(c.x(), c.y(), c.z(), p.x(), p.y(), p.z());

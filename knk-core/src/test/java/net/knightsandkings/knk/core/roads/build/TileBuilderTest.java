@@ -685,6 +685,69 @@ class TileBuilderTest {
         assertEquals(3, r.edges().size(), describe(r));
     }
 
+    // ---- pruned edges (smoke test 2026-10-03: a deleted detected edge came back on every rebuild) ----
+
+    private TileBuildResult buildWithEdgeTombstones(GridFixture f, int[]... tombstones) {
+        List<PreviousNode> nodes = new java.util.ArrayList<>();
+        for (int i = 0; i < tombstones.length; i++) {
+            int[] t = tombstones[i];
+            nodes.add(new PreviousNode(400 + i, t[0], t[1], t[2], RoadNodeKind.PRUNED_EDGE, true));
+        }
+        TileRequest req = request(f, PARAMS, GridFixture.profiles(), List.of(), new PreviousGraph(nodes, List.of()), new Seed(4, 65, 20));
+        TileBuildResult r = builder.build(req, f);
+        assertContract(r, req);
+        assertTrue(r.nodes().stream().noneMatch(n -> n.existingId().isPresent() && n.existingId().getAsInt() >= 400),
+            "a tombstone is never emitted" + describe(r));
+        return r;
+    }
+
+    private static int minX(TileBuildResult.Edge edge) {
+        return edge.geometry().stream().mapToInt(p -> p[0]).min().orElseThrow();
+    }
+
+    @Test
+    void aPrunedEdgeIsLeftOutAndItsJunctionDissolves() {
+        TileBuildResult r = buildWithEdgeTombstones(pathWithSpur(), new int[] {15, 64, 30}); // the spur's middle
+        String d = describe(r);
+        assertEquals(0, r.nodes(RoadNodeKind.JUNCTION).size(), "the junction is left with two arms and dissolves" + d);
+        assertEquals(2, r.nodes(RoadNodeKind.ENDPOINT).size(), d);
+        assertEquals(1, r.edges().size(), "one edge along the path" + d);
+    }
+
+    @Test
+    void aPrunedEdgeOnTheThroughRoadCutsIt() {
+        TileBuildResult r = buildWithEdgeTombstones(pathWithSpur(), new int[] {9, 64, 20}); // the west arm's middle
+        String d = describe(r);
+        assertEquals(0, r.nodes(RoadNodeKind.JUNCTION).size(), d);
+        assertEquals(1, r.edges().size(), "the spur and the east arm join into one edge" + d);
+        assertTrue(minX(r.edges().get(0)) >= 14, "nothing west of the junction is left" + d);
+    }
+
+    @Test
+    void prunedEdgesArePickedBeforeAnyIsRemoved() {
+        // Removing the west arm first would dissolve the junction and join the spur to the east arm;
+        // the spur's tombstone must not then take the east arm with it.
+        TileBuildResult r = buildWithEdgeTombstones(pathWithSpur(), new int[] {9, 64, 20}, new int[] {15, 64, 30});
+        String d = describe(r);
+        assertEquals(1, r.edges().size(), "the east arm stays" + d);
+        assertTrue(minX(r.edges().get(0)) >= 14, d);
+        assertTrue(r.edges().get(0).geometry().stream().allMatch(p -> p[2] <= 21), "no spur in it (the old junction point is z = 21)" + d);
+    }
+
+    @Test
+    void everyEdgeOfAJunctionPrunedLeavesNothing() {
+        TileBuildResult r = buildWithEdgeTombstones(pathWithSpur(), new int[] {9, 64, 20}, new int[] {30, 64, 20}, new int[] {15, 64, 30});
+        assertEquals(0, r.nodes().size(), describe(r));
+        assertEquals(0, r.edges().size(), describe(r));
+    }
+
+    @Test
+    void anEdgeTombstoneFartherThanTheMatchDistanceChangesNothing() {
+        TileBuildResult r = buildWithEdgeTombstones(pathWithSpur(), new int[] {25, 64, 25}); // 5 blocks off the path
+        assertEquals(1, r.nodes(RoadNodeKind.JUNCTION).size(), describe(r));
+        assertEquals(3, r.edges().size(), describe(r));
+    }
+
     // ---- two-arm junctions (smoke test 2026-10-02, junction #3615) ----
 
     private static SkeletonGraph.Result threeNodes(RoadNodeKind middle) {

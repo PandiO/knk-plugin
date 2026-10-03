@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.api.impl;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
@@ -9,6 +10,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import net.knightsandkings.knk.api.auth.AuthProvider;
 import net.knightsandkings.knk.api.dto.RoadEdgeDto;
+import net.knightsandkings.knk.api.dto.RoadEdgePruneDto;
+import net.knightsandkings.knk.api.dto.RoadEdgePruneResultDto;
 import net.knightsandkings.knk.api.dto.RoadEdgeUpdateResultDto;
 import net.knightsandkings.knk.api.dto.RoadNodeDto;
 import net.knightsandkings.knk.api.dto.RoadNodeMergeDto;
@@ -19,6 +22,7 @@ import net.knightsandkings.knk.api.dto.RoadTileDto;
 import net.knightsandkings.knk.api.dto.RoadTileUpsertResultDto;
 import net.knightsandkings.knk.api.mapper.RoadMapper;
 import net.knightsandkings.knk.core.domain.roads.RoadEdge;
+import net.knightsandkings.knk.core.domain.roads.RoadEdgePruneResult;
 import net.knightsandkings.knk.core.domain.roads.RoadEdgeRecord;
 import net.knightsandkings.knk.core.domain.roads.RoadEdgeUpdate;
 import net.knightsandkings.knk.core.domain.roads.RoadEdgeUpdateResult;
@@ -257,6 +261,20 @@ public class RoadNetworkCommandApiImpl extends BaseApiImpl implements RoadNetwor
     @Override
     public CompletableFuture<Boolean> unpruneNode(int id) {
         return deleteOrNotFound(baseUrl + NODES_ENDPOINT + "/" + id + "/prune", () -> "pruned road node " + id);
+    }
+
+    @Override
+    public CompletableFuture<RoadEdgePruneResult> pruneEdges(List<Integer> edgeIds) {
+        List<Integer> ids = List.copyOf(edgeIds);
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + EDGES_ENDPOINT + "/prune";
+            try {
+                String json = objectMapper.writeValueAsString(new RoadEdgePruneDto(ids));
+                return RoadMapper.mapEdgePruneResult(parse(postJson(url, json), RoadEdgePruneResultDto.class, url));
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to prune road edges " + ids, e);
+            }
+        }, executor);
     }
 
     @Override

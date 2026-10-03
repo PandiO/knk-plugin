@@ -12,6 +12,7 @@ import java.util.OptionalInt;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class NodeMatcherTest {
     private final NodeMatcher matcher = new NodeMatcher(BuildParameters.defaults());
@@ -89,6 +90,17 @@ class NodeMatcherTest {
             matcher.matchNodes(List.of(at(0, 64, 0)), new PreviousGraph(List.of(tombstone), List.of())), "not even on its own block");
         assertEquals(RoadNodeKind.PRUNED, RoadNodeKind.fromApiName("Pruned"));
         assertEquals("Pruned", RoadNodeKind.PRUNED.apiName());
+    }
+
+    @Test
+    void anEdgeTombstoneIsNeverMatchedEvenWhenLocked() {
+        PreviousNode tombstone = new PreviousNode(9, 0, 64, 0, RoadNodeKind.PRUNED_EDGE, true);
+        assertArrayEquals(new int[] {NodeMatcher.UNMATCHED},
+            matcher.matchNodes(List.of(at(0, 64, 0)), new PreviousGraph(List.of(tombstone), List.of())), "not even on its own block");
+        assertEquals("PrunedEdge", RoadNodeKind.PRUNED_EDGE.apiName());
+        assertEquals(RoadNodeKind.PRUNED_EDGE, RoadNodeKind.fromApiName("prunededge"));
+        assertEquals("Junction", RoadNodeKind.JUNCTION.apiName());
+        assertTrue(RoadNodeKind.PRUNED_EDGE.isTombstone() && RoadNodeKind.PRUNED.isTombstone() && !RoadNodeKind.ENDPOINT.isTombstone());
     }
 
     @Test

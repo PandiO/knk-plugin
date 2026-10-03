@@ -268,9 +268,11 @@ public final class RoadOverlayRenderer {
     }
 
     static String nodeLabel(RoadNode node) {
-        return "Node #" + node.id() + " " + node.kind().apiName().toLowerCase()
+        String kind = node.kind() == net.knightsandkings.knk.core.domain.roads.RoadNodeKind.PRUNED_EDGE
+            ? "pruned edge" : node.kind().apiName().toLowerCase();
+        return "Node #" + node.id() + " " + kind
             + node.nameOptional().map(n -> " \"" + n + "\"").orElse("")
-            + (node.locked() ? " (locked)" : "");
+            + (node.locked() && !node.kind().isTombstone() ? " (locked)" : "");
     }
 
     static String edgeLabel(RoadNetworkSnapshot snapshot, RoadEdge edge) {

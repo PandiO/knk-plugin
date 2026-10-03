@@ -44,6 +44,9 @@ import java.util.Set;
  *   <li><b>Pruned arms</b>: for each admin tombstone (a Pruned node of the previous build), the
  *       nearest dead end within {@code lockedNodeReach} is removed like a spur - its chain goes, and a
  *       junction left with two chains dissolves.</li>
+ *   <li><b>Pruned chains</b>: for each PrunedEdge tombstone (an admin pruned the edge), the chain
+ *       passing nearest it within {@code nodeMatchDistance} is removed; junctions are tidied as after a
+ *       spur, and the spurs this leaves are pruned.</li>
  *   <li><b>Loops and parallel chains</b> get a Junction inserted midway so every edge has a distinct
  *       node pair (the API's unique-pair rule).</li>
  *   <li><b>Tile border</b> (D7): chains are cut where they leave the tile; the last span inside is a
@@ -62,7 +65,7 @@ public final class SkeletonGraph {
     public record Anchor(int id, int x, int y, int z) {
     }
 
-    /** Where an admin pruned a dead end (a Pruned tombstone of the previous build). */
+    /** Where an admin pruned a dead end or an edge (a Pruned or PrunedEdge tombstone of the previous build). */
     public record Pruned(int id, int x, int y, int z) {
     }
 
@@ -158,8 +161,17 @@ public final class SkeletonGraph {
 
     /** Extract nodes and chains, leaving out the dead ends an admin pruned; call once. */
     public Result extract(List<Anchor> anchors, List<Pruned> pruned) {
+        return extract(anchors, pruned, List.of());
+    }
+
+    /**
+     * Extract nodes and chains, leaving out the dead ends ({@code pruned}) and the edges
+     * ({@code prunedEdges}, tombstones on their middle) an admin pruned; call once.
+     */
+    public Result extract(List<Anchor> anchors, List<Pruned> pruned, List<Pruned> prunedEdges) {
         Objects.requireNonNull(anchors, "anchors");
         Objects.requireNonNull(pruned, "pruned");
+        Objects.requireNonNull(prunedEdges, "prunedEdges");
         int n = mask.size();
         nodeOf = new int[n];
         Arrays.fill(nodeOf, -1);
@@ -181,6 +193,7 @@ public final class SkeletonGraph {
         extendEndpoints();
         pruneSpurs();
         removePrunedArms(pruned);
+        removePrunedChains(prunedEdges);
         splitLoopsAndParallels();
         cutAtTileBorder();
         return emit();
@@ -796,6 +809,81 @@ public final class SkeletonGraph {
             }
             usedTombstone[t] = true;
         }
+    }
+
+    /**
+     * Smoke test 2026-10-03: deleting a detected edge did not stick, so an admin prunes it instead
+     * ({@code /knk road edge prune}, or all of a junction's edges with {@code /knk road node prune}).
+     * Its PrunedEdge tombstone sits on the middle of the old centreline; the alive chain passing nearest
+     * each tombstone within {@code nodeMatchDistance} is removed. All chains are picked before any goes -
+     * removing one can dissolve a junction and join two other pruned chains into one - then the nodes are
+     * tidied as after a spur (a junction left with one chain is an Endpoint, with two it dissolves, with
+     * none it goes) and the spurs this leaves behind are pruned. Runs before the loop split and the
+     * border cut, so a tombstone takes the whole loop side or border-crossing chain it lies on.
+     */
+    private void removePrunedChains(List<Pruned> prunedEdges) {
+        if (prunedEdges.isEmpty()) {
+            return;
+        }
+        double reach = params.nodeMatchDistance();
+        Set<Integer> doomed = new java.util.TreeSet<>();
+        for (Pruned p : prunedEdges) {
+            int best = -1;
+            double bestDistance = Double.MAX_VALUE;
+            for (int id = 0; id < chains.size(); id++) {
+                WorkChain chain = chains.get(id);
+                if (!chain.alive) {
+                    continue;
+                }
+                double d = distanceToChain(chain, p);
+                if (d < bestDistance) {
+                    bestDistance = d;
+                    best = id;
+                }
+            }
+            if (best >= 0 && bestDistance <= reach) {
+                doomed.add(best);
+            }
+        }
+        if (doomed.isEmpty()) {
+            return;
+        }
+        Set<Integer> ends = new java.util.TreeSet<>();
+        for (int id : doomed) {
+            WorkChain chain = chains.get(id);
+            chain.alive = false;
+            ends.add(chain.from);
+            ends.add(chain.to);
+        }
+        for (int nodeId : ends) {
+            WorkNode node = nodes.get(nodeId);
+            if (!node.alive) {
+                continue;
+            }
+            int remaining = node.aliveChains(chains);
+            if (remaining == 0) {
+                killNode(nodeId);
+            } else if (node.kind == RoadNodeKind.JUNCTION) {
+                if (remaining == 1) {
+                    node.kind = RoadNodeKind.ENDPOINT;
+                } else if (remaining == 2) {
+                    dissolve(nodeId);
+                }
+            }
+        }
+        pruneSpurs();
+    }
+
+    /** The 3D distance from a tombstone to the nearest span of a chain. */
+    private double distanceToChain(WorkChain chain, Pruned p) {
+        double best = Double.MAX_VALUE;
+        for (int span : chain.spans) {
+            double dx = mask.x(span) - p.x();
+            double dy = mask.y(span) - p.y();
+            double dz = mask.z(span) - p.z();
+            best = Math.min(best, dx * dx + dy * dy + dz * dz);
+        }
+        return Math.sqrt(best);
     }
 
     private static double distanceSquared(WorkNode node, int x, int y, int z) {

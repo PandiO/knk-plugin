@@ -65,7 +65,7 @@ public final class OverlayColors {
             case ENDPOINT -> ENDPOINT;
             case BOUNDARY -> BOUNDARY;
             case ANCHOR -> ANCHOR;
-            case PRUNED -> PRUNED;
+            case PRUNED, PRUNED_EDGE -> PRUNED;
         };
     }
 

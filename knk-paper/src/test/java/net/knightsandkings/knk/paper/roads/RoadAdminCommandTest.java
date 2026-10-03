@@ -147,6 +147,73 @@ class RoadAdminCommandTest {
         assertEquals(List.of("prune"), command.complete(player, new String[] {"node", "pr"}));
     }
 
+    private static net.knightsandkings.knk.core.domain.roads.RoadEdge edge(int id, int from, int to, int[] a, int[] b,
+                                                                          net.knightsandkings.knk.core.domain.roads.RoadEdgeSource source) {
+        return new net.knightsandkings.knk.core.domain.roads.RoadEdge(id, from, to, List.of(a, b), 10, 3,
+            java.util.OptionalInt.empty(), java.util.OptionalInt.empty(), 1, java.util.Set.of(), List.of(), List.of(), List.of(), source, false);
+    }
+
+    @Test
+    void edgePruneTakesAnIdOrTheEdgeHere_AndAJunctionIsPrunedOnlyAfterConfirming() {
+        when(player.hasPermission(RoadAdminCommand.NODE)).thenReturn(true);
+        org.bukkit.World world = mock(org.bukkit.World.class);
+        when(world.getName()).thenReturn("world");
+        when(player.getWorld()).thenReturn(world);
+        when(player.getLocation()).thenReturn(new org.bukkit.Location(world, 10.5, 65, 10.5));
+        var detected = net.knightsandkings.knk.core.domain.roads.RoadEdgeSource.DETECTED;
+        // Junction #1 under the player: detected edges #11 (west), #12 (east), a recorded edge #13 (south);
+        // tombstone #4 of a pruned edge 3 blocks away.
+        RoadNetworkSnapshot snapshot = RoadNetworkSnapshot.builder("world")
+            .addNode(new RoadNode(1, 10, 64, 10, RoadNodeKind.JUNCTION, null, 1))
+            .addNode(new RoadNode(2, 0, 64, 10, RoadNodeKind.ENDPOINT, null, 1))
+            .addNode(new RoadNode(3, 20, 64, 10, RoadNodeKind.ENDPOINT, null, 1))
+            .addNode(new RoadNode(5, 10, 64, 30, RoadNodeKind.ANCHOR, null, 1, true))
+            .addNode(new RoadNode(4, 13, 64, 13, RoadNodeKind.PRUNED_EDGE, null, 4, true))
+            .addEdge(edge(11, 1, 2, new int[] {10, 64, 10}, new int[] {0, 64, 10}, detected))
+            .addEdge(edge(12, 1, 3, new int[] {10, 64, 10}, new int[] {20, 64, 10}, detected))
+            .addEdge(edge(13, 1, 5, new int[] {10, 64, 10}, new int[] {10, 64, 30}, net.knightsandkings.knk.core.domain.roads.RoadEdgeSource.RECORDED))
+            .build();
+        when(cache.snapshot("world")).thenReturn(snapshot);
+        when(commandApi.pruneEdges(any())).thenReturn(java.util.concurrent.CompletableFuture.completedFuture(
+            new net.knightsandkings.knk.core.domain.roads.RoadEdgePruneResult(
+                List.of(new RoadNode(40, 5, 64, 10, RoadNodeKind.PRUNED_EDGE, null, 40, true)), List.of(2))));
+        when(commandApi.unpruneNode(org.mockito.ArgumentMatchers.anyInt()))
+            .thenReturn(java.util.concurrent.CompletableFuture.completedFuture(true));
+
+        command.execute(player, new String[] {"edge", "prune", "11"});
+        verify(commandApi).pruneEdges(List.of(11));
+        command.execute(player, new String[] {"edge", "prune", "here"});
+        verify(commandApi, org.mockito.Mockito.times(2)).pruneEdges(any()); // one of the edges meeting under the feet
+        org.mockito.Mockito.clearInvocations(commandApi);
+
+        command.execute(player, new String[] {"node", "prune", "1"});
+        verify(commandApi, never()).pruneEdges(any());
+        verify(commandApi, never()).pruneNode(org.mockito.ArgumentMatchers.anyInt());
+        command.execute(player, new String[] {"node", "prune", "1", "confirm"});
+        verify(commandApi).pruneEdges(List.of(11, 12)); // the recorded edge stays
+
+        command.execute(player, new String[] {"node", "unprune"});
+        verify(commandApi).unpruneNode(4);
+        assertEquals(List.of("prune"), command.complete(player, new String[] {"edge", "pr"}));
+    }
+
+    @Test
+    void aNamedJunctionIsNotPruned() {
+        when(player.hasPermission(RoadAdminCommand.NODE)).thenReturn(true);
+        org.bukkit.World world = mock(org.bukkit.World.class);
+        when(world.getName()).thenReturn("world");
+        when(player.getWorld()).thenReturn(world);
+        when(player.getLocation()).thenReturn(new org.bukkit.Location(world, 10.5, 65, 10.5));
+        when(cache.snapshot("world")).thenReturn(RoadNetworkSnapshot.builder("world")
+            .addNode(new RoadNode(1, 10, 64, 10, RoadNodeKind.JUNCTION, "Market", 1))
+            .build());
+
+        command.execute(player, new String[] {"node", "prune", "1", "confirm"});
+
+        verify(commandApi, never()).pruneEdges(any());
+        assertTrue(lastMessage(player).contains("unname"));
+    }
+
     @Test
     void pureHelpers() {
         assertEquals("Kardenna main street", RoadAdminCommand.joinQuoted(new String[] {"start", "\"Kardenna", "main", "street\""}, 1));

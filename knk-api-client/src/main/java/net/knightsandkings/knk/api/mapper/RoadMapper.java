@@ -17,6 +17,7 @@ import net.knightsandkings.knk.api.dto.RoadComponentDto;
 import net.knightsandkings.knk.api.dto.RoadEdgeDto;
 import net.knightsandkings.knk.api.dto.RoadEdgeRecordDto;
 import net.knightsandkings.knk.api.dto.RoadEdgeUpdateDto;
+import net.knightsandkings.knk.api.dto.RoadEdgePruneResultDto;
 import net.knightsandkings.knk.api.dto.RoadEdgeUpdateResultDto;
 import net.knightsandkings.knk.api.dto.RoadErrorDto;
 import net.knightsandkings.knk.api.dto.RoadMaterialDto;
@@ -47,6 +48,7 @@ import net.knightsandkings.knk.core.domain.roads.RoadEdgeFlag;
 import net.knightsandkings.knk.core.domain.roads.RoadEdgeRecord;
 import net.knightsandkings.knk.core.domain.roads.RoadEdgeSource;
 import net.knightsandkings.knk.core.domain.roads.RoadEdgeUpdate;
+import net.knightsandkings.knk.core.domain.roads.RoadEdgePruneResult;
 import net.knightsandkings.knk.core.domain.roads.RoadEdgeUpdateResult;
 import net.knightsandkings.knk.core.domain.roads.RoadMaterialRole;
 import net.knightsandkings.knk.core.domain.roads.RoadNetworkMeta;
@@ -197,6 +199,13 @@ public final class RoadMapper {
         List<RoadComponent> components = dto.components() == null ? List.of()
             : dto.components().stream().map(RoadMapper::mapComponent).toList();
         return new RoadNetworkMeta(mapProfiles(dto.profiles()), streets, components);
+    }
+
+    public static RoadEdgePruneResult mapEdgePruneResult(RoadEdgePruneResultDto dto) {
+        if (dto == null) {
+            return null;
+        }
+        return new RoadEdgePruneResult(mapNodes(dto.tombstones()), ints(dto.deletedNodeIds()));
     }
 
     public static RoadEdgeUpdateResult mapEdgeUpdateResult(RoadEdgeUpdateResultDto dto) {
