@@ -121,6 +121,27 @@ class StatisticsListenersTest {
         verify(presentation).restoreAll(org.mockito.ArgumentMatchers.any());
     }
 
+    @Test
+    void linkFourHooksRecordInTheCurrentContext() {
+        Player victim = mock(Player.class);
+        UUID victimId = UUID.randomUUID();
+        when(victim.getUniqueId()).thenReturn(victimId);
+        StatisticsService siegeService = new StatisticsService(KnkConfig.StatisticsConfig.defaults(), buffer,
+                new StatisticsContextResolver(id -> id.equals(uuid)), presentation, clock);
+        siegeService.sessionStarted(player, 42);
+        assertFalse(siegeService.pvpKill(player, victim), "the victim has no session");
+        siegeService.sessionStarted(victim, 43);
+
+        assertTrue(siegeService.pvpKill(player, victim));
+        siegeService.addCounter(player, net.knightsandkings.knk.core.statistics.StatisticsMetric.ARROWS_FIRED, 1);
+        siegeService.addRecord(victim, net.knightsandkings.knk.core.statistics.StatisticsMetric.HIGHEST_KILLSTREAK, 3);
+
+        StatisticsBatch batch = drain();
+        assertEquals(new StatisticsBatch.PvpKillEntry(42, 43, "siege", T0), batch.pvpKills().get(0));
+        assertEquals("siege", batch.counters().get(0).context());
+        assertEquals("open_world", batch.records().get(0).context());
+    }
+
     // ===== AFK =====
 
     @Test

@@ -176,6 +176,27 @@ public final class StatisticsService {
         sessions.addCounter(player.getUniqueId(), metric, contexts.contextOf(player), value, now());
     }
 
+    /** A record (max) of the player in their current context, e.g. link 4's {@code highest_killstreak}. */
+    public void addRecord(Player player, StatisticsMetric metric, double value) {
+        sessions.addRecord(player.getUniqueId(), metric, contexts.contextOf(player), value, now());
+    }
+
+    /**
+     * A PvP kill (link 4): sent as a killer/victim pair in the killer's context. Needs both user ids;
+     * a kill involving a player whose id isn't known yet is not recorded. Siege-context kills are
+     * projected by the API from the match tables, so the caller skips running-match members (§F.6).
+     */
+    public boolean pvpKill(Player killer, Player victim) {
+        java.util.OptionalInt killerId = sessions.userId(killer.getUniqueId());
+        java.util.OptionalInt victimId = sessions.userId(victim.getUniqueId());
+        if (killerId.isEmpty() || victimId.isEmpty() || killerId.getAsInt() == victimId.getAsInt()) {
+            return false;
+        }
+        buffer().addPvpKill(new StatisticsBatch.PvpKillEntry(killerId.getAsInt(), victimId.getAsInt(),
+                contexts.contextOf(killer).forMetric(StatisticsMetric.PVP_KILLS).key(), now()));
+        return true;
+    }
+
     public StatisticsContext contextOf(Player player) {
         return contexts.contextOf(player);
     }
