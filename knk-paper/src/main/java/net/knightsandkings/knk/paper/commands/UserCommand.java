@@ -48,6 +48,7 @@ public class UserCommand implements TabExecutor {
 
     private static final Logger LOGGER = Logger.getLogger(UserCommand.class.getName());
     private static final List<String> SUBCOMMANDS = List.of("statistics", "stats");
+    private static final String SETTINGS = "settings";
 
     private final Executor mainThread;
     private final UsersQueryApi usersQueryApi;
@@ -55,6 +56,8 @@ public class UserCommand implements TabExecutor {
     private final UserCache userCache;
     private final TitleBracketsDataAccess titleBrackets;
     private final Supplier<List<String>> onlinePlayerNames;
+    /** Opens the statistics privacy menu ({@code /stats settings}, KNG-34); null until wired. */
+    private volatile java.util.function.Consumer<Player> settingsOpener;
 
     public UserCommand(Executor mainThread, UsersQueryApi usersQueryApi, UsersDataAccess usersDataAccess,
                        UserCache userCache, TitleBracketsDataAccess titleBrackets,
@@ -67,10 +70,24 @@ public class UserCommand implements TabExecutor {
         this.onlinePlayerNames = onlinePlayerNames;
     }
 
+    /**
+     * Player statistics (KNG-34): {@code /stats settings} and {@code /user statistics settings} open the
+     * statistics privacy menu through {@code opener}. A player literally named "settings" can then
+     * only be looked up from the console.
+     */
+    public void setSettingsOpener(java.util.function.Consumer<Player> opener) {
+        this.settingsOpener = opener;
+    }
+
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (args.length == 2 && SETTINGS.equalsIgnoreCase(args[1]) && SUBCOMMANDS.contains(args[0].toLowerCase(Locale.ROOT))
+                && sender instanceof Player player && settingsOpener != null) {
+            settingsOpener.accept(player);
+            return true;
+        }
         if (args.length == 0 || !SUBCOMMANDS.contains(args[0].toLowerCase(Locale.ROOT)) || args.length > 2) {
-            sender.sendMessage(ChatColor.YELLOW + "Usage: /user statistics [player]" + ChatColor.GRAY + " (alias: /user stats)");
+            sender.sendMessage(ChatColor.YELLOW + "Usage: /user statistics [player|settings]" + ChatColor.GRAY + " (alias: /user stats)");
             return true;
         }
 
@@ -182,7 +199,7 @@ public class UserCommand implements TabExecutor {
             @Override
             public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
                 if (args.length > 1) {
-                    sender.sendMessage(ChatColor.YELLOW + "Usage: /stats [player]");
+                    sender.sendMessage(ChatColor.YELLOW + "Usage: /stats [player|settings]");
                     return true;
                 }
                 return UserCommand.this.onCommand(sender, command, label, withStatistics(args));
@@ -210,10 +227,13 @@ public class UserCommand implements TabExecutor {
         }
         if (args.length == 2 && SUBCOMMANDS.contains(args[0].toLowerCase(Locale.ROOT))) {
             String prefix = args[1].toLowerCase(Locale.ROOT);
-            return onlinePlayerNames.get().stream()
+            java.util.stream.Stream<String> names = onlinePlayerNames.get().stream()
                     .filter(name -> name.toLowerCase(Locale.ROOT).startsWith(prefix))
-                    .sorted(String.CASE_INSENSITIVE_ORDER)
-                    .toList();
+                    .sorted(String.CASE_INSENSITIVE_ORDER);
+            if (sender instanceof Player && settingsOpener != null && SETTINGS.startsWith(prefix)) {
+                return java.util.stream.Stream.concat(java.util.stream.Stream.of(SETTINGS), names).toList();
+            }
+            return names.toList();
         }
         return Collections.emptyList();
     }

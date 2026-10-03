@@ -191,6 +191,9 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.core.discovery.DiscoverySpool discoverySpool;
     private net.knightsandkings.knk.paper.discovery.DomainDiscoveryListener discoveryListener;
     private net.knightsandkings.knk.paper.menu.content.DiscoveriesMenuFeature discoveriesMenuFeature;
+    private net.knightsandkings.knk.paper.statistics.StatisticsService statisticsService;
+    private net.knightsandkings.knk.paper.statistics.StatisticsFlushTask statisticsFlushTask;
+    private net.knightsandkings.knk.paper.menu.content.StatisticsVisibilityMenuFeature statisticsVisibilityMenuFeature;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private PermissionsDataAccess permissionsDataAccess;
     private KnkPermissible knkPermissible;
@@ -615,6 +618,7 @@ public class KnKPlugin extends JavaPlugin {
             getServer().getPluginManager().registerEvents(salaryPayoutScheduler, this);
             salaryPayoutScheduler.start();
             startDomainDiscovery();
+            startStatistics();
             // Rank changes made outside the plugin (web app, expiring temporary rank) show right away.
             if (playerNotificationPoller != null) {
                 playerNotificationPoller.setRankChangedHandler(userAdminService::resyncDisplay);
@@ -650,6 +654,13 @@ public class KnKPlugin extends JavaPlugin {
                     MenuService.mainThreadExecutor(this));
                 playerNotificationPoller.setCurrencyAlertHandler(alertNotifier::handle);
             }
+            // Player statistics (KNG-34): the privacy menu is registered even with statistics.enabled
+            // false - choosing who sees your statistics records nothing.
+            this.statisticsVisibilityMenuFeature = new net.knightsandkings.knk.paper.menu.content.StatisticsVisibilityMenuFeature(
+                apiClient.getStatisticsApi(), cacheManager.getUserCache(), MenuService.mainThreadExecutor(this),
+                java.time.Clock.systemUTC()
+            );
+            getServer().getPluginManager().registerEvents(statisticsVisibilityMenuFeature, this);
             List<MenuFeature> menuFeatures = List.of(
                 registries -> {
                     MenuVariableContext.registerDefaults(registries.variables());
@@ -677,7 +688,8 @@ public class KnKPlugin extends JavaPlugin {
                 new net.knightsandkings.knk.paper.menu.content.TeleportMenuFeature(() -> teleportMenuParts),
                 // Siege Phase 8b: the siege menus. SiegeService is created later (initializeSiege),
                 // so the feature looks it up on every call.
-                new net.knightsandkings.knk.paper.siege.SiegeMenuFeature(() -> siegeService)
+                new net.knightsandkings.knk.paper.siege.SiegeMenuFeature(() -> siegeService),
+                statisticsVisibilityMenuFeature
             );
             menuFeatures.forEach(feature -> feature.registerMenuHandlers(menuRegistries));
 
@@ -965,6 +977,11 @@ public class KnKPlugin extends JavaPlugin {
             discoveryFlushTask.stop();
             discoveryFlushTask.spoolEverything();
         }
+        if (statisticsFlushTask != null) {
+            // Sessions end with ServerStop; the last batches are sent (bounded wait) or spooled.
+            statisticsFlushTask.stop();
+            statisticsFlushTask.shutdown();
+        }
         if (cacheManager != null) {
             getLogger().info("Logging final cache metrics...");
             cacheManager.logMetrics();
@@ -988,6 +1005,74 @@ public class KnKPlugin extends JavaPlugin {
             privateMessageCommandLogFilter.uninstall();
         }
         getLogger().info("KnightsAndKings Plugin Disabled!");
+    }
+
+    /**
+     * Player statistics (KNG-34, knk-workspace docs/specs/player-statistics IMPLEMENTATION_PLAN.md §5):
+     * sessions, active/AFK playtime, distance and falls, sent in batches off the main thread and
+     * spooled while the API can't take them. {@code statistics.enabled: false} registers no listener
+     * or task, and {@code /afk} only answers that AFK is disabled. Needs the user cache, so it starts
+     * after the salary scheduler; the Siege service (context) is looked up on every call.
+     */
+    private void startStatistics() {
+        KnkConfig.StatisticsConfig statisticsConfig = config.statistics();
+        if (!statisticsConfig.enabled()) {
+            registerTabCommand("afk", new net.knightsandkings.knk.paper.commands.AfkCommand(null, false));
+            getLogger().info("Player statistics disabled (statistics.enabled: false)");
+            return;
+        }
+        java.time.Clock clock = java.time.Clock.systemUTC();
+        apiClient.setStatisticsSource(getServer().getName() + " " + getServer().getPort(), getPluginMeta().getVersion());
+        net.knightsandkings.knk.core.statistics.StatisticsSpool statisticsSpool = new net.knightsandkings.knk.core.statistics.StatisticsSpool(
+            new java.io.File(getDataFolder(), statisticsConfig.spoolDirectory()).toPath(), getLogger()
+        );
+        net.knightsandkings.knk.core.statistics.StatisticsRecorder statisticsRecorder = new net.knightsandkings.knk.core.statistics.StatisticsRecorder(
+            apiClient.getStatisticsApi(), net.knightsandkings.knk.core.dataaccess.RetryPolicy.defaultPolicy(), statisticsSpool, getLogger()
+        );
+        this.statisticsService = new net.knightsandkings.knk.paper.statistics.StatisticsService(
+            statisticsConfig, new net.knightsandkings.knk.core.statistics.StatisticsBuffer(),
+            net.knightsandkings.knk.paper.statistics.StatisticsContextResolver.siege(() -> siegeService),
+            new net.knightsandkings.knk.paper.statistics.AfkPresentation(
+                statisticsConfig.afk().tabListMarker(), statisticsConfig.afk().markerText()),
+            clock
+        );
+        // A player who joined while the API was down: their user id is looked up by UUID on the replay timer.
+        this.statisticsFlushTask = new net.knightsandkings.knk.paper.statistics.StatisticsFlushTask(
+            this, statisticsService, statisticsRecorder,
+            uuid -> usersQueryApi.getByUuid(uuid).thenApply(summary -> {
+                if (summary == null) {
+                    return java.util.Optional.<Integer>empty();
+                }
+                cacheManager.getUserCache().put(summary);
+                return java.util.Optional.ofNullable(summary.id());
+            })
+        );
+        var sessionListener = new net.knightsandkings.knk.paper.statistics.StatisticsSessionListener(statisticsService);
+        getServer().getPluginManager().registerEvents(sessionListener, this);
+        if (statisticsConfig.afk().enabled()) {
+            getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.statistics.AfkActivityListener(
+                statisticsService, task -> getServer().getScheduler().runTask(this, task), clock), this);
+        }
+        if (statisticsConfig.movement().enabled()) {
+            getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.statistics.MovementStatisticsListener(
+                statisticsService, statisticsConfig.movement().maxSegmentBlocks()), this);
+        }
+        if (statisticsConfig.fall().enabled()) {
+            getServer().getPluginManager().registerEvents(
+                new net.knightsandkings.knk.paper.statistics.FallStatisticsListener(statisticsService), this);
+        }
+        registerTabCommand("afk", new net.knightsandkings.knk.paper.commands.AfkCommand(
+            statisticsService, statisticsConfig.afk().enabled() && statisticsConfig.afk().commandEnabled()));
+        statisticsFlushTask.start();
+        sessionListener.startOnlinePlayers(uuid -> cacheManager.getUserCache().getByUuid(uuid)
+            .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null));
+        getLogger().info("Player statistics started (flush every " + statisticsConfig.flushIntervalSeconds()
+            + " s, spool: " + statisticsSpool.directory() + ")");
+    }
+
+    /** Player statistics (KNG-34); null when statistics are disabled. Link 4's combat listeners record through it. */
+    public net.knightsandkings.knk.paper.statistics.StatisticsService getStatisticsService() {
+        return statisticsService;
     }
 
     /**
@@ -1615,6 +1700,14 @@ public class KnKPlugin extends JavaPlugin {
                 mainThread, usersQueryApi, usersDataAccess, cacheManager.getUserCache(), titleBracketsDataAccess,
                 () -> org.bukkit.Bukkit.getOnlinePlayers().stream().map(org.bukkit.entity.Player::getName).toList()
             );
+            // Player statistics (KNG-34): /stats settings opens the privacy menu (menuService starts later).
+            userCommand.setSettingsOpener(player -> {
+                if (menuService != null) {
+                    menuService.openMenu(player, net.knightsandkings.knk.paper.menu.content.StatisticsVisibilityMenuFeature.MENU_KEY);
+                } else {
+                    player.sendMessage(org.bukkit.ChatColor.RED + "Menus aren't available right now.");
+                }
+            });
             registerTabCommand("user", userCommand);
             registerTabCommand("stats", userCommand.statsShortcut());
         } else {

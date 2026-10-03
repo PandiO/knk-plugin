@@ -195,6 +195,38 @@ discovery:
     # Shown instead when discoveries made while the API was down are granted later
     replay-summary: "&bWhile the server was busy you discovered &a{count}&b place(s):"
 
+# Player statistics (KNG-34, knk-workspace docs/specs/player-statistics/IMPLEMENTATION_PLAN.md §5.1):
+# sessions/logins, active and AFK playtime, distance per mode and the highest survived fall,
+# buffered in memory and sent to the API in batches off the main thread. While the API can't take
+# them (down, 503 statistics disabled, API key mismatch) batches are spooled to disk and replayed.
+# enabled: false registers no statistics listener, task or command (/afk) - today's behaviour.
+# The privacy menu (/stats settings, Profile → Statistics privacy) works either way.
+statistics:
+  enabled: true
+  flush-interval-seconds: 60
+  # Entries per batch (the API takes at most 2000)
+  max-batch-entries: 2000
+  # Under the plugin folder; one file per undelivered batch
+  spool-directory: statistics-spool
+  replay-interval-seconds: 60
+  # No distance or fall statistics in these game modes (playtime still counts)
+  excluded-game-modes: [CREATIVE, SPECTATOR]
+  afk:
+    # false: every online second is active time; no /afk, no automatic AFK, no marker
+    enabled: true
+    # Automatic AFK after this long without looking around, walking (not in a vehicle or water),
+    # chatting, commands, building, interacting, inventory clicks, attacking or sneak/sprint toggles
+    idle-seconds: 300
+    command-enabled: true
+    tab-list-marker: true
+    marker-text: "&7[AFK]"
+  movement:
+    enabled: true
+    # A longer single move is a relocation, not travel
+    max-segment-blocks: 10.0
+  fall:
+    enabled: true
+
 # Player payments (currency ledger Phase 3, docs/specs/currency-payments/DESIGN.md §3.6). Every
 # limit that matters (min/max, daily caps, cooldown, confirmation threshold, who may send) lives in
 # the API's currency policy; these only shape the in-game experience.

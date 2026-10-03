@@ -158,7 +158,24 @@ class UserCommandTest {
         command.onCommand(alice, mock(Command.class), "user", new String[0]);
         command.onCommand(alice, mock(Command.class), "user", new String[]{"list"});
 
-        verify(alice, atLeastOnce()).sendMessage(contains("Usage: /user statistics [player]"));
+        verify(alice, atLeastOnce()).sendMessage(contains("Usage: /user statistics [player|settings]"));
+    }
+
+    @Test
+    void statsSettingsOpensThePrivacyMenuOnceWired() {
+        Player alice = player("Alice");
+        java.util.List<Player> opened = new java.util.ArrayList<>();
+        when(usersDataAccess.getByUsernameAsync("settings")).thenReturn(new CompletableFuture<>());
+
+        command.statsShortcut().onCommand(alice, mock(Command.class), "stats", new String[]{"settings"});
+        verify(usersDataAccess).getByUsernameAsync("settings"); // not wired yet: a player name
+
+        command.setSettingsOpener(opened::add);
+        command.statsShortcut().onCommand(alice, mock(Command.class), "stats", new String[]{"Settings"});
+        command.onCommand(alice, mock(Command.class), "user", new String[]{"statistics", "settings"});
+
+        assertEquals(List.of(alice, alice), opened);
+        assertEquals(List.of("settings"), command.statsShortcut().onTabComplete(alice, mock(Command.class), "stats", new String[]{"se"}));
     }
 
     @Test

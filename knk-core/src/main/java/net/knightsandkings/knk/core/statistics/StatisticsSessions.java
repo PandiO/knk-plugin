@@ -55,7 +55,6 @@ public final class StatisticsSessions {
         double swim;
         double flying;
         double vehicle;
-        Instant lastMovement;
 
         Session(UUID playerId, int userId, UUID sessionKey, Instant startedAt, Duration idle) {
             this.playerId = playerId;
@@ -232,8 +231,11 @@ public final class StatisticsSessions {
 
     // ===== facts =====
 
-    /** One movement segment (main thread, per move event - no allocation). */
-    public void addDistance(UUID playerId, MovementClassifier.Mode mode, double blocks, Instant now) {
+    /**
+     * One movement segment (main thread, per move event - no allocation). The totals are timestamped
+     * when they are flushed.
+     */
+    public void addDistance(UUID playerId, MovementClassifier.Mode mode, double blocks) {
         Session session = active.get(playerId);
         if (session == null || mode == null || !(blocks > 0)) {
             return;
@@ -247,7 +249,6 @@ public final class StatisticsSessions {
             case FLYING -> session.flying += blocks;
             case VEHICLE -> session.vehicle += blocks;
         }
-        session.lastMovement = now;
     }
 
     /** A counter of the player's session (summed per minute in the buffer). */
@@ -300,14 +301,10 @@ public final class StatisticsSessions {
             put(session.userId, held.metric(), held.context(), held.value(), held.at());
         }
         session.heldValues.clear();
-        flushMovement(session, session.endedAt != null ? session.endedAt : session.lastMovement);
+        flushMovement(session, session.endedAt != null ? session.endedAt : session.startedAt);
     }
 
-    private void flushMovement(Session session, Instant now) {
-        Instant at = session.lastMovement != null ? session.lastMovement : now;
-        if (at == null) {
-            return;
-        }
+    private void flushMovement(Session session, Instant at) {
         if (session.foot > 0) {
             buffer.addCounter(session.userId, StatisticsMetric.DISTANCE_FOOT, StatisticsContext.NONE, session.foot, at);
         }
@@ -324,7 +321,6 @@ public final class StatisticsSessions {
         session.swim = 0;
         session.flying = 0;
         session.vehicle = 0;
-        session.lastMovement = null;
     }
 
     private void put(int userId, StatisticsMetric metric, StatisticsContext context, double value, Instant at) {

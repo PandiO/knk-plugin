@@ -108,7 +108,8 @@ public class ConfigLoader {
         KnkConfig knkConfig = new KnkConfig(apiConfig, cacheConfig, accountConfig, messagesConfig,
             loadPrivateMessages(config.getConfigurationSection("private-messages")),
             loadTeleportSettings(config.getConfigurationSection("teleport")),
-            loadDiscovery(config.getConfigurationSection("discovery")));
+            loadDiscovery(config.getConfigurationSection("discovery")),
+            loadStatistics(config.getConfigurationSection("statistics")));
         knkConfig.validate();
         
         return knkConfig;
@@ -155,6 +156,47 @@ public class ConfigLoader {
             section.getInt("cooldown-seconds", defaults.cooldownSeconds()),
             section.getInt("max-incoming", defaults.maxIncoming()),
             section.getInt("price-coins", defaults.priceCoins())
+        );
+    }
+
+    /** Player statistics (KNG-34); every key has a default, so a missing section means "on, with defaults". */
+    static KnkConfig.StatisticsConfig loadStatistics(ConfigurationSection section) {
+        KnkConfig.StatisticsConfig defaults = KnkConfig.StatisticsConfig.defaults();
+        if (section == null) {
+            return defaults;
+        }
+        KnkConfig.StatisticsConfig.AfkConfig afkDefaults = defaults.afk();
+        ConfigurationSection afk = section.getConfigurationSection("afk");
+        KnkConfig.StatisticsConfig.AfkConfig afkConfig = afk == null ? afkDefaults
+            : new KnkConfig.StatisticsConfig.AfkConfig(
+                afk.getBoolean("enabled", afkDefaults.enabled()),
+                afk.getInt("idle-seconds", afkDefaults.idleSeconds()),
+                afk.getBoolean("command-enabled", afkDefaults.commandEnabled()),
+                afk.getBoolean("tab-list-marker", afkDefaults.tabListMarker()),
+                afk.getString("marker-text", afkDefaults.markerText())
+            );
+        ConfigurationSection movement = section.getConfigurationSection("movement");
+        KnkConfig.StatisticsConfig.MovementConfig movementConfig = movement == null ? defaults.movement()
+            : new KnkConfig.StatisticsConfig.MovementConfig(
+                movement.getBoolean("enabled", defaults.movement().enabled()),
+                movement.getDouble("max-segment-blocks", defaults.movement().maxSegmentBlocks())
+            );
+        ConfigurationSection fall = section.getConfigurationSection("fall");
+        KnkConfig.StatisticsConfig.FallConfig fallConfig = fall == null ? defaults.fall()
+            : new KnkConfig.StatisticsConfig.FallConfig(fall.getBoolean("enabled", defaults.fall().enabled()));
+        java.util.List<String> gameModes = section.contains("excluded-game-modes")
+            ? section.getStringList("excluded-game-modes")
+            : KnkConfig.StatisticsConfig.DEFAULT_EXCLUDED_GAME_MODES;
+        return new KnkConfig.StatisticsConfig(
+            section.getBoolean("enabled", defaults.enabled()),
+            section.getInt("flush-interval-seconds", defaults.flushIntervalSeconds()),
+            section.getInt("max-batch-entries", defaults.maxBatchEntries()),
+            section.getString("spool-directory", defaults.spoolDirectory()),
+            section.getInt("replay-interval-seconds", defaults.replayIntervalSeconds()),
+            KnkConfig.StatisticsConfig.parseGameModes(gameModes),
+            afkConfig,
+            movementConfig,
+            fallConfig
         );
     }
 

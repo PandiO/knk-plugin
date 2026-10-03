@@ -109,10 +109,10 @@ class StatisticsSessionsTest {
     @Test
     void distanceIsTotalledPerModeAndFlushedOnAccrue() {
         sessions.start(PLAYER, 42, T0);
-        sessions.addDistance(PLAYER, MovementClassifier.Mode.FOOT, 1.5, at(1));
-        sessions.addDistance(PLAYER, MovementClassifier.Mode.SWIM, 2.0, at(2));
-        sessions.addDistance(PLAYER, MovementClassifier.Mode.FLYING, 3.0, at(3));
-        sessions.addDistance(PLAYER, MovementClassifier.Mode.VEHICLE, 4.0, at(4));
+        sessions.addDistance(PLAYER, MovementClassifier.Mode.FOOT, 1.5);
+        sessions.addDistance(PLAYER, MovementClassifier.Mode.SWIM, 2.0);
+        sessions.addDistance(PLAYER, MovementClassifier.Mode.FLYING, 3.0);
+        sessions.addDistance(PLAYER, MovementClassifier.Mode.VEHICLE, 4.0);
         sessions.accrueAll(at(60));
 
         StatisticsBatch batch = drain();
@@ -123,7 +123,7 @@ class StatisticsSessionsTest {
         assertEquals("distance.swim", batch.counters().get(1).metric());
         assertEquals(2.0, batch.counters().get(1).value(), 1e-9);
         assertEquals("", batch.counters().get(0).context());
-        assertEquals(at(4), batch.counters().get(0).occurredAt());
+        assertEquals(at(60), batch.counters().get(0).occurredAt(), "timestamped at the flush");
 
         sessions.accrueAll(at(120));
         assertNull(drain(), "totals reset after a flush");
@@ -133,7 +133,7 @@ class StatisticsSessionsTest {
     void anUnknownUserIdHoldsEverythingUntilResolved() {
         sessions.start(PLAYER, 0, T0);
         sessions.activity(PLAYER, at(30));
-        sessions.addDistance(PLAYER, MovementClassifier.Mode.FOOT, 5, at(31));
+        sessions.addDistance(PLAYER, MovementClassifier.Mode.FOOT, 5);
         sessions.addRecord(PLAYER, StatisticsMetric.HIGHEST_FALL, StatisticsContext.NONE, 12.5, at(32));
         sessions.accrueAll(at(60));
         assertNull(drain(), "nothing is sent without a user id");
@@ -172,7 +172,7 @@ class StatisticsSessionsTest {
 
     @Test
     void factsWithoutASessionAreIgnored() {
-        sessions.addDistance(PLAYER, MovementClassifier.Mode.FOOT, 1, T0);
+        sessions.addDistance(PLAYER, MovementClassifier.Mode.FOOT, 1);
         sessions.addCounter(PLAYER, StatisticsMetric.PVE_KILLS, StatisticsContext.OPEN_WORLD, 1, T0);
         assertFalse(sessions.activity(PLAYER, T0));
         assertNull(drain());

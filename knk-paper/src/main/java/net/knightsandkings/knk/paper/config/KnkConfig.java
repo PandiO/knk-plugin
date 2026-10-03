@@ -20,23 +20,33 @@ public record KnkConfig(
     MessagesConfig messages,
     PrivateMessagesConfig privateMessages,
     TeleportSettings teleport,
-    DiscoveryConfig discovery
+    DiscoveryConfig discovery,
+    StatisticsConfig statistics
 ) {
     public KnkConfig {
         // No teleport: block (e.g. an older config.yml) means the DESIGN §3.11 defaults.
         teleport = teleport != null ? teleport : TeleportSettings.defaults();
+        // No statistics: block means "on, with defaults" (player statistics, KNG-34).
+        statistics = statistics != null ? statistics : StatisticsConfig.defaults();
     }
 
-    /** Without private-messages, teleport and discovery sections: their defaults. */
+    /** Without private-messages, teleport, discovery and statistics sections: their defaults. */
     public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages) {
         this(api, cache, account, messages, PrivateMessagesConfig.defaults(), TeleportSettings.defaults(),
-            DiscoveryConfig.defaults());
+            DiscoveryConfig.defaults(), StatisticsConfig.defaults());
     }
 
-    /** Without teleport and discovery sections: their defaults. */
+    /** Without teleport, discovery and statistics sections: their defaults. */
     public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
                      PrivateMessagesConfig privateMessages) {
-        this(api, cache, account, messages, privateMessages, TeleportSettings.defaults(), DiscoveryConfig.defaults());
+        this(api, cache, account, messages, privateMessages, TeleportSettings.defaults(), DiscoveryConfig.defaults(),
+            StatisticsConfig.defaults());
+    }
+
+    /** Without a statistics section: its defaults. */
+    public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
+                     PrivateMessagesConfig privateMessages, TeleportSettings teleport, DiscoveryConfig discovery) {
+        this(api, cache, account, messages, privateMessages, teleport, discovery, StatisticsConfig.defaults());
     }
 
     public record ApiConfig(
@@ -127,6 +137,7 @@ public record KnkConfig(
             throw new IllegalArgumentException("discovery configuration is required");
         }
         discovery.validate();
+        statistics.validate();
     }
     
     public record CacheConfig(
@@ -486,6 +497,107 @@ public record KnkConfig(
             }
             if (spoolDirectory == null || spoolDirectory.isBlank()) {
                 throw new IllegalArgumentException("discovery.spool-directory is required");
+            }
+        }
+    }
+
+    /**
+     * Player statistics (KNG-34, knk-workspace docs/specs/player-statistics IMPLEMENTATION_PLAN.md
+     * §5.1): sessions, active/AFK playtime, distance and falls, buffered and flushed to knk-web-api
+     * in batches off the main thread, spooled while the API can't take them. {@code enabled: false}
+     * registers no statistics listener, task or command ({@code /afk}) - today's behaviour.
+     *
+     * @param flushIntervalSeconds  how often accrued statistics are sent (one batch per interval)
+     * @param maxBatchEntries       entries per batch (the API takes at most 2,000)
+     * @param spoolDirectory        under the plugin folder; one file per undelivered batch
+     * @param replayIntervalSeconds how often the spool is replayed (at most one batch per second on average)
+     * @param excludedGameModes     no distance or fall statistics in these game modes (playtime still counts)
+     */
+    public record StatisticsConfig(
+        boolean enabled,
+        int flushIntervalSeconds,
+        int maxBatchEntries,
+        String spoolDirectory,
+        int replayIntervalSeconds,
+        Set<GameMode> excludedGameModes,
+        AfkConfig afk,
+        MovementConfig movement,
+        FallConfig fall
+    ) {
+        public static final List<String> DEFAULT_EXCLUDED_GAME_MODES = List.of("CREATIVE", "SPECTATOR");
+
+        /**
+         * AFK detection (DESIGN.md §F.2). {@code enabled: false}: every online second is active time,
+         * no {@code /afk}, no marker.
+         *
+         * @param idleSeconds   automatic AFK after this long without an activity signal
+         * @param markerText    appended to the tab-list name while AFK ({@code &} colour codes)
+         */
+        public record AfkConfig(boolean enabled, int idleSeconds, boolean commandEnabled, boolean tabListMarker,
+                                String markerText) {
+            public static AfkConfig defaults() {
+                return new AfkConfig(true, 300, true, true, "&7[AFK]");
+            }
+        }
+
+        /** Distance per mode (DESIGN.md §F.9); a segment longer than {@code maxSegmentBlocks} is not travel. */
+        public record MovementConfig(boolean enabled, double maxSegmentBlocks) {
+            public static MovementConfig defaults() {
+                return new MovementConfig(true, 10.0);
+            }
+        }
+
+        /** Highest survived fall (DESIGN.md §F.9). */
+        public record FallConfig(boolean enabled) {
+            public static FallConfig defaults() {
+                return new FallConfig(true);
+            }
+        }
+
+        public StatisticsConfig {
+            excludedGameModes = excludedGameModes == null ? Set.of() : Set.copyOf(excludedGameModes);
+            afk = afk == null ? AfkConfig.defaults() : afk;
+            movement = movement == null ? MovementConfig.defaults() : movement;
+            fall = fall == null ? FallConfig.defaults() : fall;
+        }
+
+        public static StatisticsConfig defaults() {
+            return new StatisticsConfig(true, 60, 2000, "statistics-spool", 60,
+                parseGameModes(DEFAULT_EXCLUDED_GAME_MODES), AfkConfig.defaults(), MovementConfig.defaults(), FallConfig.defaults());
+        }
+
+        /** Game mode names, any case; an unknown name is a config error. */
+        public static Set<GameMode> parseGameModes(List<String> names) {
+            if (names == null) {
+                return Set.of();
+            }
+            return names.stream().map(name -> {
+                try {
+                    return GameMode.valueOf(name.trim().toUpperCase(Locale.ROOT));
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException("statistics.excluded-game-modes: unknown game mode '" + name + "'");
+                }
+            }).collect(Collectors.toUnmodifiableSet());
+        }
+
+        public void validate() {
+            if (flushIntervalSeconds < 10) {
+                throw new IllegalArgumentException("statistics.flush-interval-seconds must be at least 10 (got: " + flushIntervalSeconds + ")");
+            }
+            if (maxBatchEntries < 10 || maxBatchEntries > 2000) {
+                throw new IllegalArgumentException("statistics.max-batch-entries must be between 10 and 2000 (got: " + maxBatchEntries + ")");
+            }
+            if (replayIntervalSeconds < 10) {
+                throw new IllegalArgumentException("statistics.replay-interval-seconds must be at least 10 (got: " + replayIntervalSeconds + ")");
+            }
+            if (spoolDirectory == null || spoolDirectory.isBlank()) {
+                throw new IllegalArgumentException("statistics.spool-directory is required");
+            }
+            if (afk.idleSeconds() < 30) {
+                throw new IllegalArgumentException("statistics.afk.idle-seconds must be at least 30 (got: " + afk.idleSeconds() + ")");
+            }
+            if (!(movement.maxSegmentBlocks() > 0)) {
+                throw new IllegalArgumentException("statistics.movement.max-segment-blocks must be positive (got: " + movement.maxSegmentBlocks() + ")");
             }
         }
     }
