@@ -51,7 +51,8 @@ public final class SiegeResultSpool {
 
     // ---- file format (flat, strings for enums and instants so it doesn't depend on Jackson modules) ----
 
-    record ParticipantFile(int userId, int siegeTeamId, int kills, int deaths, int highestKillStreak, int captures) {}
+    /** {@code leftAt} (KNG-34): null for a member present at the end, and in files written before it existed. */
+    record ParticipantFile(int userId, int siegeTeamId, int kills, int deaths, int highestKillStreak, int captures, String leftAt) {}
 
     record ObjectiveFile(int objectiveId, int finalHolderTeamId, Integer capturedByUserId, String capturedAt) {}
 
@@ -158,7 +159,7 @@ public final class SiegeResultSpool {
         Completion c = complete.completion();
         return new PendingFile(1, TYPE_COMPLETE, complete.matchId(), c.endReason().name(), c.winningAllianceGroup(),
                 c.participants().stream().map(p -> new ParticipantFile(p.userId(), p.siegeTeamId(), p.kills(), p.deaths(),
-                        p.highestKillStreak(), p.captures())).toList(),
+                        p.highestKillStreak(), p.captures(), p.leftAt() == null ? null : p.leftAt().toString())).toList(),
                 c.objectives().stream().map(o -> new ObjectiveFile(o.objectiveId(), o.finalHolderTeamId(), o.capturedByUserId(),
                         o.capturedAt() == null ? null : o.capturedAt().toString())).toList(),
                 now);
@@ -176,7 +177,8 @@ public final class SiegeResultSpool {
             throw new IllegalArgumentException("unknown pending result type " + f.type());
         }
         List<ParticipantResult> participants = f.participants() == null ? List.of() : f.participants().stream()
-                .map(p -> new ParticipantResult(p.userId(), p.siegeTeamId(), p.kills(), p.deaths(), p.highestKillStreak(), p.captures()))
+                .map(p -> new ParticipantResult(p.userId(), p.siegeTeamId(), p.kills(), p.deaths(), p.highestKillStreak(), p.captures(),
+                        p.leftAt() == null ? null : Instant.parse(p.leftAt())))
                 .toList();
         List<ObjectiveResult> objectives = f.objectives() == null ? List.of() : f.objectives().stream()
                 .map(o -> new ObjectiveResult(o.objectiveId(), o.finalHolderTeamId(), o.capturedByUserId(),

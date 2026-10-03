@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.api.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
@@ -36,7 +37,9 @@ public final class SiegeMatchDtos {
             @JsonProperty("kills") int kills,
             @JsonProperty("deaths") int deaths,
             @JsonProperty("highestKillStreak") int highestKillStreak,
-            @JsonProperty("captures") int captures
+            @JsonProperty("captures") int captures,
+            // KNG-34: only for a member who left early (reported for their stats); omitted otherwise.
+            @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("leftAt") String leftAt
     ) {}
 
     public record ObjectiveResult(

@@ -14,15 +14,26 @@ public final class KnkSiegeMatchRecords {
     /** A participant and the team they were split into, sent when the match starts. */
     public record Participant(int userId, int siegeTeamId) {}
 
-    /** A participant's final stats, sent with {@code complete}. */
+    /**
+     * A participant's final stats, sent with {@code complete}.
+     *
+     * @param leftAt null for a member present at the end; set for a member who left early and is reported
+     *               only for their stats (KNG-34 leaver fix - the server grants them no reward)
+     */
     public record ParticipantResult(
             int userId,
             int siegeTeamId,
             int kills,
             int deaths,
             int highestKillStreak,
-            int captures
-    ) {}
+            int captures,
+            Instant leftAt
+    ) {
+        /** A member present at the end. */
+        public ParticipantResult(int userId, int siegeTeamId, int kills, int deaths, int highestKillStreak, int captures) {
+            this(userId, siegeTeamId, kills, deaths, highestKillStreak, captures, null);
+        }
+    }
 
     /**
      * One capture (or, with no capture, the final holder) of an objective. With recapture enabled an
