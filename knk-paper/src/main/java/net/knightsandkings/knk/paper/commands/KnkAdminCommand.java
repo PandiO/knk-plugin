@@ -25,6 +25,7 @@ import net.knightsandkings.knk.paper.menu.MenuService;
 import net.knightsandkings.knk.paper.tasks.GateDoorRegionCaptureHandler;
 import net.knightsandkings.knk.paper.tasks.WorldTaskHandlerRegistry;
 import net.knightsandkings.knk.paper.cache.CacheManager;
+import net.knightsandkings.knk.paper.commands.support.VisiblePlayers;
 import net.knightsandkings.knk.paper.user.UserManager;
 import org.bukkit.Bukkit;
 import org.bukkit.NamespacedKey;
@@ -57,6 +58,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
     private final java.util.Map<String, java.util.function.BiFunction<CommandSender, String[], List<String>>> extraTabCompleters =
             new java.util.HashMap<>();
     private final HelpSubcommand helpSubcommand;
+    private final VisiblePlayers visiblePlayers = VisiblePlayers.bukkit();
     /** /knk currency (currency Phase 4); null when the currency service isn't available. */
     private CurrencyAdminCommand currencyAdminCommand;
         private final Plugin plugin;
@@ -487,26 +489,94 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                         return filterByPrefix(rootCommands, args[0]);
                 }
 
-                String root = args[0].toLowerCase(Locale.ROOT);
+                String enteredRoot = args[0].toLowerCase(Locale.ROOT);
+                String root = registry.get(enteredRoot)
+                                .map(registered -> registered.metadata().name().toLowerCase(Locale.ROOT))
+                                .orElse(enteredRoot);
                 var extra = extraTabCompleters.get(root);
                 if (extra != null) {
                         return extra.apply(sender, Arrays.copyOfRange(args, 1, args.length));
                 }
                 if ("user".equals(root)) {
-                        return completeUserSubcommand(Arrays.copyOfRange(args, 1, args.length));
+                        return completeUserSubcommand(sender, Arrays.copyOfRange(args, 1, args.length));
                 }
                 if ("currency".equals(root) && currencyAdminCommand != null) {
                         return currencyAdminCommand.complete(sender, Arrays.copyOfRange(args, 1, args.length));
                 }
-                if (!"item".equals(root)) {
-                        return Collections.emptyList();
+                if ("item".equals(root)) {
+                        return completeItemSubcommand(Arrays.copyOfRange(args, 1, args.length));
                 }
-
-                return completeItemSubcommand(Arrays.copyOfRange(args, 1, args.length));
+                return completeBuiltIn(sender, root, Arrays.copyOfRange(args, 1, args.length));
                 } catch (Exception ex) {
                         plugin.getLogger().warning("Tab completion failed for /knk: " + ex.getMessage());
                         return Collections.emptyList();
                 }
+        }
+
+        private List<String> completeBuiltIn(CommandSender sender, String root, String[] args) {
+                if (args.length == 0) return List.of();
+                String current = args[args.length - 1];
+                if (args.length == 1) {
+                        return switch (root) {
+                                case "help" -> filterByPrefix(registry.listAvailable(sender).stream()
+                                                .map(command -> command.metadata().name()).toList(), current);
+                                case "cache" -> filterByPrefix(List.of("refresh", "reload"), current);
+                                case "clans" -> filterByPrefix(List.of("list", "info", "banner", "design"), current);
+                                case "towns", "districts", "streets" -> filterByPrefix(List.of("list"), current);
+                                case "locations" -> filterByPrefix(List.of("list"), current);
+                                case "location" -> filterByPrefix(List.of("here"), current);
+                                case "itemblueprints" -> filterByPrefix(List.of("list", "search", "get", "give"), current);
+                                case "menu" -> filterByPrefix(List.of("open", "page", "search", "filter"), current);
+                                case "tasks" -> filterByPrefix(List.of("Pending", "Claimed", "InProgress", "Completed", "Failed"), current);
+                                case "itemscan", "kitscan" -> filterByPrefix(List.of("claim"), current);
+                                case "gate" -> filterByPrefix(List.of("open", "close", "info", "list", "passthrough", "admin", "door", "help"), current);
+                                case "tp" -> visiblePlayers.completeOthers(sender, current);
+                                default -> List.of();
+                        };
+                }
+                if ("itemblueprints".equals(root)) {
+                        String sub = args[0].toLowerCase(Locale.ROOT);
+                        if (args.length == 2 && "search".equals(sub)) {
+                                return filterByPrefix(List.of("id", "name", "displayName"), current);
+                        }
+                        if (args.length == 3 && "give".equals(sub)) {
+                                return visiblePlayers.complete(sender, current);
+                        }
+                        if (("list".equals(sub) && args.length == 2)
+                                        || ("search".equals(sub) && args.length == 4)) {
+                                return filterByPrefix(List.of("1", "2", "3", "4", "5"), current);
+                        }
+                        if (("list".equals(sub) && args.length == 3)
+                                        || ("search".equals(sub) && args.length == 5)) {
+                                return filterByPrefix(List.of("10", "25", "50", "100"), current);
+                        }
+                }
+                if ("menu".equals(root)) {
+                        if (args.length == 2 && "page".equalsIgnoreCase(args[0])) {
+                                return filterByPrefix(List.of("next", "prev"), current);
+                        }
+                        if (args.length >= 3 && ("search".equalsIgnoreCase(args[0]) || "filter".equalsIgnoreCase(args[0]))) {
+                                return filterByPrefix(List.of("clear"), current);
+                        }
+                }
+                if ("gate".equals(root)) {
+                        if (args.length == 2 && "passthrough".equalsIgnoreCase(args[0])) {
+                                return filterByPrefix(List.of("default", "instant", "teleport"), current);
+                        }
+                        if (args.length == 2 && "admin".equalsIgnoreCase(args[0])) {
+                                return filterByPrefix(List.of("health", "repair", "tp", "active", "invincible"), current);
+                        }
+                        if (args.length == 2 && "door".equalsIgnoreCase(args[0])) {
+                                return filterByPrefix(List.of("capture", "redefine"), current);
+                        }
+                        if (args.length >= 3 && "door".equalsIgnoreCase(args[0])) {
+                                return filterByPrefix(List.of("closed", "opened"), current);
+                        }
+                }
+                if ("tp".equals(root) && args.length == 2) {
+                        return filterByPrefix(List.of("-s"), current);
+                }
+                return List.of();
         }
 
         // /knk item rename|lore|enchantments - itemArgs is args with "item" already stripped, so
@@ -740,21 +810,24 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
 
         // /knk user <player> info|coins|gems|xp <set|add|remove> <amount> - userArgs is args
         // with "user" already stripped, so userArgs[0] is the player name.
-        private List<String> completeUserSubcommand(String[] userArgs) {
+        private List<String> completeUserSubcommand(CommandSender sender, String[] userArgs) {
                 if (userArgs.length == 0) {
                         return Collections.emptyList();
                 }
                 if (userArgs.length == 1) {
-                        List<String> onlineNames = Bukkit.getOnlinePlayers().stream()
-                                        .map(Player::getName)
-                                        .toList();
-                        return filterByPrefix(onlineNames, userArgs[0]);
+                        return visiblePlayers.complete(sender, userArgs[0]);
                 }
                 if (userArgs.length == 2) {
-                        return filterByPrefix(List.of("info", "coins", "gems", "xp", "history"), userArgs[1]);
+                        return filterByPrefix(List.of("info", "coins", "gems", "xp", "history", "group", "perm"), userArgs[1]);
                 }
                 if (userArgs.length == 3 && "history".equalsIgnoreCase(userArgs[1])) {
                         return filterByPrefix(List.of("coins", "gems", "xp"), userArgs[2]);
+                }
+                if (userArgs.length == 3 && "group".equalsIgnoreCase(userArgs[1])) {
+                        return filterByPrefix(List.of("add", "remove"), userArgs[2]);
+                }
+                if (userArgs.length == 3 && "perm".equalsIgnoreCase(userArgs[1])) {
+                        return filterByPrefix(List.of("grant", "revoke"), userArgs[2]);
                 }
                 if (userArgs.length == 3 && !"info".equalsIgnoreCase(userArgs[1])) {
                         return filterByPrefix(List.of("set", "add", "remove"), userArgs[2]);

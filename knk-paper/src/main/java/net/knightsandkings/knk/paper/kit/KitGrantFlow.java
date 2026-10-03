@@ -65,11 +65,16 @@ public final class KitGrantFlow {
 
     /** Checks a {@code knk.kit.*} node through {@link KnkPermissible}; tells the player when denied. */
     public boolean requirePermission(Player player, String node) {
-        if (knkPermissible.hasPermission(player, node)) {
+        if (hasPermission(player, node)) {
             return true;
         }
         player.sendMessage(ChatColor.RED + "You don't have permission to do that.");
         return false;
+    }
+
+    /** Cache-only permission check for UI/tab visibility; unlike requirePermission, sends no denial message. */
+    public boolean hasPermission(Player player, String node) {
+        return knkPermissible.hasPermission(player, node);
     }
 
     /**

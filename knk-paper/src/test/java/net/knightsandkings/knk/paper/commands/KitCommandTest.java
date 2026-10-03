@@ -4,6 +4,7 @@ import net.knightsandkings.knk.core.dataaccess.KitsDataAccess;
 import net.knightsandkings.knk.core.domain.common.Page;
 import net.knightsandkings.knk.core.domain.item.KnkKit;
 import net.knightsandkings.knk.paper.kit.KitGrantFlow;
+import net.knightsandkings.knk.paper.commands.support.VisiblePlayers;
 import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.entity.Player;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -24,6 +26,7 @@ import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Content port CP2: {@code /kit get|purchase} delegate to the same {@link KitGrantFlow} the menu uses. */
 class KitCommandTest {
@@ -93,5 +96,32 @@ class KitCommandTest {
         run("get", "Starter");
 
         verify(kits, never()).searchAsync(any());
+    }
+
+    @Test
+    void tabCompletionIsPermissionFilteredAndUsesVisiblePlayersAndKitNames() {
+        Player bob = mock(Player.class);
+        when(player.getUniqueId()).thenReturn(UUID.randomUUID());
+        when(bob.getUniqueId()).thenReturn(UUID.randomUUID());
+        when(bob.getName()).thenReturn("Bob");
+        when(player.canSee(bob)).thenReturn(true);
+        when(flow.hasPermission(player, "knk.kit.get")).thenReturn(true);
+        when(flow.hasPermission(player, "knk.kit.give")).thenReturn(true);
+        KnkKit starter = new KnkKit(7, "Starter", null, null, null, null, null, null, null, List.of(),
+                null, null, null, false, 0, null, null, false, null);
+        when(kits.listAsync(1, 100)).thenReturn(
+                CompletableFuture.completedFuture(new Page<>(List.of(starter), 1, 1, 100)));
+        VisiblePlayers visible = new VisiblePlayers(name -> bob, uuid -> bob, () -> List.of(player, bob));
+        KitCommand completing = new KitCommand(plugin, kits, flow, visible);
+        Command bukkitCommand = mock(Command.class);
+
+        assertEquals(List.of("get", "give"),
+                completing.onTabComplete(player, bukkitCommand, "kit", new String[]{"g"}));
+        assertEquals(List.of("Bob"),
+                completing.onTabComplete(player, bukkitCommand, "kit", new String[]{"give", "b"}));
+        assertEquals(List.of("Starter"),
+                completing.onTabComplete(player, bukkitCommand, "kit", new String[]{"get", "s"}));
+        assertEquals(List.of(),
+                completing.onTabComplete(player, bukkitCommand, "kit", new String[]{"purchase", "s"}));
     }
 }

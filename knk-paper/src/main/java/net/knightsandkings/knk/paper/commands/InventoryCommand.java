@@ -129,7 +129,7 @@ public class InventoryCommand implements TabExecutor {
         }
         String sub = args[0].toLowerCase(Locale.ROOT);
         if (args.length == 2 && (OPEN_ALIASES.contains(sub) || CLEAR.equals(sub))) {
-            return support.completePlayers(args[1]);
+            return support.completeKnownPlayers(sender, args[1]);
         }
         if (args.length == 3 && CLEAR.equals(sub)) {
             return CONFIRM.startsWith(args[2].toLowerCase(Locale.ROOT)) ? List.of(CONFIRM) : Collections.emptyList();

@@ -2,6 +2,7 @@ package net.knightsandkings.knk.core.cache;
 
 import java.time.Duration;
 import java.util.UUID;
+import java.util.List;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
 
 /**
@@ -36,6 +37,13 @@ public class UserCache extends BaseCache<UUID, UserSummary> {
             return;
         }
         put(user.uuid(), user);
+    }
+
+    /** Known usernames currently retained by the cache, including stale entries (tab completion). */
+    public List<String> usernamesSnapshot() {
+        return primary.valuesSnapshot().stream().map(UserSummary::username)
+                .filter(name -> name != null && !name.isBlank())
+                .distinct().sorted(String.CASE_INSENSITIVE_ORDER).toList();
     }
 
     /**

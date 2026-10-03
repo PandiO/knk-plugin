@@ -22,6 +22,7 @@ import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
+import net.knightsandkings.knk.paper.commands.support.VisiblePlayers;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -321,14 +322,18 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
-            return filter(Stream.of("join", "leave", "menu", "info", "vote", "spawn", "skip", "help", "admin"), args[0]);
+            Stream<String> player = canSuggest(sender, SiegeService.PERMISSION_PLAY)
+                    ? Stream.of("join", "leave", "menu", "info", "vote", "spawn") : Stream.empty();
+            Stream<String> skip = canSuggest(sender, SiegeService.PERMISSION_SKIP) ? Stream.of("skip") : Stream.empty();
+            Stream<String> admin = canSuggestAnyAdmin(sender) ? Stream.of("admin") : Stream.empty();
+            return filter(Stream.of(player, skip, admin, Stream.of("help")).flatMap(s -> s), args[0]);
         }
         String sub = args[0].toLowerCase(Locale.ROOT);
         if (args.length == 2) {
             return switch (sub) {
                 case "join", "info", "skip" -> filter(service.lobbies().stream().map(SiegeLobbyRuntime::key), args[1]);
                 case "vote" -> filter(Stream.concat(Stream.of("random"), voteNames(sender)), args[1]);
-                case "admin" -> filter(Stream.of("list", "start", "stop", "skip", "kick", "reload", "manage"), args[1]);
+                case "admin" -> filter(adminActions(sender), args[1]);
                 default -> List.of();
             };
         }
@@ -339,7 +344,8 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
             }
             if (adminSub.equals("kick")) {
                 return filter(service.lobbies().stream().flatMap(rt -> rt.members().stream())
-                        .map(Bukkit::getPlayer).filter(p -> p != null).map(Player::getName), args[2]);
+                        .map(Bukkit::getPlayer).filter(p -> p != null)
+                        .filter(p -> VisiblePlayers.canSee(sender, p)).map(Player::getName), args[2]);
             }
         }
         return List.of();
@@ -351,6 +357,28 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
                 .flatMap(rt -> rt.machine().candidates().stream())
                 .map(SiegeCommand::scenarioName)
                 .map(n -> n.split(" ")[0]);
+    }
+
+    private boolean canSuggest(CommandSender sender, String node) {
+        return !(sender instanceof Player player) || service.hasPermission(player, node);
+    }
+
+    private boolean canSuggestAnyAdmin(CommandSender sender) {
+        return canSuggest(sender, SiegeService.PERMISSION_ADMIN_LIST)
+                || canSuggest(sender, SiegeService.PERMISSION_ADMIN_CONTROL)
+                || canSuggest(sender, SiegeService.PERMISSION_ADMIN_RELOAD)
+                || canSuggest(sender, SiegeService.PERMISSION_ADMIN_MANAGE);
+    }
+
+    private Stream<String> adminActions(CommandSender sender) {
+        Stream.Builder<String> actions = Stream.builder();
+        if (canSuggest(sender, SiegeService.PERMISSION_ADMIN_LIST)) actions.add("list");
+        if (canSuggest(sender, SiegeService.PERMISSION_ADMIN_CONTROL)) {
+            actions.add("start").add("stop").add("skip").add("kick");
+        }
+        if (canSuggest(sender, SiegeService.PERMISSION_ADMIN_RELOAD)) actions.add("reload");
+        if (canSuggest(sender, SiegeService.PERMISSION_ADMIN_MANAGE)) actions.add("manage");
+        return actions.build();
     }
 
     private static List<String> filter(Stream<String> options, String prefix) {

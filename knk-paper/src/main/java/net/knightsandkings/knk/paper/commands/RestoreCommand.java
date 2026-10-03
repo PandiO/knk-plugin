@@ -166,7 +166,7 @@ public class RestoreCommand implements TabExecutor {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
-            return support.completePlayers(args[0], ALL);
+            return support.completePlayers(sender, args[0], ALL);
         }
         return Collections.emptyList();
     }

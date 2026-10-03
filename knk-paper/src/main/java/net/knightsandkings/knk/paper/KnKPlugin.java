@@ -1230,9 +1230,12 @@ public class KnKPlugin extends JavaPlugin {
                 playerCurrencyService
             );
             if (managedRegions != null) {
+                var regionsCommand = new net.knightsandkings.knk.paper.commands.RegionsAdminCommand(managedRegions, this);
                 knkAdminCommand.registerSubcommand(
                     net.knightsandkings.knk.paper.commands.RegionsAdminCommand.metadata(),
-                    new net.knightsandkings.knk.paper.commands.RegionsAdminCommand(managedRegions, this)::execute);
+                    regionsCommand::execute,
+                    (sender, args) -> args.length == 1 && "repair".startsWith(args[0].toLowerCase(java.util.Locale.ROOT))
+                        ? java.util.List.of("repair") : java.util.List.of());
             }
             if (lootboxAdminCommand != null) {
                 var lootboxAdmin = lootboxAdminCommand;
@@ -1250,23 +1253,35 @@ public class KnKPlugin extends JavaPlugin {
             }
             if (userAdminService != null) {
                 // Domain discovery (KNG-20): /knk discovery list|reset|status, node knk.admin.discovery.
+                var discoveryCommand = new net.knightsandkings.knk.paper.commands.DiscoveryAdminCommand(
+                    apiClient.getDiscoveriesApi(), userAdminService, MenuService.mainThreadExecutor(this),
+                    player -> cacheManager.getUserCache().getStale(player.getUniqueId())
+                        .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null),
+                    (player, node) -> knkPermissible != null && knkPermissible.hasPermission(player, node),
+                    () -> discoveryTracker, () -> discoverySpool,
+                    uuid -> {
+                        org.bukkit.entity.Player target = org.bukkit.Bukkit.getPlayer(uuid);
+                        if (target != null) {
+                            afterDiscoveryReset(target);
+                        } else if (discoveriesMenuFeature != null) {
+                            discoveriesMenuFeature.invalidate(uuid);
+                        }
+                    }
+                );
                 knkAdminCommand.registerSubcommand(
                     net.knightsandkings.knk.paper.commands.DiscoveryAdminCommand.metadata(),
-                    new net.knightsandkings.knk.paper.commands.DiscoveryAdminCommand(
-                        apiClient.getDiscoveriesApi(), userAdminService, MenuService.mainThreadExecutor(this),
-                        player -> cacheManager.getUserCache().getStale(player.getUniqueId())
-                            .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null),
-                        (player, node) -> knkPermissible != null && knkPermissible.hasPermission(player, node),
-                        () -> discoveryTracker, () -> discoverySpool,
-                        uuid -> {
-                            org.bukkit.entity.Player target = org.bukkit.Bukkit.getPlayer(uuid);
-                            if (target != null) {
-                                afterDiscoveryReset(target);
-                            } else if (discoveriesMenuFeature != null) {
-                                discoveriesMenuFeature.invalidate(uuid);
-                            }
+                    discoveryCommand,
+                    (sender, args) -> {
+                        if (args.length == 1) {
+                            String prefix = args[0].toLowerCase(java.util.Locale.ROOT);
+                            return java.util.List.of("list", "reset", "status").stream()
+                                .filter(value -> value.startsWith(prefix)).toList();
                         }
-                    )
+                        if (args.length == 2 && ("list".equalsIgnoreCase(args[0]) || "reset".equalsIgnoreCase(args[0]))) {
+                            return visiblePlayers.complete(sender, args[1]);
+                        }
+                        return java.util.List.of();
+                    }
                 );
             }
             knkCommand.setExecutor(knkAdminCommand);
@@ -1278,14 +1293,16 @@ public class KnKPlugin extends JavaPlugin {
 
         PluginCommand accountCommand = getCommand("account");
         if (accountCommand != null) {
-            accountCommand.setExecutor(new AccountCommandRegistry(
+            AccountCommandRegistry executor = new AccountCommandRegistry(
                 this,
                 userManager,
                 chatCaptureManager,
                 userAccountApi,
                 config,
                 cooldownManager
-            ));
+            );
+            accountCommand.setExecutor(executor);
+            accountCommand.setTabCompleter(executor);
             getLogger().info("Registered /account command with cooldown management");
         } else {
             getLogger().warning("Failed to register /account command - not defined in plugin.yml?");
@@ -1294,8 +1311,8 @@ public class KnKPlugin extends JavaPlugin {
         registerModeCommand("ownermode", ActiveMode.OWNER);
         registerModeCommand("staffmode", ActiveMode.STAFF);
 
-        registerSimpleCommand("freeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(userAdminService, true));
-        registerSimpleCommand("unfreeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(userAdminService, false));
+        registerTabCommand("freeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(userAdminService, true, visiblePlayers));
+        registerTabCommand("unfreeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(userAdminService, false, visiblePlayers));
         registerSimpleCommand("staffchat", new net.knightsandkings.knk.paper.commands.StaffChatCommand());
         registerTabCommand("msg", new net.knightsandkings.knk.paper.commands.MessageCommand(messagingService, visiblePlayers));
         registerTabCommand("reply", new net.knightsandkings.knk.paper.commands.ReplyCommand(messagingService));
@@ -1306,10 +1323,11 @@ public class KnKPlugin extends JavaPlugin {
             spyService, getLogger()));
         registerIgnoreCommands();
 
-        registerSimpleCommand("kit", new net.knightsandkings.knk.paper.commands.KitCommand(
+        registerTabCommand("kit", new net.knightsandkings.knk.paper.commands.KitCommand(
             this,
             kitsDataAccess,
-            kitGrantFlow
+            kitGrantFlow,
+            visiblePlayers
         ));
 
         if (lootboxCommand != null) {
@@ -1429,7 +1447,8 @@ public class KnKPlugin extends JavaPlugin {
         pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.BackDeathListener(backService), this);
 
         var support = new net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport(
-            knkPermissible, mainThread, org.bukkit.Bukkit::getPlayerExact, org.bukkit.Bukkit::getOnlinePlayers
+            knkPermissible, mainThread, org.bukkit.Bukkit::getPlayerExact, org.bukkit.Bukkit::getOnlinePlayers,
+            () -> cacheManager.getUserCache().usernamesSnapshot()
         );
         // Same rank check as /freeze, /inventory and /knk user (console and knk.admin.user.manage.all pass).
         net.knightsandkings.knk.paper.commands.support.TargetRankCheck rankCheck = (sender, targetName, onAllowed) ->
@@ -1613,7 +1632,7 @@ public class KnKPlugin extends JavaPlugin {
         if (usersQueryApi != null && usersDataAccess != null && titleBracketsDataAccess != null) {
             var userCommand = new net.knightsandkings.knk.paper.commands.UserCommand(
                 mainThread, usersQueryApi, usersDataAccess, cacheManager.getUserCache(), titleBracketsDataAccess,
-                () -> org.bukkit.Bukkit.getOnlinePlayers().stream().map(org.bukkit.entity.Player::getName).toList()
+                visiblePlayers
             );
             registerTabCommand("user", userCommand);
             registerTabCommand("stats", userCommand.statsShortcut());
@@ -1739,6 +1758,7 @@ public class KnKPlugin extends JavaPlugin {
             this.lootboxAdminCommand.setOpening(opening);
             this.lootboxAdminCommand.setOnlinePlayerNames(() -> org.bukkit.Bukkit.getOnlinePlayers().stream()
                 .map(org.bukkit.entity.Player::getName).sorted(String.CASE_INSENSITIVE_ORDER).toList());
+            this.lootboxAdminCommand.setVisiblePlayerCompletion(visiblePlayers::complete);
             this.lootboxCommand = new net.knightsandkings.knk.paper.commands.LootboxCommand(
                 runtime::config, queryApi, permission, mainThread);
             this.lootboxCommand.setFreshPermission(freshPermission);
@@ -1806,6 +1826,9 @@ public class KnKPlugin extends JavaPlugin {
         PluginCommand pluginCommand = getCommand(name);
         if (pluginCommand != null) {
             pluginCommand.setExecutor(executor);
+            // Suppress Bukkit's default "all online players for every argument" fallback. Commands
+            // registered here intentionally accept no completable arguments.
+            pluginCommand.setTabCompleter((sender, command, alias, args) -> java.util.List.of());
             getLogger().info("Registered /" + name + " command");
         } else {
             getLogger().warning("Failed to register /" + name + " command - not defined in plugin.yml?");
@@ -1897,6 +1920,7 @@ public class KnKPlugin extends JavaPlugin {
             if (siegeMenuCommand != null) {
                 siegeMenuCommand.setExecutor((sender, command, label, args) ->
                         executor.onCommand(sender, command, label, new String[] {"menu"}));
+                siegeMenuCommand.setTabCompleter((sender, command, alias, args) -> java.util.List.of());
             }
         } else {
             getLogger().warning("Failed to register /siege command - not defined in plugin.yml?");

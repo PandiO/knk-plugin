@@ -28,6 +28,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.function.BiPredicate;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -64,6 +65,7 @@ public final class LootboxAdminCommand {
     private LootboxOpening opening;
     // Online player names for tab completion (the target of give/token).
     private Supplier<? extends Collection<String>> onlinePlayerNames = List::of;
+    private BiFunction<CommandSender, String, List<String>> visiblePlayerCompletion;
 
     public LootboxAdminCommand(
             LootboxRuntime runtime,
@@ -117,6 +119,10 @@ public final class LootboxAdminCommand {
     /** Online player names, suggested for {@code give}/{@code token}'s player argument. */
     public void setOnlinePlayerNames(Supplier<? extends Collection<String>> names) {
         this.onlinePlayerNames = names != null ? names : List::of;
+    }
+
+    public void setVisiblePlayerCompletion(BiFunction<CommandSender, String, List<String>> completion) {
+        this.visiblePlayerCompletion = completion;
     }
 
     public static String usage() {
@@ -512,6 +518,7 @@ public final class LootboxAdminCommand {
             return LootboxCommand.filter(categories, args[1]);
         }
         if (("give".equals(sub) || "token".equals(sub)) && args.length == 2) {
+            if (visiblePlayerCompletion != null) return visiblePlayerCompletion.apply(sender, args[1]);
             return LootboxCommand.filter(List.copyOf(onlinePlayerNames.get()), args[1]);
         }
         if (("give".equals(sub) || "token".equals(sub)) && args.length == 3) {
