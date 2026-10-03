@@ -8,6 +8,7 @@ import org.bukkit.entity.Player;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * Hooks {@link SiegeService} calls on the main thread as a lobby moves through its loop, so the
@@ -50,4 +51,34 @@ public interface SiegeMatchObserver {
 
     /** Plugin disable, after every lobby was stopped. */
     default void shutdown() { }
+
+    // KNG-34 link 6 (diagnostic telemetry): lobby participation, reported with stable codes only.
+
+    /**
+     * A {@code /siege join} (or menu join) was answered.
+     *
+     * @param lobby      the lobby asked for; null when none could be chosen
+     * @param joined     the player is now a member
+     * @param reasonCode {@code joined}, or why not ({@code no_permission}, {@code lobby_full}, ...)
+     */
+    default void joinAttempted(SiegeLobbyRuntime lobby, Player player, boolean joined, String reasonCode) { }
+
+    /**
+     * A scenario vote was handled by the lobby's state machine.
+     *
+     * @param scenarioId the voted scenario; null for Random
+     * @param result     the {@code VoteResult} name (CAST, CHANGED, REMOVED, CLOSED, ...)
+     */
+    default void voteCast(SiegeLobbyRuntime lobby, Player player, Integer scenarioId, String result) { }
+
+    /** Teams were split at the hub: one call per member. */
+    default void teamAssigned(SiegeLobbyRuntime lobby, UUID playerId, int teamId, String cause) { }
+
+    /**
+     * A member left the lobby or match (any phase).
+     *
+     * @param userId the player's user id (null when it was never known)
+     * @param cause  lower-case leave cause: leave, quit, kick, excluded_at_draw, snapshot_failed, round_over, shutdown
+     */
+    default void memberLeft(SiegeLobbyRuntime lobby, UUID playerId, Integer userId, String cause, boolean duringMatch) { }
 }

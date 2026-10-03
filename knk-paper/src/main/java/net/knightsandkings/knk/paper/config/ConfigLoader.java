@@ -109,7 +109,8 @@ public class ConfigLoader {
             loadPrivateMessages(config.getConfigurationSection("private-messages")),
             loadTeleportSettings(config.getConfigurationSection("teleport")),
             loadDiscovery(config.getConfigurationSection("discovery")),
-            loadStatistics(config.getConfigurationSection("statistics")));
+            loadStatistics(config.getConfigurationSection("statistics")),
+            loadTelemetry(config.getConfigurationSection("telemetry")));
         knkConfig.validate();
         
         return knkConfig;
@@ -219,6 +220,21 @@ public class ConfigLoader {
             combatConfig,
             gatesConfig,
             siegeConfig
+        );
+    }
+
+    /** Diagnostic telemetry (KNG-34 link 6); every key has a default, so a missing section means "on, with defaults". */
+    static KnkConfig.TelemetryConfig loadTelemetry(ConfigurationSection section) {
+        KnkConfig.TelemetryConfig defaults = KnkConfig.TelemetryConfig.defaults();
+        if (section == null) {
+            return defaults;
+        }
+        return new KnkConfig.TelemetryConfig(
+            section.getBoolean("enabled", defaults.enabled()),
+            section.getInt("max-buffer-events", defaults.maxBufferEvents()),
+            section.getInt("flush-interval-seconds", defaults.flushIntervalSeconds()),
+            section.getInt("config-poll-seconds", defaults.configPollSeconds()),
+            section.getInt("enhanced-movement-sample-seconds", defaults.enhancedMovementSampleSeconds())
         );
     }
 

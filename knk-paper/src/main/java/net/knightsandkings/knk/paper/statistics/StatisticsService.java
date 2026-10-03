@@ -41,6 +41,15 @@ public final class StatisticsService {
     private final AfkPresentation presentation;
     private final Clock clock;
     private final Set<UUID> kicked = new HashSet<>();
+    private AfkObserver afkObserver = AfkObserver.NONE;
+
+    /** Told about every AFK change (diagnostic telemetry, KNG-34 link 6); main thread; default no-op. */
+    @FunctionalInterface
+    public interface AfkObserver {
+        AfkObserver NONE = (player, afk, manual) -> { };
+
+        void afkChanged(Player player, boolean afk, boolean manual);
+    }
 
     public StatisticsService(KnkConfig.StatisticsConfig config, StatisticsBuffer buffer, StatisticsContextResolver contexts,
                              AfkPresentation presentation, Clock clock) {
@@ -66,6 +75,23 @@ public final class StatisticsService {
 
     public Instant now() {
         return clock.instant();
+    }
+
+    public void setAfkObserver(AfkObserver observer) {
+        this.afkObserver = observer == null ? AfkObserver.NONE : observer;
+    }
+
+    /** The open session's key (diagnostic telemetry links its events to it); null without a session. */
+    public UUID sessionKeyOf(UUID playerId) {
+        return sessions.sessionKey(playerId);
+    }
+
+    private void notifyAfk(Player player, boolean afk, boolean manual) {
+        try {
+            afkObserver.afkChanged(player, afk, manual);
+        } catch (RuntimeException e) {
+            LOGGER.fine("[Statistics] AFK observer failed: " + e);
+        }
     }
 
     // ===== sessions =====
@@ -120,6 +146,7 @@ public final class StatisticsService {
     public void activity(Player player) {
         if (sessions.activity(player.getUniqueId(), now())) {
             presentation.left(player);
+            notifyAfk(player, false, false);
         }
     }
 
@@ -132,6 +159,7 @@ public final class StatisticsService {
             } else {
                 presentation.left(player);
             }
+            notifyAfk(player, now, true);
         });
         return afk;
     }
@@ -146,6 +174,7 @@ public final class StatisticsService {
             Player player = online.apply(playerId);
             if (player != null) {
                 presentation.entered(player, false);
+                notifyAfk(player, true, false);
             }
         }
     }

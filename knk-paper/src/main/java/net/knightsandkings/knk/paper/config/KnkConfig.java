@@ -21,13 +21,23 @@ public record KnkConfig(
     PrivateMessagesConfig privateMessages,
     TeleportSettings teleport,
     DiscoveryConfig discovery,
-    StatisticsConfig statistics
+    StatisticsConfig statistics,
+    TelemetryConfig telemetry
 ) {
     public KnkConfig {
         // No teleport: block (e.g. an older config.yml) means the DESIGN §3.11 defaults.
         teleport = teleport != null ? teleport : TeleportSettings.defaults();
         // No statistics: block means "on, with defaults" (player statistics, KNG-34).
         statistics = statistics != null ? statistics : StatisticsConfig.defaults();
+        // No telemetry: block means "on, with defaults" (diagnostic telemetry, KNG-34 link 6).
+        telemetry = telemetry != null ? telemetry : TelemetryConfig.defaults();
+    }
+
+    /** Without a telemetry section: its defaults. */
+    public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
+                     PrivateMessagesConfig privateMessages, TeleportSettings teleport, DiscoveryConfig discovery,
+                     StatisticsConfig statistics) {
+        this(api, cache, account, messages, privateMessages, teleport, discovery, statistics, TelemetryConfig.defaults());
     }
 
     /** Without private-messages, teleport, discovery and statistics sections: their defaults. */
@@ -138,6 +148,7 @@ public record KnkConfig(
         }
         discovery.validate();
         statistics.validate();
+        telemetry.validate();
     }
     
     public record CacheConfig(
@@ -742,6 +753,46 @@ public record KnkConfig(
             if (log.flushSeconds() < 1) {
                 throw new IllegalArgumentException(
                     "private-messages.log.flush-seconds must be at least 1 (got: " + log.flushSeconds() + ")");
+            }
+        }
+    }
+
+    /**
+     * Diagnostic telemetry (KNG-34 link 6, knk-workspace docs/specs/player-statistics IMPLEMENTATION_PLAN.md
+     * §5.1, DESIGN.md §F.12): low-frequency baseline events for every player, enhanced events only for
+     * players/test runs the owner picked in the API. Buffered in memory (bounded, oldest dropped and
+     * counted), flushed off the main thread, never spooled. {@code enabled: false} registers no emitter,
+     * listener or task - today's behaviour.
+     *
+     * @param maxBufferEvents                events held between flushes; beyond it the oldest are dropped
+     * @param flushIntervalSeconds           how often buffered events are sent
+     * @param configPollSeconds              how often the API's emitter config (enhanced targets, test runs) is read
+     * @param enhancedMovementSampleSeconds  position sample interval for enhanced players
+     */
+    public record TelemetryConfig(
+        boolean enabled,
+        int maxBufferEvents,
+        int flushIntervalSeconds,
+        int configPollSeconds,
+        int enhancedMovementSampleSeconds
+    ) {
+        public static TelemetryConfig defaults() {
+            return new TelemetryConfig(true, 5000, 10, 60, 5);
+        }
+
+        public void validate() {
+            if (maxBufferEvents < 10) {
+                throw new IllegalArgumentException("telemetry.max-buffer-events must be at least 10 (got: " + maxBufferEvents + ")");
+            }
+            if (flushIntervalSeconds < 1) {
+                throw new IllegalArgumentException("telemetry.flush-interval-seconds must be at least 1 (got: " + flushIntervalSeconds + ")");
+            }
+            if (configPollSeconds < 10) {
+                throw new IllegalArgumentException("telemetry.config-poll-seconds must be at least 10 (got: " + configPollSeconds + ")");
+            }
+            if (enhancedMovementSampleSeconds < 1) {
+                throw new IllegalArgumentException(
+                    "telemetry.enhanced-movement-sample-seconds must be at least 1 (got: " + enhancedMovementSampleSeconds + ")");
             }
         }
     }

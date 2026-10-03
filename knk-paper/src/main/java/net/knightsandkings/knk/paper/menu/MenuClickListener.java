@@ -2,6 +2,7 @@ package net.knightsandkings.knk.paper.menu;
 
 import net.knightsandkings.knk.core.domain.menu.KnkActionBinding;
 import net.knightsandkings.knk.core.domain.menu.KnkConditionBinding;
+import net.knightsandkings.knk.core.telemetry.TelemetryCorrelation;
 import net.knightsandkings.knk.core.menu.ActionRegistry;
 import net.knightsandkings.knk.core.menu.ConditionOutcome;
 import net.knightsandkings.knk.core.menu.ConditionRegistry;
@@ -134,6 +135,8 @@ public final class MenuClickListener implements Listener {
         // see MenuActionContext's javadoc for why it comes from context here
         // rather than a paramsJson-carried section name.
         RuntimeMenuSection section = context.get().sectionsBySlot().get(slot);
+        String menuKey = context.get().menu().key();
+        observers().clicked(player, menuKey, slot, String.valueOf(item.id()), event.getClick().name());
 
         // IMPLEMENTATION_PLAN.md Phase 6 / DESIGN_REVIEW.md §2.2: built fresh,
         // right now - never reused from whatever render pass produced the
@@ -170,7 +173,7 @@ public final class MenuClickListener implements Listener {
                 actionRegistry.execute(MenuActionHandlers.PAGE_FIRST, actionContext, Map.of());
                 return;
             }
-            executeClick(item, actionContext, player);
+            executeClick(item, actionContext, player, menuKey, slot);
         } catch (MenuActionException e) {
             LOGGER.severe("Menu item (id " + item.id() + ") click failed for " + player.getName() + ": " + e.getMessage());
             player.sendMessage(ChatColor.RED + "Something went wrong with that.");
@@ -215,7 +218,7 @@ public final class MenuClickListener implements Listener {
      * action") - one action can fire while a sibling action on the very same
      * item and the very same click doesn't.
      */
-    private void executeClick(RuntimeMenuItem item, MenuActionContext context, Player player) {
+    private void executeClick(RuntimeMenuItem item, MenuActionContext context, Player player, String menuKey, int slot) {
         Map<String, Object> scope = context.variableContext();
 
         // InventoryMenu Phase 9 (E5): Render conditions are re-checked silently -
@@ -233,6 +236,9 @@ public final class MenuClickListener implements Listener {
             if (itemOutcome.denialMessage() != null) {
                 player.sendMessage(ChatColor.YELLOW + itemOutcome.denialMessage());
             }
+            for (KnkActionBinding action : item.actions()) {
+                observers().action(player, menuKey, action.actionTypeId(), slot, MenuObserver.ActionOutcome.DENIED);
+            }
             return;
         }
 
@@ -247,10 +253,22 @@ public final class MenuClickListener implements Listener {
                 if (actionOutcome.denialMessage() != null) {
                     player.sendMessage(ChatColor.YELLOW + actionOutcome.denialMessage());
                 }
+                observers().action(player, menuKey, action.actionTypeId(), slot, MenuObserver.ActionOutcome.DENIED);
                 continue;
             }
             // E3: $...$ in params values resolve against the click scope (incl. $row$).
-            actionRegistry.execute(action.actionTypeId(), context, MenuParams.resolve(action.paramsJson(), scope));
+            // KNG-34 link 6: with an observer registered, the action's API calls carry one correlation id
+            // (X-Correlation-Id) that its menu.action event shares; without one nothing changes.
+            MenuObservers observers = observers();
+            try (TelemetryCorrelation.Scope ignored = observers.isEmpty() ? null : TelemetryCorrelation.open(TelemetryCorrelation.newId())) {
+                try {
+                    actionRegistry.execute(action.actionTypeId(), context, MenuParams.resolve(action.paramsJson(), scope));
+                } catch (RuntimeException e) {
+                    observers.action(player, menuKey, action.actionTypeId(), slot, MenuObserver.ActionOutcome.FAILED);
+                    throw e;
+                }
+                observers.action(player, menuKey, action.actionTypeId(), slot, MenuObserver.ActionOutcome.SUCCEEDED);
+            }
         }
     }
 
@@ -266,6 +284,14 @@ public final class MenuClickListener implements Listener {
                     : new SectionView(section.name(), session.getPage(section.id()), 0));
         }
         return row != null ? scope.with(MenuVariableProviderRegistry.ROOT_ROW, row) : scope;
+    }
+
+    private static final MenuObservers NO_OBSERVERS = new MenuObservers();
+
+    /** The menu service's observers (KNG-34 link 6); never null, also with a mocked service. */
+    private MenuObservers observers() {
+        MenuObservers observers = menuService.observers();
+        return observers != null ? observers : NO_OBSERVERS;
     }
 
     /** Whether {@code item} has an action bound to the given {@code actionTypeId}, anywhere in its actions list. */

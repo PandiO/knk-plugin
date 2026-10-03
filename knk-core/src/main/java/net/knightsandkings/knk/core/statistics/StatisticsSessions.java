@@ -229,6 +229,12 @@ public final class StatisticsSessions {
         return session == null || !session.resolved() ? OptionalInt.empty() : OptionalInt.of(session.userId);
     }
 
+    /** The key of the player's open session (diagnostic telemetry links events to it); null without one. */
+    public UUID sessionKey(UUID playerId) {
+        Session session = active.get(playerId);
+        return session == null ? null : session.sessionKey;
+    }
+
     // ===== facts =====
 
     /**

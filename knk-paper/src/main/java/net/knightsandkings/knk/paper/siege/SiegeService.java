@@ -500,6 +500,7 @@ public final class SiegeService {
                     .append(SiegeBukkit.teamComponent(team))
                     .append(Component.text(team != null && team.isDefender() ? " (defenders)." : " (attackers).", SiegeMessages.INFO)));
             players.forEach(p -> tell(p, msg));
+            players.forEach(p -> observers.forEach(o -> safely("teamAssigned", () -> o.teamAssigned(rt, p, teamId, "split"))));
         }));
         notifyChanged(rt);
     }
@@ -807,6 +808,9 @@ public final class SiegeService {
 
         Player player = Bukkit.getPlayer(id);
         SiegeMatch match = rt.match().orElse(null);
+        boolean duringMatch = match != null && match.roster().contains(id);
+        String leaveCause = cause.name().toLowerCase(java.util.Locale.ROOT);
+        observers.forEach(o -> safely("memberLeft", () -> o.memberLeft(rt, id, userId, leaveCause, duringMatch)));
         if (match != null && match.roster().contains(id)) {
             if (cause != LeaveCause.ROUND_OVER && cause != LeaveCause.SHUTDOWN) {
                 Optional<MemberView> removed = match.roster().remove(id);
@@ -839,7 +843,7 @@ public final class SiegeService {
     public Reply join(Player player, String lobbyKey) {
         UUID id = player.getUniqueId();
         if (!hasPermission(player, PERMISSION_PLAY)) {
-            return Reply.fail(SiegeMessages.bad("You don't have permission to play sieges."));
+            return joinRefused(null, player, "no_permission", SiegeMessages.bad("You don't have permission to play sieges."));
         }
         Optional<SiegeLobbyRuntime> current = lobbyOf(id);
         SiegeLobbyRuntime rt;
@@ -848,50 +852,51 @@ public final class SiegeService {
             if (joinable.size() == 1) {
                 rt = joinable.get(0);
             } else if (lobbies.isEmpty()) {
-                return Reply.fail(SiegeMessages.bad("There are no siege lobbies right now."));
+                return joinRefused(null, player, "no_lobbies", SiegeMessages.bad("There are no siege lobbies right now."));
             } else {
-                return Reply.fail(SiegeMessages.bad("Say which lobby: /siege join <lobby>. Lobbies: " + lobbyKeys() + "."));
+                return joinRefused(null, player, "lobby_ambiguous", SiegeMessages.bad("Say which lobby: /siege join <lobby>. Lobbies: " + lobbyKeys() + "."));
             }
         } else {
             Optional<SiegeLobbyRuntime> byKey = lobbyByKey(lobbyKey);
             if (byKey.isEmpty()) {
-                return Reply.fail(SiegeMessages.bad("There is no siege lobby '" + lobbyKey + "'. Lobbies: " + lobbyKeys() + "."));
+                return joinRefused(null, player, "unknown_lobby", SiegeMessages.bad("There is no siege lobby '" + lobbyKey + "'. Lobbies: " + lobbyKeys() + "."));
             }
             rt = byKey.get();
         }
         if (current.isPresent()) {
-            return Reply.fail(current.get() == rt
+            return joinRefused(rt, player, current.get() == rt ? "already_member" : "in_other_lobby", current.get() == rt
                     ? SiegeMessages.info("You are already in " + rt.displayName() + ".")
                     : SiegeMessages.bad("You are already in " + current.get().displayName() + ". Leave it first with /siege leave."));
         }
         if (vault.hasFile(id)) {
             vault.restoreOnJoin(player);
-            return Reply.fail(SiegeMessages.bad("Your items from an earlier siege were still being restored; that is done now. "
+            return joinRefused(rt, player, "vault_restore", SiegeMessages.bad("Your items from an earlier siege were still being restored; that is done now. "
                     + "Try joining again."));
         }
         SiegeLobbyStateMachine machine = rt.machine();
         if (!machine.isJoinable()) {
-            return Reply.fail(SiegeMessages.bad(notJoinableReason(rt)));
+            return joinRefused(rt, player, "not_joinable_" + rt.phase().name().toLowerCase(java.util.Locale.ROOT), SiegeMessages.bad(notJoinableReason(rt)));
         }
         int capacity = machine.joinCapacity();
         if (rt.memberCount() >= capacity) {
-            return Reply.fail(SiegeMessages.bad(rt.displayName() + " is full (" + capacity + " players)."));
+            return joinRefused(rt, player, "lobby_full", SiegeMessages.bad(rt.displayName() + " is full (" + capacity + " players)."));
         }
         UserSummary user = userCache.getStale(id).orElse(null);
         if (user == null || user.id() == null) {
-            return Reply.fail(SiegeMessages.bad("Your profile is still loading; try again in a moment."));
+            return joinRefused(rt, player, "profile_loading", SiegeMessages.bad("Your profile is still loading; try again in a moment."));
         }
         int minXp = machine.joinMinTitleExperience();
         if (minXp > 0 && user.experiencePoints() < minXp) {
-            return Reply.fail(SiegeMessages.bad("You need at least the title " + titleRanks.requirementLabel(minXp)
+            return joinRefused(rt, player, "title_too_low", SiegeMessages.bad("You need at least the title " + titleRanks.requirementLabel(minXp)
                     + " to join " + rt.displayName() + "."));
         }
         if (!locks.tryClaimPlayer(id, rt.id())) {
-            return Reply.fail(SiegeMessages.bad("You are already in another siege."));
+            return joinRefused(rt, player, "in_other_siege", SiegeMessages.bad("You are already in another siege."));
         }
         rt.mutableMembers().add(id);
         rt.userIds().put(id, user.id());
         notifyChanged(rt);
+        observers.forEach(o -> safely("joinAttempted", () -> o.joinAttempted(rt, player, true, "joined")));
 
         Component msg = SiegeMessages.prefixed(Component.text("You joined ", SiegeMessages.GOOD)
                 .append(Component.text(rt.displayName(), SiegeMessages.HIGHLIGHT))
@@ -901,6 +906,12 @@ public final class SiegeService {
             msg = msg.append(Component.text("Vote with ", SiegeMessages.INFO)).append(SiegeMessages.command("/siege vote"));
         }
         return Reply.ok(msg);
+    }
+
+    /** A refused join, told to the observers (diagnostic telemetry) with a stable reason code. */
+    private Reply joinRefused(SiegeLobbyRuntime rt, Player player, String reasonCode, Component message) {
+        observers.forEach(o -> safely("joinAttempted", () -> o.joinAttempted(rt, player, false, reasonCode)));
+        return Reply.fail(message);
     }
 
     private String notJoinableReason(SiegeLobbyRuntime rt) {
@@ -992,6 +1003,8 @@ public final class SiegeService {
         }
         VoteResult result = rt.machine().vote(player.getUniqueId(), choice);
         notifyChanged(rt);
+        Integer votedScenario = choice.isRandom() ? null : choice.scenarioId();
+        observers.forEach(o -> safely("voteCast", () -> o.voteCast(rt, player, votedScenario, result.name())));
         boolean ok = result == VoteResult.CAST || result == VoteResult.CHANGED || result == VoteResult.REMOVED;
         return new Reply(ok, SiegeMessages.voteResult(result, label));
     }
@@ -1017,6 +1030,8 @@ public final class SiegeService {
         }
         VoteResult result = rt.machine().vote(player.getUniqueId(), choice);
         notifyChanged(rt);
+        Integer votedScenario = choice.isRandom() ? null : choice.scenarioId();
+        observers.forEach(o -> safely("voteCast", () -> o.voteCast(rt, player, votedScenario, result.name())));
         boolean ok = result == VoteResult.CAST || result == VoteResult.CHANGED || result == VoteResult.REMOVED;
         return new Reply(ok, SiegeMessages.voteResult(result, label));
     }

@@ -114,6 +114,7 @@ public class KnkApiClient {
     private final PlayerNotificationsApi playerNotificationsApi;
     private final DiscoveriesApi discoveriesApi;
     private final StatisticsApiImpl statisticsApi;
+    private final net.knightsandkings.knk.core.ports.api.TelemetryApi telemetryApi;
     private final LeaderboardsApiImpl leaderboardsApi;
     private final UserIgnoresApi userIgnoresApi;
     private final PrivateMessageLogApi privateMessageLogApi;
@@ -150,11 +151,14 @@ public class KnkApiClient {
         ExecutorService executor,
         boolean debugLogging
     ) {
+        // KNG-34 link 6: calls started inside a correlated action carry its X-Correlation-Id.
+        executor = CorrelationPropagatingExecutorService.wrap(executor);
         this.baseUrl = baseUrl;
         this.httpClient = httpClient;
         this.objectMapper = objectMapper;
         this.authProvider = authProvider;
         this.executor = executor;
+        this.telemetryApi = new net.knightsandkings.knk.api.impl.TelemetryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         
         // Initialize API implementations
         this.healthApi = new HealthApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -309,6 +313,11 @@ public class KnkApiClient {
     /** Player statistics (KNG-34): {@code api/statistics}. */
     public net.knightsandkings.knk.core.ports.api.StatisticsApi getStatisticsApi() {
         return statisticsApi;
+    }
+
+    /** Diagnostic telemetry (KNG-34 link 6): {@code api/telemetry}. */
+    public net.knightsandkings.knk.core.ports.api.TelemetryApi getTelemetryApi() {
+        return telemetryApi;
     }
 
     /** Leaderboards (KNG-34): {@code api/leaderboards}. */

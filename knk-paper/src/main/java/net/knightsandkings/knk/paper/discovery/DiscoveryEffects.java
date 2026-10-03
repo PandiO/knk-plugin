@@ -40,6 +40,8 @@ public final class DiscoveryEffects {
     private final Sound sound;
     private final String soundKey;
     private final Particle particle;
+    /** Told about every presented grant result (diagnostic telemetry, KNG-34 link 6); default no-op. */
+    private BiConsumer<Player, DiscoveryGrantResult> grantObserver = (player, result) -> { };
 
     public DiscoveryEffects(Plugin plugin, KnkConfig.DiscoveryConfig config, UsersDataAccess usersDataAccess,
                             BiConsumer<Player, UserSummary> displayRefresher) {
@@ -88,11 +90,24 @@ public final class DiscoveryEffects {
         }
     }
 
+    public void setGrantObserver(BiConsumer<Player, DiscoveryGrantResult> observer) {
+        this.grantObserver = observer == null ? (player, result) -> { } : observer;
+    }
+
+    private void observeGrants(Player player, DiscoveryGrantResult result) {
+        try {
+            grantObserver.accept(player, result);
+        } catch (RuntimeException e) {
+            LOGGER.fine("[Discovery] grant observer failed: " + e);
+        }
+    }
+
     /** Everything, for a discovery the player just made. */
     public void show(Player player, DiscoveryGrantResult result) {
         if (result == null || !result.hasGrants()) {
             return;
         }
+        observeGrants(player, result);
         UUID uuid = player.getUniqueId();
         List<DiscoveryGrant> granted = result.granted();
         for (int i = 0; i < granted.size(); i++) {
@@ -127,6 +142,7 @@ public final class DiscoveryEffects {
         if (result == null || !result.hasGrants()) {
             return;
         }
+        observeGrants(player, result);
         playSound(player);
         DiscoveryMessages.replaySummary(config.messages().replaySummary(), result).forEach(player::sendMessage);
         if (result.titleChange() != null) {

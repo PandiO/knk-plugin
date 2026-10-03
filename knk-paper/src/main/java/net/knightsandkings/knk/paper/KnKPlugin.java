@@ -195,6 +195,10 @@ public class KnKPlugin extends JavaPlugin {
     // KNG-34 link 4: gate-damage statistics; null when statistics or statistics.gates are off.
     private net.knightsandkings.knk.paper.statistics.GateDamageStatisticsSink statisticsGateSink;
     private net.knightsandkings.knk.paper.statistics.StatisticsFlushTask statisticsFlushTask;
+    // Diagnostic telemetry (KNG-34 link 6); null when telemetry.enabled is false.
+    private net.knightsandkings.knk.paper.telemetry.TelemetryEmitter telemetryEmitter;
+    private net.knightsandkings.knk.paper.telemetry.TelemetryHooks telemetryHooks;
+    private net.knightsandkings.knk.paper.telemetry.TelemetryFlushTask telemetryFlushTask;
     private net.knightsandkings.knk.paper.menu.content.StatisticsVisibilityMenuFeature statisticsVisibilityMenuFeature;
     // KNG-34 link 5: read surfaces (statistics.main, leaderboards); null when menus failed to start.
     private net.knightsandkings.knk.paper.menu.content.StatisticsMenuFeature statisticsMenuFeature;
@@ -622,6 +626,7 @@ public class KnKPlugin extends JavaPlugin {
             );
             getServer().getPluginManager().registerEvents(salaryPayoutScheduler, this);
             salaryPayoutScheduler.start();
+            startTelemetry();
             startDomainDiscovery();
             startStatistics();
             // Rank changes made outside the plugin (web app, expiring temporary rank) show right away.
@@ -716,6 +721,9 @@ public class KnKPlugin extends JavaPlugin {
                 anvilCaptureManager, new MenuRefreshSchedule()
             );
             getLogger().info("InventoryMenu rendering engine initialized (Phase 2 + 9)");
+            if (telemetryHooks != null) {
+                menuService.addObserver(telemetryHooks); // menu.opened / menu.action / menu.click (KNG-34 link 6)
+            }
 
             getServer().getPluginManager().registerEvents(
                 new MenuClickListener(
@@ -1000,6 +1008,11 @@ public class KnKPlugin extends JavaPlugin {
             statisticsFlushTask.stop();
             statisticsFlushTask.shutdown();
         }
+        if (telemetryFlushTask != null) {
+            // Diagnostics: one last send with a short bounded wait; nothing is spooled.
+            telemetryFlushTask.shutdown();
+            net.knightsandkings.knk.api.impl.BaseApiImpl.setFailureObserver(null);
+        }
         if (cacheManager != null) {
             getLogger().info("Logging final cache metrics...");
             cacheManager.logMetrics();
@@ -1032,6 +1045,38 @@ public class KnKPlugin extends JavaPlugin {
      * or task, and {@code /afk} only answers that AFK is disabled. Needs the user cache, so it starts
      * after the salary scheduler; the Siege service (context) is looked up on every call.
      */
+    /**
+     * Diagnostic telemetry (KNG-34 link 6, docs/specs/player-statistics IMPLEMENTATION_PLAN.md §5.2):
+     * a bounded in-memory buffer of baseline events (and enhanced ones for owner-picked players/test
+     * runs) sent every few seconds off the main thread, never spooled. {@code telemetry.enabled: false}
+     * creates nothing: no listener, observer, timer or correlation header - today's behaviour. Started
+     * before discovery, statistics, menus and Siege so their hooks can be attached as they start.
+     */
+    private void startTelemetry() {
+        KnkConfig.TelemetryConfig telemetryConfig = config.telemetry();
+        if (!telemetryConfig.enabled()) {
+            getLogger().info("Diagnostic telemetry disabled (telemetry.enabled: false)");
+            return;
+        }
+        this.telemetryEmitter = new net.knightsandkings.knk.paper.telemetry.TelemetryEmitter(
+            new net.knightsandkings.knk.core.telemetry.TelemetryBuffer(telemetryConfig.maxBufferEvents()),
+            java.time.Clock.systemUTC(), getServer().getName() + " " + getServer().getPort(), getPluginMeta().getVersion());
+        telemetryEmitter.setUserIds(uuid -> cacheManager.getUserCache().getByUuid(uuid)
+            .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null));
+        this.telemetryHooks = new net.knightsandkings.knk.paper.telemetry.TelemetryHooks(telemetryEmitter);
+        net.knightsandkings.knk.api.impl.BaseApiImpl.setFailureObserver(telemetryHooks);
+        getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.telemetry.TelemetryListener(
+            telemetryEmitter, task -> getServer().getScheduler().runTask(this, task)), this);
+        long sampleTicks = Math.max(1, telemetryConfig.enhancedMovementSampleSeconds()) * 20L;
+        getServer().getScheduler().runTaskTimer(this, new net.knightsandkings.knk.paper.telemetry.EnhancedMovementSampler(
+            telemetryEmitter, () -> getServer().getOnlinePlayers()), sampleTicks, sampleTicks);
+        this.telemetryFlushTask = new net.knightsandkings.knk.paper.telemetry.TelemetryFlushTask(
+            telemetryEmitter, apiClient.getTelemetryApi());
+        telemetryFlushTask.start(this, telemetryConfig.flushIntervalSeconds(), telemetryConfig.configPollSeconds());
+        getLogger().info("Diagnostic telemetry started (flush every " + telemetryConfig.flushIntervalSeconds()
+            + " s, buffer " + telemetryConfig.maxBufferEvents() + " events)");
+    }
+
     private void startStatistics() {
         KnkConfig.StatisticsConfig statisticsConfig = config.statistics();
         if (!statisticsConfig.enabled()) {
@@ -1091,6 +1136,10 @@ public class KnKPlugin extends JavaPlugin {
         }
         registerTabCommand("afk", new net.knightsandkings.knk.paper.commands.AfkCommand(
             statisticsService, statisticsConfig.afk().enabled() && statisticsConfig.afk().commandEnabled()));
+        if (telemetryHooks != null) {
+            statisticsService.setAfkObserver(telemetryHooks);
+            telemetryEmitter.setSessionKeys(statisticsService::sessionKeyOf);
+        }
         statisticsFlushTask.start();
         sessionListener.startOnlinePlayers(uuid -> cacheManager.getUserCache().getByUuid(uuid)
             .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null));
@@ -1155,6 +1204,9 @@ public class KnKPlugin extends JavaPlugin {
                 discoveryFlushTask, clock
             );
         getServer().getPluginManager().registerEvents(discoveryListener, this);
+        if (telemetryHooks != null) {
+            discoveryEffects.setGrantObserver(telemetryHooks::discoveriesGranted);
+        }
         discoveryFlushTask.start();
         discoveryListener.startOnlinePlayers(uuid -> cacheManager.getUserCache().getByUuid(uuid)
             .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null));
@@ -2065,6 +2117,10 @@ public class KnKPlugin extends JavaPlugin {
         siegeService.addObserver(new net.knightsandkings.knk.paper.siege.SiegeScoreboardPresenter());
         // Smoke test 2026-09-26: sounds, particles and chat when objectives start being attacked/defended.
         siegeService.addObserver(new net.knightsandkings.knk.paper.siege.SiegeCaptureFeedback());
+        if (telemetryEmitter != null) {
+            // KNG-34 link 6: lobby join attempts, votes, teams, match join/leave, phases, captures.
+            siegeService.addObserver(new net.knightsandkings.knk.paper.siege.SiegeTelemetryObserver(telemetryEmitter));
+        }
         var siegeBooks = new net.knightsandkings.knk.paper.siege.SiegeEnchantBooks(this, siegeService, siegeRandom);
         siegeService.addObserver(siegeBooks);
         siegeVault.setAfterRestore(player -> {

@@ -243,6 +243,22 @@ statistics:
     # they still get no reward. false = the completion payload as before
     report-departed-members: true
 
+# Diagnostic telemetry (KNG-34 link 6, docs/specs/player-statistics DESIGN.md §F.12): a timeline of
+# meaningful actions and outcomes (joins, menus, command labels, Siege lobby/match steps, failed API
+# calls) that only the owner can read in the web app. Never chat, command arguments, IPs or tokens.
+# Enhanced detail (position samples, menu clicks, hits) is only sent for players/test runs the owner
+# picks. Events are buffered and dropped when the API is down - never spooled; gameplay never waits.
+telemetry:
+  # false: no diagnostic events at all (today's behaviour)
+  enabled: true
+  # Events held between flushes; beyond this the oldest are dropped (and counted)
+  max-buffer-events: 5000
+  flush-interval-seconds: 10
+  # How often the owner's choices (enhanced players, test runs) are read from the API
+  config-poll-seconds: 60
+  # Position sample interval for enhanced players
+  enhanced-movement-sample-seconds: 5
+
 # Player payments (currency ledger Phase 3, docs/specs/currency-payments/DESIGN.md §3.6). Every
 # limit that matters (min/max, daily caps, cooldown, confirmation threshold, who may send) lives in
 # the API's currency policy; these only shape the in-game experience.
