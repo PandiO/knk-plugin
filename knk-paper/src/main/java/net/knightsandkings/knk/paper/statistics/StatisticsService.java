@@ -176,6 +176,19 @@ public final class StatisticsService {
         sessions.addCounter(player.getUniqueId(), metric, contexts.contextOf(player), value, now());
     }
 
+    /**
+     * A counter of an online player in a given context - gate damage is credited in the gate's context
+     * (DESIGN.md §F.8), not the attacker's. Held like any other fact while the user id is unknown.
+     */
+    public void addCounter(UUID playerId, StatisticsMetric metric, StatisticsContext context, double value) {
+        sessions.addCounter(playerId, metric, context.forMetric(metric), value, now());
+    }
+
+    /** The user id of the player's statistics session; empty without a session or while unknown. */
+    public java.util.OptionalInt userIdOf(UUID playerId) {
+        return sessions.userId(playerId);
+    }
+
     /** A record (max) of the player in their current context, e.g. link 4's {@code highest_killstreak}. */
     public void addRecord(Player player, StatisticsMetric metric, double value) {
         sessions.addRecord(player.getUniqueId(), metric, contexts.contextOf(player), value, now());

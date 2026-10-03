@@ -184,6 +184,25 @@ public class ConfigLoader {
         ConfigurationSection fall = section.getConfigurationSection("fall");
         KnkConfig.StatisticsConfig.FallConfig fallConfig = fall == null ? defaults.fall()
             : new KnkConfig.StatisticsConfig.FallConfig(fall.getBoolean("enabled", defaults.fall().enabled()));
+        ConfigurationSection combat = section.getConfigurationSection("combat");
+        KnkConfig.StatisticsConfig.CombatConfig combatConfig = combat == null ? defaults.combat()
+            : new KnkConfig.StatisticsConfig.CombatConfig(
+                combat.getBoolean("enabled", defaults.combat().enabled()),
+                combat.getBoolean("count-custom-damage", defaults.combat().countCustomDamage()),
+                combat.contains("pve-excluded-spawn-reasons")
+                    ? KnkConfig.StatisticsConfig.parseSpawnReasons(combat.getStringList("pve-excluded-spawn-reasons"))
+                    : defaults.combat().pveExcludedSpawnReasons()
+            );
+        ConfigurationSection gates = section.getConfigurationSection("gates");
+        KnkConfig.StatisticsConfig.GatesConfig gatesConfig = gates == null ? defaults.gates()
+            : new KnkConfig.StatisticsConfig.GatesConfig(
+                gates.getBoolean("enabled", defaults.gates().enabled()),
+                gates.getBoolean("fire-attribution", defaults.gates().fireAttribution())
+            );
+        ConfigurationSection siege = section.getConfigurationSection("siege");
+        KnkConfig.StatisticsConfig.SiegeConfig siegeConfig = siege == null ? defaults.siege()
+            : new KnkConfig.StatisticsConfig.SiegeConfig(
+                siege.getBoolean("report-departed-members", defaults.siege().reportDepartedMembers()));
         java.util.List<String> gameModes = section.contains("excluded-game-modes")
             ? section.getStringList("excluded-game-modes")
             : KnkConfig.StatisticsConfig.DEFAULT_EXCLUDED_GAME_MODES;
@@ -196,7 +215,10 @@ public class ConfigLoader {
             KnkConfig.StatisticsConfig.parseGameModes(gameModes),
             afkConfig,
             movementConfig,
-            fallConfig
+            fallConfig,
+            combatConfig,
+            gatesConfig,
+            siegeConfig
         );
     }
 

@@ -42,6 +42,63 @@ class ConfigLoaderStatisticsTest {
         assertEquals(new KnkConfig.StatisticsConfig.AfkConfig(true, 300, true, true, "&7[AFK]"), statistics.afk());
         assertEquals(new KnkConfig.StatisticsConfig.MovementConfig(true, 10.0), statistics.movement());
         assertTrue(statistics.fall().enabled());
+        // link 4
+        assertEquals(new KnkConfig.StatisticsConfig.CombatConfig(true, false,
+            Set.of("SPAWNER", "SPAWNER_EGG", "BREEDING", "EGG", "DISPENSE_EGG")), statistics.combat());
+        assertEquals(new KnkConfig.StatisticsConfig.GatesConfig(true, true), statistics.gates());
+        assertTrue(statistics.siege().reportDepartedMembers());
+    }
+
+    @Test
+    void linkFourSwitchesCanBeTurnedOff() {
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("statistics.combat.enabled", false);
+        yaml.set("statistics.combat.count-custom-damage", true);
+        yaml.set("statistics.combat.pve-excluded-spawn-reasons", List.of("spawner", "Breeding"));
+        yaml.set("statistics.gates.enabled", false);
+        yaml.set("statistics.gates.fire-attribution", false);
+        yaml.set("statistics.siege.report-departed-members", false);
+
+        KnkConfig.StatisticsConfig statistics = ConfigLoader.loadStatistics(yaml.getConfigurationSection("statistics"));
+        statistics.validate();
+
+        assertEquals(new KnkConfig.StatisticsConfig.CombatConfig(false, true, Set.of("SPAWNER", "BREEDING")), statistics.combat());
+        assertEquals(new KnkConfig.StatisticsConfig.GatesConfig(false, false), statistics.gates());
+        assertFalse(statistics.siege().reportDepartedMembers());
+    }
+
+    @Test
+    void anEmptySpawnReasonListCountsEveryCreatureAndPartialSectionsKeepDefaults() {
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("statistics.combat.pve-excluded-spawn-reasons", List.of());
+        yaml.set("statistics.gates.fire-attribution", false);
+
+        KnkConfig.StatisticsConfig statistics = ConfigLoader.loadStatistics(yaml.getConfigurationSection("statistics"));
+
+        assertEquals(Set.of(), statistics.combat().pveExcludedSpawnReasons());
+        assertTrue(statistics.combat().enabled());
+        assertTrue(statistics.gates().enabled());
+        assertFalse(statistics.gates().fireAttribution());
+        assertEquals(KnkConfig.StatisticsConfig.SiegeConfig.defaults(), statistics.siege());
+    }
+
+    @Test
+    void anUnknownSpawnReasonIsAConfigError() {
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("statistics.combat.pve-excluded-spawn-reasons", List.of("SPAWNER", "FARM"));
+
+        assertThrows(IllegalArgumentException.class,
+            () -> ConfigLoader.loadStatistics(yaml.getConfigurationSection("statistics")));
+    }
+
+    @Test
+    void theLinkThreeConstructorKeepsTheLinkFourDefaults() {
+        KnkConfig.StatisticsConfig defaults = KnkConfig.StatisticsConfig.defaults();
+        KnkConfig.StatisticsConfig linkThree = new KnkConfig.StatisticsConfig(defaults.enabled(), defaults.flushIntervalSeconds(),
+            defaults.maxBatchEntries(), defaults.spoolDirectory(), defaults.replayIntervalSeconds(), defaults.excludedGameModes(),
+            defaults.afk(), defaults.movement(), defaults.fall());
+
+        assertEquals(defaults, linkThree);
     }
 
     @Test

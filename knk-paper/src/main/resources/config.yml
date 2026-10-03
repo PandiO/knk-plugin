@@ -209,7 +209,7 @@ statistics:
   # Under the plugin folder; one file per undelivered batch
   spool-directory: statistics-spool
   replay-interval-seconds: 60
-  # No distance or fall statistics in these game modes (playtime still counts)
+  # No combat, distance or fall statistics in these game modes (playtime still counts)
   excluded-game-modes: [CREATIVE, SPECTATOR]
   afk:
     # false: every online second is active time; no /afk, no automatic AFK, no marker
@@ -226,6 +226,22 @@ statistics:
     max-segment-blocks: 10.0
   fall:
     enabled: true
+  combat:
+    # false: no kills, deaths, damage, arrows, headshots or open-world killstreaks are recorded
+    enabled: true
+    # Plugin-dealt damage (e.g. Chaos enchant procs) would be counted twice; leave off
+    count-custom-damage: false
+    # Creatures spawned like this are farmed: killing them is no PvE kill
+    pve-excluded-spawn-reasons: [SPAWNER, SPAWNER_EGG, BREEDING, EGG, DISPENSE_EGG]
+  gates:
+    # false: gate-door damage is not credited to players (gate HP works exactly the same either way)
+    enabled: true
+    # Credit fire damage to whoever set each burning door block alight
+    fire-attribution: true
+  siege:
+    # Report members who left a match early (with their kills/deaths/streak/captures) when it ends;
+    # they still get no reward. false = the completion payload as before
+    report-departed-members: true
 
 # Player payments (currency ledger Phase 3, docs/specs/currency-payments/DESIGN.md §3.6). Every
 # limit that matters (min/max, daily caps, cooldown, confirmation threshold, who may send) lives in

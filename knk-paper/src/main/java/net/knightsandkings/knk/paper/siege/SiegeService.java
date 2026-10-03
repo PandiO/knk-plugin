@@ -46,6 +46,7 @@ import net.knightsandkings.knk.core.siege.SiegeLobbyStateMachine.SkipOutcome;
 import net.knightsandkings.knk.core.siege.SiegeLobbyStateMachine.SkipRequester;
 import net.knightsandkings.knk.core.siege.SiegeLobbyStateMachine.SkipResult;
 import net.knightsandkings.knk.core.siege.SiegeMatchRoster.MemberView;
+import net.knightsandkings.knk.core.siege.SiegeDepartedMembers;
 import net.knightsandkings.knk.core.siege.SiegeMatchRoster.SpawnKind;
 import net.knightsandkings.knk.core.siege.SiegeObjectiveBoard.BoardStep;
 import net.knightsandkings.knk.core.siege.SiegePhase;
@@ -630,6 +631,8 @@ public final class SiegeService {
             if (userId == null) continue;
             participants.add(new ParticipantResult(userId, m.teamId(), m.kills(), m.deaths(), m.highestKillStreak(), m.captures()));
         }
+        SiegeDepartedMembers departed = departedMembers.remove(match);
+        if (departed != null && reportDepartedMembers) participants = departed.appendTo(participants);
         List<ObjectiveResult> objectives = new ArrayList<>();
         for (ObjectiveState state : match.board().objectives()) {
             if (state.captures().isEmpty()) {
@@ -766,11 +769,23 @@ public final class SiegeService {
         rt.userIds().clear();
         // Phase 7a: gates and area entry are restored while the round (match id, scenario) is still known.
         observers.forEach(o -> safely("roundReleased", () -> o.roundReleased(rt)));
+        rt.match().ifPresent(departedMembers::remove);
         rt.clearRound();
         notifyChanged(rt);
     }
 
     // ==================== Membership ====================
+
+    // KNG-34 leaver fix (statistics DESIGN.md §F.6): stats of members who left a running match early,
+    // appended to its completion (with leftAt, so the API grants them nothing). Off = today's payload.
+    private final Map<SiegeMatch, SiegeDepartedMembers> departedMembers = new java.util.IdentityHashMap<>();
+    private boolean reportDepartedMembers;
+
+    /** {@code statistics.enabled && statistics.siege.report-departed-members}. */
+    public void setReportDepartedMembers(boolean reportDepartedMembers) {
+        this.reportDepartedMembers = reportDepartedMembers;
+        if (!reportDepartedMembers) departedMembers.clear();
+    }
 
     enum LeaveCause { LEAVE, QUIT, KICK, EXCLUDED_AT_DRAW, SNAPSHOT_FAILED, ROUND_OVER, SHUTDOWN }
 
@@ -794,9 +809,11 @@ public final class SiegeService {
         SiegeMatch match = rt.match().orElse(null);
         if (match != null && match.roster().contains(id)) {
             if (cause != LeaveCause.ROUND_OVER && cause != LeaveCause.SHUTDOWN) {
-                match.roster().remove(id);
+                Optional<MemberView> removed = match.roster().remove(id);
                 if (userId != null) {
                     Instant leftAt = Instant.now();
+                    if (reportDepartedMembers) removed.ifPresent(view -> departedMembers
+                            .computeIfAbsent(match, m -> new SiegeDepartedMembers()).departed(userId, view, leftAt));
                     withMatchId(rt, matchId -> guarded("participantLeft", matchApi.participantLeft(matchId, userId, leftAt)));
                 }
             }

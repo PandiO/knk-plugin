@@ -522,7 +522,10 @@ public record KnkConfig(
         Set<GameMode> excludedGameModes,
         AfkConfig afk,
         MovementConfig movement,
-        FallConfig fall
+        FallConfig fall,
+        CombatConfig combat,
+        GatesConfig gates,
+        SiegeConfig siege
     ) {
         public static final List<String> DEFAULT_EXCLUDED_GAME_MODES = List.of("CREATIVE", "SPECTATOR");
 
@@ -554,16 +557,83 @@ public record KnkConfig(
             }
         }
 
+        /**
+         * Kills, deaths, damage, arrows, headshots and the open-world killstreak (DESIGN.md §F.7, link 4).
+         *
+         * @param countCustomDamage        count synthetic {@code CUSTOM} damage (Chaos enchant procs, L1-9)
+         * @param pveExcludedSpawnReasons  {@code CreatureSpawnEvent.SpawnReason} names whose creatures are no PvE kill (L1-10)
+         */
+        public record CombatConfig(boolean enabled, boolean countCustomDamage, Set<String> pveExcludedSpawnReasons) {
+            public CombatConfig {
+                pveExcludedSpawnReasons = pveExcludedSpawnReasons == null ? Set.of() : Set.copyOf(pveExcludedSpawnReasons);
+            }
+
+            public static CombatConfig defaults() {
+                return new CombatConfig(true, false, parseSpawnReasons(
+                    net.knightsandkings.knk.core.statistics.CombatStatisticsRules.DEFAULT_PVE_EXCLUDED_SPAWN_REASONS));
+            }
+        }
+
+        /**
+         * Gate-door damage credited to players (DESIGN.md §F.8, link 4).
+         *
+         * @param fireAttribution remember each burning block's igniter and credit fire ticks to them
+         */
+        public record GatesConfig(boolean enabled, boolean fireAttribution) {
+            public static GatesConfig defaults() {
+                return new GatesConfig(true, true);
+            }
+        }
+
+        /**
+         * Siege reconciliation (DESIGN.md §F.6, link 4).
+         *
+         * @param reportDepartedMembers include members who left early (with their stats and leave time) in
+         *                              the match completion; false = today's payload
+         */
+        public record SiegeConfig(boolean reportDepartedMembers) {
+            public static SiegeConfig defaults() {
+                return new SiegeConfig(true);
+            }
+        }
+
         public StatisticsConfig {
             excludedGameModes = excludedGameModes == null ? Set.of() : Set.copyOf(excludedGameModes);
             afk = afk == null ? AfkConfig.defaults() : afk;
             movement = movement == null ? MovementConfig.defaults() : movement;
             fall = fall == null ? FallConfig.defaults() : fall;
+            combat = combat == null ? CombatConfig.defaults() : combat;
+            gates = gates == null ? GatesConfig.defaults() : gates;
+            siege = siege == null ? SiegeConfig.defaults() : siege;
+        }
+
+        /** The link-3 shape (combat, gates and siege at their defaults). */
+        public StatisticsConfig(boolean enabled, int flushIntervalSeconds, int maxBatchEntries, String spoolDirectory,
+                                int replayIntervalSeconds, Set<GameMode> excludedGameModes, AfkConfig afk,
+                                MovementConfig movement, FallConfig fall) {
+            this(enabled, flushIntervalSeconds, maxBatchEntries, spoolDirectory, replayIntervalSeconds, excludedGameModes,
+                afk, movement, fall, null, null, null);
         }
 
         public static StatisticsConfig defaults() {
             return new StatisticsConfig(true, 60, 2000, "statistics-spool", 60,
-                parseGameModes(DEFAULT_EXCLUDED_GAME_MODES), AfkConfig.defaults(), MovementConfig.defaults(), FallConfig.defaults());
+                parseGameModes(DEFAULT_EXCLUDED_GAME_MODES), AfkConfig.defaults(), MovementConfig.defaults(), FallConfig.defaults(),
+                CombatConfig.defaults(), GatesConfig.defaults(), SiegeConfig.defaults());
+        }
+
+        /** Spawn reason names, any case; an unknown name is a config error. */
+        public static Set<String> parseSpawnReasons(List<String> names) {
+            if (names == null) {
+                return Set.of();
+            }
+            return names.stream().map(name -> {
+                String normalized = name == null ? "" : name.trim().toUpperCase(Locale.ROOT);
+                try {
+                    return org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.valueOf(normalized).name();
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException("statistics.combat.pve-excluded-spawn-reasons: unknown spawn reason '" + name + "'");
+                }
+            }).collect(Collectors.toUnmodifiableSet());
         }
 
         /** Game mode names, any case; an unknown name is a config error. */

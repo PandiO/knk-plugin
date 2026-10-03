@@ -47,6 +47,33 @@ class GateDamageConsequenceListenerTest {
     }
 
     @Test
+    void theEffectiveLossGoesToTheStatisticsSinkWithTheCausingEntity() {
+        net.knightsandkings.knk.paper.gates.GateDamageSink sink = mock(net.knightsandkings.knk.paper.gates.GateDamageSink.class);
+        GateDamageConsequenceListener withSink = new GateDamageConsequenceListener(healthSystem, fireSystem, sink);
+        org.bukkit.entity.Player attacker = mock(org.bukkit.entity.Player.class);
+        when(healthSystem.applyDamage(gate, 10.0)).thenReturn(4.0);
+
+        withSink.onGateDoorDamage(new GateDoorDamageEvent(gate, GateDoorDamageEvent.Cause.LEFT_CLICK, attacker, null));
+
+        verify(sink).directDamage(gate, attacker, 4.0);
+    }
+
+    @Test
+    void noLossAndAFailingSinkLeaveTheGateAlone() {
+        net.knightsandkings.knk.paper.gates.GateDamageSink sink = mock(net.knightsandkings.knk.paper.gates.GateDamageSink.class);
+        GateDamageConsequenceListener withSink = new GateDamageConsequenceListener(healthSystem, fireSystem, sink);
+        when(healthSystem.applyDamage(gate, 10.0)).thenReturn(0.0);
+        withSink.onGateDoorDamage(new GateDoorDamageEvent(gate, GateDoorDamageEvent.Cause.PROJECTILE, null, null));
+        verifyNoInteractions(sink);
+
+        when(healthSystem.applyDamage(gate, 10.0)).thenReturn(10.0);
+        org.mockito.Mockito.doThrow(new IllegalStateException("boom")).when(sink)
+            .directDamage(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyDouble());
+        withSink.onGateDoorDamage(new GateDoorDamageEvent(gate, GateDoorDamageEvent.Cause.PROJECTILE, null, null));
+        verify(healthSystem, org.mockito.Mockito.times(2)).applyDamage(gate, 10.0);
+    }
+
+    @Test
     void skipsAlreadyCancelledEvents() {
         GateDoorDamageEvent event = new GateDoorDamageEvent(gate, GateDoorDamageEvent.Cause.LEFT_CLICK, null, null);
         event.setCancelled(true);
@@ -65,7 +92,7 @@ class GateDamageConsequenceListenerTest {
 
             listener.onGateDoorIgnite(event);
 
-            verify(fireSystem, atLeastOnce()).igniteBlock(gate, hitBlock);
+            verify(fireSystem, atLeastOnce()).igniteBlock(gate, hitBlock, null);
         }
     }
 

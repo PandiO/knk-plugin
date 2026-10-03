@@ -192,6 +192,8 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.discovery.DomainDiscoveryListener discoveryListener;
     private net.knightsandkings.knk.paper.menu.content.DiscoveriesMenuFeature discoveriesMenuFeature;
     private net.knightsandkings.knk.paper.statistics.StatisticsService statisticsService;
+    // KNG-34 link 4: gate-damage statistics; null when statistics or statistics.gates are off.
+    private net.knightsandkings.knk.paper.statistics.GateDamageStatisticsSink statisticsGateSink;
     private net.knightsandkings.knk.paper.statistics.StatisticsFlushTask statisticsFlushTask;
     private net.knightsandkings.knk.paper.menu.content.StatisticsVisibilityMenuFeature statisticsVisibilityMenuFeature;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
@@ -813,9 +815,13 @@ public class KnKPlugin extends JavaPlugin {
             long fireDurationMillis = getConfig().getLong("gates.fire-duration-seconds", 8) * 1000L;
             double fireDamagePerTick = getConfig().getDouble("gates.fire-damage-per-tick", 2.0);
             GateFireSystem gateFireSystem = new GateFireSystem(healthSystem, gateManager, fireDurationMillis, fireDamagePerTick);
+            // KNG-34: effective gate HP loss credited to players (reads the loss only; HP outcomes unchanged).
+            net.knightsandkings.knk.paper.gates.GateDamageSink gateDamageSink = statisticsGateSink != null
+                ? statisticsGateSink : net.knightsandkings.knk.paper.gates.GateDamageSink.NONE;
+            gateFireSystem.setDamageSink(gateDamageSink);
 
             getServer().getPluginManager().registerEvents(new GateEventListener(gateDoorHitService), this);
-            getServer().getPluginManager().registerEvents(new GateDamageConsequenceListener(healthSystem, gateFireSystem), this);
+            getServer().getPluginManager().registerEvents(new GateDamageConsequenceListener(healthSystem, gateFireSystem, gateDamageSink), this);
 
             int passThroughInstantOpenRadius = getConfig().getInt("gates.passthrough-instant-open-radius-blocks", 1);
             int passThroughInstantOpenTimeoutSeconds = getConfig().getInt("gates.passthrough-instant-open-timeout-seconds", 5);
@@ -1060,6 +1066,16 @@ public class KnKPlugin extends JavaPlugin {
         if (statisticsConfig.fall().enabled()) {
             getServer().getPluginManager().registerEvents(
                 new net.knightsandkings.knk.paper.statistics.FallStatisticsListener(statisticsService), this);
+        }
+        if (statisticsConfig.combat().enabled()) {
+            getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.statistics.CombatStatisticsListener(
+                statisticsService, statisticsConfig.combat(),
+                net.knightsandkings.knk.paper.statistics.CombatStatisticsListener.siegeHeadshots(() -> siegeService)), this);
+        }
+        if (statisticsConfig.gates().enabled()) {
+            // Installed into the gate fire system and consequence listener when the gates start (below).
+            this.statisticsGateSink = new net.knightsandkings.knk.paper.statistics.GateDamageStatisticsSink(
+                statisticsService, statisticsConfig.gates().fireAttribution());
         }
         registerTabCommand("afk", new net.knightsandkings.knk.paper.commands.AfkCommand(
             statisticsService, statisticsConfig.afk().enabled() && statisticsConfig.afk().commandEnabled()));
@@ -1978,6 +1994,8 @@ public class KnKPlugin extends JavaPlugin {
             cacheManager.getUserCache(),
             siegeRandom
         );
+        // KNG-34 leaver fix: members who left early are reported with their stats (no reward).
+        siegeService.setReportDepartedMembers(config.statistics().enabled() && config.statistics().siege().reportDepartedMembers());
 
         PluginCommand siegeCommand = getCommand("siege");
         if (siegeCommand != null) {
@@ -2032,6 +2050,7 @@ public class KnKPlugin extends JavaPlugin {
             var siegeGates = new net.knightsandkings.knk.paper.siege.SiegeGateController(
                 this, gateManager, gateHealthSystem, apiClient.getSiegeGatesCommandApi());
             siegeService.addObserver(siegeGates);
+            if (statisticsGateSink != null) statisticsGateSink.setLockedByMatch(siegeGates::isLocked);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeGateListener(siegeGates, gateManager), this);
             siegeGates.recoverOnStartup();
             // Phase 7b: non-members see the locked gates removed and walk through them (degrade

@@ -2,12 +2,14 @@ package net.knightsandkings.knk.paper.listeners;
 
 import net.knightsandkings.knk.paper.events.GateDoorDamageEvent;
 import net.knightsandkings.knk.paper.events.GateDoorIgniteEvent;
+import net.knightsandkings.knk.paper.gates.GateDamageSink;
 import net.knightsandkings.knk.paper.gates.GateFireSystem;
 import net.knightsandkings.knk.paper.gates.HealthSystem;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 
 import java.util.Map;
+import java.util.logging.Logger;
 
 /**
  * Consequence listener for gate door events: owns the damage amount per GateDoorDamageEvent
@@ -24,12 +26,21 @@ public class GateDamageConsequenceListener implements Listener {
         GateDoorDamageEvent.Cause.BLOCK_BREAK, 10.0
     );
 
+    private static final Logger LOGGER = Logger.getLogger(GateDamageConsequenceListener.class.getName());
+
     private final HealthSystem healthSystem;
     private final GateFireSystem fireSystem;
+    private final GateDamageSink damageSink;
 
     public GateDamageConsequenceListener(HealthSystem healthSystem, GateFireSystem fireSystem) {
+        this(healthSystem, fireSystem, GateDamageSink.NONE);
+    }
+
+    /** @param damageSink KNG-34 gate-damage statistics: receives the effective loss of each hit, changes nothing */
+    public GateDamageConsequenceListener(HealthSystem healthSystem, GateFireSystem fireSystem, GateDamageSink damageSink) {
         this.healthSystem = healthSystem;
         this.fireSystem = fireSystem;
+        this.damageSink = damageSink == null ? GateDamageSink.NONE : damageSink;
     }
 
     @EventHandler
@@ -39,7 +50,14 @@ public class GateDamageConsequenceListener implements Listener {
         }
 
         double amount = DAMAGE_BY_CAUSE.getOrDefault(event.getCause(), 10.0);
-        healthSystem.applyDamage(event.getGate(), amount);
+        double loss = healthSystem.applyDamage(event.getGate(), amount);
+        if (loss > 0) {
+            try {
+                damageSink.directDamage(event.getGate(), event.getCausingEntity(), loss);
+            } catch (RuntimeException e) {
+                LOGGER.warning("Gate damage statistics failed: " + e);
+            }
+        }
     }
 
     @EventHandler
@@ -48,6 +66,6 @@ public class GateDamageConsequenceListener implements Listener {
             return;
         }
 
-        fireSystem.igniteBlock(event.getGate(), event.getHitBlock());
+        fireSystem.igniteBlock(event.getGate(), event.getHitBlock(), event.getCausingEntity());
     }
 }
