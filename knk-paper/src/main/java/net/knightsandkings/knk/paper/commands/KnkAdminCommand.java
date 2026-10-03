@@ -57,6 +57,9 @@ import net.knightsandkings.knk.paper.commands.support.CommandPermissions;
 public class KnkAdminCommand implements CommandExecutor, TabCompleter {
     private final CommandRegistry registry = new CommandRegistry();
     private CommandPermissions commandPermissions = CommandPermissions.bukkitOnly();
+    /** Nodes a subcommand checks synchronously inside its executor; asked for before it runs (KNG-24). */
+    private final java.util.Map<String, List<String>> nodesCheckedInside = new java.util.HashMap<>();
+    private GateCommand gateCommand;
     private final java.util.Map<String, java.util.function.BiFunction<CommandSender, String[], List<String>>> extraTabCompleters =
             new java.util.HashMap<>();
     private final HelpSubcommand helpSubcommand;
@@ -370,6 +373,9 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         );
 
         GateCommand gateCommand = new GateCommand(gateManager, gateStructuresApi, gateDoorsApi, userManager, usersCommandApi, districtGateLoader, gateDoorRegionCaptureHandler);
+        this.gateCommand = gateCommand;
+        nodesCheckedInside.put("gate", GateCommand.CHECKED_NODES);
+        nodesCheckedInside.put("user", UserManagementCommand.CHECKED_NODES);
         registry.register(
                 new CommandMetadata("gate", "Control and inspect gate structures", "/knk gate <open|close|info|list|passthrough|admin>", null,
                         List.of("/knk gate list", "/knk gate info <name>", "/knk gate open <name>", "/knk gate passthrough <default|instant|teleport>")),
@@ -472,8 +478,10 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
             return true;
         }
 
-        // KNG-24: the metadata permission through KnkPermissible (in-house grants and wildcards, ops).
-        registry.execute(sender, cmd, subArgs);
+        // KNG-24: the metadata permission through KnkPermissible (in-house grants and wildcards, ops),
+        // after asking for the nodes the executor checks from the cache.
+        List<String> inside = nodesCheckedInside.getOrDefault(cmd.metadata().name().toLowerCase(Locale.ROOT), List.of());
+        commandPermissions.warm(sender, inside, () -> registry.execute(sender, cmd, subArgs));
         return true;
     }
 
@@ -484,6 +492,9 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
     public void setCommandPermissions(CommandPermissions permissions) {
         this.commandPermissions = java.util.Objects.requireNonNull(permissions, "permissions must not be null");
         registry.setPermissions(permissions);
+        if (gateCommand != null) {
+            gateCommand.setPermissions(permissions);
+        }
     }
 
         @Override

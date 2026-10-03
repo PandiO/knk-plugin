@@ -608,6 +608,8 @@ public class KnKPlugin extends JavaPlugin {
                 // After a group/title change: redraw the target's tab-list team and footer (KNG-7).
                 (player, summary) -> net.knightsandkings.knk.paper.utils.ScoreboardUtil.setScoreboard(List.of(player), knkPermissible, summary)
             );
+            // KNG-24: knk.admin.user.* checked through KnkPermissible as well as Bukkit.
+            this.userAdminService.setPermissions(commandPermissions());
             // Salary on join (offline gap) and every hour online; the scoreboard is redrawn after a payout.
             this.salaryPayoutScheduler = new net.knightsandkings.knk.paper.user.SalaryPayoutScheduler(
                 this, usersCommandApi, cacheManager.getUserCache(), usersDataAccess,

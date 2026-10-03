@@ -440,4 +440,44 @@ class UserAdminServiceTest {
         assertEquals(1, redrawn.size());
         assertSame(online, redrawn.get(0)[0]);
     }
+
+    // ---- KNG-24: in-house grants ----
+
+    private void inHouse(java.util.Set<String> granted) {
+        var permissible = mock(net.knightsandkings.knk.paper.permissions.KnkPermissible.class);
+        when(permissible.hasPermission(any(Player.class), anyString()))
+                .thenAnswer(inv -> granted.contains((String) inv.getArgument(1)));
+        when(permissible.checkAsync(any(), anyString())).thenAnswer(inv -> CompletableFuture.completedFuture(
+                granted.contains((String) inv.getArgument(1))
+                        ? net.knightsandkings.knk.core.domain.permissions.PermissionDecision.ALLOWED
+                        : net.knightsandkings.knk.core.domain.permissions.PermissionDecision.DENIED));
+        service.setPermissions(net.knightsandkings.knk.paper.commands.support.CommandPermissions.of(permissible, Runnable::run));
+    }
+
+    @Test
+    void inHouseGrantPassesThePropertyAndXpRaiseChecks() {
+        inHouse(java.util.Set.of("knk.admin.user.coins", "knk.admin.user.gems", "knk.admin.user.xp"));
+        assertTrue(service.requireProperty(staff, "coins"));
+        assertTrue(service.requireXpRaise(staff));
+        assertFalse(service.requireProperty(staff, "perm"));
+    }
+
+    @Test
+    void inHouseManageAllSkipsTheRankCheck() {
+        inHouse(java.util.Set.of(UserAdminService.MANAGE_ALL_NODE));
+        java.util.concurrent.atomic.AtomicBoolean allowed = new java.util.concurrent.atomic.AtomicBoolean();
+        service.withRankCheck(staff, target, actingApi -> allowed.set(true), () -> { });
+        assertTrue(allowed.get());
+        verify(ranks, never()).actorOutranks(anyInt(), anyInt());
+    }
+
+    @Test
+    void withoutManageAllTheRankCheckStillApplies() {
+        inHouse(java.util.Set.of());
+        when(ranks.actorOutranks(42, 7)).thenReturn(CompletableFuture.completedFuture(false));
+        java.util.concurrent.atomic.AtomicBoolean allowed = new java.util.concurrent.atomic.AtomicBoolean();
+        service.withRankCheck(staff, target, actingApi -> allowed.set(true), () -> { });
+        assertFalse(allowed.get());
+        verify(staff).sendMessage(org.mockito.ArgumentMatchers.contains("equal or higher rank"));
+    }
 }
