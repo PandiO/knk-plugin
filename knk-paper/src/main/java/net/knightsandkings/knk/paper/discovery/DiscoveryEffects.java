@@ -94,6 +94,25 @@ public final class DiscoveryEffects {
         this.grantObserver = observer == null ? (player, result) -> { } : observer;
     }
 
+    /**
+     * Adds an observer next to the existing one (KNG-34: diagnostic telemetry and world analytics both
+     * watch grants). Each runs in its own try, so one failing never hides a grant from the other.
+     */
+    public void addGrantObserver(BiConsumer<Player, DiscoveryGrantResult> observer) {
+        if (observer == null) {
+            return;
+        }
+        BiConsumer<Player, DiscoveryGrantResult> previous = grantObserver;
+        this.grantObserver = (player, result) -> {
+            try {
+                previous.accept(player, result);
+            } catch (RuntimeException e) {
+                LOGGER.fine("[Discovery] grant observer failed: " + e);
+            }
+            observer.accept(player, result);
+        };
+    }
+
     private void observeGrants(Player player, DiscoveryGrantResult result) {
         try {
             grantObserver.accept(player, result);

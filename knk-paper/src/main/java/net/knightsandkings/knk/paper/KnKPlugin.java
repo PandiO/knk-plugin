@@ -199,6 +199,9 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.telemetry.TelemetryEmitter telemetryEmitter;
     private net.knightsandkings.knk.paper.telemetry.TelemetryHooks telemetryHooks;
     private net.knightsandkings.knk.paper.telemetry.TelemetryFlushTask telemetryFlushTask;
+    private net.knightsandkings.knk.paper.analytics.WorldAnalyticsFlushTask worldAnalyticsFlushTask;
+    private net.knightsandkings.knk.paper.analytics.MenuFunnelRecorder menuFunnelRecorder;
+    private net.knightsandkings.knk.paper.analytics.DomainInteractionRecorder domainInteractionRecorder;
     private net.knightsandkings.knk.paper.menu.content.StatisticsVisibilityMenuFeature statisticsVisibilityMenuFeature;
     // KNG-34 link 5: read surfaces (statistics.main, leaderboards); null when menus failed to start.
     private net.knightsandkings.knk.paper.menu.content.StatisticsMenuFeature statisticsMenuFeature;
@@ -627,6 +630,7 @@ public class KnKPlugin extends JavaPlugin {
             getServer().getPluginManager().registerEvents(salaryPayoutScheduler, this);
             salaryPayoutScheduler.start();
             startTelemetry();
+            startWorldAnalytics();
             startDomainDiscovery();
             startStatistics();
             // Rank changes made outside the plugin (web app, expiring temporary rank) show right away.
@@ -723,6 +727,9 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().info("InventoryMenu rendering engine initialized (Phase 2 + 9)");
             if (telemetryHooks != null) {
                 menuService.addObserver(telemetryHooks); // menu.opened / menu.action / menu.click (KNG-34 link 6)
+            }
+            if (menuFunnelRecorder != null) {
+                menuService.addObserver(menuFunnelRecorder); // anonymous menu funnels (KNG-34 link 7)
             }
 
             getServer().getPluginManager().registerEvents(
@@ -1008,6 +1015,10 @@ public class KnKPlugin extends JavaPlugin {
             statisticsFlushTask.stop();
             statisticsFlushTask.shutdown();
         }
+        if (worldAnalyticsFlushTask != null) {
+            // World analytics: the open window is posted with a short bounded wait; nothing is spooled.
+            worldAnalyticsFlushTask.shutdown();
+        }
         if (telemetryFlushTask != null) {
             // Diagnostics: one last send with a short bounded wait; nothing is spooled.
             telemetryFlushTask.shutdown();
@@ -1075,6 +1086,46 @@ public class KnKPlugin extends JavaPlugin {
         telemetryFlushTask.start(this, telemetryConfig.flushIntervalSeconds(), telemetryConfig.configPollSeconds());
         getLogger().info("Diagnostic telemetry started (flush every " + telemetryConfig.flushIntervalSeconds()
             + " s, buffer " + telemetryConfig.maxBufferEvents() + " events)");
+    }
+
+    /**
+     * World analytics (KNG-34 link 7, docs/specs/player-statistics IMPLEMENTATION_PLAN.md §5): anonymous
+     * movement heatmap cells (a timer, never a move listener), menu funnels (a {@code MenuObserver},
+     * attached when the menu service starts) and domain interactions (region events + discovery grants,
+     * attached when discovery starts), posted every {@code flush-interval-seconds} off the main thread and
+     * never across a local midnight. {@code world-analytics.enabled: false} creates nothing - today's
+     * behaviour. AFK comes from player statistics when they run (looked up on every sample).
+     */
+    private void startWorldAnalytics() {
+        KnkConfig.WorldAnalyticsConfig analyticsConfig = config.worldAnalytics();
+        if (!analyticsConfig.enabled()) {
+            getLogger().info("World analytics disabled (world-analytics.enabled: false)");
+            return;
+        }
+        net.knightsandkings.knk.core.analytics.WorldAnalyticsWindow window = new net.knightsandkings.knk.core.analytics.WorldAnalyticsWindow(
+            analyticsConfig.cellSize(), java.time.Clock.systemUTC(), java.time.ZoneId.of("Europe/Amsterdam"),
+            analyticsConfig.maxPendingBatches());
+        if (analyticsConfig.movement()) {
+            long sampleTicks = analyticsConfig.movementSampleSeconds() * 20L;
+            getServer().getScheduler().runTaskTimer(this, new net.knightsandkings.knk.paper.analytics.MovementSampler(
+                window, () -> getServer().getOnlinePlayers(),
+                uuid -> statisticsService != null && statisticsService.isAfk(uuid),
+                analyticsConfig.excludedGameModes()), sampleTicks, sampleTicks);
+        }
+        if (analyticsConfig.menuFunnels()) {
+            this.menuFunnelRecorder = new net.knightsandkings.knk.paper.analytics.MenuFunnelRecorder(window);
+        }
+        if (analyticsConfig.domainInteractions()) {
+            this.domainInteractionRecorder = new net.knightsandkings.knk.paper.analytics.DomainInteractionRecorder(window);
+            getServer().getPluginManager().registerEvents(domainInteractionRecorder, this);
+        }
+        this.worldAnalyticsFlushTask = new net.knightsandkings.knk.paper.analytics.WorldAnalyticsFlushTask(
+            window, apiClient.getWorldAnalyticsApi(), getServer().getName() + " " + getServer().getPort());
+        worldAnalyticsFlushTask.start(this, analyticsConfig.flushIntervalSeconds(), () -> apiClient.getStatisticsApi().getCatalog());
+        getLogger().info("World analytics started (flush every " + analyticsConfig.flushIntervalSeconds()
+            + " s, movement " + (analyticsConfig.movement() ? "every " + analyticsConfig.movementSampleSeconds() + " s" : "off")
+            + ", menu funnels " + (analyticsConfig.menuFunnels() ? "on" : "off")
+            + ", domain interactions " + (analyticsConfig.domainInteractions() ? "on" : "off") + ")");
     }
 
     private void startStatistics() {
@@ -1206,6 +1257,9 @@ public class KnKPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(discoveryListener, this);
         if (telemetryHooks != null) {
             discoveryEffects.setGrantObserver(telemetryHooks::discoveriesGranted);
+        }
+        if (domainInteractionRecorder != null) {
+            discoveryEffects.addGrantObserver(domainInteractionRecorder::discoveriesGranted);
         }
         discoveryFlushTask.start();
         discoveryListener.startOnlinePlayers(uuid -> cacheManager.getUserCache().getByUuid(uuid)

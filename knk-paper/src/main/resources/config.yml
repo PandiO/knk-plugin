@@ -259,6 +259,27 @@ telemetry:
   # Position sample interval for enhanced players
   enhanced-movement-sample-seconds: 5
 
+# World analytics (KNG-34 link 7, knk-workspace docs/specs/player-statistics): anonymous movement
+# heatmaps, menu funnels and domain interactions for the owner's /owner/analytics page. Aggregated in
+# memory (no user ids or names leave the plugin), posted every flush-interval-seconds, never across a
+# local midnight of the API's statistics time zone. Kept in memory while the API is unreachable (up
+# to max-pending-batches windows), never spooled to disk.
+world-analytics:
+  # false: no sampler, menu observer, region listener or task (today's behaviour)
+  enabled: true
+  # One position sample per online, non-AFK player this often (at least 10)
+  movement-sample-seconds: 10
+  # Heatmap cell edge in blocks
+  cell-size: 16
+  flush-interval-seconds: 300
+  # Part switches
+  movement: true
+  menu-funnels: true
+  domain-interactions: true
+  # Players in these game modes are not sampled (spectators never are)
+  excluded-game-modes: [CREATIVE, SPECTATOR]
+  max-pending-batches: 12
+
 # Player payments (currency ledger Phase 3, docs/specs/currency-payments/DESIGN.md §3.6). Every
 # limit that matters (min/max, daily caps, cooldown, confirmation threshold, who may send) lives in
 # the API's currency policy; these only shape the in-game experience.

@@ -115,6 +115,7 @@ public class KnkApiClient {
     private final DiscoveriesApi discoveriesApi;
     private final StatisticsApiImpl statisticsApi;
     private final net.knightsandkings.knk.core.ports.api.TelemetryApi telemetryApi;
+    private final net.knightsandkings.knk.core.ports.api.WorldAnalyticsApi worldAnalyticsApi;
     private final LeaderboardsApiImpl leaderboardsApi;
     private final UserIgnoresApi userIgnoresApi;
     private final PrivateMessageLogApi privateMessageLogApi;
@@ -159,6 +160,7 @@ public class KnkApiClient {
         this.authProvider = authProvider;
         this.executor = executor;
         this.telemetryApi = new net.knightsandkings.knk.api.impl.TelemetryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.worldAnalyticsApi = new net.knightsandkings.knk.api.impl.WorldAnalyticsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         
         // Initialize API implementations
         this.healthApi = new HealthApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -318,6 +320,11 @@ public class KnkApiClient {
     /** Diagnostic telemetry (KNG-34 link 6): {@code api/telemetry}. */
     public net.knightsandkings.knk.core.ports.api.TelemetryApi getTelemetryApi() {
         return telemetryApi;
+    }
+
+    /** World analytics (KNG-34 link 7): {@code api/world-analytics}. */
+    public net.knightsandkings.knk.core.ports.api.WorldAnalyticsApi getWorldAnalyticsApi() {
+        return worldAnalyticsApi;
     }
 
     /** Leaderboards (KNG-34): {@code api/leaderboards}. */

@@ -110,7 +110,8 @@ public class ConfigLoader {
             loadTeleportSettings(config.getConfigurationSection("teleport")),
             loadDiscovery(config.getConfigurationSection("discovery")),
             loadStatistics(config.getConfigurationSection("statistics")),
-            loadTelemetry(config.getConfigurationSection("telemetry")));
+            loadTelemetry(config.getConfigurationSection("telemetry")),
+            loadWorldAnalytics(config.getConfigurationSection("world-analytics")));
         knkConfig.validate();
         
         return knkConfig;
@@ -235,6 +236,28 @@ public class ConfigLoader {
             section.getInt("flush-interval-seconds", defaults.flushIntervalSeconds()),
             section.getInt("config-poll-seconds", defaults.configPollSeconds()),
             section.getInt("enhanced-movement-sample-seconds", defaults.enhancedMovementSampleSeconds())
+        );
+    }
+
+    /** World analytics (KNG-34 link 7); every key has a default, so a missing section means "on, with defaults". */
+    static KnkConfig.WorldAnalyticsConfig loadWorldAnalytics(ConfigurationSection section) {
+        KnkConfig.WorldAnalyticsConfig defaults = KnkConfig.WorldAnalyticsConfig.defaults();
+        if (section == null) {
+            return defaults;
+        }
+        java.util.Set<org.bukkit.GameMode> gameModes = section.contains("excluded-game-modes")
+            ? KnkConfig.StatisticsConfig.parseGameModes(section.getStringList("excluded-game-modes"))
+            : defaults.excludedGameModes();
+        return new KnkConfig.WorldAnalyticsConfig(
+            section.getBoolean("enabled", defaults.enabled()),
+            section.getInt("movement-sample-seconds", defaults.movementSampleSeconds()),
+            section.getInt("cell-size", defaults.cellSize()),
+            section.getInt("flush-interval-seconds", defaults.flushIntervalSeconds()),
+            section.getBoolean("movement", defaults.movement()),
+            section.getBoolean("menu-funnels", defaults.menuFunnels()),
+            section.getBoolean("domain-interactions", defaults.domainInteractions()),
+            gameModes,
+            section.getInt("max-pending-batches", defaults.maxPendingBatches())
         );
     }
 

@@ -22,7 +22,8 @@ public record KnkConfig(
     TeleportSettings teleport,
     DiscoveryConfig discovery,
     StatisticsConfig statistics,
-    TelemetryConfig telemetry
+    TelemetryConfig telemetry,
+    WorldAnalyticsConfig worldAnalytics
 ) {
     public KnkConfig {
         // No teleport: block (e.g. an older config.yml) means the DESIGN §3.11 defaults.
@@ -31,6 +32,16 @@ public record KnkConfig(
         statistics = statistics != null ? statistics : StatisticsConfig.defaults();
         // No telemetry: block means "on, with defaults" (diagnostic telemetry, KNG-34 link 6).
         telemetry = telemetry != null ? telemetry : TelemetryConfig.defaults();
+        // No world-analytics: block means "on, with defaults" (KNG-34 link 7).
+        worldAnalytics = worldAnalytics != null ? worldAnalytics : WorldAnalyticsConfig.defaults();
+    }
+
+    /** Without a world-analytics section: its defaults. */
+    public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
+                     PrivateMessagesConfig privateMessages, TeleportSettings teleport, DiscoveryConfig discovery,
+                     StatisticsConfig statistics, TelemetryConfig telemetry) {
+        this(api, cache, account, messages, privateMessages, teleport, discovery, statistics, telemetry,
+            WorldAnalyticsConfig.defaults());
     }
 
     /** Without a telemetry section: its defaults. */
@@ -149,6 +160,7 @@ public record KnkConfig(
         discovery.validate();
         statistics.validate();
         telemetry.validate();
+        worldAnalytics.validate();
     }
     
     public record CacheConfig(
@@ -793,6 +805,61 @@ public record KnkConfig(
             if (enhancedMovementSampleSeconds < 1) {
                 throw new IllegalArgumentException(
                     "telemetry.enhanced-movement-sample-seconds must be at least 1 (got: " + enhancedMovementSampleSeconds + ")");
+            }
+        }
+    }
+
+    /**
+     * World analytics (KNG-34 link 7, knk-workspace docs/specs/player-statistics IMPLEMENTATION_PLAN.md
+     * §5.1, DESIGN.md D10/D11): anonymous movement heatmap cells, menu funnels and domain interactions,
+     * aggregated in memory and posted every {@code flush-interval-seconds} (never across a local midnight).
+     * No user id or name leaves the plugin. {@code enabled: false} creates no sampler, observer, listener
+     * or task - today's behaviour; the three part switches turn single parts off.
+     *
+     * @param movementSampleSeconds  one position sample per online, non-AFK player this often (at least 10 s)
+     * @param cellSize               heatmap cell edge in blocks
+     * @param flushIntervalSeconds   how often the aggregates are posted
+     * @param movement               sample positions for the heatmap
+     * @param menuFunnels            count menu opens, actions, back and close
+     * @param domainInteractions     count region entries/exits and discoveries per domain
+     * @param excludedGameModes      players in these game modes are not sampled (spectators never are)
+     * @param maxPendingBatches      closed windows kept in memory while the API is unreachable (oldest dropped)
+     */
+    public record WorldAnalyticsConfig(
+        boolean enabled,
+        int movementSampleSeconds,
+        int cellSize,
+        int flushIntervalSeconds,
+        boolean movement,
+        boolean menuFunnels,
+        boolean domainInteractions,
+        Set<GameMode> excludedGameModes,
+        int maxPendingBatches
+    ) {
+        public WorldAnalyticsConfig {
+            excludedGameModes = excludedGameModes == null ? Set.of() : Set.copyOf(excludedGameModes);
+        }
+
+        public static WorldAnalyticsConfig defaults() {
+            return new WorldAnalyticsConfig(true, 10, 16, 300, true, true, true,
+                Set.of(GameMode.CREATIVE, GameMode.SPECTATOR), 12);
+        }
+
+        public void validate() {
+            if (movementSampleSeconds < 10) {
+                throw new IllegalArgumentException(
+                    "world-analytics.movement-sample-seconds must be at least 10 (got: " + movementSampleSeconds + ")");
+            }
+            if (cellSize < 1 || cellSize > 1024) {
+                throw new IllegalArgumentException("world-analytics.cell-size must be between 1 and 1024 (got: " + cellSize + ")");
+            }
+            if (flushIntervalSeconds < 30) {
+                throw new IllegalArgumentException(
+                    "world-analytics.flush-interval-seconds must be at least 30 (got: " + flushIntervalSeconds + ")");
+            }
+            if (maxPendingBatches < 1) {
+                throw new IllegalArgumentException(
+                    "world-analytics.max-pending-batches must be at least 1 (got: " + maxPendingBatches + ")");
             }
         }
     }
