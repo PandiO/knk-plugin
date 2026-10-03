@@ -194,6 +194,7 @@ public class KnKPlugin extends JavaPlugin {
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private PermissionsDataAccess permissionsDataAccess;
     private KnkPermissible knkPermissible;
+    private net.knightsandkings.knk.paper.commands.support.CommandPermissions commandPermissions;
     private JoinLoadingGuard joinLoadingGuard;
     private ModeService modeService;
     private net.knightsandkings.knk.paper.user.AdminFreezeManager adminFreezeManager;
@@ -1269,6 +1270,7 @@ public class KnKPlugin extends JavaPlugin {
                     )
                 );
             }
+            knkAdminCommand.setCommandPermissions(commandPermissions());
             knkCommand.setExecutor(knkAdminCommand);
             knkCommand.setTabCompleter(knkAdminCommand);
             getLogger().info("Registered /knk admin command");
@@ -1296,8 +1298,7 @@ public class KnKPlugin extends JavaPlugin {
 
         // KNG-24: gated on their in-house node in the executor, not by plugin.yml's permission:
         // (Bukkit never sees in-house grants, so non-op staff got "Unknown or incomplete command").
-        var commandPermissions = net.knightsandkings.knk.paper.commands.support.CommandPermissions.of(
-            knkPermissible, MenuService.mainThreadExecutor(this));
+        var commandPermissions = commandPermissions();
         var gatedCommandVisibility = new net.knightsandkings.knk.paper.listeners.GatedCommandVisibilityListener(
             commandPermissions, MenuService.mainThreadExecutor(this));
         registerGatedCommand("freeze", "knk.freeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(userAdminService, true),
@@ -1812,6 +1813,15 @@ public class KnKPlugin extends JavaPlugin {
         } else {
             getLogger().warning("Failed to register /" + name + " command - not defined in plugin.yml?");
         }
+    }
+
+    /** Bukkit-or-in-house permission checks for commands (KNG-24); Bukkit-only when the API isn't configured. */
+    private net.knightsandkings.knk.paper.commands.support.CommandPermissions commandPermissions() {
+        if (commandPermissions == null) {
+            commandPermissions = net.knightsandkings.knk.paper.commands.support.CommandPermissions.of(
+                knkPermissible, MenuService.mainThreadExecutor(this));
+        }
+        return commandPermissions;
     }
 
     /** A command gated on {@code node} through KnkPermissible and hidden from players lacking it (KNG-24). */
