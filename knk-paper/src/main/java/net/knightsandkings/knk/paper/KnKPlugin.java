@@ -1157,6 +1157,9 @@ public class KnKPlugin extends JavaPlugin {
         getLogger().info("Registered AdminFreezeListener for /freeze enforcement");
         pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.PrivateMessageSessionListener(
             this, messagingService, spyService, ignoreService), this);
+        // KNG-25: /minecraft:tell and /minecraft:w broke the typing player's secure chat (always on -
+        // the plugin's tell/w aliases shadow the vanilla redirects whether or not the block below runs).
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.ShadowedVanillaCommandListener(), this);
         if (config.privateMessages().blockVanillaCommands()) {
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.VanillaMessagingBlockListener(), this);
             getLogger().info("Registered VanillaMessagingBlockListener (/minecraft:msg|tell|w -> /msg; /teammsg, /tm, /me off)");
