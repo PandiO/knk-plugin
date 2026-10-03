@@ -151,6 +151,12 @@ commands:
     description: "Show your statistics, or another player's (same as /user statistics); /stats settings: who may see your statistics"
     usage: "/stats [player|settings]"
 
+  # Player statistics (KNG-34, DESIGN.md §F.11): leaderboards - no args opens the board menu.
+  leaderboard:
+    description: "Show a leaderboard (weekly, monthly or all time), or the list of leaderboards"
+    usage: "/leaderboard [board] [weekly|monthly|lifetime]"
+    aliases: [lb]
+
   # Player statistics (KNG-34, DESIGN.md §F.2): toggle AFK. With statistics.enabled false (or
   # statistics.afk.command-enabled false) it only answers "AFK is disabled".
   afk:

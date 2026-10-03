@@ -67,6 +67,10 @@ final class ContentFeatures {
         features.add(new TeleportMenuFeature(() -> null));
         features.add(new StatisticsVisibilityMenuFeature(mock(net.knightsandkings.knk.core.ports.api.StatisticsApi.class),
                 new net.knightsandkings.knk.core.cache.UserCache(java.time.Duration.ofMinutes(5)), Runnable::run, Clock.systemUTC()));
+        features.add(new StatisticsMenuFeature(mock(net.knightsandkings.knk.core.ports.api.StatisticsApi.class),
+                new net.knightsandkings.knk.core.cache.UserCache(java.time.Duration.ofMinutes(5)), Clock.systemUTC()));
+        features.add(new LeaderboardsMenuFeature(mock(net.knightsandkings.knk.core.ports.api.LeaderboardsApi.class),
+                new net.knightsandkings.knk.core.cache.UserCache(java.time.Duration.ofMinutes(5)), Clock.systemUTC()));
         return features;
     }
 

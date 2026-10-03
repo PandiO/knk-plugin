@@ -196,6 +196,9 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.statistics.GateDamageStatisticsSink statisticsGateSink;
     private net.knightsandkings.knk.paper.statistics.StatisticsFlushTask statisticsFlushTask;
     private net.knightsandkings.knk.paper.menu.content.StatisticsVisibilityMenuFeature statisticsVisibilityMenuFeature;
+    // KNG-34 link 5: read surfaces (statistics.main, leaderboards); null when menus failed to start.
+    private net.knightsandkings.knk.paper.menu.content.StatisticsMenuFeature statisticsMenuFeature;
+    private net.knightsandkings.knk.paper.menu.content.LeaderboardsMenuFeature leaderboardsMenuFeature;
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private PermissionsDataAccess permissionsDataAccess;
     private KnkPermissible knkPermissible;
@@ -663,6 +666,13 @@ public class KnKPlugin extends JavaPlugin {
                 java.time.Clock.systemUTC()
             );
             getServer().getPluginManager().registerEvents(statisticsVisibilityMenuFeature, this);
+            // KNG-34 link 5: statistics and leaderboard menus - reads only, also with statistics.enabled false.
+            this.statisticsMenuFeature = new net.knightsandkings.knk.paper.menu.content.StatisticsMenuFeature(
+                apiClient.getStatisticsApi(), cacheManager.getUserCache(), java.time.Clock.systemUTC());
+            this.leaderboardsMenuFeature = new net.knightsandkings.knk.paper.menu.content.LeaderboardsMenuFeature(
+                apiClient.getLeaderboardsApi(), cacheManager.getUserCache(), java.time.Clock.systemUTC());
+            getServer().getPluginManager().registerEvents(statisticsMenuFeature, this);
+            getServer().getPluginManager().registerEvents(leaderboardsMenuFeature, this);
             List<MenuFeature> menuFeatures = List.of(
                 registries -> {
                     MenuVariableContext.registerDefaults(registries.variables());
@@ -691,7 +701,9 @@ public class KnKPlugin extends JavaPlugin {
                 // Siege Phase 8b: the siege menus. SiegeService is created later (initializeSiege),
                 // so the feature looks it up on every call.
                 new net.knightsandkings.knk.paper.siege.SiegeMenuFeature(() -> siegeService),
-                statisticsVisibilityMenuFeature
+                statisticsVisibilityMenuFeature,
+                statisticsMenuFeature,
+                leaderboardsMenuFeature
             );
             menuFeatures.forEach(feature -> feature.registerMenuHandlers(menuRegistries));
 
@@ -1724,10 +1736,44 @@ public class KnKPlugin extends JavaPlugin {
                     player.sendMessage(org.bukkit.ChatColor.RED + "Menus aren't available right now.");
                 }
             });
+            // KNG-34 link 5: /stats continues with the gameplay statistics the API shows to the viewer.
+            if (apiClient != null) {
+                var statisticsApi = apiClient.getStatisticsApi();
+                userCommand.setStatisticsReader((target, acting) -> statisticsApi.getUserStatistics(target, acting, "lifetime", null));
+            }
             registerTabCommand("user", userCommand);
             registerTabCommand("stats", userCommand.statsShortcut());
         } else {
             getLogger().warning("/user and /stats not registered - user data access failed to initialize");
+        }
+
+        // KNG-34 link 5: /leaderboard (/lb) - chat view of a board, or the board menu.
+        if (apiClient != null && cacheManager != null) {
+            var leaderboardsApi = apiClient.getLeaderboardsApi();
+            var lists = leaderboardsMenuFeature;
+            var leaderboardCommand = new net.knightsandkings.knk.paper.commands.LeaderboardCommand(
+                leaderboardsApi,
+                () -> lists != null ? lists.boards() : leaderboardsApi.listBoards(),
+                () -> {
+                    if (lists == null) {
+                        return List.of();
+                    }
+                    if (lists.cachedBoards().isEmpty()) {
+                        lists.boards().exceptionally(ex -> List.of()); // warm for the next completion
+                    }
+                    return lists.cachedBoards();
+                },
+                uuid -> cacheManager.getUserCache().getStale(uuid).map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null),
+                mainThread
+            );
+            leaderboardCommand.setMenuOpener(player -> {
+                if (menuService != null && menuService.isMenuAvailable(net.knightsandkings.knk.paper.menu.content.LeaderboardsMenuFeature.LIST_MENU_KEY)) {
+                    menuService.openMenu(player, net.knightsandkings.knk.paper.menu.content.LeaderboardsMenuFeature.LIST_MENU_KEY);
+                } else {
+                    player.performCommand("leaderboard " + "active_playtime");
+                }
+            });
+            registerTabCommand("leaderboard", leaderboardCommand);
         }
 
         if (knkPermissible == null || userAdminService == null) {

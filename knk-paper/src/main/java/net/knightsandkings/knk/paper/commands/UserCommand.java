@@ -20,10 +20,12 @@ import org.bukkit.entity.Player;
 import net.knightsandkings.knk.core.cache.UserCache;
 import net.knightsandkings.knk.core.dataaccess.TitleBracketsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
+import net.knightsandkings.knk.core.domain.statistics.PlayerStatistics;
 import net.knightsandkings.knk.core.domain.users.ActiveMode;
 import net.knightsandkings.knk.core.domain.users.TitleBracket;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.core.ports.api.UsersQueryApi;
+import net.knightsandkings.knk.core.statistics.StatisticsLines;
 import net.knightsandkings.knk.paper.menu.content.ProfileView;
 
 /**
@@ -40,9 +42,11 @@ import net.knightsandkings.knk.paper.menu.content.ProfileView;
  * The numbers come from {@link ProfileView}, the same view the Profile menu renders, over a fresh
  * API read (cache fallback) - so command and menu never disagree.
  * <p>
- * v2's {@code UserStatistics} was a different thing: ~20 gameplay counters (kills, deaths, siege
- * wins, damage dealt, distance travelled, ...). v3 doesn't track any of those yet; that gap is its
- * own issue (KNG-14), and this command should grow those lines once the data exists.
+ * Player statistics (KNG-34, the KNG-14 counters): when wired ({@link #setStatisticsReader}), the
+ * lines continue with the gameplay statistics the API shows to the viewer
+ * ({@code GET api/statistics/users/{id}} acting as the player; the console reads as an anonymous
+ * visitor) - lifetime playtime, then each group with something visible. A failed read only drops
+ * those lines.
  */
 public class UserCommand implements TabExecutor {
 
@@ -58,6 +62,8 @@ public class UserCommand implements TabExecutor {
     private final Supplier<List<String>> onlinePlayerNames;
     /** Opens the statistics privacy menu ({@code /stats settings}, KNG-34); null until wired. */
     private volatile java.util.function.Consumer<Player> settingsOpener;
+    /** (target user id, acting user id or null) → the viewer-filtered statistics (KNG-34); null = not shown. */
+    private volatile java.util.function.BiFunction<Integer, Integer, CompletableFuture<PlayerStatistics>> statisticsReader;
 
     public UserCommand(Executor mainThread, UsersQueryApi usersQueryApi, UsersDataAccess usersDataAccess,
                        UserCache userCache, TitleBracketsDataAccess titleBrackets,
@@ -77,6 +83,11 @@ public class UserCommand implements TabExecutor {
      */
     public void setSettingsOpener(java.util.function.Consumer<Player> opener) {
         this.settingsOpener = opener;
+    }
+
+    /** Player statistics (KNG-34): the read behind the gameplay lines; null hides them. */
+    public void setStatisticsReader(java.util.function.BiFunction<Integer, Integer, CompletableFuture<PlayerStatistics>> reader) {
+        this.statisticsReader = reader;
     }
 
     @Override
@@ -122,7 +133,7 @@ public class UserCommand implements TabExecutor {
                     sender.sendMessage(ChatColor.RED + "Your account isn't loaded yet - try again in a moment.");
                     return;
                 }
-                send(sender, statisticsLines(summary, brackets, true));
+                sendWithStatistics(sender, summary, statisticsLines(summary, brackets, true));
             });
             return null;
         });
@@ -136,7 +147,7 @@ public class UserCommand implements TabExecutor {
                             sender.sendMessage(ChatColor.RED + "No player found named '" + targetName + "'.");
                             return;
                         }
-                        send(sender, statisticsLines(result.value().get(), brackets, full));
+                        sendWithStatistics(sender, result.value().get(), statisticsLines(result.value().get(), brackets, full));
                     });
                     return null;
                 })
@@ -153,6 +164,37 @@ public class UserCommand implements TabExecutor {
                     LOGGER.log(Level.FINE, "user stats: couldn't load title brackets", ex);
                     return titleBrackets.cachedOrEmpty();
                 });
+    }
+
+    /** Sends {@code lines}, followed by the gameplay statistics when a reader is wired (main thread). */
+    private void sendWithStatistics(CommandSender sender, UserSummary target, List<String> lines) {
+        var reader = statisticsReader;
+        if (reader == null) {
+            send(sender, lines);
+            return;
+        }
+        Integer acting = sender instanceof Player player ? userCache.getStale(player.getUniqueId()).map(UserSummary::id).orElse(null) : null;
+        CompletableFuture<PlayerStatistics> read;
+        try {
+            read = reader.apply(target.id(), acting);
+        } catch (RuntimeException e) {
+            read = CompletableFuture.failedFuture(e);
+        }
+        read.whenComplete((statistics, error) -> mainThread.execute(() -> {
+            if (error != null) {
+                LOGGER.log(Level.FINE, "user stats: statistics read failed for user " + target.id(), error);
+            }
+            send(sender, appendStatistics(lines, error == null ? statistics : null));
+        }));
+    }
+
+    /** {@code lines} plus the gameplay statistics lines of {@code statistics} (none when null). */
+    static List<String> appendStatistics(List<String> lines, PlayerStatistics statistics) {
+        List<String> all = new ArrayList<>(lines);
+        if (statistics != null) {
+            all.addAll(StatisticsLines.lines(statistics, false));
+        }
+        return all;
     }
 
     private static void send(CommandSender sender, List<String> lines) {
