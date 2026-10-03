@@ -20,6 +20,7 @@ import net.knightsandkings.knk.api.impl.UsersQueryApiImpl;
 import net.knightsandkings.knk.api.impl.UsersCommandApiImpl;
 import net.knightsandkings.knk.api.impl.PlayerNotificationsApiImpl;
 import net.knightsandkings.knk.api.impl.DiscoveriesApiImpl;
+import net.knightsandkings.knk.api.impl.StatisticsApiImpl;
 import net.knightsandkings.knk.api.impl.UserIgnoresApiImpl;
 import net.knightsandkings.knk.api.impl.PrivateMessageLogApiImpl;
 import net.knightsandkings.knk.api.impl.UserAccountApiImpl;
@@ -111,6 +112,7 @@ public class KnkApiClient {
     private final UsersCommandApi usersCommandApi;
     private final PlayerNotificationsApi playerNotificationsApi;
     private final DiscoveriesApi discoveriesApi;
+    private final StatisticsApiImpl statisticsApi;
     private final UserIgnoresApi userIgnoresApi;
     private final PrivateMessageLogApi privateMessageLogApi;
     private final UserAccountApi userAccountApi;
@@ -167,6 +169,7 @@ public class KnkApiClient {
         this.usersCommandApi = new UsersCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.playerNotificationsApi = new PlayerNotificationsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.discoveriesApi = new DiscoveriesApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.statisticsApi = new StatisticsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.userIgnoresApi = new UserIgnoresApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.privateMessageLogApi = new PrivateMessageLogApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.userAccountApi = new UserAccountApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -298,6 +301,16 @@ public class KnkApiClient {
     /** Domain discovery (KNG-20): {@code api/users/{userId}/discoveries}. */
     public DiscoveriesApi getDiscoveriesApi() {
         return discoveriesApi;
+    }
+
+    /** Player statistics (KNG-34): {@code api/statistics}. */
+    public net.knightsandkings.knk.core.ports.api.StatisticsApi getStatisticsApi() {
+        return statisticsApi;
+    }
+
+    /** Server name and plugin version sent with every statistics batch. */
+    public void setStatisticsSource(String serverName, String pluginVersion) {
+        statisticsApi.setSource(serverName, pluginVersion);
     }
 
     /** KNG-18 Phase 2: players' ignore lists. */
