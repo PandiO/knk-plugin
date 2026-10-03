@@ -1,9 +1,16 @@
 package net.knightsandkings.knk.api.mapper;
 
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.UUID;
 
 import net.knightsandkings.knk.api.dto.StatisticsDtos;
+import net.knightsandkings.knk.core.domain.common.Page;
+import net.knightsandkings.knk.core.domain.statistics.PlayerStatistics;
+import net.knightsandkings.knk.core.domain.statistics.TitleChange;
 import net.knightsandkings.knk.core.domain.statistics.StatisticVisibility;
 import net.knightsandkings.knk.core.domain.statistics.StatisticsBatch;
 import net.knightsandkings.knk.core.domain.statistics.StatisticsBatchResult;
@@ -83,6 +90,79 @@ public final class StatisticsMapper {
                                 c.context(), StatisticVisibility.fromApiName(c.visibility()), Boolean.TRUE.equals(c.isOverride())))
                                 .toList()))
                         .toList());
+    }
+
+    public static PlayerStatistics fromDto(StatisticsDtos.PlayerStatistics dto) {
+        if (dto == null) {
+            return null;
+        }
+        StatisticsDtos.Profile p = dto.profile();
+        PlayerStatistics.Profile profile = p == null ? null : new PlayerStatistics.Profile(p.titleName(),
+                orZero(p.experience()), orZero(p.coins()), orZero(p.gems()), instant(p.firstJoinedAt()),
+                p.activePlaytimeSeconds() == null ? 0L : p.activePlaytimeSeconds(), p.afkSeconds() == null ? 0L : p.afkSeconds());
+        List<PlayerStatistics.Metric> metrics = dto.metrics() == null ? List.of() : dto.metrics().stream()
+                .filter(m -> m.key() != null)
+                .map(m -> new PlayerStatistics.Metric(m.key(), m.settingKey(), m.value(), m.unit(), m.aggregation(),
+                        m.contexts() == null ? List.of() : m.contexts().stream()
+                                .filter(c -> c.context() != null)
+                                .map(c -> new PlayerStatistics.ContextValue(c.context(), c.value() == null ? 0d : c.value()))
+                                .toList()))
+                .toList();
+        StatisticsDtos.Economy e = dto.economy();
+        StatisticsDtos.Discoveries d = dto.discoveries();
+        return new PlayerStatistics(orZero(dto.userId()), dto.username(), dto.period(), date(dto.periodStart()),
+                date(dto.periodEndExclusive()), dto.timeZone(), dto.viewer(), profile, metrics,
+                e == null ? null : new PlayerStatistics.Economy(orZero(e.coinsEarned()), orZero(e.coinsSpent()),
+                        orZero(e.gemsEarned()), orZero(e.gemsSpent())),
+                d == null ? null : new PlayerStatistics.Discoveries(orZero(d.total()), orZero(d.towns()), orZero(d.districts()),
+                        orZero(d.structures())));
+    }
+
+    public static Page<TitleChange> fromDto(StatisticsDtos.TitleHistoryPage dto) {
+        if (dto == null || dto.items() == null) {
+            return new Page<>(List.of(), 0, 1, 0);
+        }
+        List<TitleChange> items = dto.items().stream()
+                .map(t -> new TitleChange(instant(t.changedAt()), t.fromTitleName(), t.toTitleName(), t.direction()))
+                .toList();
+        return new Page<>(items, dto.totalCount() == null ? items.size() : dto.totalCount(),
+                dto.pageNumber() == null ? 1 : dto.pageNumber(), dto.pageSize() == null ? items.size() : dto.pageSize());
+    }
+
+    private static int orZero(Integer value) {
+        return value == null ? 0 : value;
+    }
+
+    private static long orZero(Long value) {
+        return value == null ? 0L : value;
+    }
+
+    /** API dates are {@code yyyy-MM-dd}; null or unparseable → null. */
+    static LocalDate date(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(value.length() > 10 ? value.substring(0, 10) : value);
+        } catch (DateTimeParseException e) {
+            return null;
+        }
+    }
+
+    /** API instants are ISO-8601 UTC, with or without the offset (DateTime Kind.Utc → "Z"). */
+    static Instant instant(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return OffsetDateTime.parse(value).toInstant();
+        } catch (DateTimeParseException e) {
+            try {
+                return java.time.LocalDateTime.parse(value).toInstant(java.time.ZoneOffset.UTC);
+            } catch (DateTimeParseException ignored) {
+                return null;
+            }
+        }
     }
 
     public static StatisticsDtos.VisibilityUpdate toDto(List<StatisticsVisibilitySettings.Change> changes) {

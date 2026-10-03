@@ -1,6 +1,9 @@
 package net.knightsandkings.knk.api.impl;
 
 import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -10,11 +13,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import net.knightsandkings.knk.api.auth.AuthProvider;
 import net.knightsandkings.knk.api.dto.StatisticsDtos;
 import net.knightsandkings.knk.api.mapper.StatisticsMapper;
+import net.knightsandkings.knk.core.domain.common.Page;
+import net.knightsandkings.knk.core.domain.statistics.PlayerStatistics;
 import net.knightsandkings.knk.core.domain.statistics.StatisticsBatch;
 import net.knightsandkings.knk.core.domain.statistics.StatisticsBatchResult;
 import net.knightsandkings.knk.core.domain.statistics.StatisticsCatalog;
 import net.knightsandkings.knk.core.domain.statistics.StatisticsVisibilityConflictException;
 import net.knightsandkings.knk.core.domain.statistics.StatisticsVisibilitySettings;
+import net.knightsandkings.knk.core.domain.statistics.TitleChange;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.StatisticsApi;
 import okhttp3.MediaType;
@@ -78,6 +84,49 @@ public class StatisticsApiImpl extends BaseApiImpl implements StatisticsApi {
                 throw new RuntimeException("Failed to load the statistics catalog", e);
             }
         }, executor);
+    }
+
+    @Override
+    public CompletableFuture<PlayerStatistics> getUserStatistics(int userId, Integer actingUserId, String period, LocalDate date) {
+        return CompletableFuture.supplyAsync(() -> {
+            StringBuilder url = new StringBuilder(baseUrl + STATISTICS_ENDPOINT + "/users/" + userId + "?period=")
+                    .append(URLEncoder.encode(period == null ? "lifetime" : period, StandardCharsets.UTF_8));
+            if (date != null) {
+                url.append("&date=").append(date);
+            }
+            try {
+                return StatisticsMapper.fromDto(parse(getActing(url.toString(), actingUserId), StatisticsDtos.PlayerStatistics.class,
+                        url.toString()));
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to load the statistics of user " + userId, e);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<Page<TitleChange>> getTitleHistory(int userId, Integer actingUserId, int page, int pageSize) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + STATISTICS_ENDPOINT + "/users/" + userId + "/title-history?page=" + Math.max(1, page)
+                    + "&pageSize=" + Math.max(1, pageSize);
+            try {
+                return StatisticsMapper.fromDto(parse(getActing(url, actingUserId), StatisticsDtos.TitleHistoryPage.class, url));
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to load the title history of user " + userId, e);
+            }
+        }, executor);
+    }
+
+    /** GET with {@code X-Acting-User-Id} when a player is viewing; without it the API treats the read as anonymous. */
+    private String getActing(String url, Integer actingUserId) throws ApiException, IOException {
+        if (actingUserId == null) {
+            return get(url);
+        }
+        Request request = newRequest(url)
+                .header(UsersCommandApiImpl.ACTING_USER_HEADER, String.valueOf(actingUserId))
+                .get()
+                .build();
+        if (debugLogging) LOGGER.info("API Request: GET " + url);
+        return execute(request, url);
     }
 
     @Override

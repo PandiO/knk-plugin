@@ -228,4 +228,68 @@ class StatisticsApiImplTest {
 
         assertEquals(403, assertInstanceOf(ApiException.class, error.getCause().getCause()).getStatusCode());
     }
+
+    // ---- link 5: reads ----
+
+    private static final String STATISTICS_JSON = "{\"userId\":7,\"username\":\"Bob\",\"period\":\"week\","
+            + "\"periodStart\":\"2026-09-28\",\"periodEndExclusive\":\"2026-10-05\",\"timeZone\":\"Europe/Amsterdam\","
+            + "\"viewer\":\"signedIn\",\"profile\":{\"titleName\":\"Squire\",\"titleBracketId\":2,\"experience\":150,"
+            + "\"coins\":3,\"gems\":1,\"firstJoinedAt\":\"2026-09-01T10:00:00Z\",\"activePlaytimeSeconds\":3600,\"afkSeconds\":60},"
+            + "\"metrics\":[{\"key\":\"pvp_kills\",\"settingKey\":\"pvp_kills\",\"value\":null,\"rawValue\":null,"
+            + "\"unit\":\"Count\",\"aggregation\":\"Sum\",\"contexts\":[{\"context\":\"open_world\",\"value\":5,\"rawValue\":5}]},"
+            + "{\"key\":\"highest_fall\",\"settingKey\":\"highest_fall\",\"value\":23.5,\"unit\":\"Blocks\","
+            + "\"aggregation\":\"Max\",\"contexts\":null}],"
+            + "\"economy\":{\"coinsEarned\":100,\"coinsSpent\":5,\"gemsEarned\":0,\"gemsSpent\":0},\"discoveries\":null}";
+
+    @Test
+    void userStatisticsAreReadActingAsTheViewer_WithThePeriodQuery() {
+        responseJson = STATISTICS_JSON;
+
+        var stats = api.getUserStatistics(7, 9, "week", java.time.LocalDate.of(2026, 10, 1)).join();
+
+        assertEquals("http://api.test/api/statistics/users/7?period=week&date=2026-10-01", seen.get(0).url().toString());
+        assertEquals("9", seen.get(0).header("X-Acting-User-Id"));
+        assertEquals(("Bob"), stats.username());
+        assertEquals(java.time.LocalDate.of(2026, 9, 28), stats.periodStart());
+        assertEquals(Instant.parse("2026-09-01T10:00:00Z"), stats.profile().firstJoinedAt());
+        assertEquals(3600L, stats.profile().activePlaytimeSeconds());
+        var pvp = stats.metric("pvp_kills").orElseThrow();
+        assertEquals(null, pvp.value()); // hidden total (L2-5)
+        assertEquals(5d, pvp.contexts().get(0).value());
+        assertEquals(23.5d, stats.metric("highest_fall").orElseThrow().value());
+        assertTrue(stats.metric("highest_fall").orElseThrow().contexts().isEmpty());
+        assertEquals(100L, stats.economy().coinsEarned());
+        assertEquals(null, stats.discoveries());
+    }
+
+    @Test
+    void aConsoleReadSendsNoActingUser() {
+        responseJson = STATISTICS_JSON;
+
+        api.getUserStatistics(7, null, null, null).join();
+
+        assertEquals("http://api.test/api/statistics/users/7?period=lifetime", seen.get(0).url().toString());
+        assertEquals(null, seen.get(0).header("X-Acting-User-Id"));
+    }
+
+    @Test
+    void titleHistoryIsMapped_AndAPrivateHistoryKeeps403() {
+        responseJson = "{\"items\":[{\"changedAt\":\"2026-10-02T10:00:00Z\",\"fromTitleName\":\"Serf\",\"toTitleName\":\"Squire\","
+                + "\"direction\":\"Promotion\"},{\"changedAt\":\"2026-10-01T10:00:00\",\"fromTitleName\":null,\"toTitleName\":\"Serf\","
+                + "\"direction\":\"Demotion\"}],\"totalCount\":2,\"pageNumber\":1,\"pageSize\":20}";
+
+        var page = api.getTitleHistory(7, 9, 1, 20).join();
+
+        assertEquals("http://api.test/api/statistics/users/7/title-history?page=1&pageSize=20", seen.get(0).url().toString());
+        assertEquals("9", seen.get(0).header("X-Acting-User-Id"));
+        assertEquals(2, page.totalCount());
+        assertTrue(page.items().get(0).isPromotion());
+        assertFalse(page.items().get(1).isPromotion());
+        assertEquals(Instant.parse("2026-10-01T10:00:00Z"), page.items().get(1).changedAt());
+
+        status = 403;
+        responseJson = "{\"error\":\"Forbidden\",\"message\":\"hidden\"}";
+        CompletionException error = assertThrows(CompletionException.class, () -> api.getTitleHistory(7, 9, 1, 20).join());
+        assertEquals(403, assertInstanceOf(ApiException.class, error.getCause().getCause()).getStatusCode());
+    }
 }

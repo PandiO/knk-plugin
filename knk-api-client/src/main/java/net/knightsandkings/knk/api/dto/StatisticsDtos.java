@@ -128,6 +128,76 @@ public final class StatisticsDtos {
             @JsonProperty("visibility") String visibility
     ) {}
 
+    // ---- GET api/statistics/users/{id} (viewer-filtered) ----
+
+    public record PlayerStatistics(
+            @JsonProperty("userId") Integer userId,
+            @JsonProperty("username") String username,
+            @JsonProperty("period") String period,
+            @JsonProperty("periodStart") String periodStart,
+            @JsonProperty("periodEndExclusive") String periodEndExclusive,
+            @JsonProperty("timeZone") String timeZone,
+            @JsonProperty("viewer") String viewer,
+            @JsonProperty("profile") Profile profile,
+            @JsonProperty("metrics") List<Metric> metrics,
+            @JsonProperty("economy") Economy economy,
+            @JsonProperty("discoveries") Discoveries discoveries
+    ) {}
+
+    public record Profile(
+            @JsonProperty("titleName") String titleName,
+            @JsonProperty("experience") Integer experience,
+            @JsonProperty("coins") Integer coins,
+            @JsonProperty("gems") Integer gems,
+            @JsonProperty("firstJoinedAt") String firstJoinedAt,
+            @JsonProperty("activePlaytimeSeconds") Long activePlaytimeSeconds,
+            @JsonProperty("afkSeconds") Long afkSeconds
+    ) {}
+
+    public record Metric(
+            @JsonProperty("key") String key,
+            @JsonProperty("settingKey") String settingKey,
+            @JsonProperty("value") Double value,
+            @JsonProperty("unit") String unit,
+            @JsonProperty("aggregation") String aggregation,
+            @JsonProperty("contexts") List<MetricContext> contexts
+    ) {}
+
+    public record MetricContext(
+            @JsonProperty("context") String context,
+            @JsonProperty("value") Double value
+    ) {}
+
+    public record Economy(
+            @JsonProperty("coinsEarned") Long coinsEarned,
+            @JsonProperty("coinsSpent") Long coinsSpent,
+            @JsonProperty("gemsEarned") Long gemsEarned,
+            @JsonProperty("gemsSpent") Long gemsSpent
+    ) {}
+
+    public record Discoveries(
+            @JsonProperty("total") Integer total,
+            @JsonProperty("towns") Integer towns,
+            @JsonProperty("districts") Integer districts,
+            @JsonProperty("structures") Integer structures
+    ) {}
+
+    // ---- GET api/statistics/users/{id}/title-history ----
+
+    public record TitleHistoryPage(
+            @JsonProperty("items") List<TitleChange> items,
+            @JsonProperty("totalCount") Integer totalCount,
+            @JsonProperty("pageNumber") Integer pageNumber,
+            @JsonProperty("pageSize") Integer pageSize
+    ) {}
+
+    public record TitleChange(
+            @JsonProperty("changedAt") String changedAt,
+            @JsonProperty("fromTitleName") String fromTitleName,
+            @JsonProperty("toTitleName") String toTitleName,
+            @JsonProperty("direction") String direction
+    ) {}
+
     /** The 409 body: {@code { error: "VisibilityConflict", message, current }}. */
     public record VisibilityConflict(
             @JsonProperty("error") String error,

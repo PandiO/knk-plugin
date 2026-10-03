@@ -21,6 +21,7 @@ import net.knightsandkings.knk.api.impl.UsersCommandApiImpl;
 import net.knightsandkings.knk.api.impl.PlayerNotificationsApiImpl;
 import net.knightsandkings.knk.api.impl.DiscoveriesApiImpl;
 import net.knightsandkings.knk.api.impl.StatisticsApiImpl;
+import net.knightsandkings.knk.api.impl.LeaderboardsApiImpl;
 import net.knightsandkings.knk.api.impl.UserIgnoresApiImpl;
 import net.knightsandkings.knk.api.impl.PrivateMessageLogApiImpl;
 import net.knightsandkings.knk.api.impl.UserAccountApiImpl;
@@ -113,6 +114,7 @@ public class KnkApiClient {
     private final PlayerNotificationsApi playerNotificationsApi;
     private final DiscoveriesApi discoveriesApi;
     private final StatisticsApiImpl statisticsApi;
+    private final LeaderboardsApiImpl leaderboardsApi;
     private final UserIgnoresApi userIgnoresApi;
     private final PrivateMessageLogApi privateMessageLogApi;
     private final UserAccountApi userAccountApi;
@@ -170,6 +172,7 @@ public class KnkApiClient {
         this.playerNotificationsApi = new PlayerNotificationsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.discoveriesApi = new DiscoveriesApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.statisticsApi = new StatisticsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.leaderboardsApi = new LeaderboardsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.userIgnoresApi = new UserIgnoresApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.privateMessageLogApi = new PrivateMessageLogApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.userAccountApi = new UserAccountApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -306,6 +309,11 @@ public class KnkApiClient {
     /** Player statistics (KNG-34): {@code api/statistics}. */
     public net.knightsandkings.knk.core.ports.api.StatisticsApi getStatisticsApi() {
         return statisticsApi;
+    }
+
+    /** Leaderboards (KNG-34): {@code api/leaderboards}. */
+    public net.knightsandkings.knk.core.ports.api.LeaderboardsApi getLeaderboardsApi() {
+        return leaderboardsApi;
     }
 
     /** Server name and plugin version sent with every statistics batch. */

@@ -54,6 +54,18 @@ class StatisticsRecorderTest {
         }
 
         @Override
+        public CompletableFuture<net.knightsandkings.knk.core.domain.statistics.PlayerStatistics> getUserStatistics(
+                int userId, Integer actingUserId, String period, java.time.LocalDate date) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public CompletableFuture<net.knightsandkings.knk.core.domain.common.Page<net.knightsandkings.knk.core.domain.statistics.TitleChange>>
+                getTitleHistory(int userId, Integer actingUserId, int page, int pageSize) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public CompletableFuture<StatisticsVisibilitySettings> getVisibility(int userId, int actingUserId) {
             throw new UnsupportedOperationException();
         }
