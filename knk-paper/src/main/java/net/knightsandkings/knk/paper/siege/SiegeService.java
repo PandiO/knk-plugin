@@ -480,6 +480,7 @@ public final class SiegeService {
                 removeMember(rt, id, LeaveCause.SNAPSHOT_FAILED, false);
                 continue;
             }
+            prepareForMatch(player);
             hub.ifPresent(location -> SiegeBukkit.teleport(player, location));
             player.sendMessage(SiegeMessages.info("You are at the hub of " + scenarioName(scenario)
                     + ". Your inventory and position are saved and will be restored after the siege."));
@@ -487,6 +488,20 @@ public final class SiegeService {
         // Phase 7a: gates and area entry lock down now, before the start (DESIGN §6.5 "lock scenario" first).
         observers.forEach(o -> safely("areaLockdownStarted", () -> o.areaLockdownStarted(rt, scenario)));
         notifyChanged(rt);
+    }
+
+    /**
+     * KNG-28: everyone fights in survival without flight. A member who joined in creative (or
+     * spectator, or with /fly) would otherwise keep it for the whole match: creative players can't
+     * be damaged at all, so hits on them never raise a damage event and the siege combat rules -
+     * including the "inside their spawn area" message to the damager - never run. The vault took
+     * the game mode just before this and puts it back after the match. Flight permission is not
+     * in the snapshot, so a survival player who used /fly turns it on again afterwards.
+     */
+    static void prepareForMatch(Player player) {
+        if (player.getGameMode() != GameMode.SURVIVAL) player.setGameMode(GameMode.SURVIVAL);
+        player.setFlying(false);
+        player.setAllowFlight(false);
     }
 
     // ---------- Split (T-10) ----------
