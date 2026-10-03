@@ -137,6 +137,24 @@ class StatisticsListenersTest {
     }
 
     @Test
+    void pressurePlatesAreNotActivityButClicksAre() {
+        service.sessionStarted(player, 42);
+        service.toggleAfk(player);
+        AfkActivityListener listener = new AfkActivityListener(service, Runnable::run, clock);
+        org.bukkit.event.player.PlayerInteractEvent plate = mock(org.bukkit.event.player.PlayerInteractEvent.class);
+        when(plate.getPlayer()).thenReturn(player);
+        when(plate.getAction()).thenReturn(org.bukkit.event.block.Action.PHYSICAL);
+        listener.onInteract(plate);
+        assertTrue(service.isAfk(uuid));
+
+        org.bukkit.event.player.PlayerInteractEvent click = mock(org.bukkit.event.player.PlayerInteractEvent.class);
+        when(click.getPlayer()).thenReturn(player);
+        when(click.getAction()).thenReturn(org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK);
+        listener.onInteract(click);
+        assertFalse(service.isAfk(uuid));
+    }
+
+    @Test
     void theAfkCommandIsRecognisedWithOrWithoutNamespace() {
         assertTrue(AfkActivityListener.isAfkCommand("/afk"));
         assertTrue(AfkActivityListener.isAfkCommand("/AFK now"));

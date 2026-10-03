@@ -29,7 +29,8 @@ import io.papermc.paper.event.player.AsyncChatEvent;
  * AFK activity signals (DESIGN.md §F.2): looking around (yaw or pitch ≥ 1°), walking while not in a
  * vehicle and not in water, chat, commands, block break/place, interacting with a block or entity,
  * inventory clicks, attacking, toggling sneak/sprint. <b>Not</b> activity (anti-AFK-pool): movement in
- * a vehicle or in water (incl. pushes by water/pistons), taking damage, teleports. Move events are
+ * a vehicle or in water (incl. pushes by water/pistons), stepping on pressure plates, taking damage,
+ * teleports. Move events are
  * throttled to one signal per player per second. Chat arrives off the main thread and is handed to
  * it ({@code mainThread}).
  */
@@ -120,9 +121,12 @@ public final class AfkActivityListener implements Listener {
         return label.equals("afk");
     }
 
+    /** Pressure plates and tripwires (PHYSICAL) fire without the player doing anything - not activity. */
     @EventHandler(priority = EventPriority.MONITOR)
     public void onInteract(PlayerInteractEvent event) {
-        service.activity(event.getPlayer());
+        if (event.getAction() != org.bukkit.event.block.Action.PHYSICAL) {
+            service.activity(event.getPlayer());
+        }
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
