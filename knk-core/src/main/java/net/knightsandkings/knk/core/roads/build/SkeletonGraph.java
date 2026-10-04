@@ -490,8 +490,10 @@ public final class SkeletonGraph {
         for (int c : candidates) {
             parent[c] = c;
         }
-        // Spans on a short skeleton path between two candidates, keyed by one of the candidates.
-        List<int[]> absorbed = new ArrayList<>();
+        // Per candidate, the other candidates within the radius on the skeleton (walking through
+        // candidates, never through a plaza junction): their distance and the spans between them.
+        Map<Integer, Map<Integer, Integer>> reach = new HashMap<>();
+        Map<Long, List<Integer>> between = new HashMap<>();
         // A candidate within the radius of a plaza (reached on the skeleton, never walked through):
         // the nearest plaza node and the spans of the path to it (fix plan 5.5 item 5).
         Map<Integer, int[]> plazaOf = new HashMap<>();
@@ -499,11 +501,18 @@ public final class SkeletonGraph {
         int radius = params.junctionClusterRadius();
         int[] dist = new int[n];
         int[] via = new int[n];
+        Arrays.fill(dist, -1);
+        List<Integer> touched = new ArrayList<>();
         for (int c : candidates) {
-            Arrays.fill(dist, -1);
+            for (int t : touched) {
+                dist[t] = -1;
+            }
+            touched.clear();
+            Map<Integer, Integer> reached = new HashMap<>();
             ArrayDeque<Integer> queue = new ArrayDeque<>();
             dist[c] = 0;
             via[c] = -1;
+            touched.add(c);
             queue.add(c);
             while (!queue.isEmpty()) {
                 int i = queue.poll();
@@ -516,10 +525,10 @@ public final class SkeletonGraph {
                         continue;
                     }
                     if (nodeOf[nb] >= 0) {
-                        int reached = dist[i] + 1;
+                        int steps = dist[i] + 1;
                         int[] known = plazaOf.get(c);
-                        if (plazaNodes.contains(nodeOf[nb]) && (known == null || reached < known[1])) {
-                            plazaOf.put(c, new int[] {nodeOf[nb], reached});
+                        if (plazaNodes.contains(nodeOf[nb]) && (known == null || steps < known[1])) {
+                            plazaOf.put(c, new int[] {nodeOf[nb], steps});
                             List<Integer> path = new ArrayList<>();
                             for (int s = i; s != c && s != -1; s = via[s]) {
                                 path.add(s);
@@ -530,76 +539,116 @@ public final class SkeletonGraph {
                     }
                     dist[nb] = dist[i] + 1;
                     via[nb] = i;
+                    touched.add(nb);
+                    queue.add(nb);
                     if (parent[nb] != -1) {
-                        union(parent, c, nb);
-                        for (int s = via[nb]; s != c && s != -1; s = via[s]) {
-                            absorbed.add(new int[] {s, c});
+                        reached.put(nb, dist[nb]);
+                        long pair = pairKey(c, nb);
+                        if (!between.containsKey(pair)) {
+                            List<Integer> path = new ArrayList<>();
+                            for (int s = via[nb]; s != c && s != -1; s = via[s]) {
+                                path.add(s);
+                            }
+                            between.put(pair, path);
                         }
-                    } else {
-                        queue.add(nb);
                     }
                 }
             }
+            reach.put(c, reached);
         }
-        Map<Integer, List<Integer>> clusters = new HashMap<>();
+        List<int[]> pairs = new ArrayList<>(); // {distance, a, b} with a < b
+        for (int c : candidates) {
+            for (Map.Entry<Integer, Integer> e : reach.get(c).entrySet()) {
+                if (c < e.getKey()) {
+                    pairs.add(new int[] {e.getValue(), c, e.getKey()});
+                }
+            }
+        }
+        for (int[] pair : pairs) {
+            union(parent, pair[1], pair[2]);
+        }
+        Map<Integer, List<Integer>> clusters = new java.util.TreeMap<>();
         for (int c : candidates) {
             clusters.computeIfAbsent(find(parent, c), k -> new ArrayList<>()).add(c);
         }
-        Map<Integer, Integer> nodeOfRoot = new HashMap<>();
-        for (Map.Entry<Integer, List<Integer>> e : clusters.entrySet()) {
-            List<Integer> members = e.getValue();
-            int nearestMember = -1;
+        // Smoke test 2026-10-04 (finding L): only the members that fork at a plaza's edge join that plaza.
+        // The cluster used to join as a whole, and a chain of forks across Brink's wide stairs linked a
+        // road fork 20 blocks away into the plaza junction; its roads then ran to the plaza as parallel
+        // edges. The members left over form their own junction(s), clustered among themselves.
+        Map<Integer, Integer> nodeOfCandidate = new HashMap<>();
+        int[] rest = new int[n];
+        Arrays.fill(rest, -1);
+        for (List<Integer> members : clusters.values()) {
+            List<Integer> free = new ArrayList<>();
             for (int c : members) {
                 int[] attached = plazaOf.get(c);
-                if (attached != null && (nearestMember < 0 || attached[1] < plazaOf.get(nearestMember)[1]
-                    || (attached[1] == plazaOf.get(nearestMember)[1] && c < nearestMember))) {
-                    nearestMember = c;
+                if (attached == null) {
+                    free.add(c);
+                    rest[c] = c;
+                    continue;
                 }
-            }
-            if (nearestMember >= 0) {
-                // The cluster forks right at a plaza's edge: it is part of that plaza's junction.
-                int plaza = plazaOf.get(nearestMember)[0];
-                nodeOfRoot.put(e.getKey(), plaza);
-                for (int i : members) {
-                    nodeOf[i] = plaza;
-                }
-                for (int span : plazaPath.get(nearestMember)) {
+                nodeOf[c] = attached[0];
+                nodeOfCandidate.put(c, attached[0]);
+                for (int span : plazaPath.get(c)) {
                     if (nodeOf[span] < 0) {
-                        nodeOf[span] = plaza;
+                        nodeOf[span] = attached[0];
                     }
                 }
+            }
+            if (free.isEmpty()) {
                 continue;
             }
-            double cx = 0;
-            double cy = 0;
-            double cz = 0;
-            for (int i : members) {
-                cx += mask.x(i);
-                cy += mask.y(i);
-                cz += mask.z(i);
-            }
-            cx /= members.size();
-            cy /= members.size();
-            cz /= members.size();
-            int centre = -1;
-            for (int i : members) {
-                if (centre < 0 || distanceTo(i, cx, cy, cz) < distanceTo(centre, cx, cy, cz)
-                    || (distanceTo(i, cx, cy, cz) == distanceTo(centre, cx, cy, cz) && i < centre)) {
-                    centre = i;
+            for (int[] pair : pairs) {
+                if (rest[pair[1]] >= 0 && rest[pair[2]] >= 0 && free.contains(pair[1]) && free.contains(pair[2])) {
+                    union(rest, pair[1], pair[2]);
                 }
             }
-            int node = newNode(centre, RoadNodeKind.JUNCTION);
-            nodeOfRoot.put(e.getKey(), node);
-            for (int i : members) {
-                nodeOf[i] = node;
+            Map<Integer, List<Integer>> groups = new java.util.TreeMap<>();
+            for (int c : free) {
+                groups.computeIfAbsent(find(rest, c), k -> new ArrayList<>()).add(c);
+            }
+            for (List<Integer> group : groups.values()) {
+                int node = newNode(centreOf(group), RoadNodeKind.JUNCTION);
+                for (int c : group) {
+                    nodeOf[c] = node;
+                    nodeOfCandidate.put(c, node);
+                }
             }
         }
-        for (int[] pair : absorbed) {
-            int span = pair[0];
-            if (nodeOf[span] < 0) {
-                nodeOf[span] = nodeOfRoot.get(find(parent, pair[1]));
+        for (int[] pair : pairs) {
+            Integer a = nodeOfCandidate.get(pair[1]);
+            if (a == null || !a.equals(nodeOfCandidate.get(pair[2]))) {
+                continue; // spans between two members of one junction belong to it
+            }
+            for (int span : between.getOrDefault(pairKey(pair[1], pair[2]), List.of())) {
+                if (nodeOf[span] < 0) {
+                    nodeOf[span] = a;
+                }
             }
         }
+    }
+
+    /** The member nearest the members' centroid (lowest index on a tie). */
+    private int centreOf(List<Integer> members) {
+        double cx = 0;
+        double cy = 0;
+        double cz = 0;
+        for (int i : members) {
+            cx += mask.x(i);
+            cy += mask.y(i);
+            cz += mask.z(i);
+        }
+        cx /= members.size();
+        cy /= members.size();
+        cz /= members.size();
+        int centre = -1;
+        for (int i : members) {
+            if (centre < 0 || distanceTo(i, cx, cy, cz) < distanceTo(centre, cx, cy, cz)
+                || (distanceTo(i, cx, cy, cz) == distanceTo(centre, cx, cy, cz) && i < centre)) {
+                centre = i;
+            }
+        }
+        return centre;
     }
 
     private static int find(int[] parent, int i) {

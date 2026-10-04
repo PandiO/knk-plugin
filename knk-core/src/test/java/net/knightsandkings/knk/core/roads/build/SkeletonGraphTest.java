@@ -343,6 +343,48 @@ class SkeletonGraphTest {
             + separate.picture(64, 29, 39));
     }
 
+    /**
+     * Finding L (2026-10-04, Brink): a 1-wide road leaves a plaza with a stub every 4 blocks before it
+     * meets a north-south road 19 blocks out. The stubs' forks are within the cluster radius of each
+     * other, so they chain into one cluster from the plaza's edge to the far crossing. Only the fork at
+     * the plaza's edge may join the plaza; the crossing stays a junction of its own, with one edge to the
+     * plaza, instead of both roads running to the plaza as separate edges.
+     */
+    static GridFixture plazaWithAChainOfForks() {
+        GridFixture f = new GridFixture();
+        for (int z = 0; z <= 34; z++) {
+            StringBuilder row = new StringBuilder(".".repeat(40));
+            if (z >= 10 && z <= 24) {
+                for (int x = 0; x <= 14; x++) row.setCharAt(x, 'S'); // the plaza
+            }
+            if (z == 17) {
+                for (int x = 15; x <= 33; x++) row.setCharAt(x, 'G'); // the road east
+            }
+            if (z == 15 || z == 16) {
+                for (int x : new int[] {17, 21, 25, 29}) row.setCharAt(x, 'G'); // stubs every 4 blocks
+            }
+            row.setCharAt(33, 'G'); // the north-south road at x 33
+            f.layer(0, 64, z, row.toString());
+        }
+        return f;
+    }
+
+    @Test
+    void aChainOfForksDoesNotPullAFarCrossingIntoThePlaza() {
+        BuildParameters params = PARAMS.withPlazaGrowth(0).withGraphRules(5, PARAMS.minSpurLength());
+        Extraction e = extract(plazaWithAChainOfForks(), 39, 34, EVERYWHERE, params, List.of(), 64);
+        String picture = e.picture(64, 39, 34);
+        List<Node> junctions = e.result().nodes().stream().filter(n -> n.kind() == RoadNodeKind.JUNCTION).toList();
+        assertEquals(2, junctions.size(), "the plaza and the crossing\n" + picture);
+        Node plaza = junctions.stream().filter(Node::plaza).findFirst().orElseThrow(() -> new AssertionError(picture));
+        Node crossing = junctions.stream().filter(n -> !n.plaza()).findFirst().orElseThrow();
+        assertTrue(crossing.x() > 20, "the crossing's junction is out on the road, not at the plaza: " + crossing + picture);
+        long plazaArms = e.result().chains().stream().filter(c -> c.from() == plaza.id() || c.to() == plaza.id()).count();
+        assertEquals(1, plazaArms, "one edge from the plaza to the crossing\n" + picture);
+        long crossingArms = e.result().chains().stream().filter(c -> c.from() == crossing.id() || c.to() == crossing.id()).count();
+        assertEquals(3, crossingArms, "the plaza, north and south\n" + picture);
+    }
+
     @Test
     void shortSpursAtAJunctionArePrunedLongArmsStay() {
         // A 1-wide path with a 2-cell stub (spur) and a 6-cell branch; every real arm is longer
