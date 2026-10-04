@@ -386,6 +386,21 @@ class SkeletonGraphTest {
     }
 
     @Test
+    void aThinLoopAroundAnObstacleIsOneLane() {
+        // Finding L: a path splits around a 4-block obstacle (a market stall) with its two sides 2 blocks
+        // apart. That is one lane, not a pair of edges with a split junction between them.
+        GridFixture f = new GridFixture().layer(64,
+            "......GGGGGG......",
+            "GGGGGGG....GGGGGGG",
+            "......GGGGGG......");
+        Extraction e = extract(f, 17, 2, 64);
+        String picture = e.picture(64, 17, 2);
+        assertEquals(0, e.count(RoadNodeKind.JUNCTION), picture);
+        assertEquals(2, e.count(RoadNodeKind.ENDPOINT), picture);
+        assertEquals(1, e.result().chains().size(), picture);
+    }
+
+    @Test
     void shortSpursAtAJunctionArePrunedLongArmsStay() {
         // A 1-wide path with a 2-cell stub (spur) and a 6-cell branch; every real arm is longer
         // than minSpurLength (4) measured from the junction.

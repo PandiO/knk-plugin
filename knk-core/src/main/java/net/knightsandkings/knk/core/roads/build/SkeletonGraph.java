@@ -116,6 +116,11 @@ public final class SkeletonGraph {
         "A chain of a junction straddling the tile border could not be joined to the junction; dropped";
 
     private static final int MAX_SPLIT_ROUNDS = 8;
+    /**
+     * Two sides of a loop, or two chains between the same nodes, that stay within this many blocks of
+     * each other all the way are one lane around an obstacle (a lamp post, a planter, a market stall).
+     */
+    static final double THIN_LOOP_DISTANCE = 3.0;
     /** How far {@link #bridgedToNodes} walks from a straddling node's member span to its centre. */
     private static final int NODE_PATH_MAX_STEPS = 64;
 
@@ -235,6 +240,7 @@ public final class SkeletonGraph {
         pruneSpurs();
         removePrunedArms(pruned);
         removePrunedChains(prunedEdges);
+        collapseThinLoopsAndParallels();
         splitLoopsAndParallels();
         cutAtTileBorder();
         return emit();
@@ -1118,8 +1124,11 @@ public final class SkeletonGraph {
     private void removeChain(int id) {
         WorkChain chain = chains.get(id);
         chain.alive = false;
-        for (int nodeId : new int[] {chain.from, chain.to}) {
+        for (int nodeId : chain.from == chain.to ? new int[] {chain.from} : new int[] {chain.from, chain.to}) {
             WorkNode node = nodes.get(nodeId);
+            if (!node.alive) {
+                continue;
+            }
             int remaining = node.aliveChains(chains);
             if (remaining == 0) {
                 killNode(nodeId);
@@ -1233,6 +1242,81 @@ public final class SkeletonGraph {
     }
 
     // ---- 7. loops and parallel chains --------------------------------------------------------
+
+    /**
+     * Smoke test 2026-10-04 (finding L): the centreline of a wide road or plaza runs around every small
+     * obstacle in it, so a lamp post or a stall becomes a loop (a node back to itself) or two chains
+     * between the same two nodes, a block or two apart. Splitting them into extra junctions (below)
+     * filled Brink and Northern Gate Square with short loops of junk junctions. When the two sides stay
+     * within {@link #THIN_LOOP_DISTANCE} of each other all the way, they are one lane: a loop goes (it
+     * leads nowhere but back), of two parallel chains the longer goes. A real ring road or a block of
+     * houses between two streets has its sides further apart and is split as before.
+     */
+    private void collapseThinLoopsAndParallels() {
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            Map<Long, Integer> firstOfPair = new HashMap<>();
+            for (int id = 0; id < chains.size() && !changed; id++) {
+                WorkChain chain = chains.get(id);
+                if (!chain.alive) {
+                    continue;
+                }
+                if (chain.from == chain.to) {
+                    if (thinLoop(chain.spans)) {
+                        removeChain(id);
+                        changed = true;
+                    }
+                    continue;
+                }
+                Integer other = firstOfPair.putIfAbsent(pairKey(chain.from, chain.to), id);
+                if (other != null && within(chain.spans, chains.get(other).spans) && within(chains.get(other).spans, chain.spans)) {
+                    removeChain(chainLength(chain) >= chainLength(chains.get(other)) ? id : other);
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    /** A loop whose way out (to its farthest span) and way back stay close: one lane around an obstacle. */
+    private boolean thinLoop(int[] spans) {
+        if (spans.length < 3) {
+            return true;
+        }
+        int far = 0;
+        double farthest = -1;
+        for (int k = 0; k < spans.length; k++) {
+            double d = mask.distance(spans[0], spans[k]);
+            if (d > farthest) {
+                farthest = d;
+                far = k;
+            }
+        }
+        int[] out = Arrays.copyOfRange(spans, 0, far + 1);
+        int[] back = Arrays.copyOfRange(spans, far, spans.length);
+        return within(out, back) && within(back, out);
+    }
+
+    /** Every span of {@code a} lies within {@link #THIN_LOOP_DISTANCE} (3D) of some span of {@code b}. */
+    private boolean within(int[] a, int[] b) {
+        double limit = THIN_LOOP_DISTANCE * THIN_LOOP_DISTANCE;
+        for (int i : a) {
+            boolean near = false;
+            for (int j : b) {
+                double dx = mask.x(i) - mask.x(j);
+                double dy = mask.y(i) - mask.y(j);
+                double dz = mask.z(i) - mask.z(j);
+                if (dx * dx + dy * dy + dz * dz <= limit) {
+                    near = true;
+                    break;
+                }
+            }
+            if (!near) {
+                return false;
+            }
+        }
+        return true;
+    }
 
     private void splitLoopsAndParallels() {
         for (int round = 0; round < MAX_SPLIT_ROUNDS; round++) {
