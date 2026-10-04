@@ -172,6 +172,7 @@ public final class TileBuilder {
             runsByPair.put(pairKey(from, to), run);
         }
         Set<Integer> dissolved = dissolveTwoArmJunctions(runsByPair, graph, existing, locked, request.previousGraph());
+        Set<Integer> oneArm = oneArmJunctions(runsByPair, graph, existing, locked, request.previousGraph());
 
         List<Node> nodes = new ArrayList<>();
         for (SkeletonGraph.Node node : graph.nodes()) {
@@ -181,7 +182,7 @@ public final class TileBuilder {
             }
             int[] pos = positions[i];
             nodes.add(new Node(key(i), existing[i] == NodeMatcher.UNMATCHED ? OptionalInt.empty() : OptionalInt.of(existing[i]),
-                pos[0], pos[1], pos[2], node.kind()));
+                pos[0], pos[1], pos[2], oneArm.contains(i) ? RoadNodeKind.ENDPOINT : node.kind()));
         }
         ProfileMatcher profileMatcher = new ProfileMatcher(request.profiles());
         List<Edge> edges = new ArrayList<>();
@@ -290,6 +291,32 @@ public final class TileBuilder {
             }
         }
         return dissolved;
+    }
+
+    /**
+     * Smoke test 2026-10-04 (finding L): steps that drop a chain without tidying its nodes - a duplicate
+     * too short to split, two runs between the same nodes after a merge (the shorter stays) - can leave a
+     * Junction with one arm, which is a dead end. Such a node is emitted as an Endpoint, unless it is locked, a plaza's
+     * junction (a square at the end of a road is still a place) or its previous build gave it three or
+     * more edges (the same guards as {@link #dissolveTwoArmJunctions}).
+     */
+    static Set<Integer> oneArmJunctions(Map<Long, Run> runs, SkeletonGraph.Result graph, int[] existing,
+                                        boolean[] locked, PreviousGraph previous) {
+        Map<Integer, Integer> degree = new HashMap<>();
+        for (Run run : runs.values()) {
+            degree.merge(run.from(), 1, Integer::sum);
+            degree.merge(run.to(), 1, Integer::sum);
+        }
+        Set<Integer> out = new HashSet<>();
+        for (Map.Entry<Integer, Integer> entry : degree.entrySet()) {
+            int n = entry.getKey();
+            SkeletonGraph.Node node = graph.nodes().get(n);
+            if (entry.getValue() == 1 && !locked[n] && node.kind() == RoadNodeKind.JUNCTION && !node.plaza()
+                && previousDegree(previous, existing[n]) < 3) {
+                out.add(n);
+            }
+        }
+        return out;
     }
 
     private static int previousDegree(PreviousGraph previous, int previousId) {

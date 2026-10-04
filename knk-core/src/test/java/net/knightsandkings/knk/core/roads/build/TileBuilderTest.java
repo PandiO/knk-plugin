@@ -936,6 +936,25 @@ class TileBuilderTest {
         assertEquals(3, r.edges().size(), describe(r));
     }
 
+    @Test
+    void aJunctionLeftWithOneArmIsAnEndpoint() {
+        // Finding L: a junction can be left with one arm when a duplicate chain is dropped without
+        // tidying its nodes. A one-arm junction is a dead end.
+        Map<Long, TileBuilder.Run> runs = runs(run(0, 1, 0, 10, 0));
+        assertEquals(Set.of(1), TileBuilder.oneArmJunctions(runs, threeNodes(RoadNodeKind.JUNCTION),
+            new int[] {-1, 99, -1}, new boolean[3], PreviousGraph.EMPTY));
+        assertTrue(TileBuilder.oneArmJunctions(runs, threeNodes(RoadNodeKind.JUNCTION), new int[] {-1, 7, -1},
+            new boolean[] {false, true, false}, PreviousGraph.EMPTY).isEmpty(), "locked by an admin");
+        assertTrue(TileBuilder.oneArmJunctions(runs, threeNodes(RoadNodeKind.ANCHOR), new int[] {-1, -1, -1},
+            new boolean[3], PreviousGraph.EMPTY).isEmpty(), "only Junctions");
+        SkeletonGraph.Result square = new SkeletonGraph.Result(List.of(
+            new SkeletonGraph.Node(0, 0, 64, 0, RoadNodeKind.ENDPOINT, OptionalInt.empty(), 0),
+            new SkeletonGraph.Node(1, 10, 64, 0, RoadNodeKind.JUNCTION, OptionalInt.empty(), 10, true),
+            new SkeletonGraph.Node(2, 20, 64, 0, RoadNodeKind.BOUNDARY, OptionalInt.empty(), 20)), List.of(), List.of());
+        assertTrue(TileBuilder.oneArmJunctions(runs, square, new int[] {-1, -1, -1}, new boolean[3], PreviousGraph.EMPTY)
+            .isEmpty(), "a square at the end of a road is still a place");
+    }
+
     // ---- two-arm junctions (smoke test 2026-10-02, junction #3615) ----
 
     private static SkeletonGraph.Result threeNodes(RoadNodeKind middle) {
