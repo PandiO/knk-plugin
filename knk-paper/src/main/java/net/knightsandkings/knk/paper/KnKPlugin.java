@@ -476,8 +476,9 @@ public class KnKPlugin extends JavaPlugin {
             regionHttpServer = new RegionHttpServer(this, wgRegionIdHandler, httpPort);
             regionHttpServer.start();
 
-            // Start temp region retention task (14 day retention policy)
-            tempRegionRetentionTask = new TempRegionRetentionTask(this, 14, managedRegions::protectsFromCleanup);
+            // Start temp region retention task (14 day retention policy; never deletes a region a domain uses)
+            tempRegionRetentionTask = new TempRegionRetentionTask(this, 14, managedRegions::protectsFromCleanup,
+                    TempRegionRetentionTask.domainUsageVia(domainsQueryApi));
             tempRegionRetentionTask.start();
 
             // Start headless WorldTask poller (webapp-initiated tasks that need no player)
