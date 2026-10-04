@@ -9,6 +9,7 @@ import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.plugin.Plugin;
+import net.knightsandkings.knk.paper.commands.support.VisiblePlayers;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -21,6 +22,7 @@ public class EnchantmentCommandHandler implements CommandExecutor, TabCompleter 
     private final EnchantmentConfigManager configManager;
     private final EnchantmentCommandValidator validator;
     private final Map<String, EnchantmentSubcommand> subcommands;
+    private final VisiblePlayers visiblePlayers = VisiblePlayers.bukkit();
 
     public EnchantmentCommandHandler(
             Plugin plugin,
@@ -135,6 +137,10 @@ public class EnchantmentCommandHandler implements CommandExecutor, TabCompleter 
                 .map(net.knightsandkings.knk.core.domain.enchantment.Enchantment::id)
                 .sorted()
                 .toList();
+    }
+
+    public List<String> visiblePlayerNames(CommandSender sender, String prefix) {
+        return visiblePlayers.complete(sender, prefix);
     }
 
     private void register(EnchantmentSubcommand subcommand) {

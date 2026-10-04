@@ -109,10 +109,10 @@ public class FlyCommand implements TabExecutor {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
-            return support.completePlayers(args[0], STATES.toArray(String[]::new));
+            return support.completePlayers(sender, args[0], STATES.toArray(String[]::new));
         }
         if (args.length == 2 && parseState(args[0]) != null) {
-            return support.completePlayers(args[1]);
+            return support.completePlayers(sender, args[1]);
         }
         return Collections.emptyList();
     }

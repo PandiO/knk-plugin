@@ -55,7 +55,7 @@ class BlueprintItemAssemblerTest {
         assertTrue(result.skipped().isEmpty());
         assertEquals(Map.of("minecraft:sharpness", 4), vanilla.appliedOn(sword));
         // Custom enchantment lines go first, above the description and grade line.
-        assertEquals(List.of("§7Poison II", "§7A fine blade", "§l§bGrade: ★★"), loreByItem.get(sword));
+        assertEquals(List.of("§7Poison II", "", "§7A fine blade", "", "§l§bGrade: ★★"), loreByItem.get(sword));
     }
 
     @Test

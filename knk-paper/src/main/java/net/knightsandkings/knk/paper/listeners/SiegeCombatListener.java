@@ -70,14 +70,24 @@ public class SiegeCombatListener implements Listener {
                     }
                 }
             }
-            case DENY_VICTIM_SAFE -> deny(event, attacker, "You can't hurt players inside their spawn area!");
-            case DENY_ATTACKER_SAFE -> deny(event, attacker, "You can't hurt players while you are inside your spawn area!");
-            case DENY_ALLY -> deny(event, attacker, null);
-            case DENY_NOT_STARTED -> deny(event, attacker, "The siege hasn't started yet.");
-            case DENY_MEMBER_VS_NON_MEMBER -> deny(event, attacker, a != null
-                    ? "In a siege you can only fight enemies in your own match."
-                    : "You can't attack players who are in a siege.");
+            default -> deny(event, attacker, denyMessage(outcome, a != null));
         }
+    }
+
+    /**
+     * What the damager is told about a denied hit, or null for none (allies only get the warning
+     * sound, DESIGN §6.7). Depends on the outcome alone, never on the team's role.
+     */
+    static String denyMessage(Outcome outcome, boolean attackerInSiege) {
+        return switch (outcome) {
+            case DENY_VICTIM_SAFE -> "You can't hurt players inside their spawn area!";
+            case DENY_ATTACKER_SAFE -> "You can't hurt players while you are inside your spawn area!";
+            case DENY_NOT_STARTED -> "The siege hasn't started yet.";
+            case DENY_MEMBER_VS_NON_MEMBER -> attackerInSiege
+                    ? "In a siege you can only fight enemies in your own match."
+                    : "You can't attack players who are in a siege.";
+            case DENY_ALLY, NOT_SIEGE, ALLOW -> null;
+        };
     }
 
     private static void deny(EntityDamageByEntityEvent event, Player attacker, String message) {

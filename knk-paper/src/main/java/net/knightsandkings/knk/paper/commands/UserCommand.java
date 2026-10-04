@@ -7,7 +7,6 @@ import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
-import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -25,6 +24,7 @@ import net.knightsandkings.knk.core.domain.users.TitleBracket;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.core.ports.api.UsersQueryApi;
 import net.knightsandkings.knk.paper.menu.content.ProfileView;
+import net.knightsandkings.knk.paper.commands.support.VisiblePlayers;
 
 /**
  * {@code /user statistics|stats [player]}, and the shortcut {@code /stats [player]} - port of v2's
@@ -54,17 +54,17 @@ public class UserCommand implements TabExecutor {
     private final UsersDataAccess usersDataAccess;
     private final UserCache userCache;
     private final TitleBracketsDataAccess titleBrackets;
-    private final Supplier<List<String>> onlinePlayerNames;
+    private final VisiblePlayers visiblePlayers;
 
     public UserCommand(Executor mainThread, UsersQueryApi usersQueryApi, UsersDataAccess usersDataAccess,
                        UserCache userCache, TitleBracketsDataAccess titleBrackets,
-                       Supplier<List<String>> onlinePlayerNames) {
+                       VisiblePlayers visiblePlayers) {
         this.mainThread = mainThread;
         this.usersQueryApi = usersQueryApi;
         this.usersDataAccess = usersDataAccess;
         this.userCache = userCache;
         this.titleBrackets = titleBrackets;
-        this.onlinePlayerNames = onlinePlayerNames;
+        this.visiblePlayers = visiblePlayers;
     }
 
     @Override
@@ -209,11 +209,7 @@ public class UserCommand implements TabExecutor {
             return SUBCOMMANDS.stream().filter(s -> s.startsWith(prefix)).toList();
         }
         if (args.length == 2 && SUBCOMMANDS.contains(args[0].toLowerCase(Locale.ROOT))) {
-            String prefix = args[1].toLowerCase(Locale.ROOT);
-            return onlinePlayerNames.get().stream()
-                    .filter(name -> name.toLowerCase(Locale.ROOT).startsWith(prefix))
-                    .sorted(String.CASE_INSENSITIVE_ORDER)
-                    .toList();
+            return visiblePlayers.complete(sender, args[1]);
         }
         return Collections.emptyList();
     }

@@ -109,12 +109,7 @@ public class InfoEnchantmentCommand implements EnchantmentSubcommand {
     @Override
     public List<String> tabComplete(CommandSender sender, String[] args) {
         if (args.length == 1 && sender.hasPermission("customenchantments.command.info.others")) {
-            String prefix = args[0] == null ? "" : args[0].toLowerCase();
-            return Bukkit.getOnlinePlayers().stream()
-                    .map(Player::getName)
-                    .filter(name -> name.toLowerCase().startsWith(prefix))
-                    .sorted()
-                    .toList();
+            return handler.visiblePlayerNames(sender, args[0]);
         }
         return List.of();
     }

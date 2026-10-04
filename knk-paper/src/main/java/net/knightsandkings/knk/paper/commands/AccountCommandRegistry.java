@@ -6,6 +6,10 @@ import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
+import org.bukkit.command.TabExecutor;
+
+import java.util.List;
+import java.util.Locale;
 
 import net.knightsandkings.knk.core.ports.api.UserAccountApi;
 import net.knightsandkings.knk.paper.KnKPlugin;
@@ -18,7 +22,7 @@ import net.knightsandkings.knk.paper.utils.CommandCooldownManager;
  * Command dispatcher for /account commands.
  * Handles subcommands: status, create, link.
  */
-public class AccountCommandRegistry implements CommandExecutor {
+public class AccountCommandRegistry implements TabExecutor {
     private final CommandRegistry registry = new CommandRegistry();
     private final KnkConfig config;
 
@@ -83,6 +87,17 @@ public class AccountCommandRegistry implements CommandExecutor {
         }
 
         return cmd.executor().execute(sender, subArgs);
+    }
+
+    @Override
+    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        if (args.length != 1) return List.of();
+        String prefix = args[0].toLowerCase(Locale.ROOT);
+        return registry.listAvailable(sender).stream()
+                .map(entry -> entry.metadata().name())
+                .filter(name -> name.toLowerCase(Locale.ROOT).startsWith(prefix))
+                .sorted(String.CASE_INSENSITIVE_ORDER)
+                .toList();
     }
 
     private void sendPrefixed(CommandSender sender, String message) {

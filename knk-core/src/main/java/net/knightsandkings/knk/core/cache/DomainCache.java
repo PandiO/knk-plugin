@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -181,6 +182,11 @@ public class DomainCache<K, V> {
      */
     public int size() {
         return entries.size();
+    }
+
+    /** Thread-safe snapshot of all cached values, including stale entries. */
+    public List<V> valuesSnapshot() {
+        return entries.values().stream().map(entry -> entry.value).toList();
     }
 
     /**

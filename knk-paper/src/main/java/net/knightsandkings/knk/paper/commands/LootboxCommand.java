@@ -168,7 +168,9 @@ public final class LootboxCommand implements TabExecutor {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
-            return filter(List.of("help", "odds"), args[0]);
+            List<String> roots = sender instanceof Player player && !permission.test(player, ODDS_NODE)
+                    ? List.of("help") : List.of("help", "odds");
+            return filter(roots, args[0]);
         }
         if (args.length == 2 && "odds".equalsIgnoreCase(args[0])) {
             return filter(config.get().types().stream()

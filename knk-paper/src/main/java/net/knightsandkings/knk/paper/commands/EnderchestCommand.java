@@ -84,10 +84,10 @@ public class EnderchestCommand implements TabExecutor {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
-            return support.completePlayers(args[0], SUBCOMMANDS.toArray(String[]::new));
+            return support.completeKnownPlayers(sender, args[0], SUBCOMMANDS.toArray(String[]::new));
         }
         if (args.length == 2 && SUBCOMMANDS.contains(args[0].toLowerCase(Locale.ROOT))) {
-            return support.completePlayers(args[1]);
+            return support.completeKnownPlayers(sender, args[1]);
         }
         return Collections.emptyList();
     }

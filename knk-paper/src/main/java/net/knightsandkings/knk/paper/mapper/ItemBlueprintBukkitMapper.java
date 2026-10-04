@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.mapper;
 
+import net.knightsandkings.knk.core.domain.item.ItemLoreLayout;
 import net.knightsandkings.knk.core.domain.item.KnkItemBlueprint;
 import net.knightsandkings.knk.core.domain.item.KnkItemBlueprintOrigin;
 import net.knightsandkings.knk.paper.enchantbook.EnchantBookItems;
@@ -48,6 +49,8 @@ public final class ItemBlueprintBukkitMapper {
             if (originLoreLine != null) {
                 lore.add(originLoreLine);
             }
+
+            lore = ItemLoreLayout.compose(List.of(), lore);
 
             if (!lore.isEmpty()) {
                 meta.setLore(lore);

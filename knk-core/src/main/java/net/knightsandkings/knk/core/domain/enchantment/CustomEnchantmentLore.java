@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.core.domain.enchantment;
 
+import net.knightsandkings.knk.core.domain.item.ItemLoreLayout;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentRepository;
 
 import java.util.ArrayList;
@@ -28,18 +29,13 @@ public final class CustomEnchantmentLore {
     }
 
     /**
-     * The same lines, custom enchantment lines first (in their existing order), the rest after them unchanged.
-     * Lore without custom enchantments comes back as is.
+     * The same lines, custom enchantment lines first (in their existing order), with the shared
+     * item-lore spacing applied to the remaining description/grade/origin sections.
      */
     public static List<String> enchantmentsFirst(EnchantmentRepository repository, List<String> lore) {
-        if (lore == null || lore.isEmpty()) {
-            return List.of();
-        }
+        if (lore == null || lore.isEmpty()) return List.of();
 
         Map<String, Integer> enchantments = repository.getEnchantments(lore).join();
-        if (enchantments.isEmpty()) {
-            return lore;
-        }
 
         List<String> rest = new ArrayList<>(lore);
         for (String enchantmentId : enchantments.keySet()) {
@@ -52,8 +48,6 @@ public final class CustomEnchantmentLore {
             enchantmentLines = repository.applyEnchantment(enchantmentLines, entry.getKey(), level).join();
         }
 
-        List<String> reordered = new ArrayList<>(enchantmentLines);
-        reordered.addAll(rest);
-        return reordered;
+        return ItemLoreLayout.compose(enchantmentLines, rest);
     }
 }
