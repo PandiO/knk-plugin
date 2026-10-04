@@ -90,8 +90,14 @@ public final class SkeletonGraph {
      * @param anchorId the admin anchor this node stands for, if any
      * @param span     mask index of the span the node sits on ({@link RoadMask#NONE} never happens for
      *                 detected nodes; anchors keep the span they snapped to)
+     * @param plaza    the junction of a plaza (designed or automatic): an area, never joined away as a
+     *                 two-arm junction
      */
-    public record Node(int id, int x, int y, int z, RoadNodeKind kind, OptionalInt anchorId, int span) {
+    public record Node(int id, int x, int y, int z, RoadNodeKind kind, OptionalInt anchorId, int span, boolean plaza) {
+        /** A node that is no plaza junction. */
+        public Node(int id, int x, int y, int z, RoadNodeKind kind, OptionalInt anchorId, int span) {
+            this(id, x, y, z, kind, anchorId, span, false);
+        }
     }
 
     /** A chain of skeleton spans from node {@code from} to node {@code to}, node spans included. */
@@ -137,8 +143,14 @@ public final class SkeletonGraph {
         RoadNodeKind kind;
         int anchorId = -1;
         boolean alive = true;
-        /** A designed plaza's junction: never dissolved or turned into an Endpoint by the tidy steps. */
+        /** A designed plaza's junction (the admin's position, locked). */
         boolean designed;
+        /**
+         * A plaza's junction (designed or automatic): never dissolved or turned into an Endpoint by the
+         * tidy steps - a plaza is a place with one exit or two, and joining its chains would cut straight
+         * across it (finding L).
+         */
+        boolean plaza;
         final List<Integer> chainIds = new ArrayList<>();
 
         int aliveChains(List<WorkChain> chains) {
@@ -301,6 +313,7 @@ public final class SkeletonGraph {
             work.y = plaza.y();
             work.z = plaza.z();
             work.designed = true;
+            work.plaza = true;
             plazaNodes.add(node);
             for (int i : footprint) {
                 if (skeleton[i]) {
@@ -388,6 +401,7 @@ public final class SkeletonGraph {
             }
             // The junction sits on the widest span even if the skeleton does not pass through it.
             int node = newNode(centre, RoadNodeKind.JUNCTION);
+            nodes.get(node).plaza = true;
             plazaNodes.add(node);
             for (int i : skeletonSpans) {
                 nodeOf[i] = node;
@@ -984,7 +998,7 @@ public final class SkeletonGraph {
             int remaining = node.aliveChains(chains);
             if (remaining == 0) {
                 killNode(nodeId);
-            } else if (node.kind == RoadNodeKind.JUNCTION && !node.designed) {
+            } else if (node.kind == RoadNodeKind.JUNCTION && !node.plaza) {
                 if (remaining == 1) {
                     node.kind = RoadNodeKind.ENDPOINT;
                 } else if (remaining == 2) {
@@ -1060,7 +1074,7 @@ public final class SkeletonGraph {
             int remaining = node.aliveChains(chains);
             if (remaining == 0) {
                 killNode(nodeId);
-            } else if (node.kind == RoadNodeKind.JUNCTION && !node.designed) {
+            } else if (node.kind == RoadNodeKind.JUNCTION && !node.plaza) {
                 if (remaining == 1) {
                     node.kind = RoadNodeKind.ENDPOINT;
                 } else if (remaining == 2) {
@@ -1438,7 +1452,7 @@ public final class SkeletonGraph {
             }
             remap[id] = outNodes.size();
             outNodes.add(new Node(outNodes.size(), node.x, node.y, node.z, node.kind,
-                node.anchorId >= 0 ? OptionalInt.of(node.anchorId) : OptionalInt.empty(), node.span));
+                node.anchorId >= 0 ? OptionalInt.of(node.anchorId) : OptionalInt.empty(), node.span, node.plaza));
         }
         List<Chain> outChains = new ArrayList<>();
         for (WorkChain chain : chains) {

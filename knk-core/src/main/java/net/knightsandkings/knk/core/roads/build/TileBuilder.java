@@ -260,7 +260,7 @@ public final class TileBuilder {
                 int n = entry.getKey();
                 List<Run> arms = entry.getValue();
                 if (arms.size() != 2 || locked[n] || graph.nodes().get(n).kind() != RoadNodeKind.JUNCTION
-                    || previousDegree(previous, existing[n]) >= 3) {
+                    || graph.nodes().get(n).plaza() || previousDegree(previous, existing[n]) >= 3) {
                     continue;
                 }
                 Run first = arms.get(0);

@@ -1008,6 +1008,19 @@ class TileBuilderTest {
     }
 
     @Test
+    void aPlazaWithTwoExitsStaysAJunction() {
+        // Finding L: a plaza is a place even with two exits (Brink's other arms are in the next tile);
+        // joining its two runs would make one edge cut straight across it.
+        Map<Long, TileBuilder.Run> runs = runs(run(0, 1, 0, 10, 0), run(1, 2, 10, 20, 10));
+        SkeletonGraph.Result plaza = new SkeletonGraph.Result(List.of(
+            new SkeletonGraph.Node(0, 0, 64, 0, RoadNodeKind.ENDPOINT, OptionalInt.empty(), 0),
+            new SkeletonGraph.Node(1, 10, 64, 0, RoadNodeKind.JUNCTION, OptionalInt.empty(), 10, true),
+            new SkeletonGraph.Node(2, 20, 64, 0, RoadNodeKind.BOUNDARY, OptionalInt.empty(), 20)), List.of(), List.of());
+        assertTrue(TileBuilder.dissolveTwoArmJunctions(runs, plaza, new int[] {-1, -1, -1}, new boolean[3], PreviousGraph.EMPTY).isEmpty());
+        assertEquals(2, runs.size());
+    }
+
+    @Test
     void anUnlockedNeighbourAndAFarJunctionAreNotMerged() {
         // Only unmatched nodes merge: a junction the admin left alone (#101, matched) stays, and so does
         // one farther than locked-node-reach.
