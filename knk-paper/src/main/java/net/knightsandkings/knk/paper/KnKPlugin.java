@@ -1733,7 +1733,7 @@ public class KnKPlugin extends JavaPlugin {
                 mainThread, queryApi, commandApi, runtime::settings, userIdOf);
             var opening = new net.knightsandkings.knk.paper.lootbox.LootboxOpening(
                 this, delivery, announcer, queryApi, runtime::settings, runtime::config,
-                () -> java.util.concurrent.ThreadLocalRandom.current().nextDouble());
+                () -> java.util.concurrent.ThreadLocalRandom.current().nextDouble(), inSiege);
             pluginManager.registerEvents(opening, this);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxInteractListener(
                 runtime, new net.knightsandkings.knk.core.lootbox.ClaimGuard(), commandApi, tokenDelivery, announcer,
@@ -1809,14 +1809,15 @@ public class KnKPlugin extends JavaPlugin {
     }
 
     /**
-     * After a siege restored a player's own inventory: hand over the lootbox tokens held back during the siege, so they
-     * don't have to rejoin. A second later, so a quitting player is gone (their next join delivers them) and a player
-     * who immediately joined another siege is skipped.
+     * After a siege restored a player's own inventory: hand over the lootbox tokens held back during the siege and any
+     * reel item that came up during it, so they don't have to rejoin. A second later, so a quitting player is gone
+     * (their next join delivers them) and a player who immediately joined another siege is skipped.
      */
-    private void deliverLootboxTokensAfterSiege(org.bukkit.entity.Player player) {
+    private void deliverLootboxItemsAfterSiege(org.bukkit.entity.Player player) {
         var tokenDelivery = lootboxTokenDelivery;
+        var opening = lootboxOpening;
         // Not while disabling (siege shutdown restores everyone; scheduling then throws): their next join delivers.
-        if (tokenDelivery == null || !isEnabled()) {
+        if ((tokenDelivery == null && opening == null) || !isEnabled()) {
             return;
         }
         java.util.UUID uuid = player.getUniqueId();
@@ -1824,7 +1825,12 @@ public class KnKPlugin extends JavaPlugin {
             org.bukkit.entity.Player online = getServer().getPlayer(uuid);
             if (online != null && online.isOnline()
                 && (siegeService == null || siegeService.activeLobbyOf(uuid).isEmpty())) {
-                tokenDelivery.deliverUndelivered(online);
+                if (opening != null) {
+                    opening.deliverWaiting(online);
+                }
+                if (tokenDelivery != null) {
+                    tokenDelivery.deliverUndelivered(online);
+                }
             }
         }, 20L);
     }
@@ -1979,7 +1985,7 @@ public class KnKPlugin extends JavaPlugin {
         siegeService.addObserver(siegeBooks);
         siegeVault.setAfterRestore(player -> {
             siegeBooks.sweep(player);
-            deliverLootboxTokensAfterSiege(player);
+            deliverLootboxItemsAfterSiege(player);
         });
 
         var pluginManager = getServer().getPluginManager();

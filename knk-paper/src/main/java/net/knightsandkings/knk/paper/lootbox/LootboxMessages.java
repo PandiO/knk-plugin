@@ -14,6 +14,9 @@ public final class LootboxMessages {
     public static final String STUCK = ChatColor.RED + "The lootbox is stuck — try again in a moment.";
     /** The box was opened (its result is stored) but the item couldn't be handed over now. */
     public static final String STUCK_ITEM = ChatColor.YELLOW + "Your lootbox item couldn't be handed over right now - it arrives when you next join.";
+    /** A reel finished while the player was in a siege: the siege inventory is replaced afterwards, so the item waits. */
+    public static final String HELD_DURING_SIEGE = ChatColor.YELLOW + "Your lootbox item is kept safe - you get it as soon as the siege is over.";
+    public static final String ARRIVED_AFTER_SIEGE = ChatColor.GREEN + "The lootbox item you won during the siege is here:";
     public static final String TOKEN_REVOKED_REMOVED = ChatColor.RED + "A lootbox you held was revoked by staff and has been removed.";
     public static final String TOKEN_OPENED_ELSEWHERE_REMOVED = ChatColor.RED + "A copy of a lootbox that was already opened has crumbled away.";
     public static final String TOO_FAR = ChatColor.RED + "Get closer to open this lootbox.";

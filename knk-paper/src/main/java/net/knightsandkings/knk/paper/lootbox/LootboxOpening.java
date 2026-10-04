@@ -38,6 +38,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.DoubleSupplier;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.logging.Logger;
 
@@ -49,7 +50,10 @@ import java.util.logging.Logger;
  * <p>
  * The reel is only a presentation of a result that is already stored: closing the menu early hands the item over at
  * once, a player who quits mid-spin gets it when they rejoin (and, failing that, through the API's pending claims),
- * and a server stop hands every spinning item over first. The passing items follow the box's real odds (the odds
+ * and a server stop hands every spinning item over first. An item that comes up while the player is in a siege (hub
+ * or match) is held until the siege restores their own inventory ({@link #deliverWaiting}), because the siege
+ * inventory is replaced afterwards and the item would be lost with it; nothing is confirmed to the API meanwhile, so
+ * the claim stays redeliverable through its pending claims. The passing items follow the box's real odds (the odds
  * preview, cached for a few minutes) and are fetched with a short timeout; without them the reel shows only the
  * winner. {@code opening.style: instant} skips the reel.
  */
@@ -70,21 +74,27 @@ public final class LootboxOpening implements Listener {
     private final Supplier<LootboxSettings> settings;
     private final Supplier<KnkLootboxRuntimeConfig> config;
     private final DoubleSupplier random;
+    private final Predicate<UUID> inSiege;
 
     // Main thread only.
     private final Map<UUID, Spin> spins = new HashMap<>();
-    private final Map<UUID, List<Pending>> interrupted = new HashMap<>();
+    // Items waiting for their player: they quit mid-spin, or are in a siege that replaces their inventory.
+    private final Map<UUID, List<Pending>> waiting = new HashMap<>();
     private final Map<String, CachedOdds> odds = new HashMap<>();
     private final Map<Integer, ItemStack> previews = new HashMap<>();
 
-    private record Pending(LootboxDelivery.Prepared prepared, String giftedBy) {
+    private record Pending(LootboxDelivery.Prepared prepared, String giftedBy, boolean heldForSiege) {
+        Pending(LootboxDelivery.Prepared prepared, String giftedBy) {
+            this(prepared, giftedBy, false);
+        }
     }
 
     private record CachedOdds(Instant fetchedAt, List<LootboxReel.Weighted<Integer>> blueprints) {
     }
 
     public LootboxOpening(Plugin plugin, LootboxDelivery delivery, LootboxAnnouncer announcer, LootboxesQueryApi queryApi,
-                          Supplier<LootboxSettings> settings, Supplier<KnkLootboxRuntimeConfig> config, DoubleSupplier random) {
+                          Supplier<LootboxSettings> settings, Supplier<KnkLootboxRuntimeConfig> config, DoubleSupplier random,
+                          Predicate<UUID> inSiege) {
         this.plugin = plugin;
         this.delivery = delivery;
         this.announcer = announcer;
@@ -92,6 +102,7 @@ public final class LootboxOpening implements Listener {
         this.settings = settings;
         this.config = config;
         this.random = random;
+        this.inSiege = inSiege != null ? inSiege : id -> false;
     }
 
     /**
@@ -221,8 +232,16 @@ public final class LootboxOpening implements Listener {
         }, Math.max(1, showFor));
     }
 
-    /** Hands the item over and says what it was (and, for an announced drop, broadcasts it). */
+    /**
+     * Hands the item over and says what it was (and, for an announced drop, broadcasts it). In a siege the item is held
+     * instead: it would land in the siege inventory, which is replaced when the siege ends.
+     */
     private void finish(Player player, LootboxDelivery.Prepared prepared, String giftedBy, LootboxSettings current) {
+        if (inSiege.test(player.getUniqueId())) {
+            remember(player.getUniqueId(), new Pending(prepared, giftedBy, true));
+            player.sendMessage(LootboxMessages.HELD_DURING_SIEGE);
+            return;
+        }
         LootboxDelivery.Outcome outcome = delivery.handOver(player, prepared, false);
         KnkLootboxClaimResult claim = prepared.claim();
         if (outcome.given()) {
@@ -385,24 +404,41 @@ public final class LootboxOpening implements Listener {
     @EventHandler(priority = EventPriority.MONITOR)
     public void onJoin(PlayerJoinEvent event) {
         UUID id = event.getPlayer().getUniqueId();
-        List<Pending> waiting = interrupted.remove(id);
-        if (waiting == null || waiting.isEmpty()) {
+        if (!waiting.containsKey(id)) {
             return;
         }
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
             Player player = Bukkit.getPlayer(id);
-            if (player == null) {
-                interrupted.computeIfAbsent(id, ignored -> new ArrayList<>()).addAll(waiting);
-                return;
-            }
-            for (Pending pending : waiting) {
-                finish(player, pending.prepared(), pending.giftedBy(), settings.get());
+            if (player != null) {
+                deliverWaiting(player);
             }
         }, 40L);
     }
 
+    /**
+     * Main thread: hands over the items waiting for {@code player} (a spin cut short by a quit, or held during a
+     * siege), unless they are in a siege right now: those stay until the next call (the siege's inventory restore).
+     * An item held for a siege says so first.
+     */
+    public void deliverWaiting(Player player) {
+        UUID id = player.getUniqueId();
+        if (!player.isOnline() || inSiege.test(id)) {
+            return;
+        }
+        List<Pending> pendings = waiting.remove(id);
+        if (pendings == null) {
+            return;
+        }
+        for (Pending pending : pendings) {
+            if (pending.heldForSiege()) {
+                player.sendMessage(LootboxMessages.ARRIVED_AFTER_SIEGE);
+            }
+            finish(player, pending.prepared(), pending.giftedBy(), settings.get());
+        }
+    }
+
     private void remember(UUID playerId, Pending pending) {
-        interrupted.computeIfAbsent(playerId, ignored -> new ArrayList<>()).add(pending);
+        waiting.computeIfAbsent(playerId, ignored -> new ArrayList<>()).add(pending);
     }
 
     // ===== Looks =====
