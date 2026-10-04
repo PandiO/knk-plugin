@@ -46,18 +46,21 @@ commands:
   freeze:
     description: "Freeze a player - locks movement/chat/commands/damage until unfrozen (rebuild of v1's FreezeCommands, a dead no-op stub there)"
     usage: "/freeze <player> <reason...>"
-    permission: knk.freeze
+    # No permission: here (KNG-24) - gated on knk.freeze through KnkPermissible inside the executor
+    # and hidden from players lacking it by GatedCommandVisibilityListener.
 
   unfreeze:
     description: "Unfreeze a previously-frozen player"
     usage: "/unfreeze <player>"
-    permission: knk.unfreeze
+    # No permission: here (KNG-24) - gated on knk.unfreeze through KnkPermissible inside the executor
+    # and hidden from players lacking it by GatedCommandVisibilityListener.
 
   staffchat:
     description: "Broadcast a message to online staff (rebuild of v1's StaffChatCommand)"
     usage: "/staffchat <message>"
     aliases: [sc]
-    permission: knk.staffchat
+    # No permission: here (KNG-24) - gated on knk.staffchat through KnkPermissible inside the executor
+    # and hidden from players lacking it by GatedCommandVisibilityListener.
 
   msg:
     description: "Send a private message to another player (rebuild of v1's MessageCommands)"

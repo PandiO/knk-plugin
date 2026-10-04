@@ -9,6 +9,7 @@ import net.knightsandkings.knk.core.domain.gates.CachedGateStructure;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
+import net.knightsandkings.knk.paper.commands.support.CommandPermissions;
 import net.knightsandkings.knk.paper.gates.DistrictGateLoader;
 import net.knightsandkings.knk.paper.gates.GateDoorOpenStateMapper;
 import net.knightsandkings.knk.paper.tasks.GateDoorRegionCaptureHandler;
@@ -45,6 +46,9 @@ public class GateCommand implements CommandExecutor {
     private final UsersCommandApi usersCommandApi;
     private final DistrictGateLoader districtGateLoader;
     private final GateDoorRegionCaptureHandler gateDoorRegionCaptureHandler;
+    private CommandPermissions permissions = CommandPermissions.bukkitOnly();
+    /** The nodes /knk gate checks synchronously (per-gate open/close nodes aside); asked for before it runs. */
+    public static final List<String> CHECKED_NODES = List.of("knk.gate.admin", "knk.gate.open.*", "knk.gate.close.*");
 
     public GateCommand(GateManager gateManager, GateStructuresApi gateStructuresApi, GateDoorsApi gateDoorsApi,
                         UserManager userManager, UsersCommandApi usersCommandApi,
@@ -57,6 +61,14 @@ public class GateCommand implements CommandExecutor {
         this.usersCommandApi = usersCommandApi;
         this.districtGateLoader = districtGateLoader;
         this.gateDoorRegionCaptureHandler = gateDoorRegionCaptureHandler;
+    }
+
+    /**
+     * Checks knk.gate.* through KnkPermissible as well as Bukkit (KNG-24; plain sender.hasPermission
+     * refused in-house grants). Bukkit-only until set.
+     */
+    public void setPermissions(CommandPermissions permissions) {
+        this.permissions = java.util.Objects.requireNonNull(permissions, "permissions must not be null");
     }
 
     @Override
@@ -141,7 +153,7 @@ public class GateCommand implements CommandExecutor {
      * only in which of its two entry points is called.
      */
     private boolean executeDoorRegion(CommandSender sender, String[] args, boolean isRedefine) {
-        if (!sender.hasPermission("knk.gate.admin")) {
+        if (!permissions.has(sender, "knk.gate.admin")) {
             sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
             return true;
         }
@@ -451,7 +463,7 @@ public class GateCommand implements CommandExecutor {
      * gates in the web app.
      */
     public boolean executeAdminReload(CommandSender sender, String[] args) {
-        if (!sender.hasPermission("knk.gate.admin")) {
+        if (!permissions.has(sender, "knk.gate.admin")) {
             sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
             return true;
         }
@@ -501,7 +513,7 @@ public class GateCommand implements CommandExecutor {
      * Handle /gate admin health <door> <amount>
      */
     public boolean executeAdminHealth(CommandSender sender, String[] args) {
-        if (!sender.hasPermission("knk.gate.admin")) {
+        if (!permissions.has(sender, "knk.gate.admin")) {
             sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
             return true;
         }
@@ -535,7 +547,7 @@ public class GateCommand implements CommandExecutor {
      * Handle /gate admin repair <door>
      */
     public boolean executeAdminRepair(CommandSender sender, String[] args) {
-        if (!sender.hasPermission("knk.gate.admin")) {
+        if (!permissions.has(sender, "knk.gate.admin")) {
             sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
             return true;
         }
@@ -566,7 +578,7 @@ public class GateCommand implements CommandExecutor {
      * Handle /gate admin tp <door>
      */
     public boolean executeAdminTeleport(CommandSender sender, String[] args) {
-        if (!sender.hasPermission("knk.gate.admin")) {
+        if (!permissions.has(sender, "knk.gate.admin")) {
             sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
             return true;
         }
@@ -640,7 +652,7 @@ public class GateCommand implements CommandExecutor {
      * exposed here - add a case below if/when a concrete admin or Siege use needs one.
      */
     public boolean executeAdminOverride(CommandSender sender, String[] args) {
-        if (!sender.hasPermission("knk.gate.admin")) {
+        if (!permissions.has(sender, "knk.gate.admin")) {
             sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
             return true;
         }
@@ -762,11 +774,11 @@ public class GateCommand implements CommandExecutor {
      * Check if sender has a permission.
      */
     private boolean checkPermission(CommandSender sender, String permission) {
-        return sender.hasPermission(permission);
+        return permissions.has(sender, permission);
     }
 
     private CachedGateDoor findAdminGate(CommandSender sender, String[] args, String settingName) {
-        if (!sender.hasPermission("knk.gate.admin")) {
+        if (!permissions.has(sender, "knk.gate.admin")) {
             sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
             return null;
         }

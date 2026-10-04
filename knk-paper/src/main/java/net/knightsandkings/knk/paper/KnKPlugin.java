@@ -194,6 +194,7 @@ public class KnKPlugin extends JavaPlugin {
     private MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private PermissionsDataAccess permissionsDataAccess;
     private KnkPermissible knkPermissible;
+    private net.knightsandkings.knk.paper.commands.support.CommandPermissions commandPermissions;
     private JoinLoadingGuard joinLoadingGuard;
     private ModeService modeService;
     private net.knightsandkings.knk.paper.user.AdminFreezeManager adminFreezeManager;
@@ -607,6 +608,8 @@ public class KnKPlugin extends JavaPlugin {
                 // After a group/title change: redraw the target's tab-list team and footer (KNG-7).
                 (player, summary) -> net.knightsandkings.knk.paper.utils.ScoreboardUtil.setScoreboard(List.of(player), knkPermissible, summary)
             );
+            // KNG-24: knk.admin.user.* checked through KnkPermissible as well as Bukkit.
+            this.userAdminService.setPermissions(commandPermissions());
             // Salary on join (offline gap) and every hour online; the scoreboard is redrawn after a payout.
             this.salaryPayoutScheduler = new net.knightsandkings.knk.paper.user.SalaryPayoutScheduler(
                 this, usersCommandApi, cacheManager.getUserCache(), usersDataAccess,
@@ -1154,6 +1157,9 @@ public class KnKPlugin extends JavaPlugin {
         getLogger().info("Registered AdminFreezeListener for /freeze enforcement");
         pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.PrivateMessageSessionListener(
             this, messagingService, spyService, ignoreService), this);
+        // KNG-25: /minecraft:tell and /minecraft:w broke the typing player's secure chat (always on -
+        // the plugin's tell/w aliases shadow the vanilla redirects whether or not the block below runs).
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.ShadowedVanillaCommandListener(), this);
         if (config.privateMessages().blockVanillaCommands()) {
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.VanillaMessagingBlockListener(), this);
             getLogger().info("Registered VanillaMessagingBlockListener (/minecraft:msg|tell|w -> /msg; /teammsg, /tm, /me off)");
@@ -1284,6 +1290,7 @@ public class KnKPlugin extends JavaPlugin {
                     }
                 );
             }
+            knkAdminCommand.setCommandPermissions(commandPermissions());
             knkCommand.setExecutor(knkAdminCommand);
             knkCommand.setTabCompleter(knkAdminCommand);
             getLogger().info("Registered /knk admin command");
@@ -1311,9 +1318,20 @@ public class KnKPlugin extends JavaPlugin {
         registerModeCommand("ownermode", ActiveMode.OWNER);
         registerModeCommand("staffmode", ActiveMode.STAFF);
 
-        registerTabCommand("freeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(userAdminService, true, visiblePlayers));
-        registerTabCommand("unfreeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(userAdminService, false, visiblePlayers));
-        registerSimpleCommand("staffchat", new net.knightsandkings.knk.paper.commands.StaffChatCommand());
+        // KNG-24: gated on their in-house node in the executor, not by plugin.yml's permission:
+        // (Bukkit never sees in-house grants, so non-op staff got "Unknown or incomplete command").
+        var commandPermissions = commandPermissions();
+        var gatedCommandVisibility = new net.knightsandkings.knk.paper.listeners.GatedCommandVisibilityListener(
+            commandPermissions, MenuService.mainThreadExecutor(this));
+        registerGatedCommand("freeze", "knk.freeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(userAdminService, true, visiblePlayers),
+            commandPermissions, gatedCommandVisibility);
+        registerGatedCommand("unfreeze", "knk.unfreeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(userAdminService, false, visiblePlayers),
+            commandPermissions, gatedCommandVisibility);
+        registerGatedCommand("staffchat", net.knightsandkings.knk.paper.commands.StaffChatCommand.NODE,
+            new net.knightsandkings.knk.paper.commands.StaffChatCommand(commandPermissions::hasAsync,
+                MenuService.mainThreadExecutor(this), org.bukkit.Bukkit::getOnlinePlayers),
+            commandPermissions, gatedCommandVisibility);
+        getServer().getPluginManager().registerEvents(gatedCommandVisibility, this);
         registerTabCommand("msg", new net.knightsandkings.knk.paper.commands.MessageCommand(messagingService, visiblePlayers));
         registerTabCommand("reply", new net.knightsandkings.knk.paper.commands.ReplyCommand(messagingService));
         registerTabCommand("socialspy", new net.knightsandkings.knk.paper.commands.SocialSpyCommand(
@@ -1817,6 +1835,31 @@ public class KnKPlugin extends JavaPlugin {
             pluginCommand.setExecutor(executor);
             pluginCommand.setTabCompleter(executor);
             getLogger().info("Registered /" + name + " command");
+        } else {
+            getLogger().warning("Failed to register /" + name + " command - not defined in plugin.yml?");
+        }
+    }
+
+    /** Bukkit-or-in-house permission checks for commands (KNG-24); Bukkit-only when the API isn't configured. */
+    private net.knightsandkings.knk.paper.commands.support.CommandPermissions commandPermissions() {
+        if (commandPermissions == null) {
+            commandPermissions = net.knightsandkings.knk.paper.commands.support.CommandPermissions.of(
+                knkPermissible, MenuService.mainThreadExecutor(this));
+        }
+        return commandPermissions;
+    }
+
+    /** A command gated on {@code node} through KnkPermissible and hidden from players lacking it (KNG-24). */
+    private void registerGatedCommand(String name, String node, org.bukkit.command.CommandExecutor executor,
+                                      net.knightsandkings.knk.paper.commands.support.CommandPermissions permissions,
+                                      net.knightsandkings.knk.paper.listeners.GatedCommandVisibilityListener visibility) {
+        PluginCommand pluginCommand = getCommand(name);
+        if (pluginCommand != null) {
+            var gated = new net.knightsandkings.knk.paper.commands.support.PermissionGatedCommand(node, executor, permissions);
+            pluginCommand.setExecutor(gated);
+            pluginCommand.setTabCompleter(gated);
+            visibility.gate(pluginCommand, node);
+            getLogger().info("Registered /" + name + " command (gated on " + node + ")");
         } else {
             getLogger().warning("Failed to register /" + name + " command - not defined in plugin.yml?");
         }
