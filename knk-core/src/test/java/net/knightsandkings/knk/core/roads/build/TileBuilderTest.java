@@ -265,6 +265,55 @@ class TileBuilderTest {
     }
 
     @Test
+    void anEdgeClimbsToARaisedPlazaAlongItsStairsNotThroughTheGround() {
+        // Smoke test 2026-10-04: a 15×15 plaza (x,z 20..34) on a solid hill at y 70; the 3-wide road
+        // from the west is flat at y 64 (x 2..13) and climbs six stairs (x 14..19, y 65..70) that lie
+        // inside the plaza footprint, so the chain ends at the foot of the stairs.
+        GridFixture f = new GridFixture();
+        for (int z = 20; z <= 34; z++) {
+            f.layer(20, 70, z, "S".repeat(15));
+            for (int x = 20; x <= 34; x++) f.column(x, z, 64, 69, GridFixture.STONE);
+        }
+        for (int z = 26; z <= 28; z++) {
+            f.layer(2, 64, z, "S".repeat(12));
+            for (int k = 0; k < 6; k++) {
+                f.block(14 + k, 65 + k, z, GridFixture.STAIRS);
+                f.column(14 + k, z, 64, 64 + k, GridFixture.STONE);
+            }
+        }
+        TileRequest req = request(f, PARAMS.withPlazaGrowth(6), GridFixture.profiles(), List.of(), PreviousGraph.EMPTY,
+            new Seed(3, 65, 27));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        Node plaza = onlyNode(r, RoadNodeKind.JUNCTION);
+        assertEquals(70, plaza.y(), d);
+        Edge west = r.edges().stream()
+            .filter(e -> r.node(e.fromKey().equals(plaza.key()) ? e.toKey() : e.fromKey()).orElseThrow().x() < 10)
+            .findFirst().orElseThrow();
+        assertOnTheGround(west, f, d);
+        assertTrue(r.warnings().isEmpty(), d);
+    }
+
+    /** No sampled point of the edge has solid blocks at both feet and head height (1-block tolerance for slopes). */
+    private static void assertOnTheGround(Edge e, GridFixture f, String d) {
+        List<int[]> g = e.geometry();
+        for (int s = 0; s + 1 < g.size(); s++) {
+            int[] a = g.get(s);
+            int[] b = g.get(s + 1);
+            for (int i = 0; i <= 20; i++) {
+                double t = i / 20.0;
+                int x = (int) Math.round(a[0] + (b[0] - a[0]) * t);
+                int y = (int) Math.round(a[1] + (b[1] - a[1]) * t);
+                int z = (int) Math.round(a[2] + (b[2] - a[2]) * t);
+                assertFalse(f.isSolid(x, y + 1, z) && f.isSolid(x, y + 2, z),
+                    "segment " + s + " runs through the ground at (" + x + ", " + y + ", " + z + ")" + d);
+            }
+        }
+    }
+
+    @Test
     void stairsUpAHill() {
         // 3-wide stone road: flat at y 64 (x 4..13), stairs rising one block per step (x 14..19, y 65..70),
         // flat at y 70 (x 20..29).

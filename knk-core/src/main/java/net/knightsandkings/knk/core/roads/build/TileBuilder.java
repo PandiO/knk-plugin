@@ -11,12 +11,15 @@ import net.knightsandkings.knk.core.roads.build.TileBuildResult.Edge;
 import net.knightsandkings.knk.core.roads.build.TileBuildResult.Node;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalInt;
+import java.util.PriorityQueue;
 import java.util.Set;
 
 /**
@@ -33,6 +36,11 @@ public final class TileBuilder {
 
     /** Bump when the builder's output changes in a way that should force rebuilds ({@code RoadTile.BuilderVersion}). */
     public static final int BUILDER_VERSION = 1;
+
+    /** A closing walk ({@link #closingPath}) may be this many times the straight distance between chain end and node … */
+    static final double CLOSING_STRETCH = 2.0;
+    /** … plus this many blocks (a short gap around a planter or lamp post). */
+    static final double CLOSING_SLACK = 8.0;
 
     /**
      * One build request.
@@ -345,24 +353,101 @@ public final class TileBuilder {
         return "n" + nodeIndex;
     }
 
-    /** The chain's span positions, closed onto the two node positions (which may be off the chain). */
+    /**
+     * The chain's span positions, closed onto the two node positions (which may be off the chain). A
+     * plaza or cluster junction sits at its core while its chains start at the edge of its footprint,
+     * up to tens of blocks away and often below it (smoke test 2026-10-04): that gap is closed along
+     * the mask ({@link #closingPath}), so the edge climbs the plaza's stairs instead of cutting through
+     * the ground. A node off the mask (a locked or anchor position) keeps the straight closing.
+     */
     static List<int[]> polyline(RoadMask mask, Chain chain, int[] from, int[] to) {
-        List<int[]> points = new ArrayList<>(chain.spans().length + 2);
+        int[] spans = chain.spans();
+        List<int[]> points = new ArrayList<>(spans.length + 2);
         points.add(from);
-        for (int span : chain.spans()) {
-            int[] p = {mask.x(span), mask.y(span), mask.z(span)};
-            if (!samePoint(points.get(points.size() - 1), p)) {
-                points.add(p);
+        if (spans.length > 0) {
+            List<int[]> head = closingPath(mask, from, spans[0]);
+            for (int k = head.size() - 1; k >= 0; k--) {
+                addPoint(points, head.get(k));
             }
         }
-        if (!samePoint(points.get(points.size() - 1), to)) {
-            points.add(to);
+        for (int span : spans) {
+            addPoint(points, new int[] {mask.x(span), mask.y(span), mask.z(span)});
         }
+        if (spans.length > 0) {
+            for (int[] p : closingPath(mask, to, spans[spans.length - 1])) {
+                addPoint(points, p);
+            }
+        }
+        addPoint(points, to);
         if (points.size() == 1) {
             points.add(to.clone());
         }
         return points;
     }
+
+    private static void addPoint(List<int[]> points, int[] p) {
+        if (!samePoint(points.get(points.size() - 1), p)) {
+            points.add(p);
+        }
+    }
+
+    /**
+     * The shortest walk over mask links from the chain's end span to the span under a node position,
+     * as the positions strictly between them, ordered from the chain end towards the node; empty when
+     * they touch, when the node is off the mask, or when no walk is found within
+     * {@code CLOSING_STRETCH × the straight distance + CLOSING_SLACK} (the straight closing then
+     * stays). Dijkstra with the polyline's own step lengths (1, √2, with height), visiting only spans
+     * that close enough.
+     */
+    static List<int[]> closingPath(RoadMask mask, int[] node, int chainEnd) {
+        int target = mask.indexOf(node[0], node[1], node[2]);
+        if (target == RoadMask.NONE || target == chainEnd) {
+            return List.of();
+        }
+        double straight = mask.distance(chainEnd, target);
+        if (straight < 1.5) {
+            return List.of();
+        }
+        double limit = CLOSING_STRETCH * straight + CLOSING_SLACK;
+        Map<Integer, Double> cost = new HashMap<>();
+        Map<Integer, Integer> parent = new HashMap<>();
+        PriorityQueue<double[]> queue = new PriorityQueue<>((p, q) -> Double.compare(p[0], q[0]));
+        cost.put(chainEnd, 0.0);
+        queue.add(new double[] {0.0, chainEnd});
+        while (!queue.isEmpty()) {
+            double[] head = queue.poll();
+            int i = (int) head[1];
+            if (head[0] > cost.get(i)) {
+                continue;
+            }
+            if (i == target) {
+                List<int[]> path = new ArrayList<>();
+                for (int k = parent.get(target); k != chainEnd; k = parent.get(k)) {
+                    path.add(new int[] {mask.x(k), mask.y(k), mask.z(k)});
+                }
+                Collections.reverse(path);
+                return path;
+            }
+            for (int d = 0; d < SpanGrid.DIRECTIONS; d++) {
+                int nb = mask.neighbour(i, d);
+                if (nb == RoadMask.NONE) {
+                    continue;
+                }
+                double c = head[0] + mask.distance(i, nb);
+                if (c + mask.distance(nb, target) > limit) {
+                    continue;
+                }
+                Double known = cost.get(nb);
+                if (known == null || c < known) {
+                    cost.put(nb, c);
+                    parent.put(nb, i);
+                    queue.add(new double[] {c, nb});
+                }
+            }
+        }
+        return List.of();
+    }
+
 
     private static boolean samePoint(int[] a, int[] b) {
         return a[0] == b[0] && a[1] == b[1] && a[2] == b[2];
