@@ -578,7 +578,7 @@ public final class SkeletonGraph {
                 continue;
             }
             WorkNode node;
-            if (nodeOf[best] >= 0) {
+            if (nodeOf[best] >= 0 && anchorTakesOver(nodes.get(nodeOf[best]), anchor, maxDistance)) {
                 node = nodes.get(nodeOf[best]);
                 if (node.anchorId >= 0) {
                     warnings.add(new BuildWarning(WARN_ANCHOR_DUPLICATE + " (anchor " + anchor.id() + ")",
@@ -586,7 +586,19 @@ public final class SkeletonGraph {
                     continue;
                 }
             } else {
-                node = nodes.get(newNode(best, RoadNodeKind.ANCHOR));
+                int owner = nodeOf[best];
+                int id = newNode(best, RoadNodeKind.ANCHOR);
+                node = nodes.get(id);
+                if (owner >= 0) {
+                    // Inside a plaza or cluster footprint: the anchor also takes the footprint's other
+                    // skeleton spans next to it, so every exit there leaves from the anchor.
+                    for (int i = 0; i < mask.size(); i++) {
+                        if (skeleton[i] && nodeOf[i] == owner
+                            && Math.sqrt(distanceTo(i, anchor.x(), anchor.y(), anchor.z())) <= maxDistance) {
+                            nodeOf[i] = id;
+                        }
+                    }
+                }
             }
             node.kind = RoadNodeKind.ANCHOR;
             node.anchorId = anchor.id();
@@ -594,6 +606,22 @@ public final class SkeletonGraph {
             node.y = anchor.y();
             node.z = anchor.z();
         }
+    }
+
+    /**
+     * Whether an anchor whose nearest centreline span already belongs to a node becomes that node
+     * (the junction the admin stood next to) - only when the node itself stands within reach. A plaza
+     * or cluster junction owns every skeleton span of its footprint; an anchor at the edge of that
+     * footprint must not drag the whole junction to itself (smoke test 2026-10-04: anchor 3588 at the
+     * foot of Brink's stairs took over the Brink plaza junction 21 blocks away). Such an anchor gets
+     * its own node on that span instead, together with the footprint's skeleton spans within the same
+     * reach, so the exits next to it leave from the anchor; the chain tracing joins it to the plaza.
+     */
+    private static boolean anchorTakesOver(WorkNode node, Anchor anchor, double maxDistance) {
+        double dx = node.x - anchor.x();
+        double dy = node.y - anchor.y();
+        double dz = node.z - anchor.z();
+        return Math.sqrt(dx * dx + dy * dy + dz * dz) <= maxDistance;
     }
 
     // ---- 5. chains ---------------------------------------------------------------------------

@@ -40,9 +40,10 @@ public final class TileBuilder {
     /**
      * Bump when the builder's output changes in a way that should force rebuilds ({@code RoadTile.BuilderVersion};
      * recorded on every tile, not yet compared, so a bump does not queue rebuilds by itself). 2: chains close
-     * onto plaza and cluster junctions along the mask, terrain warnings (2026-10-04).
+     * onto plaza and cluster junctions along the mask, terrain warnings (2026-10-04). 3: an anchor inside a
+     * plaza footprint gets its own node instead of moving the plaza junction (2026-10-04).
      */
-    public static final int BUILDER_VERSION = 2;
+    public static final int BUILDER_VERSION = 3;
 
     /** A closing walk ({@link #closingPath}) may be this many times the straight distance between chain end and node … */
     static final double CLOSING_STRETCH = 2.0;

@@ -266,21 +266,7 @@ class TileBuilderTest {
 
     @Test
     void anEdgeClimbsToARaisedPlazaAlongItsStairsNotThroughTheGround() {
-        // Smoke test 2026-10-04: a 15×15 plaza (x,z 20..34) on a solid hill at y 70; the 3-wide road
-        // from the west is flat at y 64 (x 2..13) and climbs six stairs (x 14..19, y 65..70) that lie
-        // inside the plaza footprint, so the chain ends at the foot of the stairs.
-        GridFixture f = new GridFixture();
-        for (int z = 20; z <= 34; z++) {
-            f.layer(20, 70, z, "S".repeat(15));
-            for (int x = 20; x <= 34; x++) f.column(x, z, 64, 69, GridFixture.STONE);
-        }
-        for (int z = 26; z <= 28; z++) {
-            f.layer(2, 64, z, "S".repeat(12));
-            for (int k = 0; k < 6; k++) {
-                f.block(14 + k, 65 + k, z, GridFixture.STAIRS);
-                f.column(14 + k, z, 64, 64 + k, GridFixture.STONE);
-            }
-        }
+        GridFixture f = raisedPlazaWithWestStairs();
         TileRequest req = request(f, PARAMS.withPlazaGrowth(6), GridFixture.profiles(), List.of(), PreviousGraph.EMPTY,
             new Seed(3, 65, 27));
         TileBuildResult r = builder.build(req, f);
@@ -318,6 +304,54 @@ class TileBuilderTest {
 
         assertTrue(TileBuilder.terrainWarning(grid,
             List.of(new int[] {22, 64, 11}, new int[] {41, 64, 11}, new int[] {47, 70, 11})).isEmpty(), "gate and stairs");
+    }
+
+    /**
+     * Smoke test 2026-10-04: a 15×15 plaza (x,z 20..34) on a solid hill at y 70; the 3-wide road from
+     * the west is flat at y 64 (x 2..13) and climbs six stairs (x 14..19, y 65..70). With a plaza growth
+     * of 6 the stairs lie inside the plaza footprint, so the west chain ends at the foot of the stairs.
+     */
+    private static GridFixture raisedPlazaWithWestStairs() {
+        GridFixture f = new GridFixture();
+        for (int z = 20; z <= 34; z++) {
+            f.layer(20, 70, z, "S".repeat(15));
+            for (int x = 20; x <= 34; x++) f.column(x, z, 64, 69, GridFixture.STONE);
+        }
+        for (int z = 26; z <= 28; z++) {
+            f.layer(2, 64, z, "S".repeat(12));
+            for (int k = 0; k < 6; k++) {
+                f.block(14 + k, 65 + k, z, GridFixture.STAIRS);
+                f.column(14 + k, z, 64, 64 + k, GridFixture.STONE);
+            }
+        }
+        return f;
+    }
+
+    @Test
+    void anAnchorAtTheEdgeOfAPlazaFootprintGetsItsOwnNodeInsteadOfMovingThePlaza() {
+        // Smoke test 2026-10-04: anchor 3588 at the foot of Brink's stairs, inside the plaza footprint,
+        // took over the plaza junction 21 blocks away, so every plaza arm started at the stair foot.
+        GridFixture f = raisedPlazaWithWestStairs();
+        TileRequest req = request(f, PARAMS.withPlazaGrowth(6), GridFixture.profiles(), List.of(new Anchor(77, 13, 65, 27)),
+            PreviousGraph.EMPTY, new Seed(3, 65, 27));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        Node plaza = onlyNode(r, RoadNodeKind.JUNCTION);
+        assertEquals(List.of(27, 70, 27), List.of(plaza.x(), plaza.y(), plaza.z()), "the plaza stays at its core" + d);
+        Node anchor = onlyNode(r, RoadNodeKind.ANCHOR);
+        assertEquals(OptionalInt.of(77), anchor.existingId(), d);
+        assertEquals(List.of(13, 65, 27), List.of(anchor.x(), anchor.y(), anchor.z()), d);
+        assertTrue(r.edges().stream().anyMatch(e -> Set.of(e.fromKey(), e.toKey()).equals(Set.of(plaza.key(), anchor.key()))),
+            "the anchor and the plaza are joined" + d);
+        Node west = onlyNode(r, RoadNodeKind.ENDPOINT);
+        assertTrue(r.edges().stream().anyMatch(e -> Set.of(e.fromKey(), e.toKey()).equals(Set.of(west.key(), anchor.key()))),
+            "the west road leaves from the anchor, not from the plaza" + d);
+        for (Edge e : r.edges()) {
+            assertOnTheGround(e, f, d);
+        }
+        assertTrue(r.warnings().isEmpty(), d);
     }
 
     /** No sampled point of the edge has solid blocks at both feet and head height (1-block tolerance for slopes). */
