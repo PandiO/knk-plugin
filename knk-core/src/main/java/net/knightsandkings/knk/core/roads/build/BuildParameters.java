@@ -32,11 +32,14 @@ package net.knightsandkings.knk.core.roads.build;
  *                              (beyond {@code nodeMatchDistance}), and an unmatched Junction or
  *                              Endpoint joined to it by a chain this short merges into it, so the
  *                              cleanup survives a rebuild ({@code locked-node-reach}; fix plan 5.5 item 6)
+ * @param autoPlazas            whether wide road areas outside designed plazas still become plaza junctions
+ *                              on their own ({@code auto-plazas}; DESIGN §5.6 step 4, rev. 5); designed
+ *                              plazas always apply
  */
 public record BuildParameters(int tileSize, int tileMargin, int maxCellsPerTile, int junctionClusterRadius,
                               int minSpurLength, int ambiguousReach, double rdpEpsilon, int seedSnapRadius,
                               double nodeMatchDistance, double edgeMatchDistance, int plazaGrowth,
-                              double lockedNodeReach) {
+                              double lockedNodeReach, boolean autoPlazas) {
 
     public static final int DEFAULT_TILE_SIZE = 512;
     public static final int DEFAULT_TILE_MARGIN = 32;
@@ -71,42 +74,49 @@ public record BuildParameters(int tileSize, int tileMargin, int maxCellsPerTile,
         return new BuildParameters(DEFAULT_TILE_SIZE, DEFAULT_TILE_MARGIN, DEFAULT_MAX_CELLS_PER_TILE,
             DEFAULT_JUNCTION_CLUSTER_RADIUS, DEFAULT_MIN_SPUR_LENGTH, DEFAULT_AMBIGUOUS_REACH,
             DEFAULT_RDP_EPSILON, DEFAULT_SEED_SNAP_RADIUS, DEFAULT_NODE_MATCH_DISTANCE,
-            DEFAULT_EDGE_MATCH_DISTANCE, DEFAULT_PLAZA_GROWTH, DEFAULT_LOCKED_NODE_REACH);
+            DEFAULT_EDGE_MATCH_DISTANCE, DEFAULT_PLAZA_GROWTH, DEFAULT_LOCKED_NODE_REACH, true);
     }
 
     /** The defaults with another tile size and margin (tests build small tiles). */
     public BuildParameters withTile(int size, int margin) {
         return new BuildParameters(size, margin, maxCellsPerTile, junctionClusterRadius, minSpurLength,
-            ambiguousReach, rdpEpsilon, seedSnapRadius, nodeMatchDistance, edgeMatchDistance, plazaGrowth, lockedNodeReach);
+            ambiguousReach, rdpEpsilon, seedSnapRadius, nodeMatchDistance, edgeMatchDistance, plazaGrowth, lockedNodeReach, autoPlazas);
     }
 
     /** The same parameters with another cell cap. */
     public BuildParameters withMaxCells(int maxCells) {
         return new BuildParameters(tileSize, tileMargin, maxCells, junctionClusterRadius, minSpurLength,
-            ambiguousReach, rdpEpsilon, seedSnapRadius, nodeMatchDistance, edgeMatchDistance, plazaGrowth, lockedNodeReach);
+            ambiguousReach, rdpEpsilon, seedSnapRadius, nodeMatchDistance, edgeMatchDistance, plazaGrowth, lockedNodeReach, autoPlazas);
     }
 
     /** The same parameters with another ambiguity reach. */
     public BuildParameters withAmbiguousReach(int reach) {
         return new BuildParameters(tileSize, tileMargin, maxCellsPerTile, junctionClusterRadius, minSpurLength,
-            reach, rdpEpsilon, seedSnapRadius, nodeMatchDistance, edgeMatchDistance, plazaGrowth, lockedNodeReach);
+            reach, rdpEpsilon, seedSnapRadius, nodeMatchDistance, edgeMatchDistance, plazaGrowth, lockedNodeReach, autoPlazas);
     }
 
     /** The same parameters with other junction/spur rules. */
     public BuildParameters withGraphRules(int clusterRadius, int minSpur) {
         return new BuildParameters(tileSize, tileMargin, maxCellsPerTile, clusterRadius, minSpur,
-            ambiguousReach, rdpEpsilon, seedSnapRadius, nodeMatchDistance, edgeMatchDistance, plazaGrowth, lockedNodeReach);
+            ambiguousReach, rdpEpsilon, seedSnapRadius, nodeMatchDistance, edgeMatchDistance, plazaGrowth, lockedNodeReach, autoPlazas);
     }
 
     /** The same parameters with another plaza growth. */
     public BuildParameters withPlazaGrowth(int growth) {
         return new BuildParameters(tileSize, tileMargin, maxCellsPerTile, junctionClusterRadius, minSpurLength,
-            ambiguousReach, rdpEpsilon, seedSnapRadius, nodeMatchDistance, edgeMatchDistance, growth, lockedNodeReach);
+            ambiguousReach, rdpEpsilon, seedSnapRadius, nodeMatchDistance, edgeMatchDistance, growth, lockedNodeReach, autoPlazas);
     }
 
     /** The same parameters with another locked-node reach. */
     public BuildParameters withLockedNodeReach(double reach) {
         return new BuildParameters(tileSize, tileMargin, maxCellsPerTile, junctionClusterRadius, minSpurLength,
-            ambiguousReach, rdpEpsilon, seedSnapRadius, nodeMatchDistance, edgeMatchDistance, plazaGrowth, reach);
+            ambiguousReach, rdpEpsilon, seedSnapRadius, nodeMatchDistance, edgeMatchDistance, plazaGrowth, reach, autoPlazas);
+    }
+
+    /** The same parameters with automatic plaza detection on or off. */
+    public BuildParameters withAutoPlazas(boolean auto) {
+        return new BuildParameters(tileSize, tileMargin, maxCellsPerTile, junctionClusterRadius, minSpurLength,
+            ambiguousReach, rdpEpsilon, seedSnapRadius, nodeMatchDistance, edgeMatchDistance, plazaGrowth, lockedNodeReach,
+            auto);
     }
 }

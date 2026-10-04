@@ -238,6 +238,87 @@ class TileBuilderTest {
         assertEquals(5, r.edges().size(), d);
     }
 
+    /** The 15×15 plaza (x,z 20..34, y 64) with 3-wide exits of 16 cells on all four sides. */
+    private static GridFixture plazaWithFourExits() {
+        GridFixture f = new GridFixture();
+        for (int z = 20; z <= 34; z++) f.layer(20, 64, z, "S".repeat(15));
+        for (int z = 26; z <= 28; z++) {
+            f.layer(4, 64, z, "S".repeat(16));
+            f.layer(35, 64, z, "S".repeat(16));
+        }
+        for (int z = 4; z < 20; z++) f.layer(26, 64, z, "SSS");
+        for (int z = 35; z < 51; z++) f.layer(26, 64, z, "SSS");
+        return f;
+    }
+
+    private static TileRequest plazaRequest(GridFixture f, BuildParameters params, List<Anchor> anchors, PreviousGraph previous,
+                                            List<SkeletonGraph.Plaza> plazas, Seed seed) {
+        return new TileRequest("world", 0, 0, params, List.of(seed), GridFixture.profiles(), f, anchors, previous, plazas);
+    }
+
+    @Test
+    void aDesignedPlazaIsOneJunctionOnTheAdminsNodeEvenWithAutomaticPlazasOff() {
+        // Rev. 5: the admin made junction 42 at (25, 64, 27) - off the plaza's middle - a plaza of radius 10.
+        GridFixture f = plazaWithFourExits();
+        PreviousGraph previous = new PreviousGraph(List.of(new PreviousNode(42, 25, 64, 27, RoadNodeKind.JUNCTION, true)), List.of());
+        TileRequest req = plazaRequest(f, PARAMS.withAutoPlazas(false), List.of(), previous,
+            List.of(new SkeletonGraph.Plaza(42, 25, 64, 27, 10)), new Seed(27, 65, 27));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        Node plaza = onlyNode(r, RoadNodeKind.JUNCTION);
+        assertEquals(List.of(25, 64, 27), List.of(plaza.x(), plaza.y(), plaza.z()), d);
+        assertEquals(OptionalInt.of(42), plaza.existingId(), d);
+        assertEquals(4, r.nodes(RoadNodeKind.ENDPOINT).size(), d);
+        assertEquals(4, r.edges().size(), d);
+        assertTrue(r.edges().stream().allMatch(e -> e.fromKey().equals(plaza.key()) || e.toKey().equals(plaza.key())), d);
+        assertTrue(r.warnings().isEmpty(), d);
+    }
+
+    @Test
+    void aDesignedPlazaOnAStraightRoadStaysAJunctionWithTwoArms() {
+        GridFixture f = wideRoad(4, 10, 40, 3, 64); // x 4..43, z 10..12
+        TileRequest req = plazaRequest(f, PARAMS, List.of(), PreviousGraph.EMPTY,
+            List.of(new SkeletonGraph.Plaza(7, 24, 64, 11, 3)), new Seed(5, 65, 11));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        Node plaza = onlyNode(r, RoadNodeKind.JUNCTION);
+        assertEquals(List.of(24, 64, 11), List.of(plaza.x(), plaza.y(), plaza.z()), d);
+        assertEquals(2, r.nodes(RoadNodeKind.ENDPOINT).size(), d);
+        assertEquals(2, r.edges().size(), "not joined away as a two-arm junction" + d);
+    }
+
+    @Test
+    void anAnchorCanBeThePlazaCentre() {
+        GridFixture f = plazaWithFourExits();
+        TileRequest req = plazaRequest(f, PARAMS.withAutoPlazas(false), List.of(new Anchor(55, 27, 64, 27)), PreviousGraph.EMPTY,
+            List.of(new SkeletonGraph.Plaza(55, 27, 64, 27, 9)), new Seed(27, 65, 27));
+        TileBuildResult r = builder.build(req, f);
+        String d = describe(r);
+
+        assertContract(r, req);
+        assertEquals(List.of(), r.nodes(RoadNodeKind.JUNCTION), d);
+        Node anchor = onlyNode(r, RoadNodeKind.ANCHOR);
+        assertEquals(OptionalInt.of(55), anchor.existingId(), d);
+        assertEquals(4, r.edges().size(), d);
+        assertTrue(r.edges().stream().allMatch(e -> e.fromKey().equals(anchor.key()) || e.toKey().equals(anchor.key())), d);
+    }
+
+    @Test
+    void aPlazaCentreOffTheRoadIsAWarning() {
+        GridFixture f = wideRoad(4, 10, 40, 3, 64);
+        TileRequest req = plazaRequest(f, PARAMS, List.of(), PreviousGraph.EMPTY,
+            List.of(new SkeletonGraph.Plaza(9, 24, 64, 30, 5)), new Seed(5, 65, 11));
+        TileBuildResult r = builder.build(req, f);
+
+        assertTrue(r.warningTexts().stream().anyMatch(w -> w.startsWith(SkeletonGraph.WARN_PLAZA_OFF_ROAD + " (node 9)")),
+            r.warningTexts().toString());
+        assertEquals(List.of(), r.nodes(RoadNodeKind.JUNCTION), "the road is built as if there were no plaza");
+    }
+
     @Test
     void plazaWithFourExitsIsOneJunction() {
         // 15×15 plaza (x,z 20..34) with 3-wide exits of 16 cells on all four sides.

@@ -41,9 +41,9 @@ public final class TileBuilder {
      * Bump when the builder's output changes in a way that should force rebuilds ({@code RoadTile.BuilderVersion};
      * recorded on every tile, not yet compared, so a bump does not queue rebuilds by itself). 2: chains close
      * onto plaza and cluster junctions along the mask, terrain warnings (2026-10-04). 3: an anchor inside a
-     * plaza footprint gets its own node instead of moving the plaza junction (2026-10-04).
+     * plaza footprint gets its own node instead of moving the plaza junction (2026-10-04). 4: designed plazas (rev. 5).
      */
-    public static final int BUILDER_VERSION = 3;
+    public static final int BUILDER_VERSION = 4;
 
     /** A closing walk ({@link #closingPath}) may be this many times the straight distance between chain end and node … */
     static final double CLOSING_STRETCH = 2.0;
@@ -68,10 +68,11 @@ public final class TileBuilder {
      * @param gateCells     closed footprints of every gate door (plan D9)
      * @param anchors       this tile's admin Anchor nodes
      * @param previousGraph the tile's previous build for stable ids ({@link PreviousGraph#EMPTY} first time)
+     * @param plazas        this tile's designed plaza centres (DESIGN §5.6 step 4, rev. 5)
      */
     public record TileRequest(String world, int tileX, int tileZ, BuildParameters parameters, List<Seed> seeds,
                               ProfileSet profiles, GateCells gateCells, List<Anchor> anchors,
-                              PreviousGraph previousGraph) {
+                              PreviousGraph previousGraph, List<SkeletonGraph.Plaza> plazas) {
         public TileRequest {
             Objects.requireNonNull(world, "world");
             Objects.requireNonNull(parameters, "parameters");
@@ -80,6 +81,13 @@ public final class TileBuilder {
             Objects.requireNonNull(gateCells, "gateCells");
             anchors = List.copyOf(Objects.requireNonNull(anchors, "anchors"));
             Objects.requireNonNull(previousGraph, "previousGraph");
+            plazas = List.copyOf(Objects.requireNonNull(plazas, "plazas"));
+        }
+
+        /** A request without designed plazas. */
+        public TileRequest(String world, int tileX, int tileZ, BuildParameters parameters, List<Seed> seeds,
+                           ProfileSet profiles, GateCells gateCells, List<Anchor> anchors, PreviousGraph previousGraph) {
+            this(world, tileX, tileZ, parameters, seeds, profiles, gateCells, anchors, previousGraph, List.of());
         }
 
         /** The tile's own x/z rectangle. */
@@ -116,7 +124,7 @@ public final class TileBuilder {
             }
         }
         SkeletonGraph.Result graph = new SkeletonGraph(mask, skeleton, dt, params, request.profiles(), request.tile())
-            .extract(request.anchors(), pruned, prunedEdges);
+            .extract(request.anchors(), pruned, prunedEdges, request.plazas());
         warnings.addAll(graph.warnings());
 
         // Stable ids and positions.
@@ -140,6 +148,11 @@ public final class TileBuilder {
                 }
             }
             positions[i] = pos;
+            for (SkeletonGraph.Plaza plaza : request.plazas()) {
+                if (pos[0] == plaza.x() && pos[1] == plaza.y() && pos[2] == plaza.z()) {
+                    locked[i] = true; // a designed plaza's junction is the admin's, like a locked node
+                }
+            }
         }
         int[] into = mergeIntoLockedNodes(graph, existing, locked, positions, mask, params.lockedNodeReach());
 

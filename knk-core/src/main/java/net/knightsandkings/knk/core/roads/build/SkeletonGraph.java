@@ -70,6 +70,18 @@ public final class SkeletonGraph {
     }
 
     /**
+     * A designed plaza (DESIGN §5.6 step 4, rev. 5): an admin made the node {@code id} at
+     * {@code (x, y, z)} the centre of a plaza of {@code radius} blocks.
+     */
+    public record Plaza(int id, int x, int y, int z, int radius) {
+        public Plaza {
+            if (radius < 1) {
+                throw new IllegalArgumentException("plaza radius must be >= 1");
+            }
+        }
+    }
+
+    /**
      * A graph node.
      *
      * @param id       0-based index into the result's node list
@@ -91,6 +103,8 @@ public final class SkeletonGraph {
 
     public static final String WARN_ANCHOR_OFF_ROAD = "Anchor is not within reach of the road centreline";
     public static final String WARN_ANCHOR_DUPLICATE = "Second anchor on the same centreline span ignored";
+    public static final String WARN_PLAZA_OFF_ROAD = "Plaza centre is not on the road";
+    public static final String WARN_PLAZA_OVERLAP = "Plaza centre lies in another designed plaza; ignored";
 
     public static final String WARN_BORDER_NODE_UNREACHABLE =
         "A chain of a junction straddling the tile border could not be joined to the junction; dropped";
@@ -112,6 +126,8 @@ public final class SkeletonGraph {
     private final List<BuildWarning> warnings = new ArrayList<>();
     /** Junctions made by {@link #collapsePlazas}; a junction cluster next to one merges into it. */
     private final Set<Integer> plazaNodes = new HashSet<>();
+    /** Mask spans inside a designed plaza's footprint; the automatic plaza rule leaves them alone. */
+    private boolean[] designed;
 
     private static final class WorkNode {
         int span;
@@ -121,6 +137,8 @@ public final class SkeletonGraph {
         RoadNodeKind kind;
         int anchorId = -1;
         boolean alive = true;
+        /** A designed plaza's junction: never dissolved or turned into an Endpoint by the tidy steps. */
+        boolean designed;
         final List<Integer> chainIds = new ArrayList<>();
 
         int aliveChains(List<WorkChain> chains) {
@@ -169,17 +187,28 @@ public final class SkeletonGraph {
      * ({@code prunedEdges}, tombstones on their middle) an admin pruned; call once.
      */
     public Result extract(List<Anchor> anchors, List<Pruned> pruned, List<Pruned> prunedEdges) {
+        return extract(anchors, pruned, prunedEdges, List.of());
+    }
+
+    /**
+     * Extract nodes and chains with the admin's designed plazas ({@code plazas}, DESIGN §5.6 step 4)
+     * collapsed first, leaving out the pruned dead ends and edges; call once.
+     */
+    public Result extract(List<Anchor> anchors, List<Pruned> pruned, List<Pruned> prunedEdges, List<Plaza> plazas) {
         Objects.requireNonNull(anchors, "anchors");
         Objects.requireNonNull(pruned, "pruned");
         Objects.requireNonNull(prunedEdges, "prunedEdges");
+        Objects.requireNonNull(plazas, "plazas");
         int n = mask.size();
         nodeOf = new int[n];
         Arrays.fill(nodeOf, -1);
+        designed = new boolean[n];
         int[] degree = new int[n];
         for (int i = 0; i < n; i++) {
             degree[i] = skeleton[i] ? Thinning.degree(mask, skeleton, i) : 0;
         }
 
+        collapseDesignedPlazas(plazas, degree);
         collapsePlazas(degree);
         clusterJunctions(degree);
         for (int i = 0; i < n; i++) {
@@ -224,11 +253,75 @@ public final class SkeletonGraph {
 
     // ---- 2. plazas ---------------------------------------------------------------------------
 
+    /**
+     * Designed plazas (DESIGN §5.6 step 4, rev. 5), before the automatic rule: the mask span nearest
+     * the plaza node (within {@code nodeMatchDistance}) starts a flood over linked mask spans within the
+     * plaza's radius of the node - the footprint. Every skeleton span in it belongs to one Junction on
+     * the node's own position, so the rebuilt node matches the admin's (locked) node exactly; an Anchor
+     * centre then takes that junction over in {@link #placeAnchors}.
+     */
+    private void collapseDesignedPlazas(List<Plaza> plazas, int[] degree) {
+        for (Plaza plaza : plazas) {
+            int centre = RoadMask.NONE;
+            double best = Double.MAX_VALUE;
+            for (int i = 0; i < mask.size(); i++) {
+                double d = Math.sqrt(distanceTo(i, plaza.x(), plaza.y(), plaza.z()));
+                if (d <= params.nodeMatchDistance() && d < best) {
+                    best = d;
+                    centre = i;
+                }
+            }
+            if (centre == RoadMask.NONE) {
+                warnings.add(new BuildWarning(WARN_PLAZA_OFF_ROAD + " (node " + plaza.id() + ")", plaza.x(), plaza.y(), plaza.z()));
+                continue;
+            }
+            if (designed[centre]) {
+                warnings.add(new BuildWarning(WARN_PLAZA_OVERLAP + " (node " + plaza.id() + ")", plaza.x(), plaza.y(), plaza.z()));
+                continue;
+            }
+            List<Integer> footprint = new ArrayList<>();
+            ArrayDeque<Integer> queue = new ArrayDeque<>();
+            designed[centre] = true;
+            queue.add(centre);
+            while (!queue.isEmpty()) {
+                int i = queue.poll();
+                footprint.add(i);
+                for (int d = 0; d < SpanGrid.DIRECTIONS; d++) {
+                    int nb = mask.neighbour(i, d);
+                    if (nb != RoadMask.NONE && !designed[nb]
+                        && Math.sqrt(distanceTo(nb, plaza.x(), plaza.y(), plaza.z())) <= plaza.radius()) {
+                        designed[nb] = true;
+                        queue.add(nb);
+                    }
+                }
+            }
+            int node = newNode(centre, RoadNodeKind.JUNCTION);
+            WorkNode work = nodes.get(node);
+            work.x = plaza.x();
+            work.y = plaza.y();
+            work.z = plaza.z();
+            work.designed = true;
+            plazaNodes.add(node);
+            for (int i : footprint) {
+                if (skeleton[i]) {
+                    nodeOf[i] = node;
+                    degree[i] = Math.min(degree[i], 2);
+                }
+            }
+        }
+    }
+
     private void collapsePlazas(int[] degree) {
+        if (!params.autoPlazas()) {
+            return;
+        }
         int n = mask.size();
         boolean[] core = new boolean[n];
         boolean anyCore = false;
         for (int i = 0; i < n; i++) {
+            if (designed[i]) {
+                continue; // inside a designed plaza
+            }
             OptionalInt widthMax = profiles.maxWidthMax(mask.floor(i), mask.x(i), mask.z(i));
             core[i] = widthMax.isPresent() && DistanceTransform.width(dt[i]) > widthMax.getAsInt();
             anyCore |= core[i];
@@ -348,7 +441,7 @@ public final class SkeletonGraph {
                 }
                 for (int d = 0; d < SpanGrid.DIRECTIONS; d++) {
                     int nb = mask.neighbour(i, d);
-                    if (nb != RoadMask.NONE && !footprint[nb] && budget[nb] < b - 1) {
+                    if (nb != RoadMask.NONE && !footprint[nb] && !designed[nb] && budget[nb] < b - 1) {
                         budget[nb] = b - 1;
                         buckets.get(b - 1).add(nb);
                     }
@@ -891,7 +984,7 @@ public final class SkeletonGraph {
             int remaining = node.aliveChains(chains);
             if (remaining == 0) {
                 killNode(nodeId);
-            } else if (node.kind == RoadNodeKind.JUNCTION) {
+            } else if (node.kind == RoadNodeKind.JUNCTION && !node.designed) {
                 if (remaining == 1) {
                     node.kind = RoadNodeKind.ENDPOINT;
                 } else if (remaining == 2) {
@@ -967,7 +1060,7 @@ public final class SkeletonGraph {
             int remaining = node.aliveChains(chains);
             if (remaining == 0) {
                 killNode(nodeId);
-            } else if (node.kind == RoadNodeKind.JUNCTION) {
+            } else if (node.kind == RoadNodeKind.JUNCTION && !node.designed) {
                 if (remaining == 1) {
                     node.kind = RoadNodeKind.ENDPOINT;
                 } else if (remaining == 2) {

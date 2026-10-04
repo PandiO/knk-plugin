@@ -3,7 +3,9 @@ package net.knightsandkings.knk.core.roads.build;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BuildParametersTest {
 
@@ -44,10 +46,12 @@ class BuildParametersTest {
         assertThrows(IllegalArgumentException.class, () -> d.withTile(16, -1));
         assertThrows(IllegalArgumentException.class, () -> d.withMaxCells(0));
         assertThrows(IllegalArgumentException.class, () -> d.withAmbiguousReach(-1));
-        assertThrows(IllegalArgumentException.class, () -> new BuildParameters(16, 0, 10, 1, 1, 1, -0.1, 1, 1, 1, 0, 0));
+        assertThrows(IllegalArgumentException.class, () -> new BuildParameters(16, 0, 10, 1, 1, 1, -0.1, 1, 1, 1, 0, 0, true));
         assertThrows(IllegalArgumentException.class, () -> d.withLockedNodeReach(-1));
         assertEquals(2.5, d.withLockedNodeReach(2.5).lockedNodeReach());
         assertThrows(IllegalArgumentException.class, () -> d.withPlazaGrowth(-1));
         assertEquals(5, d.withPlazaGrowth(5).plazaGrowth());
+        assertTrue(d.autoPlazas(), "automatic plazas are on by default");
+        assertFalse(d.withAutoPlazas(false).autoPlazas());
     }
 }
