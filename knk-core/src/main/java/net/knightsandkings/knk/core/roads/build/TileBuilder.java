@@ -196,7 +196,7 @@ public final class TileBuilder {
             edges.add(new Edge(edgeId, key(run.from()), key(run.to()), geometry, run.length(), avgWidth, profileId,
                 doors, List.of(), List.of()));
         }
-        return new TileBuildResult(BUILDER_VERSION, mask.size(), mask.levelCount(), nodes, edges, warnings);
+        return new TileBuildResult(BUILDER_VERSION, mask.size(), mask.levelCount(), nodes, edges, warnings, graph.corrections());
     }
 
     /** One edge before simplification: its node indices, the closed polyline and the mask spans, oriented from → to. */

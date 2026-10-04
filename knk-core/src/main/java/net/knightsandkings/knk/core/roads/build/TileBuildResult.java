@@ -18,9 +18,41 @@ import java.util.OptionalInt;
  * @param nodes          nodes inside the tile
  * @param edges          edges inside the tile (no cross-tile edges — the API stitches boundary nodes)
  * @param warnings       cell cap, unmatched seeds, anchors off the road …
+ * @param corrections    what each admin correction did in this build (not uploaded; for the build summary)
  */
 public record TileBuildResult(int builderVersion, int cellCount, int levelCount, List<Node> nodes,
-                              List<Edge> edges, List<BuildWarning> warnings) {
+                              List<Edge> edges, List<BuildWarning> warnings, List<Correction> corrections) {
+
+    /** The kind of an admin correction the builder applies. */
+    public enum CorrectionKind {
+        /** A Pruned tombstone: leave out the nearest dead end ({@code /knk road node prune}). */
+        PRUNED_DEAD_END,
+        /** A PrunedEdge tombstone: leave out the chain passing nearest ({@code /knk road edge prune}). */
+        PRUNED_EDGE,
+        /** An admin Anchor node. */
+        ANCHOR,
+        /** A designed plaza centre (rev. 5). */
+        PLAZA
+    }
+
+    /**
+     * What one admin correction did in this build (smoke test 2026-10-04, finding L): every prune
+     * tombstone, anchor and designed plaza, whether it found something to act on ({@code applied}) and
+     * what ({@code detail}). Corrections are rules replayed on every rebuild; one that matches nothing
+     * any more is stale, and one that acts far from its own position may hit something new.
+     */
+    public record Correction(int nodeId, CorrectionKind kind, boolean applied, String detail, int x, int y, int z) {
+        public Correction {
+            Objects.requireNonNull(kind, "kind");
+            Objects.requireNonNull(detail, "detail");
+        }
+    }
+
+    /** A result without correction notes. */
+    public TileBuildResult(int builderVersion, int cellCount, int levelCount, List<Node> nodes,
+                           List<Edge> edges, List<BuildWarning> warnings) {
+        this(builderVersion, cellCount, levelCount, nodes, edges, warnings, List.of());
+    }
 
     /** Mirrors {@code RoadTileGraphNodeDto}: {@code key}, {@code existingId}, {@code x}, {@code y}, {@code z}, {@code kind}. */
     public record Node(String key, OptionalInt existingId, int x, int y, int z, RoadNodeKind kind) {
@@ -72,6 +104,7 @@ public record TileBuildResult(int builderVersion, int cellCount, int levelCount,
         nodes = List.copyOf(Objects.requireNonNull(nodes, "nodes"));
         edges = List.copyOf(Objects.requireNonNull(edges, "edges"));
         warnings = List.copyOf(Objects.requireNonNull(warnings, "warnings"));
+        corrections = List.copyOf(Objects.requireNonNull(corrections, "corrections"));
     }
 
     /** Warnings as the API's {@code warnings[]} strings. */

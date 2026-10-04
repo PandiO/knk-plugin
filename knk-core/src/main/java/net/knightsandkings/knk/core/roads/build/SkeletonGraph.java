@@ -104,13 +104,24 @@ public final class SkeletonGraph {
     public record Chain(int from, int to, int[] spans) {
     }
 
-    public record Result(List<Node> nodes, List<Chain> chains, List<BuildWarning> warnings) {
+    /**
+     * @param corrections what each admin correction (prune tombstone, anchor, designed plaza) did in this
+     *                    build (finding L)
+     */
+    public record Result(List<Node> nodes, List<Chain> chains, List<BuildWarning> warnings,
+                         List<TileBuildResult.Correction> corrections) {
+        /** A result without correction notes. */
+        public Result(List<Node> nodes, List<Chain> chains, List<BuildWarning> warnings) {
+            this(nodes, chains, warnings, List.of());
+        }
     }
 
     public static final String WARN_ANCHOR_OFF_ROAD = "Anchor is not within reach of the road centreline";
     public static final String WARN_ANCHOR_DUPLICATE = "Second anchor on the same centreline span ignored";
     public static final String WARN_PLAZA_OFF_ROAD = "Plaza centre is not on the road";
     public static final String WARN_PLAZA_OVERLAP = "Plaza centre lies in another designed plaza; ignored";
+    /** A prune tombstone that found no dead end / no chain to leave out: stale since the network changed. */
+    public static final String WARN_PRUNE_STALE = "Prune matched nothing (stale; unprune it)";
 
     public static final String WARN_BORDER_NODE_UNREACHABLE =
         "A chain of a junction straddling the tile border could not be joined to the junction; dropped";
@@ -135,6 +146,7 @@ public final class SkeletonGraph {
     private final List<WorkNode> nodes = new ArrayList<>();
     private final List<WorkChain> chains = new ArrayList<>();
     private final List<BuildWarning> warnings = new ArrayList<>();
+    private final List<TileBuildResult.Correction> corrections = new ArrayList<>();
     /** Junctions made by {@link #collapsePlazas}; a junction cluster next to one merges into it. */
     private final Set<Integer> plazaNodes = new HashSet<>();
     /** Mask spans inside a designed plaza's footprint; the automatic plaza rule leaves them alone. */
@@ -269,6 +281,22 @@ public final class SkeletonGraph {
         return length;
     }
 
+    private void note(int nodeId, TileBuildResult.CorrectionKind kind, boolean applied, String detail, int x, int y, int z) {
+        corrections.add(new TileBuildResult.Correction(nodeId, kind, applied, detail, x, y, z));
+    }
+
+    /** A tombstone's note; one that matched nothing is also a warning, so it shows with a teleport. */
+    private void noteTombstone(Pruned p, TileBuildResult.CorrectionKind kind, boolean applied, String detail) {
+        note(p.id(), kind, applied, detail, p.x(), p.y(), p.z());
+        if (!applied) {
+            warnings.add(new BuildWarning(WARN_PRUNE_STALE + " (node " + p.id() + ")", p.x(), p.y(), p.z()));
+        }
+    }
+
+    private static String oneDecimal(double value) {
+        return String.format(java.util.Locale.ROOT, "%.1f", value);
+    }
+
     // ---- 2. plazas ---------------------------------------------------------------------------
 
     /**
@@ -291,10 +319,12 @@ public final class SkeletonGraph {
             }
             if (centre == RoadMask.NONE) {
                 warnings.add(new BuildWarning(WARN_PLAZA_OFF_ROAD + " (node " + plaza.id() + ")", plaza.x(), plaza.y(), plaza.z()));
+                note(plaza.id(), TileBuildResult.CorrectionKind.PLAZA, false, "centre not on the road", plaza.x(), plaza.y(), plaza.z());
                 continue;
             }
             if (designed[centre]) {
                 warnings.add(new BuildWarning(WARN_PLAZA_OVERLAP + " (node " + plaza.id() + ")", plaza.x(), plaza.y(), plaza.z()));
+                note(plaza.id(), TileBuildResult.CorrectionKind.PLAZA, false, "centre inside another plaza", plaza.x(), plaza.y(), plaza.z());
                 continue;
             }
             List<Integer> footprint = new ArrayList<>();
@@ -321,6 +351,8 @@ public final class SkeletonGraph {
             work.designed = true;
             work.plaza = true;
             plazaNodes.add(node);
+            note(plaza.id(), TileBuildResult.CorrectionKind.PLAZA, true, "footprint of " + footprint.size() + " road cells",
+                plaza.x(), plaza.y(), plaza.z());
             for (int i : footprint) {
                 if (skeleton[i]) {
                     nodeOf[i] = node;
@@ -737,6 +769,8 @@ public final class SkeletonGraph {
             if (best < 0) {
                 warnings.add(new BuildWarning(WARN_ANCHOR_OFF_ROAD + " (anchor " + anchor.id() + ")",
                     anchor.x(), anchor.y(), anchor.z()));
+                note(anchor.id(), TileBuildResult.CorrectionKind.ANCHOR, false, "no centreline within "
+                    + (int) maxDistance + " blocks", anchor.x(), anchor.y(), anchor.z());
                 continue;
             }
             WorkNode node;
@@ -745,9 +779,15 @@ public final class SkeletonGraph {
                 if (node.anchorId >= 0) {
                     warnings.add(new BuildWarning(WARN_ANCHOR_DUPLICATE + " (anchor " + anchor.id() + ")",
                         anchor.x(), anchor.y(), anchor.z()));
+                    note(anchor.id(), TileBuildResult.CorrectionKind.ANCHOR, false, "another anchor holds the same spot",
+                        anchor.x(), anchor.y(), anchor.z());
                     continue;
                 }
+                note(anchor.id(), TileBuildResult.CorrectionKind.ANCHOR, true, "took over the " + node.kind.apiName().toLowerCase()
+                    + " there", anchor.x(), anchor.y(), anchor.z());
             } else {
+                note(anchor.id(), TileBuildResult.CorrectionKind.ANCHOR, true, nodeOf[best] >= 0
+                    ? "own node at the edge of a plaza or junction" : "split the road", anchor.x(), anchor.y(), anchor.z());
                 int owner = nodeOf[best];
                 int id = newNode(best, RoadNodeKind.ANCHOR);
                 node = nodes.get(id);
@@ -985,6 +1025,7 @@ public final class SkeletonGraph {
         pairs.sort((a, b) -> a[0] != b[0] ? Double.compare(a[0], b[0])
             : a[1] != b[1] ? Double.compare(a[1], b[1]) : Double.compare(a[2], b[2]));
         boolean[] usedTombstone = new boolean[pruned.size()];
+        double[] usedAt = new double[pruned.size()];
         for (double[] pair : pairs) {
             int t = (int) pair[1];
             WorkNode node = nodes.get((int) pair[2]);
@@ -998,6 +1039,13 @@ public final class SkeletonGraph {
                 }
             }
             usedTombstone[t] = true;
+            usedAt[t] = pair[0];
+        }
+        for (int t = 0; t < pruned.size(); t++) {
+            Pruned p = pruned.get(t);
+            noteTombstone(p, TileBuildResult.CorrectionKind.PRUNED_DEAD_END, usedTombstone[t], usedTombstone[t]
+                ? "left out the dead end " + oneDecimal(usedAt[t]) + " blocks away"
+                : "no dead end within " + oneDecimal(reach) + " blocks");
         }
     }
 
@@ -1031,9 +1079,13 @@ public final class SkeletonGraph {
                     best = id;
                 }
             }
-            if (best >= 0 && bestDistance <= reach) {
+            boolean hit = best >= 0 && bestDistance <= reach;
+            if (hit) {
                 doomed.add(best);
             }
+            noteTombstone(p, TileBuildResult.CorrectionKind.PRUNED_EDGE, hit, hit
+                ? "left out the chain " + oneDecimal(bestDistance) + " blocks away"
+                : "no chain within " + oneDecimal(reach) + " blocks");
         }
         if (doomed.isEmpty()) {
             return;
@@ -1600,6 +1652,6 @@ public final class SkeletonGraph {
             outChains.add(new Chain(from, to, chain.spans.clone()));
         }
         return new Result(Collections.unmodifiableList(outNodes), Collections.unmodifiableList(outChains),
-            Collections.unmodifiableList(new ArrayList<>(warnings)));
+            Collections.unmodifiableList(new ArrayList<>(warnings)), List.copyOf(corrections));
     }
 }

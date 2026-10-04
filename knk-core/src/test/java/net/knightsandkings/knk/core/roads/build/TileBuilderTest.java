@@ -937,6 +937,26 @@ class TileBuilderTest {
     }
 
     @Test
+    void everyCorrectionSaysWhatItDidAndAStaleTombstoneIsAWarning() {
+        // Finding L (2026-10-04): tombstones are rules replayed on every build. The build reports which
+        // still act and which match nothing any more, so stale ones can be unpruned instead of guessed at.
+        TileBuildResult r = buildWithEdgeTombstones(pathWithSpur(), new int[] {15, 64, 30}, new int[] {25, 64, 25});
+        assertEquals(2, r.corrections().size(), r.corrections().toString());
+        TileBuildResult.Correction used = r.corrections().get(0);
+        assertEquals(400, used.nodeId());
+        assertEquals(TileBuildResult.CorrectionKind.PRUNED_EDGE, used.kind());
+        assertTrue(used.applied(), used.toString());
+        assertTrue(used.detail().startsWith("left out the chain"), used.detail());
+        TileBuildResult.Correction stale = r.corrections().get(1);
+        assertEquals(401, stale.nodeId());
+        assertFalse(stale.applied(), stale.toString());
+        assertTrue(r.warnings().stream().anyMatch(w -> w.message().startsWith(SkeletonGraph.WARN_PRUNE_STALE)
+            && w.message().contains("node 401") && w.x() == 25 && w.z() == 25), describe(r));
+        assertEquals(1, r.warnings().stream().filter(w -> w.message().startsWith(SkeletonGraph.WARN_PRUNE_STALE)).count(),
+            "only the stale one warns" + describe(r));
+    }
+
+    @Test
     void aJunctionLeftWithOneArmIsAnEndpoint() {
         // Finding L: a junction can be left with one arm when a duplicate chain is dropped without
         // tidying its nodes. A one-arm junction is a dead end.

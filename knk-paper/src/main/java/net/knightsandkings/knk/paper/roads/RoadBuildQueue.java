@@ -38,6 +38,7 @@ import net.knightsandkings.knk.core.ports.api.RoadNetworkCommandApi;
 import net.knightsandkings.knk.core.ports.api.RoadNetworkQueryApi;
 import net.knightsandkings.knk.core.regions.RegionDomainResolver;
 import net.knightsandkings.knk.core.roads.build.BuildWarning;
+import net.knightsandkings.knk.core.roads.build.TileBuildResult;
 import net.knightsandkings.knk.core.roads.route.CoverageCheck;
 import net.knightsandkings.knk.paper.config.NavigationConfig;
 import net.knightsandkings.knk.paper.regions.RegionIds;
@@ -337,6 +338,7 @@ public final class RoadBuildQueue {
             }
             lines.add(Component.text(" " + warning.message() + " ", RoadMessages.WARN).append(RoadMessages.teleport(warning.x(), warning.y(), warning.z())));
         }
+        correctionsLine(outcome.build().corrections()).ifPresent(lines::add);
         if (!outcome.coverageMisses().isEmpty()) {
             Component line = Component.text(" survey coverage: " + outcome.coverageMisses().size() + " walked point(s) got no road - a material missing from the profiles, or a stretch to record: ", RoadMessages.WARN);
             int n = 0;
@@ -350,6 +352,53 @@ public final class RoadBuildQueue {
             lines.add(line);
         }
         return lines;
+    }
+
+    /**
+     * One line on the admin corrections the build replayed (smoke test 2026-10-04, finding L): prune
+     * tombstones used / stale (the stale ones are warnings above, with a teleport), anchors and designed
+     * plazas placed. Empty when the tile has none.
+     */
+    static Optional<Component> correctionsLine(List<TileBuildResult.Correction> corrections) {
+        int prunes = 0;
+        int stale = 0;
+        int anchors = 0;
+        int anchorsMissed = 0;
+        int plazas = 0;
+        int plazasMissed = 0;
+        for (TileBuildResult.Correction c : corrections) {
+            switch (c.kind()) {
+                case PRUNED_DEAD_END, PRUNED_EDGE -> {
+                    prunes++;
+                    stale += c.applied() ? 0 : 1;
+                }
+                case ANCHOR -> {
+                    anchors++;
+                    anchorsMissed += c.applied() ? 0 : 1;
+                }
+                case PLAZA -> {
+                    plazas++;
+                    plazasMissed += c.applied() ? 0 : 1;
+                }
+            }
+        }
+        if (prunes + anchors + plazas == 0) {
+            return Optional.empty();
+        }
+        StringBuilder text = new StringBuilder(" corrections: ");
+        text.append(prunes).append(" prune(s)");
+        if (prunes > 0) {
+            text.append(" (").append(prunes - stale).append(" used, ").append(stale).append(" stale)");
+        }
+        text.append(", ").append(anchors).append(" anchor(s)");
+        if (anchorsMissed > 0) {
+            text.append(" (").append(anchorsMissed).append(" off the road)");
+        }
+        text.append(", ").append(plazas).append(" designed plaza(s)");
+        if (plazasMissed > 0) {
+            text.append(" (").append(plazasMissed).append(" not placed)");
+        }
+        return Optional.of(Component.text(text.toString(), stale + anchorsMissed + plazasMissed > 0 ? RoadMessages.WARN : RoadMessages.INFO));
     }
 
     // ===== requester =====

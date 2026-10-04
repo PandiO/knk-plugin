@@ -510,7 +510,7 @@ public final class RoadBuildJob {
                 new ArrayList<>(regionsByEdge.getOrDefault(i, Set.of()))));
         }
         TileBuildResult build = new TileBuildResult(result.builderVersion(), result.cellCount(), result.levelCount(),
-            result.nodes(), tagged, result.warnings());
+            result.nodes(), tagged, result.warnings(), result.corrections());
         progress.accept("Tile " + key.tileX() + "," + key.tileZ() + ": uploading " + build.nodes().size() + " nodes, " + build.edges().size() + " edges…");
         commandApi.upsertTileGraph(key.world(), key.tileX(), key.tileZ(), build).whenComplete((upsert, ex) -> mainThread.execute(() -> {
             if (ex != null) {
