@@ -11,8 +11,9 @@ import net.knightsandkings.knk.core.regions.managed.RepairReport;
 import net.knightsandkings.knk.paper.regions.managed.ManagedRegionsBootstrap;
 
 /**
- * {@code /knk regions repair}: runs the managed-region repair that also runs at startup, e.g. after a Town or Structure was
- * created in the web app (their regions are set up by the next repair, not at creation). Safe to repeat.
+ * {@code /knk regions repair}: runs the managed-region repair that also runs at startup, e.g. after regions were edited by
+ * hand or a domain's rename could not reach the server. Never renames a region (the API's
+ * {@code POST /api/Regions/finalize-temp-names} does that). Safe to repeat.
  */
 public class RegionsAdminCommand {
 
