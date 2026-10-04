@@ -147,6 +147,39 @@ class RoadAdminCommandTest {
         assertEquals(List.of("prune"), command.complete(player, new String[] {"node", "pr"}));
     }
 
+    @Test
+    void nodePlazaAndUnplazaTakeAnIdOrTheNodeHere_AndMoveNeedsAnId() {
+        when(player.hasPermission(RoadAdminCommand.NODE)).thenReturn(true);
+        org.bukkit.World world = mock(org.bukkit.World.class);
+        when(world.getName()).thenReturn("world");
+        when(player.getWorld()).thenReturn(world);
+        when(player.getLocation()).thenReturn(new org.bukkit.Location(world, 10.5, 65, 10.5));
+        // A dead end under the player, a junction 3 blocks away, a plaza centre (radius 12) 10 blocks away.
+        RoadNetworkSnapshot snapshot = RoadNetworkSnapshot.builder("world")
+            .addNode(new RoadNode(1, 10, 64, 10, RoadNodeKind.ENDPOINT, null, 1))
+            .addNode(new RoadNode(2, 13, 64, 10, RoadNodeKind.JUNCTION, null, 1))
+            .addNode(new RoadNode(3, 20, 64, 10, RoadNodeKind.ANCHOR, "Square", 1, true, 12))
+            .build();
+        when(cache.snapshot("world")).thenReturn(snapshot);
+        when(commandApi.updateNode(org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.any()))
+            .thenReturn(java.util.concurrent.CompletableFuture.completedFuture(new RoadNode(2, 13, 64, 10, RoadNodeKind.JUNCTION, null, 1, true, 8)));
+
+        command.execute(player, new String[] {"node", "plaza", "8"});
+        verify(commandApi).updateNode(2, net.knightsandkings.knk.core.domain.roads.RoadNodeUpdate.plaza(8)); // a junction, not the dead end
+        command.execute(player, new String[] {"node", "plaza", "6", "3"});
+        verify(commandApi).updateNode(3, net.knightsandkings.knk.core.domain.roads.RoadNodeUpdate.plaza(6));
+        command.execute(player, new String[] {"node", "unplaza"});
+        verify(commandApi).updateNode(3, net.knightsandkings.knk.core.domain.roads.RoadNodeUpdate.noPlaza()); // standing in its plaza
+
+        org.mockito.Mockito.clearInvocations(player);
+        command.execute(player, new String[] {"node", "plaza", "40"});
+        assertTrue(lastMessage(player).contains("/knk road node plaza <radius 1-32> [id]"), lastMessage(player));
+        org.mockito.Mockito.clearInvocations(player);
+        command.execute(player, new String[] {"node", "move"});
+        assertTrue(lastMessage(player).contains("/knk road node move <id>"), lastMessage(player));
+        assertEquals(List.of("plaza"), command.complete(player, new String[] {"node", "pl"}));
+    }
+
     private static net.knightsandkings.knk.core.domain.roads.RoadEdge edge(int id, int from, int to, int[] a, int[] b,
                                                                           net.knightsandkings.knk.core.domain.roads.RoadEdgeSource source) {
         return new net.knightsandkings.knk.core.domain.roads.RoadEdge(id, from, to, List.of(a, b), 10, 3,

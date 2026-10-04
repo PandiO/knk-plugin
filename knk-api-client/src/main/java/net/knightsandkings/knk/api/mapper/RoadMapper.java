@@ -105,7 +105,7 @@ public final class RoadMapper {
 
     public static RoadNode mapNode(RoadNodeDto dto) {
         return new RoadNode(dto.id(), dto.x(), dto.y(), dto.z(), RoadNodeKind.fromApiName(dto.kind()), dto.name(),
-            dto.componentId(), dto.locked());
+            dto.componentId(), dto.locked(), dto.plazaRadius() == null ? 0 : dto.plazaRadius());
     }
 
     public static RoadEdge mapEdge(RoadEdgeDto dto) {
@@ -280,7 +280,8 @@ public final class RoadMapper {
 
     public static RoadNodeUpdateDto toNodeUpdateDto(RoadNodeUpdate update) {
         return new RoadNodeUpdateDto(update.name(), update.clearName(),
-            update.kind() == null ? null : update.kind().apiName(), update.locked());
+            update.kind() == null ? null : update.kind().apiName(), update.locked(), update.x(), update.y(), update.z(),
+            update.plazaRadius(), update.clearPlaza());
     }
 
     public static RoadNodeAnchorDto toAnchorDto(RoadNodeAnchor anchor) {
@@ -343,6 +344,20 @@ public final class RoadMapper {
         return graph.nodes().stream()
             .filter(n -> n.kind() == RoadNodeKind.ANCHOR)
             .map(n -> new SkeletonGraph.Anchor(n.id(), n.x(), n.y(), n.z()))
+            .toList();
+    }
+
+    /**
+     * The designed plazas of a tile download (DESIGN §5.6 step 4, rev. 5): every Junction or Anchor
+     * node with a plaza radius, as the skeleton builder's plaza centres.
+     */
+    public static List<SkeletonGraph.Plaza> toPlazas(RoadTileGraph graph) {
+        if (graph == null) {
+            return List.of();
+        }
+        return graph.nodes().stream()
+            .filter(n -> n.isPlazaCentre() && (n.kind() == RoadNodeKind.JUNCTION || n.kind() == RoadNodeKind.ANCHOR))
+            .map(n -> new SkeletonGraph.Plaza(n.id(), n.x(), n.y(), n.z(), n.plazaRadius()))
             .toList();
     }
 

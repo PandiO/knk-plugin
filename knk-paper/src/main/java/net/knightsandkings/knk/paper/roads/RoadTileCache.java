@@ -155,6 +155,9 @@ public final class RoadTileCache {
             }
             o.addProperty("componentId", n.componentId());
             o.addProperty("locked", n.locked());
+            if (n.isPlazaCentre()) {
+                o.addProperty("plazaRadius", n.plazaRadius());
+            }
             nodes.add(o);
         }
         root.add("nodes", nodes);
@@ -220,7 +223,8 @@ public final class RoadTileCache {
             nodes.add(new RoadNode(o.get("id").getAsInt(), o.get("x").getAsInt(), o.get("y").getAsInt(),
                 o.get("z").getAsInt(), RoadNodeKind.fromApiName(o.get("kind").getAsString()),
                 o.has("name") ? o.get("name").getAsString() : null, o.get("componentId").getAsInt(),
-                o.has("locked") && o.get("locked").getAsBoolean()));
+                o.has("locked") && o.get("locked").getAsBoolean(),
+                o.has("plazaRadius") ? o.get("plazaRadius").getAsInt() : 0));
         }
 
         List<RoadEdge> edges = new ArrayList<>();

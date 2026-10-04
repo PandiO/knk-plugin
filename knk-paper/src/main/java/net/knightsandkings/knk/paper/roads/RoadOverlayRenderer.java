@@ -272,6 +272,7 @@ public final class RoadOverlayRenderer {
             ? "pruned edge" : node.kind().apiName().toLowerCase();
         return "Node #" + node.id() + " " + kind
             + node.nameOptional().map(n -> " \"" + n + "\"").orElse("")
+            + (node.isPlazaCentre() ? " · plaza r" + node.plazaRadius() : "")
             + (node.locked() && !node.kind().isTombstone() ? " (locked)" : "");
     }
 

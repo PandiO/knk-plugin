@@ -9,5 +9,10 @@ public record RoadNodeUpdateDto(
     @JsonProperty("name") String name,
     @JsonProperty("clearName") boolean clearName,
     @JsonProperty("kind") String kind,
-    @JsonProperty("locked") Boolean locked
+    @JsonProperty("locked") Boolean locked,
+    @JsonProperty("x") Integer x,
+    @JsonProperty("y") Integer y,
+    @JsonProperty("z") Integer z,
+    @JsonProperty("plazaRadius") Integer plazaRadius,
+    @JsonProperty("clearPlaza") boolean clearPlaza
 ) {}

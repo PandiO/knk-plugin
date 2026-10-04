@@ -120,6 +120,7 @@ public final class RoadBuildJob {
     private List<RoadProfile> profiles = List.of();
     private NodeMatcher.PreviousGraph previousGraph = NodeMatcher.PreviousGraph.EMPTY;
     private List<SkeletonGraph.Anchor> anchors = List.of();
+    private List<SkeletonGraph.Plaza> plazas = List.of();
     private final Set<MaskBuilder.Seed> seeds = new LinkedHashSet<>();
     private final List<RoadBreadcrumbPoint> breadcrumbs = new ArrayList<>();
     private ChunkSnapshotSurfaceGrid grid;
@@ -197,6 +198,7 @@ public final class RoadBuildJob {
             previousF.join().ifPresent(graph -> {
                 previousGraph = RoadMapper.toPreviousGraph(graph);
                 anchors = RoadMapper.toAnchors(graph);
+                plazas = RoadMapper.toPlazas(graph);
             });
             for (RoadSeed seed : seedsF.join()) {
                 if (region.contains(seed.x(), seed.z())) {
@@ -363,7 +365,7 @@ public final class RoadBuildJob {
         ScopeLookup scope = scopeLookup();
         ProfileSet profileSet = new ProfileSet(RoadMapper.toBuilderProfiles(profiles), scope);
         TileBuilder.TileRequest request = new TileBuilder.TileRequest(key.world(), key.tileX(), key.tileZ(), params,
-            new ArrayList<>(seeds), profileSet, GateCellsIndex.of(gateManager, key.world()), anchors, previousGraph);
+            new ArrayList<>(seeds), profileSet, GateCellsIndex.of(gateManager, key.world()), anchors, previousGraph, plazas);
         ChunkSnapshotSurfaceGrid surface = grid;
         buildThread.execute(() -> {
             TileBuildResult result;

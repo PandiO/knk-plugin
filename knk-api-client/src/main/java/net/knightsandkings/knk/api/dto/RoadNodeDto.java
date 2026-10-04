@@ -17,5 +17,6 @@ public record RoadNodeDto(
     @JsonProperty("source") String source,
     @JsonProperty("name") String name,
     @JsonProperty("componentId") int componentId,
-    @JsonProperty("locked") boolean locked
+    @JsonProperty("locked") boolean locked,
+    @JsonProperty("plazaRadius") Integer plazaRadius
 ) {}

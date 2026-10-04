@@ -38,6 +38,14 @@ class RoadOverlayRendererTest {
     }
 
     @Test
+    void nodeLabelsShowADesignedPlaza() {
+        assertEquals("Node #4 junction \"Brink\" · plaza r12 (locked)", RoadOverlayRenderer.nodeLabel(
+            new RoadNode(4, 0, 64, 0, net.knightsandkings.knk.core.domain.roads.RoadNodeKind.JUNCTION, "Brink", 4, true, 12)));
+        assertEquals("Node #5 endpoint", RoadOverlayRenderer.nodeLabel(
+            new RoadNode(5, 0, 64, 0, net.knightsandkings.knk.core.domain.roads.RoadNodeKind.ENDPOINT, null, 5)));
+    }
+
+    @Test
     void aNodeIsNamedAtAnyDistanceAlongTheView() {
         // 30 blocks away (the old rule only looked 12 blocks ahead)
         Optional<String> far = look(new double[] {40.5, 66.6, 30.5}, new double[] {0, 0, -1}, new double[] {40.5, 65, 30.5});

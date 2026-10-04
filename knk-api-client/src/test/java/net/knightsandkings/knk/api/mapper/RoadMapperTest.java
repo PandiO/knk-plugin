@@ -30,6 +30,7 @@ import net.knightsandkings.knk.api.dto.RoadProfileDto;
 import net.knightsandkings.knk.api.dto.RoadSeedDto;
 import net.knightsandkings.knk.api.dto.RoadSeedLocationDto;
 import net.knightsandkings.knk.api.dto.RoadSurveyDto;
+import net.knightsandkings.knk.api.dto.RoadNodeDto;
 import net.knightsandkings.knk.api.dto.RoadTileGraphDto;
 import net.knightsandkings.knk.api.dto.RoadTileUpsertResultDto;
 import net.knightsandkings.knk.core.domain.roads.RoadApiError;
@@ -150,6 +151,33 @@ class RoadMapperTest {
         List<SkeletonGraph.Anchor> anchors = RoadMapper.toAnchors(graph);
         assertEquals(List.of(new SkeletonGraph.Anchor(3, 300, 65, 120)), anchors);
         assertEquals(List.of(), RoadMapper.toAnchors(null));
+    }
+
+    @Test
+    void plazaCentresAndNodeMovesMapBothWays() throws Exception {
+        String json = "{\"id\":7,\"world\":\"w\",\"x\":10,\"y\":64,\"z\":20,\"tileId\":1,\"kind\":\"Junction\","
+            + "\"source\":\"Detected\",\"componentId\":7,\"locked\":true,\"plazaRadius\":12}";
+        RoadNode plaza = RoadMapper.mapNode(mapper.readValue(json, RoadNodeDto.class));
+        assertEquals(12, plaza.plazaRadius());
+        RoadNode plain = RoadMapper.mapNode(mapper.readValue(json.replace(",\"plazaRadius\":12", ""), RoadNodeDto.class));
+        assertEquals(0, plain.plazaRadius());
+
+        RoadTileGraph graph = RoadMapper.mapTileGraph(mapper.readValue(fixture("tile-graph.json"), RoadTileGraphDto.class));
+        RoadNode anchor = graph.nodes().get(2);
+        RoadNode endpoint = new RoadNode(9, 400, 64, 120, RoadNodeKind.ENDPOINT, null, 9, true, 5); // not a valid centre kind
+        RoadTileGraph withPlazas = new RoadTileGraph(graph.tile(), List.of(plaza, endpoint,
+            new RoadNode(anchor.id(), anchor.x(), anchor.y(), anchor.z(), anchor.kind(), anchor.name(), anchor.componentId(), true, 6)),
+            graph.edges());
+        assertEquals(List.of(new SkeletonGraph.Plaza(7, 10, 64, 20, 12), new SkeletonGraph.Plaza(3, 300, 65, 120, 6)),
+            RoadMapper.toPlazas(withPlazas));
+        assertEquals(List.of(), RoadMapper.toPlazas(graph));
+        assertEquals(List.of(), RoadMapper.toPlazas(null));
+
+        String move = mapper.writeValueAsString(RoadMapper.toNodeUpdateDto(RoadNodeUpdate.moveTo(1, 2, 3)));
+        assertTrue(move.contains("\"x\":1") && move.contains("\"y\":2") && move.contains("\"z\":3"), move);
+        assertFalse(move.contains("plazaRadius"), move);
+        assertTrue(mapper.writeValueAsString(RoadMapper.toNodeUpdateDto(RoadNodeUpdate.plaza(9))).contains("\"plazaRadius\":9"));
+        assertTrue(mapper.writeValueAsString(RoadMapper.toNodeUpdateDto(RoadNodeUpdate.noPlaza())).contains("\"clearPlaza\":true"));
     }
 
     @Test

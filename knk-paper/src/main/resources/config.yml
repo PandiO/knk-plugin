@@ -239,6 +239,9 @@ navigation:
     # A node an admin locked (edited, merged into, recorded through) absorbs rebuilt junctions and
     # dead ends within this many blocks, so manual cleanup survives a rebuild
     locked-node-reach: 8.0
+    # Wide road areas become one plaza junction on their own (true), or only where an admin designed a
+    # plaza with /knk road node plaza <radius> (false). Designed plazas always apply (DESIGN §5.6 step 4)
+    auto-plazas: true
   # Walkable last-mile paths (KNG-51, docs/specs/navigation/LAST_MILE_PATHFINDING.md §9): direct mode
   # (a target within max-snap-distance, and the last leg after a road's end) follows a path a player
   # can walk instead of a straight line through terrain. No path found -> the straight line.

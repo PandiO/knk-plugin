@@ -86,6 +86,16 @@ class RoadApiRecordsTest {
         assertThrows(IllegalArgumentException.class, () -> new RoadNodeUpdate("Gate", true, null, null));
         assertEquals(new RoadNodeUpdate(null, true, null, null), RoadNodeUpdate.unnamed());
         assertEquals(Boolean.FALSE, RoadNodeUpdate.locked(false).locked());
+        // Rev. 5: a move needs all three coordinates; clearing and setting a plaza exclude each other.
+        assertThrows(IllegalArgumentException.class, () -> new RoadNodeUpdate(null, false, null, null, 1, null, 3, null, false));
+        assertThrows(IllegalArgumentException.class, () -> new RoadNodeUpdate(null, false, null, null, null, null, null, 8, true));
+        RoadNodeUpdate move = RoadNodeUpdate.moveTo(10, 64, -5);
+        assertEquals(List.of(10, 64, -5), List.of(move.x(), move.y(), move.z()));
+        assertEquals(Integer.valueOf(12), RoadNodeUpdate.plaza(12).plazaRadius());
+        assertTrue(RoadNodeUpdate.noPlaza().clearPlaza());
+        assertThrows(IllegalArgumentException.class, () -> new RoadNode(1, 0, 64, 0, RoadNodeKind.JUNCTION, null, 1, true, -1));
+        assertTrue(new RoadNode(1, 0, 64, 0, RoadNodeKind.JUNCTION, null, 1, true, 9).isPlazaCentre());
+        assertFalse(new RoadNode(1, 0, 64, 0, RoadNodeKind.JUNCTION, null, 1, true).isPlazaCentre());
 
         assertThrows(IllegalArgumentException.class, () -> new RoadEdgeUpdate(4, true, false, null, false, null, null));
         assertThrows(IllegalArgumentException.class, () -> new RoadEdgeUpdate(null, false, false, 2, true, null, null));

@@ -126,13 +126,23 @@ public record NavigationConfig(
      * @param ambiguousReach        an ambiguous material only counts within this many cells of a sure road cell
      * @param plazaGrowth           a plaza reaches this many cells beyond its wide core (fix plan 5.5 item 5)
      * @param lockedNodeReach       a locked node absorbs the builder's nodes this close (fix plan 5.5 item 6)
+     * @param autoPlazas            wide road areas outside designed plazas still become plaza junctions on their
+     *                              own (DESIGN §5.6 step 4, rev. 5)
      */
     public record BuilderConfig(int tileSize, int tileMargin, int maxCellsPerTile, int snapshotChunksPerTick,
                                 int junctionClusterRadius, int minSpurLength, int ambiguousReach, int plazaGrowth,
-                                double lockedNodeReach) {
+                                double lockedNodeReach, boolean autoPlazas) {
         public static BuilderConfig defaults() {
             return new BuilderConfig(512, 32, 250_000, 4, 3, 4, 3, BuildParameters.DEFAULT_PLAZA_GROWTH,
-                BuildParameters.DEFAULT_LOCKED_NODE_REACH);
+                BuildParameters.DEFAULT_LOCKED_NODE_REACH, true);
+        }
+
+        /** A builder config with automatic plazas on. */
+        public BuilderConfig(int tileSize, int tileMargin, int maxCellsPerTile, int snapshotChunksPerTick,
+                             int junctionClusterRadius, int minSpurLength, int ambiguousReach, int plazaGrowth,
+                             double lockedNodeReach) {
+            this(tileSize, tileMargin, maxCellsPerTile, snapshotChunksPerTick, junctionClusterRadius, minSpurLength,
+                ambiguousReach, plazaGrowth, lockedNodeReach, true);
         }
 
         public void validate() {
@@ -173,7 +183,8 @@ public record NavigationConfig(
                 .withAmbiguousReach(ambiguousReach)
                 .withGraphRules(junctionClusterRadius, minSpurLength)
                 .withPlazaGrowth(plazaGrowth)
-                .withLockedNodeReach(lockedNodeReach);
+                .withLockedNodeReach(lockedNodeReach)
+                .withAutoPlazas(autoPlazas);
         }
     }
 

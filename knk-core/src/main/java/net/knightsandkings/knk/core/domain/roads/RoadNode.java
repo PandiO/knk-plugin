@@ -22,8 +22,12 @@ import java.util.Optional;
  * @param locked      an admin locked the node's position (Phase 1 decision 7): the builder must
  *                    keep it where it is ({@code NodeMatcher.PreviousNode.locked}). Phase 2e added
  *                    this field from the API's {@code RoadNodeDto}; the router ignores it
+ * @param plazaRadius radius of the designed plaza this node is the centre of, or {@code 0} when it is
+ *                    none (DESIGN §5.6 step 4, rev. 5); the builder makes that footprint one junction
+ *                    on this node
  */
-public record RoadNode(int id, int x, int y, int z, RoadNodeKind kind, String name, int componentId, boolean locked) {
+public record RoadNode(int id, int x, int y, int z, RoadNodeKind kind, String name, int componentId, boolean locked,
+                       int plazaRadius) {
 
     public RoadNode {
         if (id < 0) {
@@ -33,6 +37,19 @@ public record RoadNode(int id, int x, int y, int z, RoadNodeKind kind, String na
         if (name != null && name.isBlank()) {
             name = null;
         }
+        if (plazaRadius < 0) {
+            throw new IllegalArgumentException("plazaRadius must be >= 0 (0 = no plaza)");
+        }
+    }
+
+    /** A node that is no plaza centre. */
+    public RoadNode(int id, int x, int y, int z, RoadNodeKind kind, String name, int componentId, boolean locked) {
+        this(id, x, y, z, kind, name, componentId, locked, 0);
+    }
+
+    /** Whether this node is the centre of a designed plaza. */
+    public boolean isPlazaCentre() {
+        return plazaRadius > 0;
     }
 
     /** An unlocked node (what the router and its fixtures build). */

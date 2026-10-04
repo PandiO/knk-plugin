@@ -67,6 +67,9 @@ import net.kyori.adventure.text.Component;
 public class RoadAdminCommand implements SubcommandExecutor {
 
     public static final String NODE = "knk.admin.road";
+    /** Largest designed plaza radius (the web-api's {@code RoadNetworkService.MaxPlazaRadius}). */
+    static final int MAX_PLAZA_RADIUS = 32;
+
     public static final String USAGE = "/knk road <survey|profile|build|seed|show|hide|street|node|record|edge|tiles|reload|status|why>";
     static final int PAGE_SIZE = 10;
     /** How far from the admin a node/edge may be for "here". */
@@ -188,7 +191,7 @@ public class RoadAdminCommand implements SubcommandExecutor {
                 case "build" -> prefix(List.of("here", "tile", "radius", "dirty", "all", "status", "cancel"), last);
                 case "seed" -> prefix(List.of("add", "remove", "list"), last);
                 case "show" -> prefix(List.of("16", "32", "48", "96", "all"), last);
-                case "node" -> prefix(List.of("name", "unname", "merge", "anchor", "lock", "unlock", "prune", "unprune"), last);
+                case "node" -> prefix(List.of("name", "unname", "move", "plaza", "unplaza", "merge", "anchor", "lock", "unlock", "prune", "unprune"), last);
                 case "record" -> prefix(List.of("start", "stop", "cancel"), last);
                 case "edge" -> prefix(List.of("set", "delete", "prune"), last);
                 case "street" -> prefix(streetNames(sender), last);
@@ -740,6 +743,49 @@ public class RoadAdminCommand implements SubcommandExecutor {
             }
             case "unname" -> withNodeHere(sender, snapshot, player, node -> commandApi.updateNode(node.id(), RoadNodeUpdate.unnamed())
                 .whenComplete((n, ex) -> done(sender, "unname the node", ex, "Node #" + node.id() + " has no name any more.", player)));
+            case "move" -> {
+                // Rev. 5: move a node to the block the admin stands on (locked there; the ends of its edges follow).
+                Integer id = args.length > 1 ? parseInt(args[1]) : null;
+                if (id == null) {
+                    sender.sendMessage(RoadMessages.usage("/knk road node move <id>   (moves it to the block you stand on)"));
+                    return;
+                }
+                Location floor = floorOf(player);
+                commandApi.updateNode(id, RoadNodeUpdate.moveTo(floor.getBlockX(), floor.getBlockY(), floor.getBlockZ()))
+                    .whenComplete((n, ex) -> done(sender, "move the node", ex, "Node #" + id + " moved to " + floor.getBlockX() + " "
+                        + floor.getBlockY() + " " + floor.getBlockZ() + " and locked there. Rebuild the tile to re-route its edges.", player));
+            }
+            case "plaza" -> {
+                // Rev. 5 (DESIGN §5.6 step 4): a Junction or Anchor becomes the centre of a designed plaza.
+                Integer radius = args.length > 1 ? parseInt(args[1]) : null;
+                if (radius == null || radius < 1 || radius > MAX_PLAZA_RADIUS) {
+                    sender.sendMessage(RoadMessages.usage("/knk road node plaza <radius 1-" + MAX_PLAZA_RADIUS + "> [id]"));
+                    return;
+                }
+                Integer given = args.length > 2 ? parseInt(args[2]) : null;
+                Optional<RoadNode> target = given != null ? snapshot.node(given)
+                    : nodeHereMatching(snapshot, player, k -> k == RoadNodeKind.JUNCTION || k == RoadNodeKind.ANCHOR);
+                if (target.isEmpty()) {
+                    sender.sendMessage(RoadMessages.bad(given != null ? "No node #" + given + " in this world."
+                        : "No junction or anchor within " + (int) HERE_DISTANCE + " blocks - stand at it, give its id, or place one with /knk road node anchor."));
+                    return;
+                }
+                int id = target.get().id();
+                commandApi.updateNode(id, RoadNodeUpdate.plaza(radius)).whenComplete((n, ex) -> done(sender, "make the plaza", ex,
+                    "Node #" + id + " is the centre of a plaza of radius " + radius + " (locked). The next build of this tile makes "
+                        + "the road within " + radius + " blocks one junction there.", player));
+            }
+            case "unplaza" -> {
+                Integer given = args.length > 1 ? parseInt(args[1]) : null;
+                Optional<RoadNode> target = given != null ? snapshot.node(given) : plazaHere(snapshot, player);
+                if (target.isEmpty()) {
+                    sender.sendMessage(RoadMessages.bad(given != null ? "No node #" + given + " in this world." : "You are not on a designed plaza - give the centre's id."));
+                    return;
+                }
+                int id = target.get().id();
+                commandApi.updateNode(id, RoadNodeUpdate.noPlaza()).whenComplete((n, ex) -> done(sender, "clear the plaza", ex,
+                    "Node #" + id + " is no plaza centre any more; the next build treats the area as before.", player));
+            }
             case "merge" -> {
                 Integer keep = args.length > 1 ? parseInt(args[1]) : null;
                 Integer merge = args.length > 2 ? parseInt(args[2]) : null;
@@ -815,7 +861,7 @@ public class RoadAdminCommand implements SubcommandExecutor {
                     refreshTiles(player.getWorld().getName());
                 }));
             }
-            default -> sender.sendMessage(RoadMessages.usage("/knk road node name <name> | unname | merge <keep> <merge> | anchor [name] | lock|unlock [id] | prune|unprune [id]"));
+            default -> sender.sendMessage(RoadMessages.usage("/knk road node name <name> | unname | move <id> | plaza <radius> [id] | unplaza [id] | merge <keep> <merge> | anchor [name] | lock|unlock [id] | prune|unprune [id]"));
         }
     }
 
@@ -891,6 +937,24 @@ public class RoadAdminCommand implements SubcommandExecutor {
     /** Like {@link #nodeHere(RoadNetworkSnapshot, Player)}, only nodes of {@code kind} (null: any but a tombstone). */
     static Optional<RoadNode> nodeHere(RoadNetworkSnapshot snapshot, Player player, RoadNodeKind kind) {
         return nodeHereMatching(snapshot, player, kind == null ? k -> !k.isTombstone() : k -> k == kind);
+    }
+
+    /** The nearest designed plaza centre whose plaza the player stands in (or within {@link #HERE_DISTANCE} of it). */
+    static Optional<RoadNode> plazaHere(RoadNetworkSnapshot snapshot, Player player) {
+        Location at = player.getLocation();
+        RoadNode best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (RoadNode node : snapshot.nodes()) {
+            if (!node.isPlazaCentre()) {
+                continue;
+            }
+            double d = node.distanceTo(at.getX() - 0.5, at.getY() - 1, at.getZ() - 0.5);
+            if (d <= Math.max(HERE_DISTANCE, node.plazaRadius()) && d < bestDistance) {
+                bestDistance = d;
+                best = node;
+            }
+        }
+        return Optional.ofNullable(best);
     }
 
     /** The nearest node within {@link #HERE_DISTANCE} of the player's feet whose kind passes {@code accept}. */
