@@ -26,6 +26,7 @@ import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -665,6 +666,15 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 return false;
             }
             
+            // Regions whose parent is this one (e.g. a Town's Districts): WorldGuard unsets their parent when the old
+            // region is removed, so they are pointed at the renamed region below.
+            List<ProtectedRegion> children = new ArrayList<>();
+            for (ProtectedRegion candidate : regionManager.getRegions().values()) {
+                if (candidate.getParent() == region) {
+                    children.add(candidate);
+                }
+            }
+
             // Remove old region and create new one with updated name
             regionManager.removeRegion(oldRegionId);
             
@@ -688,8 +698,15 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 );
             } else {
                 LOGGER.warning("Failed to rename region: unsupported region type");
-                // Restore old region if we can't handle the type
+                // Restore old region (and its children's link to it) if we can't handle the type
                 regionManager.addRegion(region);
+                for (ProtectedRegion child : children) {
+                    try {
+                        child.setParent(region);
+                    } catch (ProtectedRegion.CircularInheritanceException ignored) {
+                        // It was their parent a moment ago, so this can't form a cycle
+                    }
+                }
                 return false;
             }
             
@@ -708,10 +725,26 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 }
             }
             
+            // Keep the region in the hierarchy: its own parent and its children's link to it
+            try {
+                newRegion.setParent(region.getParent());
+            } catch (ProtectedRegion.CircularInheritanceException e) {
+                LOGGER.warning("Could not keep the parent of renamed region " + newRegionId + ": " + e.getMessage());
+            }
+
             // Add the new region
             regionManager.addRegion(newRegion);
+
+            for (ProtectedRegion child : children) {
+                try {
+                    child.setParent(newRegion);
+                } catch (ProtectedRegion.CircularInheritanceException e) {
+                    LOGGER.warning("Could not re-link child region " + child.getId() + " to " + newRegionId + ": " + e.getMessage());
+                }
+            }
             
-            LOGGER.info("Successfully renamed region from " + oldRegionId + " to " + newRegionId);
+            LOGGER.info("Successfully renamed region from " + oldRegionId + " to " + newRegionId
+                    + (children.isEmpty() ? "" : " (" + children.size() + " child region(s) re-linked)"));
             return true;
             
         } catch (Exception e) {
