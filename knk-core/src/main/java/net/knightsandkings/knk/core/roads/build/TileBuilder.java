@@ -9,15 +9,18 @@ import net.knightsandkings.knk.core.roads.build.SkeletonGraph.Anchor;
 import net.knightsandkings.knk.core.roads.build.SkeletonGraph.Chain;
 import net.knightsandkings.knk.core.roads.build.TileBuildResult.Edge;
 import net.knightsandkings.knk.core.roads.build.TileBuildResult.Node;
+import net.knightsandkings.knk.core.util.BlockKey;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.PriorityQueue;
 import java.util.Set;
@@ -41,6 +44,11 @@ public final class TileBuilder {
     static final double CLOSING_STRETCH = 2.0;
     /** … plus this many blocks (a short gap around a planter or lamp post). */
     static final double CLOSING_SLACK = 8.0;
+
+    public static final String WARN_EDGE_UNDERGROUND = "Edge runs through the ground from here";
+    public static final String WARN_EDGE_FLOATING = "Edge floats above the ground from here";
+    /** Distinct blocks a segment must pass through (or float over) before {@link #terrainWarning} reports it. */
+    static final int TERRAIN_MIN_BLOCKS = 2;
 
     /**
      * One build request.
@@ -161,6 +169,7 @@ public final class TileBuilder {
         List<Edge> edges = new ArrayList<>();
         for (Run run : runsByPair.values()) {
             List<int[]> geometry = Rdp.simplify(run.polyline(), params.rdpEpsilon());
+            terrainWarning(spanGrid, geometry).ifPresent(warnings::add);
             double avgWidth = averageWidth(dt, run.spans());
             OptionalInt profileId = profileMatcher.match(mask, dt, run.spans());
             List<Integer> doors = gateDoors(mask, run.spans());
@@ -383,6 +392,52 @@ public final class TileBuilder {
             points.add(to.clone());
         }
         return points;
+    }
+
+    /**
+     * A warning when the final geometry leaves the walking surface (smoke test 2026-10-04): a segment
+     * passes through the ground (solid blocks at feet and head height) or floats over it (no floor at
+     * or just under the line) at {@value #TERRAIN_MIN_BLOCKS} or more distinct blocks. The one-block
+     * tolerance on both sides absorbs rounding on stairs and slopes; a point counts only when every
+     * column around it (x and z rounded down and up) agrees, so RDP cutting a path's corner by up to
+     * {@code rdpEpsilon} over a wall or a drop is not reported. Gate doors count as passable. The
+     * warning sits at the start of the first such segment.
+     */
+    static Optional<BuildWarning> terrainWarning(SpanGrid grid, List<int[]> geometry) {
+        for (int s = 0; s + 1 < geometry.size(); s++) {
+            int[] a = geometry.get(s);
+            int[] b = geometry.get(s + 1);
+            int steps = (int) Math.ceil(Rdp.length(List.of(a, b)) * 4);
+            Set<Long> buried = new HashSet<>();
+            Set<Long> floating = new HashSet<>();
+            for (int k = 1; k < steps; k++) {
+                double t = (double) k / steps;
+                double px = a[0] + (b[0] - a[0]) * t;
+                double pz = a[2] + (b[2] - a[2]) * t;
+                int y = (int) Math.floor(a[1] + (b[1] - a[1]) * t + 0.5);
+                boolean allBuried = true;
+                boolean allFloating = true;
+                for (int x = (int) Math.floor(px); x <= (int) Math.ceil(px); x++) {
+                    for (int z = (int) Math.floor(pz); z <= (int) Math.ceil(pz); z++) {
+                        allBuried &= !grid.isPassable(x, y + 1, z) && !grid.isPassable(x, y + 2, z);
+                        allFloating &= grid.isPassable(x, y, z) && grid.isPassable(x, y - 1, z);
+                    }
+                }
+                long block = BlockKey.pack((int) Math.floor(px + 0.5), y, (int) Math.floor(pz + 0.5));
+                if (allBuried) {
+                    buried.add(block);
+                } else if (allFloating) {
+                    floating.add(block);
+                }
+            }
+            if (buried.size() >= TERRAIN_MIN_BLOCKS) {
+                return Optional.of(new BuildWarning(WARN_EDGE_UNDERGROUND, a[0], a[1], a[2]));
+            }
+            if (floating.size() >= TERRAIN_MIN_BLOCKS) {
+                return Optional.of(new BuildWarning(WARN_EDGE_FLOATING, a[0], a[1], a[2]));
+            }
+        }
+        return Optional.empty();
     }
 
     private static void addPoint(List<int[]> points, int[] p) {

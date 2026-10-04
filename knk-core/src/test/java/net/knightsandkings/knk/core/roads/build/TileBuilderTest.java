@@ -296,6 +296,30 @@ class TileBuilderTest {
         assertTrue(r.warnings().isEmpty(), d);
     }
 
+    @Test
+    void geometryThroughTheGroundOrAboveItIsAWarningButStairsAndGatesAreNot() {
+        // A 3-wide road at y 64 (x 2..41, z 10..12) with a closed gate at x 30, stairs up to y 70
+        // (x 42..47) and a stone hill standing on it at x 10..20.
+        GridFixture f = wideRoad(2, 10, 40, 3, 64);
+        for (int x = 10; x <= 20; x++) f.column(x, 11, 65, 68, GridFixture.STONE);
+        f.gate(7, 30, 64, 11, 3);
+        for (int k = 0; k < 6; k++) f.block(42 + k, 65 + k, 11, GridFixture.STAIRS);
+        SpanGrid grid = new SpanGrid(f, GridFixture.profiles(), f);
+
+        BuildWarning through = TileBuilder.terrainWarning(grid, List.of(new int[] {4, 64, 11}, new int[] {25, 64, 11}))
+            .orElseThrow();
+        assertEquals(TileBuilder.WARN_EDGE_UNDERGROUND, through.message());
+        assertEquals(List.of(4, 64, 11), List.of(through.x(), through.y(), through.z()));
+
+        BuildWarning above = TileBuilder.terrainWarning(grid,
+            List.of(new int[] {22, 64, 11}, new int[] {24, 64, 11}, new int[] {22, 70, 11}, new int[] {40, 70, 11})).orElseThrow();
+        assertEquals(TileBuilder.WARN_EDGE_FLOATING, above.message());
+        assertEquals(List.of(24, 64, 11), List.of(above.x(), above.y(), above.z()), "the segment that leaves the floor");
+
+        assertTrue(TileBuilder.terrainWarning(grid,
+            List.of(new int[] {22, 64, 11}, new int[] {41, 64, 11}, new int[] {47, 70, 11})).isEmpty(), "gate and stairs");
+    }
+
     /** No sampled point of the edge has solid blocks at both feet and head height (1-block tolerance for slopes). */
     private static void assertOnTheGround(Edge e, GridFixture f, String d) {
         List<int[]> g = e.geometry();
