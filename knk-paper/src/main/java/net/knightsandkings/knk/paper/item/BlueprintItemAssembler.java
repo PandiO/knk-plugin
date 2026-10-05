@@ -24,8 +24,11 @@ import java.util.function.Consumer;
 
 /**
  * Blueprint plus an enchantment list -&gt; a finished {@link ItemStack} (docs/specs/lootboxes/DESIGN.md §3.4,
- * IMPLEMENTATION_PLAN.md Phase 0). Extracted from {@code /knk itemblueprints give} so lootbox delivery, kits and
- * that command build items the same way:
+ * IMPLEMENTATION_PLAN.md Phase 0). Extracted from {@code /knk itemblueprints give} so lootbox delivery (drops and
+ * the opening reel's passing items), kits and that command build items the same way. <b>This is the one place an
+ * item is made from a blueprint</b>: every route calls {@link #assemble(KnkItemBlueprint, String, List, List, Options, Integer)}
+ * or {@link #assembleDefaults}, so description colour, grade and origin lines, lore spacing and custom enchantment
+ * lines are rendered once, in the steps below (the permanent enchantment book decoration included):
  * <ol>
  *   <li>{@link ItemBlueprintBukkitMapper#fromBlueprint}: name, lore, grade line and tag, origin line, and the
  *       permanent enchantment book decoration.</li>
@@ -178,7 +181,69 @@ public final class BlueprintItemAssembler {
         return enchant(build(blueprint, materialNamespaceKey), blueprint, enchantments, options);
     }
 
-    /** {@link #assemble} with the blueprint's own default enchantments ({@link #defaultEnchantments}). */
+    /**
+     * The one way to make a blueprint item for a player: {@link #build}, then {@code defaults} as authored
+     * ({@link Options#DEFAULTS}), then {@code rolled} with {@code rolledOptions} (null = the vanilla rules on, no
+     * stamp; the second pass is skipped when there is nothing to roll and nothing to stamp), then {@code quantity}
+     * ({@link #applyQuantity}). The result counts and lists both enchantment passes. Throws like {@link #build}.
+     *
+     * @param defaults       the blueprint's own enchantments, e.g. {@link #defaultEnchantments} (or the claim's final
+     *                       levels for those)
+     * @param rolled         server-rolled enchantments (lootboxes); empty for kits and {@code /knk itemblueprints give}
+     * @param rolledOptions  how to apply {@code rolled}, e.g. {@code Options.DEFAULTS.withVanillaRules(true).withMetaStamp(...)}
+     * @param quantity       stack size, capped at the maximum; null keeps the blueprint's own
+     */
+    public Result assemble(
+            KnkItemBlueprint blueprint,
+            String materialNamespaceKey,
+            List<EnchantmentRequest> defaults,
+            List<EnchantmentRequest> rolled,
+            Options rolledOptions,
+            Integer quantity
+    ) {
+        ItemStack itemStack = build(blueprint, materialNamespaceKey);
+        Result first = enchant(itemStack, blueprint, defaults, Options.DEFAULTS);
+        int applied = first.applied();
+        List<String> skipped = new ArrayList<>(first.skipped());
+
+        Options rolledEffective = rolledOptions != null ? rolledOptions : Options.DEFAULTS.withVanillaRules(true);
+        if ((rolled != null && !rolled.isEmpty()) || rolledEffective.metaStamp() != null) {
+            Result second = enchant(itemStack, blueprint, rolled, rolledEffective);
+            applied += second.applied();
+            skipped.addAll(second.skipped());
+        }
+
+        applyQuantity(itemStack, blueprint, quantity);
+        return new Result(itemStack, applied, List.copyOf(skipped));
+    }
+
+    /**
+     * {@link #assemble(KnkItemBlueprint, String, List, List, Options, Integer)} with the blueprint's own default
+     * enchantments ({@link #defaultEnchantments}, using {@code fetchedDefinitions} where given) and nothing rolled:
+     * kits and {@code /knk itemblueprints give}.
+     */
+    public Result assembleDefaults(
+            KnkItemBlueprint blueprint,
+            String materialNamespaceKey,
+            Map<Integer, KnkEnchantmentDefinition> fetchedDefinitions,
+            Integer quantity
+    ) {
+        return assemble(blueprint, materialNamespaceKey, defaultEnchantments(blueprint, fetchedDefinitions), List.of(), null, quantity);
+    }
+
+    /** The largest stack an item of {@code blueprint} may be: the blueprint's own limit, else the material's. */
+    public static int maxStackSize(KnkItemBlueprint blueprint, ItemStack itemStack) {
+        return blueprint.maxStackSize() != null && blueprint.maxStackSize() > 0 ? blueprint.maxStackSize() : itemStack.getMaxStackSize();
+    }
+
+    /** Sets the stack size to {@code quantity} (at least 1, at most {@link #maxStackSize}); null leaves it alone. */
+    public static void applyQuantity(ItemStack itemStack, KnkItemBlueprint blueprint, Integer quantity) {
+        if (quantity != null) {
+            itemStack.setAmount(Math.max(1, Math.min(quantity, Math.max(1, maxStackSize(blueprint, itemStack)))));
+        }
+    }
+
+    /** {@link #assemble(KnkItemBlueprint, String, List, Options)} with the blueprint's own default enchantments. */
     public Result assembleWithDefaults(
             KnkItemBlueprint blueprint,
             String materialNamespaceKey,
