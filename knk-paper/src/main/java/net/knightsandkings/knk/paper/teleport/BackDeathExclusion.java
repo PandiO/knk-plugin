@@ -11,8 +11,9 @@ import org.bukkit.entity.Player;
  * <p>
  * Asked on the main thread at {@code PlayerDeathEvent} priority LOWEST - before the siege's own
  * death handling (HIGHEST) can end the match or move the player - so "was this a match death" is
- * answered from the state the player died in. An excluded death also wipes any older death, so
- * {@code /back} never leads anywhere after a siege death. A throwing exclusion counts as "excluded"
+ * answered from the state the player died in. An excluded death records nothing and leaves older
+ * {@code /back} entries alone (developer decision 2026-10-05, KNG-42: a place from before the siege may
+ * still be used after it, while it lasts). A throwing exclusion counts as "excluded"
  * (fail closed). Must be quick and must not block.
  */
 @FunctionalInterface

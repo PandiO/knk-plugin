@@ -54,12 +54,14 @@ import net.kyori.adventure.text.Component;
  *   <li><b>Commit</b>: guards again (things change during a warmup), destination re-read, then - for
  *       a plan with a {@link TeleportCharge} (warps, paid requests) - the server authorizes and
  *       charges it (and it is refunded if the teleport then doesn't happen), safe spot
- *       (player teleports only - staff land exactly where they asked), then
+ *       (player teleports and a staff {@code /back <player>} - other staff teleports land exactly where
+ *       they asked), then
  *       {@code teleportAsync(loc, TeleportCause.COMMAND)} - never the default {@code PLUGIN} cause,
  *       so the region listener sees these teleports like vanilla ones (the siege's own teleports use
  *       {@code PLUGIN} and stay outside the engine).</li>
- *   <li><b>After</b>: cooldown (player teleports), a log line (INFO for staff teleports), and for
- *       staff teleports an audit entry in the web API ({@link TeleportAuditor}, Phase 2).</li>
+ *   <li><b>After</b>: cooldown (player teleports), a log line (INFO for staff teleports), for
+ *       staff teleports an audit entry in the web API ({@link TeleportAuditor}, Phase 2), and the
+ *       {@link TeleportArrivalListener}s ({@code /back} origins, KNG-42).</li>
  * </ol>
  * The returned future completes on the main thread with the {@link TeleportOutcome}; the caller
  * reports it. Warmup notices and cancel reasons are sent to the moving player by the engine itself.
@@ -90,6 +92,7 @@ public class TeleportService {
     private final TeleportCooldowns cooldowns = new TeleportCooldowns();
     private final WarmupBook<Warmup> warmups = new WarmupBook<>();
     private final List<TeleportRestriction> restrictions = new CopyOnWriteArrayList<>();
+    private final List<TeleportArrivalListener> arrivalListeners = new CopyOnWriteArrayList<>();
     /** Authority of teleports whose {@code teleportAsync} is in flight, for the region listener's bypass. */
     private final Map<UUID, Authority> inFlight = new ConcurrentHashMap<>();
     /** Charges asked for (or answered) whose teleport hasn't been handed to Bukkit yet - refunded on shutdown. */
@@ -115,6 +118,11 @@ public class TeleportService {
     /** Add a guard (see {@link TeleportRestriction}); later registrations are checked after earlier ones. */
     public void registerRestriction(TeleportRestriction restriction) {
         restrictions.add(Objects.requireNonNull(restriction, "restriction must not be null"));
+    }
+
+    /** Tell {@code listener} about every teleport that happens (KNG-42: {@code /back} origins). */
+    public void addArrivalListener(TeleportArrivalListener listener) {
+        arrivalListeners.add(Objects.requireNonNull(listener, "listener must not be null"));
     }
 
     /** Where staff teleports are audited (docs/specs/teleport/DESIGN.md §3.10); null turns auditing off. */
@@ -319,7 +327,7 @@ public class TeleportService {
                 return;
             }
         }
-        if (plan.kind().isStaff()) {
+        if (plan.kind().isStaff() && !plan.backTrip()) {
             teleport(plan, authority, to, result);
             return;
         }
@@ -446,6 +454,7 @@ public class TeleportService {
             if (plan.kind().isStaff()) {
                 audit(plan, from, to);
             }
+            arrived(plan, from, to);
             result.complete(TeleportOutcome.teleported());
         })));
     }
@@ -460,6 +469,18 @@ public class TeleportService {
             current.record(plan, from, to);
         } catch (RuntimeException ex) {
             LOGGER.log(Level.WARNING, "[KnK Teleport] Could not audit the teleport of " + plan.subject().getName(), ex);
+        }
+    }
+
+    /** Hands a finished teleport to the arrival listeners; a failure there never touches the outcome. */
+    private void arrived(TeleportPlan plan, Location from, Location to) {
+        for (TeleportArrivalListener listener : arrivalListeners) {
+            try {
+                listener.arrived(plan, from, to);
+            } catch (RuntimeException ex) {
+                LOGGER.log(Level.WARNING, "[KnK Teleport] Arrival listener " + listener.getClass().getName()
+                    + " failed for " + plan.subject().getName(), ex);
+            }
         }
     }
 

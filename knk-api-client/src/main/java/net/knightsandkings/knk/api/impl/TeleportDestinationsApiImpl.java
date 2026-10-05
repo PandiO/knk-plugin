@@ -68,6 +68,14 @@ public class TeleportDestinationsApiImpl extends BaseApiImpl implements Teleport
     }
 
     @Override
+    public CompletableFuture<TeleportChargeResult> chargeBackFee(int userId, int amountCoins, String idempotencyKey,
+                                                                String backKind) {
+        return charge(baseUrl + ENDPOINT + "/back-fee",
+            new TeleportChargeDtos.BackFee(userId, amountCoins, idempotencyKey, backKind),
+            "the /back fee of user " + userId);
+    }
+
+    @Override
     public CompletableFuture<TeleportRefundResult> refund(int userId, String idempotencyKey, String reason) {
         return CompletableFuture.supplyAsync(() -> {
             String url = baseUrl + ENDPOINT + "/refund";

@@ -13,12 +13,13 @@ import org.bukkit.entity.Player;
 
 import net.knightsandkings.knk.core.domain.teleport.KnkTeleportDestination;
 import net.knightsandkings.knk.core.domain.teleport.TeleportChargeResult;
+import net.knightsandkings.knk.core.teleport.BackKind;
 import net.knightsandkings.knk.core.teleport.TeleportCharger;
 import net.knightsandkings.knk.core.teleport.TeleportDenial;
 
 /**
  * Builds the {@link TeleportCharge}s of paid teleports (docs/specs/teleport/DESIGN.md §3.5, §3.7,
- * Phase 5): a warp's gem price and a {@code /tpa}'s coin fee. Both go to knk-web-api's charge
+ * Phase 5): a warp's gem price, a {@code /tpa}'s coin fee and a {@code /back}'s coin fee (KNG-42). All go to knk-web-api's charge
  * routes through {@link TeleportCharger} with a fresh idempotency key per teleport attempt, so a
  * timed-out charge is retried without charging twice and refunded when the teleport doesn't happen.
  * The server decides whether the player may go and what it costs; the plugin only passes the
@@ -78,6 +79,21 @@ public class TeleportCharges {
                 if ("InsufficientCoins".equals(result.refusalCode())) {
                     return TeleportDenial.of("fee", requesterName + " doesn't have the " + coins
                         + " coins this teleport request costs.");
+                }
+                return super.denialOf(result);
+            }
+        };
+    }
+
+    /** The flat coin fee of {@code player}'s own {@code /back} (Linear KNG-42), for the ledger tagged with {@code kind}. */
+    public TeleportCharge backFee(Player player, int coins, BackKind kind) {
+        UUID payer = player.getUniqueId();
+        String key = TeleportCharger.newKey("back");
+        return new Charge(payer, key, "coins", userId -> charger.chargeBackFee(userId, coins, key, kind.configKey())) {
+            @Override
+            TeleportDenial denialOf(TeleportChargeResult result) {
+                if ("InsufficientCoins".equals(result.refusalCode())) {
+                    return TeleportDenial.of("fee", "You don't have the " + coins + " coins /back costs.");
                 }
                 return super.denialOf(result);
             }

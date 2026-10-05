@@ -1,5 +1,7 @@
 package net.knightsandkings.knk.paper.teleport;
 
+import net.knightsandkings.knk.core.teleport.BackKind;
+
 /**
  * Permission nodes of the teleport feature (docs/specs/teleport/DESIGN.md §3.3). All resolve
  * through {@code KnkPermissible} (the REST-backed permission model; ops pass); the plugin.yml
@@ -33,6 +35,19 @@ public final class TeleportNodes {
 
     /** {@code /back} - to where you last died, for a few minutes (Dragon Blood, developer decision Q5). */
     public static final String BACK = "knk.teleport.back";
+    /** {@code /back} - to where you were before your last {@code /warp} or menu warp (KNG-42). */
+    public static final String BACK_WARPS = "knk.teleport.back.warps";
+    /** {@code /back} - to where you were before your last {@code /tpa}/{@code /tpahere} or own staff {@code /tp} (KNG-42). */
+    public static final String BACK_TELEPORT = "knk.teleport.back.teleport";
+    /** {@code /back} - to where you were before your last {@code /spawn} (KNG-42). */
+    public static final String BACK_SPAWN = "knk.teleport.back.spawn";
+    /**
+     * {@code /back} for every {@link BackKind} (KNG-42). Granting {@code knk.teleport.back.*} works too
+     * (the API's wildcard matching covers every kind's node).
+     */
+    public static final String BACK_ALL = "knk.teleport.back.all";
+    /** {@code /back <player> [-s]} - send someone back to their latest {@code /back} place (KNG-42). */
+    public static final String STAFF_BACK_OTHERS = "knk.teleport.staff.back.others";
 
     /** 3 s instead of 5 s warmup (v1: any donator rank). */
     public static final String WARMUP_SHORT = "knk.teleport.warmup.short";
@@ -44,5 +59,15 @@ public final class TeleportNodes {
     public static final String REGION_BYPASS = "knk.region.bypass";
 
     private TeleportNodes() {
+    }
+
+    /** The node that lets a player {@code /back} to a place of {@code kind} (KNG-42). */
+    public static String backNode(BackKind kind) {
+        return switch (kind) {
+            case DEATH -> BACK;
+            case WARPS -> BACK_WARPS;
+            case TELEPORT -> BACK_TELEPORT;
+            case SPAWN -> BACK_SPAWN;
+        };
     }
 }

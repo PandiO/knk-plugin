@@ -1448,10 +1448,15 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().warning("teleport.request.price-coins is " + config.teleport().request().priceCoins()
                 + " but the API client isn't available to charge it, so /tpa and /tpahere will be refused.");
         }
-        // Phase 7: /back to the last death (developer decision Q5); siege deaths are excluded through
-        // registerBackDeathExclusion.
+        // Phase 7 + KNG-42: /back to the last death or teleport origin the player's nodes allow; siege
+        // deaths are excluded through registerBackDeathExclusion. Registers itself with the engine.
         this.backService = new net.knightsandkings.knk.paper.teleport.BackService(
             teleportService, mainThread, knkPermissible::hasPermissionAsync, org.bukkit.Bukkit::getWorld);
+        backService.setCharges(charges);
+        if (config.teleport().back().isPaid() && charges == null) {
+            getLogger().warning("teleport.back.price-coins is " + config.teleport().back().priceCoins()
+                + " but the API client isn't available to charge it, so /back will be refused.");
+        }
         getServer().getScheduler().runTaskTimer(this, () -> {
             teleportService.tick(adminFreezeManager::isFrozen);
             teleportRequestService.tick();
@@ -1488,8 +1493,9 @@ public class KnKPlugin extends JavaPlugin {
             // Each player's cached destination list and user id go when they leave.
             warmupListener.addQuitHook(warpCommand::forget);
         }
-        // Phase 7: /back.
-        this.backCommand = new net.knightsandkings.knk.paper.commands.BackCommand(support, backService);
+        // Phase 7 + KNG-42: /back, /back <player> [-s].
+        this.backCommand = new net.knightsandkings.knk.paper.commands.BackCommand(support, backService, rankCheck,
+            targets, modeService::isVanished);
         // Phase 6: the teleport menu (teleport.destinations) runs the same /warp, /spawn and request paths,
         // and a bare /warp opens it (the chat list while the menu isn't available).
         this.teleportMenuParts = new net.knightsandkings.knk.paper.menu.content.TeleportMenuFeature.Teleports(

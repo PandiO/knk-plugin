@@ -30,6 +30,16 @@ public interface TeleportDestinationsCommandApi {
     CompletableFuture<TeleportChargeResult> chargeRequestFee(int userId, int amountCoins, String idempotencyKey,
                                                             Integer otherUserId);
 
+    /**
+     * Charge the flat coin fee of a player's own {@code /back} ({@code teleport.back.price-coins},
+     * Linear KNG-42).
+     *
+     * @param backKind what the player goes back to ({@code death}, {@code warps}, {@code teleport},
+     *                 {@code spawn}), for the ledger's metadata
+     */
+    CompletableFuture<TeleportChargeResult> chargeBackFee(int userId, int amountCoins, String idempotencyKey,
+                                                         String backKind);
+
     /** Give back what the charge made under {@code idempotencyKey} took; harmless to repeat. */
     CompletableFuture<TeleportRefundResult> refund(int userId, String idempotencyKey, String reason);
 }

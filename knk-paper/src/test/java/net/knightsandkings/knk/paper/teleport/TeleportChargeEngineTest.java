@@ -6,6 +6,7 @@ import net.knightsandkings.knk.core.domain.teleport.TeleportRefundResult;
 import net.knightsandkings.knk.core.ports.api.TeleportDestinationsCommandApi;
 import net.knightsandkings.knk.core.teleport.BlockProbe;
 import net.knightsandkings.knk.core.teleport.TeleportCharger;
+import net.knightsandkings.knk.core.teleport.TeleportDenial;
 import net.knightsandkings.knk.core.teleport.TeleportOutcome;
 import net.knightsandkings.knk.core.teleport.TeleportRequestBook.Direction;
 import net.knightsandkings.knk.core.teleport.TeleportRequestSettings;
@@ -65,6 +66,12 @@ class TeleportChargeEngineTest {
         @Override
         public CompletableFuture<TeleportChargeResult> chargeRequestFee(int userId, int amountCoins, String key, Integer otherUserId) {
             feeCalls.add(userId + ":" + amountCoins + ":" + otherUserId + ":" + key);
+            return CompletableFuture.completedFuture(next);
+        }
+
+        @Override
+        public CompletableFuture<TeleportChargeResult> chargeBackFee(int userId, int amountCoins, String key, String backKind) {
+            feeCalls.add(userId + ":" + amountCoins + ":" + backKind + ":" + key);
             return CompletableFuture.completedFuture(next);
         }
 
@@ -336,5 +343,115 @@ class TeleportChargeEngineTest {
         verify(bob, never()).teleportAsync(any(Location.class), any(TeleportCause.class));
         verify(bob).sendMessage(contains("Alice doesn't have the 250 coins"));
         assertFalse(api.feeCalls.isEmpty());
+    }
+
+    // ===== KNG-42: the /back fee =====
+
+    private void grant(Player player, String... nodes) {
+        granted.computeIfAbsent(player.getUniqueId(), id -> new HashSet<>()).addAll(Set.of(nodes));
+    }
+
+    private BackService paidBack(int priceCoins) {
+        TeleportSettings d = TeleportSettings.defaults();
+        engine.updateSettings(new TeleportSettings(d.warmupSeconds(), d.warmupShortSeconds(), d.cooldownSeconds(),
+            d.combatTagSeconds(), d.safeSearchRadius(), d.request(), d.destinationsCacheSeconds(),
+            new net.knightsandkings.knk.core.teleport.TeleportBackSettings(true, 300, Map.of(), priceCoins)));
+        return new BackService(engine, Runnable::run, permissions, id -> world);
+    }
+
+    /** {@code player} warps from where they stand to the town for free, leaving a WARPS place behind. */
+    private void warpAwayFree(Player player) {
+        Location town = new Location(world, 500.5, 64, 500.5);
+        TeleportOutcome outcome = engine.start(TeleportPlan.warp(player, town, "Town", null)).join();
+        assertTrue(outcome.isTeleported());
+        when(player.getLocation()).thenReturn(town);
+    }
+
+    @Test
+    void aPaidBackIsChargedAfterTheWarmup_TaggedWithItsKind() {
+        BackService back = paidBack(250);
+        back.setCharges(charges);
+        grant(alice, TeleportNodes.BACK_WARPS, TeleportNodes.BYPASS_WARMUP, TeleportNodes.BYPASS_COOLDOWN);
+        warpAwayFree(alice);
+        api.next = TeleportChargeResult.allowed("Coins", 250, 750, false, null);
+        granted.get(alice.getUniqueId()).remove(TeleportNodes.BYPASS_WARMUP);
+
+        CompletableFuture<BackService.Trip> trip = back.start(alice, back.access(alice).join());
+        assertTrue(api.feeCalls.isEmpty(), "nothing charged during the warmup");
+        advance(5_000);
+
+        assertTrue(trip.join().isTeleported());
+        assertEquals(1, api.feeCalls.size());
+        assertTrue(api.feeCalls.get(0).startsWith("7:250:warps:back:"), api.feeCalls.get(0));
+        verify(alice).sendMessage(org.mockito.ArgumentMatchers.contains("You paid 250 coins"));
+    }
+
+    @Test
+    void aPaidBackThatCantBeAffordedIsRefused_AndKeepsThePlace() {
+        BackService back = paidBack(250);
+        back.setCharges(charges);
+        grant(alice, TeleportNodes.BACK_WARPS, TeleportNodes.BYPASS_WARMUP, TeleportNodes.BYPASS_COOLDOWN);
+        warpAwayFree(alice);
+        api.next = TeleportChargeResult.refused("InsufficientCoins", "Not enough coins.");
+
+        BackService.Trip trip = back.start(alice, back.access(alice).join()).join();
+
+        assertEquals("fee", trip.code());
+        assertTrue(trip.outcome().message().contains("250 coins"), trip.outcome().message());
+        assertTrue(back.secondsLeft(alice.getUniqueId()) > 0, "a refused /back keeps the place");
+    }
+
+    @Test
+    void anUnsafePaidBackIsRefunded() {
+        BackService back = paidBack(250);
+        back.setCharges(charges);
+        grant(alice, TeleportNodes.BACK_WARPS, TeleportNodes.BYPASS_WARMUP, TeleportNodes.BYPASS_COOLDOWN);
+        warpAwayFree(alice);
+        api.next = TeleportChargeResult.allowed("Coins", 250, 750, false, null);
+        safe = false;
+
+        BackService.Trip trip = back.start(alice, back.access(alice).join()).join();
+
+        assertEquals(TeleportDenial.UNSAFE, trip.code());
+        assertEquals(1, api.refundKeys.size());
+    }
+
+    @Test
+    void bypassCostMakesBackFree_AndAFreeBackAsksNothing() {
+        BackService back = paidBack(250);
+        back.setCharges(charges);
+        grant(alice, TeleportNodes.BACK_WARPS, TeleportNodes.BYPASS_WARMUP, TeleportNodes.BYPASS_COOLDOWN,
+            TeleportNodes.BYPASS_COST);
+        warpAwayFree(alice);
+
+        assertTrue(back.start(alice, back.access(alice).join()).join().isTeleported());
+        assertTrue(api.feeCalls.isEmpty());
+
+        BackService free = paidBack(0);
+        free.setCharges(charges);
+        grant(bob, TeleportNodes.BACK_WARPS, TeleportNodes.BYPASS_WARMUP, TeleportNodes.BYPASS_COOLDOWN);
+        warpAwayFree(bob);
+        assertTrue(free.start(bob, free.access(bob).join()).join().isTeleported());
+        assertTrue(api.feeCalls.isEmpty());
+    }
+
+    @Test
+    void aPaidBackWithoutTheApiIsRefused() {
+        BackService back = paidBack(250);
+        grant(alice, TeleportNodes.BACK_WARPS, TeleportNodes.BYPASS_WARMUP, TeleportNodes.BYPASS_COOLDOWN);
+        warpAwayFree(alice);
+
+        assertEquals(BackService.FEE_UNAVAILABLE, back.start(alice, back.access(alice).join()).join().code());
+    }
+
+    @Test
+    void staffBackIsNeverCharged() {
+        BackService back = paidBack(250);
+        back.setCharges(charges);
+        grant(alice, TeleportNodes.BYPASS_WARMUP, TeleportNodes.BYPASS_COOLDOWN);
+        warpAwayFree(alice);
+
+        assertTrue(back.startFor(bob, alice, false).join().isTeleported());
+        assertTrue(api.feeCalls.isEmpty());
     }
 }

@@ -119,7 +119,7 @@ player-notifications:
 
 # Teleport engine (docs/specs/teleport/DESIGN.md §3.11, knk-workspace). Staff teleports (/tp,
 # /tphere, /knk tp) are instant and skip warmup, cooldown, combat tag and the safe-spot check; the
-# settings below apply to player teleports (/tpa, /tpahere, /spawn, /warp; /back in a later phase).
+# settings below apply to player teleports (/tpa, /tpahere, /spawn, /warp, /back).
 teleport:
   # Seconds a player waits before teleporting; moving to another block or taking damage cancels it
   warmup-seconds: 5            # v1 default
@@ -148,12 +148,24 @@ teleport:
   destinations:
     # Seconds a player's destination list (names, prices, locks) is cached
     cache-seconds: 60
-  # /back (knk.teleport.back, meant for Dragon Blood): back to where you last died, once per death.
-  # Warmup, cooldown, combat tag and the safe-spot check apply; a siege death gives no /back.
+  # /back (Linear KNG-42): back to the latest place among the kinds the player's nodes allow -
+  # where they died (knk.teleport.back, meant for Dragon Blood), or where they were before a /warp
+  # (knk.teleport.back.warps), a /tpa, /tpahere or their own staff /tp (knk.teleport.back.teleport)
+  # or a /spawn (knk.teleport.back.spawn); knk.teleport.back.all allows every kind. Each place is
+  # single use. Warmup, cooldown, combat tag and the safe-spot check apply. Siege deaths and siege
+  # teleports are never recorded; places from before a siege stay usable after it while they last.
+  # Staff: /back <player> [-s] (knk.teleport.staff.back.others) - instant, audited, free.
   back:
     enabled: true
-    # Seconds after a death during which /back can be started
+    # Seconds after the death or teleport during which /back can be started (every kind)
     expire-seconds: 300        # developer decision Q5: 5 minutes
+    # Optional per-kind overrides of expire-seconds (death, warps, teleport, spawn)
+    # expire-seconds-by-kind:
+    #   warps: 600
+    #   spawn: 120
+    # Coins a player's own /back costs (0 = free; knk.teleport.bypass.cost pays nothing). Charged by
+    # the web API when the teleport happens (after the warmup) and refunded if it then fails.
+    price-coins: 0
 
 # Domain discovery (Linear KNG-20, knk-workspace docs/specs/domain-discovery/DESIGN.md §3.6):
 # the first time a player enters a Town, District or Structure it is recorded and rewarded once.

@@ -29,6 +29,15 @@ public final class TeleportChargeDtos {
         @JsonProperty("otherUserId") Integer otherUserId
     ) {}
 
+    /** POST .../back-fee - the flat coin fee of a player's own /back (Linear KNG-42). */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record BackFee(
+        @JsonProperty("userId") int userId,
+        @JsonProperty("amountCoins") int amountCoins,
+        @JsonProperty("idempotencyKey") String idempotencyKey,
+        @JsonProperty("backKind") String backKind
+    ) {}
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record ChargeResult(
         @JsonProperty("currency") String currency,

@@ -162,4 +162,20 @@ class TeleportDestinationsApiImplTest {
         assertFalse(nothing.refunded());
         assertNull(nothing.newBalance());
     }
+
+    @Test
+    void backFeeBody() throws Exception {
+        responseJson = "{\"currency\":\"Coins\",\"charged\":250,\"newBalance\":750,\"replayed\":false,\"destination\":null}";
+
+        TeleportChargeResult fee = api.chargeBackFee(12, 250, "back:k", "warps").join();
+
+        assertEquals("http://api.test/api/teleport-destinations/back-fee", seen.get(0).url().toString());
+        JsonNode body = mapper.readTree(bodies.get(0));
+        assertEquals(12, body.get("userId").asInt());
+        assertEquals(250, body.get("amountCoins").asInt());
+        assertEquals("back:k", body.get("idempotencyKey").asText());
+        assertEquals("warps", body.get("backKind").asText());
+        assertTrue(fee.allowed());
+        assertEquals(250L, fee.charged());
+    }
 }
