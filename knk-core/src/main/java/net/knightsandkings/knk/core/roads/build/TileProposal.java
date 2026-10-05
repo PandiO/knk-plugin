@@ -158,10 +158,26 @@ public record TileProposal(int baseVersion, int builderVersion, String createdBy
                 domainIds, regionIds, node, target, note);
         }
 
-        /** Where the admin is teleported to look at the item: the middle of the polyline, or the node. */
+        /** Where the admin is teleported to look at the item: the middle of the polyline (by length), or the node. */
         public int[] focus() {
             if (!kind.isEdge()) {
                 return kind == Kind.NODE_MOVED ? target.clone() : node.position();
+            }
+            double total = 0;
+            for (int i = 1; i < geometry.size(); i++) {
+                total += distance(geometry.get(i - 1), geometry.get(i));
+            }
+            double half = total / 2;
+            for (int i = 1; i < geometry.size(); i++) {
+                int[] a = geometry.get(i - 1);
+                int[] b = geometry.get(i);
+                double step = distance(a, b);
+                if (step >= half && step > 0) {
+                    double t = half / step;
+                    return new int[] {(int) Math.round(a[0] + t * (b[0] - a[0])), (int) Math.round(a[1] + t * (b[1] - a[1])),
+                        (int) Math.round(a[2] + t * (b[2] - a[2]))};
+                }
+                half -= step;
             }
             return geometry.get(geometry.size() / 2).clone();
         }

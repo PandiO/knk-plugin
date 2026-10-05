@@ -166,6 +166,7 @@ class TileDiffTest {
         assertEquals(12, items.get(0).edgeId());
         assertEquals(4, items.get(1).node().nodeId());
         assertEquals("1 removed edge #12 (#2 → #4)", items.get(0).describe());
+        assertArrayEquals(new int[] {200, 64, 175}, items.get(0).focus()); // the middle of the edge
     }
 
     @Test
