@@ -140,7 +140,7 @@ class RoadCuratedTilesApiTest {
         assertEquals(1, body.get("movedCount").asInt());
         assertEquals(0, body.get("removedCount").asInt());
         assertEquals("EDGE_ADDED", body.get("items").get(0).get("kind").asText());
-        assertEquals("1 added edge 8 m (#3588 → new junction)", body.get("items").get(0).get("summary").asText());
+        assertEquals("item 1: added edge 8 m (#3588 → new junction)", body.get("items").get(0).get("summary").asText());
         assertEquals(0, body.get("items").get(0).get("to").get("nodeId").asInt());
         assertFalse(body.get("items").get(1).has("geometry")); // node items carry no polyline
         assertEquals("gate doors [] → [7]", body.get("rejected").get(0).get("note").asText());

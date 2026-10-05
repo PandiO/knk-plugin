@@ -59,7 +59,7 @@ import net.kyori.adventure.text.Component;
 public final class RoadProposals {
     public static final int PAGE_SIZE = 10;
     /** Sub-commands, for tab completion. */
-    public static final List<String> ACTIONS = List.of("show", "list", "accept", "reject", "clear", "rejected", "unreject");
+    public static final List<String> ACTIONS = List.of("show", "list", "accept", "reject", "clear", "rejected", "unreject", "unconfirm");
 
     /** {@link #propose}: the stored proposal (empty = the build found nothing to review) and how many items the rejected list hid. */
     public record Created(TileProposal proposal, int hidden) {
@@ -188,9 +188,9 @@ public final class RoadProposals {
             case "reject" -> reject(sender, key.get(), rest);
             case "clear" -> clear(sender, key.get());
             case "rejected" -> rejected(sender, key.get());
-            case "unreject" -> unreject(sender, key.get(), rest);
-            default -> sender.sendMessage(RoadMessages.usage("/knk road proposal [page] | list | accept <all|n…|kind> | reject <all|n…|kind>"
-                + " | clear | rejected | unreject <n…|all>  [@tileX,tileZ]"));
+            case "unreject", "unconfirm" -> unreject(sender, key.get(), rest);
+            default -> sender.sendMessage(RoadMessages.usage("/knk road proposal [page] | list | accept <all|item…|kind> | reject <all|item…|kind>"
+                + " | clear | rejected | unreject <R…|all>  [@tileX,tileZ]"));
         }
     }
 
@@ -340,9 +340,9 @@ public final class RoadProposals {
     static List<Component> acceptedMessages(TileDiff.Merge merge, List<Item> remaining, TileProposal proposal, TileKey key, boolean uploaded) {
         List<Component> lines = new ArrayList<>();
         if (!merge.applied().isEmpty()) {
-            lines.add(RoadMessages.good("Tile " + label(key) + ": accepted " + merge.applied().size() + " item(s) " + numbers(merge.applied()) + "."));
+            lines.add(RoadMessages.good("Tile " + label(key) + ": accepted " + items(merge.applied()) + " - applied to the road graph."));
         }
-        merge.skipped().forEach((n, reason) -> lines.add(RoadMessages.warn(" " + n + " skipped: " + reason
+        merge.skipped().forEach((n, reason) -> lines.add(RoadMessages.warn(" item " + n + " skipped: " + reason
             + " (rebuild the tile for a fresh proposal).")));
         if (remaining.isEmpty()) {
             lines.add(RoadMessages.good("Review of tile " + label(key) + " finished"
@@ -353,6 +353,11 @@ public final class RoadProposals {
         return lines;
     }
 
+    /**
+     * Reject (plan §5.7 D4): every rejected item goes on the tile's rejected list as R1, R2 …, which {@code unreject}
+     * undoes. A removed edge is also confirmed and a removed node locked (the road part is kept); the entry records which
+     * nodes that locked, so unreject unlocks exactly those again. Other changes are only hidden from later proposals.
+     */
     private void reject(CommandSender sender, TileKey key, List<String> tokens) {
         withProposal(sender, key, proposal -> {
             ProposalSelection.Result selection = ProposalSelection.parse(tokens, proposal.items());
@@ -361,41 +366,58 @@ public final class RoadProposals {
                 return CompletableFuture.completedFuture(null);
             }
             List<Item> chosen = proposal.items().stream().filter(i -> selection.numbers().contains(i.n())).toList();
-            List<String> problems = Collections.synchronizedList(new ArrayList<>());
-            List<CompletableFuture<?>> confirms = new ArrayList<>();
-            List<Item> rejected = new ArrayList<>(proposal.rejected());
-            for (Item item : chosen) {
-                switch (item.kind()) {
-                    case EDGE_REMOVED -> confirms.add(commandApi.updateEdge(item.edgeId(), RoadEdgeUpdate.confirmed(true))
-                        .handle((r, ex) -> note(problems, ex, "confirm edge #" + item.edgeId())));
-                    case NODE_REMOVED -> confirms.add(commandApi.updateNode(item.node().nodeId(), RoadNodeUpdate.locked(true))
-                        .handle((r, ex) -> note(problems, ex, "lock node #" + item.node().nodeId())));
-                    default -> rejected.add(item);
+            return queryApi.tileGraph(key.world(), key.tileX(), key.tileZ(), null).thenCompose(download -> {
+                Set<Integer> unlocked = new java.util.HashSet<>();
+                download.body().nodes().stream().filter(n -> !n.locked()).forEach(n -> unlocked.add(n.id()));
+                List<String> problems = Collections.synchronizedList(new ArrayList<>());
+                List<CompletableFuture<?>> keeps = new ArrayList<>();
+                List<Item> rejected = new ArrayList<>(proposal.rejected());
+                List<String> moves = new ArrayList<>();
+                for (Item item : chosen) {
+                    Item entry = item;
+                    switch (item.kind()) {
+                        case EDGE_REMOVED -> {
+                            entry = item.withLockedNodes(java.util.stream.Stream.of(item.from().nodeId(), item.to().nodeId())
+                                .filter(unlocked::contains).toList());
+                            keeps.add(commandApi.updateEdge(item.edgeId(), RoadEdgeUpdate.confirmed(true))
+                                .handle((r, ex) -> note(problems, ex, "confirm edge #" + item.edgeId())));
+                        }
+                        case NODE_REMOVED -> {
+                            entry = item.withLockedNodes(unlocked.contains(item.node().nodeId()) ? List.of(item.node().nodeId()) : List.of());
+                            keeps.add(commandApi.updateNode(item.node().nodeId(), RoadNodeUpdate.locked(true))
+                                .handle((r, ex) -> note(problems, ex, "lock node #" + item.node().nodeId())));
+                        }
+                        default -> {
+                        }
+                    }
+                    rejected.add(entry);
+                    moves.add("item " + item.n() + " → R" + rejected.size());
                 }
-            }
-            List<Item> remaining = proposal.items().stream().filter(i -> !selection.numbers().contains(i.n())).toList();
-            TileProposal next = proposal.with(remaining, rejected);
-            return CompletableFuture.allOf(confirms.toArray(CompletableFuture[]::new))
-                .thenCompose(v -> commandApi.saveProposal(key.world(), key.tileX(), key.tileZ(), next))
-                .thenCompose(saved -> remaining.isEmpty() ? finishReview(key, proposal) : CompletableFuture.completedFuture(null))
-                .thenRun(() -> mainThread.execute(() -> {
-                    proposals.put(key, next);
-                    sender.sendMessage(RoadMessages.good("Tile " + label(key) + ": rejected " + chosen.size() + " item(s) " + numbers(selection.numbers())
-                        + " - kept " + chosen.stream().filter(i -> i.kind() == Kind.EDGE_REMOVED || i.kind() == Kind.NODE_REMOVED).count()
-                        + " road part(s) the build lost (confirmed), " + (rejected.size() - proposal.rejected().size())
-                        + " change(s) on the rejected list."));
-                    problems.forEach(p -> sender.sendMessage(RoadMessages.warn(" " + p)));
-                    if (remaining.isEmpty()) {
-                        sender.sendMessage(RoadMessages.good("Review of tile " + label(key) + " finished: it now counts as built with v"
-                            + proposal.builderVersion() + "."));
-                    } else {
-                        sender.sendMessage(RoadMessages.info(remaining.size() + " item(s) left. ")
-                            .append(RoadMessages.command("[show]", "/knk road proposal " + at(key))));
-                    }
-                    if (cache != null) {
-                        cache.refreshTiles(key.world());
-                    }
-                }));
+                List<Item> remaining = proposal.items().stream().filter(i -> !selection.numbers().contains(i.n())).toList();
+                TileProposal next = proposal.with(remaining, rejected);
+                long kept = chosen.stream().filter(Item::isRemoval).count();
+                return CompletableFuture.allOf(keeps.toArray(CompletableFuture[]::new))
+                    .thenCompose(v -> commandApi.saveProposal(key.world(), key.tileX(), key.tileZ(), next))
+                    .thenCompose(saved -> remaining.isEmpty() ? finishReview(key, proposal) : CompletableFuture.completedFuture(null))
+                    .thenRun(() -> mainThread.execute(() -> {
+                        proposals.put(key, next);
+                        sender.sendMessage(RoadMessages.good("Tile " + label(key) + ": rejected " + String.join(", ", moves) + "."
+                            + (kept > 0 ? " " + kept + " road part(s) the build lost are kept (edge confirmed / node locked)." : "")));
+                        sender.sendMessage(RoadMessages.info(" Take a decision back with /knk road proposal unreject R<n> ")
+                            .append(RoadMessages.command("[rejected list]", "/knk road proposal rejected " + at(key))));
+                        problems.forEach(p -> sender.sendMessage(RoadMessages.warn(" " + p)));
+                        if (remaining.isEmpty()) {
+                            sender.sendMessage(RoadMessages.good("Review of tile " + label(key) + " finished: it now counts as built with v"
+                                + proposal.builderVersion() + "."));
+                        } else {
+                            sender.sendMessage(RoadMessages.info(remaining.size() + " item(s) left. ")
+                                .append(RoadMessages.command("[show]", "/knk road proposal " + at(key))));
+                        }
+                        if (cache != null) {
+                            cache.refreshTiles(key.world());
+                        }
+                    }));
+            });
         });
     }
 
@@ -433,21 +455,35 @@ public final class RoadProposals {
             }
             List<Item> rejected = found.map(TileProposal::rejected).orElse(List.of());
             if (rejected.isEmpty()) {
-                sender.sendMessage(RoadMessages.info("Tile " + label(key) + " has no rejected changes."));
+                sender.sendMessage(RoadMessages.info("Tile " + label(key) + " has no rejected items."));
                 return;
             }
-            sender.sendMessage(RoadMessages.prefixed(Component.text("Rejected changes of tile " + label(key) + " (hidden from later proposals):",
+            sender.sendMessage(RoadMessages.prefixed(Component.text("Rejected items of tile " + label(key)
+                + " (kept road parts, and changes hidden from later proposals) - /knk road proposal unreject R<n> takes one back:",
                 RoadMessages.HIGHLIGHT)));
-            for (int i = 0; i < rejected.size(); i++) {
-                Item item = rejected.get(i);
-                int[] focus = item.focus();
-                sender.sendMessage(Component.text(" " + (i + 1) + ". " + item.describe().replaceFirst("^\\d+ ", "") + " ", RoadMessages.INFO)
-                    .append(RoadMessages.teleport(focus[0], focus[1], focus[2])).append(Component.text(" "))
-                    .append(RoadMessages.command("[unreject]", "/knk road proposal unreject " + (i + 1) + " " + at(key))));
+            for (Component line : rejectedLines(rejected, key)) {
+                sender.sendMessage(line);
             }
         }));
     }
 
+    static List<Component> rejectedLines(List<Item> rejected, TileKey key) {
+        List<Component> lines = new ArrayList<>();
+        for (int i = 0; i < rejected.size(); i++) {
+            Item item = rejected.get(i);
+            int[] focus = item.focus();
+            lines.add(Component.text(" R" + (i + 1) + ": " + item.what() + (item.isRemoval() ? " - kept" : " - hidden") + " ", RoadMessages.INFO)
+                .append(RoadMessages.teleport(focus[0], focus[1], focus[2])).append(Component.text(" "))
+                .append(RoadMessages.command("[unreject]", "/knk road proposal unreject R" + (i + 1) + " " + at(key))));
+        }
+        return lines;
+    }
+
+    /**
+     * Takes rejected items back (R1, R2 … as {@code rejected} lists them; {@code unconfirm} is the same): a kept edge is
+     * unconfirmed and the nodes its rejection locked are unlocked again, a kept node is unlocked; any other entry no longer
+     * hides its change. The next build may propose all of them again.
+     */
     private void unreject(CommandSender sender, TileKey key, List<String> tokens) {
         load(key).whenComplete((found, ex) -> mainThread.execute(() -> {
             if (RoadAdminCommand.failed(sender, "load the proposal of tile " + label(key), ex)) {
@@ -455,35 +491,64 @@ public final class RoadProposals {
             }
             List<Item> rejected = found.map(TileProposal::rejected).orElse(List.of());
             if (rejected.isEmpty()) {
-                sender.sendMessage(RoadMessages.info("Tile " + label(key) + " has no rejected changes."));
+                sender.sendMessage(RoadMessages.info("Tile " + label(key) + " has no rejected items."));
                 return;
             }
-            // Rejected entries are addressed by their position in the list (their item numbers repeat across proposals).
             List<Item> positions = new ArrayList<>();
             for (int i = 0; i < rejected.size(); i++) {
                 positions.add(rejected.get(i).numbered(i + 1));
             }
-            ProposalSelection.Result selection = ProposalSelection.parse(tokens, positions);
+            ProposalSelection.Result selection = ProposalSelection.parse(rejectedTokens(tokens), positions);
             if (!selection.ok()) {
-                sender.sendMessage(RoadMessages.bad(selection.error()));
+                sender.sendMessage(RoadMessages.bad("Say which rejected items: R1" + (rejected.size() > 1 ? "-R" + rejected.size() : "")
+                    + " (see /knk road proposal rejected), or all."));
                 return;
             }
+            List<String> problems = Collections.synchronizedList(new ArrayList<>());
+            List<CompletableFuture<?>> undo = new ArrayList<>();
             List<Item> kept = new ArrayList<>();
+            List<String> done = new ArrayList<>();
             for (int i = 0; i < rejected.size(); i++) {
+                Item item = rejected.get(i);
                 if (!selection.numbers().contains(i + 1)) {
-                    kept.add(rejected.get(i));
+                    kept.add(item);
+                    continue;
                 }
+                if (item.kind() == Kind.EDGE_REMOVED) {
+                    undo.add(commandApi.updateEdge(item.edgeId(), RoadEdgeUpdate.confirmed(false))
+                        .handle((r, e) -> note(problems, e, "unconfirm edge #" + item.edgeId())));
+                }
+                for (int nodeId : item.lockedNodeIds()) {
+                    undo.add(commandApi.updateNode(nodeId, RoadNodeUpdate.locked(false))
+                        .handle((r, e) -> note(problems, e, "unlock node #" + nodeId)));
+                }
+                done.add("R" + (i + 1) + " (" + item.what() + (item.isRemoval()
+                    ? (item.kind() == Kind.EDGE_REMOVED ? ": unconfirmed" : ": ") + (item.lockedNodeIds().isEmpty() ? ""
+                        : (item.kind() == Kind.EDGE_REMOVED ? ", " : "") + "unlocked " + item.lockedNodeIds().stream().map(n -> "#" + n).toList())
+                    : "") + ")");
             }
             TileProposal next = found.get().with(found.get().items(), kept);
-            commandApi.saveProposal(key.world(), key.tileX(), key.tileZ(), next).whenComplete((s, ex2) -> mainThread.execute(() -> {
-                if (RoadAdminCommand.failed(sender, "update the rejected list of tile " + label(key), ex2)) {
-                    return;
-                }
-                proposals.put(key, next);
-                sender.sendMessage(RoadMessages.good("Tile " + label(key) + ": " + selection.numbers().size()
-                    + " change(s) taken off the rejected list; the next build proposes them again."));
-            }));
+            CompletableFuture.allOf(undo.toArray(CompletableFuture[]::new))
+                .thenCompose(v -> commandApi.saveProposal(key.world(), key.tileX(), key.tileZ(), next))
+                .whenComplete((s, ex2) -> mainThread.execute(() -> {
+                    if (RoadAdminCommand.failed(sender, "update the rejected list of tile " + label(key), ex2)) {
+                        return;
+                    }
+                    proposals.put(key, next);
+                    sender.sendMessage(RoadMessages.good("Tile " + label(key) + ": took back " + String.join(", ", done)
+                        + ". The next build may propose them again."
+                        + (kept.isEmpty() ? "" : " The rejected list is renumbered: R1-R" + kept.size() + ".")));
+                    problems.forEach(p -> sender.sendMessage(RoadMessages.warn(" " + p)));
+                    if (cache != null) {
+                        cache.refreshTiles(key.world());
+                    }
+                }));
         }));
+    }
+
+    /** "R3", "r1-R3", "R1,R2" → "3", "1-3", "1,2" (plain numbers and "all" pass through). */
+    static List<String> rejectedTokens(List<String> tokens) {
+        return tokens.stream().map(t -> t.replaceAll("(?i)\\br(\\d)", "$1")).toList();
     }
 
     /** Loads the proposal, refuses when there is nothing to review or another review step of the tile runs. */
@@ -582,8 +647,10 @@ public final class RoadProposals {
         return parts.isEmpty() ? "no changes" : String.join(", ", parts);
     }
 
-    private static String numbers(Set<Integer> numbers) {
-        return new TreeSet<>(numbers).toString().replace("[", "(").replace("]", ")");
+    /** "item 6" or "items 1, 3, 5". */
+    static String items(Set<Integer> numbers) {
+        List<String> sorted = new TreeSet<>(numbers).stream().map(String::valueOf).toList();
+        return (sorted.size() == 1 ? "item " : "items ") + String.join(", ", sorted);
     }
 
     private static String worldOf(CommandSender sender) {

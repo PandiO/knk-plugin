@@ -340,7 +340,7 @@ public final class RoadMapper {
             mapEnd(dto.from()), mapEnd(dto.to()), geometry(dto.geometry()), geometry(dto.before()),
             dto.length() == null ? 0 : dto.length(), dto.avgWidth() == null ? 0 : dto.avgWidth(), optional(dto.profileId()),
             ints(dto.gateDoorIds()), ints(dto.domainIds()), strings(dto.regionIds()), mapEnd(dto.node()),
-            dto.target(), dto.note());
+            dto.target(), dto.note(), ints(dto.lockedNodeIds()));
     }
 
     public static RoadProposalItemDto toItemDto(TileProposal.Item item) {
@@ -349,7 +349,8 @@ public final class RoadMapper {
             toEndDto(item.from()), toEndDto(item.to()), edge ? geometry(item.geometry()) : null,
             item.before().isEmpty() ? null : geometry(item.before()), edge ? item.length() : null, edge ? item.avgWidth() : null,
             boxed(item.profileId()), edge ? item.gateDoorIds() : null, edge ? item.domainIds() : null,
-            edge ? item.regionIds() : null, toEndDto(item.node()), item.target(), item.note().isEmpty() ? null : item.note());
+            edge ? item.regionIds() : null, toEndDto(item.node()), item.target(), item.note().isEmpty() ? null : item.note(),
+            item.lockedNodeIds().isEmpty() ? null : item.lockedNodeIds());
     }
 
     private static TileProposal.End mapEnd(RoadProposalEndDto dto) {

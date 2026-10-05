@@ -31,5 +31,6 @@ public record RoadProposalItemDto(
     @JsonProperty("regionIds") List<String> regionIds,
     @JsonProperty("node") RoadProposalEndDto node,
     @JsonProperty("target") int[] target,
-    @JsonProperty("note") String note
+    @JsonProperty("note") String note,
+    @JsonProperty("lockedNodeIds") List<Integer> lockedNodeIds
 ) {}

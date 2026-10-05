@@ -165,7 +165,7 @@ class TileDiffTest {
         assertEquals(List.of(1, 2), items.stream().map(Item::n).toList());
         assertEquals(12, items.get(0).edgeId());
         assertEquals(4, items.get(1).node().nodeId());
-        assertEquals("1 removed edge #12 (#2 → #4)", items.get(0).describe());
+        assertEquals("item 1: removed edge #12 (#2 → #4)", items.get(0).describe());
         assertArrayEquals(new int[] {200, 64, 175}, items.get(0).focus()); // the middle of the edge
     }
 
@@ -224,7 +224,7 @@ class TileDiffTest {
 
         assertEquals(List.of(Kind.NODE_MOVED), kinds(items));
         assertArrayEquals(p(305, 100), items.get(0).target());
-        assertEquals("1 moved node #3 by 5 blocks", items.get(0).describe());
+        assertEquals("item 1: moved node #3 by 5 blocks", items.get(0).describe());
     }
 
     @Test
@@ -255,7 +255,33 @@ class TileDiffTest {
             kinds(DIFF.compute(stored(), build.result())));
     }
 
+    @Test
+    void domainIdsAreNotCompared_butWorldGuardRegionsAre() {
+        // Smoke test 2026-10-05: the domain lookup behind domainIds may miss a region at build time ("domains [5, 8] → [5]").
+        Build domains = Build.same();
+        domains.edges.removeIf(e -> e.existingId().equals(OptionalInt.of(11)));
+        domains.edges.add(new TileBuildResult.Edge(OptionalInt.of(11), "j", "e", List.of(p(200, 100), p(300, 100)), 100, 3,
+            OptionalInt.of(1), List.of(), List.of(5), List.of()));
+        assertTrue(DIFF.compute(stored(), domains.result()).isEmpty());
+
+        Build regions = Build.same();
+        regions.edges.removeIf(e -> e.existingId().equals(OptionalInt.of(11)));
+        regions.edges.add(new TileBuildResult.Edge(OptionalInt.of(11), "j", "e", List.of(p(200, 100), p(300, 100)), 100, 3,
+            OptionalInt.of(1), List.of(), List.of(), List.of("cinix_market")));
+        Item item = DIFF.compute(stored(), regions.result()).get(0);
+        assertEquals("regions [] → [cinix_market]", item.note());
+    }
+
     // ================================================================ rejected list
+
+    @Test
+    void aRejectedRemovalIsOnlyARecord_itNeverHidesAProposal() {
+        Item removal = DIFF.compute(stored(), Build.same().without("s").result()).get(0);
+
+        assertEquals(0, DIFF.withoutRejected(List.of(removal), List.of(removal.withLockedNodes(List.of(4)))).hidden());
+        assertEquals(List.of(4), removal.withLockedNodes(List.of(4)).lockedNodeIds());
+        assertTrue(removal.isRemoval());
+    }
 
     @Test
     void aRejectedAdditionHidesTheSameRoadNextTime() {

@@ -147,8 +147,11 @@ public final class TileDiff {
             if (!new TreeSet<>(edge.gateDoorIds()).equals(new TreeSet<>(match.gateDoorIds()))) {
                 notes.add("gate doors " + new TreeSet<>(match.gateDoorIds()) + " → " + new TreeSet<>(edge.gateDoorIds()));
             }
-            if (!new TreeSet<>(edge.domainIds()).equals(new TreeSet<>(match.domainIds()))) {
-                notes.add("domains " + new TreeSet<>(match.domainIds()) + " → " + new TreeSet<>(edge.domainIds()));
+            // WorldGuard regions, not domain ids: the domains are looked up from the regions through a cache that
+            // may not know every region at build time (smoke test 2026-10-05: "domains [5, 8] → [5]" on unchanged
+            // edges), and the router reads the regions anyway.
+            if (!new TreeSet<>(edge.regionIds()).equals(new TreeSet<>(match.regionIds()))) {
+                notes.add("regions " + new TreeSet<>(match.regionIds()) + " → " + new TreeSet<>(edge.regionIds()));
             }
             if (!edge.profileId().equals(match.profileId())) {
                 notes.add("profile " + idText(match.profileId()) + " → " + idText(edge.profileId()));
@@ -286,12 +289,13 @@ public final class TileDiff {
             case EDGE_CHANGED -> item.edgeId() == rejected.edgeId()
                 && NodeMatcher.polylineDistance(item.geometry(), rejected.geometry()) <= settings.edgeMatchDistance()
                 && new TreeSet<>(item.gateDoorIds()).equals(new TreeSet<>(rejected.gateDoorIds()))
-                && new TreeSet<>(item.domainIds()).equals(new TreeSet<>(rejected.domainIds()))
+                && new TreeSet<>(item.regionIds()).equals(new TreeSet<>(rejected.regionIds()))
                 && item.profileId().equals(rejected.profileId());
             case NODE_MOVED -> item.node().nodeId() == rejected.node().nodeId()
                 && TileProposal.distance(item.target(), rejected.target()) <= settings.moveTolerance();
-            case EDGE_REMOVED -> item.edgeId() == rejected.edgeId();
-            case NODE_REMOVED -> item.node().nodeId() == rejected.node().nodeId();
+            // A rejected removal confirmed the edge / locked the node, which keeps it out of proposals by itself; its
+            // rejected-list entry is only the record unreject undoes, so it never hides anything.
+            case EDGE_REMOVED, NODE_REMOVED -> false;
         };
     }
 

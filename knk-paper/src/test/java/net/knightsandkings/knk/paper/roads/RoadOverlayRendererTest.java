@@ -89,7 +89,7 @@ class RoadOverlayRendererTest {
         Optional<String> label = RoadOverlayRenderer.describeLookedAtProposal(pending, new double[] {35, 66.6, 15.5},
             new double[] {1, -0.1, 0}, 48);
 
-        assertEquals(Optional.of("Proposal 0,0 · 3 added edge 30 m (#2 → new endpoint)"), label);
+        assertEquals(Optional.of("Proposal 0,0 · item 3: added edge 30 m (#2 → new endpoint)"), label);
         assertEquals(Optional.empty(), RoadOverlayRenderer.describeLookedAtProposal(pending, new double[] {35, 66.6, 15.5},
             new double[] {-1, 0, 0}, 48));
         assertEquals(OverlayColors.PROPOSAL_ADDED, RoadOverlayRenderer.proposalColour(TileProposal.Kind.EDGE_ADDED));

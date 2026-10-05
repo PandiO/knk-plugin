@@ -38,7 +38,7 @@ public record TileProposal(int baseVersion, int builderVersion, String createdBy
         EDGE_ADDED("added"),
         /** A stored detected edge the build no longer finds. */
         EDGE_REMOVED("removed"),
-        /** A stored detected edge the build traces elsewhere, or through other gate doors, domains or a profile. */
+        /** A stored detected edge the build traces elsewhere, or through other gate doors, WorldGuard regions or a profile. */
         EDGE_CHANGED("changed"),
         /** A stored, unlocked node the build places more than {@link TileDiff#MOVE_TOLERANCE} blocks away. */
         NODE_MOVED("moved"),
@@ -117,10 +117,21 @@ public record TileProposal(int baseVersion, int builderVersion, String createdBy
      * @param node        the stored node of a node item, or {@code null}
      * @param target      a moved node's new position {@code {x, y, z}}, or {@code null}
      * @param note        a short human description of what changed (changed edges), or {@code ""}
+     * @param lockedNodeIds on the rejected list only: the nodes rejecting this removal locked (they were unlocked
+     *                    before), so {@code unreject} can unlock exactly those again
      */
     public record Item(int n, Kind kind, int edgeId, End from, End to, List<int[]> geometry, List<int[]> before,
                        double length, double avgWidth, OptionalInt profileId, List<Integer> gateDoorIds,
-                       List<Integer> domainIds, List<String> regionIds, End node, int[] target, String note) {
+                       List<Integer> domainIds, List<String> regionIds, End node, int[] target, String note,
+                       List<Integer> lockedNodeIds) {
+
+        /** An item that locked nothing. */
+        public Item(int n, Kind kind, int edgeId, End from, End to, List<int[]> geometry, List<int[]> before,
+                    double length, double avgWidth, OptionalInt profileId, List<Integer> gateDoorIds,
+                    List<Integer> domainIds, List<String> regionIds, End node, int[] target, String note) {
+            this(n, kind, edgeId, from, to, geometry, before, length, avgWidth, profileId, gateDoorIds, domainIds, regionIds,
+                node, target, note, List.of());
+        }
 
         public Item {
             Objects.requireNonNull(kind, "kind");
@@ -132,6 +143,7 @@ public record TileProposal(int baseVersion, int builderVersion, String createdBy
             regionIds = List.copyOf(Objects.requireNonNull(regionIds, "regionIds"));
             note = note == null ? "" : note;
             target = target == null ? null : target.clone();
+            lockedNodeIds = lockedNodeIds == null ? List.of() : List.copyOf(lockedNodeIds);
             if (kind.isEdge()) {
                 Objects.requireNonNull(from, "from");
                 Objects.requireNonNull(to, "to");
@@ -155,7 +167,18 @@ public record TileProposal(int baseVersion, int builderVersion, String createdBy
         /** The same item with another number. */
         public Item numbered(int number) {
             return new Item(number, kind, edgeId, from, to, geometry, before, length, avgWidth, profileId, gateDoorIds,
-                domainIds, regionIds, node, target, note);
+                domainIds, regionIds, node, target, note, lockedNodeIds);
+        }
+
+        /** The same item recording the nodes its rejection locked. */
+        public Item withLockedNodes(List<Integer> nodeIds) {
+            return new Item(n, kind, edgeId, from, to, geometry, before, length, avgWidth, profileId, gateDoorIds,
+                domainIds, regionIds, node, target, note, nodeIds);
+        }
+
+        /** Whether rejecting this item keeps a stored road part (confirms the edge, locks the node) instead of listing a change. */
+        public boolean isRemoval() {
+            return kind == Kind.EDGE_REMOVED || kind == Kind.NODE_REMOVED;
         }
 
         /** Where the admin is teleported to look at the item: the middle of the polyline (by length), or the node. */
@@ -182,14 +205,22 @@ public record TileProposal(int baseVersion, int builderVersion, String createdBy
             return geometry.get(geometry.size() / 2).clone();
         }
 
-        /** One line for chat: "3 added edge 41 m (new → #3588)". */
+        /**
+         * One line for chat: "item 3: added edge 41 m (#3588 → new junction)". The item number is what {@code accept} and
+         * {@code reject} take; a {@code #} number is a stored edge or node id.
+         */
         public String describe() {
+            return "item " + n + ": " + what();
+        }
+
+        /** What the item proposes, without its number: "added edge 41 m (#3588 → new junction)". */
+        public String what() {
             return switch (kind) {
-                case EDGE_ADDED -> n + " added edge " + Math.round(length) + " m (" + label(from) + " → " + label(to) + ")";
-                case EDGE_REMOVED -> n + " removed edge #" + edgeId + " (" + label(from) + " → " + label(to) + ")";
-                case EDGE_CHANGED -> n + " changed edge #" + edgeId + (note.isEmpty() ? "" : ": " + note);
-                case NODE_MOVED -> n + " moved node #" + node.nodeId() + " by " + Math.round(distance(node.position(), target)) + " blocks";
-                case NODE_REMOVED -> n + " removed " + node.kind().apiName().toLowerCase() + " #" + node.nodeId();
+                case EDGE_ADDED -> "added edge " + Math.round(length) + " m (" + label(from) + " → " + label(to) + ")";
+                case EDGE_REMOVED -> "removed edge #" + edgeId + " (" + label(from) + " → " + label(to) + ")";
+                case EDGE_CHANGED -> "changed edge #" + edgeId + (note.isEmpty() ? "" : ": " + note);
+                case NODE_MOVED -> "moved node #" + node.nodeId() + " by " + Math.round(distance(node.position(), target)) + " blocks";
+                case NODE_REMOVED -> "removed " + node.kind().apiName().toLowerCase() + " #" + node.nodeId();
             };
         }
 

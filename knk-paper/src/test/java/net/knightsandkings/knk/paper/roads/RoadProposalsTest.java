@@ -234,7 +234,7 @@ class RoadProposalsTest {
         assertEquals(9, left.baseVersion()); // rebased on the version the upsert returned
         verify(cache).invalidateTile(TILE);
         verify(cache).invalidateTileId("world", 7);
-        assertTrue(messages(player).stream().anyMatch(m -> m.contains("accepted 1 item(s) (3)")));
+        assertTrue(messages(player).stream().anyMatch(m -> m.contains("accepted item 3 - applied to the road graph")));
     }
 
     @Test
@@ -285,7 +285,11 @@ class RoadProposalsTest {
         verify(commandApi).updateNode(4, RoadNodeUpdate.locked(true));
         TileProposal saved = savedProposal();
         assertTrue(saved.items().isEmpty());
-        assertEquals(List.of(Kind.EDGE_ADDED), saved.rejected().stream().map(Item::kind).toList());
+        // Every rejected item is on the list (R1-R3); the removals record the nodes their rejection locked.
+        assertEquals(List.of(Kind.EDGE_REMOVED, Kind.NODE_REMOVED, Kind.EDGE_ADDED), saved.rejected().stream().map(Item::kind).toList());
+        assertEquals(List.of(2, 4), saved.rejected().get(0).lockedNodeIds());
+        assertEquals(List.of(4), saved.rejected().get(1).lockedNodeIds());
+        assertTrue(messages(player).stream().anyMatch(m -> m.contains("rejected item 1 → R1, item 2 → R2, item 3 → R3")));
         // Nothing left: the current graph is uploaded with the proposal's figures.
         assertEquals(6, uploaded().builderVersion());
     }
@@ -325,6 +329,33 @@ class RoadProposalsTest {
     }
 
     @Test
+    void unrejectingAKeptEdgeUnconfirmsItAndUnlocksTheNodesItsRejectionLocked() {
+        List<Item> items = proposal(List.of()).items();
+        Item keptEdge = items.get(0).withLockedNodes(List.of(4));
+        storedProposal(new TileProposal(5, 6, null, 0, 0, List.of(), List.of(), List.of(items.get(2), keptEdge)));
+        when(commandApi.updateEdge(eq(12), any())).thenReturn(CompletableFuture.completedFuture(mock(RoadEdgeUpdateResult.class)));
+        when(commandApi.updateNode(eq(4), any())).thenReturn(CompletableFuture.completedFuture(mock(RoadNode.class)));
+
+        proposals.command(player, new String[] {"unconfirm", "R2"});
+
+        verify(commandApi).updateEdge(12, RoadEdgeUpdate.confirmed(false));
+        verify(commandApi).updateNode(4, RoadNodeUpdate.locked(false));
+        verify(commandApi, never()).updateNode(eq(2), any()); // #2 was locked before the rejection: it stays locked
+        assertEquals(List.of(Kind.EDGE_ADDED), savedProposal().rejected().stream().map(Item::kind).toList());
+        assertTrue(messages(player).stream().anyMatch(m -> m.contains("took back R2 (removed edge #12 (#2 → #4): unconfirmed, unlocked [#4])")));
+    }
+
+    @Test
+    void rejectedEntriesAreAddressedAsR() {
+        assertEquals(List.of("3", "1-3", "1,2", "all", "4"), RoadProposals.rejectedTokens(List.of("R3", "r1-R3", "R1,R2", "all", "4")));
+        List<Item> items = proposal(List.of()).items();
+        List<String> lines = RoadProposals.rejectedLines(List.of(items.get(2), items.get(0)), TILE).stream()
+            .map(c -> PlainTextComponentSerializer.plainText().serialize(c)).toList();
+        assertTrue(lines.get(0).startsWith(" R1: added edge 100 m (#3 → new endpoint) - hidden"), lines.get(0));
+        assertTrue(lines.get(1).startsWith(" R2: removed edge #12 (#2 → #4) - kept"), lines.get(1));
+    }
+
+    @Test
     void uncurateSetsTheTileDetected() {
         when(commandApi.setTileState("world", 2, -2, RoadTileState.DETECTED)).thenReturn(CompletableFuture.completedFuture(tile(5)));
 
@@ -354,7 +385,7 @@ class RoadProposalsTest {
 
         assertTrue(lines.get(0).contains("Proposal for tile 0,0: 3 change(s) - 1 added, 2 removed"), lines.get(0));
         assertTrue(lines.get(1).contains("[accept all]") && lines.get(1).contains("[reject all]"), lines.get(1));
-        assertTrue(lines.get(2).startsWith(" 1 removed edge #12 (#2 → #4)"), lines.get(2));
+        assertTrue(lines.get(2).startsWith(" item 1: removed edge #12 (#2 → #4)"), lines.get(2));
         assertTrue(lines.get(2).contains("[accept]") && lines.get(2).contains("[reject]"), lines.get(2));
     }
 }

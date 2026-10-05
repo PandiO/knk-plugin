@@ -61,7 +61,7 @@ class RoadBuildQueueSummaryTest {
         assertEquals("[Road] Tile 2,-2 is curated - rebuilt in 12 s as a proposal of 2 change(s): 2 added, 3 hidden by the rejected list."
             + " Nothing changed yet.", lines.get(0));
         assertTrue(lines.get(1).contains("[review] [accept all] [reject all]"), lines.get(1));
-        assertTrue(lines.get(2).startsWith(" 1 added edge 10 m (#3588 → new endpoint)"), lines.get(2));
+        assertTrue(lines.get(2).startsWith(" item 1: added edge 10 m (#3588 → new endpoint)"), lines.get(2));
         assertEquals(4, lines.size());
     }
 
