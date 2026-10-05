@@ -217,4 +217,70 @@ class LootboxDeliveryTest {
         verify(inventory, times(1)).addItem(any(ItemStack.class));
         verify(api, times(3)).markDelivered(eq(41), eq(LootboxDeliveryMethod.INVENTORY), any(), eq(9));
     }
+
+    // ===== Opening reel decoys (passing items dressed like real drops) =====
+
+    private static final KnkItemBlueprintDefaultEnchantment SHARPNESS_DEFAULT =
+            new KnkItemBlueprintDefaultEnchantment(77, 11, 3, "minecraft:sharpness", "Sharpness", 5, false);
+
+    private LootboxDelivery decoyDelivery(BlueprintItemAssembler assembler) {
+        return new LootboxDelivery(Runnable::run, mock(ItemBlueprintsDataAccess.class), mock(MinecraftMaterialRefsDataAccess.class),
+                null, mock(LootboxesCommandApi.class), assembler);
+    }
+
+    private BlueprintItemAssembler assemblerBuilding(ItemStack stack) {
+        BlueprintItemAssembler assembler = mock(BlueprintItemAssembler.class);
+        when(assembler.build(any(), anyString())).thenReturn(stack);
+        when(assembler.enchant(any(), any(), anyList(), any())).thenReturn(new BlueprintItemAssembler.Result(stack, 0, List.of()));
+        return assembler;
+    }
+
+    @Test
+    void aDecoy_carriesTheBlueprintsDefaultsAndTheRolledEnchantments_withTheBoxGrade() {
+        ItemStack stack = mock(ItemStack.class);
+        when(stack.getMaxStackSize()).thenReturn(1);
+        BlueprintItemAssembler assembler = assemblerBuilding(stack);
+        LootboxDelivery delivery = decoyDelivery(assembler);
+        KnkItemBlueprint blueprint = blueprint(new KnkGrade(3, "Rare", 3), SHARPNESS_DEFAULT);
+
+        ItemStack decoy = delivery.decoy(new LootboxDelivery.DecoySource(blueprint, "minecraft:iron_sword"), 5, 0, true,
+                List.of(new KnkLootboxClaimEnchantment(12, "minecraft:fire_aspect", false, 2),
+                        new KnkLootboxClaimEnchantment(11, "minecraft:sharpness", false, 4)));
+
+        assertSame(stack, decoy);
+        org.mockito.ArgumentCaptor<KnkItemBlueprint> graded = org.mockito.ArgumentCaptor.forClass(KnkItemBlueprint.class);
+        verify(assembler).build(graded.capture(), eq("minecraft:iron_sword"));
+        assertEquals(5, graded.getValue().grade().stars(), "the grade the box gives the item shows on the decoy");
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<List<BlueprintItemAssembler.EnchantmentRequest>> requests = org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(assembler, times(2)).enchant(eq(stack), any(), requests.capture(), any());
+        assertEquals(List.of(11), requests.getAllValues().get(0).stream().map(BlueprintItemAssembler.EnchantmentRequest::definitionId).toList(),
+                "the blueprint's own default, as authored");
+        assertEquals(List.of(12), requests.getAllValues().get(1).stream().map(BlueprintItemAssembler.EnchantmentRequest::definitionId).toList(),
+                "the rolled one; a roll on a default's definition is left out");
+    }
+
+    @Test
+    void aDecoyOfAnItemThatRollsNothing_getsOnlyItsDefaults_andItsQuantity() {
+        ItemStack stack = mock(ItemStack.class);
+        when(stack.getMaxStackSize()).thenReturn(64);
+        BlueprintItemAssembler assembler = assemblerBuilding(stack);
+        LootboxDelivery delivery = decoyDelivery(assembler);
+
+        KnkItemBlueprint bread = new KnkItemBlueprint(78, "Bread", null, null, "minecraft:bread", "&fBread", null, 1, 64,
+                List.of(), 0, null, List.of(), List.of());
+        delivery.decoy(new LootboxDelivery.DecoySource(bread, "minecraft:bread"), 2, 16, false,
+                List.of(new KnkLootboxClaimEnchantment(12, "minecraft:fire_aspect", false, 2)));
+
+        verify(assembler, times(1)).enchant(eq(stack), any(), anyList(), any());
+        verify(stack).setAmount(16);
+    }
+
+    @Test
+    void aDecoyThatCantBeBuilt_isNull_notAnException() {
+        BlueprintItemAssembler assembler = mock(BlueprintItemAssembler.class);
+        when(assembler.build(any(), anyString())).thenThrow(new IllegalArgumentException("Unknown material"));
+
+        assertNull(decoyDelivery(assembler).decoy(new LootboxDelivery.DecoySource(blueprint(null), "minecraft:nope"), 3, 0, true, List.of()));
+    }
 }

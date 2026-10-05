@@ -288,7 +288,8 @@ public final class LootboxDtos {
             @JsonProperty("normalRollPercent") double normalRollPercent,
             @JsonProperty("itemGrades") List<GradeOddsDto> itemGrades,
             @JsonProperty("items") List<ItemOddsDto> items,
-            @JsonProperty("specials") List<SpecialOddsDto> specials
+            @JsonProperty("specials") List<SpecialOddsDto> specials,
+            @JsonProperty("enchantments") List<EnchantOddsDto> enchantments
     ) {
     }
 
@@ -304,7 +305,25 @@ public final class LootboxDtos {
             @JsonProperty("itemBlueprintId") Integer itemBlueprintId,
             @JsonProperty("name") String name,
             @JsonProperty("stars") int stars,
-            @JsonProperty("percent") double percent
+            @JsonProperty("percent") double percent,
+            @JsonProperty("quantity") Integer quantity,
+            @JsonProperty("rollsEnchantments") Boolean rollsEnchantments
+    ) {
+    }
+
+    public record EnchantOddsDto(
+            @JsonProperty("enchantmentDefinitionId") int enchantmentDefinitionId,
+            @JsonProperty("key") String key,
+            @JsonProperty("isCustom") boolean isCustom,
+            @JsonProperty("hitPercent") double hitPercent,
+            @JsonProperty("levelsByGrade") List<LevelRangeDto> levelsByGrade
+    ) {
+    }
+
+    public record LevelRangeDto(
+            @JsonProperty("stars") int stars,
+            @JsonProperty("minLevel") Integer minLevel,
+            @JsonProperty("maxLevel") Integer maxLevel
     ) {
     }
 

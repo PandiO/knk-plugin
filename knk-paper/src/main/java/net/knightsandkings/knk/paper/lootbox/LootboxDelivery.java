@@ -209,32 +209,73 @@ public final class LootboxDelivery {
         return new Outcome(true, false, shown, method, prepared.skipped());
     }
 
-    /**
-     * A look-alike of a pool item for the opening reel: the blueprint's material, name, lore and grade line; no
-     * enchantments, no instance tag. Completes on the main thread; null when it can't be resolved.
-     */
-    public CompletableFuture<ItemStack> preview(int itemBlueprintId) {
-        CompletableFuture<ItemStack> done = new CompletableFuture<>();
+    /** A pool item's blueprint and material, resolved once for the opening reel's passing items. */
+    public record DecoySource(KnkItemBlueprint blueprint, String materialKey) {
+    }
+
+    /** Resolves a pool item for {@link #decoy}. Completes on the main thread; null when it can't be resolved. */
+    public CompletableFuture<DecoySource> decoySource(int itemBlueprintId) {
+        CompletableFuture<DecoySource> done = new CompletableFuture<>();
         blueprints.getByIdAsync(itemBlueprintId).thenCompose(result -> {
             KnkItemBlueprint blueprint = result != null ? result.value().orElse(null) : null;
             if (blueprint == null) {
-                return CompletableFuture.<Map.Entry<KnkItemBlueprint, String>>completedFuture(null);
+                return CompletableFuture.<DecoySource>completedFuture(null);
             }
             return KitGrantPlacer.resolveMaterialNamespaceKey(blueprint, materials)
-                    .thenApply(key -> key == null || key.isBlank() ? null : Map.entry(blueprint, key));
-        }).whenComplete((resolved, ex) -> mainThread.execute(() -> {
-            if (ex != null || resolved == null) {
-                done.complete(null);
-                return;
-            }
-            try {
-                ItemStack item = assembler.build(resolved.getKey(), resolved.getValue());
-                done.complete(item);
-            } catch (Exception e) {
-                done.complete(null);
-            }
-        }));
+                    .thenApply(key -> key == null || key.isBlank() ? null : new DecoySource(blueprint, key));
+        }).whenComplete((resolved, ex) -> mainThread.execute(() -> done.complete(ex != null ? null : resolved)));
         return done;
+    }
+
+    /**
+     * Main thread: a look-alike of a pool item for the opening reel, built like the real drop so the winner isn't the
+     * only enchanted item: the blueprint's name, lore and grade line (the grade the box gives it, {@code itemStars}),
+     * its own default enchantments as authored and, when it {@code rollsEnchantments}, the {@code rolled} ones with
+     * the vanilla rules - without the instance tag. {@code quantity} 0 keeps the blueprint's own. Null when it can't be
+     * built.
+     */
+    public ItemStack decoy(DecoySource source, int itemStars, int quantity, boolean rollsEnchantments,
+                           List<KnkLootboxClaimEnchantment> rolled) {
+        try {
+            KnkItemBlueprint graded = withGradeStars(source.blueprint(), itemStars);
+            ItemStack item = assembler.build(graded, source.materialKey());
+            List<BlueprintItemAssembler.EnchantmentRequest> defaults = BlueprintItemAssembler.defaultEnchantments(graded, null);
+            assembler.enchant(item, graded, defaults, BlueprintItemAssembler.Options.DEFAULTS);
+            if (rollsEnchantments && rolled != null && !rolled.isEmpty()) {
+                Set<Integer> defaultIds = new HashSet<>();
+                defaults.forEach(request -> defaultIds.add(request.definitionId()));
+                List<BlueprintItemAssembler.EnchantmentRequest> requests = new ArrayList<>();
+                for (KnkLootboxClaimEnchantment enchantment : rolled) {
+                    if (!defaultIds.contains(enchantment.definitionId())) {
+                        requests.add(new BlueprintItemAssembler.EnchantmentRequest(
+                                enchantment.definitionId(), describe(enchantment), enchantment.level()));
+                    }
+                }
+                assembler.enchant(item, graded, requests, BlueprintItemAssembler.Options.DEFAULTS.withVanillaRules(true));
+            }
+            if (quantity > 0) {
+                KnkItemBlueprint blueprint = source.blueprint();
+                int maxStack = blueprint.maxStackSize() != null && blueprint.maxStackSize() > 0 ? blueprint.maxStackSize() : item.getMaxStackSize();
+                item.setAmount(Math.max(1, Math.min(quantity, Math.max(1, maxStack))));
+            }
+            return item;
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.FINE, "Lootbox reel: could not dress blueprint " + source.blueprint().id(), e);
+            return null;
+        }
+    }
+
+    /** The blueprint with the item grade a box gives it ({@code stars}); unchanged when unknown or already that. */
+    static KnkItemBlueprint withGradeStars(KnkItemBlueprint blueprint, int stars) {
+        KnkGrade own = blueprint.grade();
+        if (stars <= 0 || (own != null && Objects.equals(own.stars(), stars))) {
+            return blueprint;
+        }
+        KnkGrade grade = new KnkGrade(null, null, stars);
+        return new KnkItemBlueprint(blueprint.id(), blueprint.name(), blueprint.description(), blueprint.iconMaterialRefId(),
+                blueprint.iconNamespaceKey(), blueprint.defaultDisplayName(), blueprint.defaultDisplayDescription(),
+                blueprint.defaultQuantity(), blueprint.maxStackSize(), blueprint.defaultEnchantments(),
+                blueprint.defaultEnchantmentsCount(), grade, blueprint.tags(), blueprint.origins());
     }
 
     /** Whether this server already gave the claim (a replay or pending read must not show a second reel). */
