@@ -167,31 +167,26 @@ public final class KitGrantPlacer {
             return null;
         }
 
-        final ItemStack itemStack;
+        Integer quantity = slot.kind() == SlotKind.CONTENT ? slot.quantity() : null;
+        ItemStack itemStack;
         try {
-            itemStack = ITEM_ASSEMBLER.build(blueprint, materialNamespaceKey);
-        } catch (Exception ex) {
-            LOGGER.log(Level.WARNING, "KitGrantPlacer: failed to map ItemBlueprint id=" + blueprint.id() + " to a Bukkit item", ex);
-            return null;
-        }
-
-        try {
-            BlueprintItemAssembler.Result assembled = ITEM_ASSEMBLER.enchant(itemStack, blueprint,
-                    BlueprintItemAssembler.defaultEnchantments(blueprint, Map.of()), BlueprintItemAssembler.Options.DEFAULTS);
+            BlueprintItemAssembler.Result assembled = ITEM_ASSEMBLER.assembleDefaults(blueprint, materialNamespaceKey, Map.of(), quantity);
+            itemStack = assembled.itemStack();
             if (!assembled.skipped().isEmpty()) {
                 LOGGER.warning("KitGrantPlacer: ItemBlueprint id=" + blueprint.id() + " skipped enchantments: " + String.join(", ", assembled.skipped()));
             }
         } catch (Exception ex) {
-            LOGGER.log(Level.WARNING, "KitGrantPlacer: failed to enchant ItemBlueprint id=" + blueprint.id() + ", granting it as built", ex);
+            LOGGER.log(Level.WARNING, "KitGrantPlacer: failed to assemble ItemBlueprint id=" + blueprint.id() + ", granting it as built", ex);
+            try {
+                itemStack = ITEM_ASSEMBLER.build(blueprint, materialNamespaceKey);
+                BlueprintItemAssembler.applyQuantity(itemStack, blueprint, quantity);
+            } catch (Exception buildFailure) {
+                LOGGER.log(Level.WARNING, "KitGrantPlacer: failed to map ItemBlueprint id=" + blueprint.id() + " to a Bukkit item", buildFailure);
+                return null;
+            }
         }
 
-        int maxStackSize = blueprint.maxStackSize() != null && blueprint.maxStackSize() > 0
-                ? blueprint.maxStackSize()
-                : itemStack.getMaxStackSize();
-
-        if (slot.kind() == SlotKind.CONTENT && slot.quantity() != null) {
-            itemStack.setAmount(Math.max(1, Math.min(slot.quantity(), maxStackSize)));
-        }
+        int maxStackSize = BlueprintItemAssembler.maxStackSize(blueprint, itemStack);
 
         return new ResolvedItem(slot.kind(), slot.contentSlotIndex(), itemStack, maxStackSize);
     }

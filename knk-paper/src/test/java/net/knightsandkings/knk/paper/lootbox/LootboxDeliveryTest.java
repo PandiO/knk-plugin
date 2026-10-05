@@ -194,8 +194,8 @@ class LootboxDeliveryTest {
         when(blueprints.getByIdAsync(77)).thenReturn(CompletableFuture.completedFuture(FetchResult.hit(bread)));
         ItemStack stack = mock(ItemStack.class);
         BlueprintItemAssembler assembler = mock(BlueprintItemAssembler.class);
-        when(assembler.build(any(), anyString())).thenReturn(stack);
-        when(assembler.enchant(any(), any(), anyList(), any())).thenReturn(new BlueprintItemAssembler.Result(stack, 0, List.of()));
+        when(assembler.assemble(any(), anyString(), anyList(), anyList(), any(), any()))
+                .thenReturn(new BlueprintItemAssembler.Result(stack, 0, List.of()));
         LootboxesCommandApi api = mock(LootboxesCommandApi.class);
         when(api.markDelivered(anyInt(), any(), any(), any())).thenReturn(CompletableFuture.completedFuture(null));
         PlayerInventory inventory = mock(PlayerInventory.class);
@@ -230,15 +230,14 @@ class LootboxDeliveryTest {
 
     private BlueprintItemAssembler assemblerBuilding(ItemStack stack) {
         BlueprintItemAssembler assembler = mock(BlueprintItemAssembler.class);
-        when(assembler.build(any(), anyString())).thenReturn(stack);
-        when(assembler.enchant(any(), any(), anyList(), any())).thenReturn(new BlueprintItemAssembler.Result(stack, 0, List.of()));
+        when(assembler.assemble(any(), anyString(), anyList(), anyList(), any(), any()))
+                .thenReturn(new BlueprintItemAssembler.Result(stack, 0, List.of()));
         return assembler;
     }
 
     @Test
     void aDecoy_carriesTheBlueprintsDefaultsAndTheRolledEnchantments_withTheBoxGrade() {
         ItemStack stack = mock(ItemStack.class);
-        when(stack.getMaxStackSize()).thenReturn(1);
         BlueprintItemAssembler assembler = assemblerBuilding(stack);
         LootboxDelivery delivery = decoyDelivery(assembler);
         KnkItemBlueprint blueprint = blueprint(new KnkGrade(3, "Rare", 3), SHARPNESS_DEFAULT);
@@ -249,37 +248,43 @@ class LootboxDeliveryTest {
 
         assertSame(stack, decoy);
         org.mockito.ArgumentCaptor<KnkItemBlueprint> graded = org.mockito.ArgumentCaptor.forClass(KnkItemBlueprint.class);
-        verify(assembler).build(graded.capture(), eq("minecraft:iron_sword"));
-        assertEquals(5, graded.getValue().grade().stars(), "the grade the box gives the item shows on the decoy");
         @SuppressWarnings("unchecked")
-        org.mockito.ArgumentCaptor<List<BlueprintItemAssembler.EnchantmentRequest>> requests = org.mockito.ArgumentCaptor.forClass(List.class);
-        verify(assembler, times(2)).enchant(eq(stack), any(), requests.capture(), any());
-        assertEquals(List.of(11), requests.getAllValues().get(0).stream().map(BlueprintItemAssembler.EnchantmentRequest::definitionId).toList(),
+        org.mockito.ArgumentCaptor<List<BlueprintItemAssembler.EnchantmentRequest>> defaults = org.mockito.ArgumentCaptor.forClass(List.class);
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<List<BlueprintItemAssembler.EnchantmentRequest>> rolled = org.mockito.ArgumentCaptor.forClass(List.class);
+        org.mockito.ArgumentCaptor<BlueprintItemAssembler.Options> options = org.mockito.ArgumentCaptor.forClass(BlueprintItemAssembler.Options.class);
+        verify(assembler).assemble(graded.capture(), eq("minecraft:iron_sword"), defaults.capture(), rolled.capture(), options.capture(), eq(null));
+        assertEquals(5, graded.getValue().grade().stars(), "the grade the box gives the item shows on the decoy");
+        assertEquals(List.of(11), defaults.getValue().stream().map(BlueprintItemAssembler.EnchantmentRequest::definitionId).toList(),
                 "the blueprint's own default, as authored");
-        assertEquals(List.of(12), requests.getAllValues().get(1).stream().map(BlueprintItemAssembler.EnchantmentRequest::definitionId).toList(),
+        assertEquals(List.of(12), rolled.getValue().stream().map(BlueprintItemAssembler.EnchantmentRequest::definitionId).toList(),
                 "the rolled one; a roll on a default's definition is left out");
+        assertTrue(options.getValue().vanillaRules(), "rolled enchantments follow the vanilla rules, like the real drop");
+        assertNull(options.getValue().metaStamp(), "a decoy has no instance tag");
     }
 
     @Test
     void aDecoyOfAnItemThatRollsNothing_getsOnlyItsDefaults_andItsQuantity() {
         ItemStack stack = mock(ItemStack.class);
-        when(stack.getMaxStackSize()).thenReturn(64);
         BlueprintItemAssembler assembler = assemblerBuilding(stack);
         LootboxDelivery delivery = decoyDelivery(assembler);
-
         KnkItemBlueprint bread = new KnkItemBlueprint(78, "Bread", null, null, "minecraft:bread", "&fBread", null, 1, 64,
                 List.of(), 0, null, List.of(), List.of());
+
         delivery.decoy(new LootboxDelivery.DecoySource(bread, "minecraft:bread"), 2, 16, false,
                 List.of(new KnkLootboxClaimEnchantment(12, "minecraft:fire_aspect", false, 2)));
 
-        verify(assembler, times(1)).enchant(eq(stack), any(), anyList(), any());
-        verify(stack).setAmount(16);
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<List<BlueprintItemAssembler.EnchantmentRequest>> rolled = org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(assembler).assemble(any(), eq("minecraft:bread"), anyList(), rolled.capture(), any(), eq(16));
+        assertTrue(rolled.getValue().isEmpty(), "books, stackables and specials roll nothing");
     }
 
     @Test
     void aDecoyThatCantBeBuilt_isNull_notAnException() {
         BlueprintItemAssembler assembler = mock(BlueprintItemAssembler.class);
-        when(assembler.build(any(), anyString())).thenThrow(new IllegalArgumentException("Unknown material"));
+        when(assembler.assemble(any(), anyString(), anyList(), anyList(), any(), any()))
+                .thenThrow(new IllegalArgumentException("Unknown material"));
 
         assertNull(decoyDelivery(assembler).decoy(new LootboxDelivery.DecoySource(blueprint(null), "minecraft:nope"), 3, 0, true, List.of()));
     }

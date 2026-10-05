@@ -199,6 +199,79 @@ class BlueprintItemAssemblerTest {
         assertEquals(List.of("§7Poison II"), loreByItem.get(sword));
     }
 
+    @Test
+    void assembleAppliesDefaultsAsAuthored_thenRolledWithTheVanillaRules_thenTheQuantity() {
+        ItemStack sword = item(Material.DIAMOND_SWORD, "§8A fine blade");
+        vanilla.conflicts("minecraft:sharpness", "minecraft:smite");
+        vanilla.cannotEnchant("minecraft:mending", Material.DIAMOND_SWORD);
+        KnkItemBlueprint blueprint = new KnkItemBlueprint(7, "test_item", null, null, null, "Test", null, 1, 64,
+                List.of(), 0, null, List.of(), List.of());
+
+        // Defaults ignore the vanilla rules (Mending on a sword, as authored); the rolled ones follow them.
+        BlueprintItemAssembler.Result result = assembler(sword).assemble(blueprint, "minecraft:diamond_sword",
+                List.of(request(SHARPNESS, 3), request(MENDING, 1)),
+                List.of(request(SMITE, 3), request(POISON, 2)), null, 16);
+
+        assertSame(sword, result.itemStack());
+        assertEquals(Map.of("minecraft:sharpness", 3, "minecraft:mending", 1), vanilla.appliedOn(sword));
+        assertEquals(3, result.applied(), "two defaults and the rolled poison");
+        assertEquals(List.of("2 (minecraft:smite conflicts with an enchantment already on the item)"), result.skipped());
+        assertEquals(List.of("§7Poison II", "", "§8A fine blade"), loreByItem.get(sword));
+        verify(sword).setAmount(16);
+    }
+
+    @Test
+    void assembleStampsEvenWhenNothingIsRolled_andOnlyAfterTheEnchantments() {
+        ItemStack sword = item(Material.DIAMOND_SWORD);
+        List<ItemMeta> stamped = new ArrayList<>();
+
+        BlueprintItemAssembler.Result result = assembler(sword).assemble(blueprint(), "minecraft:diamond_sword",
+                List.of(request(POISON, 1)), List.of(),
+                BlueprintItemAssembler.Options.DEFAULTS.withVanillaRules(true).withMetaStamp(meta -> {
+                    stamped.add(meta);
+                    assertEquals(List.of("§7Poison I"), meta.getLore());
+                }), null);
+
+        assertEquals(1, result.applied());
+        assertEquals(1, stamped.size());
+    }
+
+    @Test
+    void assembleDefaultsIsTheBlueprintsOwnEnchantmentsAndQuantity_nothingRolled() {
+        ItemStack sword = item(Material.DIAMOND_SWORD);
+        KnkItemBlueprint blueprint = new KnkItemBlueprint(7, "test_item", null, null, null, "Test", null, 1, 64,
+                List.of(new KnkItemBlueprintDefaultEnchantment(7, 1, 4, "minecraft:sharpness", "Sharpness", 5, false)), 1,
+                null, List.of(), List.of());
+
+        BlueprintItemAssembler.Result result = assembler(sword).assembleDefaults(blueprint, "minecraft:diamond_sword", null, 5);
+
+        assertEquals(1, result.applied());
+        assertEquals(Map.of("minecraft:sharpness", 4), vanilla.appliedOn(sword));
+        verify(sword).setAmount(5);
+    }
+
+    @Test
+    void quantityIsCappedAtTheMaxStack_atLeastOne_andNullLeavesTheStackAlone() {
+        ItemStack stack = item(Material.BREAD);
+        when(stack.getMaxStackSize()).thenReturn(16);
+        KnkItemBlueprint noLimit = new KnkItemBlueprint(7, "bread", null, null, null, "Bread", null, 1, null,
+                List.of(), 0, null, List.of(), List.of());
+        KnkItemBlueprint limit4 = new KnkItemBlueprint(7, "bread", null, null, null, "Bread", null, 1, 4,
+                List.of(), 0, null, List.of(), List.of());
+
+        assertEquals(16, BlueprintItemAssembler.maxStackSize(noLimit, stack), "the material's own limit");
+        assertEquals(4, BlueprintItemAssembler.maxStackSize(limit4, stack), "the blueprint's own limit wins");
+
+        BlueprintItemAssembler.applyQuantity(stack, noLimit, 64);
+        BlueprintItemAssembler.applyQuantity(stack, limit4, 64);
+        BlueprintItemAssembler.applyQuantity(stack, limit4, 0);
+        BlueprintItemAssembler.applyQuantity(stack, limit4, null);
+        verify(stack).setAmount(16);
+        verify(stack).setAmount(4);
+        verify(stack).setAmount(1);
+        verify(stack, org.mockito.Mockito.times(3)).setAmount(org.mockito.ArgumentMatchers.anyInt());
+    }
+
     // --- fixtures ---
 
     private BlueprintItemAssembler assembler(ItemStack built) {

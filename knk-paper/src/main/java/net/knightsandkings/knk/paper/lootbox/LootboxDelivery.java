@@ -238,27 +238,20 @@ public final class LootboxDelivery {
                            List<KnkLootboxClaimEnchantment> rolled) {
         try {
             KnkItemBlueprint graded = withGradeStars(source.blueprint(), itemStars);
-            ItemStack item = assembler.build(graded, source.materialKey());
             List<BlueprintItemAssembler.EnchantmentRequest> defaults = BlueprintItemAssembler.defaultEnchantments(graded, null);
-            assembler.enchant(item, graded, defaults, BlueprintItemAssembler.Options.DEFAULTS);
-            if (rollsEnchantments && rolled != null && !rolled.isEmpty()) {
+            List<BlueprintItemAssembler.EnchantmentRequest> requests = new ArrayList<>();
+            if (rollsEnchantments && rolled != null) {
                 Set<Integer> defaultIds = new HashSet<>();
                 defaults.forEach(request -> defaultIds.add(request.definitionId()));
-                List<BlueprintItemAssembler.EnchantmentRequest> requests = new ArrayList<>();
                 for (KnkLootboxClaimEnchantment enchantment : rolled) {
                     if (!defaultIds.contains(enchantment.definitionId())) {
                         requests.add(new BlueprintItemAssembler.EnchantmentRequest(
                                 enchantment.definitionId(), describe(enchantment), enchantment.level()));
                     }
                 }
-                assembler.enchant(item, graded, requests, BlueprintItemAssembler.Options.DEFAULTS.withVanillaRules(true));
             }
-            if (quantity > 0) {
-                KnkItemBlueprint blueprint = source.blueprint();
-                int maxStack = blueprint.maxStackSize() != null && blueprint.maxStackSize() > 0 ? blueprint.maxStackSize() : item.getMaxStackSize();
-                item.setAmount(Math.max(1, Math.min(quantity, Math.max(1, maxStack))));
-            }
-            return item;
+            return assembler.assemble(graded, source.materialKey(), defaults, requests,
+                    BlueprintItemAssembler.Options.DEFAULTS.withVanillaRules(true), quantity > 0 ? quantity : null).itemStack();
         } catch (RuntimeException e) {
             LOGGER.log(Level.FINE, "Lootbox reel: could not dress blueprint " + source.blueprint().id(), e);
             return null;
@@ -292,16 +285,11 @@ public final class LootboxDelivery {
             List<String> skipped
     ) {
         KnkItemBlueprint graded = withClaimGrade(blueprint, claim);
-        ItemStack item = assembler.build(graded, materialKey);
         Requests requests = requests(graded, claim, fetched);
-        skipped.addAll(assembler.enchant(item, graded, requests.defaults(), BlueprintItemAssembler.Options.DEFAULTS).skipped());
-        skipped.addAll(assembler.enchant(item, graded, requests.rolled(), BlueprintItemAssembler.Options.DEFAULTS
-                .withVanillaRules(true)
-                .withMetaStamp(instanceStamp(claim))).skipped());
-
-        int maxStack = blueprint.maxStackSize() != null && blueprint.maxStackSize() > 0 ? blueprint.maxStackSize() : item.getMaxStackSize();
-        item.setAmount(Math.max(1, Math.min(claim.quantity(), Math.max(1, maxStack))));
-        return item;
+        BlueprintItemAssembler.Result assembled = assembler.assemble(graded, materialKey, requests.defaults(), requests.rolled(),
+                BlueprintItemAssembler.Options.DEFAULTS.withVanillaRules(true).withMetaStamp(instanceStamp(claim)), claim.quantity());
+        skipped.addAll(assembled.skipped());
+        return assembled.itemStack();
     }
 
     /** The last assembly step: the instance id for a non-stackable item, nothing for a stackable one. */
