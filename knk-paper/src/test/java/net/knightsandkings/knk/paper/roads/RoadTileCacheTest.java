@@ -20,6 +20,7 @@ import net.knightsandkings.knk.core.domain.roads.RoadNode;
 import net.knightsandkings.knk.core.domain.roads.RoadNodeKind;
 import net.knightsandkings.knk.core.domain.roads.RoadTile;
 import net.knightsandkings.knk.core.domain.roads.RoadTileGraph;
+import net.knightsandkings.knk.core.domain.roads.RoadTileState;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -31,12 +32,13 @@ class RoadTileCacheTest {
 
     static RoadTileGraph graph(int version) {
         RoadTile tile = new RoadTile(5, "world", 2, -3, version, OffsetDateTime.of(2026, 9, 28, 10, 0, 0, 0, ZoneOffset.UTC),
-            1, false, 1200, 2, 1, 1, List.of("Cell cap reached; the mask is incomplete at 10,64,10"));
+            1, false, 1200, 2, 1, 1, List.of("Cell cap reached; the mask is incomplete at 10,64,10"),
+            RoadTileState.CURATED, OffsetDateTime.of(2026, 10, 5, 8, 0, 0, 0, ZoneOffset.UTC));
         RoadNode a = new RoadNode(100, 1024, 64, -1536, RoadNodeKind.JUNCTION, "Market", 3, true, 12); // a designed plaza
         RoadNode b = new RoadNode(101, 1060, 66, -1500, RoadNodeKind.BOUNDARY, null, 3);
         RoadEdge e = new RoadEdge(200, 100, 101, List.of(new int[] {1024, 64, -1536}, new int[] {1040, 65, -1520}, new int[] {1060, 66, -1500}),
             51.2, 3.4, OptionalInt.of(1), OptionalInt.of(7), 1.25, EnumSet.of(RoadEdgeFlag.ONEWAY, RoadEdgeFlag.NO_GPS),
-            List.of(9), List.of(12, 13), List.of("kardenna", "kardenna_market"), RoadEdgeSource.DETECTED, true);
+            List.of(9), List.of(12, 13), List.of("kardenna", "kardenna_market"), RoadEdgeSource.DETECTED, true, true);
         return new RoadTileGraph(tile, List.of(a, b), List.of(e));
     }
 
@@ -66,6 +68,20 @@ class RoadTileCacheTest {
         assertEquals(o.regionIds(), e.regionIds());
         assertEquals(o.source(), e.source());
         assertEquals(o.stale(), e.stale());
+        assertTrue(e.confirmed());
+    }
+
+    @Test
+    void aFileWrittenBeforeCuratedTilesDecodesAsDetectedAndUnconfirmed() {
+        com.google.gson.JsonObject root = com.google.gson.JsonParser.parseString(RoadTileCache.encode(graph(3))).getAsJsonObject();
+        root.getAsJsonObject("tile").remove("state");
+        root.getAsJsonObject("tile").remove("curatedAt");
+        root.getAsJsonArray("edges").get(0).getAsJsonObject().remove("confirmed");
+        RoadTileGraph decoded = RoadTileCache.decode(root.toString());
+
+        assertEquals(RoadTileState.DETECTED, decoded.tile().state());
+        assertEquals(null, decoded.tile().curatedAt());
+        assertFalse(decoded.edges().get(0).confirmed());
     }
 
     @Test

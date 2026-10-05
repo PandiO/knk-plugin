@@ -28,6 +28,7 @@ import net.knightsandkings.knk.core.domain.roads.RoadNode;
 import net.knightsandkings.knk.core.domain.roads.RoadNodeKind;
 import net.knightsandkings.knk.core.domain.roads.RoadTile;
 import net.knightsandkings.knk.core.domain.roads.RoadTileGraph;
+import net.knightsandkings.knk.core.domain.roads.RoadTileState;
 
 /**
  * The on-disk tile cache of {@code RoadNetworkCache}: one file per built tile,
@@ -140,6 +141,11 @@ public final class RoadTileCache {
         t.addProperty("edgeCount", tile.edgeCount());
         t.addProperty("levelCount", tile.levelCount());
         t.add("warnings", strings(tile.warnings()));
+        // Rev. 6 Part B (plan §5.7): optional, so files written before it still decode (as Detected / unconfirmed).
+        t.addProperty("state", tile.state().apiName());
+        if (tile.curatedAt() != null) {
+            t.addProperty("curatedAt", tile.curatedAt().toString());
+        }
         root.add("tile", t);
 
         JsonArray nodes = new JsonArray();
@@ -196,6 +202,9 @@ public final class RoadTileCache {
             o.add("regionIds", strings(e.regionIds()));
             o.addProperty("source", e.source().apiName());
             o.addProperty("stale", e.stale());
+            if (e.confirmed()) {
+                o.addProperty("confirmed", true);
+            }
             edges.add(o);
         }
         root.add("edges", edges);
@@ -215,7 +224,9 @@ public final class RoadTileCache {
             t.has("builtAt") && !t.get("builtAt").isJsonNull() ? OffsetDateTime.parse(t.get("builtAt").getAsString()) : null,
             t.get("builderVersion").getAsInt(), t.get("dirty").getAsBoolean(), t.get("cellCount").getAsInt(),
             t.get("nodeCount").getAsInt(), t.get("edgeCount").getAsInt(), t.get("levelCount").getAsInt(),
-            stringList(t.getAsJsonArray("warnings")));
+            stringList(t.getAsJsonArray("warnings")),
+            RoadTileState.fromApiName(t.has("state") ? t.get("state").getAsString() : null),
+            t.has("curatedAt") ? OffsetDateTime.parse(t.get("curatedAt").getAsString()) : null);
 
         List<RoadNode> nodes = new ArrayList<>();
         for (JsonElement el : root.getAsJsonArray("nodes")) {
@@ -245,7 +256,8 @@ public final class RoadTileCache {
                 o.has("streetId") ? OptionalInt.of(o.get("streetId").getAsInt()) : OptionalInt.empty(),
                 o.get("costMultiplier").getAsDouble(), flags, intList(o.getAsJsonArray("gateDoorIds")),
                 intList(o.getAsJsonArray("domainIds")), stringList(o.getAsJsonArray("regionIds")),
-                RoadEdgeSource.fromApiName(o.get("source").getAsString()), o.get("stale").getAsBoolean()));
+                RoadEdgeSource.fromApiName(o.get("source").getAsString()), o.get("stale").getAsBoolean(),
+                o.has("confirmed") && o.get("confirmed").getAsBoolean()));
         }
         return new RoadTileGraph(tile, nodes, edges);
     }
