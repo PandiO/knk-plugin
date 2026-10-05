@@ -63,6 +63,29 @@ class CustomEnchantmentLoreTest {
     }
 
     @Test
+    void remove_TheLastEnchantmentTakesItsSpacerWithIt() {
+        List<String> enchanted = CustomEnchantmentLore.apply(repository, BLUEPRINT_LORE, "poison", 2);
+
+        assertEquals(BLUEPRINT_LORE, CustomEnchantmentLore.remove(repository, enchanted, "poison"),
+                "no blank line left at the top of the lore");
+    }
+
+    @Test
+    void remove_OneOfTwoKeepsTheBlockAndTheSpacer() {
+        List<String> two = CustomEnchantmentLore.apply(repository,
+                CustomEnchantmentLore.apply(repository, BLUEPRINT_LORE, "poison", 2), "wither", 1);
+
+        assertEquals(List.of("§7Wither I", "", "§7A fine blade", "", "§l§bGrade: ★★★", "§7Origin: Cinix (Town)"),
+                CustomEnchantmentLore.remove(repository, two, "poison"));
+    }
+
+    @Test
+    void remove_WhatIsNotThereChangesNothing_andNoLoreStaysEmpty() {
+        assertEquals(BLUEPRINT_LORE, CustomEnchantmentLore.remove(repository, BLUEPRINT_LORE, "poison"));
+        assertEquals(List.of(), CustomEnchantmentLore.remove(repository, null, "poison"));
+    }
+
+    @Test
     void apply_OnItemWithoutLore() {
         assertEquals(List.of("§7Poison I"), CustomEnchantmentLore.apply(repository, null, "poison", 1));
         assertEquals(List.of("§7Poison I"), CustomEnchantmentLore.apply(repository, List.of(), "poison", 1));

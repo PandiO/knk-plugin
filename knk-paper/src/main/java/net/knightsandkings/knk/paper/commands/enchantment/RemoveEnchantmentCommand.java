@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.commands.enchantment;
 
+import net.knightsandkings.knk.core.domain.enchantment.CustomEnchantmentLore;
 import net.knightsandkings.knk.core.domain.enchantment.Enchantment;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentRepository;
 import org.bukkit.command.CommandSender;
@@ -66,7 +67,8 @@ public class RemoveEnchantmentCommand implements EnchantmentSubcommand {
         ItemStack itemInHand = heldItemOptional.get();
         ItemMeta itemMeta = itemInHand.getItemMeta();
         List<String> lore = itemMeta != null && itemMeta.hasLore() ? itemMeta.getLore() : List.of();
-        List<String> updatedLore = repository.removeEnchantment(lore, enchantmentId).join();
+        // The shared pipeline: also drops the blank spacer that sat under the enchantment block.
+        List<String> updatedLore = CustomEnchantmentLore.remove(repository, lore, enchantmentId);
 
         if (itemMeta == null) {
             itemMeta = handler.plugin().getServer().getItemFactory().getItemMeta(itemInHand.getType());
