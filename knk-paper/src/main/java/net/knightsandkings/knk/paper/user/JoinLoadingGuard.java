@@ -4,6 +4,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
@@ -57,12 +58,23 @@ public class JoinLoadingGuard {
 
     private final Plugin plugin;
     private final KnkPermissible knkPermissible;
+    /** The mode a player gets back when the hold ends: their world's Game Settings default (KNG-52). */
+    private final Function<Player, GameMode> gameModeAfterHold;
     private final Set<UUID> loadingPlayers = ConcurrentHashMap.newKeySet();
     private final Map<UUID, BukkitTask> reminderTasks = new ConcurrentHashMap<>();
 
     public JoinLoadingGuard(Plugin plugin, KnkPermissible knkPermissible) {
+        this(plugin, knkPermissible, player -> GameMode.SURVIVAL);
+    }
+
+    /**
+     * @param gameModeAfterHold the mode to hand back when the hold ends (docs/specs/game-settings/DESIGN.md
+     *                          §3.4); a null answer means SURVIVAL
+     */
+    public JoinLoadingGuard(Plugin plugin, KnkPermissible knkPermissible, Function<Player, GameMode> gameModeAfterHold) {
         this.plugin = plugin;
         this.knkPermissible = knkPermissible;
+        this.gameModeAfterHold = gameModeAfterHold != null ? gameModeAfterHold : player -> GameMode.SURVIVAL;
     }
 
     /**
@@ -152,7 +164,8 @@ public class JoinLoadingGuard {
 
         if (player.getGameMode() == GameMode.ADVENTURE) {
             // If something else already changed their gamemode, leave it alone.
-            player.setGameMode(GameMode.SURVIVAL);
+            GameMode mode = gameModeAfterHold.apply(player);
+            player.setGameMode(mode != null ? mode : GameMode.SURVIVAL);
         }
         player.setInvulnerable(false);
         return true;

@@ -15,7 +15,6 @@ import org.bukkit.ChatColor;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Sound;
-import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -35,9 +34,7 @@ import net.knightsandkings.knk.core.dataaccess.FetchResult;
 import net.knightsandkings.knk.core.dataaccess.FetchStatus;
 import net.knightsandkings.knk.core.dataaccess.ItemBlueprintsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
-import net.knightsandkings.knk.core.dataaccess.TownsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
-import net.knightsandkings.knk.core.domain.towns.TownDetail;
 import net.knightsandkings.knk.core.domain.users.UserDetail;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.core.ports.api.KitsCommandApi;
@@ -48,6 +45,7 @@ import net.knightsandkings.knk.paper.chat.ChatLineFormat;
 import net.knightsandkings.knk.paper.kit.KitGrantPlacer;
 import net.knightsandkings.knk.paper.modes.ModeService;
 import net.knightsandkings.knk.paper.permissions.KnkPermissible;
+import net.knightsandkings.knk.paper.settings.GameSettingsManager;
 import net.knightsandkings.knk.paper.user.IgnoreService;
 import net.knightsandkings.knk.paper.utils.ColorOptions;
 import net.knightsandkings.knk.paper.utils.ScoreboardUtil;
@@ -64,11 +62,11 @@ import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 public class PlayerListener implements Listener {
 	private static final Logger LOGGER = Logger.getLogger(PlayerListener.class.getName());
 	private static final long MENTION_SOUND_COOLDOWN_MILLIS = 5_000L;
-	private static final int DEFAULT_RESPAWN_TOWN_ID = 4;
 	private static final Map<UUID, Long> mentionSoundCooldowns = new ConcurrentHashMap<>();
 
 	private final UsersDataAccess usersDataAccess;
-	private final TownsDataAccess townsDataAccess;
+	/** Null-safe: without it, the legacy join/quit lines and the server's own spawn/respawn. */
+	private final GameSettingsManager gameSettings;
 	private final CacheManager cacheManager;
 	private final KnkPermissible knkPermissible;
 	private final UsersCommandApi usersCommandApi;
@@ -80,7 +78,7 @@ public class PlayerListener implements Listener {
 
 	public PlayerListener(
 			UsersDataAccess usersDataAccess,
-			TownsDataAccess townsDataAccess,
+			GameSettingsManager gameSettings,
 			CacheManager cacheManager,
 			KnkPermissible knkPermissible,
 			UsersCommandApi usersCommandApi,
@@ -90,7 +88,7 @@ public class PlayerListener implements Listener {
 			IgnoreService ignoreService
 	) {
 		this.usersDataAccess = usersDataAccess;
-		this.townsDataAccess = townsDataAccess;
+		this.gameSettings = gameSettings;
 		this.cacheManager = cacheManager;
 		this.knkPermissible = knkPermissible;
 		this.usersCommandApi = usersCommandApi;
@@ -173,18 +171,24 @@ public class PlayerListener implements Listener {
 		// fresh userData asynchronously and also handles duplicate-account/link prompts) — this
 		// listener used to send its own, duplicate "Welcome back" message from a synchronous,
 		// possibly-stale cache read. Removed rather than kept in sync with two sources of truth.
-		e.joinMessage(Component.text("► " + "Player " + player.getName() + " joined").color(ColorOptions.message));
+		// Text from the web-app Game Settings page (docs/specs/game-settings/DESIGN.md §3.1); blank = none.
+		// ModeListener (HIGHEST) still drops it for a vanished player.
+		if (gameSettings != null) {
+			e.joinMessage(gameSettings.joinMessage(player.getName()).orElse(null));
+		} else {
+			e.joinMessage(Component.text("► " + "Player " + player.getName() + " joined").color(ColorOptions.message));
+		}
 
 		if (!knkPermissible.hasPermission(player, "knk.mode.owner")) {
-			player.setGameMode(GameMode.SURVIVAL);
+			// The server spawn /spawn uses, in its world's default game mode (DESIGN §3.2/§3.4). Never
+			// waits on the API: the spot was resolved in the background. JoinLoadingGuard.hold (later
+			// in this join) switches to ADVENTURE and hands this mode back when the account is loaded.
+			Location spawn = gameSettings != null ? gameSettings.joinSpawn() : Bukkit.getWorlds().get(0).getSpawnLocation();
+			player.setGameMode(gameSettings != null && spawn != null ? gameSettings.gameModeFor(spawn.getWorld()) : GameMode.SURVIVAL);
 			player.setFlying(false);
-			// Town town = (Town) RepositoryManager.getInstance().getRepository(Town.class, Dominion.KEY_CLASS).getList().get(0);
-			// if (town != null) {
-			// 	user.teleport(town.getLocation().getLocation(), town.getName());
-			// } else {
-			// 	user.teleport(Bukkit.getWorld(KNK.WORLD_NAME_DEF).getSpawnLocation(), null);
-			// }
-            player.teleport(Bukkit.getWorld(Bukkit.getWorlds().get(0).getName()).getSpawnLocation());
+			if (spawn != null) {
+				player.teleport(spawn);
+			}
 		}
 		ScoreboardUtil.setScoreboard(Arrays.asList(player), knkPermissible, user);
 
@@ -248,8 +252,11 @@ public class PlayerListener implements Listener {
         UserSummary user = cacheManager.getUserCache().getByUuid(player.getUniqueId()).orElse(null);
         reportPresence(user, false);
 
-		e.quitMessage(Component.text(ColorOptions.messageArrow + "Player " + player.getName() + " left").color(ColorOptions.message));
-		e.quitMessage(Component.text(ColorOptions.messageArrow + "Player " + player.getName() + " left").color(ColorOptions.message));
+		if (gameSettings != null) {
+			e.quitMessage(gameSettings.leaveMessage(player.getName()).orElse(null));
+		} else {
+			e.quitMessage(Component.text(ColorOptions.messageArrow + "Player " + player.getName() + " left").color(ColorOptions.message));
+		}
 	}
 
 	/**
@@ -351,48 +358,24 @@ public class PlayerListener implements Listener {
 	}
 
 	/**
-	 * Forces respawn to the default town for regular (default-rank or premium-tier) players.
-	 * Staff/owner-mode players are exempt, matching the same {@code knk.mode.*} gate the join
-	 * handler above already uses for its gamemode/teleport reset — an elevated-rank player who
-	 * dies should respawn normally (bed/anchor/world spawn), not get routed back to town.
-	 *
-	 * {@code PlayerRespawnEvent} requires the location to be set before the handler returns, so
-	 * this blocks on the fetch rather than using {@code .thenAccept(...)} (the previous version's
-	 * bug — its async callback always ran after Bukkit had already finished processing the
-	 * respawn, so {@code setRespawnLocation} was never actually reachable). {@code CACHE_FIRST}
-	 * means this only round-trips to the API on a cold cache, matching the blocking {@code .join()}
-	 * already used for {@link #onValidateLogin}'s comparable bounded lookups.
+	 * Respawn after death by the death world's policy from the Game Settings page
+	 * (docs/specs/game-settings/DESIGN.md §3.3): the server's own choice (bed, anchor, world spawn), a
+	 * configured Location/Town/District/Structure, or the nearest town. Replaces the hard-coded town 4.
+	 * Staff/owner-mode players are exempt, as before, and so are non-death respawns (leaving the End).
+	 * SiegeDeathRespawnListener runs later (HIGHEST) and wins for match members. Reads only what the
+	 * manager resolved beforehand - nothing here waits on the API.
 	 */
 	@EventHandler
 	public void onPlayerRespawn(PlayerRespawnEvent e) {
 		Player player = e.getPlayer();
 
-		if (knkPermissible.hasPermission(player, ModeService.OWNER_NODE)
+		if (gameSettings == null || e.getRespawnReason() != PlayerRespawnEvent.RespawnReason.DEATH
+				|| knkPermissible.hasPermission(player, ModeService.OWNER_NODE)
 				|| knkPermissible.hasPermission(player, ModeService.STAFF_NODE)) {
 			return;
 		}
 
-		FetchResult<TownDetail> result = townsDataAccess.getByIdAsync(DEFAULT_RESPAWN_TOWN_ID, FetchPolicy.CACHE_FIRST).join();
-		if (!result.isSuccess()) {
-			LOGGER.severe("Failed to load default town (id " + DEFAULT_RESPAWN_TOWN_ID + ") for respawn");
-			return;
-		}
-
-		TownDetail.Location location = result.value().orElseThrow().location();
-		if (location == null || location.world() == null || location.x() == null || location.y() == null || location.z() == null) {
-			LOGGER.warning("Default town (id " + DEFAULT_RESPAWN_TOWN_ID + ") has no location configured; respawn not overridden");
-			return;
-		}
-
-		World world = Bukkit.getWorld(location.world());
-		if (world == null) {
-			LOGGER.warning("Default town respawn world '" + location.world() + "' is not loaded; respawn not overridden");
-			return;
-		}
-
-		float yaw = location.yaw() != null ? location.yaw() : 0f;
-		float pitch = location.pitch() != null ? location.pitch() : 0f;
-		e.setRespawnLocation(new Location(world, location.x(), location.y(), location.z(), yaw, pitch));
+		gameSettings.respawnLocation(player).ifPresent(e::setRespawnLocation);
 	}
 
 	@EventHandler

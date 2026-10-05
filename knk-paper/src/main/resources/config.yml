@@ -117,6 +117,19 @@ player-notifications:
   # How often the plugin polls the API for them (skipped while no players are online)
   poll-interval-seconds: 2
 
+# Global Game Settings from the web app's Game Settings page (docs/specs/game-settings/DESIGN.md §4, KNG-52):
+# announcements, join spawn and game mode, respawn policy, per-world time lock, weather and spawn point.
+# The settings themselves are edited on the web app; these keys only tune how the plugin follows them.
+game-settings:
+  # How often the settings are read from the API (seconds, min 5). /knk cache refresh reads them at once.
+  refresh-interval-seconds: 30
+  # How often the loaded worlds are checked; they are reported to the API only when they changed
+  # (or every 10 minutes). Seconds, min 5. The report needs the plugin API key (api.auth.type: apikey).
+  runtime-sync-interval-seconds: 30
+  # Earlier versions of the settings kept in plugins/KnightsAndKings/game-settings-backups/ (0 = none).
+  # The latest version is always cached in game-settings-cache.json and used when the API is down at startup.
+  backup-history-limit: 48
+
 # Teleport engine (docs/specs/teleport/DESIGN.md §3.11, knk-workspace). Staff teleports (/tp,
 # /tphere, /knk tp) are instant and skip warmup, cooldown, combat tag and the safe-spot check; the
 # settings below apply to player teleports (/tpa, /tpahere, /spawn, /warp; /back in a later phase).
