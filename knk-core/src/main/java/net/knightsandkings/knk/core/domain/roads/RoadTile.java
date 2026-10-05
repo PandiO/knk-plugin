@@ -22,16 +22,33 @@ import java.util.Objects;
  * @param edgeCount      edges owned by the tile (including its stitch edges)
  * @param levelCount     vertical road levels the last build found (bridges/tunnels)
  * @param warnings       builder warnings of the last build plus the API's label conflicts
+ * @param state          {@link RoadTileState#CURATED}: a build of this (built) tile makes a proposal
+ *                       instead of replacing the graph (plan §5.7 D1)
+ * @param curatedAt      when the tile was first curated, or {@code null}
  */
 public record RoadTile(int id, String world, int tileX, int tileZ, int version, OffsetDateTime builtAt,
                        int builderVersion, boolean dirty, int cellCount, int nodeCount, int edgeCount,
-                       int levelCount, List<String> warnings) {
+                       int levelCount, List<String> warnings, RoadTileState state, OffsetDateTime curatedAt) {
     /** Tile edge length in blocks (DESIGN §3.3). */
     public static final int SIZE = 512;
 
     public RoadTile {
         Objects.requireNonNull(world, "world");
         warnings = List.copyOf(Objects.requireNonNull(warnings, "warnings"));
+        state = state == null ? RoadTileState.DETECTED : state;
+    }
+
+    /** A Detected tile (before rev. 6). */
+    public RoadTile(int id, String world, int tileX, int tileZ, int version, OffsetDateTime builtAt,
+                    int builderVersion, boolean dirty, int cellCount, int nodeCount, int edgeCount,
+                    int levelCount, List<String> warnings) {
+        this(id, world, tileX, tileZ, version, builtAt, builderVersion, dirty, cellCount, nodeCount, edgeCount,
+            levelCount, warnings, RoadTileState.DETECTED, null);
+    }
+
+    /** Whether a build of this tile makes a proposal: it is curated and has been built (plan §5.7 D1). */
+    public boolean proposesChanges() {
+        return state == RoadTileState.CURATED && isBuilt();
     }
 
     /** The ETag the API sends for this version: the version number in double quotes ({@code "3"}). */

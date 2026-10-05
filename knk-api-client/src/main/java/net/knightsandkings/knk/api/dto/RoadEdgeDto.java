@@ -34,5 +34,6 @@ public record RoadEdgeDto(
     @JsonProperty("domainIds") List<Integer> domainIds,
     @JsonProperty("regionIds") List<String> regionIds,
     @JsonProperty("source") String source,
-    @JsonProperty("status") String status
+    @JsonProperty("status") String status,
+    @JsonProperty("confirmed") boolean confirmed
 ) {}

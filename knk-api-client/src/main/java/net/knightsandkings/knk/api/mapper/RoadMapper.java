@@ -27,6 +27,8 @@ import net.knightsandkings.knk.api.dto.RoadNodeDto;
 import net.knightsandkings.knk.api.dto.RoadNodeUpdateDto;
 import net.knightsandkings.knk.api.dto.RoadProfileDto;
 import net.knightsandkings.knk.api.dto.RoadProfileUpsertDto;
+import net.knightsandkings.knk.api.dto.RoadProposalEndDto;
+import net.knightsandkings.knk.api.dto.RoadProposalItemDto;
 import net.knightsandkings.knk.api.dto.RoadSeedCreateDto;
 import net.knightsandkings.knk.api.dto.RoadSeedDto;
 import net.knightsandkings.knk.api.dto.RoadSeedLocationDto;
@@ -38,6 +40,9 @@ import net.knightsandkings.knk.api.dto.RoadTileGraphDto;
 import net.knightsandkings.knk.api.dto.RoadTileGraphEdgeDto;
 import net.knightsandkings.knk.api.dto.RoadTileGraphNodeDto;
 import net.knightsandkings.knk.api.dto.RoadTileGraphUpsertDto;
+import net.knightsandkings.knk.api.dto.RoadTileProposalDto;
+import net.knightsandkings.knk.api.dto.RoadTileProposalUpsertDto;
+import net.knightsandkings.knk.api.dto.RoadTileStateDto;
 import net.knightsandkings.knk.api.dto.RoadTileUpsertResultDto;
 import net.knightsandkings.knk.core.domain.roads.RoadApiError;
 import net.knightsandkings.knk.core.domain.roads.RoadBreadcrumbPoint;
@@ -66,12 +71,15 @@ import net.knightsandkings.knk.core.domain.roads.RoadSurvey;
 import net.knightsandkings.knk.core.domain.roads.RoadSurveyCreate;
 import net.knightsandkings.knk.core.domain.roads.RoadTile;
 import net.knightsandkings.knk.core.domain.roads.RoadTileGraph;
+import net.knightsandkings.knk.core.domain.roads.RoadTileProposalSummary;
+import net.knightsandkings.knk.core.domain.roads.RoadTileState;
 import net.knightsandkings.knk.core.domain.roads.RoadTileUpsertResult;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.roads.build.NodeMatcher;
 import net.knightsandkings.knk.core.roads.build.ProfileSet;
 import net.knightsandkings.knk.core.roads.build.SkeletonGraph;
 import net.knightsandkings.knk.core.roads.build.TileBuildResult;
+import net.knightsandkings.knk.core.roads.build.TileProposal;
 import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
 import net.knightsandkings.knk.core.roads.survey.ProposedProfile;
 
@@ -100,7 +108,7 @@ public final class RoadMapper {
         }
         return new RoadTile(dto.id(), dto.world(), dto.tileX(), dto.tileZ(), dto.version(), dto.builtAt(),
             dto.builderVersion(), dto.dirty(), dto.cellCount(), dto.nodeCount(), dto.edgeCount(), dto.levelCount(),
-            strings(dto.warnings()));
+            strings(dto.warnings()), RoadTileState.fromApiName(dto.state()), dto.curatedAt());
     }
 
     public static RoadNode mapNode(RoadNodeDto dto) {
@@ -112,7 +120,7 @@ public final class RoadMapper {
         return new RoadEdge(dto.id(), dto.fromNodeId(), dto.toNodeId(), geometry(dto.geometry()), dto.length(),
             dto.avgWidth(), optional(dto.profileId()), optional(dto.streetId()), dto.costMultiplier(),
             flags(dto.flags()), ints(dto.gateDoorIds()), ints(dto.domainIds()), strings(dto.regionIds()),
-            RoadEdgeSource.fromApiName(dto.source()), "Stale".equalsIgnoreCase(dto.status()));
+            RoadEdgeSource.fromApiName(dto.source()), "Stale".equalsIgnoreCase(dto.status()), dto.confirmed());
     }
 
     public static RoadTileGraph mapTileGraph(RoadTileGraphDto dto) {
@@ -290,7 +298,66 @@ public final class RoadMapper {
 
     public static RoadEdgeUpdateDto toEdgeUpdateDto(RoadEdgeUpdate update) {
         return new RoadEdgeUpdateDto(update.streetId(), update.clearStreet(), update.propagate(), update.profileId(),
-            update.clearProfile(), update.costMultiplier(), flagNames(update.flags()));
+            update.clearProfile(), update.costMultiplier(), flagNames(update.flags()), update.confirmed());
+    }
+
+    public static RoadTileStateDto toStateDto(RoadTileState state) {
+        return new RoadTileStateDto(state.apiName());
+    }
+
+    // ---- proposals (rev. 6 Part B, plan §5.7 D5) -----------------------------------------------
+
+    public static RoadTileProposalSummary mapProposalSummary(RoadTileProposalDto dto) {
+        return new RoadTileProposalSummary(dto.tileId(), dto.world(), dto.tileX(), dto.tileZ(), dto.baseVersion(),
+            dto.tileVersion(), dto.builderVersion(), dto.createdBy(), dto.createdAt(), dto.updatedAt(), dto.addedCount(),
+            dto.removedCount(), dto.changedCount(), dto.movedCount(), dto.rejectedCount());
+    }
+
+    public static TileProposal mapProposal(RoadTileProposalDto dto) {
+        if (dto == null) {
+            return null;
+        }
+        return new TileProposal(dto.baseVersion(), dto.builderVersion(), dto.createdBy(), dto.cellCount(), dto.levelCount(),
+            strings(dto.warnings()), mapItems(dto.items()), mapItems(dto.rejected()));
+    }
+
+    public static RoadTileProposalUpsertDto toProposalUpsertDto(TileProposal proposal) {
+        return new RoadTileProposalUpsertDto(proposal.baseVersion(), proposal.builderVersion(), proposal.createdBy(),
+            proposal.cellCount(), proposal.levelCount(), proposal.warnings(),
+            proposal.items().stream().map(RoadMapper::toItemDto).toList(),
+            proposal.rejected().stream().map(RoadMapper::toItemDto).toList(),
+            (int) proposal.count(TileProposal.Kind.EDGE_ADDED),
+            (int) (proposal.count(TileProposal.Kind.EDGE_REMOVED) + proposal.count(TileProposal.Kind.NODE_REMOVED)),
+            (int) proposal.count(TileProposal.Kind.EDGE_CHANGED), (int) proposal.count(TileProposal.Kind.NODE_MOVED));
+    }
+
+    static List<TileProposal.Item> mapItems(List<RoadProposalItemDto> dtos) {
+        return dtos == null ? List.of() : dtos.stream().map(RoadMapper::mapItem).toList();
+    }
+
+    public static TileProposal.Item mapItem(RoadProposalItemDto dto) {
+        return new TileProposal.Item(dto.n(), TileProposal.Kind.valueOf(dto.kind()), dto.edgeId() == null ? 0 : dto.edgeId(),
+            mapEnd(dto.from()), mapEnd(dto.to()), geometry(dto.geometry()), geometry(dto.before()),
+            dto.length() == null ? 0 : dto.length(), dto.avgWidth() == null ? 0 : dto.avgWidth(), optional(dto.profileId()),
+            ints(dto.gateDoorIds()), ints(dto.domainIds()), strings(dto.regionIds()), mapEnd(dto.node()),
+            dto.target(), dto.note());
+    }
+
+    public static RoadProposalItemDto toItemDto(TileProposal.Item item) {
+        boolean edge = item.kind().isEdge();
+        return new RoadProposalItemDto(item.n(), item.kind().name(), item.describe(), item.edgeId() == 0 ? null : item.edgeId(),
+            toEndDto(item.from()), toEndDto(item.to()), edge ? geometry(item.geometry()) : null,
+            item.before().isEmpty() ? null : geometry(item.before()), edge ? item.length() : null, edge ? item.avgWidth() : null,
+            boxed(item.profileId()), edge ? item.gateDoorIds() : null, edge ? item.domainIds() : null,
+            edge ? item.regionIds() : null, toEndDto(item.node()), item.target(), item.note().isEmpty() ? null : item.note());
+    }
+
+    private static TileProposal.End mapEnd(RoadProposalEndDto dto) {
+        return dto == null ? null : new TileProposal.End(dto.nodeId(), dto.x(), dto.y(), dto.z(), RoadNodeKind.fromApiName(dto.kind()));
+    }
+
+    private static RoadProposalEndDto toEndDto(TileProposal.End end) {
+        return end == null ? null : new RoadProposalEndDto(end.nodeId(), end.x(), end.y(), end.z(), end.kind().apiName());
     }
 
     public static RoadEdgeRecordDto toEdgeRecordDto(RoadEdgeRecord record) {

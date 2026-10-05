@@ -17,5 +17,6 @@ public record RoadEdgeUpdateDto(
     @JsonProperty("profileId") Integer profileId,
     @JsonProperty("clearProfile") boolean clearProfile,
     @JsonProperty("costMultiplier") Double costMultiplier,
-    @JsonProperty("flags") List<String> flags
+    @JsonProperty("flags") List<String> flags,
+    @JsonProperty("confirmed") Boolean confirmed
 ) {}

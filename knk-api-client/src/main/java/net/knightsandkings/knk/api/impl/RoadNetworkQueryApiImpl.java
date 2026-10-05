@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
@@ -21,6 +22,7 @@ import net.knightsandkings.knk.api.dto.RoadSeedLocationDto;
 import net.knightsandkings.knk.api.dto.RoadSurveyDto;
 import net.knightsandkings.knk.api.dto.RoadTileDto;
 import net.knightsandkings.knk.api.dto.RoadTileGraphDto;
+import net.knightsandkings.knk.api.dto.RoadTileProposalDto;
 import net.knightsandkings.knk.api.mapper.RoadMapper;
 import net.knightsandkings.knk.core.domain.common.Conditional;
 import net.knightsandkings.knk.core.domain.common.Page;
@@ -33,6 +35,8 @@ import net.knightsandkings.knk.core.domain.roads.RoadSeedLocation;
 import net.knightsandkings.knk.core.domain.roads.RoadSurvey;
 import net.knightsandkings.knk.core.domain.roads.RoadTile;
 import net.knightsandkings.knk.core.domain.roads.RoadTileGraph;
+import net.knightsandkings.knk.core.domain.roads.RoadTileProposalSummary;
+import net.knightsandkings.knk.core.roads.build.TileProposal;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.RoadNetworkQueryApi;
 import okhttp3.OkHttpClient;
@@ -99,6 +103,41 @@ public class RoadNetworkQueryApiImpl extends BaseApiImpl implements RoadNetworkQ
                     + world, e);
             }
         }, executor);
+    }
+
+    @Override
+    public CompletableFuture<Optional<TileProposal>> proposal(String world, int tileX, int tileZ) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = proposalUrl(baseUrl, world, tileX, tileZ);
+            try {
+                return Optional.ofNullable(RoadMapper.mapProposal(parse(get(url), RoadTileProposalDto.class, url)));
+            } catch (ApiException e) {
+                if (e.getStatusCode() == 404) {
+                    return Optional.<TileProposal>empty();
+                }
+                throw new RuntimeException("Failed to load the proposal of road tile (" + tileX + ", " + tileZ + ")", e);
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to load the proposal of road tile (" + tileX + ", " + tileZ + ")", e);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<List<RoadTileProposalSummary>> proposals(String world) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + TILES_ENDPOINT + "/proposals?world=" + encode(world);
+            try {
+                List<RoadTileProposalDto> dtos = parse(get(url), new TypeReference<List<RoadTileProposalDto>>() {}, url);
+                return dtos == null ? List.<RoadTileProposalSummary>of() : dtos.stream().map(RoadMapper::mapProposalSummary).toList();
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to list the road proposals of world " + world, e);
+            }
+        }, executor);
+    }
+
+    /** {@code {base}/road-tiles/{world}/{x}/{z}/proposal}. */
+    static String proposalUrl(String baseUrl, String world, int tileX, int tileZ) {
+        return baseUrl + TILES_ENDPOINT + "/" + encode(world) + "/" + tileX + "/" + tileZ + "/proposal";
     }
 
     @Override

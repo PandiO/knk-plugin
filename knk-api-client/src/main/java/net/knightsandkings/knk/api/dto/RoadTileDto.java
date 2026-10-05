@@ -8,7 +8,10 @@ import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 
 import net.knightsandkings.knk.api.serialization.LenientOffsetDateTimeDeserializer;
 
-/** Maps to knk-web-api's RoadTileDto (road navigation, KNG-27; plan D4 {@code version} = ETag). */
+/**
+ * Maps to knk-web-api's RoadTileDto (road navigation, KNG-27; plan D4 {@code version} = ETag;
+ * {@code state} {@code Detected | Curated} and {@code curatedAt}, rev. 6 plan §5.7).
+ */
 public record RoadTileDto(
     @JsonProperty("id") int id,
     @JsonProperty("world") String world,
@@ -22,5 +25,7 @@ public record RoadTileDto(
     @JsonProperty("nodeCount") int nodeCount,
     @JsonProperty("edgeCount") int edgeCount,
     @JsonProperty("levelCount") int levelCount,
-    @JsonProperty("warnings") List<String> warnings
+    @JsonProperty("warnings") List<String> warnings,
+    @JsonProperty("state") String state,
+    @JsonProperty("curatedAt") @JsonDeserialize(using = LenientOffsetDateTimeDeserializer.class) OffsetDateTime curatedAt
 ) {}

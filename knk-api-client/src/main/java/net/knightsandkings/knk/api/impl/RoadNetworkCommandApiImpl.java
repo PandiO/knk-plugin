@@ -19,6 +19,7 @@ import net.knightsandkings.knk.api.dto.RoadProfileDto;
 import net.knightsandkings.knk.api.dto.RoadSeedDto;
 import net.knightsandkings.knk.api.dto.RoadSurveyDto;
 import net.knightsandkings.knk.api.dto.RoadTileDto;
+import net.knightsandkings.knk.api.dto.RoadTileProposalDto;
 import net.knightsandkings.knk.api.dto.RoadTileUpsertResultDto;
 import net.knightsandkings.knk.api.mapper.RoadMapper;
 import net.knightsandkings.knk.core.domain.roads.RoadEdge;
@@ -36,10 +37,13 @@ import net.knightsandkings.knk.core.domain.roads.RoadSeedCreate;
 import net.knightsandkings.knk.core.domain.roads.RoadSurvey;
 import net.knightsandkings.knk.core.domain.roads.RoadSurveyCreate;
 import net.knightsandkings.knk.core.domain.roads.RoadTile;
+import net.knightsandkings.knk.core.domain.roads.RoadTileProposalSummary;
+import net.knightsandkings.knk.core.domain.roads.RoadTileState;
 import net.knightsandkings.knk.core.domain.roads.RoadTileUpsertResult;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.RoadNetworkCommandApi;
 import net.knightsandkings.knk.core.roads.build.TileBuildResult;
+import net.knightsandkings.knk.core.roads.build.TileProposal;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -51,6 +55,7 @@ import static net.knightsandkings.knk.api.impl.RoadNetworkQueryApiImpl.SEEDS_END
 import static net.knightsandkings.knk.api.impl.RoadNetworkQueryApiImpl.SURVEYS_ENDPOINT;
 import static net.knightsandkings.knk.api.impl.RoadNetworkQueryApiImpl.TILES_ENDPOINT;
 import static net.knightsandkings.knk.api.impl.RoadNetworkQueryApiImpl.encode;
+import static net.knightsandkings.knk.api.impl.RoadNetworkQueryApiImpl.proposalUrl;
 import static net.knightsandkings.knk.api.impl.RoadNetworkQueryApiImpl.tileGraphUrl;
 
 /**
@@ -143,6 +148,37 @@ public class RoadNetworkCommandApiImpl extends BaseApiImpl implements RoadNetwor
                     + world + " dirty", e);
             }
         }, executor);
+    }
+
+    @Override
+    public CompletableFuture<RoadTile> setTileState(String world, int tileX, int tileZ, RoadTileState state) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + TILES_ENDPOINT + "/" + encode(world) + "/" + tileX + "/" + tileZ + "/state";
+            try {
+                String json = objectMapper.writeValueAsString(RoadMapper.toStateDto(state));
+                return RoadMapper.mapTile(parse(putJson(url, json), RoadTileDto.class, url));
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to set road tile (" + tileX + ", " + tileZ + ") to " + state.apiName(), e);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<RoadTileProposalSummary> saveProposal(String world, int tileX, int tileZ, TileProposal proposal) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = proposalUrl(baseUrl, world, tileX, tileZ);
+            try {
+                String json = objectMapper.writeValueAsString(RoadMapper.toProposalUpsertDto(proposal));
+                return RoadMapper.mapProposalSummary(parse(putJson(url, json), RoadTileProposalDto.class, url));
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to store the proposal of road tile (" + tileX + ", " + tileZ + ")", e);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<Boolean> deleteProposal(String world, int tileX, int tileZ) {
+        return deleteOrNotFound(proposalUrl(baseUrl, world, tileX, tileZ), () -> "the proposal of road tile (" + tileX + ", " + tileZ + ")");
     }
 
     @Override

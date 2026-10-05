@@ -18,8 +18,11 @@ import net.knightsandkings.knk.core.domain.roads.RoadSeedCreate;
 import net.knightsandkings.knk.core.domain.roads.RoadSurvey;
 import net.knightsandkings.knk.core.domain.roads.RoadSurveyCreate;
 import net.knightsandkings.knk.core.domain.roads.RoadTile;
+import net.knightsandkings.knk.core.domain.roads.RoadTileProposalSummary;
+import net.knightsandkings.knk.core.domain.roads.RoadTileState;
 import net.knightsandkings.knk.core.domain.roads.RoadTileUpsertResult;
 import net.knightsandkings.knk.core.roads.build.TileBuildResult;
+import net.knightsandkings.knk.core.roads.build.TileProposal;
 
 /**
  * Road navigation writes (knk-web-api's road controllers, docs/specs/navigation/IMPLEMENTATION_PLAN.md
@@ -43,6 +46,18 @@ public interface RoadNetworkCommandApi {
 
     /** {@code POST api/road-tiles/{world}/{x}/{z}/dirty}: creates the tile row if unknown, bumps its version. */
     CompletableFuture<RoadTile> markDirty(String world, int tileX, int tileZ);
+
+    /**
+     * {@code PUT api/road-tiles/{world}/{x}/{z}/state} (plan §5.7 D1): Curated (builds make proposals) or
+     * Detected (the next build is uploaded directly and curates the tile again).
+     */
+    CompletableFuture<RoadTile> setTileState(String world, int tileX, int tileZ, RoadTileState state);
+
+    /** {@code PUT api/road-tiles/{world}/{x}/{z}/proposal}: stores the tile's proposal and rejected list (D5). */
+    CompletableFuture<RoadTileProposalSummary> saveProposal(String world, int tileX, int tileZ, TileProposal proposal);
+
+    /** {@code DELETE api/road-tiles/{world}/{x}/{z}/proposal}: the proposal and its rejected list; false on 404. */
+    CompletableFuture<Boolean> deleteProposal(String world, int tileX, int tileZ);
 
     /** {@code POST api/road-profiles} (201). */
     CompletableFuture<RoadProfile> createProfile(RoadProfileUpsert profile);

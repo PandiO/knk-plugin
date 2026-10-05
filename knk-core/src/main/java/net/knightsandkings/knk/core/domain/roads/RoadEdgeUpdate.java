@@ -17,9 +17,18 @@ import java.util.Set;
  * @param clearProfile   remove the profile
  * @param costMultiplier new routing cost multiplier ({@code > 0}), or {@code null}
  * @param flags          replace the flag set (an empty set clears every flag), or {@code null}
+ * @param confirmed      keep (true) or stop keeping (false) a detected edge a proposal wanted to remove
+ *                       (plan §5.7 D4; true also locks both its nodes), or {@code null}
  */
 public record RoadEdgeUpdate(Integer streetId, boolean clearStreet, boolean propagate, Integer profileId,
-                             boolean clearProfile, Double costMultiplier, Set<RoadEdgeFlag> flags) {
+                             boolean clearProfile, Double costMultiplier, Set<RoadEdgeFlag> flags, Boolean confirmed) {
+
+    /** An update that leaves {@code confirmed} as it is. */
+    public RoadEdgeUpdate(Integer streetId, boolean clearStreet, boolean propagate, Integer profileId,
+                          boolean clearProfile, Double costMultiplier, Set<RoadEdgeFlag> flags) {
+        this(streetId, clearStreet, propagate, profileId, clearProfile, costMultiplier, flags, null);
+    }
+
     public RoadEdgeUpdate {
         if (clearStreet && streetId != null) {
             throw new IllegalArgumentException("clearStreet and streetId are exclusive");
@@ -53,6 +62,11 @@ public record RoadEdgeUpdate(Integer streetId, boolean clearStreet, boolean prop
     /** Replace the edge's flags. */
     public static RoadEdgeUpdate flags(Set<RoadEdgeFlag> flags) {
         return new RoadEdgeUpdate(null, false, false, null, false, null, flags);
+    }
+
+    /** Keep a detected edge a proposal wanted to remove (true), or take that back (false). */
+    public static RoadEdgeUpdate confirmed(boolean confirmed) {
+        return new RoadEdgeUpdate(null, false, false, null, false, null, null, confirmed);
     }
 
     /** Change the routing cost multiplier. */

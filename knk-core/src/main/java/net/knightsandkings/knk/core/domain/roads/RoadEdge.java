@@ -34,11 +34,22 @@ import java.util.Set;
  *                       router looks domains up by
  * @param source         detected, recorded or a tile stitch
  * @param stale          {@code Status == Stale}: the tile is dirty; still routable
+ * @param confirmed      an admin kept this detected edge when a proposal wanted to remove it (plan
+ *                       §5.7 D4): later proposals never remove it; the router ignores it
  */
 public record RoadEdge(int id, int fromNodeId, int toNodeId, List<int[]> geometry, double length, double avgWidth,
                        OptionalInt profileId, OptionalInt streetId, double costMultiplier, Set<RoadEdgeFlag> flags,
                        List<Integer> gateDoorIds, List<Integer> domainIds, List<String> regionIds,
-                       RoadEdgeSource source, boolean stale) {
+                       RoadEdgeSource source, boolean stale, boolean confirmed) {
+
+    /** An unconfirmed edge (what the router and its fixtures build). */
+    public RoadEdge(int id, int fromNodeId, int toNodeId, List<int[]> geometry, double length, double avgWidth,
+                    OptionalInt profileId, OptionalInt streetId, double costMultiplier, Set<RoadEdgeFlag> flags,
+                    List<Integer> gateDoorIds, List<Integer> domainIds, List<String> regionIds,
+                    RoadEdgeSource source, boolean stale) {
+        this(id, fromNodeId, toNodeId, geometry, length, avgWidth, profileId, streetId, costMultiplier, flags,
+            gateDoorIds, domainIds, regionIds, source, stale, false);
+    }
 
     public RoadEdge {
         Objects.requireNonNull(geometry, "geometry");
