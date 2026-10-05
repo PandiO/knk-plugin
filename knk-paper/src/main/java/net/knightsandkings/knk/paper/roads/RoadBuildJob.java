@@ -579,6 +579,9 @@ public final class RoadBuildJob {
             }
             List<CompletableFuture<Void>> refreshes = new ArrayList<>();
             refreshes.add(cache.invalidateTile(key));
+            // The tile list too: the upload changed this tile's state, version and figures (smoke test 2026-10-05:
+            // /knk road tiles still showed an uncurated tile after the build had curated it again).
+            refreshes.add(cache.refreshTiles(key.world()));
             for (int bumped : upsert.bumpedTileIds()) {
                 refreshes.add(cache.invalidateTileId(key.world(), bumped));
             }
@@ -605,7 +608,8 @@ public final class RoadBuildJob {
                     return;
                 }
                 RoadTileUpsertResult upsert = done.getValue().orElse(null);
-                CompletableFuture<Void> refresh = upsert == null ? CompletableFuture.completedFuture(null) : cache.invalidateTile(key);
+                CompletableFuture<Void> refresh = upsert == null ? CompletableFuture.completedFuture(null)
+                    : CompletableFuture.allOf(cache.invalidateTile(key), cache.refreshTiles(key.world()));
                 refresh.whenComplete((v, ex2) -> mainThread.execute(() -> finish(new Outcome(key, true, null, build, upsert,
                     chunksCaptured, grid == null ? 0 : grid.spans().spanCount(), upsert == null ? List.of() : coverageMisses(),
                     elapsed(), done.getKey()))));

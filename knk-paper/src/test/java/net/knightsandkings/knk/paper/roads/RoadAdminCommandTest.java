@@ -123,6 +123,37 @@ class RoadAdminCommandTest {
     }
 
     @Test
+    void tilesRefreshesTheTileListBeforePrinting_soAStateChangeShows() {
+        // Smoke test 2026-10-05: after uncurate + a direct build the tile was Curated in the DB, but the list still
+        // showed it uncurated (the cached tile list was only refreshed every 10 minutes).
+        when(player.hasPermission(RoadAdminCommand.NODE)).thenReturn(true);
+        org.bukkit.World world = mock(org.bukkit.World.class);
+        when(world.getName()).thenReturn("world");
+        when(player.getWorld()).thenReturn(world);
+        java.util.List<net.knightsandkings.knk.core.domain.roads.RoadTile> list = new java.util.ArrayList<>(List.of(tile(
+            net.knightsandkings.knk.core.domain.roads.RoadTileState.DETECTED)));
+        when(cache.tiles("world")).thenAnswer(i -> List.copyOf(list));
+        when(cache.snapshot("world")).thenReturn(RoadNetworkSnapshot.empty("world"));
+        when(cache.refreshTiles("world")).thenAnswer(i -> {
+            list.set(0, tile(net.knightsandkings.knk.core.domain.roads.RoadTileState.CURATED));
+            return java.util.concurrent.CompletableFuture.completedFuture(null);
+        });
+
+        command.execute(player, new String[] {"tiles"});
+
+        verify(cache).refreshTiles("world");
+        ArgumentCaptor<Component> captor = ArgumentCaptor.forClass(Component.class);
+        verify(player, org.mockito.Mockito.atLeastOnce()).sendMessage(captor.capture());
+        assertTrue(captor.getAllValues().stream().map(RoadAdminCommandTest::plain).anyMatch(l -> l.startsWith(" 1,-2 ") && l.contains(" curated")),
+            captor.getAllValues().stream().map(RoadAdminCommandTest::plain).toList().toString());
+    }
+
+    private static net.knightsandkings.knk.core.domain.roads.RoadTile tile(net.knightsandkings.knk.core.domain.roads.RoadTileState state) {
+        return new net.knightsandkings.knk.core.domain.roads.RoadTile(3, "world", 1, -2, 12, java.time.OffsetDateTime.now(), 5, false,
+            1611, 7, 7, 2, List.of(), state, null);
+    }
+
+    @Test
     void nodePruneAndUnpruneTakeAnIdOrTheRightNodeHere() {
         when(player.hasPermission(RoadAdminCommand.NODE)).thenReturn(true);
         org.bukkit.World world = mock(org.bukkit.World.class);

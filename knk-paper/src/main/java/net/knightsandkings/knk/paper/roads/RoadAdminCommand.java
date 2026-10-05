@@ -1257,12 +1257,11 @@ public class RoadAdminCommand implements SubcommandExecutor {
         RoadProposals p = proposals.get();
         String w = world;
         int pg = page;
-        if (p == null) {
-            printTiles(sender, w, pg);
-            return;
-        }
-        // The pending proposal counts come from the API (plan §5.7); the list prints either way.
-        p.refreshWorld(world).whenComplete((list, ex) -> mainThread.execute(() -> printTiles(sender, w, pg)));
+        // A fresh tile list (state, versions, dirty marks) and the pending proposal counts (plan §5.7); the list
+        // prints either way, from the cache when the API does not answer.
+        CompletableFuture<?> tilesF = cache.get().refreshTiles(world);
+        CompletableFuture<?> proposalsF = p == null ? CompletableFuture.completedFuture(null) : p.refreshWorld(world);
+        CompletableFuture.allOf(tilesF, proposalsF).whenComplete((v, ex) -> mainThread.execute(() -> printTiles(sender, w, pg)));
     }
 
     private void printTiles(CommandSender sender, String world, int page) {
