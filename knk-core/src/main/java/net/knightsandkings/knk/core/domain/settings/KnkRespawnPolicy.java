@@ -22,9 +22,11 @@ public record KnkRespawnPolicy(Mode mode, KnkSpawnReference reference, Double ma
         /** A fixed Location, or a Town/District/Structure's Location. */
         CONFIGURED_REFERENCE,
         /** The town nearest to where the player died, in the same world. */
-        NEAREST_TOWN;
+        NEAREST_TOWN,
+        /** Synced with the join spawn: where the player would join (and {@code /spawn}), group override included. */
+        JOIN_SPAWN;
 
-        /** The API's value ({@code "WorldSpawn"}, {@code "ConfiguredReference"}, {@code "NearestTown"}), any case. */
+        /** The API's value ({@code "WorldSpawn"}, {@code "ConfiguredReference"}, {@code "NearestTown"}, {@code "JoinSpawn"}), any case. */
         public static Mode parse(String value) {
             if (value == null || value.isBlank()) {
                 return WORLD_SPAWN;

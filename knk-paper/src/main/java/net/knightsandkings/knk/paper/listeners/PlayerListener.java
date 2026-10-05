@@ -36,6 +36,7 @@ import net.knightsandkings.knk.core.dataaccess.ItemBlueprintsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
 import net.knightsandkings.knk.core.domain.users.UserDetail;
+import net.knightsandkings.knk.core.domain.users.PermissionGroupRef;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.core.ports.api.KitsCommandApi;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
@@ -174,7 +175,7 @@ public class PlayerListener implements Listener {
 		// Text from the web-app Game Settings page (docs/specs/game-settings/DESIGN.md §3.1); blank = none.
 		// ModeListener (HIGHEST) still drops it for a vanished player.
 		if (gameSettings != null) {
-			e.joinMessage(gameSettings.joinMessage(player.getName()).orElse(null));
+			e.joinMessage(gameSettings.joinMessage(player.getName(), groupsOf(user)).orElse(null));
 		} else {
 			e.joinMessage(Component.text("► " + "Player " + player.getName() + " joined").color(ColorOptions.message));
 		}
@@ -183,7 +184,7 @@ public class PlayerListener implements Listener {
 			// The server spawn /spawn uses, in its world's default game mode (DESIGN §3.2/§3.4). Never
 			// waits on the API: the spot was resolved in the background. JoinLoadingGuard.hold (later
 			// in this join) switches to ADVENTURE and hands this mode back when the account is loaded.
-			Location spawn = gameSettings != null ? gameSettings.joinSpawn() : Bukkit.getWorlds().get(0).getSpawnLocation();
+			Location spawn = gameSettings != null ? gameSettings.joinSpawn(groupsOf(user)) : Bukkit.getWorlds().get(0).getSpawnLocation();
 			player.setGameMode(gameSettings != null && spawn != null ? gameSettings.gameModeFor(spawn.getWorld()) : GameMode.SURVIVAL);
 			player.setFlying(false);
 			if (spawn != null) {
@@ -253,7 +254,7 @@ public class PlayerListener implements Listener {
         reportPresence(user, false);
 
 		if (gameSettings != null) {
-			e.quitMessage(gameSettings.leaveMessage(player.getName()).orElse(null));
+			e.quitMessage(gameSettings.leaveMessage(player.getName(), groupsOf(user)).orElse(null));
 		} else {
 			e.quitMessage(Component.text(ColorOptions.messageArrow + "Player " + player.getName() + " left").color(ColorOptions.message));
 		}
@@ -375,7 +376,13 @@ public class PlayerListener implements Listener {
 			return;
 		}
 
-		gameSettings.respawnLocation(player).ifPresent(e::setRespawnLocation);
+		UserSummary user = cacheManager.getUserCache().getStale(player.getUniqueId()).orElse(null);
+		gameSettings.respawnLocation(player, groupsOf(user)).ifPresent(e::setRespawnLocation);
+	}
+
+	/** The player's groups in Game Settings precedence order (KNG-52); empty when not cached yet. */
+	private static List<PermissionGroupRef> groupsOf(UserSummary user) {
+		return user != null ? user.permissionGroups() : List.of();
 	}
 
 	@EventHandler

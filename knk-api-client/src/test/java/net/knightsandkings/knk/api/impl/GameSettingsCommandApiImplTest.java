@@ -52,7 +52,13 @@ class GameSettingsCommandApiImplTest {
                 "weather":{"mode":"Blocked","blockedWeatherTypes":["THUNDER","snow"]},
                 "respawnPolicy":{"mode":"ConfiguredReference","locationReference":{"sourceType":"Location","sourceId":7}}}],
              "runtimeWorlds":[{"worldName":"world","folderName":"world","environment":"NORMAL","loaded":true,"playerCount":3,"isPrimary":true}],
-             "runtimeWorldsLastUpdatedAt":"2026-10-05T12:00:00","createdAt":"2026-08-19T10:00:00","updatedAt":"2026-10-05T11:59:00"}
+             "runtimeWorldsLastUpdatedAt":"2026-10-05T12:00:00","createdAt":"2026-08-19T10:00:00","updatedAt":"2026-10-05T11:59:00",
+             "motd":"&6Knights and Kings\\n&e{online} online",
+             "groupOverrides":[
+               {"permissionGroupId":3,"groupName":"Staff","precedence":2,"joinAnnouncement":"","joinSpawnReference":null,"respawnPolicy":null},
+               {"permissionGroupId":2,"groupName":"Noble","precedence":1,"joinAnnouncement":"&6[{group}] {player}",
+                "joinSpawnReference":{"sourceType":"Structure","sourceId":9,"displayLabel":"Structure: Lounge"},
+                "respawnPolicy":{"mode":"JoinSpawn"}}]}
             """;
 
     private final List<Request> seen = new ArrayList<>();
@@ -151,6 +157,39 @@ class GameSettingsCommandApiImplTest {
     }
 
     @Test
+    void readsTheMotdAndTheGroupOverridesInPrecedenceOrder() {
+        KnkGameSettings settings = query.get().join();
+
+        assertEquals("&6Knights and Kings\n&e{online} online", settings.motd());
+        assertEquals(List.of(2, 3), settings.groupOverrides().stream().map(o -> o.permissionGroupId()).toList());
+        var noble = settings.groupOverride(2).orElseThrow();
+        assertEquals("Noble", noble.groupName());
+        assertEquals("&6[{group}] {player}", noble.joinAnnouncement());
+        assertEquals(KnkSpawnReference.SourceType.STRUCTURE, noble.joinSpawnReference().sourceType());
+        assertEquals(KnkRespawnPolicy.Mode.JOIN_SPAWN, noble.respawnPolicy().mode());
+        var staff = settings.groupOverride(3).orElseThrow();
+        assertEquals("", staff.joinAnnouncement());
+        assertNull(staff.joinSpawnReference());
+        assertNull(staff.respawnPolicy());
+    }
+
+    @Test
+    void userSummariesCarryTheirGroupsInOrder() throws Exception {
+        var dto = net.knightsandkings.knk.api.mapper.LootboxMapperTest.apiObjectMapper().readValue("""
+                {"id":7,"username":"Steve","coins":1,"gems":2,"experiencePoints":3,"isFullAccount":true,
+                 "permissionGroups":[{"id":2,"name":"Noble"},{"id":1,"name":"Default"}]}
+                """, net.knightsandkings.knk.api.dto.UserSummaryDto.class);
+
+        var user = net.knightsandkings.knk.api.mapper.UsersMapper.mapUserSummary(dto);
+
+        assertEquals(List.of(new net.knightsandkings.knk.core.domain.users.PermissionGroupRef(2, "Noble"),
+                new net.knightsandkings.knk.core.domain.users.PermissionGroupRef(1, "Default")), user.permissionGroups());
+        assertEquals(2, net.knightsandkings.knk.api.mapper.UsersMapper.mapUserSummary(user).permissionGroups().size());
+        assertTrue(net.knightsandkings.knk.api.mapper.UsersMapper.mapUserSummary(
+                net.knightsandkings.knk.api.mapper.LootboxMapperTest.apiObjectMapper().readValue("{\"id\":1}", net.knightsandkings.knk.api.dto.UserSummaryDto.class)).permissionGroups().isEmpty());
+    }
+
+    @Test
     void anEmptyAnswerGetsTheDefaults() {
         response = "{}";
 
@@ -158,6 +197,8 @@ class GameSettingsCommandApiImplTest {
 
         assertNull(settings.joinAnnouncement());
         assertTrue(settings.worldSettings().isEmpty());
+        assertTrue(settings.groupOverrides().isEmpty());
+        assertNull(settings.motd());
         assertEquals(KnkRespawnPolicy.Mode.WORLD_SPAWN, settings.defaultRespawnPolicy().mode());
     }
 }

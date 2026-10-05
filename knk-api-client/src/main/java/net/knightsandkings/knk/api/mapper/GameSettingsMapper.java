@@ -8,6 +8,7 @@ import java.util.Set;
 import net.knightsandkings.knk.api.dto.GameSettingsDto;
 import net.knightsandkings.knk.core.domain.location.KnkLocation;
 import net.knightsandkings.knk.core.domain.settings.KnkGameSettings;
+import net.knightsandkings.knk.core.domain.settings.KnkGroupOverride;
 import net.knightsandkings.knk.core.domain.settings.KnkRespawnPolicy;
 import net.knightsandkings.knk.core.domain.settings.KnkSpawnReference;
 import net.knightsandkings.knk.core.domain.settings.KnkWeather;
@@ -30,8 +31,22 @@ public final class GameSettingsMapper {
         }
         List<KnkWorldSettings> worlds = dto.worldSettings() == null ? List.of()
             : dto.worldSettings().stream().filter(Objects::nonNull).map(GameSettingsMapper::toCore).toList();
+        List<KnkGroupOverride> groups = new java.util.ArrayList<>();
+        if (dto.groupOverrides() != null) {
+            int position = 0;
+            for (GameSettingsDto.GroupOverride o : dto.groupOverrides()) {
+                position++;
+                if (o == null) {
+                    continue;
+                }
+                groups.add(new KnkGroupOverride(o.permissionGroupId(), o.groupName(),
+                    o.precedence() != null ? o.precedence() : position, o.joinAnnouncement(),
+                    toCore(o.joinSpawnReference()), toCore(o.respawnPolicy())));
+            }
+        }
         return new KnkGameSettings(dto.joinSpawnMode(), toCore(dto.joinSpawnReference()), dto.joinAnnouncement(),
-            dto.leaveAnnouncement(), toCore(dto.defaultRespawnPolicy()), worlds, dto.updatedAt());
+            dto.leaveAnnouncement(), toCore(dto.defaultRespawnPolicy()), worlds, dto.updatedAt(),
+            dto.motd() == null || dto.motd().isBlank() ? null : dto.motd(), groups);
     }
 
     public static GameSettingsDto.RuntimeWorld toDto(KnkWorldRuntime world) {

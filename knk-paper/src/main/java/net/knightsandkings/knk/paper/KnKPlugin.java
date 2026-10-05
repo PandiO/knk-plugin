@@ -1158,6 +1158,7 @@ public class KnKPlugin extends JavaPlugin {
         pluginManager.registerEvents(new WorldGuardRegionListener(regionTracker), this);
         if (gameSettingsManager != null) {
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.GameSettingsWorldListener(this, gameSettingsManager), this);
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.GameSettingsMotdListener(gameSettingsManager), this);
         }
         pluginManager.registerEvents(new PlayerListener(usersDataAccess, gameSettingsManager, this.getCacheManager(), knkPermissible, usersCommandApi, kitsCommandApi, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, ignoreService), this);
         if (playerCurrencyService != null) {
@@ -1548,6 +1549,13 @@ public class KnKPlugin extends JavaPlugin {
         gameSettingsManager.start();
         if (cacheManager != null) {
             cacheManager.registerRefreshHook("game settings", gameSettingsManager::refreshNow);
+            // /spawn honours a group's spawn override (DESIGN §3.8); the groups come from the cached summary.
+            if (spawnCommand != null) {
+                spawnCommand.setPlayerSpawn(player -> gameSettingsManager.groupSpawnPoint(
+                    cacheManager.getUserCache().getStale(player.getUniqueId())
+                        .map(net.knightsandkings.knk.core.domain.users.UserSummary::permissionGroups)
+                        .orElse(java.util.List.of())));
+            }
         }
         getLogger().info("Game settings initialized (refresh every " + settingsConfig.refreshIntervalSeconds()
             + "s, world report check every " + settingsConfig.runtimeSyncIntervalSeconds() + "s)");

@@ -30,7 +30,9 @@ public final class RespawnPlanner {
         /** Respawn at {@link Plan#location()}. */
         LOCATION,
         /** Respawn at the spawn point of the world the player died in. */
-        WORLD_SPAWN
+        WORLD_SPAWN,
+        /** Respawn where the player would join ({@link KnkRespawnPolicy.Mode#JOIN_SPAWN}); the caller resolves it. */
+        JOIN_SPAWN
     }
 
     /**
@@ -57,6 +59,9 @@ public final class RespawnPlanner {
                             RegionCheck inside) {
         if (policy == null || policy.mode() == KnkRespawnPolicy.Mode.WORLD_SPAWN) {
             return Plan.serverDefault("world-spawn policy");
+        }
+        if (policy.mode() == KnkRespawnPolicy.Mode.JOIN_SPAWN) {
+            return new Plan(Kind.JOIN_SPAWN, null, "same as the join spawn");
         }
         if (policy.mode() == KnkRespawnPolicy.Mode.CONFIGURED_REFERENCE) {
             if (isUsable(configured)) {

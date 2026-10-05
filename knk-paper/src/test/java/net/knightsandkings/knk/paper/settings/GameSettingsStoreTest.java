@@ -17,6 +17,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import net.knightsandkings.knk.core.domain.location.KnkLocation;
 import net.knightsandkings.knk.core.domain.settings.KnkGameSettings;
+import net.knightsandkings.knk.core.domain.settings.KnkGroupOverride;
 import net.knightsandkings.knk.core.domain.settings.KnkRespawnPolicy;
 import net.knightsandkings.knk.core.domain.settings.KnkSpawnReference;
 import net.knightsandkings.knk.core.domain.settings.KnkWeather;
@@ -35,7 +36,10 @@ class GameSettingsStoreTest {
         KnkWorldSettings world = new KnkWorldSettings("world", "world", "ADVENTURE", true, 6000,
             new KnkWeatherSettings(KnkWeatherSettings.Mode.BLOCKED, null, Set.of(KnkWeather.THUNDER, KnkWeather.RAIN), 1, 2, 3),
             town, new KnkRespawnPolicy(KnkRespawnPolicy.Mode.NEAREST_TOWN, null, 250.0, false));
-        return new KnkGameSettings("CustomReference", town, join, "", null, List.of(world), "2026-10-05T11:59:00");
+        return new KnkGameSettings("CustomReference", town, join, "", null, List.of(world), "2026-10-05T11:59:00",
+            "&6Knights and Kings\n&e{online} online",
+            List.of(new KnkGroupOverride(2, "Noble", 1, "&6[{group}] {player}", town,
+                new KnkRespawnPolicy(KnkRespawnPolicy.Mode.JOIN_SPAWN, null, null, true))));
     }
 
     @Test

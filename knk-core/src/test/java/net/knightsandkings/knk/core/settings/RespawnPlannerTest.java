@@ -45,6 +45,14 @@ class RespawnPlannerTest {
     }
 
     @Test
+    void joinSpawnPolicyIsSyncedWithTheJoinSpawn() {
+        Plan plan = RespawnPlanner.plan(policy(Mode.JOIN_SPAWN, null, true), DEATH, null, TOWNS, null);
+        assertEquals(Kind.JOIN_SPAWN, plan.kind());
+        assertNull(plan.location());
+        assertEquals(Mode.JOIN_SPAWN, Mode.parse("JoinSpawn"));
+    }
+
+    @Test
     void configuredReferenceUsesTheResolvedSpot() {
         KnkLocation spot = at("world", 10, -3);
         Plan plan = RespawnPlanner.plan(policy(Mode.CONFIGURED_REFERENCE, null, true), DEATH, spot, TOWNS, null);

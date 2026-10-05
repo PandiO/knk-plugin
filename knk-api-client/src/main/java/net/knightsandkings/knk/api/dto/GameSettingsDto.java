@@ -19,8 +19,21 @@ public record GameSettingsDto(
         @JsonProperty("defaultRespawnPolicy") RespawnPolicy defaultRespawnPolicy,
         @JsonProperty("worldSettings") List<WorldSettings> worldSettings,
         @JsonProperty("runtimeWorlds") List<RuntimeWorld> runtimeWorlds,
-        @JsonProperty("updatedAt") String updatedAt
+        @JsonProperty("updatedAt") String updatedAt,
+        @JsonProperty("motd") String motd,
+        @JsonProperty("groupOverrides") List<GroupOverride> groupOverrides
 ) {
+    /** knk-web-api {@code PermissionGroupGameSettingsDto} (KNG-52). */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record GroupOverride(
+            @JsonProperty("permissionGroupId") int permissionGroupId,
+            @JsonProperty("groupName") String groupName,
+            @JsonProperty("precedence") Integer precedence,
+            @JsonProperty("joinAnnouncement") String joinAnnouncement,
+            @JsonProperty("joinSpawnReference") LocationReference joinSpawnReference,
+            @JsonProperty("respawnPolicy") RespawnPolicy respawnPolicy
+    ) {}
+
     /** knk-web-api {@code LocationReferenceDto}. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record LocationReference(

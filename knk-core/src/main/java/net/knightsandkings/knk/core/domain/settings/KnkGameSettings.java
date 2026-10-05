@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.core.domain.settings;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -17,10 +18,13 @@ import java.util.Optional;
  * @param defaultRespawnPolicy for a world without its own block; never null
  * @param worldSettings        one per world; never null
  * @param updatedAt            the API's last-edit timestamp as sent, informational
+ * @param motd                 server-list MOTD ({@code &}-coded, up to two lines); null = server.properties
+ * @param groupOverrides       per-group overrides in precedence order (KNG-52); never null
  */
 public record KnkGameSettings(String joinSpawnMode, KnkSpawnReference joinSpawnReference, String joinAnnouncement,
                               String leaveAnnouncement, KnkRespawnPolicy defaultRespawnPolicy,
-                              List<KnkWorldSettings> worldSettings, String updatedAt) {
+                              List<KnkWorldSettings> worldSettings, String updatedAt, String motd,
+                              List<KnkGroupOverride> groupOverrides) {
 
     public static final String WORLD_SPAWN = "WorldSpawn";
     public static final String CUSTOM_REFERENCE = "CustomReference";
@@ -29,11 +33,27 @@ public record KnkGameSettings(String joinSpawnMode, KnkSpawnReference joinSpawnR
         defaultRespawnPolicy = defaultRespawnPolicy != null ? defaultRespawnPolicy : KnkRespawnPolicy.worldSpawn();
         worldSettings = worldSettings == null ? List.of()
             : worldSettings.stream().filter(Objects::nonNull).filter(w -> w.worldName() != null).toList();
+        groupOverrides = groupOverrides == null ? List.of()
+            : groupOverrides.stream().filter(Objects::nonNull)
+                .sorted(Comparator.comparingInt(KnkGroupOverride::precedence)).toList();
+    }
+
+    /** Without MOTD and group overrides (the first KNG-52 round). */
+    public KnkGameSettings(String joinSpawnMode, KnkSpawnReference joinSpawnReference, String joinAnnouncement,
+                           String leaveAnnouncement, KnkRespawnPolicy defaultRespawnPolicy,
+                           List<KnkWorldSettings> worldSettings, String updatedAt) {
+        this(joinSpawnMode, joinSpawnReference, joinAnnouncement, leaveAnnouncement, defaultRespawnPolicy, worldSettings,
+            updatedAt, null, List.of());
     }
 
     /** Only the join spawn (all {@code /spawn} reads); everything else at its default. */
     public KnkGameSettings(String joinSpawnMode, KnkSpawnReference joinSpawnReference) {
         this(joinSpawnMode, joinSpawnReference, null, null, null, List.of(), null);
+    }
+
+    /** The override for {@code groupId}, if the Game Settings page has one. */
+    public Optional<KnkGroupOverride> groupOverride(int groupId) {
+        return groupOverrides.stream().filter(o -> o.permissionGroupId() == groupId).findFirst();
     }
 
     /** The server spawn set on the Game Settings page, or empty when the main world's spawn is used. */

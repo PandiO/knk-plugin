@@ -37,6 +37,7 @@ import net.knightsandkings.knk.core.domain.common.Page;
 import net.knightsandkings.knk.core.domain.common.PagedQuery;
 import net.knightsandkings.knk.core.domain.location.KnkLocation;
 import net.knightsandkings.knk.core.domain.settings.KnkGameSettings;
+import net.knightsandkings.knk.core.domain.settings.KnkGroupOverride;
 import net.knightsandkings.knk.core.domain.settings.KnkRespawnPolicy;
 import net.knightsandkings.knk.core.domain.settings.KnkSpawnReference;
 import net.knightsandkings.knk.core.domain.settings.KnkWeather;
@@ -45,10 +46,12 @@ import net.knightsandkings.knk.core.domain.settings.KnkWorldRuntime;
 import net.knightsandkings.knk.core.domain.settings.KnkWorldSettings;
 import net.knightsandkings.knk.core.domain.towns.TownDetail;
 import net.knightsandkings.knk.core.domain.towns.TownSummary;
+import net.knightsandkings.knk.core.domain.users.PermissionGroupRef;
 import net.knightsandkings.knk.core.ports.api.GameSettingsCommandApi;
 import net.knightsandkings.knk.core.ports.api.GameSettingsQueryApi;
 import net.knightsandkings.knk.core.ports.api.TownsQueryApi;
 import net.knightsandkings.knk.core.settings.Announcements;
+import net.knightsandkings.knk.core.settings.GroupOverrides;
 import net.knightsandkings.knk.core.settings.RespawnPlanner;
 import net.knightsandkings.knk.core.settings.WeatherRules;
 import net.knightsandkings.knk.core.teleport.SpawnPoint;
@@ -59,7 +62,8 @@ import net.kyori.adventure.text.Component;
 /**
  * Applies the web app's global Game Settings in the running server (docs/specs/game-settings/DESIGN.md,
  * KNG-52): join/leave announcements, the join spawn and per-world game mode, the respawn policy, the
- * per-world time lock, weather rule and spawn point; reports the loaded worlds back to the API.
+ * per-world time lock, weather rule and spawn point, per-group overrides of the join message, spawn and
+ * respawn, and the server-list MOTD; reports the loaded worlds back to the API.
  * <p>
  * Threads: the settings, resolved references and towns are read on the main thread (join, respawn,
  * weather events) from fields refreshed in the background, so no event ever waits on the API. World
@@ -225,6 +229,12 @@ public class GameSettingsManager {
             addRespawnReference(references, world.respawnPolicy());
         }
         addRespawnReference(references, settings.defaultRespawnPolicy());
+        for (KnkGroupOverride group : settings.groupOverrides()) {
+            if (group.joinSpawnReference() != null) {
+                references.add(group.joinSpawnReference());
+            }
+            addRespawnReference(references, group.respawnPolicy());
+        }
 
         List<CompletableFuture<Void>> lookups = new ArrayList<>();
         for (KnkSpawnReference reference : references) {
@@ -256,7 +266,9 @@ public class GameSettingsManager {
 
     private static boolean usesNearestTown(KnkGameSettings settings) {
         return settings.defaultRespawnPolicy().mode() == KnkRespawnPolicy.Mode.NEAREST_TOWN
-            || settings.worldSettings().stream().anyMatch(w -> w.respawnPolicy().mode() == KnkRespawnPolicy.Mode.NEAREST_TOWN);
+            || settings.worldSettings().stream().anyMatch(w -> w.respawnPolicy().mode() == KnkRespawnPolicy.Mode.NEAREST_TOWN)
+            || settings.groupOverrides().stream().anyMatch(g -> g.respawnPolicy() != null
+                && g.respawnPolicy().mode() == KnkRespawnPolicy.Mode.NEAREST_TOWN);
     }
 
     /** Every town with a spawn point, for NEAREST_TOWN. Only while some world uses that policy. */
@@ -307,23 +319,82 @@ public class GameSettingsManager {
 
     // ===== announcements, join, game mode =====
 
-    /** The join broadcast, or empty for none. */
-    public Optional<Component> joinMessage(String playerName) {
+    /**
+     * The join broadcast, or empty for none: the first of the player's groups with its own message
+     * (DESIGN §3.8), else the global one. {@code {group}} is the group whose message it is, else the
+     * player's first group.
+     *
+     * @param groups the player's groups in precedence order (UserSummary.permissionGroups); may be empty
+     */
+    public Optional<Component> joinMessage(String playerName, List<PermissionGroupRef> groups) {
         KnkGameSettings settings = current;
-        return Announcements.render(settings != null ? settings.joinAnnouncement() : null, Announcements.DEFAULT_JOIN, playerName)
+        Optional<GroupOverrides.Pick<String>> group = GroupOverrides.joinAnnouncement(settings, groups);
+        String template = group.map(GroupOverrides.Pick::value).orElse(settings != null ? settings.joinAnnouncement() : null);
+        String groupName = group.map(pick -> pick.group().name()).orElse(GroupOverrides.primaryGroupName(groups));
+        return Announcements.render(template, Announcements.DEFAULT_JOIN, playerName, groupName)
             .map(DisplayTextFormatter::toComponent);
     }
 
-    /** The quit broadcast, or empty for none. */
-    public Optional<Component> leaveMessage(String playerName) {
+    /** The quit broadcast, or empty for none. {@code {group}} is the player's first group. */
+    public Optional<Component> leaveMessage(String playerName, List<PermissionGroupRef> groups) {
         KnkGameSettings settings = current;
-        return Announcements.render(settings != null ? settings.leaveAnnouncement() : null, Announcements.DEFAULT_LEAVE, playerName)
+        return Announcements.render(settings != null ? settings.leaveAnnouncement() : null, Announcements.DEFAULT_LEAVE, playerName,
+                GroupOverrides.primaryGroupName(groups))
+            .map(DisplayTextFormatter::toComponent);
+    }
+
+    /** The server-list MOTD, or empty to leave the server's own (DESIGN §3.9). Any thread. */
+    public Optional<Component> motd(int online, int max) {
+        KnkGameSettings settings = current;
+        return Announcements.renderMotd(settings != null ? settings.motd() : null, online, max)
             .map(DisplayTextFormatter::toComponent);
     }
 
     /**
-     * Where a regular player is put on join: the server spawn {@code /spawn} uses, as last resolved, else
-     * the main world's spawn. Main thread; never waits on the API.
+     * Where this player joins (and {@code /spawn}): their first group with a spawn override (DESIGN
+     * §3.8), else the server spawn. Main thread; never waits on the API.
+     */
+    public Location joinSpawn(List<PermissionGroupRef> groups) {
+        return groupSpawn(groups).map(GroupSpot::location).orElseGet(this::joinSpawn);
+    }
+
+    /**
+     * The player's group spawn override as a {@code /spawn} destination, or null when their groups have
+     * none (then {@code /spawn} uses the server spawn). Any thread.
+     */
+    public SpawnPoint groupSpawnPoint(List<PermissionGroupRef> groups) {
+        KnkGameSettings settings = current;
+        return GroupOverrides.joinSpawn(settings, groups)
+            .map(pick -> {
+                KnkLocation spot = resolved.getOrDefault(pick.value(), pick.value().snapshot());
+                return RespawnPlanner.isUsable(spot) && Bukkit.getWorld(spot.world()) != null
+                    ? new SpawnPoint(spot, pick.value().label(), SpawnPoint.Source.REFERENCE)
+                    : null;
+            })
+            .orElse(null);
+    }
+
+    private record GroupSpot(Location location, String label) {
+    }
+
+    private Optional<GroupSpot> groupSpawn(List<PermissionGroupRef> groups) {
+        KnkGameSettings settings = current;
+        Optional<GroupOverrides.Pick<KnkSpawnReference>> pick = GroupOverrides.joinSpawn(settings, groups);
+        if (pick.isEmpty()) {
+            return Optional.empty();
+        }
+        KnkSpawnReference reference = pick.get().value();
+        Optional<Location> spot = toBukkit(resolved.getOrDefault(reference, reference.snapshot()));
+        if (spot.isEmpty()) {
+            warnOnce("group-spawn:" + pick.get().group().id(), "Spawn of group " + pick.get().group().name() + " ("
+                + reference.label() + ") has no usable location in a loaded world; using the server spawn");
+        }
+        return spot.map(location -> new GroupSpot(location, reference.label()));
+    }
+
+    /**
+     * Where a regular player is put on join without a group override: the server spawn {@code /spawn}
+     * uses, as last resolved, else the main world's spawn. Main thread; never waits on the API.
      */
     public Location joinSpawn() {
         SpawnDestinationResolver resolver = spawns.get();
@@ -367,17 +438,21 @@ public class GameSettingsManager {
 
     /**
      * Where a regular player who died respawns (DESIGN §3.3); empty leaves it to the server (bed,
-     * anchor, world spawn). Main thread, inside {@code PlayerRespawnEvent}; reads only what was resolved
+     * anchor, world spawn). The player's first group with a respawn override wins over the death world's
+     * policy (§3.8). Main thread, inside {@code PlayerRespawnEvent}; reads only what was resolved
      * beforehand.
+     *
+     * @param groups the player's groups in precedence order; may be empty
      */
-    public Optional<Location> respawnLocation(Player player) {
+    public Optional<Location> respawnLocation(Player player, List<PermissionGroupRef> groups) {
         KnkGameSettings settings = current;
         Location death = player.getLastDeathLocation() != null ? player.getLastDeathLocation() : player.getLocation();
         if (settings == null || death == null || death.getWorld() == null) {
             return Optional.empty();
         }
         World deathWorld = death.getWorld();
-        KnkRespawnPolicy policy = settings.respawnPolicyFor(deathWorld.getName());
+        KnkRespawnPolicy policy = GroupOverrides.respawnPolicy(settings, groups).map(GroupOverrides.Pick::value)
+            .orElseGet(() -> settings.respawnPolicyFor(deathWorld.getName()));
         KnkLocation configured = null;
         if (policy.reference() != null) {
             configured = resolved.get(policy.reference());
@@ -391,6 +466,7 @@ public class GameSettingsManager {
         return switch (plan.kind()) {
             case SERVER_DEFAULT -> Optional.empty();
             case WORLD_SPAWN -> Optional.of(deathWorld.getSpawnLocation());
+            case JOIN_SPAWN -> Optional.ofNullable(joinSpawn(groups));
             case LOCATION -> {
                 Optional<Location> spot = toBukkit(plan.location());
                 if (spot.isEmpty()) {
