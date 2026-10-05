@@ -33,7 +33,9 @@ public final class TeleportDestinationsMapper {
             Boolean.TRUE.equals(dto.requirementsMet()),
             Boolean.TRUE.equals(dto.canAfford()),
             dto.lockCode(),
-            dto.lockReason()
+            dto.lockReason(),
+            dto.priceCoins() != null ? dto.priceCoins() : 0,
+            dto.priceExperience() != null ? dto.priceExperience() : 0
         );
     }
 

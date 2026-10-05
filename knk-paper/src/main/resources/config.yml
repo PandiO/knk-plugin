@@ -125,7 +125,9 @@ teleport:
   warmup-seconds: 5            # v1 default
   # Warmup for holders of knk.teleport.warmup.short (granted to the Noble premium tier and up)
   warmup-short-seconds: 3      # v1 premium
-  # Seconds after a player teleport before the same kind of teleport can be used again
+  # Seconds after a player teleport before the same kind of teleport can be used again. A permission
+  # group can set its own cooldown for /tpa, /warp and /spawn in the web app (Linear KNG-41); that
+  # replaces this value for its members.
   cooldown-seconds: 30
   # A PvP hit (dealt or taken) blocks player teleports for this long
   combat-tag-seconds: 10       # v1 Main.combat
@@ -140,7 +142,9 @@ teleport:
     # Pending requests one player can have; the oldest is dropped past this
     max-incoming: 5
     # Coins a request costs the requester (0 = free). Charged by the web API when the teleport
-    # happens (after the warmup) and refunded if it then fails.
+    # happens (after the warmup) and refunded if it then fails. The requester's permission group can
+    # replace it in the web app (KNG-41: a multiple of this value, or a fixed price in coins, gems
+    # and/or XP); /spawn and /warp can be priced there too.
     price-coins: 0             # v1 intended 10000, never charged
   # /warp <destination> and /warps (knk.teleport.warp): Towns, Districts and Structures staff
   # enabled as destinations in the web app. The web API checks the title / premium tier /

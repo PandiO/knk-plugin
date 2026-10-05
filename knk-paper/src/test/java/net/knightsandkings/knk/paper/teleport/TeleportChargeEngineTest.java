@@ -1,12 +1,17 @@
 package net.knightsandkings.knk.paper.teleport;
 
+import net.knightsandkings.knk.core.dataaccess.TeleportPolicyDataAccess;
 import net.knightsandkings.knk.core.domain.teleport.KnkTeleportDestination;
+import net.knightsandkings.knk.core.domain.teleport.KnkTeleportPolicy;
+import net.knightsandkings.knk.core.domain.teleport.TeleportPayment;
 import net.knightsandkings.knk.core.domain.teleport.TeleportChargeResult;
 import net.knightsandkings.knk.core.domain.teleport.TeleportRefundResult;
 import net.knightsandkings.knk.core.ports.api.TeleportDestinationsCommandApi;
+import net.knightsandkings.knk.core.ports.api.TeleportDestinationsQueryApi;
 import net.knightsandkings.knk.core.teleport.BlockProbe;
 import net.knightsandkings.knk.core.teleport.TeleportCharger;
 import net.knightsandkings.knk.core.teleport.TeleportDenial;
+import net.knightsandkings.knk.core.teleport.TeleportKind;
 import net.knightsandkings.knk.core.teleport.TeleportOutcome;
 import net.knightsandkings.knk.core.teleport.TeleportRequestBook.Direction;
 import net.knightsandkings.knk.core.teleport.TeleportRequestSettings;
@@ -20,11 +25,16 @@ import org.bukkit.event.player.PlayerTeleportEvent.TeleportCause;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -66,6 +76,12 @@ class TeleportChargeEngineTest {
         @Override
         public CompletableFuture<TeleportChargeResult> chargeRequestFee(int userId, int amountCoins, String key, Integer otherUserId) {
             feeCalls.add(userId + ":" + amountCoins + ":" + otherUserId + ":" + key);
+            return CompletableFuture.completedFuture(next);
+        }
+
+        @Override
+        public CompletableFuture<TeleportChargeResult> chargeSpawnFee(int userId, String key) {
+            feeCalls.add(userId + ":spawn:" + key);
             return CompletableFuture.completedFuture(next);
         }
 
@@ -343,6 +359,175 @@ class TeleportChargeEngineTest {
         verify(bob, never()).teleportAsync(any(Location.class), any(TeleportCause.class));
         verify(bob).sendMessage(contains("Alice doesn't have the 250 coins"));
         assertFalse(api.feeCalls.isEmpty());
+    }
+
+    // ===== KNG-41: permission-group fees and cooldowns =====
+
+    /** The policy every player gets from the fake API; null = the API can't be reached. */
+    private KnkTeleportPolicy groupPolicy = KnkTeleportPolicy.DEFAULT;
+
+    private void useGroupSettings() {
+        TeleportDestinationsQueryApi query = new TeleportDestinationsQueryApi() {
+            @Override
+            public CompletableFuture<List<KnkTeleportDestination>> listForUser(int userId) {
+                return CompletableFuture.completedFuture(List.of());
+            }
+
+            @Override
+            public CompletableFuture<KnkTeleportPolicy> policyForUser(int userId) {
+                return groupPolicy != null ? CompletableFuture.completedFuture(groupPolicy)
+                    : CompletableFuture.failedFuture(new RuntimeException("API down"));
+            }
+        };
+        TeleportPolicyDataAccess policies = new TeleportPolicyDataAccess(query,
+            uuid -> CompletableFuture.completedFuture(userIds.get(uuid)), Duration.ofSeconds(60),
+            Clock.fixed(Instant.ofEpochMilli(0), ZoneOffset.UTC));
+        charges.setPolicies(policies);
+        engine.setCooldownPolicy(new TeleportService.CooldownPolicy() {
+            @Override
+            public OptionalInt cooldownSeconds(UUID player, TeleportKind kind) {
+                return policies.cachedOrDefault(player).of(kind).cooldown();
+            }
+
+            @Override
+            public void prefetch(UUID player) {
+                policies.refresh(player, TeleportPolicyDataAccess.PLAYER_READ_MAX_AGE);
+            }
+        });
+    }
+
+    private static KnkTeleportPolicy.Kind fixed(int coins, int gems, int xp) {
+        return new KnkTeleportPolicy.Kind("Fixed", null, coins, gems, xp, null);
+    }
+
+    @Test
+    void aFreeTpa_AsksTheServerNothing() {
+        useGroupSettings();
+        TeleportRequestService requests = paidRequests(0);
+
+        requests.send(alice, bob, Direction.TO_TARGET);
+        requests.accept(bob, null);
+        advance(5_000);
+
+        verify(alice).teleportAsync(any(Location.class), any(TeleportCause.class));
+        assertTrue(api.feeCalls.isEmpty());
+        verify(alice, never()).sendMessage(contains("It costs you"));
+    }
+
+    @Test
+    void aGroupPricedTpa_IsChargedEvenWhenTheDefaultIsFree() {
+        groupPolicy = new KnkTeleportPolicy(fixed(10, 1, 0), null, null);
+        useGroupSettings();
+        api.next = TeleportChargeResult.allowed("Coins", List.of(new TeleportPayment("Coins", 10, 990),
+            new TeleportPayment("Gems", 1, 49)), 990, false, null);
+        TeleportRequestService requests = paidRequests(0);
+
+        requests.send(alice, bob, Direction.TO_TARGET);
+        verify(alice).sendMessage(contains("It costs you 10 coins and 1 gem if the teleport happens."));
+        requests.accept(bob, null);
+        advance(5_000);
+
+        assertEquals(1, api.feeCalls.size());
+        assertTrue(api.feeCalls.get(0).startsWith("7:0:8:tpa:"), api.feeCalls.get(0));
+        verify(alice).sendMessage(contains("You paid 10 coins and 1 gem; your new balance is 990 coins and 49 gems."));
+    }
+
+    @Test
+    void aGroupThatCantBePaid_NamesTheGroupPrice() {
+        groupPolicy = new KnkTeleportPolicy(fixed(0, 2, 0), null, null);
+        useGroupSettings();
+        api.next = TeleportChargeResult.refused("InsufficientGems", "You don't have enough gems to send this teleport request!");
+        TeleportRequestService requests = paidRequests(250);
+
+        requests.send(alice, bob, Direction.TO_REQUESTER);
+        requests.accept(bob, null);
+        advance(5_000);
+
+        verify(bob, never()).teleportAsync(any(Location.class), any(TeleportCause.class));
+        verify(bob).sendMessage(contains("Alice doesn't have the 2 gems this teleport request costs."));
+    }
+
+    @Test
+    void aGroupMultiplierOfZero_MakesThePaidDefaultFree() {
+        groupPolicy = new KnkTeleportPolicy(new KnkTeleportPolicy.Kind("Multiplier", 0d, null, null, null, null), null, null);
+        useGroupSettings();
+        TeleportRequestService requests = paidRequests(250);
+
+        requests.send(alice, bob, Direction.TO_TARGET);
+        requests.accept(bob, null);
+        advance(5_000);
+
+        verify(alice).teleportAsync(any(Location.class), any(TeleportCause.class));
+        assertTrue(api.feeCalls.isEmpty());
+    }
+
+    @Test
+    void withoutAnAnswerAboutGroups_TheDefaultApplies() {
+        groupPolicy = null; // the policy can't be loaded
+        useGroupSettings();
+        api.next = TeleportChargeResult.allowed("Coins", 250, 750, false, null);
+        TeleportRequestService requests = paidRequests(250);
+
+        requests.send(alice, bob, Direction.TO_TARGET);
+        requests.accept(bob, null);
+        advance(5_000);
+
+        assertEquals(1, api.feeCalls.size());
+        assertTrue(api.feeCalls.get(0).startsWith("7:250:8:tpa:"), api.feeCalls.get(0));
+    }
+
+    @Test
+    void aGroupPricedSpawn_IsCharged_AFreeOneAsksNothing() {
+        useGroupSettings();
+        Location spawn = new Location(world, 0.5, 64, 0.5);
+        CompletableFuture<TeleportOutcome> free = engine.start(TeleportPlan.spawn(alice, spawn, "Spawn").withCharge(charges.spawnFee(alice)));
+        advance(5_000);
+        assertTrue(free.join().isTeleported());
+        assertTrue(api.feeCalls.isEmpty(), "free /spawn: no server call");
+
+        groupPolicy = new KnkTeleportPolicy(null, null, fixed(30, 0, 0));
+        useGroupSettings();
+        api.next = TeleportChargeResult.allowed("Coins", 30, 70, false, null);
+        CompletableFuture<TeleportOutcome> paid = engine.start(TeleportPlan.spawn(bob, spawn, "Spawn").withCharge(charges.spawnFee(bob)));
+        advance(5_000);
+
+        assertTrue(paid.join().isTeleported());
+        assertEquals(1, api.feeCalls.size());
+        assertTrue(api.feeCalls.get(0).startsWith("8:spawn:spawn:"), api.feeCalls.get(0));
+        verify(bob).sendMessage(contains("You paid 30 coins and your new balance is 70."));
+    }
+
+    @Test
+    void aGroupCooldownReplacesTheConfiguredOne() {
+        groupPolicy = new KnkTeleportPolicy(null, new KnkTeleportPolicy.Kind("None", null, null, null, null, 5), null);
+        useGroupSettings();
+        Location town = new Location(world, 500.5, 64, 500.5);
+
+        assertTrue(startAndWarm(alice, town).isTeleported());
+        advance(6_000);
+        // The default (30 s) would still refuse; the group's 5 s are over.
+        assertTrue(startAndWarm(alice, town).isTeleported());
+        assertEquals(5, engine.cooldownSeconds(alice.getUniqueId(), TeleportKind.WARP));
+        assertEquals(TeleportSettings.defaults().cooldownSeconds(), engine.cooldownSeconds(alice.getUniqueId(), TeleportKind.SPAWN));
+    }
+
+    @Test
+    void withoutAGroupCooldown_TheConfiguredOneApplies() {
+        useGroupSettings();
+        Location town = new Location(world, 500.5, 64, 500.5);
+
+        assertTrue(startAndWarm(alice, town).isTeleported());
+        advance(6_000);
+        TeleportOutcome second = engine.start(TeleportPlan.warp(alice, town, "Town", null)).join();
+
+        assertFalse(second.isTeleported());
+        assertEquals(TeleportDenial.COOLDOWN, second.code());
+    }
+
+    private TeleportOutcome startAndWarm(Player player, Location to) {
+        CompletableFuture<TeleportOutcome> outcome = engine.start(TeleportPlan.warp(player, to, "Town", null));
+        advance(5_000);
+        return outcome.join();
     }
 
     // ===== KNG-42: the /back fee =====

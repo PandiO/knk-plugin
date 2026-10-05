@@ -21,6 +21,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import net.knightsandkings.knk.api.auth.NoAuthProvider;
 import net.knightsandkings.knk.core.domain.teleport.KnkTeleportDestination;
+import net.knightsandkings.knk.core.domain.teleport.KnkTeleportPolicy;
 import net.knightsandkings.knk.core.domain.teleport.TeleportChargeResult;
 import net.knightsandkings.knk.core.domain.teleport.TeleportRefundResult;
 import okio.Buffer;
@@ -177,5 +178,70 @@ class TeleportDestinationsApiImplTest {
         assertEquals("warps", body.get("backKind").asText());
         assertTrue(fee.allowed());
         assertEquals(250L, fee.charged());
+    }
+
+    // ===== KNG-41: permission-group fees and cooldowns =====
+
+    @Test
+    void policyGetsThePlayersGroupSettings() {
+        responseJson = "{\"userId\":12,\"request\":{\"priceMode\":\"Fixed\",\"priceCoins\":10,\"priceGems\":1,"
+            + "\"priceExperience\":0,\"priceGroupName\":\"Royal\",\"cooldownSeconds\":3},"
+            + "\"warp\":{\"priceMode\":\"Multiplier\",\"priceMultiplier\":0.5,\"cooldownSeconds\":null},"
+            + "\"spawn\":{\"priceMode\":\"None\"}}";
+
+        KnkTeleportPolicy policy = api.policyForUser(12).join();
+
+        assertEquals("http://api.test/api/teleport-destinations/policy?userId=12", seen.get(0).url().toString());
+        assertTrue(policy.request().isFixed());
+        assertEquals(10, policy.request().priceCoins());
+        assertEquals(3, policy.request().cooldown().getAsInt());
+        assertTrue(policy.warp().isMultiplier());
+        assertEquals(0.5, policy.warp().priceMultiplier());
+        assertTrue(policy.warp().cooldown().isEmpty());
+        assertFalse(policy.spawn().priced());
+    }
+
+    @Test
+    void spawnFeeBody_AndAComboChargeMapsEveryPayment() throws Exception {
+        responseJson = "{\"currency\":\"Coins\",\"charged\":100,\"newBalance\":900,\"replayed\":false,"
+            + "\"payments\":[{\"currency\":\"Coins\",\"amount\":100,\"newBalance\":900},"
+            + "{\"currency\":\"Experience\",\"amount\":50,\"newBalance\":450}]}";
+
+        TeleportChargeResult result = api.chargeSpawnFee(7, "spawn:k").join();
+
+        assertEquals("http://api.test/api/teleport-destinations/spawn-fee", seen.get(0).url().toString());
+        JsonNode body = mapper.readTree(bodies.get(0));
+        assertEquals(7, body.get("userId").asInt());
+        assertEquals("spawn:k", body.get("idempotencyKey").asText());
+        assertTrue(result.allowed());
+        assertEquals(2, result.payments().size());
+        assertEquals("Experience", result.payments().get(1).currency());
+        assertEquals(50, result.payments().get(1).amount());
+        assertEquals(100, result.charged());
+    }
+
+    @Test
+    void aFreeChargeHasNoPayments_AndAnOldApiStillYieldsOne() {
+        responseJson = "{\"currency\":\"Coins\",\"charged\":0,\"newBalance\":10,\"payments\":[]}";
+        TeleportChargeResult free = api.chargeRequestFee(7, 0, "tpa:free", null).join();
+        assertFalse(free.paid());
+        assertTrue(free.payments().isEmpty());
+
+        responseJson = "{\"currency\":\"Gems\",\"charged\":10,\"newBalance\":40}";
+        TeleportChargeResult old = api.chargeWarp(3, 7, "warp:old", false, false).join();
+        assertEquals(1, old.payments().size());
+        assertEquals(10, old.payments().get(0).amount());
+    }
+
+    @Test
+    void listMapsTheGroupPriceInCoinsAndXp() {
+        responseJson = "[{\"domainId\":3,\"name\":\"Kardenna\",\"location\":{\"world\":\"world\"},"
+            + "\"priceGems\":1,\"priceCoins\":100,\"priceExperience\":50,\"canAfford\":true,\"available\":true,\"requirementsMet\":true}]";
+
+        KnkTeleportDestination d = api.listForUser(12).join().get(0);
+
+        assertEquals(100, d.priceCoins());
+        assertEquals(50, d.priceExperience());
+        assertEquals("100 coins, 1 gem and 50 XP", d.priceLabel());
     }
 }

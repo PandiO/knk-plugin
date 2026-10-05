@@ -54,8 +54,8 @@ import net.kyori.adventure.text.format.TextDecoration;
  * A requester who isn't online, or who the answering player can't see (vanished since), counts as
  * "no pending request" - the same answer as for a name that never asked, so nothing is revealed.
  * <p>
- * Price: {@code teleport.request.price-coins} coins (default 0 = free), charged to the requester by
- * knk-web-api when the teleport commits - after the warmup, through the same charge path as warps
+ * Price: {@code teleport.request.price-coins} coins (default 0 = free), or the requester's
+ * permission-group price (Linear KNG-41), charged to the requester by knk-web-api when the teleport commits - after the warmup, through the same charge path as warps
  * ({@link TeleportCharges}, Phase 5) - and refunded if it then doesn't happen. Without the API
  * client ({@link #setCharges} never called) a non-zero price refuses every request instead.
  * <p>
@@ -106,7 +106,10 @@ public class TeleportRequestService {
         return settings;
     }
 
-    /** How the {@code teleport.request.price-coins} fee is charged (Phase 5); null refuses paid requests. */
+    /**
+     * How the request fee is charged - {@code teleport.request.price-coins}, or the requester's
+     * permission-group price (Phase 5, KNG-41); null refuses paid requests.
+     */
     public void setCharges(TeleportCharges charges) {
         this.charges = charges;
     }
@@ -197,9 +200,13 @@ public class TeleportRequestService {
                         + " was dropped: they have too many pending requests.");
                 }
                 requester.sendMessage(sentMessage(target, book.expireSeconds()));
-                if (settings.isPaid()) {
-                    requester.sendMessage(ChatColor.GRAY + "It costs you " + settings.priceCoins()
-                        + " coins if the teleport happens.");
+                TeleportCharges fees = charges;
+                // The requester's permission group may price it (Linear KNG-41); the default otherwise.
+                String price = fees != null
+                    ? fees.priceLabel(requester.getUniqueId(), TeleportKind.REQUEST, settings.priceCoins())
+                    : settings.isPaid() ? settings.priceCoins() + " coins" : null;
+                if (price != null) {
+                    requester.sendMessage(ChatColor.GRAY + "It costs you " + price + " if the teleport happens.");
                 }
                 target.sendMessage(requestNotice(requester, result.request(), book.expireSeconds()));
             }
@@ -303,8 +310,9 @@ public class TeleportRequestService {
         }
         TeleportPlan plan = plan(requester, target, request.direction());
         TeleportCharges fees = charges;
-        if (settings.isPaid() && fees != null) {
-            // The requester pays, whoever moves; charged after the warmup, refunded if it fails.
+        if (fees != null) {
+            // The requester pays, whoever moves; charged after the warmup, refunded if it fails. Free
+            // by their group settings (KNG-41) and the default, nothing is asked of the server.
             plan = plan.withCharge(fees.requestFee(requester, target, settings.priceCoins()));
         }
         engine.start(plan).thenAccept(outcome -> report(mover, stationary, outcome));

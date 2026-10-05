@@ -1440,6 +1440,7 @@ public class KnKPlugin extends JavaPlugin {
         // Phase 5: warp gem prices and /tpa coin fees are charged by the web API (DESIGN.md §3.5/§3.7).
         net.knightsandkings.knk.paper.teleport.TeleportCharges charges = createTeleportCharges();
         teleportRequestService.setCharges(charges);
+        wireTeleportGroupSettings(charges);
         // Private messages' ignore list (KNG-18): a player you /ignore can't /tpa or /tpahere you.
         if (ignoreService != null) {
             teleportRequestService.setIgnoreCheck(ignoreService::ignores);
@@ -1487,6 +1488,9 @@ public class KnKPlugin extends JavaPlugin {
         );
         // Phase 4: /spawn (DESIGN.md §3.6).
         this.spawnCommand = createSpawnCommand(support, rankCheck, targets);
+        if (spawnCommand != null) {
+            spawnCommand.setCharges(charges);
+        }
         // Phase 5: /warp, /warps (DESIGN.md §3.7).
         this.warpCommand = createWarpCommand(support, rankCheck, targets, charges);
         if (warpCommand != null) {
@@ -1557,6 +1561,38 @@ public class KnKPlugin extends JavaPlugin {
         return new net.knightsandkings.knk.paper.teleport.TeleportCharges(
             new net.knightsandkings.knk.core.teleport.TeleportCharger(apiClient.getTeleportDestinationsCommandApi()),
             teleportUserIdLookup(), org.bukkit.Bukkit::getWorld, org.bukkit.Bukkit::getPlayer);
+    }
+
+    /**
+     * Teleport fees and cooldowns per permission group (Linear KNG-41): each player's settings from
+     * {@code GET /api/teleport-destinations/policy}, cached like the warp list and dropped by
+     * {@code /knk cache refresh}. The engine takes the cooldowns from it; /tpa and /spawn charges ask
+     * it whether they cost anything. Without the API client everyone keeps the config defaults.
+     */
+    private void wireTeleportGroupSettings(net.knightsandkings.knk.paper.teleport.TeleportCharges charges) {
+        if (charges == null) {
+            return;
+        }
+        var lookup = teleportUserIdLookup();
+        var policies = new net.knightsandkings.knk.core.dataaccess.TeleportPolicyDataAccess(
+            apiClient.getTeleportDestinationsQueryApi(), lookup::idOf,
+            java.time.Duration.ofSeconds(config.teleport().destinationsCacheSeconds()));
+        charges.setPolicies(policies);
+        teleportService.setCooldownPolicy(new net.knightsandkings.knk.paper.teleport.TeleportService.CooldownPolicy() {
+            @Override
+            public java.util.OptionalInt cooldownSeconds(java.util.UUID player,
+                                                         net.knightsandkings.knk.core.teleport.TeleportKind kind) {
+                return policies.cachedOrDefault(player).of(kind).cooldown();
+            }
+
+            @Override
+            public void prefetch(java.util.UUID player) {
+                policies.refresh(player, net.knightsandkings.knk.core.dataaccess.TeleportPolicyDataAccess.PLAYER_READ_MAX_AGE);
+            }
+        });
+        if (cacheManager != null) {
+            cacheManager.registerRefreshHook("teleport group settings", policies::invalidateAll);
+        }
     }
 
     /** A player's knk user id through the users cache; null when they have no account or the lookup failed. */
