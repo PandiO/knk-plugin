@@ -241,6 +241,7 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.roads.RoadBuildQueue roadBuildQueue;
     private net.knightsandkings.knk.paper.roads.RoadSurveyService roadSurveyService;
     private net.knightsandkings.knk.paper.roads.RoadOverlayRenderer roadOverlayRenderer;
+    private net.knightsandkings.knk.paper.roads.RoadProposals roadProposals;
     private GateStateSyncTask gateStateSyncTask;
     private GateDisplayManager gateDisplayManager;
     private DistrictGateLoader districtGateLoader;
@@ -1167,6 +1168,11 @@ public class KnKPlugin extends JavaPlugin {
         this.roadBuildQueue = new net.knightsandkings.knk.paper.roads.RoadBuildQueue(
             this, navigation, queryApi, commandApi, roadNetworkCache, gateManager, regionIds, regionDomainResolver,
             mainThread, net.knightsandkings.knk.paper.utils.TickBudget.server());
+        // Curated tiles (rev. 6 Part B, plan §5.7): builds of Curated tiles become proposals to review.
+        this.roadProposals = new net.knightsandkings.knk.paper.roads.RoadProposals(
+            queryApi, commandApi, roadNetworkCache, () -> navigation.builder().buildParameters(), mainThread);
+        roadBuildQueue.setProposals(roadProposals);
+        roadOverlayRenderer.setProposals(roadProposals::pendingItems);
         this.roadSurveyService = new net.knightsandkings.knk.paper.roads.RoadSurveyService(
             this, navigation, queryApi, commandApi, roadNetworkCache, regionIds, mainThread,
             player -> cacheManager.getUserCache().getStale(player.getUniqueId())
@@ -1545,6 +1551,7 @@ public class KnKPlugin extends JavaPlugin {
                 () -> roadNetworkCache, () -> roadDirtyTracker, () -> roadOverlayRenderer,
                 () -> roadSurveyService, () -> roadBuildQueue);
             roadAdmin.setNavigation(() -> navigationService, () -> navigationDestinations);
+            roadAdmin.setProposals(() -> roadProposals);
             knkAdminCommand.registerSubcommand(
                 net.knightsandkings.knk.paper.roads.RoadAdminCommand.metadata(), roadAdmin, roadAdmin::complete);
             // Road navigation Phase 4: /navigate (/nav), DESIGN §6.1. The services are read lazily - they

@@ -73,7 +73,8 @@ import net.knightsandkings.knk.paper.utils.TickBudget;
  *       ({@link RegionIds} R8) → domain ids through the {@link RegionDomainResolver} (R7, D11).</li>
  *   <li><b>Upload</b>: {@code upsertTileGraph}; the cache re-downloads this tile and the bumped neighbours;
  *       the summary (counts, disappeared nodes, conflicts, warnings, survey coverage misses, each with a
- *       clickable teleport) goes to whoever asked.</li>
+ *       clickable teleport) goes to whoever asked. A Curated, built tile (rev. 6 Part B, plan §5.7) is not
+ *       uploaded: its differences to the stored graph become a proposal ({@link RoadProposals}).</li>
  * </ol>
  * All node/geometry coordinates are floor blocks (Phase 2c decision 1).
  */
@@ -91,10 +92,24 @@ public final class RoadBuildJob {
     /** Domain Locations within this many blocks of a road cell seed the build (DESIGN §5.4). */
     public static final int DOMAIN_SEED_REACH = 8;
 
-    /** What the job reports when it ends. */
+    /**
+     * What the job reports when it ends. A Curated tile (plan §5.7) ends with a {@code proposal} instead of an
+     * {@code upsert} - unless the build found nothing to review, then both are set (the unchanged graph was
+     * uploaded with this build's figures).
+     */
     public record Outcome(TileKey tile, boolean success, String error, TileBuildResult build, RoadTileUpsertResult upsert,
                           int chunksCaptured, int spansExtracted, List<CoverageCheck.Miss> coverageMisses,
-                          long millis) {
+                          long millis, RoadProposals.Created proposal) {
+        /** An outcome without a proposal (a Detected tile, or a failure). */
+        public Outcome(TileKey tile, boolean success, String error, TileBuildResult build, RoadTileUpsertResult upsert,
+                       int chunksCaptured, int spansExtracted, List<CoverageCheck.Miss> coverageMisses, long millis) {
+            this(tile, success, error, build, upsert, chunksCaptured, spansExtracted, coverageMisses, millis, null);
+        }
+
+        /** Whether the build made a proposal to review (nothing was uploaded). */
+        public boolean proposed() {
+            return proposal != null && !proposal.nothingToReview();
+        }
     }
 
     private final Plugin plugin;
@@ -111,6 +126,8 @@ public final class RoadBuildJob {
     private final TileKey key;
     private final Consumer<String> progress;
     private final Consumer<Outcome> onDone;
+    private final RoadProposals proposals;
+    private final String requester;
 
     private final AtomicBoolean cancelled = new AtomicBoolean();
     private final AtomicBoolean finished = new AtomicBoolean();
@@ -119,6 +136,10 @@ public final class RoadBuildJob {
     // filled by the phases
     private List<RoadProfile> profiles = List.of();
     private NodeMatcher.PreviousGraph previousGraph = NodeMatcher.PreviousGraph.EMPTY;
+    /** The stored graph (a curated tile's proposal is its difference to the build); null for a new tile. */
+    private RoadTileGraph storedGraph;
+    /** Plan §5.7: the tile is Curated and built, and curated tiles are on - the build makes a proposal. */
+    private volatile boolean propose;
     private List<SkeletonGraph.Anchor> anchors = List.of();
     private List<SkeletonGraph.Plaza> plazas = List.of();
     private final Set<MaskBuilder.Seed> seeds = new LinkedHashSet<>();
@@ -135,6 +156,18 @@ public final class RoadBuildJob {
                         RoadNetworkCache cache, GateManager gateManager, RegionIds regionIds, RegionDomainResolver regionResolver,
                         Executor mainThread, Executor buildThread, TickBudget tickBudget, TileKey key,
                         Consumer<String> progress, Consumer<Outcome> onDone) {
+        this(plugin, config, queryApi, commandApi, cache, gateManager, regionIds, regionResolver, mainThread, buildThread,
+            tickBudget, key, progress, onDone, null, null);
+    }
+
+    /**
+     * @param proposals the curated-tile proposals (plan §5.7), or {@code null}: every build is uploaded directly
+     * @param requester who asked for the build (a proposal records it), or {@code null}
+     */
+    public RoadBuildJob(Plugin plugin, NavigationConfig config, RoadNetworkQueryApi queryApi, RoadNetworkCommandApi commandApi,
+                        RoadNetworkCache cache, GateManager gateManager, RegionIds regionIds, RegionDomainResolver regionResolver,
+                        Executor mainThread, Executor buildThread, TickBudget tickBudget, TileKey key,
+                        Consumer<String> progress, Consumer<Outcome> onDone, RoadProposals proposals, String requester) {
         this.plugin = plugin;
         this.config = Objects.requireNonNull(config, "config");
         this.queryApi = Objects.requireNonNull(queryApi, "queryApi");
@@ -149,6 +182,8 @@ public final class RoadBuildJob {
         this.key = Objects.requireNonNull(key, "key");
         this.progress = progress == null ? s -> { } : progress;
         this.onDone = Objects.requireNonNull(onDone, "onDone");
+        this.proposals = proposals;
+        this.requester = requester;
     }
 
     public TileKey tile() {
@@ -183,7 +218,10 @@ public final class RoadBuildJob {
             ? queryApi.seedLocations(key.world(), region.minX() - DOMAIN_SEED_REACH, region.minZ() - DOMAIN_SEED_REACH,
                 region.maxX() + DOMAIN_SEED_REACH, region.maxZ() + DOMAIN_SEED_REACH)
             : CompletableFuture.<List<RoadSeedLocation>>completedFuture(List.of());
-        CompletableFuture<Optional<RoadTileGraph>> previousF = previousGraph();
+        CompletableFuture<Optional<RoadTileGraph>> previousF = curatedTile().thenCompose(curated -> {
+            propose = curated;
+            return previousGraph(curated);
+        });
 
         CompletableFuture.allOf(profilesF, seedsF, surveysF, locationsF, previousF).whenComplete((v, ex) -> mainThread.execute(() -> {
             if (ex != null) {
@@ -196,6 +234,7 @@ public final class RoadBuildJob {
             }
             profiles = profilesF.join();
             previousF.join().ifPresent(graph -> {
+                storedGraph = graph;
                 previousGraph = RoadMapper.toPreviousGraph(graph);
                 anchors = RoadMapper.toAnchors(graph);
                 plazas = RoadMapper.toPlazas(graph);
@@ -242,10 +281,27 @@ public final class RoadBuildJob {
         }));
     }
 
-    private CompletableFuture<Optional<RoadTileGraph>> previousGraph() {
-        Optional<RoadTileGraph> cached = cache.tileGraph(key);
+    /**
+     * Whether this build makes a proposal (plan §5.7 D1): curated tiles are on and the API's fresh tile list says
+     * the tile is Curated and built. The tile list is read fresh because a state change does not change the
+     * tile's version, so the cached graph may hold an older state.
+     */
+    private CompletableFuture<Boolean> curatedTile() {
+        if (proposals == null || !config.builder().curatedTiles()) {
+            return CompletableFuture.completedFuture(false);
+        }
+        return queryApi.tiles(key.world()).thenApply(tiles -> tiles.stream()
+            .anyMatch(t -> t.tileX() == key.tileX() && t.tileZ() == key.tileZ() && t.proposesChanges()));
+    }
+
+    /** The stored graph; for a proposal always downloaded fresh, so it is compared with what the API holds now. */
+    private CompletableFuture<Optional<RoadTileGraph>> previousGraph(boolean fresh) {
+        Optional<RoadTileGraph> cached = fresh ? Optional.empty() : cache.tileGraph(key);
         if (cached.isPresent()) {
             return CompletableFuture.completedFuture(cached);
+        }
+        if (fresh) {
+            return queryApi.tileGraph(key.world(), key.tileX(), key.tileZ(), null).thenApply(result -> result.bodyOptional());
         }
         boolean built = cache.tiles(key.world()).stream().anyMatch(t -> t.tileX() == key.tileX() && t.tileZ() == key.tileZ() && t.isBuilt());
         if (!built) {
@@ -511,6 +567,10 @@ public final class RoadBuildJob {
         }
         TileBuildResult build = new TileBuildResult(result.builderVersion(), result.cellCount(), result.levelCount(),
             result.nodes(), tagged, result.warnings(), result.corrections());
+        if (propose && storedGraph != null) {
+            propose(build);
+            return;
+        }
         progress.accept("Tile " + key.tileX() + "," + key.tileZ() + ": uploading " + build.nodes().size() + " nodes, " + build.edges().size() + " edges…");
         commandApi.upsertTileGraph(key.world(), key.tileX(), key.tileZ(), build).whenComplete((upsert, ex) -> mainThread.execute(() -> {
             if (ex != null) {
@@ -527,6 +587,29 @@ public final class RoadBuildJob {
                 finish(new Outcome(key, true, null, build, upsert, chunksCaptured, grid == null ? 0 : grid.spans().spanCount(), misses, elapsed()));
             }));
         }));
+    }
+
+    /**
+     * A Curated tile (plan §5.7): the build's differences to the stored graph become a proposal; nothing is
+     * uploaded. When there is nothing to review, the unchanged graph is uploaded with this build's figures (the tile
+     * counts as built with this builder version and is no longer dirty).
+     */
+    private void propose(TileBuildResult build) {
+        progress.accept("Tile " + key.tileX() + "," + key.tileZ() + ": comparing with the curated graph…");
+        proposals.propose(key, storedGraph, build, requester).thenCompose(created -> created.nothingToReview()
+                ? proposals.uploadUnchanged(key, storedGraph, build).thenApply(upsert -> Map.entry(created, Optional.of(upsert)))
+                : CompletableFuture.completedFuture(Map.entry(created, Optional.<RoadTileUpsertResult>empty())))
+            .whenComplete((done, ex) -> mainThread.execute(() -> {
+                if (ex != null) {
+                    fail("could not store the proposal: " + RoadMessages.describeError(ex), ex);
+                    return;
+                }
+                RoadTileUpsertResult upsert = done.getValue().orElse(null);
+                CompletableFuture<Void> refresh = upsert == null ? CompletableFuture.completedFuture(null) : cache.invalidateTile(key);
+                refresh.whenComplete((v, ex2) -> mainThread.execute(() -> finish(new Outcome(key, true, null, build, upsert,
+                    chunksCaptured, grid == null ? 0 : grid.spans().spanCount(), upsert == null ? List.of() : coverageMisses(),
+                    elapsed(), done.getKey()))));
+            }));
     }
 
     /** Survey breadcrumbs marked on-road in this tile that ended up more than 2 blocks from any built edge. */

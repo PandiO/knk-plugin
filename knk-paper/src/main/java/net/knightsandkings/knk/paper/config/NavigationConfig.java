@@ -128,13 +128,23 @@ public record NavigationConfig(
      * @param lockedNodeReach       a locked node absorbs the builder's nodes this close (fix plan 5.5 item 6)
      * @param autoPlazas            wide road areas outside designed plazas still become plaza junctions on their
      *                              own (DESIGN §5.6 step 4, rev. 5)
+     * @param curatedTiles          a build of a Curated tile makes a proposal the admin reviews (rev. 6 Part B,
+     *                              plan §5.7); false uploads every build directly (the kill switch)
      */
     public record BuilderConfig(int tileSize, int tileMargin, int maxCellsPerTile, int snapshotChunksPerTick,
                                 int junctionClusterRadius, int minSpurLength, int ambiguousReach, int plazaGrowth,
-                                double lockedNodeReach, boolean autoPlazas) {
+                                double lockedNodeReach, boolean autoPlazas, boolean curatedTiles) {
         public static BuilderConfig defaults() {
             return new BuilderConfig(512, 32, 250_000, 4, 3, 4, 3, BuildParameters.DEFAULT_PLAZA_GROWTH,
-                BuildParameters.DEFAULT_LOCKED_NODE_REACH, true);
+                BuildParameters.DEFAULT_LOCKED_NODE_REACH, true, true);
+        }
+
+        /** A builder config with curated tiles on. */
+        public BuilderConfig(int tileSize, int tileMargin, int maxCellsPerTile, int snapshotChunksPerTick,
+                             int junctionClusterRadius, int minSpurLength, int ambiguousReach, int plazaGrowth,
+                             double lockedNodeReach, boolean autoPlazas) {
+            this(tileSize, tileMargin, maxCellsPerTile, snapshotChunksPerTick, junctionClusterRadius, minSpurLength,
+                ambiguousReach, plazaGrowth, lockedNodeReach, autoPlazas, true);
         }
 
         /** A builder config with automatic plazas on. */

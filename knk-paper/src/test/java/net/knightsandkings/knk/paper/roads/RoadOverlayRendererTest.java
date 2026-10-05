@@ -15,6 +15,7 @@ import net.knightsandkings.knk.core.domain.roads.RoadEdgeFlag;
 import net.knightsandkings.knk.core.domain.roads.RoadEdgeSource;
 import net.knightsandkings.knk.core.domain.roads.RoadNode;
 import net.knightsandkings.knk.core.domain.roads.RoadNodeKind;
+import net.knightsandkings.knk.core.roads.build.TileProposal;
 import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
 
 /**
@@ -74,5 +75,24 @@ class RoadOverlayRendererTest {
         Optional<String> text = look(new double[] {2.5, 66.6, 2.5}, new double[] {0, 1, 0}, new double[] {2.5, 65, 2.5});
         assertEquals(Optional.of("Node #1 junction \"Market\" (locked) (here)"), text);
         assertEquals(Optional.empty(), look(new double[] {20.5, 66.6, 20.5}, new double[] {0, 1, 0}, new double[] {20.5, 65, 20.5}));
+    }
+
+    @Test
+    void aLookedAtProposalItemIsNamedWithItsNumber() {
+        TileProposal.Item added = new TileProposal.Item(3, TileProposal.Kind.EDGE_ADDED, 0,
+            new TileProposal.End(2, 40, 64, 0, RoadNodeKind.JUNCTION), new TileProposal.End(0, 40, 64, 30, RoadNodeKind.ENDPOINT),
+            List.of(new int[] {40, 64, 0}, new int[] {40, 64, 30}), List.of(), 30, 3, OptionalInt.empty(), List.of(), List.of(),
+            List.of(), null, null, "");
+        java.util.Map<TileKey, List<TileProposal.Item>> pending = java.util.Map.of(new TileKey("world", 0, 0), List.of(added));
+
+        // Standing at (35, 65, 15) looking east: the ray crosses the new road (x = 40) between its corners.
+        Optional<String> label = RoadOverlayRenderer.describeLookedAtProposal(pending, new double[] {35, 66.6, 15.5},
+            new double[] {1, -0.1, 0}, 48);
+
+        assertEquals(Optional.of("Proposal 0,0 · 3 added edge 30 m (#2 → new endpoint)"), label);
+        assertEquals(Optional.empty(), RoadOverlayRenderer.describeLookedAtProposal(pending, new double[] {35, 66.6, 15.5},
+            new double[] {-1, 0, 0}, 48));
+        assertEquals(OverlayColors.PROPOSAL_ADDED, RoadOverlayRenderer.proposalColour(TileProposal.Kind.EDGE_ADDED));
+        assertEquals(OverlayColors.PROPOSAL_REMOVED, RoadOverlayRenderer.proposalColour(TileProposal.Kind.NODE_REMOVED));
     }
 }

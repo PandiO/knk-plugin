@@ -250,7 +250,8 @@ public class ConfigLoader {
                 builder.getInt("ambiguous-reach", builderDefaults.ambiguousReach()),
                 builder.getInt("plaza-growth", builderDefaults.plazaGrowth()),
                 builder.getDouble("locked-node-reach", builderDefaults.lockedNodeReach()),
-                builder.getBoolean("auto-plazas", builderDefaults.autoPlazas()));
+                builder.getBoolean("auto-plazas", builderDefaults.autoPlazas()),
+                builder.getBoolean("curated-tiles", builderDefaults.curatedTiles()));
 
         NavigationConfig.WalkConfig walkDefaults = defaults.walk();
         ConfigurationSection walk = section.getConfigurationSection("walk");

@@ -24,6 +24,10 @@ public final class OverlayColors {
     public static final int ANCHOR = 0xFF4081;
     public static final int NAMED_NODE = 0x69F0AE;
     public static final int PRUNED = 0x5D4037;
+    /** Proposal items of curated tiles (plan §5.7): added, removed, changed or moved. */
+    public static final int PROPOSAL_ADDED = 0x00E676;
+    public static final int PROPOSAL_REMOVED = 0xFF1744;
+    public static final int PROPOSAL_CHANGED = 0xFFEA00;
 
     /** Distinct, saturated street hues; a street keeps its colour across sessions (a stride over its id). */
     private static final int[] STREET_PALETTE = {

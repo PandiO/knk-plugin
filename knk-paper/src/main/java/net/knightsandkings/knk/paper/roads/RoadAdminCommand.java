@@ -37,10 +37,12 @@ import net.knightsandkings.knk.core.domain.roads.RoadProfileUpsert;
 import net.knightsandkings.knk.core.domain.roads.RoadSeed;
 import net.knightsandkings.knk.core.domain.roads.RoadSeedCreate;
 import net.knightsandkings.knk.core.domain.roads.RoadTile;
+import net.knightsandkings.knk.core.domain.roads.RoadTileState;
 import net.knightsandkings.knk.core.domain.streets.StreetSummary;
 import net.knightsandkings.knk.core.ports.api.RoadNetworkCommandApi;
 import net.knightsandkings.knk.core.ports.api.RoadNetworkQueryApi;
 import net.knightsandkings.knk.core.ports.api.StreetsQueryApi;
+import net.knightsandkings.knk.core.roads.build.TileBuilder;
 import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
 import net.knightsandkings.knk.core.roads.route.SnapPoint;
 import net.knightsandkings.knk.core.roads.route.Snapper;
@@ -61,7 +63,9 @@ import net.kyori.adventure.text.Component;
  * status|cancel}, {@code seed add [note]|remove <id>|list}, {@code show [radius] [all]|hide},
  * {@code street <street> [edgeId] [--continue]}, {@code node name <name>|unname|merge <keep> <merge>|anchor [name]|
  * lock|unlock}, {@code record start|stop [street]|cancel}, {@code edge set <id|here> cost|oneway|nogps|close|open|
- * profile|unlabel}, {@code edge delete <id>}, {@code tiles [page]}, {@code why}, {@code reload}, {@code status},
+ * profile|unlabel}, {@code edge delete <id>}, {@code edge confirm|unconfirm <id|here>}, {@code tiles [page]},
+ * {@code tile curate|uncurate [@x,z]} and {@code proposal [page]|list|accept|reject|clear|rejected|unreject}
+ * (curated tiles, rev. 6 Part B: {@link RoadProposals}), {@code why}, {@code reload}, {@code status},
  * {@code goto <x> <y> <z>} (the target of every clickable teleport).
  */
 public class RoadAdminCommand implements SubcommandExecutor {
@@ -70,13 +74,13 @@ public class RoadAdminCommand implements SubcommandExecutor {
     /** Largest designed plaza radius (the web-api's {@code RoadNetworkService.MaxPlazaRadius}). */
     static final int MAX_PLAZA_RADIUS = 32;
 
-    public static final String USAGE = "/knk road <survey|profile|build|seed|show|hide|street|node|record|edge|tiles|reload|status|why>";
+    public static final String USAGE = "/knk road <survey|profile|build|seed|show|hide|street|node|record|edge|tiles|tile|proposal|reload|status|why>";
     static final int PAGE_SIZE = 10;
     /** How far from the admin a node/edge may be for "here". */
     static final double HERE_DISTANCE = 6.0;
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final List<String> ROOTS = List.of("survey", "profile", "build", "seed", "show", "hide", "street",
-        "node", "record", "edge", "tiles", "reload", "status", "why", "goto");
+        "node", "record", "edge", "tiles", "tile", "proposal", "reload", "status", "why", "goto");
 
     private final RoadNetworkQueryApi queryApi;
     private final RoadNetworkCommandApi commandApi;
@@ -91,6 +95,8 @@ public class RoadAdminCommand implements SubcommandExecutor {
     /** Phase 4: {@code why} needs /navigate's service and catalogue; both null until navigation started. */
     private volatile Supplier<net.knightsandkings.knk.paper.navigation.NavigationService> navigation = () -> null;
     private volatile Supplier<net.knightsandkings.knk.paper.navigation.NavigationDestinations> destinations = () -> null;
+    /** Rev. 6 Part B (plan §5.7): proposals of curated tiles; null until navigation started. */
+    private volatile Supplier<RoadProposals> proposals = () -> null;
 
     public RoadAdminCommand(RoadNetworkQueryApi queryApi, RoadNetworkCommandApi commandApi, StreetsQueryApi streetsQueryApi,
                             Executor mainThread, BiPredicate<Player, String> knkPermission,
@@ -143,6 +149,8 @@ public class RoadAdminCommand implements SubcommandExecutor {
                 case "record" -> record(sender, rest);
                 case "edge" -> edge(sender, rest);
                 case "tiles" -> tiles(sender, rest);
+                case "tile" -> withProposals(sender, p -> p.tileCommand(sender, rest));
+                case "proposal" -> withProposals(sender, p -> p.command(sender, rest));
                 case "reload" -> reload(sender);
                 case "status" -> status(sender);
                 case "why" -> why(sender, rest);
@@ -153,6 +161,15 @@ public class RoadAdminCommand implements SubcommandExecutor {
             sender.sendMessage(RoadMessages.bad("Command failed: " + e.getMessage()));
         }
         return true;
+    }
+
+    private void withProposals(CommandSender sender, java.util.function.Consumer<RoadProposals> then) {
+        RoadProposals p = proposals.get();
+        if (p == null) {
+            sender.sendMessage(RoadMessages.bad("Proposals are not available (navigation disabled)."));
+            return;
+        }
+        then.accept(p);
     }
 
     boolean hasNode(CommandSender sender) {
@@ -193,7 +210,9 @@ public class RoadAdminCommand implements SubcommandExecutor {
                 case "show" -> prefix(List.of("16", "32", "48", "96", "all"), last);
                 case "node" -> prefix(List.of("name", "unname", "move", "plaza", "unplaza", "merge", "anchor", "lock", "unlock", "prune", "unprune"), last);
                 case "record" -> prefix(List.of("start", "stop", "cancel"), last);
-                case "edge" -> prefix(List.of("set", "delete", "prune"), last);
+                case "edge" -> prefix(List.of("set", "delete", "prune", "confirm", "unconfirm"), last);
+                case "tile" -> prefix(List.of("curate", "uncurate"), last);
+                case "proposal" -> prefix(RoadProposals.ACTIONS, last);
                 case "street" -> prefix(streetNames(sender), last);
                 default -> Collections.emptyList();
             };
@@ -215,6 +234,14 @@ public class RoadAdminCommand implements SubcommandExecutor {
                 }
                 case "edge" -> {
                     return prefix(List.of("here"), last);
+                }
+                case "proposal" -> {
+                    if ("accept".equals(args[1]) || "reject".equals(args[1])) {
+                        return prefix(net.knightsandkings.knk.core.roads.build.ProposalSelection.WORDS, last);
+                    }
+                    if ("unreject".equals(args[1])) {
+                        return prefix(List.of("all"), last);
+                    }
                 }
                 default -> {
                 }
@@ -632,11 +659,16 @@ public class RoadAdminCommand implements SubcommandExecutor {
             }
         }
         renderer.show(player, radius, all);
+        RoadProposals p = proposals.get();
+        if (p != null) {
+            p.refreshWorld(player.getWorld().getName()); // the overlay draws their pending items too
+        }
         RoadNetworkSnapshot snapshot = cache.get().snapshot(player.getWorld().getName());
         sender.sendMessage(RoadMessages.good("Overlay on: " + Math.min(radius, RoadOverlayRenderer.MAX_RADIUS) + " blocks"
             + (all ? ", every level" : ", ±" + RoadOverlayRenderer.LEVEL_RANGE + " blocks of your height")
             + " (" + snapshot.nodeCount() + " nodes, " + snapshot.edgeCount() + " edges in this world). "
-            + "Streets in colour, unlabelled grey, stale orange, closed red, gates yellow. /knk road hide to stop."));
+            + "Streets in colour, unlabelled grey, stale orange, closed red, gates yellow; proposals: added green, removed red, "
+            + "changed or moved yellow (look at one for its number). /knk road hide to stop."));
     }
 
     private void hide(CommandSender sender) {
@@ -1047,9 +1079,13 @@ public class RoadAdminCommand implements SubcommandExecutor {
             pruneEdge(sender, args);
             return;
         }
+        if ("confirm".equals(action) || "unconfirm".equals(action)) {
+            confirmEdge(sender, args, "confirm".equals(action));
+            return;
+        }
         if (!"set".equals(action) || args.length < 3) {
             sender.sendMessage(RoadMessages.usage("/knk road edge set <id|here> cost <x> | oneway [on|off] | nogps [on|off] | close | open | profile <id> | unlabel"
-                + " | prune <id|here> | delete <id>"));
+                + " | prune <id|here> | confirm|unconfirm <id|here> | delete <id>"));
             return;
         }
         Player player = sender instanceof Player p ? p : null;
@@ -1137,6 +1173,38 @@ public class RoadAdminCommand implements SubcommandExecutor {
         }));
     }
 
+    /**
+     * {@code /knk road edge confirm|unconfirm <id|here>} (plan §5.7 D4): a confirmed detected edge is never proposed
+     * for removal and survives builds that lose it (its ends are locked); unconfirm is the way back.
+     */
+    private void confirmEdge(CommandSender sender, String[] args, boolean confirm) {
+        Player player = sender instanceof Player p ? p : null;
+        Integer id = null;
+        if (args.length > 1 && "here".equalsIgnoreCase(args[1])) {
+            if (player == null) {
+                sender.sendMessage(RoadMessages.bad("'here' needs a player; give an edge id."));
+                return;
+            }
+            id = edgeHere(cache.get().snapshot(player.getWorld().getName()), player).map(RoadEdge::id).orElse(null);
+            if (id == null) {
+                sender.sendMessage(RoadMessages.bad("No edge here (within " + (int) HERE_DISTANCE + " blocks) - give an edge id."));
+                return;
+            }
+        } else if (args.length > 1) {
+            id = parseInt(args[1]);
+        }
+        if (id == null) {
+            sender.sendMessage(RoadMessages.usage("/knk road edge " + (confirm ? "confirm" : "unconfirm") + " <id|here>"));
+            return;
+        }
+        int edgeId = id;
+        commandApi.updateEdge(edgeId, RoadEdgeUpdate.confirmed(confirm)).whenComplete((result, ex) -> done(sender,
+            (confirm ? "confirm" : "unconfirm") + " edge #" + edgeId, ex,
+            confirm ? "Edge #" + edgeId + " confirmed: builds keep it and never propose to remove it (its nodes are locked)."
+                : "Edge #" + edgeId + " unconfirmed: a build that no longer finds it may propose to remove it (unlock its nodes if they should follow the build).",
+            player));
+    }
+
     private Optional<RoadEdge> findEdge(int id, Player player) {
         RoadNetworkCache c = cache.get();
         if (player != null) {
@@ -1186,6 +1254,18 @@ public class RoadAdminCommand implements SubcommandExecutor {
             sender.sendMessage(RoadMessages.bad("The console must name the world: /knk road tiles <world> [page]"));
             return;
         }
+        RoadProposals p = proposals.get();
+        String w = world;
+        int pg = page;
+        if (p == null) {
+            printTiles(sender, w, pg);
+            return;
+        }
+        // The pending proposal counts come from the API (plan §5.7); the list prints either way.
+        p.refreshWorld(world).whenComplete((list, ex) -> mainThread.execute(() -> printTiles(sender, w, pg)));
+    }
+
+    private void printTiles(CommandSender sender, String world, int page) {
         RoadNetworkCache c = cache.get();
         List<RoadTile> tiles = new ArrayList<>(c.tiles(world));
         tiles.sort((a, b) -> {
@@ -1208,7 +1288,10 @@ public class RoadAdminCommand implements SubcommandExecutor {
             TileKey key = TileKey.of(tile);
             Component line = Component.text(" " + tile.tileX() + "," + tile.tileZ() + " ", RoadMessages.VALUE)
                 .append(RoadMessages.teleport(key.minX() + RoadTile.SIZE / 2, snapshotHeight(snapshot, key), key.minZ() + RoadTile.SIZE / 2))
-                .append(Component.text(" v" + tile.version() + (tile.isBuilt() ? " built " + DATE.format(tile.builtAt()) : " never built")
+                .append(Component.text(" v" + tile.version() + (tile.isBuilt() ? " built " + DATE.format(tile.builtAt())
+                    + " with builder " + tile.builderVersion() + (tile.builderVersion() < TileBuilder.BUILDER_VERSION ? " (older)" : "") : " never built")
+                    + (tile.state() == RoadTileState.CURATED ? " curated" : "")
+                    + pendingText(key)
                     + " " + tile.nodeCount() + "n/" + tile.edgeCount() + "e" + (tile.levelCount() > 1 ? " " + tile.levelCount() + " levels" : "")
                     + (tile.dirty() ? " DIRTY" : "") + (tile.warnings().isEmpty() ? "" : " " + tile.warnings().size() + " warning(s)"), tile.dirty() ? RoadMessages.WARN : RoadMessages.INFO))
                 .append(Component.text(" "))
@@ -1217,6 +1300,13 @@ public class RoadAdminCommand implements SubcommandExecutor {
         }
         sender.sendMessage(Component.text(" Page " + page + "/" + pages, RoadMessages.INFO)
             .append(page < pages ? Component.text(" ").append(RoadMessages.command("[next]", "/knk road tiles " + world + " " + (page + 1))) : Component.empty()));
+    }
+
+    /** " · 7 to review" when the tile's cached proposal has pending items (plan §5.7). */
+    private String pendingText(TileKey key) {
+        RoadProposals p = proposals.get();
+        int pending = p == null ? 0 : p.cached(key).map(pr -> pr.items().size()).orElse(0);
+        return pending == 0 ? "" : " · " + pending + " to review";
     }
 
     /** A sensible y for a tile teleport: the average node height of the tile, else the world's sea level. */
@@ -1251,6 +1341,11 @@ public class RoadAdminCommand implements SubcommandExecutor {
     }
 
     /** Wires {@code /knk road why} to /navigate (Phase 4); read lazily, so it may be called any time. */
+    /** Rev. 6 Part B: {@code proposal} and {@code tile} need the proposal service (created with the roads). */
+    public void setProposals(Supplier<RoadProposals> proposals) {
+        this.proposals = proposals == null ? () -> null : proposals;
+    }
+
     public void setNavigation(Supplier<net.knightsandkings.knk.paper.navigation.NavigationService> navigation,
                               Supplier<net.knightsandkings.knk.paper.navigation.NavigationDestinations> destinations) {
         this.navigation = navigation == null ? () -> null : navigation;

@@ -93,6 +93,16 @@ class ConfigLoaderNavigationTest {
         assertEquals(7, navigation.survey().crossSectionHalfWidth());
         assertEquals(8, navigation.builder().snapshotChunksPerTick());
         assertEquals(512, navigation.builder().tileSize());
+        assertTrue(navigation.builder().curatedTiles(), "curated tiles are on unless switched off");
+    }
+
+    @Test
+    void curatedTilesCanBeSwitchedOff() throws Exception {
+        assertTrue(ConfigLoader.load(bundledConfig()).navigation().builder().curatedTiles());
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("navigation.builder.curated-tiles", false);
+
+        assertFalse(ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation")).builder().curatedTiles());
     }
 
     @Test

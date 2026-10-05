@@ -20,6 +20,7 @@ import org.bukkit.util.Vector;
 
 import net.knightsandkings.knk.core.domain.roads.RoadEdge;
 import net.knightsandkings.knk.core.domain.roads.RoadNode;
+import net.knightsandkings.knk.core.roads.build.TileProposal;
 import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
 import net.knightsandkings.knk.core.roads.route.SnapPoint;
 import net.knightsandkings.knk.core.roads.route.Snapper;
@@ -55,10 +56,17 @@ public final class RoadOverlayRenderer {
     private final Function<String, RoadNetworkSnapshot> snapshots;
     private final Map<UUID, View> viewers = new ConcurrentHashMap<>();
     private BukkitTask ticker;
+    /** Pending proposal items per tile of a world (plan §5.7); none until {@link #setProposals}. */
+    private volatile Function<String, Map<TileKey, List<TileProposal.Item>>> proposals = world -> Map.of();
 
     public RoadOverlayRenderer(Plugin plugin, Function<String, RoadNetworkSnapshot> snapshots) {
         this.plugin = plugin;
         this.snapshots = Objects.requireNonNull(snapshots, "snapshots");
+    }
+
+    /** Curated tiles (plan §5.7): also draw the pending proposal items of the viewer's world. */
+    public void setProposals(Function<String, Map<TileKey, List<TileProposal.Item>>> proposals) {
+        this.proposals = proposals == null ? world -> Map.of() : proposals;
     }
 
     // ===== per admin =====
@@ -153,7 +161,131 @@ public final class RoadOverlayRenderer {
             ParticleDraw.pillar(viewer, new Vector(node.x() + 0.5, node.y() + PARTICLE_LIFT, node.z() + 0.5),
                 node.isDestination() ? 3.0 : 2.0, 0.5, Particle.DUST, new Particle.DustOptions(Color.fromRGB(rgb), 1.2f));
         }
+        Map<TileKey, List<TileProposal.Item>> pending = proposals.apply(viewer.getWorld().getName());
+        drawProposals(viewer, pending, vx, vy, vz, view);
+        Optional<String> proposalLabel = lookedAtProposal(viewer, pending, view);
+        if (proposalLabel.isPresent()) {
+            viewer.sendActionBar(Component.text(proposalLabel.get(), RoadMessages.WARN));
+            return;
+        }
         lookedAt(viewer, snapshot, view).ifPresent(text -> viewer.sendActionBar(Component.text(text, RoadMessages.HIGHLIGHT)));
+    }
+
+    /** Proposal items near the viewer: added green, removed red, changed yellow, a moved node as a yellow line + pillar. */
+    private static void drawProposals(Player viewer, Map<TileKey, List<TileProposal.Item>> pending, double vx, double vy, double vz, View view) {
+        for (List<TileProposal.Item> items : pending.values()) {
+            for (TileProposal.Item item : items) {
+                if (!near(item, vx, vy, vz, view)) {
+                    continue;
+                }
+                Particle.DustOptions dust = new Particle.DustOptions(Color.fromRGB(proposalColour(item.kind())), 1.5f);
+                switch (item.kind()) {
+                    case EDGE_ADDED, EDGE_REMOVED, EDGE_CHANGED ->
+                        ParticleDraw.polyline(viewer, lifted(item.geometry()), EDGE_SPACING / 2, Particle.DUST, dust);
+                    case NODE_MOVED -> {
+                        int[] from = item.node().position();
+                        ParticleDraw.polyline(viewer, lifted(List.of(from, item.target())), EDGE_SPACING / 2, Particle.DUST, dust);
+                        ParticleDraw.pillar(viewer, new Vector(item.target()[0] + 0.5, item.target()[1] + PARTICLE_LIFT, item.target()[2] + 0.5),
+                            3.0, 0.5, Particle.DUST, dust);
+                    }
+                    case NODE_REMOVED -> {
+                        int[] at = item.node().position();
+                        ParticleDraw.pillar(viewer, new Vector(at[0] + 0.5, at[1] + PARTICLE_LIFT, at[2] + 0.5), 3.0, 0.5, Particle.DUST, dust);
+                    }
+                }
+            }
+        }
+    }
+
+    static int proposalColour(TileProposal.Kind kind) {
+        return switch (kind) {
+            case EDGE_ADDED -> OverlayColors.PROPOSAL_ADDED;
+            case EDGE_REMOVED, NODE_REMOVED -> OverlayColors.PROPOSAL_REMOVED;
+            case EDGE_CHANGED, NODE_MOVED -> OverlayColors.PROPOSAL_CHANGED;
+        };
+    }
+
+    private static boolean near(TileProposal.Item item, double vx, double vy, double vz, View view) {
+        for (int[] p : points(item)) {
+            if (within(p[0], p[1], p[2], vx, vy, vz, view)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static List<int[]> points(TileProposal.Item item) {
+        if (item.kind().isEdge()) {
+            return item.geometry();
+        }
+        return item.kind() == TileProposal.Kind.NODE_MOVED ? List.of(item.node().position(), item.target()) : List.of(item.node().position());
+    }
+
+    private Optional<String> lookedAtProposal(Player viewer, Map<TileKey, List<TileProposal.Item>> pending, View view) {
+        if (pending.isEmpty()) {
+            return Optional.empty();
+        }
+        Location eye = viewer.getEyeLocation();
+        Vector dir = eye.getDirection();
+        return describeLookedAtProposal(pending, new double[] {eye.getX(), eye.getY(), eye.getZ()},
+            new double[] {dir.getX(), dir.getY(), dir.getZ()}, view.radius());
+    }
+
+    /**
+     * Package-private for tests: the proposal item whose drawn points pass closest to the view ray (within
+     * {@link #RAY_TOLERANCE}, up to {@code maxDistance} ahead), as "Proposal 2,-2 · 3 added edge …" - particles carry
+     * no text, so the action bar gives the item number the review commands take.
+     */
+    static Optional<String> describeLookedAtProposal(Map<TileKey, List<TileProposal.Item>> pending, double[] eye, double[] dir,
+                                                     double maxDistance) {
+        double norm = Math.sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+        if (norm == 0) {
+            return Optional.empty();
+        }
+        double[] d = {dir[0] / norm, dir[1] / norm, dir[2] / norm};
+        String best = null;
+        double bestOff = RAY_TOLERANCE;
+        double bestAlong = Double.MAX_VALUE;
+        for (Map.Entry<TileKey, List<TileProposal.Item>> entry : pending.entrySet()) {
+            for (TileProposal.Item item : entry.getValue()) {
+                for (int[] p : densified(points(item))) {
+                    double[] q = {p[0] + 0.5, p[1] + PARTICLE_LIFT, p[2] + 0.5};
+                    double along = (q[0] - eye[0]) * d[0] + (q[1] - eye[1]) * d[1] + (q[2] - eye[2]) * d[2];
+                    if (along < 0 || along > maxDistance) {
+                        continue;
+                    }
+                    double ox = q[0] - (eye[0] + d[0] * along);
+                    double oy = q[1] - (eye[1] + d[1] * along);
+                    double oz = q[2] - (eye[2] + d[2] * along);
+                    double off = Math.sqrt(ox * ox + oy * oy + oz * oz);
+                    if (off < bestOff - 1e-9 || (Math.abs(off - bestOff) <= 1e-9 && along < bestAlong)) {
+                        bestOff = off;
+                        bestAlong = along;
+                        best = "Proposal " + RoadProposals.label(entry.getKey()) + " · " + item.describe();
+                    }
+                }
+            }
+        }
+        return Optional.ofNullable(best);
+    }
+
+    /** The polyline's points plus one every block between them (the ray test needs the segments, not only the corners). */
+    private static List<int[]> densified(List<int[]> points) {
+        List<int[]> out = new ArrayList<>();
+        for (int i = 0; i < points.size(); i++) {
+            int[] a = points.get(i);
+            out.add(a);
+            if (i + 1 < points.size()) {
+                int[] b = points.get(i + 1);
+                int steps = (int) Math.ceil(Math.sqrt(Math.pow(b[0] - a[0], 2) + Math.pow(b[1] - a[1], 2) + Math.pow(b[2] - a[2], 2)));
+                for (int s = 1; s < steps; s++) {
+                    double t = (double) s / steps;
+                    out.add(new int[] {(int) Math.round(a[0] + t * (b[0] - a[0])), (int) Math.round(a[1] + t * (b[1] - a[1])),
+                        (int) Math.round(a[2] + t * (b[2] - a[2]))});
+                }
+            }
+        }
+        return out;
     }
 
     /** Edges with at least one geometry point within the view's radius (and level range unless {@code all}). */

@@ -39,6 +39,7 @@ import net.knightsandkings.knk.core.ports.api.RoadNetworkQueryApi;
 import net.knightsandkings.knk.core.regions.RegionDomainResolver;
 import net.knightsandkings.knk.core.roads.build.BuildWarning;
 import net.knightsandkings.knk.core.roads.build.TileBuildResult;
+import net.knightsandkings.knk.core.roads.build.TileProposal;
 import net.knightsandkings.knk.core.roads.route.CoverageCheck;
 import net.knightsandkings.knk.paper.config.NavigationConfig;
 import net.knightsandkings.knk.paper.regions.RegionIds;
@@ -76,6 +77,7 @@ public final class RoadBuildQueue {
     private BukkitTask ticker;
     private RoadBuildJob running;
     private int failures;
+    private RoadProposals proposals;
 
     public RoadBuildQueue(Plugin plugin, NavigationConfig config, RoadNetworkQueryApi queryApi, RoadNetworkCommandApi commandApi,
                           RoadNetworkCache cache, GateManager gateManager, RegionIds regionIds, RegionDomainResolver regionResolver,
@@ -92,6 +94,11 @@ public final class RoadBuildQueue {
         this.tickBudget = tickBudget == null ? TickBudget.server() : tickBudget;
         this.stateFile = cache.files().root().resolve("build-queue.json");
         this.state = BuildQueueState.load(stateFile).orElseGet(BuildQueueState::new);
+    }
+
+    /** Curated tiles (plan §5.7): builds of Curated tiles make proposals here. Without it every build is uploaded. */
+    public void setProposals(RoadProposals proposals) {
+        this.proposals = proposals;
     }
 
     // ===== lifecycle =====
@@ -276,8 +283,9 @@ public final class RoadBuildQueue {
         }
         persist();
         TileKey key = next.get();
+        String requesterName = state.requester().map(id -> Bukkit.getOfflinePlayer(id).getName()).orElse(null);
         running = new RoadBuildJob(plugin, config, queryApi, commandApi, cache, gateManager, regionIds, regionResolver,
-            mainThread, buildThread, tickBudget, key, this::notifyRequesterBar, this::completed);
+            mainThread, buildThread, tickBudget, key, this::notifyRequesterBar, this::completed, proposals, requesterName);
         LOGGER.info("[Roads] Building tile " + key + " (" + state.pendingCount() + " more queued)");
         running.start();
     }
@@ -305,6 +313,9 @@ public final class RoadBuildQueue {
 
     /** The per-tile build summary (DESIGN §7): counts, disappeared nodes, conflicts, warnings, coverage misses. */
     static List<Component> summary(RoadBuildJob.Outcome outcome) {
+        if (outcome.proposal() != null) {
+            return proposalSummary(outcome);
+        }
         List<Component> lines = new ArrayList<>();
         RoadTileUpsertResult up = outcome.upsert();
         TileKey tile = outcome.tile();
@@ -351,6 +362,52 @@ public final class RoadBuildQueue {
             }
             lines.add(line);
         }
+        return lines;
+    }
+
+    /**
+     * The summary of a Curated tile's build (plan §5.7): the proposal's counts with review buttons and its first
+     * items with teleports - or "no changes" when the build matches the stored graph. Warnings and corrections
+     * as for any build.
+     */
+    static List<Component> proposalSummary(RoadBuildJob.Outcome outcome) {
+        List<Component> lines = new ArrayList<>();
+        TileKey tile = outcome.tile();
+        RoadProposals.Created created = outcome.proposal();
+        TileProposal proposal = created.proposal();
+        String hidden = created.hidden() > 0 ? ", " + created.hidden() + " hidden by the rejected list" : "";
+        if (!outcome.proposed()) {
+            lines.add(RoadMessages.prefixed(Component.text("Tile " + tile.tileX() + "," + tile.tileZ() + " rebuilt in " + (outcome.millis() / 1000)
+                + " s: no changes against the curated graph" + hidden + "; it now counts as built with v" + proposal.builderVersion(), RoadMessages.HIGHLIGHT)));
+        } else {
+            lines.add(RoadMessages.prefixed(Component.text("Tile " + tile.tileX() + "," + tile.tileZ() + " is curated - rebuilt in " + (outcome.millis() / 1000)
+                + " s as a proposal of " + proposal.items().size() + " change(s): " + RoadProposals.counts(proposal) + hidden + ". Nothing changed yet.",
+                RoadMessages.HIGHLIGHT)));
+            String at = RoadProposals.at(tile);
+            lines.add(Component.text(" ", RoadMessages.INFO)
+                .append(RoadMessages.command("[review]", "/knk road proposal " + at)).append(Component.text(" "))
+                .append(RoadMessages.command("[accept all]", "/knk road proposal accept all " + at)).append(Component.text(" "))
+                .append(RoadMessages.command("[reject all]", "/knk road proposal reject all " + at))
+                .append(Component.text(" - /knk road show draws it (green added, red removed, yellow changed or moved)", RoadMessages.INFO)));
+            int shown = 0;
+            for (TileProposal.Item item : proposal.items()) {
+                if (shown++ >= MAX_SUMMARY_ITEMS) {
+                    lines.add(Component.text(" … " + (proposal.items().size() - MAX_SUMMARY_ITEMS) + " more: /knk road proposal 2 " + at, RoadMessages.INFO));
+                    break;
+                }
+                lines.add(RoadProposals.itemLine(item, tile));
+            }
+        }
+        List<BuildWarning> warnings = outcome.build().warnings();
+        int shownWarnings = 0;
+        for (BuildWarning warning : warnings) {
+            if (shownWarnings++ >= MAX_SUMMARY_ITEMS) {
+                lines.add(Component.text(" … " + (warnings.size() - MAX_SUMMARY_ITEMS) + " more warning(s) in the tile overview", RoadMessages.INFO));
+                break;
+            }
+            lines.add(Component.text(" " + warning.message() + " ", RoadMessages.WARN).append(RoadMessages.teleport(warning.x(), warning.y(), warning.z())));
+        }
+        correctionsLine(outcome.build().corrections()).ifPresent(lines::add);
         return lines;
     }
 

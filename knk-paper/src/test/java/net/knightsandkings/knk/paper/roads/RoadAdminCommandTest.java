@@ -115,6 +115,11 @@ class RoadAdminCommandTest {
         assertEquals(List.of("close", "cost"), command.complete(player, new String[] {"edge", "set", "12", "c"}));
         assertEquals(List.of("Accent"), command.complete(player, new String[] {"profile", "role", "1", "STONE", "a"}));
         assertEquals(List.of(), command.complete(player, new String[] {"reload", "x"}));
+        assertEquals(List.of("tile", "tiles"), command.complete(player, new String[] {"til"}));
+        assertEquals(List.of("curate", "uncurate"), command.complete(player, new String[] {"tile", ""}));
+        assertEquals(List.of("reject", "rejected"), command.complete(player, new String[] {"proposal", "rej"}));
+        assertEquals(List.of("added", "all"), command.complete(player, new String[] {"proposal", "accept", "a"}));
+        assertEquals(List.of("confirm"), command.complete(player, new String[] {"edge", "conf"}));
     }
 
     @Test

@@ -242,6 +242,10 @@ navigation:
     # Wide road areas become one plaza junction on their own (true), or only where an admin designed a
     # plaza with /knk road node plaza <radius> (false). Designed plazas always apply (DESIGN §5.6 step 4)
     auto-plazas: true
+    # Curated tiles (rev. 6 Part B, plan §5.7): once a tile has been built, a rebuild only proposes changes
+    # (/knk road proposal) instead of replacing the stored graph. false = every build is uploaded directly,
+    # as before (the kill switch). /knk road tile uncurate lets one tile's next build write directly.
+    curated-tiles: true
   # Walkable last-mile paths (KNG-51, docs/specs/navigation/LAST_MILE_PATHFINDING.md §9): direct mode
   # (a target within max-snap-distance, and the last leg after a road's end) follows a path a player
   # can walk instead of a straight line through terrain. No path found -> the straight line.
