@@ -299,6 +299,18 @@ class SiegeTeleportRestrictionTest {
         verify(alice).teleportAsync(eq(field), eq(TeleportCause.COMMAND));
     }
 
+    @Test
+    void staffBackOfAMemberWithNothingRecordedSaysTheyAreInASiege() {
+        BackService back = new BackService(engine, Runnable::run, permissions, id -> id.equals(worldId) ? world : null);
+        joinSiege(alice);
+
+        TeleportOutcome outcome = done(back.startFor(bob, alice, false).thenApply(BackService.Trip::outcome));
+        assertSiegeDenial("Alice is in a siege match; use /siege admin kick first.", outcome);
+
+        members.remove(alice.getUniqueId());
+        assertEquals(BackService.NOWHERE, done(back.startFor(bob, alice, false).thenApply(BackService.Trip::outcome)).code());
+    }
+
     private void die(BackDeathListener deaths, Player player, Location where) {
         when(player.getLocation()).thenReturn(where);
         PlayerDeathEvent event = mock(PlayerDeathEvent.class);
