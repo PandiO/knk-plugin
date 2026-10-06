@@ -24,7 +24,6 @@ import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.event.player.PlayerPickupItemEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.scheduler.BukkitRunnable;
@@ -393,13 +392,5 @@ public class PlayerListener implements Listener {
 		float yaw = location.yaw() != null ? location.yaw() : 0f;
 		float pitch = location.pitch() != null ? location.pitch() : 0f;
 		e.setRespawnLocation(new Location(world, location.x(), location.y(), location.z(), yaw, pitch));
-	}
-
-	@EventHandler
-	public void onItemPickup(PlayerPickupItemEvent e) {
-		if (e.getPlayer().isOp()) {
-			return;
-		}
-		e.setCancelled(true);
 	}
 }
