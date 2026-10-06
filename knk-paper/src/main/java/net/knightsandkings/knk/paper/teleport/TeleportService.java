@@ -333,6 +333,39 @@ public class TeleportService {
         warmups.start(subject.getUniqueId(), warmup, clock.getAsLong(), seconds)
             .ifPresent(previous -> finishCancelled(previous.payload(), WarmupCancelReason.REPLACED));
         subject.sendMessage(ChatColor.YELLOW + "You need to wait " + seconds + " seconds before teleporting... Don't move.");
+        announcePrice(plan);
+    }
+
+    /**
+     * During the warmup, tell the payer what the teleport will cost (KNG-41: the price may come from
+     * their permission group). Only teleports with a warmup get it; nothing for a free one.
+     */
+    private void announcePrice(TeleportPlan plan) {
+        TeleportCharge charge = plan.charge();
+        if (charge == null) {
+            return;
+        }
+        CompletableFuture<Optional<TeleportCharge.PriceNotice>> notice;
+        try {
+            notice = charge.priceNotice();
+        } catch (RuntimeException ex) {
+            LOGGER.log(Level.FINE, "Could not work out the price of " + plan.subject().getName() + "'s teleport", ex);
+            return;
+        }
+        Player subject = plan.subject();
+        notice.whenComplete((answer, ex) -> mainThread.execute(() -> {
+            if (ex != null || answer == null || answer.isEmpty() || !warmups.isWarmingUp(subject.getUniqueId())) {
+                return;
+            }
+            Player payer = answer.get().payer();
+            if (payer == null || !payer.isOnline()) {
+                return;
+            }
+            String price = answer.get().price();
+            payer.sendMessage(ChatColor.GRAY + (payer.getUniqueId().equals(subject.getUniqueId())
+                ? "This teleport costs you " + price + ", paid when you arrive."
+                : "You pay " + price + " when " + subject.getName() + " arrives."));
+        }));
     }
 
     private void commit(TeleportPlan plan, Authority authority, CompletableFuture<TeleportOutcome> result, boolean recheck) {

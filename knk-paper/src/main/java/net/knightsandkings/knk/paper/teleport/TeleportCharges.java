@@ -2,6 +2,7 @@ package net.knightsandkings.knk.paper.teleport;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
@@ -67,20 +68,6 @@ public class TeleportCharges {
         this.policies = policies;
     }
 
-    /**
-     * What {@code player}'s teleport of {@code kind} costs by their cached group settings and the
-     * {@code defaultCoins} ("100 coins and 1 gem"), or null when it's free - for a heads-up message;
-     * the charge prices it again. Never does I/O; refreshes the cache in the background.
-     */
-    public String priceLabel(UUID player, TeleportKind kind, int defaultCoins) {
-        TeleportPolicyDataAccess current = policies;
-        KnkTeleportPolicy.Kind settings = KnkTeleportPolicy.Kind.NONE;
-        if (current != null) {
-            current.refresh(player, TeleportPolicyDataAccess.PLAYER_READ_MAX_AGE);
-            settings = current.cachedOrDefault(player).of(kind);
-        }
-        return settings.costsAnything(defaultCoins) ? settings.priceLabel(defaultCoins) : null;
-    }
 
     /**
      * The charge of {@code /warp <destination>} for {@code player}: the server re-checks title,
@@ -92,6 +79,13 @@ public class TeleportCharges {
         String key = TeleportCharger.newKey("warp");
         return new Charge(payer, key, userId ->
             charger.chargeWarp(destination.domainId(), userId, key, bypassRequirements, bypassCost)) {
+            @Override
+            public CompletableFuture<Optional<PriceNotice>> priceNotice() {
+                // The player's own price from their (at most a few seconds old) destination list.
+                return CompletableFuture.completedFuture(bypassCost || !destination.hasPrice()
+                    ? Optional.empty() : Optional.of(new PriceNotice(player, destination.priceLabel())));
+            }
+
             @Override
             Location destinationOf(TeleportChargeResult result) {
                 return toLocation(result.destination() != null ? result.destination() : destination, worlds);
@@ -108,7 +102,7 @@ public class TeleportCharges {
         UUID payer = requester.getUniqueId();
         UUID otherId = other.getUniqueId();
         String requesterName = requester.getName();
-        return new PolicyCharge(payer, TeleportKind.REQUEST, coins, settings -> {
+        return new PolicyCharge(requester, TeleportKind.REQUEST, coins, settings -> {
             String key = TeleportCharger.newKey("tpa");
             String price = settings.priceLabel(coins);
             return new Charge(payer, key, userId -> idOf(otherId).thenCompose(otherUserId ->
@@ -131,7 +125,7 @@ public class TeleportCharges {
      */
     public TeleportCharge spawnFee(Player player) {
         UUID payer = player.getUniqueId();
-        return new PolicyCharge(payer, TeleportKind.SPAWN, 0, settings -> {
+        return new PolicyCharge(player, TeleportKind.SPAWN, 0, settings -> {
             String key = TeleportCharger.newKey("spawn");
             return new Charge(payer, key, userId -> charger.chargeSpawnFee(userId, key)) { };
         });
@@ -142,6 +136,11 @@ public class TeleportCharges {
         UUID payer = player.getUniqueId();
         String key = TeleportCharger.newKey("back");
         return new Charge(payer, key, userId -> charger.chargeBackFee(userId, coins, key, kind.configKey())) {
+            @Override
+            public CompletableFuture<Optional<PriceNotice>> priceNotice() {
+                return CompletableFuture.completedFuture(Optional.of(new PriceNotice(player, TeleportPayment.amount(coins, "Coins"))));
+            }
+
             @Override
             TeleportDenial denialOf(TeleportChargeResult result) {
                 if ("InsufficientCoins".equals(result.refusalCode())) {
@@ -188,6 +187,7 @@ public class TeleportCharges {
      * otherwise the real charge takes over.
      */
     private final class PolicyCharge implements TeleportCharge {
+        private final Player payerPlayer;
         private final UUID payer;
         private final TeleportKind kind;
         private final int defaultCoins;
@@ -195,8 +195,9 @@ public class TeleportCharges {
         private TeleportCharge inner;
         private boolean abandoned;
 
-        PolicyCharge(UUID payer, TeleportKind kind, int defaultCoins, Function<KnkTeleportPolicy.Kind, TeleportCharge> paidCharge) {
-            this.payer = payer;
+        PolicyCharge(Player payer, TeleportKind kind, int defaultCoins, Function<KnkTeleportPolicy.Kind, TeleportCharge> paidCharge) {
+            this.payerPlayer = payer;
+            this.payer = payer.getUniqueId();
             this.kind = kind;
             this.defaultCoins = defaultCoins;
             this.paidCharge = paidCharge;
@@ -221,6 +222,16 @@ public class TeleportCharges {
                 return charge.authorize();
             }).exceptionally(ex -> Authorization.denied(TeleportDenial.of(TeleportCharger.UNAVAILABLE,
                 "Teleporting isn't available right now. Try again.")));
+        }
+
+        @Override
+        public CompletableFuture<Optional<PriceNotice>> priceNotice() {
+            return policyOf(payer).thenApply(policy -> {
+                KnkTeleportPolicy.Kind settings = policy.of(kind);
+                return settings.costsAnything(defaultCoins)
+                    ? Optional.of(new PriceNotice(payerPlayer, settings.priceLabel(defaultCoins)))
+                    : Optional.<PriceNotice>empty();
+            }).exceptionally(ex -> Optional.empty());
         }
 
         private synchronized TeleportCharge inner() {

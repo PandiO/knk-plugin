@@ -19,7 +19,6 @@ import org.bukkit.command.TabExecutor;
 import org.bukkit.entity.Player;
 
 import net.knightsandkings.knk.core.teleport.SpawnPoint;
-import net.knightsandkings.knk.core.teleport.TeleportKind;
 import net.knightsandkings.knk.core.teleport.TeleportOutcome;
 import net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport;
 import net.knightsandkings.knk.paper.commands.support.TargetRankCheck;
@@ -104,10 +103,7 @@ public class SpawnCommand implements TabExecutor {
             support.hasAsync(player, TeleportNodes.BYPASS_COST).thenAccept(bypassCost -> support.mainThread().execute(() -> {
                 TeleportPlan plan = TeleportPlan.spawn(player, destination, point.label());
                 if (!Boolean.TRUE.equals(bypassCost)) {
-                    String price = fees.priceLabel(player.getUniqueId(), TeleportKind.SPAWN, 0);
-                    if (price != null) {
-                        player.sendMessage(ChatColor.GRAY + "/spawn costs you " + price + ", paid when you arrive.");
-                    }
+                    // The engine tells the player the price during the warmup.
                     plan = plan.withCharge(fees.spawnFee(player));
                 }
                 teleportService.start(plan).thenAccept(outcome -> reportOwn(player, outcome));

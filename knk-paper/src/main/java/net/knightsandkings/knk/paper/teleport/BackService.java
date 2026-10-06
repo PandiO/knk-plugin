@@ -270,8 +270,7 @@ public class BackService {
         return claimAndGo(player, access.kinds(), (entry, destination) -> {
             TeleportPlan plan = TeleportPlan.back(player, destination, entry.location().label(entry.kind()));
             if (paid) {
-                player.sendMessage(ChatColor.GRAY + "/back costs " + settings.priceCoins()
-                    + " coins, paid when you arrive.");
+                // The engine tells the player the price during the warmup (KNG-41).
                 plan = plan.withCharge(fees.backFee(player, settings.priceCoins(), entry.kind()));
             }
             return plan;

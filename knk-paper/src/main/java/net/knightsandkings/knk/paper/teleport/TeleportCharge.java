@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.teleport;
 
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 
@@ -39,6 +40,19 @@ public interface TeleportCharge {
 
     /** The teleport happened: tell the payer what it cost. Main thread. */
     void completed(Player subject);
+
+    /**
+     * What this teleport will cost and who pays, for the notice the engine shows during the warmup
+     * (Linear KNG-41); empty when it is free (or the price can't be known). Any thread; never completes
+     * exceptionally. The charge after the warmup prices it again, server-side.
+     */
+    default CompletableFuture<Optional<PriceNotice>> priceNotice() {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    /** @param payer who pays; @param price e.g. "100 coins and 1 gem" */
+    record PriceNotice(Player payer, String price) {
+    }
 
     /**
      * The server's answer.

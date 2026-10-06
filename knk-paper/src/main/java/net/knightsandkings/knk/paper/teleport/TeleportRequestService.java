@@ -200,14 +200,7 @@ public class TeleportRequestService {
                         + " was dropped: they have too many pending requests.");
                 }
                 requester.sendMessage(sentMessage(target, book.expireSeconds()));
-                TeleportCharges fees = charges;
-                // The requester's permission group may price it (Linear KNG-41); the default otherwise.
-                String price = fees != null
-                    ? fees.priceLabel(requester.getUniqueId(), TeleportKind.REQUEST, settings.priceCoins())
-                    : settings.isPaid() ? settings.priceCoins() + " coins" : null;
-                if (price != null) {
-                    requester.sendMessage(ChatColor.GRAY + "It costs you " + price + " if the teleport happens.");
-                }
+                // The price is announced during the warmup by the engine (KNG-41), not here.
                 target.sendMessage(requestNotice(requester, result.request(), book.expireSeconds()));
             }
         }

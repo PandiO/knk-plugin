@@ -336,8 +336,9 @@ class TeleportChargeEngineTest {
         TeleportRequestService requests = paidRequests(250);
 
         requests.send(alice, bob, Direction.TO_REQUESTER);
-        verify(alice).sendMessage(contains("It costs you 250 coins"));
         requests.accept(bob, null);
+        // Bob warms up; Alice, who pays, is told the price (KNG-41).
+        verify(alice).sendMessage(contains("You pay 250 coins when Bob arrives."));
         assertTrue(api.feeCalls.isEmpty(), "charged at commit, not at accept");
         advance(5_000);
 
@@ -411,7 +412,8 @@ class TeleportChargeEngineTest {
 
         verify(alice).teleportAsync(any(Location.class), any(TeleportCause.class));
         assertTrue(api.feeCalls.isEmpty());
-        verify(alice, never()).sendMessage(contains("It costs you"));
+        verify(alice, never()).sendMessage(contains("costs you"));
+        verify(alice, never()).sendMessage(contains("You pay"));
     }
 
     @Test
@@ -423,8 +425,8 @@ class TeleportChargeEngineTest {
         TeleportRequestService requests = paidRequests(0);
 
         requests.send(alice, bob, Direction.TO_TARGET);
-        verify(alice).sendMessage(contains("It costs you 10 coins and 1 gem if the teleport happens."));
         requests.accept(bob, null);
+        verify(alice).sendMessage(contains("This teleport costs you 10 coins and 1 gem, paid when you arrive."));
         advance(5_000);
 
         assertEquals(1, api.feeCalls.size());
@@ -524,6 +526,49 @@ class TeleportChargeEngineTest {
         assertEquals(TeleportDenial.COOLDOWN, second.code());
     }
 
+    // ----- the price notice during the warmup (KNG-41 smoke test) -----
+
+    @Test
+    void aPaidWarp_TellsThePriceDuringTheWarmup() {
+        warp(alice);
+
+        verify(alice).sendMessage(contains("This teleport costs you 10 gems, paid when you arrive."));
+        assertTrue(api.warpKeys.isEmpty(), "told during the warmup, charged after it");
+    }
+
+    @Test
+    void aFreeOrBypassedWarp_HasNoNotice() {
+        KnkTeleportDestination free = new KnkTeleportDestination(4, "Free", "Town", "world",
+            50.5, 64, 50.5, 0f, 0f, 0, null, null, false, true, true, true, null, null);
+        Location location = TeleportCharges.toLocation(free, name -> world);
+        engine.start(TeleportPlan.warp(alice, location, "Free", charges.warp(alice, free, false, false)));
+        engine.start(TeleportPlan.warp(bob, TeleportCharges.toLocation(kardenna, name -> world), kardenna.name(),
+            charges.warp(bob, kardenna, false, true)));
+
+        verify(alice, never()).sendMessage(contains("costs you"));
+        verify(bob, never()).sendMessage(contains("costs you"));
+    }
+
+    @Test
+    void withoutAWarmup_NoNoticeIsSent() {
+        grant(alice, TeleportNodes.BYPASS_WARMUP);
+
+        assertTrue(warp(alice).join().isTeleported());
+
+        verify(alice, never()).sendMessage(contains("costs you"));
+        verify(alice).sendMessage(contains("You paid 10 gems"));
+    }
+
+    @Test
+    void aGroupPricedSpawn_IsAnnouncedFromFreshGroupSettings() {
+        groupPolicy = new KnkTeleportPolicy(null, null, fixed(30, 0, 0));
+        useGroupSettings();
+
+        engine.start(TeleportPlan.spawn(alice, new Location(world, 0.5, 64, 0.5), "Spawn").withCharge(charges.spawnFee(alice)));
+
+        verify(alice).sendMessage(contains("This teleport costs you 30 coins, paid when you arrive."));
+    }
+
     private TeleportOutcome startAndWarm(Player player, Location to) {
         CompletableFuture<TeleportOutcome> outcome = engine.start(TeleportPlan.warp(player, to, "Town", null));
         advance(5_000);
@@ -563,6 +608,7 @@ class TeleportChargeEngineTest {
 
         CompletableFuture<BackService.Trip> trip = back.start(alice, back.access(alice).join());
         assertTrue(api.feeCalls.isEmpty(), "nothing charged during the warmup");
+        verify(alice).sendMessage(contains("This teleport costs you 250 coins, paid when you arrive."));
         advance(5_000);
 
         assertTrue(trip.join().isTeleported());
