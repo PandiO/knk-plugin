@@ -23,6 +23,7 @@ import net.knightsandkings.knk.core.teleport.TeleportOutcome;
 import net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport;
 import net.knightsandkings.knk.paper.commands.support.TargetRankCheck;
 import net.knightsandkings.knk.paper.teleport.SpawnDestinationResolver;
+import net.knightsandkings.knk.paper.teleport.TeleportCharges;
 import net.knightsandkings.knk.paper.teleport.TeleportNodes;
 import net.knightsandkings.knk.paper.teleport.TeleportPlan;
 import net.knightsandkings.knk.paper.teleport.TeleportService;
@@ -52,6 +53,7 @@ public class SpawnCommand implements TabExecutor {
     private final TeleportService teleportService;
     private final SpawnDestinationResolver spawn;
     private final Predicate<Player> isVanished;
+    private volatile TeleportCharges charges;
 
     public SpawnCommand(PlayerCommandSupport support, TargetRankCheck rankCheck, VisibleTargetResolver targets,
                         TeleportService teleportService, SpawnDestinationResolver spawn, Predicate<Player> isVanished) {
@@ -90,9 +92,31 @@ public class SpawnCommand implements TabExecutor {
             sender.sendMessage(ChatColor.YELLOW + "Usage from the console: /spawn <player>");
             return;
         }
-        support.whenAllowed(sender, TeleportNodes.SPAWN, () -> withSpawn(sender, (destination, point) ->
-            teleportService.start(TeleportPlan.spawn(player, destination, point.label()))
-                .thenAccept(outcome -> reportOwn(player, outcome))));
+        support.whenAllowed(sender, TeleportNodes.SPAWN, () -> withSpawn(sender, (destination, point) -> {
+            TeleportCharges fees = charges;
+            if (fees == null) {
+                teleportService.start(TeleportPlan.spawn(player, destination, point.label()))
+                    .thenAccept(outcome -> reportOwn(player, outcome));
+                return;
+            }
+            // A permission group may price /spawn (Linear KNG-41); knk.teleport.bypass.cost makes it free.
+            support.hasAsync(player, TeleportNodes.BYPASS_COST).thenAccept(bypassCost -> support.mainThread().execute(() -> {
+                TeleportPlan plan = TeleportPlan.spawn(player, destination, point.label());
+                if (!Boolean.TRUE.equals(bypassCost)) {
+                    // The engine tells the player the price during the warmup.
+                    plan = plan.withCharge(fees.spawnFee(player));
+                }
+                teleportService.start(plan).thenAccept(outcome -> reportOwn(player, outcome));
+            }));
+        }));
+    }
+
+    /**
+     * How a permission group's {@code /spawn} price is charged (Linear KNG-41); null = {@code /spawn}
+     * stays free (no API client).
+     */
+    public void setCharges(TeleportCharges charges) {
+        this.charges = charges;
     }
 
     private void other(CommandSender sender, String targetName, boolean silentRequested) {

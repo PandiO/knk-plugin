@@ -76,6 +76,14 @@ public class TeleportCharger {
         return charge(userId, key, () -> api.chargeRequestFee(userId, amountCoins, key, otherUserId));
     }
 
+    public CompletableFuture<TeleportChargeResult> chargeSpawnFee(int userId, String key) {
+        return charge(userId, key, () -> api.chargeSpawnFee(userId, key));
+    }
+
+    public CompletableFuture<TeleportChargeResult> chargeBackFee(int userId, int amountCoins, String key, String backKind) {
+        return charge(userId, key, () -> api.chargeBackFee(userId, amountCoins, key, backKind));
+    }
+
     /**
      * Give back the charge made under {@code key}. Never completes exceptionally: completes with the
      * server's answer, or with null once every attempt failed (logged).

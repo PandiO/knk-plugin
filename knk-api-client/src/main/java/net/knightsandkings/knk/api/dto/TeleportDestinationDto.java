@@ -21,7 +21,9 @@ public record TeleportDestinationDto(
     @JsonProperty("requirementsMet") Boolean requirementsMet,
     @JsonProperty("canAfford") Boolean canAfford,
     @JsonProperty("lockCode") String lockCode,
-    @JsonProperty("lockReason") String lockReason
+    @JsonProperty("lockReason") String lockReason,
+    @JsonProperty("priceCoins") Integer priceCoins,
+    @JsonProperty("priceExperience") Integer priceExperience
 ) {
     /** knk-web-api {@code TeleportLocationDto}. */
     @JsonIgnoreProperties(ignoreUnknown = true)

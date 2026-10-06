@@ -112,6 +112,9 @@ class TeleportMenuFeatureTest {
         @Override public CompletableFuture<TeleportChargeResult> chargeRequestFee(int u, int a, String k, Integer o) {
             return CompletableFuture.completedFuture(TeleportChargeResult.allowed("Coins", 0, 0, false, null));
         }
+        @Override public CompletableFuture<TeleportChargeResult> chargeBackFee(int u, int a, String k, String b) {
+            return CompletableFuture.completedFuture(TeleportChargeResult.allowed("Coins", 0, 0, false, null));
+        }
         @Override public CompletableFuture<TeleportRefundResult> refund(int u, String k, String r) {
             return CompletableFuture.completedFuture(new TeleportRefundResult(false, null, 0, null, false));
         }

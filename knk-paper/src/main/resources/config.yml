@@ -119,13 +119,15 @@ player-notifications:
 
 # Teleport engine (docs/specs/teleport/DESIGN.md §3.11, knk-workspace). Staff teleports (/tp,
 # /tphere, /knk tp) are instant and skip warmup, cooldown, combat tag and the safe-spot check; the
-# settings below apply to player teleports (/tpa, /tpahere, /spawn, /warp; /back in a later phase).
+# settings below apply to player teleports (/tpa, /tpahere, /spawn, /warp, /back).
 teleport:
   # Seconds a player waits before teleporting; moving to another block or taking damage cancels it
   warmup-seconds: 5            # v1 default
   # Warmup for holders of knk.teleport.warmup.short (granted to the Noble premium tier and up)
   warmup-short-seconds: 3      # v1 premium
-  # Seconds after a player teleport before the same kind of teleport can be used again
+  # Seconds after a player teleport before the same kind of teleport can be used again. A permission
+  # group can set its own cooldown for /tpa, /warp and /spawn in the web app (Linear KNG-41); that
+  # replaces this value for its members.
   cooldown-seconds: 30
   # A PvP hit (dealt or taken) blocks player teleports for this long
   combat-tag-seconds: 10       # v1 Main.combat
@@ -140,7 +142,9 @@ teleport:
     # Pending requests one player can have; the oldest is dropped past this
     max-incoming: 5
     # Coins a request costs the requester (0 = free). Charged by the web API when the teleport
-    # happens (after the warmup) and refunded if it then fails.
+    # happens (after the warmup) and refunded if it then fails. The requester's permission group can
+    # replace it in the web app (KNG-41: a multiple of this value, or a fixed price in coins, gems
+    # and/or XP); /spawn and /warp can be priced there too.
     price-coins: 0             # v1 intended 10000, never charged
   # /warp <destination> and /warps (knk.teleport.warp): Towns, Districts and Structures staff
   # enabled as destinations in the web app. The web API checks the title / premium tier /
@@ -148,12 +152,24 @@ teleport:
   destinations:
     # Seconds a player's destination list (names, prices, locks) is cached
     cache-seconds: 60
-  # /back (knk.teleport.back, meant for Dragon Blood): back to where you last died, once per death.
-  # Warmup, cooldown, combat tag and the safe-spot check apply; a siege death gives no /back.
+  # /back (Linear KNG-42): back to the latest place among the kinds the player's nodes allow -
+  # where they died (knk.teleport.back, meant for Dragon Blood), or where they were before a /warp
+  # (knk.teleport.back.warps), a /tpa, /tpahere or their own staff /tp (knk.teleport.back.teleport)
+  # or a /spawn (knk.teleport.back.spawn); knk.teleport.back.all allows every kind. Each place is
+  # single use. Warmup, cooldown, combat tag and the safe-spot check apply. Siege deaths and siege
+  # teleports are never recorded; places from before a siege stay usable after it while they last.
+  # Staff: /back <player> [-s] (knk.teleport.staff.back.others) - instant, audited, free.
   back:
     enabled: true
-    # Seconds after a death during which /back can be started
+    # Seconds after the death or teleport during which /back can be started (every kind)
     expire-seconds: 300        # developer decision Q5: 5 minutes
+    # Optional per-kind overrides of expire-seconds (death, warps, teleport, spawn)
+    # expire-seconds-by-kind:
+    #   warps: 600
+    #   spawn: 120
+    # Coins a player's own /back costs (0 = free; knk.teleport.bypass.cost pays nothing). Charged by
+    # the web API when the teleport happens (after the warmup) and refunded if it then fails.
+    price-coins: 0
 
 # Domain discovery (Linear KNG-20, knk-workspace docs/specs/domain-discovery/DESIGN.md §3.6):
 # the first time a player enters a Town, District or Structure it is recorded and rewarded once.

@@ -39,6 +39,11 @@ class TeleportChargerTest {
         }
 
         @Override
+        public CompletableFuture<TeleportChargeResult> chargeBackFee(int userId, int amountCoins, String key, String backKind) {
+            return chargeWarp(0, userId, key, false, false);
+        }
+
+        @Override
         public CompletableFuture<TeleportRefundResult> refund(int userId, String key, String reason) {
             refundKeys.add(key);
             if (refundFailures > 0) {

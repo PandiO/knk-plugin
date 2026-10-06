@@ -88,6 +88,17 @@ public final class PlayerCommandSupport {
                 }));
     }
 
+    /** Whether {@code player} holds {@code node}, quietly: false when it couldn't be checked. Any thread. */
+    public CompletableFuture<Boolean> hasAsync(Player player, String node) {
+        try {
+            return knkPermissible.checkAsync(player, node)
+                    .thenApply(decision -> decision == PermissionDecision.ALLOWED)
+                    .exceptionally(ex -> false);
+        } catch (RuntimeException ex) {
+            return CompletableFuture.completedFuture(false);
+        }
+    }
+
     /**
      * Like {@link #whenAllowed}, but holding any one of {@code nodes} is enough (e.g. a new node and
      * the legacy node it replaces). Refused as "can't be checked" only when no node was allowed and
