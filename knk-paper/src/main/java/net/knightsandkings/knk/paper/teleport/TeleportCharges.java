@@ -14,6 +14,7 @@ import org.bukkit.World;
 import org.bukkit.entity.Player;
 
 import net.knightsandkings.knk.core.dataaccess.TeleportPolicyDataAccess;
+import net.knightsandkings.knk.core.domain.currency.CurrencyFormat;
 import net.knightsandkings.knk.core.domain.teleport.KnkTeleportDestination;
 import net.knightsandkings.knk.core.domain.teleport.KnkTeleportPolicy;
 import net.knightsandkings.knk.core.domain.teleport.TeleportChargeResult;
@@ -372,11 +373,10 @@ public class TeleportCharges {
             }
             Player payerPlayer = subject.getUniqueId().equals(payer) ? subject : onlineById.apply(payer);
             if (payerPlayer != null && payerPlayer.isOnline()) {
-                // v1 wording.
                 // v1 wording for one currency; a combined group price (KNG-41) lists each balance.
                 List<TeleportPayment> payments = result.payments();
                 String balance = payments.size() == 1
-                    ? " and your new balance is " + payments.get(0).newBalance()
+                    ? " and your new balance is " + CurrencyFormat.amount(payments.get(0).newBalance())
                     : "; your new balance is " + TeleportPayment.describeBalances(payments);
                 payerPlayer.sendMessage(ChatColor.GOLD + "You paid " + TeleportPayment.describeAmounts(payments) + balance + ".");
             }

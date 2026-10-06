@@ -15,6 +15,9 @@ import java.util.List;
 
 public final class ItemBlueprintBukkitMapper {
 
+    /** Dark gray, the colour of an ordinary blueprint description. */
+    static final String DESCRIPTION_COLOR = "&8";
+
     private ItemBlueprintBukkitMapper() {
     }
 
@@ -70,7 +73,12 @@ public final class ItemBlueprintBukkitMapper {
         return itemStack;
     }
 
-    private static List<String> buildLore(String description) {
+    /**
+     * The description's lines as lore. A line without a color of its own is dark gray ({@code &8}): lore without one
+     * is vanilla's purple, which no description should end up in by accident. A color the description sets itself
+     * (also at the start of the line) overrides it.
+     */
+    static List<String> buildLore(String description) {
         List<String> lore = new ArrayList<>();
         if (description == null || description.isBlank()) {
             return lore;
@@ -80,7 +88,7 @@ public final class ItemBlueprintBukkitMapper {
         for (String line : lines) {
             String trimmed = line != null ? line.trim() : "";
             if (!trimmed.isEmpty()) {
-                lore.add(DisplayTextFormatter.translateToLegacy(trimmed));
+                lore.add(DisplayTextFormatter.translateToLegacy(DESCRIPTION_COLOR + trimmed));
             }
         }
 

@@ -685,4 +685,5 @@ class TeleportChargeEngineTest {
         assertTrue(back.startFor(bob, alice, false).join().isTeleported());
         assertTrue(api.feeCalls.isEmpty());
     }
+
 }

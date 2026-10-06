@@ -98,4 +98,14 @@ class TeleportGroupPricesTest {
         assertEquals("900 coins and 49 gems", TeleportPayment.describeBalances(combo.payments()));
         assertTrue(TeleportChargeResult.refused("X", "no").payments().isEmpty());
     }
+
+    @Test
+    void paymentAmountsAndBalancesGroupDigits() {
+        java.util.List<TeleportPayment> payments = java.util.List.of(
+            new TeleportPayment("Coins", 10_000, 1_234_567), new TeleportPayment("Gems", 1, 2_500));
+
+        assertEquals("10,000 coins and 1 gem", TeleportPayment.describeAmounts(payments));
+        assertEquals("1,234,567 coins and 2,500 gems", TeleportPayment.describeBalances(payments));
+        assertEquals("1 coin", TeleportPayment.amount(1, "Coins"));
+    }
 }

@@ -281,15 +281,25 @@ public class BackService {
      * Staff {@code /back <player>}: send {@code target} to their latest entry of any kind, whatever
      * nodes they hold, as an instant, audited staff teleport (safe spot still searched). Uses the entry
      * up. The caller checks {@value TeleportNodes#STAFF_BACK_OTHERS} and the rank. Completes on the main
-     * thread.
+     * thread. With nothing recorded, a guard that refuses moving the player at all (a siege member) is
+     * reported instead of "nowhere to go back to" (KNG-42 smoke test, step 8.5).
      */
     public CompletableFuture<Trip> startFor(CommandSender actor, Player target, boolean silent) {
         if (!isEnabled()) {
             return CompletableFuture.completedFuture(Trip.refused(DISABLED, "/back is turned off on this server."));
         }
-        return claimAndGo(target, EnumSet.allOf(BackKind.class), (entry, destination) ->
+        Set<BackKind> every = EnumSet.allOf(BackKind.class);
+        String nowhere = target.getName() + " has nowhere to go back to.";
+        if (!book.isClaimed(target.getUniqueId()) && book.available(target.getUniqueId(), every, engine.now()).isEmpty()) {
+            // Nothing to claim: ask the guards with the player's own spot as the destination first.
+            Location here = target.getLocation();
+            return engine.check(TeleportPlan.staffBack(actor, target, () -> here, "back (check)", silent))
+                .thenApply(denial -> denial.map(d -> new Trip(TeleportOutcome.denied(d), null))
+                    .orElseGet(() -> Trip.refused(NOWHERE, nowhere)));
+        }
+        return claimAndGo(target, every, (entry, destination) ->
                 TeleportPlan.staffBack(actor, target, destination, entry.location().label(entry.kind()), silent),
-            target.getName() + " has nowhere to go back to.", target.getName() + " is already on the way back.");
+            nowhere, target.getName() + " is already on the way back.");
     }
 
     @FunctionalInterface

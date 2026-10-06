@@ -1,5 +1,7 @@
 package net.knightsandkings.knk.core.domain.teleport;
 
+import net.knightsandkings.knk.core.domain.currency.CurrencyFormat;
+
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -32,13 +34,13 @@ public record TeleportPayment(String currency, long amount, long newBalance) {
         };
     }
 
-    /** {@code amount} followed by its word, singular for 1 ("1 gem", "100 coins", "50 XP"). */
+    /** {@code amount} with digit grouping, then its word, singular for 1 ("1 gem", "1,000 coins", "50 XP"). */
     public static String amount(long amount, String currency) {
         String word = word(currency);
         if (amount == 1 && word.endsWith("s")) {
             word = word.substring(0, word.length() - 1);
         }
-        return amount + " " + word;
+        return CurrencyFormat.amount(amount) + " " + word;
     }
 
     /** "100 coins", "100 coins and 1 gem", "100 coins, 1 gem and 50 XP". */
