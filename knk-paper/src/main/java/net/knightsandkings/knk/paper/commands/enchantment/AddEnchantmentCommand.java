@@ -89,8 +89,7 @@ public class AddEnchantmentCommand implements EnchantmentSubcommand {
         ItemStack itemInHand = heldItemOptional.get();
         ItemMeta itemMeta = itemInHand.getItemMeta();
         List<String> lore = itemMeta != null && itemMeta.hasLore() ? itemMeta.getLore() : List.of();
-        List<String> updatedLore = repository.applyEnchantment(lore, enchantment.id(), level).join();
-        updatedLore = reorderLoreEnchantmentsFirst(updatedLore);
+        List<String> updatedLore = CustomEnchantmentLore.apply(repository, lore, enchantment.id(), level);
 
         if (itemMeta == null) {
             itemMeta = handler.plugin().getServer().getItemFactory().getItemMeta(itemInHand.getType());
@@ -103,10 +102,6 @@ public class AddEnchantmentCommand implements EnchantmentSubcommand {
 
         sender.sendMessage(handler.colorize(handler.message("messages.cmd-add-success", "&aEnchantment was added to item successfully.")));
         return true;
-    }
-
-    private List<String> reorderLoreEnchantmentsFirst(List<String> loreLines) {
-        return CustomEnchantmentLore.enchantmentsFirst(repository, loreLines);
     }
 
     @Override
