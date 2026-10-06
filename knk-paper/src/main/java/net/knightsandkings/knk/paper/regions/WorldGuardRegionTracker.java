@@ -13,7 +13,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.function.Predicate;
 import java.util.logging.Logger;
 
 import org.bukkit.Bukkit;
@@ -45,12 +44,14 @@ import net.knightsandkings.knk.paper.utils.ColorOptions;
  * - Stale cache usage allows movement while fresh data loads
  * - Failed lookup cooldown prevents API hammering
  *
- * <p>KNG-55: a move is judged from the regions at the player's actual position ({@code from}), and the
- * tracked region set (and the enter/leave events) only follow a move that is allowed or bypassed. A
- * denied move is cancelled by {@code WorldGuardRegionListener} and leaves the player - and this
- * tracker - where they were, so the next step over the border is judged (and denied) again. Before,
- * the tracked set was updated before the decision, so after one cancelled step the tracker believed
- * the player was already across and let every following step through.
+ * <p><b>Does not enforce AllowEntry/AllowExit</b> (KNG-56): WorldGuard does, through
+ * {@code regions.access.DomainAccessHandler} and the flags it keeps on disk, before this tracker sees
+ * a move (its listener runs at MONITOR). The tracker only describes moves that happened - welcome
+ * messages, gate control, on-demand district gate loading and {@code OnRegionEnterEvent}/
+ * {@code OnRegionLeaveEvent} - from the API's domain data.
+ *
+ * <p>KNG-55: a move is described from the regions at the player's actual position ({@code from}),
+ * so a move the tracker never saw can't make it describe the wrong border.
  */
 public class WorldGuardRegionTracker {
     private final Function<Location, Set<String>> regionLookup;
@@ -66,11 +67,6 @@ public class WorldGuardRegionTracker {
     private final Map<String, Long> failedRegionLookups = new ConcurrentHashMap<>();
     // One future per region id being fetched; removed (and completed) when its lookup finishes.
     private final Map<String, CompletableFuture<Void>> inFlightLookups = new ConcurrentHashMap<>();
-    // Players being moved by enforcementTeleport: that teleport is never judged (it may leave a no-exit domain).
-    private final Set<UUID> enforcementTeleports = new HashSet<>();
-    // Who may ignore AllowEntry/AllowExit denials (knk.region.bypass, docs/specs/teleport/DESIGN.md §4 D11).
-    private volatile Predicate<Player> denialBypass = player -> false;
-
     // Also covers a lookup that came back without a domain (a WorldGuard region no domain uses).
     private static final long FAILED_LOOKUP_COOLDOWN_MS = 30000;  // 30 second cooldown
 
@@ -121,13 +117,11 @@ public class WorldGuardRegionTracker {
     }
 
     /**
-     * Handle player movement between WorldGuard regions.
+     * Handle a player's move between WorldGuard regions (one that WorldGuard allowed).
      *
      * <p>The regions the player leaves are the ones at {@code from} - where the player really is -
      * not the tracked set, so a move another listener cancelled, or a ride the tracker never saw,
-     * can't make the tracker judge the wrong border. The tracked set and the enter/leave events are
-     * only updated when the move goes ahead: when the returned decision denies the move and the
-     * player holds no bypass, the caller must cancel it, and the tracker keeps the player outside.
+     * can't make the tracker describe the wrong border.
      *
      * @return RegionTransitionDecision if regions changed and all data is cached, null otherwise
      */
@@ -138,11 +132,6 @@ public class WorldGuardRegionTracker {
 
         UUID playerId = player.getUniqueId();
         Set<String> newRegions = getRegionNamesAt(to);
-        if (enforcementTeleports.contains(playerId)) {
-            commitRegions(player, newRegions);
-            return null;
-        }
-
         Set<String> trackedRegions = regionsByPlayer.getOrDefault(playerId, Collections.emptySet());
         Set<String> oldRegions = from != null ? getRegionNamesAt(from) : trackedRegions;
 
@@ -183,7 +172,7 @@ public class WorldGuardRegionTracker {
                     pending.add(lookup);
                 }
             }
-            revalidateWhenResolved(player, pending, oldRegions, newRegions, from, false);
+            revalidateWhenResolved(player, pending, oldRegions, newRegions, false);
 
             // Update player regions and allow movement with stale/partial data
             commitRegions(player, newRegions);
@@ -205,62 +194,8 @@ public class WorldGuardRegionTracker {
                         ", message=" + decision.getMessage().orElse("(none)"));
         }
 
-        if (decision == null || decision.isMovementAllowed() || bypassesDenials(player)) {
-            commitRegions(player, newRegions);
-        }
-        // else: denied - the caller cancels the move, so the player (and the tracked set) stay put
-        // and the next step over the border is judged again.
+        commitRegions(player, newRegions);
         return decision;
-    }
-
-    /**
-     * Players matching {@code bypass} are never stopped by an AllowEntry/AllowExit denial - neither
-     * by {@code WorldGuardRegionListener} nor by the delayed re-validation below.
-     */
-    public void setDenialBypass(Predicate<Player> bypass) {
-        this.denialBypass = bypass != null ? bypass : player -> false;
-    }
-
-    public boolean bypassesDenials(Player player) {
-        return player != null && denialBypass.test(player);
-    }
-
-    /**
-     * Would moving {@code player} to {@code to} be refused by a domain's AllowEntry/AllowExit?
-     * Side-effect free (no region events, no tracked-region update, no gate control) and cache-only,
-     * for the teleport engine's up-front check (docs/specs/teleport/DESIGN.md §3.4). Main thread only.
-     *
-     * @return a deny decision, or null when allowed or not decidable from the cache
-     */
-    public RegionTransitionDecision previewAccess(Player player, Location to) {
-        if (player == null || to == null || to.getWorld() == null) {
-            return null;
-        }
-        Set<String> oldRegions = regionsByPlayer.get(player.getUniqueId());
-        if (oldRegions == null) {
-            oldRegions = getRegionNamesAt(player.getLocation());
-        }
-        Set<String> newRegions = getRegionNamesAt(to);
-        if (oldRegions.equals(newRegions)) {
-            return null;
-        }
-        return transitionService.previewAccess(oldRegions, newRegions);
-    }
-
-    /**
-     * Teleport {@code player} to {@code target} to undo a move a domain refuses (KNG-55). The teleport
-     * itself is not judged - it may have to take the player out of a domain they may not leave - and
-     * the tracked regions follow wherever the player ends up. Main thread only.
-     */
-    public void enforcementTeleport(Player player, Location target) {
-        UUID playerId = player.getUniqueId();
-        enforcementTeleports.add(playerId);
-        try {
-            player.teleport(target);
-        } finally {
-            enforcementTeleports.remove(playerId);
-        }
-        commitRegions(player, getRegionNamesAt(player.getLocation()));
     }
 
     public void handleQuit(Player player) {
@@ -301,7 +236,7 @@ public class WorldGuardRegionTracker {
                 // whatever they joined inside, along with anything that depends on that event
                 // (like on-demand district gate loading).
                 revalidateWhenResolved(player, List.of(startAsyncLookup(player, cacheStatus.missing)),
-                    Collections.emptySet(), current, null, true);
+                    Collections.emptySet(), current, true);
             }
         }
 
@@ -415,28 +350,20 @@ public class WorldGuardRegionTracker {
 
     /** Once every pending lookup has finished, re-validate the move on the main thread. */
     private void revalidateWhenResolved(Player player, List<CompletableFuture<Void>> pending, Set<String> oldRegions,
-                                        Set<String> newRegions, Location returnTo, boolean forceRevalidation) {
+                                        Set<String> newRegions, boolean forceRevalidation) {
         if (pending.isEmpty()) {
             return;
         }
-        Location target = returnTo != null ? returnTo.clone() : null;
         CompletableFuture.allOf(pending.toArray(CompletableFuture[]::new))
             .whenComplete((ignored, ex) -> mainThread.execute(
-                () -> revalidatePlayerLocation(player, oldRegions, newRegions, target, forceRevalidation)));
+                () -> revalidatePlayerLocation(player, oldRegions, newRegions, forceRevalidation)));
     }
 
     /**
-     * Re-validate player location after async API fetch completes.
-     * Checks if player is still in the regions and enforces entry/exit rules.
-     * MUST be called on main thread.
+     * Describe a move once the domain data it needed has arrived (welcome message, gates, district
+     * gate loading). MUST be called on main thread. Access is not judged here: WorldGuard already
+     * allowed the move (KNG-56).
      *
-     * <p>KNG-55: a player who walked on while the lookup ran is still checked. Before, re-validation
-     * was skipped unless the player stood in exactly the regions of the move, so walking one step
-     * further (into a nested region, say) kept them in a domain they may not enter. Now the move is
-     * judged from where it started to where the player is now - side-effect free, since later moves
-     * already ran their own transitions - and a refused player is put back where the move started.
-     *
-     * @param returnTo where the player was before the move ({@code from}); the world spawn if null
      * @param forceRevalidation if true (join-time pre-warm only), skips the "is the player still
      *     in the same spot" check and processes expectedNewRegions unconditionally - this exists
      *     purely to unblock one-time "entered" side effects (like district gate loading) for
@@ -446,7 +373,7 @@ public class WorldGuardRegionTracker {
      *     they walked to since, would be a surprising thing for the plugin to do on its own.
      */
     private void revalidatePlayerLocation(Player player, Set<String> oldRegions, Set<String> expectedNewRegions,
-                                          Location returnTo, boolean forceRevalidation) {
+                                          boolean forceRevalidation) {
         if (player == null || !player.isOnline()) {
             if (logger != null && player != null) {
                 logger.fine("[KnK Tracker] " + player.getName() + " revalidation skipped (offline)");
@@ -470,40 +397,11 @@ public class WorldGuardRegionTracker {
             logger.fine("[KnK Tracker] " + player.getName() + " revalidating: expected=" + expectedNewRegions + ", current=" + currentRegions);
         }
 
-        RegionTransitionDecision decision;
-        if (currentRegions.equals(expectedNewRegions)) {
-            // Still where the move went: run the full transition with fresh data
-            decision = transitionService.handleRegionTransition(playerId, oldRegions, currentRegions);
-        } else if (currentRegions.equals(oldRegions)) {
-            // Back where the move started: nothing to enforce
-            return;
-        } else {
-            // Moved on during the fetch: only the access rules, from the move's start to here
-            decision = transitionService.previewAccess(oldRegions, currentRegions);
-            if (decision != null && decision.isMovementAllowed()) {
-                decision = null;  // the later moves showed their own messages
-            }
+        if (!currentRegions.equals(expectedNewRegions)) {
+            return;  // moved on: the later moves described themselves
         }
-
-        if (decision != null && !decision.isMovementAllowed() && bypassesDenials(player)) {
-            if (logger != null) {
-                logger.fine("[KnK Tracker] " + player.getName() + " entry denied after revalidation, but holds the region bypass");
-            }
-        } else if (decision != null && !decision.isMovementAllowed()) {
-            // Movement should have been denied - put the player back where the move started
-            Location target = returnTo != null && returnTo.getWorld() != null
-                ? returnTo : player.getWorld().getSpawnLocation();
-            if (logger != null) {
-                logger.warning("[KnK Tracker] " + player.getName() + " movement denied after revalidation, teleporting back to " + target);
-            }
-
-            decision.getMessage().ifPresent(msg ->
-                player.sendMessage(Component.text(msg).color(ColorOptions.error))
-            );
-
-            enforcementTeleport(player, target);
-        } else if (decision != null) {
-            // Entry allowed - show message
+        RegionTransitionDecision decision = transitionService.handleRegionTransition(playerId, oldRegions, currentRegions);
+        if (decision != null && decision.isMovementAllowed()) {
             decision.getMessage().ifPresent(msg ->
                 player.sendActionBar(Component.text(msg).color(ColorOptions.message))
             );

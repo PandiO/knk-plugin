@@ -13,13 +13,12 @@ import net.knightsandkings.knk.core.teleport.TeleportDenial;
 
 /**
  * Refuses a teleport into a domain with {@code AllowEntry = false} or out of one with
- * {@code AllowExit = false} up front, with the same verdict {@code WorldGuardRegionListener} would
- * reach when the teleport event fires (docs/specs/teleport/DESIGN.md §3.1/§3.4) - so a player is
- * refused before a warmup rather than after it. Holders of {@code knk.region.bypass} pass (for a
- * staff teleport: the staff member); the listener lets the same teleport through for them.
+ * {@code AllowExit = false} up front, with the same verdict WorldGuard's session reaches when the
+ * teleport event fires ({@code regions.access.DomainAccessService.preview}, KNG-56;
+ * docs/specs/teleport/DESIGN.md §3.1/§3.4) - so a player is refused before a warmup rather than
+ * after it. Holders of {@code knk.region.bypass} pass (for a staff teleport: the staff member).
  * <p>
- * Reads cached domain data only ({@code WorldGuardRegionTracker.previewAccess}); a region that
- * isn't cached yet counts as allowed here and is still enforced by the listener.
+ * Reads the access flags on the WorldGuard regions, so it works while the API is down.
  */
 public final class RegionTeleportRestriction implements TeleportRestriction {
 

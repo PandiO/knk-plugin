@@ -409,6 +409,25 @@ regions:
     extra-regions: []
     #  - { region: arena_2, kind: arena, parent: district_2 }
     #  - { region: arena_2-battleground, kind: battleground, parent: arena_2 }
+  # Domain AllowEntry/AllowExit (KNG-56). The rules are written onto each domain's WorldGuard region as the flags
+  # knk-allow-entry / knk-allow-exit / knk-domain-name, which WorldGuard saves - so they are enforced at startup, at
+  # join and while the API is down (the last synced values). WorldGuard enforces them for every way of moving;
+  # owners and members of a region, knk.region.bypass and WorldGuard's region bypass pass.
+  access:
+    sync:
+      enabled: true
+      delay-ticks: 100            # first sync after enable (WorldGuard must have loaded its regions)
+      attempts: 3                 # retries while the API is still starting
+      retry-delay-seconds: 30
+      interval-minutes: 5         # re-sync from the API this often (0 = only at startup / repair / new regions)
+    message-interval-ms: 2000     # a player is told "You are not allowed to ..." at most this often
+    # Only a refusal RATE no honest player reaches (a client pushing a border makes a few per second) leads to an
+    # action: first a teleport to the world spawn, then - if it happens again within escalation-window-seconds - a kick.
+    load-guard:
+      enabled: true
+      max-refusals-per-second: 20
+      window-seconds: 3
+      escalation-window-seconds: 60
 cache:
   # Global time-to-live for cached API responses (in seconds)
   # After this duration, cached data is considered stale and will be refetched
