@@ -45,7 +45,7 @@ class NavigationDestinationsTest {
             PagedQuery q = inv.getArgument(0);
             List<KnkDomainSummary> all = List.of(new KnkDomainSummary(1, "Kardenna", "Town"), new KnkDomainSummary(2, "Market", "Town"),
                 new KnkDomainSummary(3, "Market", "District"), new KnkDomainSummary(9, "Mill House", "Structure"),
-                new KnkDomainSummary(50, "Wild", "Kingdom"));
+                new KnkDomainSummary(11, "Keep Gate", "GateStructure"), new KnkDomainSummary(50, "Wild", "Kingdom"));
             return CompletableFuture.completedFuture(q.pageNumber() == 1 ? new Page<>(all, all.size(), 1, q.pageSize()) : new Page<>(List.of(), all.size(), q.pageNumber(), q.pageSize()));
         });
         when(locations.searchAsync(any())).thenAnswer(inv -> {
@@ -76,7 +76,7 @@ class NavigationDestinationsTest {
         assertTrue(all.stream().anyMatch(t -> t.type() == NavTarget.Type.STREET && t.name().equals("Main Street")));
         assertTrue(all.stream().anyMatch(t -> t.type() == NavTarget.Type.NODE && t.name().equals("Cinix Keep")));
         assertFalse(all.stream().anyMatch(t -> t.name().equals("Wild")), "unknown domain types are skipped");
-        assertEquals(4, destinations.remote().stream().filter(t -> t.type().isDomain()).count());
+        assertEquals(5, destinations.remote().stream().filter(t -> t.type().isDomain()).count());
     }
 
     @Test
@@ -94,6 +94,32 @@ class NavigationDestinationsTest {
         Resolution unknown = destinations.resolve("Kard", "world");
         assertFalse(unknown.found());
         assertEquals(List.of("Kardenna", "Kardenna Mill", "Kardenna Castle"), unknown.suggestionNames(), "API places first, then the snapshot's nodes");
+    }
+
+    @Test
+    void gatesAreStructuresThatAlsoAnswerToTheirOwnWordAndItsNickname() {
+        NavTarget gate = destinations.resolve("Keep Gate", "world").target();
+        assertEquals(NavTarget.Type.STRUCTURE, gate.type(), "a GateStructure is a Structure, not dropped");
+        assertEquals(11, gate.id());
+        assertEquals(List.of("gatestructure", "gate"), gate.aliases());
+        assertEquals("structure:Keep Gate", gate.qualifiedName());
+        assertEquals(gate, destinations.resolve("structure:Keep Gate", "world").target());
+        assertEquals(gate, destinations.resolve("gatestructure:keep gate", "world").target());
+        assertEquals(gate, destinations.resolve("gate:#11", "world").target());
+        assertFalse(destinations.resolve("gate:Mill House", "world").found(), "a plain Structure is no gate");
+
+        assertEquals(List.of("structure:Mill", "structure:Keep"), destinations.complete(List.of("structure:"), "world"));
+        assertEquals(List.of("gate:Keep"), destinations.complete(List.of("gate:"), "world"));
+        assertEquals(List.of("Gate"), destinations.complete(List.of("gatestructure:Keep", ""), "world"));
+    }
+
+    @Test
+    void theCatalogueTypeWordMapsSubtypesToTheirType() {
+        assertEquals(NavTarget.Type.STRUCTURE, NavTarget.Type.ofDomainType("GateStructure"));
+        assertEquals(NavTarget.Type.STRUCTURE, NavTarget.Type.ofDomainType("structure"));
+        assertEquals(NavTarget.Type.TOWN, NavTarget.Type.ofDomainType("Town"));
+        assertEquals(null, NavTarget.Type.ofDomainType("Kingdom"));
+        assertEquals(List.of(), NavTarget.domain(NavTarget.Type.STRUCTURE, 9, "Mill House", "Structure").aliases());
     }
 
     @Test

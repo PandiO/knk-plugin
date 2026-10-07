@@ -86,4 +86,36 @@ class NamedTargetsTest {
         assertEquals(List.of("District"), targets.complete(places, List.of("residential", "d")));
         assertEquals(List.of(), targets.complete(places, List.of("Kardenna", "")), "a one-word name has no second word");
     }
+
+    @Test
+    void aTypePrefixCompletesEveryItemOfThatType() {
+        assertEquals(List.of("town:Kardenna", "town:Market", "town:New"), targets.complete(all, "town:"),
+            "unique names too, not only the shared ones");
+        assertEquals(List.of("town:New"), targets.complete(all, "TOWN:n"));
+        assertEquals(List.of("Haven"), targets.complete(all, List.of("town:New", "")));
+        assertEquals(List.of("location:Kardenna"), targets.complete(all, "location:"));
+        assertEquals(List.of("Mill"), targets.complete(all, List.of("location:Kardenna", "")));
+        assertEquals(List.of(), targets.complete(all, "kingdom:"), "no item of that type");
+    }
+
+    @Test
+    void aliasesPickTheItemLikeItsOwnTypeWord() {
+        Place keepGate = new Place(6, "Keep Gate", "structure");
+        Place ruin = new Place(7, "Ruin", "structure");
+        List<Place> places = List.of(keepGate, ruin, kardenna);
+        NamedTargets<Place> aliased = new NamedTargets<>(Place::name, Place::type, Place::id,
+            p -> p.id() == 6 ? List.of("gatestructure", "gate") : List.of());
+
+        assertSame(keepGate, aliased.resolve(places, "structure:Keep Gate").target());
+        assertSame(keepGate, aliased.resolve(places, "GateStructure:keep gate").target());
+        assertSame(keepGate, aliased.resolve(places, "gate:#6").target());
+        assertFalse(aliased.resolve(places, "gate:Ruin").found(), "the alias belongs to the gate only");
+        assertEquals("structure:Keep Gate", aliased.qualifiedName(keepGate), "the own type word stays the qualified form");
+        assertEquals(List.of(keepGate), aliased.suggestions(places, "gate:k"));
+        assertEquals(List.of("structure:Keep", "structure:Ruin"), aliased.complete(places, "structure:"));
+        assertEquals(List.of("gate:Keep"), aliased.complete(places, "gate:"));
+        assertEquals(List.of("Gate"), aliased.complete(places, List.of("gate:Keep", "")));
+        assertTrue(aliased.hasType(keepGate, "GATE"));
+        assertFalse(targets.hasType(keepGate, "gate"), "no alias function: only the own type word");
+    }
 }

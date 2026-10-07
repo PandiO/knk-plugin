@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.core.util;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -15,7 +16,9 @@ import java.util.function.ToIntFunction;
  * {@code KnkTeleportDestination}. Case-insensitive, over whatever list the caller passes. A name
  * several items share (a Town and a District both called "Market") is ambiguous and the caller
  * picks with the {@code type:name} form ({@code town:Market}); with an id accessor the
- * {@code type:#id} / {@code #id} forms pick by id. Pure, so it is unit-tested without a server.
+ * {@code type:#id} / {@code #id} forms pick by id. An item may answer to more type words than its own
+ * (aliases: a subtype's own word, a nickname), and {@code type:} + Tab lists every item of that type.
+ * Pure, so it is unit-tested without a server.
  *
  * @param <T> the item type; {@code name} and {@code type} read its display name and its type word
  */
@@ -43,6 +46,7 @@ public final class NamedTargets<T> {
     private final Function<T, String> name;
     private final Function<T, String> type;
     private final ToIntFunction<T> id;
+    private final Function<T, ? extends Collection<String>> aliases;
 
     /** Without an id accessor: the {@code #id} forms never match. */
     public NamedTargets(Function<T, String> name, Function<T, String> type) {
@@ -55,9 +59,19 @@ public final class NamedTargets<T> {
      * @param id   the item's numeric id for the {@code type:#id} form, or null when there is none
      */
     public NamedTargets(Function<T, String> name, Function<T, String> type, ToIntFunction<T> id) {
+        this(name, type, id, null);
+    }
+
+    /**
+     * @param aliases more type words that pick the item too (a gate is {@code structure}, and also
+     *                {@code gatestructure} and {@code gate}), compared ignoring case; null for none
+     */
+    public NamedTargets(Function<T, String> name, Function<T, String> type, ToIntFunction<T> id,
+                        Function<T, ? extends Collection<String>> aliases) {
         this.name = Objects.requireNonNull(name, "name");
         this.type = Objects.requireNonNull(type, "type");
         this.id = id;
+        this.aliases = aliases;
     }
 
     /**
@@ -78,7 +92,7 @@ public final class NamedTargets<T> {
         List<T> matches = new ArrayList<>();
         Integer wantedId = parseId(wanted);
         for (T item : items) {
-            boolean typeFits = wantedType == null || typeOf(item).equalsIgnoreCase(wantedType);
+            boolean typeFits = wantedType == null || hasType(item, wantedType);
             if (!typeFits) {
                 continue;
             }
@@ -120,7 +134,7 @@ public final class NamedTargets<T> {
         List<T> out = new ArrayList<>();
         for (T item : items) {
             String itemName = nameOf(item).toLowerCase(Locale.ROOT);
-            boolean typeFits = wantedType == null || typeOf(item).equalsIgnoreCase(wantedType);
+            boolean typeFits = wantedType == null || hasType(item, wantedType);
             if ((typeFits && itemName.startsWith(bare)) || itemName.startsWith(wanted)) {
                 out.add(item);
             }
@@ -137,7 +151,9 @@ public final class NamedTargets<T> {
      * Tab completions for the last of {@code words} (the command's arguments so far). An item's name
      * - or its {@code type:name} form when several items share the name - is offered one word at a
      * time, since the client completes one argument: after "Residential" the next word "District" is
-     * offered. Matching ignores case.
+     * offered. Once the first word starts with a type word and a colon ({@code structure:}), every item of
+     * that type (or alias) is offered in that form: {@code structure:} + Tab → {@code structure:Keep}, then
+     * {@code Gate}. Matching ignores case.
      */
     public List<String> complete(List<T> items, List<String> words) {
         if (items == null || words == null || words.isEmpty()) {
@@ -145,6 +161,7 @@ public final class NamedTargets<T> {
         }
         int index = words.size() - 1;
         String current = words.get(index).toLowerCase(Locale.ROOT);
+        String typed = typedType(words.get(0));
         Set<String> seen = new LinkedHashSet<>();
         Set<String> shared = new LinkedHashSet<>();
         for (T item : items) {
@@ -157,7 +174,8 @@ public final class NamedTargets<T> {
         for (T item : items) {
             String itemName = nameOf(item);
             boolean isShared = shared.contains(itemName.toLowerCase(Locale.ROOT));
-            String candidate = isShared ? qualifiedName(item) : itemName;
+            String candidate = typed != null && hasType(item, typed) ? typed + ":" + itemName
+                : isShared ? qualifiedName(item) : itemName;
             String[] parts = candidate.split(" ");
             if (parts.length <= index || !samePrefix(parts, words, index)) {
                 continue;
@@ -176,6 +194,29 @@ public final class NamedTargets<T> {
     /** The {@code type:name} form ({@code town:Kardenna}) that picks one of several same-named items. */
     public String qualifiedName(T item) {
         return typeOf(item).toLowerCase(Locale.ROOT) + ":" + nameOf(item);
+    }
+
+    /** Whether {@code word} is the item's type word or one of its aliases, ignoring case. */
+    public boolean hasType(T item, String word) {
+        if (typeOf(item).equalsIgnoreCase(word)) {
+            return true;
+        }
+        Collection<String> more = aliases == null ? null : aliases.apply(item);
+        if (more != null) {
+            for (String alias : more) {
+                if (alias != null && alias.equalsIgnoreCase(word)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** "structure:Ke" → "structure"; null when the word has no type word before a colon. */
+    private static String typedType(String firstWord) {
+        String word = firstWord == null ? "" : firstWord.trim().toLowerCase(Locale.ROOT);
+        int colon = word.indexOf(':');
+        return colon > 0 ? word.substring(0, colon) : null;
     }
 
     private String nameOf(T item) {

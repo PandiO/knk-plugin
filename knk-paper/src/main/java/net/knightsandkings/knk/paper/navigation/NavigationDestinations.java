@@ -28,8 +28,9 @@ import net.knightsandkings.knk.core.util.NamedTargets;
 
 /**
  * The {@code /navigate} catalogue (DESIGN §6.1, plan Phase 4 task 5): Locations and Towns /
- * Districts / Structures from the web API (reuse map R19 {@code DomainCatalogDataAccess.searchAsync},
- * R18 {@code LocationsDataAccess.searchAsync}), the labelled streets and the named road nodes of
+ * Districts / Structures (gates included, also as {@code gatestructure:} / {@code gate:}) from the
+ * web API (reuse map R19 {@code DomainCatalogDataAccess.searchAsync}, R18
+ * {@code LocationsDataAccess.searchAsync}), the labelled streets and the named road nodes of
  * the world's network snapshot, as one list of {@link NavTarget}s that {@link NamedTargets} (R21)
  * resolves: a bare name, {@code type:name}, {@code type:#id}; one match → go, several → the
  * {@code type:name} choices; tab completion the same way.
@@ -108,7 +109,7 @@ public final class NavigationDestinations {
     }
 
     private static final NamedTargets<NavTarget> TARGETS =
-        new NamedTargets<>(NavTarget::name, t -> t.type().word(), NavTarget::id);
+        new NamedTargets<>(NavTarget::name, t -> t.type().word(), NavTarget::id, NavTarget::aliases);
 
     private final DomainCatalogDataAccess domains;
     private final LocationsDataAccess locations;
@@ -257,7 +258,7 @@ public final class NavigationDestinations {
                 for (KnkDomainSummary domain : list) {
                     NavTarget.Type type = NavTarget.Type.ofDomainType(domain.domainType());
                     if (type != null && domain.id() != null && domain.name() != null && !domain.name().isBlank()) {
-                        out.add(NavTarget.domain(type, domain.id(), domain.name()));
+                        out.add(NavTarget.domain(type, domain.id(), domain.name(), domain.domainType()));
                     }
                 }
                 return out;
