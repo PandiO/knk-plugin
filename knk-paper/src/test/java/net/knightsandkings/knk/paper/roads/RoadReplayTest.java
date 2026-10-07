@@ -263,8 +263,13 @@ class RoadReplayTest {
     }
 
     static Map<String, String> control() throws IOException {
+        return control("control.txt");
+    }
+
+    /** A {@code key=value} file in {@code replay/} ({@code #} comments); empty when it is missing. */
+    static Map<String, String> control(String name) throws IOException {
         Map<String, String> c = new HashMap<>();
-        File f = new File(DIR + "replay/control.txt");
+        File f = new File(DIR + "replay/" + name);
         if (f.exists()) {
             for (String line : Files.readAllLines(f.toPath())) {
                 int eq = line.indexOf('=');

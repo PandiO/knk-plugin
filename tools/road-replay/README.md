@@ -1,7 +1,7 @@
 # Road build offline replay (KNG-27)
 
 **Status:** Committed tooling (plan §5.7 decision D7). First used for finding L, 2026-10-04.
-**Last updated:** 2026-10-05
+**Last updated:** 2026-10-07
 
 Runs the real `TileBuilder` on **copies** of the dev world's region files, with the build inputs exported read-only
 from the dev DB. Use it to reproduce a live build exactly, then change one input at a time: tombstones on or off, a
@@ -54,3 +54,27 @@ First check that the `live` variant reproduces the stored build: the same node a
 geometry. If it does not, an input is missing. Gate cells are not exported, and the passability rules use the
 curated collidable list, not Bukkit's. The proposal leaves out domains, regions and gate doors, because the replay
 does not tag them.
+
+## Walk path replay (KNG-51)
+
+`knk-paper/src/test/java/net/knightsandkings/knk/paper/roads/WalkReplayTest.java` replays one direct-mode walk search:
+the server's capture box (`WalkBox`, `capture-margin`), `WalkChunkExtractor`, `CapturedWalkTerrain` and `WalkSearch`,
+on the same copied region files. Use it when `/knk road status` counts a request as "no path" or "budget".
+
+1. Copy the region files around the leg into `region/` (the leg plus 16 blocks; usually one or two files).
+2. Write `replay/walk.txt`:
+   ```
+   # the player's location (feet) and the leg's target as navigation passes it (a Location: its y - 1)
+   start=1425.53,49.0,-526.59
+   target=1430,42,-553
+   # optional: the config values (defaults as shipped), and a top view of the box for floor y 27..65
+   detour-allowance=48
+   map=27,65
+   ```
+   Other keys: `margin`, `max-expansions`, `max-length-factor`, `max-length`, `max-drop`, `drop-penalty`,
+   `arrive-distance`.
+3. Run as above with `--tests "*WalkReplayTest*"` and read `replay/out_walk.txt`: the result with the configured budget,
+   the same search without length cap (the real path, if any), and the map with the path drawn.
+
+The server's login line (`logged in with entity id … at (…)`) gives a start position. Gate doors and WorldGuard access
+are not replayed (open access), and passability uses the curated collidable list, not Bukkit's.
