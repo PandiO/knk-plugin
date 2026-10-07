@@ -252,10 +252,14 @@ navigation:
   walk:
     # false = straight lines exactly as before (the kill switch)
     enabled: true
-    # Cells one search may expand, and the longest path it may return (factor x the straight distance, capped)
+    # Cells one search may expand, and the longest path it may return: factor x the straight distance or the
+    # straight distance + detour-allowance, whichever is longer, never above max-length
     max-expansions: 20000
     max-length-factor: 1.75
     max-length: 96
+    # Blocks a path may always add to the straight distance: a short leg behind a building needs a detour of
+    # several times its length (a 27 m leg went round in 68). 0 = the factor alone
+    detour-allowance: 48
     # Deepest drop taken (3 = no fall damage) and the extra cost per block dropped (drops only when needed)
     max-drop: 3
     drop-penalty: 10

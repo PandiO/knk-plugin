@@ -85,11 +85,17 @@ class WalkTypesTest {
     // ===== budget, goal, request =====
 
     @Test
-    void theLengthCapIsTheFactorTimesTheStraightDistanceUpToTheMaximum() {
-        assertEquals(17.5, WalkBudget.DEFAULTS.lengthCap(10), 1e-9);
+    void theLengthCapIsTheFactorOrTheDetourAllowanceUpToTheMaximum() {
+        assertEquals(58.0, WalkBudget.DEFAULTS.lengthCap(10), 1e-9, "short legs: straight + 48");
+        assertEquals(75.5, WalkBudget.DEFAULTS.lengthCap(27.5), 1e-9, "the 2026-10-07 Merchant Square leg");
         assertEquals(96.0, WalkBudget.DEFAULTS.lengthCap(80), 1e-9);
-        assertThrows(IllegalArgumentException.class, () -> new WalkBudget(0, 1.75, 96, 2, 3));
-        assertThrows(IllegalArgumentException.class, () -> new WalkBudget(10, 0.5, 96, 2, 3));
+        WalkBudget factorOnly = new WalkBudget(20_000, 1.75, 96, 0, 2, 3);
+        assertEquals(17.5, factorOnly.lengthCap(10), 1e-9, "allowance 0: the factor alone, as before");
+        assertEquals(84.0, new WalkBudget(20_000, 1.75, 200, 10, 2, 3).lengthCap(48), 1e-9, "long legs: the factor");
+        assertThrows(IllegalArgumentException.class, () -> new WalkBudget(0, 1.75, 96, 48, 2, 3));
+        assertThrows(IllegalArgumentException.class, () -> new WalkBudget(10, 0.5, 96, 48, 2, 3));
+        assertThrows(IllegalArgumentException.class, () -> new WalkBudget(10, 1.75, 96, -1, 2, 3));
+        assertThrows(IllegalArgumentException.class, () -> new WalkBudget(10, 1.75, 96, Double.NaN, 2, 3));
     }
 
     @Test

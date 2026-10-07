@@ -54,7 +54,7 @@ class WalkSearchTimingTest {
         WalkFixture f = openField();
         f.column(80, 48, 65, 68, GridFixture.STONE);
         WalkRequest unreachable = WalkRequest.toPoint(f.terrain(), 0.5, 65, 48.5, 80.5, 68, 48.5, 0.25)
-            .withBudget(new WalkBudget(20_000, 10.0, 400.0, 2, 3));
+            .withBudget(new WalkBudget(20_000, 10.0, 400.0, 0.0, 2, 3));
         WalkResult result = new WalkSearch().find(unreachable);
 
         assertEquals(WalkResult.Status.NO_PATH, result.status(), result.toString());

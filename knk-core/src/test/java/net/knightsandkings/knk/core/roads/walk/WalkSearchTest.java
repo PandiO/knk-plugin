@@ -380,7 +380,7 @@ class WalkSearchTest {
     @Test
     void anExhaustedExpansionBudgetIsFallback() {
         WalkFixture f = new WalkFixture().floor(0, 0, 30, 0, 64, G);
-        WalkRequest request = f.request(0, 64, 0, 30, 64, 0).withBudget(new WalkBudget(5, 1.75, 96, 2, 3));
+        WalkRequest request = f.request(0, 64, 0, 30, 64, 0).withBudget(new WalkBudget(5, 1.75, 96, 48, 2, 3));
         WalkResult result = new WalkSearch().find(request);
 
         assertEquals(WalkResult.Status.FALLBACK, result.status());
@@ -390,23 +390,46 @@ class WalkSearchTest {
 
     @Test
     void aDetourLongerThanTheLengthCapIsFallback() {
-        // the straight distance is 4, the only way round is ~16 > 1.75 × 4
+        // the straight distance is 4, the only way round is ~16 > 1.75 × 4 (no detour allowance)
         WalkFixture f = new WalkFixture().floor(0, 0, 8, 4, 64, G).layer(65,
             ".........", ".........", "########.", ".........", ".........");
-        WalkResult result = new WalkSearch().find(f.request(0, 64, 0, 0, 64, 4).withBudget(WalkBudget.DEFAULTS));
+        WalkResult result = new WalkSearch().find(f.request(0, 64, 0, 0, 64, 4)
+            .withBudget(new WalkBudget(20_000, 1.75, 96, 0, 2, 3)));
 
         assertEquals(WalkResult.Status.FALLBACK, result.status(), result.toString());
         assertEquals("length cap", result.reason());
 
-        WalkRequest generous = f.request(0, 64, 0, 0, 64, 4).withBudget(new WalkBudget(20_000, 10, 96, 2, 3));
+        WalkRequest generous = f.request(0, 64, 0, 0, 64, 4).withBudget(new WalkBudget(20_000, 10, 96, 0, 2, 3));
         assertTrue(new WalkSearch().find(generous).isFound());
+        assertTrue(new WalkSearch().find(f.request(0, 64, 0, 0, 64, 4).withBudget(WalkBudget.DEFAULTS)).isFound(),
+            "the default detour allowance covers it");
+    }
+
+    @Test
+    void aTargetBehindABuildingIsFoundWithTheDefaultBudget() {
+        // Finding N2 (live test 2026-10-07): /navigate Merchant Square from 27.5 blocks away, a building in
+        // between; the walkable way round is 67.7 blocks, the old cap min(96, 1.75 × 27.5) = 48 gave FALLBACK.
+        // Here: 26 blocks straight, a wall across the field with a gap at the far end, ~62 blocks round.
+        String[] rows = new String[27];
+        java.util.Arrays.fill(rows, "...............................");
+        rows[13] = "############################...";
+        WalkFixture f = new WalkFixture().floor(0, 0, 30, 26, 64, G).layer(65, rows);
+        WalkRequest request = f.request(1, 64, 0, 1, 64, 26).withBudget(WalkBudget.DEFAULTS);
+        WalkResult result = new WalkSearch().find(request);
+
+        assertTrue(result.isFound(), result.toString());
+        double length = result.path().orElseThrow().length();
+        assertTrue(length > 1.75 * request.straightDistance(), "longer than the old cap: " + length);
+        assertTrue(length <= WalkBudget.DEFAULTS.lengthCap(request.straightDistance()) + 1e-9);
+        assertEquals(WalkResult.Status.FALLBACK, new WalkSearch().find(request.withBudget(
+            new WalkBudget(20_000, 1.75, 96, 0, 2, 3))).status(), "the old cap");
     }
 
     @Test
     void noPartialPathIsEverReturned() {
         WalkFixture f = new WalkFixture().floor(0, 0, 30, 0, 64, G);
         WalkResult result = new WalkSearch().find(
-            f.request(0, 64, 0, 30, 64, 0).withBudget(new WalkBudget(10, 1.75, 96, 2, 3)));
+            f.request(0, 64, 0, 30, 64, 0).withBudget(new WalkBudget(10, 1.75, 96, 48, 2, 3)));
 
         assertTrue(result.path().isEmpty());
     }

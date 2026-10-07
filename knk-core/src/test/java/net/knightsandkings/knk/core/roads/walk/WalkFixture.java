@@ -32,7 +32,7 @@ final class WalkFixture {
      * The budget of the geometry fixtures: the design's expansion cap, but a length cap loose enough
      * that small detour fixtures test the walkability rules, not the 1.75× cap (that has its own tests).
      */
-    static final WalkBudget GEOMETRY = new WalkBudget(20_000, 10.0, 200.0, 2, 3);
+    static final WalkBudget GEOMETRY = new WalkBudget(20_000, 10.0, 200.0, 0.0, 2, 3);
 
     final GridFixture grid = new GridFixture();
 

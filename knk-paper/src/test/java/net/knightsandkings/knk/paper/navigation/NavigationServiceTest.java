@@ -743,7 +743,7 @@ class NavigationServiceTest {
         clearInvocations(trail, hud, player);
         events.clear();
         tick.set(100);
-        service = walkService(NavigationConfig.defaults().withWalk(new NavigationConfig.WalkConfig(false, 20000, 1.75, 96,
+        service = walkService(NavigationConfig.defaults().withWalk(new NavigationConfig.WalkConfig(false, 20000, 1.75, 96, 48,
             3, 10, 16, 10, 6, 2, List.of("LADDER"))));
         scenario.run();
 

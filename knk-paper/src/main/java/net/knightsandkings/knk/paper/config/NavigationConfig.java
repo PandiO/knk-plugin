@@ -207,6 +207,7 @@ public record NavigationConfig(
      * @param maxExpansions         cells one search may expand
      * @param maxLengthFactor       a path may be at most this many times the straight distance
      * @param maxLength             and never longer than this many blocks
+     * @param detourAllowance       but always at least this many blocks longer than the straight distance
      * @param maxDrop               deepest drop taken (3 = no fall damage)
      * @param dropPenalty           extra cost per block dropped
      * @param captureMargin         blocks captured around the start→target box (also up and down)
@@ -216,7 +217,7 @@ public record NavigationConfig(
      * @param climbables            material names climbed like a ladder
      */
     public record WalkConfig(boolean enabled, int maxExpansions, double maxLengthFactor, double maxLength,
-                             int maxDrop, double dropPenalty, int captureMargin, int chunkTtlSeconds,
+                             double detourAllowance, int maxDrop, double dropPenalty, int captureMargin, int chunkTtlSeconds,
                              double recomputeDistance, int maxConcurrentSearches, List<String> climbables) {
         public WalkConfig {
             climbables = climbables == null ? List.of("LADDER") : climbables.stream()
@@ -226,7 +227,7 @@ public record NavigationConfig(
 
         public static WalkConfig defaults() {
             return new WalkConfig(true, WalkBudget.DEFAULTS.maxExpansions(), WalkBudget.DEFAULTS.maxLengthFactor(),
-                WalkBudget.DEFAULTS.maxLength(), MovementProfile.PLAYER.maxDrop(), MovementProfile.PLAYER.dropPenalty(),
+                WalkBudget.DEFAULTS.maxLength(), WalkBudget.DEFAULTS.detourAllowance(), MovementProfile.PLAYER.maxDrop(), MovementProfile.PLAYER.dropPenalty(),
                 16, 10, 6, 2, List.of("LADDER"));
         }
 
@@ -239,6 +240,9 @@ public record NavigationConfig(
             }
             if (!(maxLength > 0)) {
                 throw new IllegalArgumentException("navigation.walk.max-length must be positive (got: " + maxLength + ")");
+            }
+            if (!(detourAllowance >= 0) || Double.isInfinite(detourAllowance)) {
+                throw new IllegalArgumentException("navigation.walk.detour-allowance must be a number >= 0 (got: " + detourAllowance + ")");
             }
             if (maxDrop < 0) {
                 throw new IllegalArgumentException("navigation.walk.max-drop must not be negative (got: " + maxDrop + ")");
@@ -272,7 +276,7 @@ public record NavigationConfig(
 
         /** The search budget (snap radii keep the core defaults: start 2, goal 3). */
         public WalkBudget budget() {
-            return new WalkBudget(maxExpansions, maxLengthFactor, maxLength, WalkBudget.DEFAULTS.startSnap(),
+            return new WalkBudget(maxExpansions, maxLengthFactor, maxLength, detourAllowance, WalkBudget.DEFAULTS.startSnap(),
                 WalkBudget.DEFAULTS.goalSnap());
         }
     }
