@@ -645,9 +645,13 @@ public class KnKPlugin extends JavaPlugin {
                 playerNotificationPoller.setRankChangedHandler(userAdminService::resyncDisplay);
             }
             // Domain discovery (KNG-20): registered even with discovery.enabled false - the hub's
-            // Discoveries tile reads its root, and the menu still lists past discoveries.
+            // Discoveries tile reads its root, and the menu still lists past discoveries. Discovery staff
+            // see types switched off in the web app tagged "Disabled" in the menu head.
+            String discoveryStaffNode = net.knightsandkings.knk.paper.commands.DiscoveryAdminCommand.NODE;
             this.discoveriesMenuFeature = new net.knightsandkings.knk.paper.menu.content.DiscoveriesMenuFeature(
-                apiClient.getDiscoveriesApi(), cacheManager.getUserCache(), java.time.Clock.systemUTC()
+                apiClient.getDiscoveriesApi(), cacheManager.getUserCache(), java.time.Clock.systemUTC(),
+                player -> player.hasPermission(discoveryStaffNode)
+                    || (knkPermissible != null && knkPermissible.hasPermission(player, discoveryStaffNode))
             );
             // A discovery reset made in the web app: drop the cached menu data and re-sync the online
             // player's tracking (the same path /knk discovery reset takes, see its afterReset below).

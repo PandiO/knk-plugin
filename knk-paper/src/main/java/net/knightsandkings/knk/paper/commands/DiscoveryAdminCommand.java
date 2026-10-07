@@ -154,7 +154,9 @@ public class DiscoveryAdminCommand implements SubcommandExecutor {
         List<String> counts = new ArrayList<>();
         if (summary != null) {
             for (DiscoveryTypeCount count : summary.byType()) {
-                if (count.total() > 0) {
+                if (!count.enabled()) {
+                    counts.add(count.domainType() + " disabled");
+                } else if (count.total() > 0) {
                     counts.add(count.domainType() + " " + count.discovered() + "/" + count.total());
                 }
             }
