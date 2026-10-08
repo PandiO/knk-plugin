@@ -99,7 +99,7 @@ class GateDoorCommandTest {
         boolean result = gateCommand.executeOpen(mockSender, new String[]{"10"});
 
         assertTrue(result);
-        verify(mockGateManager).getGate(10);
+        verify(mockGateManager, atLeastOnce()).getGate(10);
         verify(mockGateManager).openGate(10);
     }
 
@@ -338,6 +338,8 @@ class GateDoorCommandTest {
             "north"
         );
         gate.setCurrentState(AnimationState.CLOSED);
+        // Commands look the door up again by id once the permission check answers.
+        when(mockGateManager.getGate(id)).thenReturn(gate);
         return gate;
     }
 }

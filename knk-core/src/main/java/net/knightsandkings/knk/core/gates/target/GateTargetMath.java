@@ -23,6 +23,8 @@ import java.util.OptionalDouble;
 public final class GateTargetMath {
     /** Slack between the first solid block the ray hits and the door box that holds that block. */
     static final double BLOCK_HIT_SLACK = 0.05;
+    /** A ray-trace hit lands on a block face, so "inside a region" allows for float error at its surface. */
+    static final double HIT_INSIDE_TOLERANCE = 0.01;
 
     private GateTargetMath() {
     }
@@ -88,7 +90,10 @@ public final class GateTargetMath {
      *                        was hit within {@code maxDistance}. A door behind that block is
      *                        hidden by it; a closed door's own block is inside its region, so the
      *                        region is entered no later than the hit.
-     * @return the door, with {@link DoorCandidate#distance()} the distance along the ray
+     * @return the door, with {@link DoorCandidate#distance()} the distance along the ray.
+     *         A region the eye is already inside (standing in an open portcullis, on a lowered
+     *         drawbridge) is entered at 0 whichever way the player faces, so it only counts when
+     *         the block the player looks at lies inside it.
      */
     public static Optional<DoorCandidate> lookedAt(List<DoorRegion> regions, String worldName,
                                                    double[] eye, double[] direction,
@@ -107,11 +112,25 @@ public final class GateTargetMath {
             if (!Objects.equals(region.worldName(), worldName)) {
                 continue;
             }
-            OptionalDouble entry = region.box().rayEntry(eye[0], eye[1], eye[2], dx, dy, dz);
-            if (entry.isEmpty() || entry.getAsDouble() > reach) {
-                continue;
+            double t;
+            if (region.box().distanceTo(eye[0], eye[1], eye[2]) == 0) {
+                if (blockHitDistance == null || blockHitDistance > maxDistance) {
+                    continue;
+                }
+                double hx = eye[0] + dx * blockHitDistance;
+                double hy = eye[1] + dy * blockHitDistance;
+                double hz = eye[2] + dz * blockHitDistance;
+                if (region.box().distanceTo(hx, hy, hz) > HIT_INSIDE_TOLERANCE) {
+                    continue;
+                }
+                t = blockHitDistance;
+            } else {
+                OptionalDouble entry = region.box().rayEntry(eye[0], eye[1], eye[2], dx, dy, dz);
+                if (entry.isEmpty() || entry.getAsDouble() > reach) {
+                    continue;
+                }
+                t = entry.getAsDouble();
             }
-            double t = entry.getAsDouble();
             if (best == null || t < best.distance() || (t == best.distance() && region.doorId() < best.doorId())) {
                 best = new DoorCandidate(region.doorId(), region.structureId(), t);
             }

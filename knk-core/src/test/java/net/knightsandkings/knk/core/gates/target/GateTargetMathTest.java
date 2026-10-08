@@ -140,6 +140,45 @@ class GateTargetMathTest {
     }
 
     @Test
+    void standingInsideOneDoorRegionAndLookingAtAnotherPicksTheOther() {
+        // Eye inside an open portcullis opening (A); 6 blocks further north stands door B, whose
+        // closed block the ray hits.
+        GateBox doorA = new GateBox(10, 64, 20, 13, 68, 21);
+        GateBox doorB = new GateBox(10, 64, 13, 13, 68, 14);
+        List<DoorRegion> regions = List.of(new DoorRegion(1, 100, "world", doorA), new DoorRegion(2, 200, "world", doorB));
+
+        Optional<DoorCandidate> hit = GateTargetMath.lookedAt(regions, "world", new double[]{11.5, 65.6, 20.5},
+            new double[]{0, 0, -1}, 12, 6.5);
+
+        assertEquals(2, hit.orElseThrow().doorId());
+    }
+
+    @Test
+    void standingInsideADoorRegionDoesNotPickItWhenLookingElsewhere() {
+        GateBox doorA = new GateBox(10, 64, 20, 13, 68, 21);
+        List<DoorRegion> regions = List.of(new DoorRegion(1, 100, "world", doorA));
+
+        // Looking down and ahead: the ray hits the ground in front of the opening, outside it.
+        assertTrue(GateTargetMath.lookedAt(regions, "world", new double[]{11.5, 65.6, 20.5},
+            new double[]{0, -1, 1}, 12, 3.0).isEmpty());
+        // Looking into the sky: nothing hit.
+        assertTrue(GateTargetMath.lookedAt(regions, "world", new double[]{11.5, 65.6, 20.5},
+            new double[]{0, 1, 0}, 12, null).isEmpty());
+    }
+
+    @Test
+    void standingOnALoweredDrawbridgeAndLookingAtItPicksIt() {
+        // The drawbridge's region covers the deck the player stands on; the ray hits the deck.
+        GateBox drawbridge = new GateBox(10, 63, 14, 13, 68, 21);
+        List<DoorRegion> regions = List.of(new DoorRegion(1, 100, "world", drawbridge));
+
+        Optional<DoorCandidate> hit = GateTargetMath.lookedAt(regions, "world", new double[]{11.5, 65.6, 17.5},
+            new double[]{0, -1, -1}, 12, Math.sqrt(2) * 1.6);
+
+        assertEquals(1, hit.orElseThrow().doorId());
+    }
+
+    @Test
     void doorToggleFlipsTheTargetState() {
         assertTrue(GateToggle.doorOpens(AnimationState.CLOSED));
         assertTrue(GateToggle.doorOpens(AnimationState.CLOSING));

@@ -393,7 +393,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         registerSubcommand(
                 new CommandMetadata("gatedoor", "Control one gate door",
                         "/knk gatedoor <open|close|toggle|info|list|repair|tp|health|active|invincible|capture|redefine> [door|here]", null,
-                        List.of("/gatedoor list 16", "/gatedoor repair here", "/gatedoor toggle", "/gatedoor open North Gate Left")),
+                        List.of("/gatedoor list 16", "/gatedoor repair here", "/gatedoor toggle", "/gatedoor open 3 Left")),
                 (sender, args) -> gateDoorCommand.onCommand(sender, null, "knk", args),
                 gateDoorCommand::complete
         );
@@ -501,10 +501,6 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
-    /**
-     * The permission check for every subcommand's metadata node, the help listing and tab completion
-     * (KNG-24). Bukkit-only until set - KnKPlugin sets the KnkPermissible-backed one.
-     */
     /** {@code gates.here.*} / {@code gates.lookat.*} for the gate commands' implicit targets (KNG-78/79). */
     public void setGateTargetingSettings(net.knightsandkings.knk.paper.gates.GateTargeting.Settings settings) {
         if (gateCommand != null) {
@@ -512,6 +508,10 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         }
     }
 
+    /**
+     * The permission check for every subcommand's metadata node, the help listing and tab completion
+     * (KNG-24). Bukkit-only until set - KnKPlugin sets the KnkPermissible-backed one.
+     */
     public void setCommandPermissions(CommandPermissions permissions) {
         this.commandPermissions = java.util.Objects.requireNonNull(permissions, "permissions must not be null");
         registry.setPermissions(permissions);

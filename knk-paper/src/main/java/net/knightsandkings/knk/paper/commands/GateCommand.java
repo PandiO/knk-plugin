@@ -160,7 +160,8 @@ public class GateCommand implements CommandExecutor {
         CachedGateStructure structure = support.structure(sender, args,
             Request.of(STRUCTURE_ROOT, "open", true, "Usage: /gate open <structure name|id> | here"));
         if (structure != null) {
-            support.withNodes(sender, GateCommandSupport.structureControlNodes(structure), () -> openAll(sender, structure, "Opening"));
+            support.withNodes(sender, GateCommandSupport.structureControlNodes(structure),
+                () -> whenLoaded(sender, structure, s -> openAll(sender, s, "Opening")));
         }
         return true;
     }
@@ -169,7 +170,8 @@ public class GateCommand implements CommandExecutor {
         CachedGateStructure structure = support.structure(sender, args,
             Request.of(STRUCTURE_ROOT, "close", true, "Usage: /gate close <structure name|id> | here"));
         if (structure != null) {
-            support.withNodes(sender, GateCommandSupport.structureControlNodes(structure), () -> closeAll(sender, structure, "Closing"));
+            support.withNodes(sender, GateCommandSupport.structureControlNodes(structure),
+                () -> whenLoaded(sender, structure, s -> closeAll(sender, s, "Closing")));
         }
         return true;
     }
@@ -184,18 +186,28 @@ public class GateCommand implements CommandExecutor {
         if (structure == null) {
             return true;
         }
-        support.withNodes(sender, GateCommandSupport.structureControlNodes(structure), () -> {
-            List<AnimationState> states = support.doorsOf(structure).stream()
+        support.withNodes(sender, GateCommandSupport.structureControlNodes(structure), () -> whenLoaded(sender, structure, current -> {
+            List<AnimationState> states = support.doorsOf(current).stream()
                 .filter(CachedGateDoor::isEffectivelyActive)
                 .map(CachedGateDoor::getCurrentState)
                 .toList();
             if (GateToggle.structureOpens(states)) {
-                openAll(sender, structure, "Toggling: opening");
+                openAll(sender, current, "Toggling: opening");
             } else {
-                closeAll(sender, structure, "Toggling: closing");
+                closeAll(sender, current, "Toggling: closing");
             }
-        });
+        }));
         return true;
+    }
+
+    /** Acts on the structure as cached now - a reload may have replaced it during the permission warm-up. */
+    private void whenLoaded(CommandSender sender, CachedGateStructure resolved, java.util.function.Consumer<CachedGateStructure> action) {
+        CachedGateStructure current = gateManager.getStructure(resolved.getId());
+        if (current == null) {
+            sender.sendMessage(ChatColor.RED + "Gate " + quoted(resolved) + " is no longer loaded.");
+            return;
+        }
+        action.accept(current);
     }
 
     private void openAll(CommandSender sender, CachedGateStructure structure, String verb) {
@@ -396,8 +408,9 @@ public class GateCommand implements CommandExecutor {
             sender.sendMessage(ChatColor.YELLOW + "Gate " + quoted(structure) + " has no loaded doors to teleport to.");
             return true;
         }
-        support.teleportTo(player, doors.get(0));
-        sender.sendMessage(ChatColor.GREEN + "Teleported to " + structureLabel(structure) + " (" + doorLabel(doors.get(0)) + ").");
+        if (support.teleportTo(player, doors.get(0))) {
+            sender.sendMessage(ChatColor.GREEN + "Teleported to " + structureLabel(structure) + " (" + doorLabel(doors.get(0)) + ").");
+        }
         return true;
     }
 
@@ -653,8 +666,8 @@ public class GateCommand implements CommandExecutor {
 
     /** {@code /knk gate door capture|redefine ...} - now {@code /gatedoor capture|redefine ...}. */
     private boolean executeDeprecatedDoor(CommandSender sender, String[] args) {
-        String action = args.length == 0 ? "" : args[0].toLowerCase(Locale.ROOT);
-        deprecated(sender, "/knk gate door " + action, "/gatedoor " + action);
+        String action = args.length == 0 ? "" : " " + args[0].toLowerCase(Locale.ROOT);
+        deprecated(sender, "/knk gate door" + action, "/gatedoor" + action);
         return doorCommand.onCommand(sender, null, GateCommandSupport.DOOR_ROOT, args);
     }
 

@@ -108,17 +108,20 @@ public class GateTargeting {
     }
 
     /**
-     * Regions of the loaded doors in {@code world} (a door with a blank world counts as being in
-     * every world, as {@link GateAnimationTask} treats it). {@code reach} is unused for now - the
-     * door count per world is small enough to box every door - but marks where an index would go.
+     * Regions of the loaded doors in {@code world}. A door with a blank world (an anchor saved
+     * without one) counts as being in the server's primary world only - the one the animation
+     * falls back to - so it can't be targeted from the same coordinates in the nether.
+     * {@code reach} is unused for now - the door count per world is small enough to box every
+     * door - but marks where an index would go.
      */
     List<DoorRegion> regionsIn(World world, double reach) {
         String worldName = worldName(world);
+        boolean primaryWorld = isPrimaryWorld(world);
         List<DoorRegion> regions = new ArrayList<>();
         for (CachedGateDoor door : gateManager.getAllGates().values()) {
             String doorWorld = door.getWorldName();
-            boolean anyWorld = doorWorld == null || doorWorld.isBlank();
-            if (!anyWorld && !doorWorld.equals(worldName)) {
+            boolean blankWorld = doorWorld == null || doorWorld.isBlank();
+            if (blankWorld ? !primaryWorld : !doorWorld.equals(worldName)) {
                 continue;
             }
             GateBox box = GateDoorBounds.of(door, gateManager);
@@ -127,6 +130,22 @@ public class GateTargeting {
             }
         }
         return regions;
+    }
+
+    /** True for the server's first (default) world; true as well when that can't be told (no server, tests). */
+    private static boolean isPrimaryWorld(World world) {
+        if (world == null) {
+            return false;
+        }
+        try {
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            if (server == null || server.getWorlds().isEmpty()) {
+                return true;
+            }
+            return server.getWorlds().get(0).getName().equals(world.getName());
+        } catch (RuntimeException ex) {
+            return true;
+        }
     }
 
     private static String worldName(World world) {

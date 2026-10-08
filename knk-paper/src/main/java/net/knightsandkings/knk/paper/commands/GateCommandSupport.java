@@ -57,6 +57,11 @@ public class GateCommandSupport {
     public static final String STRUCTURE_ROOT = "gate";
     public static final String DOOR_ROOT = "gatedoor";
 
+    /** Subcommands taking a structure / a door, for "use the other command" hints. */
+    static final java.util.Set<String> STRUCTURE_TARGET_SUBS = java.util.Set.of("open", "close", "toggle", "info", "repair", "tp", "override");
+    static final java.util.Set<String> DOOR_TARGET_SUBS = java.util.Set.of("open", "close", "toggle", "info", "repair", "tp",
+        "health", "active", "invincible", "capture", "redefine");
+
     public static final String GATE_ADMIN = "knk.gate.admin";
     public static final String GATEDOOR_ADMIN = "knk.gatedoor.admin";
 
@@ -143,9 +148,12 @@ public class GateCommandSupport {
             String joined = String.join(" ", selector);
             sender.sendMessage(ChatColor.RED + "Gate door '" + joined + "' not found.");
             CachedGateStructure structure = resolveStructure(joined);
-            if (structure != null) {
+            if (structure != null && STRUCTURE_TARGET_SUBS.contains(request.sub())) {
                 sender.sendMessage(ChatColor.GRAY + "'" + joined + "' is a gate structure; for the whole gate use /gate "
-                    + request.sub() + " " + joined + ", or name a door: /gatedoor " + request.sub() + " " + joined + " <door>.");
+                    + request.sub() + " " + joined + ", or name a door: /gatedoor " + request.sub() + " " + structure.getId() + " <door>.");
+            } else if (structure != null) {
+                sender.sendMessage(ChatColor.GRAY + "'" + joined + "' is a gate structure; name one of its doors: /gatedoor "
+                    + request.sub() + " " + structure.getId() + " <door>.");
             }
         }
         return door;
@@ -180,13 +188,31 @@ public class GateCommandSupport {
         if (structure == null) {
             sender.sendMessage(ChatColor.RED + "Gate structure '" + joined + "' not found.");
             CachedGateDoor door = resolveDoor(selector);
-            if (door != null) {
-                sender.sendMessage(ChatColor.GRAY + "'" + joined + "' is a gate door (" + doorLabel(door)
-                    + "); for just that door use /gatedoor " + request.sub() + " " + door.getId()
-                    + ", for its whole gate /gate " + request.sub() + " " + door.getGateStructureId() + ".");
+            if (door != null && STRUCTURE_TARGET_SUBS.contains(request.sub())) {
+                String forDoor = DOOR_TARGET_SUBS.contains(request.sub())
+                    ? "; for just that door use /gatedoor " + request.sub() + " " + door.getId() + ", for" : "; for";
+                sender.sendMessage(ChatColor.GRAY + "'" + joined + "' is a gate door (" + doorLabel(door) + ")"
+                    + forDoor + " its whole gate /gate " + request.sub() + " " + door.getGateStructureId() + ".");
             }
+            return null;
         }
+        noteDoorIdNowMeansStructure(sender, selector, structure, request);
         return structure;
+    }
+
+    /**
+     * Before KNG-77, {@code /knk gate open 7} meant door 7. When a numeric selector is also the id
+     * of a door of <em>another</em> gate, say that /gate now takes a structure id.
+     */
+    private void noteDoorIdNowMeansStructure(CommandSender sender, String[] selector, CachedGateStructure structure, Request request) {
+        if (selector.length != 1 || !selector[0].chars().allMatch(Character::isDigit)) {
+            return;
+        }
+        CachedGateDoor door = gateManager.getGate(structure.getId());
+        if (door != null && door.getGateStructureId() != structure.getId() && DOOR_TARGET_SUBS.contains(request.sub())) {
+            sender.sendMessage(ChatColor.GRAY + "Note: /gate takes a gate structure id (since KNG-77). For "
+                + doorLabel(door) + " use /gatedoor " + request.sub() + " " + door.getId() + ".");
+        }
     }
 
     private Optional<CachedGateDoor> lookedAtDoor(Player player) {
@@ -204,6 +230,9 @@ public class GateCommandSupport {
             if (door != null) {
                 player.sendMessage(ChatColor.GRAY + "Using the nearest door: " + doorLabel(door)
                     + String.format(Locale.ROOT, " (%.1f m).", candidates.get(0).distance()));
+            } else {
+                player.sendMessage(ChatColor.RED + "The nearest gate door (#" + candidates.get(0).doorId()
+                    + ") is no longer loaded; try again.");
             }
             return door;
         }
@@ -272,6 +301,10 @@ public class GateCommandSupport {
     }
 
     private static void sendChoices(Player player, String header, List<Component> lines) {
+        if (lines.isEmpty()) {
+            player.sendMessage(ChatColor.RED + "The gates near you are no longer loaded; try again.");
+            return;
+        }
         player.sendMessage(Component.text(header, NamedTextColor.GOLD));
         lines.forEach(player::sendMessage);
     }
@@ -350,18 +383,20 @@ public class GateCommandSupport {
         return permissions.has(sender, node);
     }
 
-    /** {@code knk.gate.<action>.<structureId>} or {@code knk.gate.<action>.*} (action: open / close). */
+    /** {@code knk.gate.<action>.<structureId>}, {@code knk.gate.<action>.*} (action: open / close) or {@code knk.gate.admin}. */
     public boolean mayControlStructure(CommandSender sender, String action, int structureId) {
-        return has(sender, "knk.gate." + action + "." + structureId) || has(sender, "knk.gate." + action + ".*");
+        return has(sender, "knk.gate." + action + "." + structureId) || has(sender, "knk.gate." + action + ".*")
+            || isStructureAdmin(sender);
     }
 
     /**
-     * {@code knk.gatedoor.<action>.<doorId>} or {@code knk.gatedoor.<action>.*}, or the right to do
-     * the same to the door's whole gate ({@link #mayControlStructure}).
+     * {@code knk.gatedoor.<action>.<doorId>} or {@code knk.gatedoor.<action>.*}, door admin, or the
+     * right to do the same to the door's whole gate ({@link #mayControlStructure}). Admin nodes are
+     * checked here, not only through plugin.yml children, because in-house grants don't see those.
      */
     public boolean mayControlDoor(CommandSender sender, String action, CachedGateDoor door) {
         return has(sender, "knk.gatedoor." + action + "." + door.getId()) || has(sender, "knk.gatedoor." + action + ".*")
-            || mayControlStructure(sender, action, door.getGateStructureId());
+            || isDoorAdmin(sender) || mayControlStructure(sender, action, door.getGateStructureId());
     }
 
     /** The per-id nodes {@link #mayControlDoor} may check, to warm before checking. */
@@ -422,8 +457,16 @@ public class GateCommandSupport {
         gateManager.fireStateChanged(door.getId());
     }
 
-    /** Teleports the player onto the door's anchor, in the door's own world when it is loaded. */
-    public void teleportTo(Player player, CachedGateDoor door) {
+    /**
+     * Teleports the player onto the door's anchor, in the door's own world when it is loaded.
+     *
+     * @return false (and nothing happens) when the door has no anchor point
+     */
+    public boolean teleportTo(Player player, CachedGateDoor door) {
+        if (door.getAnchorPoint() == null) {
+            player.sendMessage(ChatColor.RED + capitalise(doorLabel(door)) + " has no anchor point to teleport to.");
+            return false;
+        }
         World world = null;
         String worldName = door.getWorldName();
         if (worldName != null && !worldName.isBlank() && player.getServer() != null) {
@@ -434,6 +477,11 @@ public class GateCommandSupport {
         }
         Vector anchor = door.getAnchorPoint();
         player.teleport(new Location(world, anchor.getX() + 0.5, anchor.getY() + 1, anchor.getZ() + 0.5));
+        return true;
+    }
+
+    static String capitalise(String text) {
+        return text.isEmpty() ? text : Character.toUpperCase(text.charAt(0)) + text.substring(1);
     }
 
     public void persistOperationalSettings(CachedGateDoor gate) {

@@ -163,6 +163,61 @@ class GateCommandTest {
     }
 
     @Test
+    void gateAdminMayOpenWithoutTheOpenNodes() {
+        granted = Set.of("knk.gate.admin");
+        when(gateManager.openGate(anyInt())).thenReturn(true);
+
+        gateCommand.executeOpen(player, new String[]{"3"});
+        gateCommand.doorCommand().executeOpen(player, new String[]{"17"});
+
+        verify(gateManager).openGate(16);
+        verify(gateManager, times(2)).openGate(17);
+    }
+
+    @Test
+    void doorAdminMayOpenADoorButNotTheWholeGate() {
+        granted = Set.of("knk.gatedoor.admin");
+        when(gateManager.openGate(anyInt())).thenReturn(true);
+
+        gateCommand.doorCommand().executeOpen(player, new String[]{"16"});
+        gateCommand.executeOpen(player, new String[]{"3"});
+
+        verify(gateManager).openGate(16);
+        verify(gateManager, never()).openGate(17);
+    }
+
+    @Test
+    void aNumberThatUsedToBeADoorIdGetsANote() {
+        CachedGateDoor otherGatesDoor = door(3, new CachedGateStructure(9, "South Gate"), "Main", AnimationState.CLOSED);
+        when(gateManager.getGate(3)).thenReturn(otherGatesDoor);
+        when(gateManager.openGate(anyInt())).thenReturn(true);
+
+        gateCommand.executeOpen(sender, new String[]{"3"});
+
+        verify(gateManager).openGate(16);
+        assertTrue(messages.stream().anyMatch(m -> m.contains("Note: /gate takes a gate structure id")
+            && m.contains("/gatedoor open 3")), messages::toString);
+    }
+
+    @Test
+    void aGateUnloadedBeforeThePermissionAnswerIsReported() {
+        when(gateManager.getStructure(3)).thenReturn(north, (CachedGateStructure) null);
+
+        gateCommand.executeOpen(sender, new String[]{"3"});
+
+        verify(gateManager, never()).openGate(anyInt());
+        assertTrue(messages.stream().anyMatch(m -> m.contains("no longer loaded")), messages::toString);
+    }
+
+    @Test
+    void hintsOnlyNameCommandsThatExist() {
+        gateCommand.onCommand(sender, null, "gate", new String[]{"override", "16", "active", "true"});
+
+        assertTrue(messages.stream().noneMatch(m -> m.contains("/gatedoor override")), messages::toString);
+        assertTrue(messages.stream().anyMatch(m -> m.contains("/gate override 3")), messages::toString);
+    }
+
+    @Test
     void anIdThatIsADoorNotAStructurePointsToGatedoor() {
         gateCommand.executeOpen(sender, new String[]{"16"});
 

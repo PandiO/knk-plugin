@@ -109,7 +109,7 @@ public class GateDoorCommand implements CommandExecutor {
         Request request = Request.of(DOOR_ROOT, "open", true, "Usage: /gatedoor open <door name|id> | <structure> <door> | here");
         CachedGateDoor door = support.door(sender, args, request);
         if (door != null) {
-            support.withNodes(sender, GateCommandSupport.doorControlNodes(door), () -> open(sender, door));
+            support.withNodes(sender, GateCommandSupport.doorControlNodes(door), () -> whenLoaded(sender, door, d -> open(sender, d)));
         }
         return true;
     }
@@ -118,7 +118,7 @@ public class GateDoorCommand implements CommandExecutor {
         Request request = Request.of(DOOR_ROOT, "close", true, "Usage: /gatedoor close <door name|id> | <structure> <door> | here");
         CachedGateDoor door = support.door(sender, args, request);
         if (door != null) {
-            support.withNodes(sender, GateCommandSupport.doorControlNodes(door), () -> close(sender, door));
+            support.withNodes(sender, GateCommandSupport.doorControlNodes(door), () -> whenLoaded(sender, door, d -> close(sender, d)));
         }
         return true;
     }
@@ -128,15 +128,28 @@ public class GateDoorCommand implements CommandExecutor {
         Request request = Request.of(DOOR_ROOT, "toggle", true, "Usage: /gatedoor toggle <door name|id> | <structure> <door> | here");
         CachedGateDoor door = support.door(sender, args, request);
         if (door != null) {
-            support.withNodes(sender, GateCommandSupport.doorControlNodes(door), () -> {
-                if (GateToggle.doorOpens(door.getCurrentState())) {
-                    open(sender, door);
+            support.withNodes(sender, GateCommandSupport.doorControlNodes(door), () -> whenLoaded(sender, door, d -> {
+                if (GateToggle.doorOpens(d.getCurrentState())) {
+                    open(sender, d);
                 } else {
-                    close(sender, door);
+                    close(sender, d);
                 }
-            });
+            }));
         }
         return true;
+    }
+
+    /**
+     * The permission warm-up may answer a tick or more later; a {@code /gate reload} in between
+     * replaces the cached door, so act on the current one.
+     */
+    private void whenLoaded(CommandSender sender, CachedGateDoor resolved, java.util.function.Consumer<CachedGateDoor> action) {
+        CachedGateDoor current = gateManager.getGate(resolved.getId());
+        if (current == null) {
+            sender.sendMessage(ChatColor.RED + capitalise(doorLabel(resolved)) + " is no longer loaded.");
+            return;
+        }
+        action.accept(current);
     }
 
     private void open(CommandSender sender, CachedGateDoor door) {
@@ -285,8 +298,9 @@ public class GateDoorCommand implements CommandExecutor {
         if (gate == null) {
             return true;
         }
-        support.teleportTo(player, gate);
-        sender.sendMessage(ChatColor.GREEN + "Teleported to " + doorLabel(gate) + ".");
+        if (support.teleportTo(player, gate)) {
+            sender.sendMessage(ChatColor.GREEN + "Teleported to " + doorLabel(gate) + ".");
+        }
         return true;
     }
 
@@ -401,7 +415,7 @@ public class GateDoorCommand implements CommandExecutor {
     }
 
     private static String capitalise(String text) {
-        return text.isEmpty() ? text : Character.toUpperCase(text.charAt(0)) + text.substring(1);
+        return GateCommandSupport.capitalise(text);
     }
 
     // === tab completion ===
@@ -441,7 +455,7 @@ public class GateDoorCommand implements CommandExecutor {
             .sorted(Comparator.comparingInt(CachedGateDoor::getId))
             .forEach(door -> {
                 selectors.add(String.valueOf(door.getId()));
-                if (!door.getName().contains(" ")) {
+                if (door.getName() != null && !door.getName().isBlank() && !door.getName().contains(" ")) {
                     selectors.add(door.getName());
                 }
             });
@@ -454,7 +468,7 @@ public class GateDoorCommand implements CommandExecutor {
             .sorted(Comparator.comparingInt(CachedGateStructure::getId))
             .forEach(structure -> {
                 selectors.add(String.valueOf(structure.getId()));
-                if (!structure.getName().contains(" ")) {
+                if (structure.getName() != null && !structure.getName().isBlank() && !structure.getName().contains(" ")) {
                     selectors.add(structure.getName());
                 }
             });
