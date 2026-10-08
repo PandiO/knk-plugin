@@ -140,12 +140,18 @@ public class DomainAccessService {
 
     /**
      * Tell the player (throttled) and run the load guard for one refused move, mount or respawn
-     * that the caller has already blocked.
+     * that the caller has already blocked. The message goes to the action bar and, the first time
+     * in a refusal episode, to chat as well (KNG-74) - the action bar is shared with other HUDs
+     * such as the navigation arrow, which yields to it while {@link #holdsActionBar} is true.
      */
     public void refused(Player player, Refusal refusal) {
-        RefusalGuard.Outcome outcome = guard.onRefusal(player.getUniqueId(), clock.getAsLong());
+        RefusalGuard.Outcome outcome = guard.onRefusal(player.getUniqueId(), clock.getAsLong(), refusal.message());
         if (outcome.showMessage()) {
-            player.sendActionBar(Component.text(refusal.message()).color(ColorOptions.error));
+            Component message = Component.text(refusal.message()).color(ColorOptions.error);
+            player.sendActionBar(message);
+            if (outcome.showInChat()) {
+                player.sendMessage(message);
+            }
         }
         Enforcer current = enforcer;
         if (current == null) {
@@ -180,6 +186,14 @@ public class DomainAccessService {
                 exempt.remove(id);
             }
         }
+    }
+
+    /**
+     * Whether a deny message was just put in this player's action bar and should not be overwritten
+     * yet by other action-bar users (KNG-74: the navigation HUD's arrow).
+     */
+    public boolean holdsActionBar(UUID playerId) {
+        return playerId != null && guard.holdsActionBar(playerId, clock.getAsLong());
     }
 
     public void forget(Player player) {

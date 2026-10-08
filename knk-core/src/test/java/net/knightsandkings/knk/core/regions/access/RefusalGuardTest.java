@@ -83,6 +83,85 @@ class RefusalGuardTest {
         assertTrue(theirs.showMessage());
     }
 
+    // ---- KNG-74: chat once per refusal episode, action-bar hold ----
+
+    private static final String ENTER = "You are not allowed to enter Old Quarter.";
+    private static final String LEAVE = "You are not allowed to leave Jail.";
+
+    @Test
+    void theFirstRefusalOfAnEpisodeGoesToChatAndTheActionBar() {
+        RefusalGuard guard = new RefusalGuard(Settings.defaults());
+
+        Outcome first = guard.onRefusal(player, 0, ENTER);
+
+        assertTrue(first.showMessage());
+        assertTrue(first.showInChat());
+    }
+
+    @Test
+    void refusalsWithinTheQuietPeriodAreNotRepeatedInChat() {
+        RefusalGuard guard = new RefusalGuard(Settings.defaults());  // 2 s throttle, 10 s quiet period
+        guard.onRefusal(player, 0, ENTER);
+
+        // pushing the border five times a second for a whole minute: one episode
+        int shown = 0;
+        for (long t = 200; t < 60_000; t += 200) {
+            Outcome outcome = guard.onRefusal(player, t, ENTER);
+            assertFalse(outcome.showInChat(), "at " + t + " ms");
+            if (outcome.showMessage()) {
+                shown++;
+            }
+        }
+        assertTrue(shown >= 29, "the action bar keeps repeating it every 2 s, was " + shown);
+    }
+
+    @Test
+    void afterTheQuietPeriodTheNextRefusalGoesToChatAgain() {
+        RefusalGuard guard = new RefusalGuard(Settings.defaults());
+        guard.onRefusal(player, 0, ENTER);
+        guard.onRefusal(player, 3_000, ENTER);
+
+        assertFalse(guard.onRefusal(player, 12_999, ENTER).showInChat(), "only 9.999 s quiet");
+        Outcome again = guard.onRefusal(player, 22_999, ENTER);
+        assertTrue(again.showMessage());
+        assertTrue(again.showInChat(), "10 s without a refusal");
+    }
+
+    @Test
+    void aDifferentRefusalStartsANewEpisodeButKeepsTheThrottle() {
+        RefusalGuard guard = new RefusalGuard(Settings.defaults());
+        guard.onRefusal(player, 0, ENTER);
+
+        Outcome throttled = guard.onRefusal(player, 1_000, LEAVE);
+        assertFalse(throttled.showMessage());
+        assertFalse(throttled.showInChat());
+
+        assertTrue(guard.onRefusal(player, 2_000, LEAVE).showInChat(), "another domain: said in chat");
+        assertFalse(guard.onRefusal(player, 4_000, LEAVE).showInChat());
+    }
+
+    @Test
+    void aZeroQuietPeriodSendsEveryShownMessageToChat() {
+        RefusalGuard guard = new RefusalGuard(new Settings(2000, true, 20, 3000, 60_000, 0, 3000));
+
+        assertTrue(guard.onRefusal(player, 0, ENTER).showInChat());
+        assertFalse(guard.onRefusal(player, 500, ENTER).showInChat(), "still throttled");
+        assertTrue(guard.onRefusal(player, 2_000, ENTER).showInChat());
+    }
+
+    @Test
+    void aShownMessageHoldsTheActionBarForAWhile() {
+        RefusalGuard guard = new RefusalGuard(Settings.defaults());  // 3 s hold
+
+        assertFalse(guard.holdsActionBar(player, 0), "nothing shown yet");
+        guard.onRefusal(player, 1_000, ENTER);
+        assertTrue(guard.holdsActionBar(player, 1_000));
+        assertTrue(guard.holdsActionBar(player, 3_999));
+        guard.onRefusal(player, 2_500, ENTER);  // throttled: not shown, does not extend the hold
+        assertFalse(guard.holdsActionBar(player, 4_000));
+        assertFalse(guard.holdsActionBar(UUID.randomUUID(), 1_000), "per player");
+    }
+
     private long flood(RefusalGuard guard, long start) {
         long t = start;
         while (guard.onRefusal(player, t).action() == Action.NONE) {
