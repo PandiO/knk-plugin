@@ -12,6 +12,7 @@ import net.knightsandkings.knk.core.teleport.BackKind;
 import net.knightsandkings.knk.core.teleport.TeleportBackSettings;
 import net.knightsandkings.knk.core.teleport.TeleportRequestSettings;
 import net.knightsandkings.knk.core.teleport.TeleportSettings;
+import net.knightsandkings.knk.paper.commands.LinkCodeMessage;
 
 /**
  * Loads and parses plugin configuration from config.yml.
@@ -105,7 +106,7 @@ public class ConfigLoader {
             messagesSection.getString("prefix", "&8[&6KnK&8] &r"),
             messagesSection.getString("account-created", "&aAccount created successfully!"),
             messagesSection.getString("account-linked", "&aYour accounts have been linked!"),
-            messagesSection.getString("link-code-generated", "&aYour link code is: &6{code}"),
+            messagesSection.getString("link-code-generated", LinkCodeMessage.DEFAULT_TEMPLATE),
             messagesSection.getString("invalid-link-code", "&cThis code is invalid or has expired."),
             messagesSection.getString("duplicate-account", "&cYou have two accounts. Please choose which one to keep."),
             messagesSection.getString("merge-complete", "&aAccount merge complete. Your account now has {coins} coins, {gems} gems, and {exp} XP.")

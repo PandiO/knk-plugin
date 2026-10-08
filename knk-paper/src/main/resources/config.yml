@@ -298,8 +298,9 @@ messages:
   # Accounts linked
   account-linked: "&aYour accounts have been linked!"
   
-  # Link code generated
-  link-code-generated: "&aYour link code is: &6{code}&a. Use this code in the web app. Expires in {minutes} minutes."
+  # Link code generated (/account link). Placeholders: {code}, {minutes}, {url} (web.public-url).
+  # \n starts a new chat line; lines that use {url} are left out while web.public-url is empty.
+  link-code-generated: "&aYour link code is &6{code}&a. It expires in {minutes} minutes.\n&aNew to the website? Register at &e{url}/auth/register\n&aEnter the code when you register on the website, or on your Account page if you already have a web login."
   
   # Invalid or expired link code
   invalid-link-code: "&cThis code is invalid or has expired. Use &6/account link &cto get a new one."

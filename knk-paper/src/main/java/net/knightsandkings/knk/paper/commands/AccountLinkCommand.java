@@ -100,11 +100,12 @@ public class AccountLinkCommand implements CommandExecutor {
                 LinkCodeResponseDto response = (LinkCodeResponseDto) responseObj;
                 runSync(() -> {
                     String formattedCode = response.formattedCode() != null ? response.formattedCode() : response.code();
-                    String message = config.messages().linkCodeGenerated()
-                        .replace("{code}", formattedCode)
-                        .replace("{minutes}", String.valueOf(config.account().linkCodeExpiryMinutes()));
-                    sendPrefixed(player, message);
-                    plugin.getLogger().info("Link code generated for " + player.getName() + ": " + formattedCode);
+                    for (String line : LinkCodeMessage.format(config.messages().linkCodeGenerated(), formattedCode,
+                            config.account().linkCodeExpiryMinutes(), config.web().publicUrl())) {
+                        sendPrefixed(player, line);
+                    }
+                    // Never log the code itself: whoever holds it can register the player's web login.
+                    plugin.getLogger().info("Link code generated for " + player.getName());
                 });
             })
             .exceptionally(ex -> {
@@ -131,7 +132,7 @@ public class AccountLinkCommand implements CommandExecutor {
             return;
         }
 
-        plugin.getLogger().info(player.getName() + " attempting to consume link code: " + code);
+        plugin.getLogger().info(player.getName() + " is entering a link code");
         cooldownManager.recordExecution(player.getUniqueId(), "link.consume");
         
         // Validate link code (minecraft-first flow)
@@ -139,7 +140,7 @@ public class AccountLinkCommand implements CommandExecutor {
             .thenAccept(validationObj -> {
                 ValidateLinkCodeResponseDto validation = (ValidateLinkCodeResponseDto) validationObj;
                 if (!Boolean.TRUE.equals(validation.isValid())) {
-                    plugin.getLogger().info("Invalid link code provided by " + player.getName() + ": " + code);
+                    plugin.getLogger().info("Invalid link code provided by " + player.getName());
                     runSync(() -> {
                         sendPrefixed(player, config.messages().invalidLinkCode());
                         // Reset cooldown on failure
