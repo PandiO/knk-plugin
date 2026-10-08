@@ -289,6 +289,8 @@ navigation:
     max-concurrent-searches: 2
     # Materials climbed like a ladder
     climbables: [LADDER]
+    # Extra cost of a step beside a wall: paths keep a block from walls and round corners wider (0 = hug them)
+    wall-cost: 1.0
 
 # Player payments (currency ledger Phase 3, docs/specs/currency-payments/DESIGN.md §3.6). Every
 # limit that matters (min/max, daily caps, cooldown, confirmation threshold, who may send) lives in

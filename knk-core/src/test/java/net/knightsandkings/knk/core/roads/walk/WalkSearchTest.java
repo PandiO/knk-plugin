@@ -426,6 +426,37 @@ class WalkSearchTest {
     }
 
     @Test
+    void theWallCostRoundsAnOuterCornerABlockWide() {
+        // live test 2026-10-08 (N7): the trail hugged corners so tightly it seemed to stop. A building in the
+        // north-west corner of a field; around its south-east corner from the south side to the east side.
+        String[] rows = new String[13];
+        java.util.Arrays.fill(rows, ".............");
+        for (int z = 0; z <= 5; z++) {
+            rows[z] = "######.......";
+        }
+        WalkFixture f = new WalkFixture().floor(0, 0, 12, 12, 64, G).layer(65, rows);
+        WalkRequest request = f.request(2, 64, 9, 9, 64, 2);
+
+        WalkPath hugging = found(new WalkSearch().find(request));
+        WalkPath wide = found(new WalkSearch().find(request.withProfile(MovementProfile.PLAYER)));
+
+        assertTrue(touchesBuilding(hugging), "without the wall cost the path brushes the corner: " + hugging);
+        assertFalse(touchesBuilding(wide), "with it the path keeps a block away: " + wide);
+        assertTrue(wide.length() <= hugging.length() + 2.5, "for a small detour: " + wide.length() + " vs " + hugging.length());
+    }
+
+    /** Whether a path cell has the building (x 0..5, z 0..5) among its 8 neighbours. */
+    private static boolean touchesBuilding(WalkPath path) {
+        for (int i = 0; i < path.size(); i++) {
+            long c = path.cell(i);
+            if (BlockKey.x(c) <= 6 && BlockKey.z(c) <= 6) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Test
     void aBudgetRunOutGivesNoPathButAPartialOne() {
         WalkFixture f = new WalkFixture().floor(0, 0, 30, 0, 64, G);
         WalkResult result = new WalkSearch().find(

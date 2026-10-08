@@ -35,8 +35,9 @@ import static net.knightsandkings.knk.core.roads.walk.WalkGrid.NO_LINK;
  * ladder one block up/down ({@code climbCost}); ladder → standing cells as the reverse of those.
  *
  * <p><b>Cost</b> of entering a cell = move cost (× water factor) + door cost (door cells; blocked if
- * the profile opens no doors) + the {@link CellAccess} verdict ({@code +∞} = never entered). The
- * start cell is exempt from access (the mover is already there).
+ * the profile opens no doors) + wall cost (a standing cell with a wall among its 8 neighbours, so
+ * paths round corners a block wide where there is room) + the {@link CellAccess} verdict
+ * ({@code +∞} = never entered). The start cell is exempt from access (the mover is already there).
  *
  * <p><b>Search.</b> Start = the nearest cell within {@code startSnap} of the feet; a target with no
  * cell within {@code goalSnap} → NO_PATH. Heuristic = {@code max(horizontal distance, |Δfloor y|)} to
@@ -410,7 +411,30 @@ public final class WalkSearch implements WalkPathfinder {
                 }
                 cost += profile.doorCost();
             }
+            if (profile.wallCost() > 0 && besideWall(x, y, z)) {
+                cost += profile.wallCost();
+            }
             relax(u, BlockKey.pack(x, y, z), false, cost + accessCost, stepLength);
+        }
+
+        /**
+         * A wall - a solid block the mover cannot pass, at feet or head height - in one of the 8 columns
+         * around the cell. Blocks outside the capture are neither solid nor passable: no wall.
+         */
+        private boolean besideWall(int x, int y, int z) {
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    if (dx == 0 && dz == 0) {
+                        continue;
+                    }
+                    for (int h = 1; h <= profile.headroom(); h++) {
+                        if (surface.isSolid(x + dx, y + h, z + dz) && !grid.isPassable(x + dx, y + h, z + dz)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
         }
 
         private void relaxLadder(Node u, int x, int y, int z, double move, double stepLength) {

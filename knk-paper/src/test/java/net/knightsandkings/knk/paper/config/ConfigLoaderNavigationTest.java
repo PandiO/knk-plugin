@@ -61,8 +61,8 @@ class ConfigLoaderNavigationTest {
         assertNotNull(walk, "config.yml has a navigation.walk block (KNG-51 §9)");
         assertEquals(java.util.Set.of("enabled", "max-expansions", "max-length-factor", "max-length", "detour-allowance", "max-drop",
             "drop-penalty", "capture-margin", "chunk-ttl-seconds", "recompute-distance", "max-concurrent-searches",
-            "climbables"), walk.getKeys(false));
-        assertEquals(new NavigationConfig.WalkConfig(true, 20_000, 1.75, 96, 48, 3, 10, 16, 10, 6, 2, List.of("LADDER")),
+            "climbables", "wall-cost"), walk.getKeys(false));
+        assertEquals(new NavigationConfig.WalkConfig(true, 20_000, 1.75, 96, 48, 3, 10, 16, 10, 6, 2, List.of("LADDER"), 1.0),
             ConfigLoader.load(yaml).navigation().walk());
     }
 
@@ -108,7 +108,7 @@ class ConfigLoaderNavigationTest {
     @Test
     void walkKeysDefaultToTheDesignAndOverride() {
         NavigationConfig.WalkConfig defaults = ConfigLoader.loadNavigation(null).walk();
-        assertEquals(new NavigationConfig.WalkConfig(true, 20_000, 1.75, 96, 48, 3, 10, 16, 10, 6, 2, List.of("LADDER")),
+        assertEquals(new NavigationConfig.WalkConfig(true, 20_000, 1.75, 96, 48, 3, 10, 16, 10, 6, 2, List.of("LADDER"), 1.0),
             defaults, "KNG-51 §9 defaults");
         assertEquals(net.knightsandkings.knk.core.roads.walk.MovementProfile.PLAYER, defaults.profile());
         assertEquals(net.knightsandkings.knk.core.roads.walk.WalkBudget.DEFAULTS, defaults.budget());

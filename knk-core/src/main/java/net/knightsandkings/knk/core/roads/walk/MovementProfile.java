@@ -26,6 +26,9 @@ import java.util.stream.Collectors;
  * @param waterFactor cost multiplier of a move into a wading cell
  * @param climbables  material names that are climbed (default {@code LADDER}; config {@code climbables})
  * @param climbCost   cost per block climbed up or down
+ * @param wallCost    extra cost of a cell with a wall (anything not passable at feet or head height)
+ *                    among its 8 neighbours: paths keep a block from walls and round corners wider where
+ *                    there is room (live test 2026-10-08, finding N7; player 1.0, config {@code wall-cost})
  */
 public record MovementProfile(
     int headroom,
@@ -37,7 +40,8 @@ public record MovementProfile(
     boolean wades,
     double waterFactor,
     Set<String> climbables,
-    double climbCost
+    double climbCost,
+    double wallCost
 ) {
 
     /** A player is just under two blocks tall. */
@@ -45,7 +49,13 @@ public record MovementProfile(
 
     /** The player, with the defaults decided 2026-10-02 (§4, §11). */
     public static final MovementProfile PLAYER = new MovementProfile(
-        PLAYER_HEADROOM, 3, 10.0, 1.0, true, 3.0, true, 3.0, Set.of("LADDER"), 2.0);
+        PLAYER_HEADROOM, 3, 10.0, 1.0, true, 3.0, true, 3.0, Set.of("LADDER"), 2.0, 1.0);
+
+    /** A profile without a wall cost (the geometry fixtures, NPC profiles that do not mind walls). */
+    public MovementProfile(int headroom, int maxDrop, double dropPenalty, double jumpCost, boolean opensDoors,
+                           double doorCost, boolean wades, double waterFactor, Set<String> climbables, double climbCost) {
+        this(headroom, maxDrop, dropPenalty, jumpCost, opensDoors, doorCost, wades, waterFactor, climbables, climbCost, 0.0);
+    }
 
     public MovementProfile {
         if (headroom < 1) {
@@ -57,6 +67,7 @@ public record MovementProfile(
         requireCost(dropPenalty, "dropPenalty");
         requireCost(jumpCost, "jumpCost");
         requireCost(doorCost, "doorCost");
+        requireCost(wallCost, "wallCost");
         if (!(waterFactor >= 1.0) || Double.isInfinite(waterFactor)) {
             throw new IllegalArgumentException("waterFactor must be a finite number >= 1: " + waterFactor);
         }
@@ -79,13 +90,19 @@ public record MovementProfile(
     /** This profile with other drop settings (config {@code navigation.walk.max-drop}, {@code drop-penalty}). */
     public MovementProfile withDrops(int maxDrop, double dropPenalty) {
         return new MovementProfile(headroom, maxDrop, dropPenalty, jumpCost, opensDoors, doorCost, wades,
-            waterFactor, climbables, climbCost);
+            waterFactor, climbables, climbCost, wallCost);
+    }
+
+    /** This profile with another wall cost (config {@code navigation.walk.wall-cost}). */
+    public MovementProfile withWallCost(double wallCost) {
+        return new MovementProfile(headroom, maxDrop, dropPenalty, jumpCost, opensDoors, doorCost, wades,
+            waterFactor, climbables, climbCost, wallCost);
     }
 
     /** This profile with another climbable list (config {@code navigation.walk.climbables}). */
     public MovementProfile withClimbables(Set<String> climbables) {
         return new MovementProfile(headroom, maxDrop, dropPenalty, jumpCost, opensDoors, doorCost, wades,
-            waterFactor, climbables, climbCost);
+            waterFactor, climbables, climbCost, wallCost);
     }
 
     /** Whether a material name is climbed by this mover. */

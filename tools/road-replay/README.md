@@ -71,7 +71,7 @@ on the same copied region files. Use it when `/knk road status` counts a request
    detour-allowance=48
    map=27,65
    ```
-   Other keys: `margin`, `max-expansions`, `max-length-factor`, `max-length`, `max-drop`, `drop-penalty`,
+   Other keys: `margin`, `max-expansions`, `max-length-factor`, `max-length`, `wall-cost`, `max-drop`, `drop-penalty`,
    `arrive-distance`.
 3. Run as above with `--tests "*WalkReplayTest*"` and read `replay/out_walk.txt`: the result with the configured budget,
    the same search without length cap (the real path, if any), and the map with the path drawn.

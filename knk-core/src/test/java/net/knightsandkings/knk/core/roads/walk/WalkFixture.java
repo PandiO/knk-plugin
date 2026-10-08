@@ -82,12 +82,19 @@ final class WalkFixture {
     }
 
     /**
+     * The player without the wall cost: the geometry fixtures test the walkability rules and their exact
+     * costs; the wall cost has its own tests.
+     */
+    static final MovementProfile GEOMETRY_PLAYER = MovementProfile.PLAYER.withWallCost(0);
+
+    /**
      * A request from the floor cell {@code (sx, sFloorY, sz)} (feet one above, block centre) to the
-     * floor cell {@code (tx, tFloorY, tz)}, arriving only on that cell, player profile, open access, {@link #GEOMETRY} budget.
+     * floor cell {@code (tx, tFloorY, tz)}, arriving only on that cell, {@link #GEOMETRY_PLAYER}, open access,
+     * {@link #GEOMETRY} budget.
      */
     WalkRequest request(int sx, int sFloorY, int sz, int tx, int tFloorY, int tz) {
         return WalkRequest.toPoint(terrain(), sx + 0.5, sFloorY + 1.0, sz + 0.5, tx + 0.5, tFloorY, tz + 0.5, 0.25)
-            .withBudget(GEOMETRY);
+            .withBudget(GEOMETRY).withProfile(GEOMETRY_PLAYER);
     }
 
     WalkResult walk(int sx, int sFloorY, int sz, int tx, int tFloorY, int tz) {

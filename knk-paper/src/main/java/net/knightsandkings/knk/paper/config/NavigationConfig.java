@@ -215,10 +215,12 @@ public record NavigationConfig(
      * @param recomputeDistance     off-path distance that recomputes the path
      * @param maxConcurrentSearches walk searches running at once, server-wide
      * @param climbables            material names climbed like a ladder
+     * @param wallCost              extra cost of a cell beside a wall: paths keep a block from walls (0 = hug them)
      */
     public record WalkConfig(boolean enabled, int maxExpansions, double maxLengthFactor, double maxLength,
                              double detourAllowance, int maxDrop, double dropPenalty, int captureMargin, int chunkTtlSeconds,
-                             double recomputeDistance, int maxConcurrentSearches, List<String> climbables) {
+                             double recomputeDistance, int maxConcurrentSearches, List<String> climbables,
+                             double wallCost) {
         public WalkConfig {
             climbables = climbables == null ? List.of("LADDER") : climbables.stream()
                 .map(name -> name == null ? "" : name.trim().toUpperCase(Locale.ROOT))
@@ -228,7 +230,7 @@ public record NavigationConfig(
         public static WalkConfig defaults() {
             return new WalkConfig(true, WalkBudget.DEFAULTS.maxExpansions(), WalkBudget.DEFAULTS.maxLengthFactor(),
                 WalkBudget.DEFAULTS.maxLength(), WalkBudget.DEFAULTS.detourAllowance(), MovementProfile.PLAYER.maxDrop(), MovementProfile.PLAYER.dropPenalty(),
-                16, 10, 6, 2, List.of("LADDER"));
+                16, 10, 6, 2, List.of("LADDER"), MovementProfile.PLAYER.wallCost());
         }
 
         public void validate() {
@@ -243,6 +245,9 @@ public record NavigationConfig(
             }
             if (!(detourAllowance >= 0) || Double.isInfinite(detourAllowance)) {
                 throw new IllegalArgumentException("navigation.walk.detour-allowance must be a number >= 0 (got: " + detourAllowance + ")");
+            }
+            if (!(wallCost >= 0) || Double.isInfinite(wallCost)) {
+                throw new IllegalArgumentException("navigation.walk.wall-cost must be a number >= 0 (got: " + wallCost + ")");
             }
             if (maxDrop < 0) {
                 throw new IllegalArgumentException("navigation.walk.max-drop must not be negative (got: " + maxDrop + ")");
@@ -271,7 +276,8 @@ public record NavigationConfig(
 
         /** The player's {@link MovementProfile} with this config's drops and climbables. */
         public MovementProfile profile() {
-            return MovementProfile.PLAYER.withDrops(maxDrop, dropPenalty).withClimbables(Set.copyOf(climbables));
+            return MovementProfile.PLAYER.withDrops(maxDrop, dropPenalty).withClimbables(Set.copyOf(climbables))
+                .withWallCost(wallCost);
         }
 
         /** The search budget (snap radii keep the core defaults: start 2, goal 3). */

@@ -31,7 +31,7 @@ class WalkLegPreparerTest {
     private final WalkCaptureTest.FakeWorld fake = WalkCaptureTest.village();
     private final WalkSnapshotServiceTest.FakeChunks chunks = new WalkSnapshotServiceTest.FakeChunks(fake);
     private final NavigationConfig.WalkConfig config = new NavigationConfig.WalkConfig(true, 5000, 2.0, 64, 0, 2, 7, 4, 10,
-        6, 2, java.util.List.of("LADDER"));
+        6, 2, java.util.List.of("LADDER"), 0.5);
     private final WalkSnapshotService snapshots = new WalkSnapshotService(WalkCaptureTest.rules(), config,
         new TickBudget(() -> 20.0), () -> 0L);
     private final World world = mock(World.class);

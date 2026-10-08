@@ -38,7 +38,7 @@ import net.knightsandkings.knk.paper.navigation.walk.WalkChunkExtractor;
  *
  * <p>{@code walk.txt} keys: {@code start=x,feetY,z} (the player's location), {@code target=x,y,z} (the leg's
  * target as navigation passes it), optional {@code margin=16}, {@code max-expansions=20000},
- * {@code max-length-factor=1.75}, {@code max-length=96}, {@code detour-allowance=48}, {@code max-drop=3}, {@code drop-penalty=10},
+ * {@code max-length-factor=1.75}, {@code max-length=96}, {@code detour-allowance=48}, {@code wall-cost=1.0}, {@code max-drop=3}, {@code drop-penalty=10},
  * {@code arrive-distance=4} and {@code map=y0,y1} (a top view of the box, highest cell per column in that range).
  * Gate doors and WorldGuard access are not replayed (open access); passability uses the curated collidable list.
  */
@@ -53,7 +53,8 @@ class WalkReplayTest {
         int margin = Integer.parseInt(c.getOrDefault("margin", "16"));
         MovementProfile profile = MovementProfile.PLAYER
             .withDrops(Integer.parseInt(c.getOrDefault("max-drop", "3")), Double.parseDouble(c.getOrDefault("drop-penalty", "10")))
-            .withClimbables(Set.of("LADDER"));
+            .withClimbables(Set.of("LADDER"))
+            .withWallCost(Double.parseDouble(c.getOrDefault("wall-cost", String.valueOf(MovementProfile.PLAYER.wallCost()))));
         WalkBudget live = new WalkBudget(Integer.parseInt(c.getOrDefault("max-expansions", "20000")),
             Double.parseDouble(c.getOrDefault("max-length-factor", "1.75")), Double.parseDouble(c.getOrDefault("max-length", "96")),
             Double.parseDouble(c.getOrDefault("detour-allowance", "48")), WalkBudget.DEFAULTS.startSnap(), WalkBudget.DEFAULTS.goalSnap());
