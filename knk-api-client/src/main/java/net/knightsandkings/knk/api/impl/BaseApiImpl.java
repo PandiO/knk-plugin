@@ -3,6 +3,7 @@ package net.knightsandkings.knk.api.impl;
 import java.io.IOException;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.concurrent.ExecutorService;
 import java.util.logging.Logger;
 
@@ -90,6 +91,30 @@ public class BaseApiImpl {
         return out.toString();
     }
 
+    /**
+     * Account link codes are credentials (whoever holds one can register that player's web login), so
+     * they never go to the log: the code in a {@code validate-link-code/{code}} URL is replaced, and the
+     * bodies of link-code calls (a generated code comes back in the response) are not logged.
+     */
+    private static final Pattern LINK_CODE_IN_PATH =
+        Pattern.compile("(?i)(/validate-link-code/)[^/?#]+");
+    private static final Pattern LINK_CODE_CALL =
+        Pattern.compile("(?i)/(generate|validate)-link-code(/|\\?|$)");
+
+    /** {@code url} for the log, with a link code in the path replaced. */
+    static String loggableUrl(String url) {
+        return url == null ? null : LINK_CODE_IN_PATH.matcher(url).replaceAll("$1" + REDACTED);
+    }
+
+    /** Whether request/response bodies of {@code url} may carry a link code, so must not be logged. */
+    static boolean carriesLinkCode(String url) {
+        return url != null && LINK_CODE_CALL.matcher(url).find();
+    }
+
+    private String loggableBody(String url, String body) {
+        return carriesLinkCode(url) ? "<" + (body == null ? 0 : body.length()) + " chars, not logged>" : snippet(body);
+    }
+
     protected String snippet(String body) {
         if (body == null) return "";
         int max = MAX_RESPONSE_SNIPPET_LENGTH;
@@ -101,31 +126,32 @@ public class BaseApiImpl {
         try (Response response = httpClient.newCall(request).execute()) {
             long latency = System.currentTimeMillis() - startTime;
             String responseBody = response.body() != null ? response.body().string() : "";
+            String logUrl = loggableUrl(url);
 
             // Always log extensive details when the response is an error
             if (!response.isSuccessful()) {
                 LOGGER.warning(String.format("API Error: %s %s -> [%d] %s in %dms",
-                    request.method(), url, response.code(), response.message(), latency));
+                    request.method(), logUrl, response.code(), response.message(), latency));
                 LOGGER.warning("  Request headers:\n" + loggableHeaders(request.headers()));
                 LOGGER.warning("  Response headers:\n" + loggableHeaders(response.headers()));
-                LOGGER.warning("  Response body: " + snippet(responseBody));
+                LOGGER.warning("  Response body: " + loggableBody(url, responseBody));
             } else if (debugLogging) {
                 LOGGER.info(String.format("API Response: %s %s [%d] in %dms",
-                    request.method(), url, response.code(), latency));
+                    request.method(), logUrl, response.code(), latency));
                 LOGGER.info("  Request headers:\n" + loggableHeaders(request.headers()));
                 LOGGER.info("  Response headers:\n" + loggableHeaders(response.headers()));
-                LOGGER.info("  Response body: " + snippet(responseBody));
+                LOGGER.info("  Response body: " + loggableBody(url, responseBody));
             }
 
             if (!response.isSuccessful()) {
-                throw new ApiException(url, response.code(), "Request failed", snippet(responseBody));
+                throw new ApiException(logUrl, response.code(), "Request failed", loggableBody(url, responseBody));
             }
             // 204 No Content is a success with no body - return empty string
             if (response.code() == 204) {
                 return "";
             }
             if (responseBody.isEmpty()) {
-                throw new ApiException(url, response.code(), "Empty response body", "");
+                throw new ApiException(logUrl, response.code(), "Empty response body", "");
             }
             return responseBody;
         }
@@ -133,7 +159,7 @@ public class BaseApiImpl {
 
     protected String get(String url) throws ApiException, IOException {
         Request request = newRequest(url).get().build();
-        if (debugLogging) LOGGER.info("API Request: GET " + url);
+        if (debugLogging) LOGGER.info("API Request: GET " + loggableUrl(url));
         return execute(request, url);
     }
 
@@ -152,15 +178,15 @@ public class BaseApiImpl {
             .post(RequestBody.create(json, MediaType.get("application/json")))
             .build();
         if (debugLogging) {
-            LOGGER.info("API Request: POST " + url);
-            LOGGER.info("  Body: " + (logBody ? snippet(json) : "<" + json.length() + " chars, not logged>"));
+            LOGGER.info("API Request: POST " + loggableUrl(url));
+            LOGGER.info("  Body: " + (logBody ? loggableBody(url, json) : "<" + json.length() + " chars, not logged>"));
         }
         return execute(request, url);
     }
 
     protected String delete(String url) throws ApiException, IOException {
         Request request = newRequest(url).delete().build();
-        if (debugLogging) LOGGER.info("API Request: DELETE " + url);
+        if (debugLogging) LOGGER.info("API Request: DELETE " + loggableUrl(url));
         return execute(request, url);
     }
 
@@ -171,8 +197,8 @@ public class BaseApiImpl {
             .put(RequestBody.create(json, MediaType.get("application/json")))
             .build();
         if (debugLogging) {
-            LOGGER.info("API Request: PUT " + url);
-            LOGGER.info("  Body: " + snippet(json));
+            LOGGER.info("API Request: PUT " + loggableUrl(url));
+            LOGGER.info("  Body: " + loggableBody(url, json));
         }
         return execute(request, url);
     }
@@ -181,7 +207,8 @@ public class BaseApiImpl {
         try {
             return objectMapper.readValue(json, type);
         } catch (Exception ex) {
-            throw new ApiException(url, 200, "Failed to parse response: " + ex.getMessage(), snippet(json));
+            throw new ApiException(loggableUrl(url), 200, "Failed to parse response: "
+                + (carriesLinkCode(url) ? ex.getClass().getSimpleName() : ex.getMessage()), loggableBody(url, json));
         }
     }
 
@@ -189,7 +216,8 @@ public class BaseApiImpl {
         try {
             return objectMapper.readValue(json, typeRef);
         } catch (Exception ex) {
-            throw new ApiException(url, 200, "Failed to parse response: " + ex.getMessage(), snippet(json));
+            throw new ApiException(loggableUrl(url), 200, "Failed to parse response: "
+                + (carriesLinkCode(url) ? ex.getClass().getSimpleName() : ex.getMessage()), loggableBody(url, json));
         }
     }
 }
