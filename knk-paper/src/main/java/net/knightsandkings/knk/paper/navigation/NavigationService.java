@@ -256,10 +256,12 @@ public final class NavigationService implements SiegeMatchObserver {
     static final class DirectLeg {
         /**
          * PENDING: a walk path is being computed, the straight line is drawn meanwhile; WALKING: the
-         * trail follows {@link #path}; FALLBACK: no walk path (none found, not capturable, or walk paths
-         * off) - today's straight line.
+         * trail follows {@link #path} (a partial path when {@link #partial}); NO_PATH: the search found no
+         * way and no partial one - no trail, "No conventional path to X found." (live test 2026-10-08,
+         * N8: no straight line through walls, closed doors or denied regions); FALLBACK: no search
+         * result (not capturable, failed, or walk paths off) - today's straight line.
          */
-        enum Status { PENDING, WALKING, FALLBACK }
+        enum Status { PENDING, WALKING, NO_PATH, FALLBACK }
 
         /** The leg's target as a floor point (re-derived by {@link #recheckDirect} for regions and streets). */
         double[] target;
@@ -271,6 +273,10 @@ public final class NavigationService implements SiegeMatchObserver {
         Status status = Status.FALLBACK;
         /** The walk path as floor points (WALKING only). */
         List<double[]> path;
+        /** The path ends short of the target (a partial path, §11-5). */
+        boolean partial;
+        /** "No conventional path" was said for this leg; said again only after a path was found meanwhile. */
+        boolean noPathAnnounced;
         /** The target the last walk request was made for. */
         double[] requestedTarget;
         /** Tick of the last walk request (the path's age counts from it). */
@@ -296,7 +302,9 @@ public final class NavigationService implements SiegeMatchObserver {
                 return distance(x, floorY, z, target);
             }
             double[] at = TrailRenderer.project(path, new double[] {x, floorY, z});
-            return TrailRenderer.polylineLength(path) - at[0] + at[1];
+            double rest = partial ? distance(path.get(path.size() - 1)[0], path.get(path.size() - 1)[1],
+                path.get(path.size() - 1)[2], target) : 0;
+            return TrailRenderer.polylineLength(path) - at[0] + at[1] + rest;
         }
 
         /** Drops the request in flight (its result will be ignored) and cancels a pending capture. */
@@ -665,11 +673,11 @@ public final class NavigationService implements SiegeMatchObserver {
         }
     }
 
-    /** The leg's trail: the walk path when there is one, else the straight line. */
+    /** The leg's trail: the walk path when there is one, nothing when there is no way, else the straight line. */
     private void drawLeg(Active a, DirectLeg leg) {
         if (leg.walking()) {
             deps.trail().drawPath(a.player, leg.path);
-        } else {
+        } else if (leg.status != DirectLeg.Status.NO_PATH) {
             deps.trail().drawDirect(a.player, leg.target);
         }
     }
@@ -813,9 +821,11 @@ public final class NavigationService implements SiegeMatchObserver {
 
     /**
      * Main thread: a walk result (null = none: not captured, failed) for a still-current request.
-     * FOUND → WALKING, the trail switches to the path at once. NO_PATH or FALLBACK with a partial path
-     * (decision §11-5, revised 2026-10-07) → WALKING along it, then a straight line to the target
-     * (counted PARTIAL too). Anything else → FALLBACK, today's straight line.
+     * FOUND → WALKING, the trail switches to the path at once. A search that found no way (NO_PATH, or
+     * FALLBACK: out of budget) → "No conventional path to X found." once, and WALKING along the partial
+     * path when there is one (§11-5; counted PARTIAL too), else NO_PATH without a trail - never a straight
+     * line through what blocks the way (live test 2026-10-08, N8; the wording leaves room for secret
+     * passages). No result → FALLBACK, today's straight line.
      */
     private void walkDelivered(Active a, DirectLeg leg, int generation, WalkResult result, WalkCount failure) {
         if (!walkCurrent(a, leg, generation)) {
@@ -840,8 +850,24 @@ public final class NavigationService implements SiegeMatchObserver {
                 + (partial.isPresent() ? ", partial path" : ""));
         }
         boolean wasWalking = leg.walking();
-        if (result != null && (result.isFound() || partial.isPresent())) {
-            leg.path = result.isFound() ? result.path().orElseThrow().points() : partialToTarget(partial.get(), leg.target);
+        if (result != null && !result.isFound() && !leg.noPathAnnounced) {
+            leg.noPathAnnounced = true;
+            a.player.sendMessage(NavigationMessages.noConventionalPath(a.destination.name()));
+        }
+        if (result != null && result.isFound()) {
+            leg.noPathAnnounced = false;
+        }
+        if (result != null && !result.isFound() && partial.isEmpty()) {
+            leg.path = null;
+            leg.partial = false;
+            leg.status = DirectLeg.Status.NO_PATH;
+            Location feet = a.player.getLocation();
+            leg.best = distance(feet.getX(), feet.getY() - 1, feet.getZ(), leg.target);
+            return;
+        }
+        if (result != null) {
+            leg.partial = !result.isFound();
+            leg.path = result.isFound() ? result.path().orElseThrow().points() : partial.get().points();
             leg.status = DirectLeg.Status.WALKING;
             Location feet = a.player.getLocation();
             double remaining = leg.remainingOf(feet.getX(), feet.getY() - 1, feet.getZ());
@@ -859,13 +885,6 @@ public final class NavigationService implements SiegeMatchObserver {
             leg.best = distance(feet.getX(), feet.getY() - 1, feet.getZ(), leg.target);
             deps.trail().drawDirect(a.player, leg.target);
         }
-    }
-
-    /** A partial path's points, then the target: the trail shows the rest as a straight line. */
-    static List<double[]> partialToTarget(WalkPath partial, double[] target) {
-        List<double[]> points = new ArrayList<>(partial.points());
-        points.add(target.clone());
-        return points;
     }
 
     /** Ends the session's direct leg: a walk request in flight is dropped, its capture cancelled. */

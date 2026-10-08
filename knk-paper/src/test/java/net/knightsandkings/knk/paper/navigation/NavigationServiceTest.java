@@ -684,10 +684,34 @@ class NavigationServiceTest {
     }
 
     @Test
-    void noPathABudgetOutAFailedSearchAndAnUncapturedLegAllKeepTheStraightLine() {
+    void noPathOrABudgetOutSaysSoAndDrawsNoStraightLine() {
+        // live test 2026-10-08 (A8/A9, N8): no straight line through what blocks the way
         List<Runnable> setups = List.of(
             () -> walkFinder = r -> WalkResult.noPath("unreachable", 9000),
-            () -> walkFinder = r -> WalkResult.fallback("expansion budget", 20000),
+            () -> walkFinder = r -> WalkResult.fallback("expansion budget", 20000));
+        for (Runnable setup : setups) {
+            setup.run();
+            clearInvocations(trail, player);
+            NavigationService walking = walkService(NavigationConfig.defaults());
+            walking.navigate(player, well());
+            runSearches();
+
+            assertEquals(NavigationService.DirectLeg.Status.NO_PATH, legStatus(walking));
+            ticks(10);
+            verify(trail, never()).drawPath(any(), any());
+            verify(trail, times(1)).drawDirect(any(), any()); // only while the search ran
+            assertEquals(1, messages().stream().filter(m -> m.contains("No conventional path to Well found")).count());
+            ticks(NavigationService.RECHECK_TICKS * 4);
+            runSearches();
+            assertEquals(1, messages().stream().filter(m -> m.contains("No conventional path")).count(), "said once per leg");
+            assertTrue(walking.isNavigating(playerId), "the leg stays; a door may open");
+            walking.stop(player);
+        }
+    }
+
+    @Test
+    void aFailedSearchAndAnUncapturedLegKeepTheStraightLine() {
+        List<Runnable> setups = List.of(
             () -> walkFinder = r -> {
                 throw new IllegalStateException("floorMaterial of a block the capture did not record");
             },
@@ -708,7 +732,7 @@ class NavigationServiceTest {
     }
 
     @Test
-    void anUnreachableTargetFollowsThePartialPathThenAStraightLine() {
+    void anUnreachableTargetFollowsThePartialPath() {
         // §11-5, revised 2026-10-07 (live test A1): the developer prefers a partial path to the straight line
         WalkPath partial = mock(WalkPath.class);
         when(partial.points()).thenReturn(List.of(new double[] {0.5, 64, 0.5}, new double[] {0.5, 64, 6.5},
@@ -722,9 +746,9 @@ class NavigationServiceTest {
         assertEquals(NavigationService.DirectLeg.Status.WALKING, legStatus(walking));
         ArgumentCaptor<List<double[]>> drawn = pathCaptor();
         verify(trail).drawPath(any(), drawn.capture());
-        assertEquals(4, drawn.getValue().size(), "the partial path, then the target");
+        assertEquals(3, drawn.getValue().size(), "the partial path only - no straight line on (N8)");
         assertArrayEquals(new double[] {12.5, 64, 6.5}, drawn.getValue().get(2), 1e-9);
-        assertArrayEquals(new double[] {20.5, 64, 0.5}, drawn.getValue().get(3), 1e-9, "the straight rest ends at the target");
+        assertTrue(messages().stream().anyMatch(m -> m.contains("No conventional path to Well found")));
         assertTrue(walking.walkStatus().contains("no path 1"), walking.walkStatus());
         assertTrue(walking.walkStatus().contains("partial 1"), walking.walkStatus());
 

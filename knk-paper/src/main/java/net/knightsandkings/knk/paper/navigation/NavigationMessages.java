@@ -211,6 +211,15 @@ public final class NavigationMessages {
         return good("A shorter route opened - following it now.");
     }
 
+    /**
+     * Direct mode: the walk search found no way to the target (walls, closed doors or gates, regions the
+     * player may not enter). "Conventional" on purpose: a secret passage may still exist (live test
+     * 2026-10-08, N8).
+     */
+    public static Component noConventionalPath(String name) {
+        return warn("No conventional path to " + name + " found.");
+    }
+
     /** A partial route's blocking element opened: the full route is taken. */
     public static Component reopened(String name) {
         return good("The way to " + name + " is open again - following it now.");
