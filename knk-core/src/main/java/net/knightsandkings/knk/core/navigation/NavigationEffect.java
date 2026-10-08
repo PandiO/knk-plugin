@@ -25,7 +25,9 @@ public sealed interface NavigationEffect {
         /** An element on the route became blocked ("The West Gate closed — recalculating"). */
         ELEMENT_BLOCKED,
         /** Something opened; the new route is taken only when clearly shorter (DESIGN §6.7). */
-        IMPROVEMENT
+        IMPROVEMENT,
+        /** What blocked a partial route opened: the full route is taken (live test 2026-10-08, N5). */
+        REOPENED
     }
 
     /** Why a session ended. */
@@ -101,6 +103,13 @@ public sealed interface NavigationEffect {
 
     /** Within {@code arrive-distance} of the goal: sound + "You have arrived at …". */
     record ArrivedEffect() implements NavigationEffect {}
+
+    /**
+     * Within {@code arrive-distance} of a <em>partial</em> route's end - the closed gate, the edge of a
+     * domain the player may not enter. Not an arrival (live test 2026-10-08, N5): the session keeps
+     * guiding and takes the full route when the element opens. Emitted once per route.
+     */
+    record BlockedEndReachedEffect(BlockedExplainer.Explanation explanation) implements NavigationEffect {}
 
     /** The session is over; clear trail and HUD, fire {@code NavigationEndEvent}. */
     record EndedEffect(EndReason reason) implements NavigationEffect {}

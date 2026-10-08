@@ -211,6 +211,20 @@ public final class NavigationMessages {
         return good("A shorter route opened - following it now.");
     }
 
+    /** A partial route's blocking element opened: the full route is taken. */
+    public static Component reopened(String name) {
+        return good("The way to " + name + " is open again - following it now.");
+    }
+
+    /**
+     * The end of a partial route reached - not an arrival (live test 2026-10-08, N5): "End of the open
+     * route to X: the South Gate is closed. The route continues when it opens - /navigate stop to end."
+     */
+    public static Component blockedEnd(String name, BlockedExplainer.Explanation explanation) {
+        String ending = explanation.isDomainBlock() ? " /navigate stop to end." : " The route continues when it opens - /navigate stop to end.";
+        return warn("End of the open route to " + name + ": " + explanation.reason() + "." + ending);
+    }
+
     public static Component arrived(String name) {
         return good("You have arrived at " + name + ".");
     }

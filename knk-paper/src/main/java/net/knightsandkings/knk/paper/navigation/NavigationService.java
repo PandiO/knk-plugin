@@ -27,6 +27,7 @@ import org.bukkit.scheduler.BukkitTask;
 import net.knightsandkings.knk.core.domain.roads.RoadEdge;
 import net.knightsandkings.knk.core.navigation.NavigationEffect;
 import net.knightsandkings.knk.core.navigation.NavigationEffect.ArrivedEffect;
+import net.knightsandkings.knk.core.navigation.NavigationEffect.BlockedEndReachedEffect;
 import net.knightsandkings.knk.core.navigation.NavigationEffect.ComputeRouteEffect;
 import net.knightsandkings.knk.core.navigation.NavigationEffect.EndReason;
 import net.knightsandkings.knk.core.navigation.NavigationEffect.EndedEffect;
@@ -964,6 +965,7 @@ public final class NavigationService implements SiegeMatchObserver {
                 case RouteKeptEffect e -> deps.logger().fine("[Navigation] " + a.player.getName() + ": route kept");
                 case GuidanceEffect e -> guidance(a, e);
                 case ArrivedEffect e -> arrivedAtRouteEnd(a);
+                case BlockedEndReachedEffect e -> a.player.sendMessage(NavigationMessages.blockedEnd(a.destination.name(), e.explanation()));
                 case EndedEffect e -> ended(a, e.reason());
             }
         }
@@ -1017,6 +1019,7 @@ public final class NavigationService implements SiegeMatchObserver {
                 effect.explanation().ifPresent(why -> player.sendMessage(NavigationMessages.partialRoute(a.destination.name(), why)));
             }
             case IMPROVEMENT -> player.sendMessage(NavigationMessages.shorterRoute());
+            case REOPENED -> player.sendMessage(NavigationMessages.reopened(a.destination.name()));
             case ELEMENT_BLOCKED, OFF_ROUTE -> effect.explanation()
                 .ifPresent(why -> player.sendMessage(NavigationMessages.partialRoute(a.destination.name(), why)));
         }
@@ -1033,7 +1036,7 @@ public final class NavigationService implements SiegeMatchObserver {
             String detail = effect.explanation().map(BlockedExplainer.Explanation::reason).orElse(null);
             deps.events().accept(new NavigationRerouteEvent(player, a.destination.name(), effect.reason(), detail));
         }
-        deps.trail().drawRoute(player, route, 0, a.target);
+        deps.trail().drawRoute(player, route, 0, trailTarget(a));
         deps.hud().update(player, a.destination.name(), route.length(), 0);
     }
 
@@ -1062,12 +1065,21 @@ public final class NavigationService implements SiegeMatchObserver {
             }
         }
         if (since % deps.trail().periodTicks() == 0) {
-            deps.trail().drawRoute(a.player, route, effect.along(), a.target);
+            deps.trail().drawRoute(a.player, route, effect.along(), trailTarget(a));
         }
         if (since % HUD_TICKS == 0) {
             deps.hud().update(a.player, label, effect.remainingBlocks(), effect.progress());
             deps.hud().arrowTowards(a.player, effect.aheadPoint()[0], effect.aheadPoint()[2]);
         }
+    }
+
+    /**
+     * Where the trail's last straight leg goes after the route: the target, except on a partial route -
+     * its end is the closed gate or the domain's edge, and a line on to the target would cut through
+     * it (live test 2026-10-08, N5: "a trail off the bridge onto the ice").
+     */
+    private static double[] trailTarget(Active a) {
+        return a.session != null && a.session.explanation().isPresent() ? null : a.target;
     }
 
     /** The core session reached the road's end: the real arrival, or the last off-road leg to the target. */

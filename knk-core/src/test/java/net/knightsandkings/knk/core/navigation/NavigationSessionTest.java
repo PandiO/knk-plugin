@@ -2,6 +2,7 @@ package net.knightsandkings.knk.core.navigation;
 
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
 import net.knightsandkings.knk.core.navigation.NavigationEffect.ArrivedEffect;
+import net.knightsandkings.knk.core.navigation.NavigationEffect.BlockedEndReachedEffect;
 import net.knightsandkings.knk.core.navigation.NavigationEffect.ComputeRouteEffect;
 import net.knightsandkings.knk.core.navigation.NavigationEffect.EndReason;
 import net.knightsandkings.knk.core.navigation.NavigationEffect.EndedEffect;
@@ -223,8 +224,33 @@ class NavigationSessionTest {
         assertEquals(100, adopted.route().length(), 1e-9, "as far as B");
         assertEquals(NavigationSession.State.GUIDING, s.state());
         assertTrue(s.explanation().isPresent());
-        // arriving at the gate end of the partial route counts as arrival
-        only(s.tick(98, 65, 0, 8), ArrivedEffect.class);
+        // the gate end of the partial route is no arrival (live test 2026-10-08, N5): announced once, still guiding
+        BlockedEndReachedEffect end = only(s.tick(98, 65, 0, 8), BlockedEndReachedEffect.class);
+        assertEquals("the West Gate is closed", end.explanation().reason());
+        assertEquals(NavigationSession.State.GUIDING, s.state());
+        assertTrue(s.tick(98, 65, 0, 9).stream().noneMatch(e -> e instanceof BlockedEndReachedEffect || e instanceof ArrivedEffect));
+    }
+
+    @Test
+    void aPartialRouteTakesOnlyAFullRouteAsImprovement() {
+        NavigationSession s = guided(0);
+        s.onElementBlocked(EdgeVerdict.blocked("the West Gate is closed",
+            EdgeVerdict.Cause.gate(NetworkFixtureAccess.GATE_DOOR, "the West Gate")), 5);
+        s.onRouteResult(routeAtoE(closedGate()), 7);
+        assertTrue(s.explanation().isPresent());
+
+        ComputeRouteEffect compute = only(s.onElementOpened(300), ComputeRouteEffect.class);
+        assertFalse(compute.keepCurrentUnlessShorter());
+        // N5: the gate is still closed - the partial route stays, no "shorter route" announced
+        only(s.onRouteResult(routeAtoE(closedGate()), 301), RouteKeptEffect.class);
+        assertEquals(NavigationSession.State.GUIDING, s.state());
+        assertEquals(100, s.route().orElseThrow().length(), 1e-9);
+
+        only(s.onElementOpened(600), ComputeRouteEffect.class);
+        RouteAdoptedEffect reopened = only(s.onRouteResult(routeAtoE(AccessPolicy.ALL_OPEN), 601), RouteAdoptedEffect.class);
+        assertEquals(RouteReason.REOPENED, reopened.reason());
+        assertTrue(reopened.explanation().isEmpty());
+        assertEquals(200, s.route().orElseThrow().length(), 1e-9);
     }
 
     @Test

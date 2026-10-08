@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.core.navigation;
 
 import net.knightsandkings.knk.core.navigation.NavigationEffect.ArrivedEffect;
+import net.knightsandkings.knk.core.navigation.NavigationEffect.BlockedEndReachedEffect;
 import net.knightsandkings.knk.core.navigation.NavigationEffect.ComputeRouteEffect;
 import net.knightsandkings.knk.core.navigation.NavigationEffect.EndReason;
 import net.knightsandkings.knk.core.navigation.NavigationEffect.EndedEffect;
@@ -36,9 +37,11 @@ import java.util.function.Function;
  *       the reason; a re-route that finds only a partial route (BLOCKED) still adopts it.</li>
  *   <li><b>Element opened:</b> at most once per {@code improvementIntervalTicks} a route is
  *       recomputed and adopted only if shorter than {@code (1 - threshold) × remaining}.</li>
- *   <li><b>Arrival:</b> within {@code arriveDistance} (3D) of the route's end point; for a partial
- *       route that is the last reachable point ("Guiding you to the gate"). Whether the player is
- *       inside the destination region is the runtime's check → {@link #end}.</li>
+ *   <li><b>Arrival:</b> within {@code arriveDistance} (3D) of a full route's end point. The end of a
+ *       partial route ("Guiding you to the gate") is no arrival: {@link BlockedEndReachedEffect} once,
+ *       and the session keeps guiding until the element opens (live test 2026-10-08, N5). While the
+ *       route is partial, an improvement is taken only when it is a full route ({@code REOPENED}).
+ *       Whether the player is inside the destination region is the runtime's check → {@link #end}.</li>
  *   <li><b>Timeout:</b> {@code maxSessionMinutes} after the start.</li>
  * </ul>
  * Positions are the player's <b>feet</b> block coordinates; the session compares them with the
@@ -70,6 +73,7 @@ public final class NavigationSession {
     private RouteReason pendingReason;
     private boolean pendingKeepUnlessShorter;
     private EndReason endReason;
+    private boolean blockedEndAnnounced;
 
     /**
      * @param parameters tunables
@@ -146,6 +150,12 @@ public final class NavigationSession {
         switch (result.status()) {
             case FOUND, BLOCKED -> {
                 Route candidate = result.route();
+                boolean wasPartial = route != null && explanation.isPresent();
+                if (reason == RouteReason.IMPROVEMENT && route != null && result.status() == RouteResult.Status.BLOCKED) {
+                    // still blocked: keep the partial route (its end and its message) instead of a new one
+                    state = State.GUIDING;
+                    return List.of(new RouteKeptEffect());
+                }
                 if (keepUnlessShorter && route != null) {
                     // an improvement must be a full route, clearly shorter than what is left
                     boolean partial = result.status() == RouteResult.Status.BLOCKED;
@@ -157,11 +167,12 @@ public final class NavigationSession {
                 adopt(candidate, result.explanationOptional());
                 state = State.GUIDING;
                 List<NavigationEffect> effects = new ArrayList<>();
-                effects.add(new RouteAdoptedEffect(route, routeManeuvers, reason, explanation));
+                RouteReason announced = reason == RouteReason.IMPROVEMENT && wasPartial && explanation.isEmpty()
+                    ? RouteReason.REOPENED : reason;
+                effects.add(new RouteAdoptedEffect(route, routeManeuvers, announced, explanation));
                 if (isAtEnd(route.start().x(), route.start().y(), route.start().z())) {
                     // already there (an empty route, or a start within arrive distance of the goal)
-                    state = State.ARRIVED;
-                    effects.add(new ArrivedEffect());
+                    effects.addAll(atEnd());
                 }
                 return effects;
             }
@@ -201,11 +212,13 @@ public final class NavigationSession {
         Route.Projection projection = route.project(feetX, floorY, feetZ,
             along - parameters.offRouteLookBackBlocks());
         along = Math.max(along, projection.along());
-        if (isAtEnd(feetX, floorY, feetZ)) {
-            state = State.ARRIVED;
-            return List.of(new ArrivedEffect());
-        }
         List<NavigationEffect> effects = new ArrayList<>();
+        if (isAtEnd(feetX, floorY, feetZ)) {
+            if (explanation.isEmpty()) {
+                return atEnd();
+            }
+            effects.addAll(atEnd()); // the closed gate / the domain's edge: wait there
+        }
         if (projection.distance() > parameters.rerouteDistance()) {
             offRouteTicks++;
         } else {
@@ -275,7 +288,21 @@ public final class NavigationSession {
         return new ComputeRouteEffect(reason, keepUnlessShorter);
     }
 
+    /** At the route's end: arrived, or (a partial route) the blocked end announced once. */
+    private List<NavigationEffect> atEnd() {
+        if (explanation.isEmpty()) {
+            state = State.ARRIVED;
+            return List.of(new ArrivedEffect());
+        }
+        if (blockedEndAnnounced) {
+            return List.of();
+        }
+        blockedEndAnnounced = true;
+        return List.of(new BlockedEndReachedEffect(explanation.get()));
+    }
+
     private void adopt(Route candidate, Optional<BlockedExplainer.Explanation> why) {
+        this.blockedEndAnnounced = false;
         this.route = candidate;
         this.routeManeuvers = List.copyOf(maneuvers.apply(candidate));
         this.explanation = why;

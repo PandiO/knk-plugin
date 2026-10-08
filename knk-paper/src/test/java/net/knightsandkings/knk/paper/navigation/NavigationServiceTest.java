@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeast;
@@ -318,6 +319,18 @@ class NavigationServiceTest {
         assertTrue(session.explanation().isPresent());
         assertTrue(session.explanation().get().isDomainBlock());
         assertTrue(messages().stream().anyMatch(m -> m.contains("You may not enter Kardenna Castle") && m.contains("Guiding you to its edge")));
+        verify(trail).drawRoute(any(), any(), anyDouble(), isNull());
+
+        // live test 2026-10-08, N5: the edge of the domain is no arrival
+        double[] end = session.route().orElseThrow().end().point();
+        moveTo(end[0], end[1] + 1, end[2]);
+        ticks(1);
+        assertTrue(service.isNavigating(playerId), "still guiding, waiting for the way to open");
+        assertTrue(events.stream().noneMatch(e -> e instanceof NavigationArriveEvent));
+        assertTrue(messages().stream().noneMatch(m -> m.contains("You have arrived")), messages().toString());
+        assertTrue(messages().stream().anyMatch(m -> m.contains("End of the open route to Kardenna Castle")), messages().toString());
+        ticks(5);
+        assertEquals(1, messages().stream().filter(m -> m.contains("End of the open route")).count(), "said once");
     }
 
     @Test
