@@ -106,6 +106,16 @@ public final class NavigationService implements SiegeMatchObserver {
                                                    AccessPolicy policy) {
             return null;
         }
+
+        /**
+         * Main thread: whether the part of {@code edge} between two polyline positions is usable - the
+         * stretch still ahead of a player on a blocked edge (N10: a gate behind them no longer counts).
+         * Without the world side, the whole edge's verdict.
+         */
+        default boolean partOpen(Player player, RoadNetworkSnapshot snapshot, RoadEdge edge, double fromAlong,
+                                 double toAlong, AccessPolicy policy) {
+            return policy.check(edge).isUsable();
+        }
     }
 
     /**
@@ -1157,15 +1167,29 @@ public final class NavigationService implements SiegeMatchObserver {
             return;
         }
         AccessPolicy policy = deps.policies().policyFor(a.player, a.snapshot);
+        double travelled = a.session.along();
+        double stepStart = 0;
         for (int i = 0; i < route.steps().size(); i++) {
             Route.Step step = route.steps().get(i);
+            double stepLength = Math.abs(step.exitAlong() - step.entryAlong());
+            double stepEnd = stepStart + stepLength;
+            if (stepEnd <= travelled) {
+                stepStart = stepEnd;
+                continue; // walked already: a gate closing behind the player is no block (live test 2026-10-08, N10)
+            }
             EdgeVerdict verdict = policy.check(step.edge());
             boolean openSide = i == 0 && a.lastRequest != null
                 && a.lastRequest.startStepOpenBySides(step.edge().id(), step.forward());
+            if (verdict.isBlocked() && !openSide && stepStart < travelled) {
+                // on this step now: only the stretch still ahead counts
+                double here = step.entryAlong() + (step.forward() ? 1 : -1) * (travelled - stepStart);
+                openSide = deps.policies().partOpen(a.player, a.snapshot, step.edge(), here, step.exitAlong(), policy);
+            }
             if (verdict.isBlocked() && !openSide) {
                 apply(a, a.session.onElementBlocked(verdict, now));
                 return;
             }
+            stepStart = stepEnd;
         }
         Optional<BlockedExplainer.Explanation> why = a.session.explanation();
         if (why.isPresent() && !policy.check(why.get().blockedEdge()).isBlocked()) {

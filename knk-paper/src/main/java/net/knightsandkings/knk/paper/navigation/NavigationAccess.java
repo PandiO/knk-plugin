@@ -121,6 +121,18 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
         return new RouteRequest.StartSides(towardFrom, towardTo);
     }
 
+    /** Main thread: the stretch of {@code edge} between two polyline positions, tagged from the world, checked alone. */
+    @Override
+    public boolean partOpen(Player player, RoadNetworkSnapshot snapshot, RoadEdge edge, double fromAlong, double toAlong,
+                            AccessPolicy policy) {
+        World world = player.getWorld();
+        if (world == null) {
+            return policy.check(edge).isUsable();
+        }
+        return partOpen(edge, snapshot.polyline(edge).subPolyline(fromAlong, toAlong), world,
+            GateCellsIndex.of(gateManager, world.getName()), policy);
+    }
+
     private boolean partOpen(RoadEdge edge, List<double[]> part, World world, GateCells gates, AccessPolicy policy) {
         Optional<RoadEdge> sub = partOf(edge, part, b -> regionIds.at(world, b[0], b[1], b[2]), gates);
         return sub.isEmpty() || policy.check(sub.get()).isUsable(); // empty: the start point is the node

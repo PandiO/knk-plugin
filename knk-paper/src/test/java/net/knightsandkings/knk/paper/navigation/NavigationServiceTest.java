@@ -304,6 +304,31 @@ class NavigationServiceTest {
     }
 
     @Test
+    void aGateClosingBehindThePlayerDoesNotBlockTheRoute() {
+        // live test 2026-10-08 (C3, N10): through the gate, then it closes (or a /knk gate open animates it)
+        service.navigate(player, Destination.point("Kardenna Castle", NavigationTestNetwork.WORLD, 200.5, 65, 200.5));
+        for (double x = 10.5; x <= 200.5; x += 5) {
+            moveTo(x, 65, 0.5);
+            ticks(1);
+        }
+        for (double z = 5.5; z <= 30.5; z += 5) {
+            moveTo(200.5, 65, z);
+            ticks(1);
+        }
+        NavigationSession session = service.sessionOf(playerId).orElseThrow();
+        assertTrue(session.along() > 200, "past the gate edge: " + session.along());
+
+        gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.OPENING);
+        service.onGateChanged(NavigationTestNetwork.GATE_DOOR);
+        gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.CLOSED);
+        service.onGateChanged(NavigationTestNetwork.GATE_DOOR);
+        ticks(NavigationService.RECHECK_TICKS + 1);
+
+        assertTrue(messages().stream().noneMatch(m -> m.contains("West Gate")), messages().toString());
+        assertEquals(NavigationSession.State.GUIDING, session.state());
+    }
+
+    @Test
     void theSafetyNetRecheckCatchesAGateClosedWithoutAnEvent() {
         service.navigate(player, cinixKeep());
         gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.CLOSED);
