@@ -145,6 +145,8 @@ public class KnKPlugin extends JavaPlugin {
     private RegionHttpServer regionHttpServer;
     private KnkConfig config;
     private CacheManager cacheManager;
+    /** KNG-58: last-known account, freeze, mode and permission answers on disk, for when the API is down. */
+    private net.knightsandkings.knk.core.offline.OfflineSecurityStore offlineSecurity;
     private DataAccessFactory dataAccessFactory;
     private TownsQueryApi townsQueryApi;
     private LocationsQueryApi locationsQueryApi;
@@ -567,7 +569,8 @@ public class KnKPlugin extends JavaPlugin {
                 menuTemplatesQueryApi
             );
             this.permissionsDataAccess = dataAccessFactory.createPermissionsDataAccess(permissionsApi);
-            this.knkPermissible = new KnkPermissible(cacheManager.getUserCache(), permissionsDataAccess);
+            this.offlineSecurity = createOfflineSecurity();
+            this.knkPermissible = new KnkPermissible(cacheManager.getUserCache(), permissionsDataAccess, offlineSecurity);
             // Gate pass-through (and navigation's gate verdicts) honour KnK's permission model as well as Bukkit's.
             net.knightsandkings.knk.paper.gates.GatePassThroughRules.setPermissionCheck((player, node) ->
                 player.hasPermission(node) || (knkPermissible != null && knkPermissible.hasPermission(player, node)));
@@ -577,6 +580,9 @@ public class KnKPlugin extends JavaPlugin {
             this.joinLoadingGuard = new JoinLoadingGuard(this, knkPermissible);
             this.modeService = new ModeService(this, knkPermissible, cacheManager.getUserCache(), usersCommandApi);
             this.adminFreezeManager = new net.knightsandkings.knk.paper.user.AdminFreezeManager();
+            modeService.setOfflineStore(offlineSecurity);
+            adminFreezeManager.setOfflineStore(offlineSecurity);
+            startOfflineSecurityTasks();
             initPrivateMessaging();
             this.rankHierarchy = new net.knightsandkings.knk.paper.commands.support.RankHierarchy(usersQueryApi);
             this.minecraftMaterialRefsDataAccess = dataAccessFactory.createMinecraftMaterialRefsDataAccess(
@@ -1060,6 +1066,9 @@ public class KnKPlugin extends JavaPlugin {
             // Unsent candidates and grants still in flight go to the spool, replayed on the next start.
             discoveryFlushTask.stop();
             discoveryFlushTask.spoolEverything();
+        }
+        if (offlineSecurity != null) {
+            offlineSecurity.flushIfDirty();
         }
         if (cacheManager != null) {
             getLogger().info("Logging final cache metrics...");
@@ -1969,6 +1978,77 @@ public class KnKPlugin extends JavaPlugin {
             new net.knightsandkings.knk.paper.commands.WarpCommand.Deps(support, rankCheck, targets, teleportService,
                 teleportDestinationsDataAccess, charges, teleportUserIdLookup(), knkPermissible::hasPermissionAsync,
                 org.bukkit.Bukkit::getWorld, modeService::isVanished));
+    }
+
+    /**
+     * KNG-58: the offline security cache ({@code offline-cache} in config.yml). Every user and
+     * permission answer the API gives is recorded; a UUID the API no longer knows, or a permission
+     * check for an unknown user, deletes what is kept about that player. Null when disabled.
+     */
+    private net.knightsandkings.knk.core.offline.OfflineSecurityStore createOfflineSecurity() {
+        var cfg = getConfig();
+        if (!cfg.getBoolean("offline-cache.enabled", true)) {
+            getLogger().warning("[KnK Offline] offline-cache.enabled=false: permissions, freeze and modes are not "
+                + "enforced from the last known state while the API is down");
+            return null;
+        }
+        var settings = new net.knightsandkings.knk.core.offline.OfflineSecurityStore.Settings(
+            java.time.Duration.ofDays(Math.max(1, Math.min(30, cfg.getInt("offline-cache.identity-max-age-days", 30)))),
+            java.time.Duration.ofHours(Math.max(1, cfg.getInt("offline-cache.permission-max-age-hours", 72))));
+        var store = new net.knightsandkings.knk.core.offline.OfflineSecurityStore(
+            new java.io.File(getDataFolder(), cfg.getString("offline-cache.file", "offline-security.json")).toPath(),
+            settings, java.time.Clock.systemUTC());
+        store.load();
+        getLogger().info("[KnK Offline] Loaded " + store.identityCount() + " account(s) and "
+            + store.permissionCount() + " permission answer(s) from the offline security cache");
+
+        usersDataAccess.setAnswerListener(new net.knightsandkings.knk.core.dataaccess.UsersDataAccess.UserAnswerListener() {
+            @Override
+            public void found(net.knightsandkings.knk.core.domain.users.UserSummary user) {
+                store.recordUser(user);
+            }
+
+            @Override
+            public void notFound(java.util.UUID uuid) {
+                store.forgetUser(uuid);
+            }
+        });
+        permissionsDataAccess.setAnswerListener((userId, node, result) -> {
+            if (result == null) {
+                store.forgetUserId(userId);
+            } else {
+                store.recordPermission(userId, node, result.isAllowed());
+            }
+        });
+        return store;
+    }
+
+    /**
+     * KNG-58: write the offline security cache every {@code flush-seconds}, prune entries past their
+     * max age hourly, and re-check accounts the API hasn't confirmed for {@code verify-after-hours}
+     * (an erased account is deleted). All off the main thread.
+     */
+    private void startOfflineSecurityTasks() {
+        if (offlineSecurity == null) {
+            return;
+        }
+        var cfg = getConfig();
+        long flushTicks = Math.max(1, cfg.getLong("offline-cache.flush-seconds", 10)) * 20L;
+        java.time.Duration verifyAfter = java.time.Duration.ofHours(Math.max(1, cfg.getInt("offline-cache.verify-after-hours", 6)));
+        var verifier = new net.knightsandkings.knk.core.offline.OfflineIdentityVerifier(offlineSecurity, usersQueryApi::getByUuid);
+        var scheduler = getServer().getScheduler();
+        scheduler.runTaskTimerAsynchronously(this, offlineSecurity::flushIfDirty, flushTicks, flushTicks);
+        scheduler.runTaskTimerAsynchronously(this, () -> {
+            int pruned = offlineSecurity.prune();
+            if (pruned > 0) {
+                getLogger().info("[KnK Offline] Pruned " + pruned + " offline security entr(y/ies) past their max age");
+            }
+            var result = verifier.run(verifyAfter);
+            if (result.forgotten() > 0) {
+                getLogger().info("[KnK Offline] Deleted the offline data of " + result.forgotten()
+                    + " account(s) the API no longer knows under that UUID");
+            }
+        }, 20L * 120, 20L * 3600);
     }
 
     /**

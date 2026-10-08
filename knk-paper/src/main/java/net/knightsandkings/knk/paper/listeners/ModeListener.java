@@ -10,6 +10,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 
+import net.knightsandkings.knk.core.domain.permissions.PermissionDecision;
 import net.knightsandkings.knk.core.domain.users.ActiveMode;
 import net.knightsandkings.knk.paper.modes.ModeService;
 import net.knightsandkings.knk.paper.utils.ColorOptions;
@@ -56,12 +57,20 @@ public class ModeListener implements Listener {
         // visible rather than silently keeping a mode they can no longer toggle off-and-on.
         e.joinMessage(null);
         modeService.applyMode(player, persisted, false);
-        modeService.whenHasModePermission(player, persisted, allowed -> {
+        modeService.whenModePermissionKnown(player, persisted, decision -> {
             if (!player.isOnline() || modeService.getActiveMode(player) != persisted) {
                 return;
             }
             String name = ModeService.displayName(persisted);
-            if (allowed) {
+            if (decision == PermissionDecision.UNAVAILABLE) {
+                // KNG-58: the API is down and there's no last-known answer - stay hidden (revealing
+                // staff is the unsafe direction) and leave the persisted mode alone.
+                LOGGER.warning("Keeping " + persisted + " for " + player.getName() + ": permission can't be checked right now");
+                player.sendActionBar(Component.text("Restored " + name + " - permissions can't be checked right now.")
+                    .color(ColorOptions.messageachievement));
+                return;
+            }
+            if (decision.allowed()) {
                 player.sendActionBar(Component.text("Restored " + name + " - you are hidden from other players.")
                     .color(ColorOptions.messageachievement));
                 return;
