@@ -48,6 +48,7 @@ import net.knightsandkings.knk.core.regions.DomainAccessEvaluator;
 import net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot;
 import net.knightsandkings.knk.core.roads.route.CompositeAccessPolicy;
 import net.knightsandkings.knk.core.roads.route.DomainAvailability;
+import net.knightsandkings.knk.core.domain.roads.RoadEdge;
 import net.knightsandkings.knk.core.roads.route.GateAvailability;
 import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
 import net.knightsandkings.knk.core.roads.route.AccessPolicy;
@@ -350,6 +351,42 @@ class NavigationServiceTest {
         gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.OPENING);
         service.onGateChanged(NavigationTestNetwork.GATE_DOOR);
         gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.CLOSED);
+        service.onGateChanged(NavigationTestNetwork.GATE_DOOR);
+        ticks(NavigationService.RECHECK_TICKS + 1);
+
+        assertTrue(messages().stream().noneMatch(m -> m.contains("West Gate")), messages().toString());
+        assertEquals(NavigationSession.State.GUIDING, session.state());
+    }
+
+    @Test
+    void aRouteStartingPastTheGateOnItsEdgeIsNotBlockedByIt() {
+        // live test 2026-10-08 run 5 (C3): navigation started on the town side of the South Gate, on the gate's own
+        // edge; the step walks only from the player to the node, but the whole edge's verdict was used
+        NavigationService.PolicyFactory gateAtX150 = new NavigationService.PolicyFactory() {
+            @Override
+            public AccessPolicy policyFor(Player p, RoadNetworkSnapshot snapshot) {
+                return policies.policyFor(p, snapshot);
+            }
+
+            @Override
+            public boolean partOpen(Player p, RoadNetworkSnapshot snapshot, RoadEdge edge, double fromAlong, double toAlong,
+                                    AccessPolicy policy) {
+                boolean passesGate = edge.id() == NavigationTestNetwork.E_BC
+                    && Math.min(fromAlong, toAlong) <= 50 && Math.max(fromAlong, toAlong) >= 50;
+                return !passesGate || policy.check(edge).isUsable();
+            }
+        };
+        service = new NavigationService(new NavigationService.Deps(null, NavigationConfig.defaults(),
+            w -> network.snapshot, gateAtX150, shapes, eligibility, hud, trail, Runnable::run, Runnable::run, tick::get,
+            events::add, Logger.getLogger("test")));
+        moveTo(170.5, 65, 0.5);
+        service.navigate(player, Destination.point("Kardenna Castle", NavigationTestNetwork.WORLD, 200.5, 65, 200.5));
+        NavigationSession session = service.sessionOf(playerId).orElseThrow();
+        assertEquals(NavigationTestNetwork.E_BC, session.route().orElseThrow().steps().get(0).edge().id());
+
+        gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.CLOSED);
+        service.onGateChanged(NavigationTestNetwork.GATE_DOOR);
+        gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.OPENING);
         service.onGateChanged(NavigationTestNetwork.GATE_DOOR);
         ticks(NavigationService.RECHECK_TICKS + 1);
 

@@ -1244,10 +1244,16 @@ public final class NavigationService implements SiegeMatchObserver {
             EdgeVerdict verdict = policy.check(step.edge());
             boolean openSide = i == 0 && a.lastRequest != null
                 && a.lastRequest.startStepOpenBySides(step.edge().id(), step.forward());
-            if (verdict.isBlocked() && !openSide && stepStart < travelled) {
-                // on this step now: only the stretch still ahead counts
-                double here = step.entryAlong() + (step.forward() ? 1 : -1) * (travelled - stepStart);
-                openSide = deps.policies().partOpen(a.player, a.snapshot, step.edge(), here, step.exitAlong(), policy);
+            if (verdict.isBlocked() && !openSide) {
+                // only the stretch this step still walks counts: from the player (on it now) or from where it
+                // enters the edge (a route that starts or ends mid-edge) to where it leaves it (N10)
+                double from = stepStart < travelled
+                    ? step.entryAlong() + (step.forward() ? 1 : -1) * (travelled - stepStart)
+                    : step.entryAlong();
+                double edgeLength = a.snapshot.polyline(step.edge()).length();
+                boolean wholeEdge = Math.abs(step.exitAlong() - from) >= edgeLength - 1e-6;
+                openSide = !wholeEdge
+                    && deps.policies().partOpen(a.player, a.snapshot, step.edge(), from, step.exitAlong(), policy);
             }
             if (verdict.isBlocked() && !openSide) {
                 apply(a, a.session.onElementBlocked(verdict, now));
