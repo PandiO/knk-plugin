@@ -44,9 +44,14 @@ import static net.knightsandkings.knk.core.roads.walk.WalkGrid.NO_LINK;
  * apart from the goal predicate's own slack. Ties on {@code f} prefer the larger {@code g}, then
  * insertion order (deterministic, as {@code AStarRouter}). Expansions over {@code maxExpansions}, or a
  * search that only failed because paths hit the length cap → FALLBACK; a reachable area exhausted
- * without arriving → NO_PATH. Never a partial path (§11-5).
+ * without arriving → NO_PATH. Either may carry a {@link WalkResult#partialPath() partial path} (§11-5,
+ * revised 2026-10-07): to the expanded cell closest to the target (3D, ties to the cheaper), when it
+ * is at least {@link #MIN_PARTIAL_GAIN} blocks closer than the start cell.
  */
 public final class WalkSearch implements WalkPathfinder {
+
+    /** A partial path must end at least this many blocks closer to the target than the start cell. */
+    public static final double MIN_PARTIAL_GAIN = 2.0;
 
     private static final double SQRT2 = Math.sqrt(2.0);
     private static final double EPS = 1e-9;
@@ -107,6 +112,9 @@ public final class WalkSearch implements WalkPathfinder {
         private int expansions;
         private boolean lengthCapped;
         private double cap;
+        private Node closest;
+        private double closestDistance = Double.POSITIVE_INFINITY;
+        private double startDistance;
 
         Run(WalkRequest request) {
             this.request = request;
@@ -128,6 +136,7 @@ public final class WalkSearch implements WalkPathfinder {
                 return WalkResult.noPath("no walkable cell near the target", 0);
             }
             cap = budget.lengthCap(request.straightDistance());
+            startDistance = targetDistance(start);
             nodes.put(start.key, start);
             push(start);
 
@@ -141,8 +150,9 @@ public final class WalkSearch implements WalkPathfinder {
                 if (request.goal().reached(BlockKey.x(u.key) + 0.5, floorY(u), BlockKey.z(u.key) + 0.5)) {
                     return WalkResult.found(path(u), expansions);
                 }
+                noteClosest(u);
                 if (expansions >= budget.maxExpansions()) {
-                    return WalkResult.fallback("expansion budget", expansions);
+                    return WalkResult.fallback("expansion budget", expansions, partial());
                 }
                 expansions++;
                 if (u.ladder) {
@@ -152,8 +162,33 @@ public final class WalkSearch implements WalkPathfinder {
                 }
             }
             return lengthCapped
-                ? WalkResult.fallback("length cap", expansions)
-                : WalkResult.noPath("target unreachable", expansions);
+                ? WalkResult.fallback("length cap", expansions, partial())
+                : WalkResult.noPath("target unreachable", expansions, partial());
+        }
+
+        // ===== partial path (§11-5) =====
+
+        private double targetDistance(Node n) {
+            double dx = BlockKey.x(n.key) + 0.5 - request.targetX();
+            double dy = floorY(n) - request.targetFloorY();
+            double dz = BlockKey.z(n.key) + 0.5 - request.targetZ();
+            return Math.sqrt(dx * dx + dy * dy + dz * dz);
+        }
+
+        private void noteClosest(Node u) {
+            double d = targetDistance(u);
+            if (d < closestDistance - EPS || Math.abs(d - closestDistance) <= EPS && closest != null && u.g < closest.g) {
+                closest = u;
+                closestDistance = d;
+            }
+        }
+
+        /** The way to the closest expanded cell, or null when it is not clearly closer than the start. */
+        private WalkPath partial() {
+            if (closest == null || closest.parent == null || closestDistance > startDistance - MIN_PARTIAL_GAIN) {
+                return null;
+            }
+            return path(closest);
         }
 
         // ===== cells =====

@@ -55,6 +55,7 @@ import net.knightsandkings.knk.core.roads.route.RouterParameters;
 import net.knightsandkings.knk.core.roads.route.SnapPoint;
 import net.knightsandkings.knk.core.roads.route.Snapper;
 import net.knightsandkings.knk.core.roads.walk.WalkGoal;
+import net.knightsandkings.knk.core.roads.walk.WalkPath;
 import net.knightsandkings.knk.core.roads.walk.WalkPathfinder;
 import net.knightsandkings.knk.core.roads.walk.WalkRequest;
 import net.knightsandkings.knk.core.roads.walk.WalkResult;
@@ -189,7 +190,7 @@ public final class NavigationService implements SiegeMatchObserver {
     private BukkitTask ticker;
 
     /** Walk request outcomes, for {@code /knk road status}. */
-    enum WalkCount { REQUESTED, FOUND, NO_PATH, FALLBACK, NOT_CAPTURED, FAILED }
+    enum WalkCount { REQUESTED, FOUND, NO_PATH, FALLBACK, NOT_CAPTURED, FAILED, PARTIAL }
 
     /** One player's navigation: the core session plus what the runtime adds. */
     final class Active {
@@ -789,8 +790,9 @@ public final class NavigationService implements SiegeMatchObserver {
 
     /**
      * Main thread: a walk result (null = none: not captured, failed) for a still-current request.
-     * FOUND → WALKING, the trail switches to the path at once; anything else → FALLBACK, today's
-     * straight line (NO_PATH and FALLBACK alike, decision §11-5: no partial paths).
+     * FOUND → WALKING, the trail switches to the path at once. NO_PATH or FALLBACK with a partial path
+     * (decision §11-5, revised 2026-10-07) → WALKING along it, then a straight line to the target
+     * (counted PARTIAL too). Anything else → FALLBACK, today's straight line.
      */
     private void walkDelivered(Active a, DirectLeg leg, int generation, WalkResult result, WalkCount failure) {
         if (!walkCurrent(a, leg, generation)) {
@@ -804,13 +806,19 @@ public final class NavigationService implements SiegeMatchObserver {
             case FALLBACK -> result == null ? WalkCount.FAILED : WalkCount.FALLBACK;
         };
         walkCounts[count.ordinal()]++;
+        Optional<WalkPath> partial =
+            result == null || result.isFound() ? Optional.empty() : result.partialPath();
+        if (partial.isPresent()) {
+            walkCounts[WalkCount.PARTIAL.ordinal()]++;
+        }
         if (deps.logger().isLoggable(Level.FINE)) {
             deps.logger().fine("[Navigation] Walk path for " + a.player.getName() + ": " + count
-                + (result == null ? "" : " (" + result.reason() + ", " + result.expansions() + " cells)"));
+                + (result == null ? "" : " (" + result.reason() + ", " + result.expansions() + " cells)")
+                + (partial.isPresent() ? ", partial path" : ""));
         }
         boolean wasWalking = leg.walking();
-        if (result != null && result.isFound()) {
-            leg.path = result.path().orElseThrow().points();
+        if (result != null && (result.isFound() || partial.isPresent())) {
+            leg.path = result.isFound() ? result.path().orElseThrow().points() : partialToTarget(partial.get(), leg.target);
             leg.status = DirectLeg.Status.WALKING;
             Location feet = a.player.getLocation();
             double remaining = leg.remainingOf(feet.getX(), feet.getY() - 1, feet.getZ());
@@ -828,6 +836,13 @@ public final class NavigationService implements SiegeMatchObserver {
             leg.best = distance(feet.getX(), feet.getY() - 1, feet.getZ(), leg.target);
             deps.trail().drawDirect(a.player, leg.target);
         }
+    }
+
+    /** A partial path's points, then the target: the trail shows the rest as a straight line. */
+    static List<double[]> partialToTarget(WalkPath partial, double[] target) {
+        List<double[]> points = new ArrayList<>(partial.points());
+        points.add(target.clone());
+        return points;
     }
 
     /** Ends the session's direct leg: a walk request in flight is dropped, its capture cancelled. */
@@ -852,7 +867,8 @@ public final class NavigationService implements SiegeMatchObserver {
         }
         String counts = "requested " + walkCounts[WalkCount.REQUESTED.ordinal()] + ", found " + walkCounts[WalkCount.FOUND.ordinal()]
             + ", no path " + walkCounts[WalkCount.NO_PATH.ordinal()] + ", budget " + walkCounts[WalkCount.FALLBACK.ordinal()]
-            + ", not captured " + walkCounts[WalkCount.NOT_CAPTURED.ordinal()] + ", failed " + walkCounts[WalkCount.FAILED.ordinal()];
+            + ", not captured " + walkCounts[WalkCount.NOT_CAPTURED.ordinal()] + ", failed " + walkCounts[WalkCount.FAILED.ordinal()]
+            + "; partial " + walkCounts[WalkCount.PARTIAL.ordinal()];
         String capture = deps.walk().preparer().describe();
         return "on; " + walking + " walking, " + inFlight + " computing; " + counts + (capture.isEmpty() ? "" : "; " + capture);
     }

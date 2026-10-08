@@ -426,12 +426,40 @@ class WalkSearchTest {
     }
 
     @Test
-    void noPartialPathIsEverReturned() {
+    void aBudgetRunOutGivesNoPathButAPartialOne() {
         WalkFixture f = new WalkFixture().floor(0, 0, 30, 0, 64, G);
         WalkResult result = new WalkSearch().find(
             f.request(0, 64, 0, 30, 64, 0).withBudget(new WalkBudget(10, 1.75, 96, 48, 2, 3)));
 
+        assertTrue(result.path().isEmpty(), "never a path that does not arrive");
+        WalkPath partial = result.partialPath().orElseThrow();
+        assertEquals(BlockKey.pack(0, 64, 0), partial.cell(0));
+        assertEquals(10, BlockKey.x(partial.cell(partial.size() - 1)), "the closest of the 11 cells closed");
+    }
+
+    @Test
+    void anUnreachableTargetGivesThePartialPathToTheClosestReachableCell() {
+        // §11-5 (2026-10-07): a walled-in target - follow the way to the wall, the rest is a straight line
+        WalkFixture f = new WalkFixture().floor(0, 0, 12, 6, 64, G).layer(65,
+            ".............", ".............", "........#####", "........#...#", "........#...#", "........#####", ".............");
+        WalkResult result = f.walk(0, 64, 0, 10, 64, 4);
+
+        assertEquals(WalkResult.Status.NO_PATH, result.status(), result.toString());
         assertTrue(result.path().isEmpty());
+        WalkPath partial = result.partialPath().orElseThrow();
+        long end = partial.cell(partial.size() - 1);
+        double endDistance = Math.hypot(BlockKey.x(end) + 0.5 - 10.5, BlockKey.z(end) + 0.5 - 4.5);
+        assertEquals(2.0, endDistance, 1e-9, "next to the wall, beside the target: " + partial);
+    }
+
+    @Test
+    void noPartialPathWhenNoCellGetsClearlyCloser() {
+        WalkFixture f = new WalkFixture().floor(0, 0, 1, 0, 64, G).floor(5, 0, 6, 0, 64, G);
+        WalkResult result = f.walk(0, 64, 0, 5, 64, 0);
+
+        assertEquals(WalkResult.Status.NO_PATH, result.status());
+        assertTrue(result.partialPath().isEmpty(), "one block closer is no partial path: " + result);
+        assertTrue(new WalkSearch().find(f.request(0, 64, 0, 5, 64, 0)).path().isEmpty());
     }
 
     // ===== snapping =====

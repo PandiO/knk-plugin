@@ -630,6 +630,34 @@ class NavigationServiceTest {
     }
 
     @Test
+    void anUnreachableTargetFollowsThePartialPathThenAStraightLine() {
+        // §11-5, revised 2026-10-07 (live test A1): the developer prefers a partial path to the straight line
+        WalkPath partial = mock(WalkPath.class);
+        when(partial.points()).thenReturn(List.of(new double[] {0.5, 64, 0.5}, new double[] {0.5, 64, 6.5},
+            new double[] {12.5, 64, 6.5}));
+        walkFinder = r -> WalkResult.noPath("target unreachable", 900, partial);
+        NavigationService walking = walkService(NavigationConfig.defaults());
+
+        walking.navigate(player, well());
+        runSearches();
+
+        assertEquals(NavigationService.DirectLeg.Status.WALKING, legStatus(walking));
+        ArgumentCaptor<List<double[]>> drawn = pathCaptor();
+        verify(trail).drawPath(any(), drawn.capture());
+        assertEquals(4, drawn.getValue().size(), "the partial path, then the target");
+        assertArrayEquals(new double[] {12.5, 64, 6.5}, drawn.getValue().get(2), 1e-9);
+        assertArrayEquals(new double[] {20.5, 64, 0.5}, drawn.getValue().get(3), 1e-9, "the straight rest ends at the target");
+        assertTrue(walking.walkStatus().contains("no path 1"), walking.walkStatus());
+        assertTrue(walking.walkStatus().contains("partial 1"), walking.walkStatus());
+
+        walkFinder = r -> WalkResult.fallback("expansion budget", 20000, partial);
+        NavigationService budget = walkService(NavigationConfig.defaults());
+        budget.navigate(player, well());
+        runSearches();
+        assertEquals(NavigationService.DirectLeg.Status.WALKING, legStatus(budget), "a budget run-out uses it too");
+    }
+
+    @Test
     void aResultForAReplacedLegIsDroppedAndItsCaptureCancelled() {
         NavigationService walking = walkService(NavigationConfig.defaults());
         walking.navigate(player, well());
