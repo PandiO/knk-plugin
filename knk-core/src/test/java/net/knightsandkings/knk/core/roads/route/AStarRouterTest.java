@@ -261,6 +261,35 @@ class AStarRouterTest {
         assertEquals(E_BE, r.explanation().blockedEdge().id());
     }
 
+    @Test
+    void theOpenSideOfABlockedStartEdgeCanBeWalked() {
+        // live test 2026-10-08 (N6): standing on the gate road on B's side of the closed gate, the way back is open
+        RouteRequest req = request(SnapPoint.onEdge(town, E_BE, 50), SnapPoint.atNode(town, A),
+            gate(AnimationState.CLOSED, false, false)).withStartSides(new RouteRequest.StartSides(true, false));
+        RouteResult r = router.routeOrExplain(req);
+
+        assertEquals(RouteResult.Status.FOUND, r.status());
+        assertEquals(List.of(-E_BE, -E_AB), edges(r.route()));
+        assertEquals(150, r.route().length(), 1e-9);
+        assertTrue(r.route().steps().get(0).verdict().isOpen(), "the walked part of the start edge is open");
+
+        // towards the gate it stays blocked; the explanation's partial route is empty (the player is at it)
+        RouteResult toE = router.routeOrExplain(request(SnapPoint.onEdge(town, E_BE, 50), SnapPoint.atNode(town, E),
+            gate(AnimationState.CLOSED, false, false)).withStartSides(new RouteRequest.StartSides(true, false)));
+        assertEquals(RouteResult.Status.BLOCKED, toE.status());
+        assertEquals(E_BE, toE.explanation().blockedEdge().id());
+        assertTrue(toE.route().isEmpty());
+    }
+
+    @Test
+    void theOpenSideLeadsOnToTheGoalWhenTheExplainerWouldOtherwiseStopAtTheStart() {
+        // the all-open route to E goes forward over the start edge; the open side is forward: no block on the way
+        RouteResult r = router.routeOrExplain(request(SnapPoint.onEdge(town, E_BE, 50), SnapPoint.atNode(town, E),
+            gate(AnimationState.CLOSED, false, false)).withStartSides(new RouteRequest.StartSides(false, true)));
+        assertEquals(RouteResult.Status.FOUND, r.status());
+        assertEquals(List.of(E_BE), edges(r.route()));
+    }
+
     // ---- domains -----------------------------------------------------------------------------------
 
     @Test

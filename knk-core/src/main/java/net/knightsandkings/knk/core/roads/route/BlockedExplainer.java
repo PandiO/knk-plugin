@@ -70,7 +70,7 @@ public final class BlockedExplainer {
         for (int i = 0; i < full.steps().size(); i++) {
             Route.Step step = full.steps().get(i);
             EdgeVerdict verdict = policy.check(step.edge());
-            if (verdict.isBlocked()) {
+            if (verdict.isBlocked() && !(i == 0 && request.startStepOpenBySides(step.edge().id(), step.forward()))) {
                 Route partial = full.truncated(snapshot, i).withVerdicts(snapshot, policy);
                 return Optional.of(new Explanation(verdict, step.edge(), partial, full));
             }

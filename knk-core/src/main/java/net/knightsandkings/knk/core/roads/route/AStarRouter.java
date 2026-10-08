@@ -200,16 +200,22 @@ public final class AStarRouter {
 
         void expandStart() {
             RoadEdge edge = snapshot.edgeAt(startEdgeIndex);
-            if (!verdict(startEdgeIndex).isUsable()) {
+            boolean usable = verdict(startEdgeIndex).isUsable();
+            RouteRequest.StartSides sides = request.startSides();
+            if (!usable && sides == null) {
                 return; // Phase 2d decision: a blocked start edge cannot be left
             }
+            boolean forwardOpen = usable || sides.towardTo();
+            boolean backwardOpen = usable || sides.towardFrom();
             EdgePolyline p = snapshot.polylineAt(startEdgeIndex);
             double perBlock = p.length() <= 0 ? 0 : edgeCost(startEdgeIndex) / p.length();
             double along = start.along();
             // forward: towards the To node
-            relaxGoalsOnEdge(START_STATE, startEdgeIndex, along, true, perBlock);
-            relax(START_STATE, edge.toNodeId(), (p.length() - along) * perBlock, startEdgeIndex, true);
-            if (!edge.isOneway()) {
+            if (forwardOpen) {
+                relaxGoalsOnEdge(START_STATE, startEdgeIndex, along, true, perBlock);
+                relax(START_STATE, edge.toNodeId(), (p.length() - along) * perBlock, startEdgeIndex, true);
+            }
+            if (!edge.isOneway() && backwardOpen) {
                 relaxGoalsOnEdge(START_STATE, startEdgeIndex, along, false, perBlock);
                 relax(START_STATE, edge.fromNodeId(), along * perBlock, startEdgeIndex, false);
             }
@@ -261,7 +267,11 @@ public final class AStarRouter {
                 double entry = a.fromState == START_STATE ? start.along() : (a.forward ? 0 : p.length());
                 double exit = isGoal(state) ? goal.along() : (a.forward ? p.length() : 0);
                 if (Math.abs(exit - entry) > 1e-9) {
-                    steps.add(Route.Step.of(edge, a.forward, entry, exit, verdict(a.edgeIndex)));
+                    EdgeVerdict v = verdict(a.edgeIndex);
+                    if (a.fromState == START_STATE && !v.isUsable()) {
+                        v = EdgeVerdict.open(); // the open part of a blocked start edge (start sides)
+                    }
+                    steps.add(Route.Step.of(edge, a.forward, entry, exit, v));
                 }
                 state = a.fromState;
             }

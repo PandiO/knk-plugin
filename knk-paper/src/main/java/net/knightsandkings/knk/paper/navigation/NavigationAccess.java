@@ -3,6 +3,8 @@ package net.knightsandkings.knk.paper.navigation;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -13,6 +15,7 @@ import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import org.bukkit.World;
 import org.bukkit.entity.Player;
 
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
@@ -21,15 +24,21 @@ import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.core.regions.DomainAccessEvaluator;
 import net.knightsandkings.knk.core.regions.RegionDomainResolver;
 import net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot;
+import net.knightsandkings.knk.core.roads.build.EdgeTagging;
+import net.knightsandkings.knk.core.roads.build.GateCells;
 import net.knightsandkings.knk.core.roads.route.AccessPolicy;
 import net.knightsandkings.knk.core.roads.route.CompositeAccessPolicy;
 import net.knightsandkings.knk.core.roads.route.DomainAvailability;
+import net.knightsandkings.knk.core.roads.route.EdgePolyline;
 import net.knightsandkings.knk.core.roads.route.GateAvailability;
 import net.knightsandkings.knk.core.roads.route.GateAvailability.GateView;
 import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
+import net.knightsandkings.knk.core.roads.route.RouteRequest;
+import net.knightsandkings.knk.core.roads.route.SnapPoint;
 import net.knightsandkings.knk.core.roads.route.StaticFlagsAvailability;
 import net.knightsandkings.knk.paper.gates.GatePassThroughRules;
 import net.knightsandkings.knk.paper.regions.RegionIds;
+import net.knightsandkings.knk.paper.roads.GateCellsIndex;
 import net.knightsandkings.knk.paper.siege.SiegeGateController;
 
 /**
@@ -89,6 +98,58 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
         }
         return CompositeAccessPolicy.of(new StaticFlagsAvailability(), gateAvailability(player, doorIds),
             new DomainAvailability(evaluator, this::domainByRegionId, currentRegions, bypass.test(player)));
+    }
+
+    /**
+     * Main thread (live test 2026-10-08, N6): a player standing on a blocked edge - the road through a
+     * closed gate, the road into a domain they may not enter - may still walk the part of it that does
+     * not reach the block. Each part, from the start point to a node, is tagged from the world like the
+     * live tags (its regions and gate doors only) and checked with the same policy.
+     */
+    @Override
+    public RouteRequest.StartSides startSides(Player player, RoadNetworkSnapshot snapshot, SnapPoint start,
+                                              AccessPolicy policy) {
+        RoadEdge edge = snapshot.edge(start.edgeId()).orElse(null);
+        World world = player.getWorld();
+        if (edge == null || world == null || !policy.check(edge).isBlocked()) {
+            return null;
+        }
+        EdgePolyline polyline = snapshot.polyline(edge);
+        GateCells gates = GateCellsIndex.of(gateManager, world.getName());
+        boolean towardFrom = partOpen(edge, polyline.subPolyline(start.along(), 0), world, gates, policy);
+        boolean towardTo = partOpen(edge, polyline.subPolyline(start.along(), polyline.length()), world, gates, policy);
+        return new RouteRequest.StartSides(towardFrom, towardTo);
+    }
+
+    private boolean partOpen(RoadEdge edge, List<double[]> part, World world, GateCells gates, AccessPolicy policy) {
+        Optional<RoadEdge> sub = partOf(edge, part, b -> regionIds.at(world, b[0], b[1], b[2]), gates);
+        return sub.isEmpty() || policy.check(sub.get()).isUsable(); // empty: the start point is the node
+    }
+
+    /**
+     * Part of {@code edge} along {@code part} (points from the start point to a node) as an edge of its own,
+     * tagged only with what the world has along it: regions at feet level ({@code regionsAt(x, feetY, z)})
+     * and gate doors. Empty when the part is shorter than one block.
+     */
+    static Optional<RoadEdge> partOf(RoadEdge edge, List<double[]> part, java.util.function.Function<int[], Set<String>> regionsAt,
+                                     GateCells gates) {
+        List<int[]> blocks = new java.util.ArrayList<>();
+        for (double[] p : part) {
+            int[] b = {(int) Math.floor(p[0]), (int) Math.floor(p[1]), (int) Math.floor(p[2])};
+            if (blocks.isEmpty() || !java.util.Arrays.equals(blocks.get(blocks.size() - 1), b)) {
+                blocks.add(b);
+            }
+        }
+        if (blocks.size() < 2) {
+            return Optional.empty();
+        }
+        Set<String> regions = new LinkedHashSet<>();
+        for (int[] s : EdgeTagging.samples(blocks, EdgeTagging.REGION_STEP)) {
+            regions.addAll(regionsAt.apply(new int[] {s[0], s[1] + 1, s[2]}));
+        }
+        return Optional.of(new RoadEdge(edge.id(), edge.fromNodeId(), edge.toNodeId(), blocks, edge.length(), edge.avgWidth(),
+            edge.profileId(), edge.streetId(), edge.costMultiplier(), edge.flags(), EdgeTagging.doorsAlong(blocks, gates),
+            List.of(), List.copyOf(regions), edge.source(), edge.stale(), edge.confirmed()));
     }
 
     /**

@@ -15,9 +15,30 @@ import java.util.Objects;
  * @param goals        one or more goal points; the search stops at the first one reached
  * @param accessPolicy the player's availability rules (built per request)
  * @param classCost    routing factor per road class (edges without a profile use 1.0)
+ * @param startSides   when the policy blocks the start edge: which of its two parts, from the start
+ *                     point to each node, the player may still walk (live test 2026-10-08, N6); null
+ *                     = the whole start edge follows the policy
  */
 public record RouteRequest(SnapPoint start, List<SnapPoint> goals, AccessPolicy accessPolicy,
-                           Map<RoadClass, Double> classCost) {
+                           Map<RoadClass, Double> classCost, StartSides startSides) {
+
+    /**
+     * The open parts of a blocked start edge: the gate or the domain edge lies on one side of the
+     * player, the other side can still be walked to its node.
+     *
+     * @param towardFrom the part from the start point back to the edge's From node is open
+     * @param towardTo   the part from the start point on to the edge's To node is open
+     */
+    public record StartSides(boolean towardFrom, boolean towardTo) {
+        /** Whether the part walked in this direction ({@code forward} = towards To) is open. */
+        public boolean open(boolean forward) {
+            return forward ? towardTo : towardFrom;
+        }
+    }
+
+    public RouteRequest(SnapPoint start, List<SnapPoint> goals, AccessPolicy accessPolicy, Map<RoadClass, Double> classCost) {
+        this(start, goals, accessPolicy, classCost, null);
+    }
 
     public RouteRequest {
         Objects.requireNonNull(start, "start");
@@ -42,10 +63,23 @@ public record RouteRequest(SnapPoint start, List<SnapPoint> goals, AccessPolicy 
     }
 
     public RouteRequest withPolicy(AccessPolicy policy) {
-        return new RouteRequest(start, goals, policy, classCost);
+        return new RouteRequest(start, goals, policy, classCost, startSides);
     }
 
+    /** A new start drops the start sides (they belong to the old start point). */
     public RouteRequest withStart(SnapPoint newStart) {
-        return new RouteRequest(newStart, goals, accessPolicy, classCost);
+        return new RouteRequest(newStart, goals, accessPolicy, classCost, null);
+    }
+
+    public RouteRequest withStartSides(StartSides sides) {
+        return new RouteRequest(start, goals, accessPolicy, classCost, sides);
+    }
+
+    /**
+     * Whether the route's first step - the start edge walked in direction {@code forward} - is open
+     * by the start sides although the policy blocks the edge as a whole.
+     */
+    public boolean startStepOpenBySides(int edgeId, boolean forward) {
+        return startSides != null && edgeId == start.edgeId() && startSides.open(forward);
     }
 }

@@ -49,6 +49,10 @@ import net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot;
 import net.knightsandkings.knk.core.roads.route.CompositeAccessPolicy;
 import net.knightsandkings.knk.core.roads.route.DomainAvailability;
 import net.knightsandkings.knk.core.roads.route.GateAvailability;
+import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
+import net.knightsandkings.knk.core.roads.route.AccessPolicy;
+import net.knightsandkings.knk.core.roads.route.SnapPoint;
+import net.knightsandkings.knk.core.roads.route.RouteRequest;
 import net.knightsandkings.knk.core.roads.route.GateAvailability.GateView;
 import net.knightsandkings.knk.core.roads.route.RegionShape;
 import net.knightsandkings.knk.core.roads.route.StaticFlagsAvailability;
@@ -307,6 +311,42 @@ class NavigationServiceTest {
         ticks(NavigationService.RECHECK_TICKS + 1);
 
         assertDetour(service.sessionOf(playerId).orElseThrow());
+    }
+
+    @Test
+    void standingOnTheRoadOfAClosedGateTheOpenSideLeadsToTheDetour() {
+        // live test 2026-10-08 (N6): in front of the closed gate, on its road - the way back is open
+        gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.CLOSED);
+        List<RouteRequest.StartSides> asked = new ArrayList<>();
+        NavigationService.PolicyFactory withSides = new NavigationService.PolicyFactory() {
+            @Override
+            public AccessPolicy policyFor(Player p, RoadNetworkSnapshot snapshot) {
+                return policies.policyFor(p, snapshot);
+            }
+
+            @Override
+            public RouteRequest.StartSides startSides(Player p, RoadNetworkSnapshot snapshot, SnapPoint start, AccessPolicy policy) {
+                RouteRequest.StartSides sides = new RouteRequest.StartSides(true, false);
+                asked.add(sides);
+                return sides;
+            }
+        };
+        service = new NavigationService(new NavigationService.Deps(null, NavigationConfig.defaults(),
+            w -> network.snapshot, withSides, shapes, eligibility, hud, trail, Runnable::run, Runnable::run, tick::get,
+            events::add, Logger.getLogger("test")));
+        moveTo(140.5, 65, 0.5);
+
+        service.navigate(player, cinixKeep());
+
+        NavigationSession session = service.sessionOf(playerId).orElseThrow();
+        assertTrue(session.explanation().isEmpty(), "a full route, not a partial one");
+        assertEquals(NavigationTestNetwork.E_BC, session.route().orElseThrow().steps().get(0).edge().id());
+        assertFalse(session.route().orElseThrow().steps().get(0).forward(), "back towards B");
+        assertEquals(1, asked.size());
+        ticks(NavigationService.RECHECK_TICKS + 1);
+        assertTrue(messages().stream().noneMatch(m -> m.contains("No open route") || m.contains("arrived")
+            || m.contains("recalculating")), messages().toString());
+        assertTrue(service.isNavigating(playerId));
     }
 
     @Test
