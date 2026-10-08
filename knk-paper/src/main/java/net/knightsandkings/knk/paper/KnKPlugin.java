@@ -221,6 +221,28 @@ public class KnKPlugin extends JavaPlugin {
     private GateDoorsApi gateDoorsApi;
     private GateDoorRegionCaptureHandler gateDoorRegionCaptureHandler;
     private GateManager gateManager;
+    // Road navigation (KNG-27, Phase 3). regionDomainResolver / regionTracker were locals of onEnable
+    // before; the road builder (domain tagging) and navigation read them, so they are fields now (R7, R8).
+    private RegionDomainResolver regionDomainResolver;
+    private WorldGuardRegionTracker regionTracker;
+    private net.knightsandkings.knk.core.dataaccess.LocationsDataAccess locationsDataAccess;
+    private net.knightsandkings.knk.core.dataaccess.StreetsDataAccess streetsDataAccess;
+    private net.knightsandkings.knk.core.dataaccess.DistrictsDataAccess districtsDataAccess;
+    private net.knightsandkings.knk.core.dataaccess.StructuresDataAccess structuresDataAccess;
+    private net.knightsandkings.knk.paper.roads.RoadNetworkCache roadNetworkCache;
+    // Road navigation Phase 4 (/navigate); null while navigation is disabled.
+    private net.knightsandkings.knk.paper.navigation.NavigationService navigationService;
+    private net.knightsandkings.knk.paper.roads.LiveEdgeTags liveEdgeTags;
+    private net.knightsandkings.knk.paper.navigation.NavigationDestinations navigationDestinations;
+    private java.util.concurrent.ExecutorService navigationRouting;
+    // KNG-51 walkable last-mile paths; null while navigation.walk.enabled is false.
+    private net.knightsandkings.knk.paper.navigation.walk.WalkSnapshotService walkSnapshots;
+    private java.util.concurrent.ExecutorService walkSearches;
+    private net.knightsandkings.knk.paper.roads.RoadDirtyTracker roadDirtyTracker;
+    private net.knightsandkings.knk.paper.roads.RoadBuildQueue roadBuildQueue;
+    private net.knightsandkings.knk.paper.roads.RoadSurveyService roadSurveyService;
+    private net.knightsandkings.knk.paper.roads.RoadOverlayRenderer roadOverlayRenderer;
+    private net.knightsandkings.knk.paper.roads.RoadProposals roadProposals;
     private GateStateSyncTask gateStateSyncTask;
     private GateDisplayManager gateDisplayManager;
     private DistrictGateLoader districtGateLoader;
@@ -251,6 +273,8 @@ public class KnKPlugin extends JavaPlugin {
     /** What the teleport menu uses; set once the teleport engine started (after the menu registries lock). */
     private volatile net.knightsandkings.knk.paper.menu.content.TeleportMenuFeature.Teleports teleportMenuParts;
     private SiegeService siegeService;
+    /** The siege gate lockdowns (Phase 7a); read-only for road navigation (KNG-27 plan R24). Null without the gate system. */
+    private net.knightsandkings.knk.paper.siege.SiegeGateController siegeGates;
     private net.knightsandkings.knk.core.siege.SiegeMatchRecorder siegeMatchRecorder;
     /** Kept for the siege gate controller (Phase 7a), which respawns doors a match destroyed. */
     private HealthSystem gateHealthSystem;
@@ -544,6 +568,9 @@ public class KnKPlugin extends JavaPlugin {
             );
             this.permissionsDataAccess = dataAccessFactory.createPermissionsDataAccess(permissionsApi);
             this.knkPermissible = new KnkPermissible(cacheManager.getUserCache(), permissionsDataAccess);
+            // Gate pass-through (and navigation's gate verdicts) honour KnK's permission model as well as Bukkit's.
+            net.knightsandkings.knk.paper.gates.GatePassThroughRules.setPermissionCheck((player, node) ->
+                player.hasPermission(node) || (knkPermissible != null && knkPermissible.hasPermission(player, node)));
             // A grant or group change made in the web app shows in game within the 30 s cache time;
             // /knk cache refresh applies it at once.
             cacheManager.registerRefreshHook("permissions", permissionsDataAccess::invalidateAll);
@@ -749,7 +776,7 @@ public class KnKPlugin extends JavaPlugin {
             // Create domain resolver for mapping WG region IDs to domain entities. Built before the
             // enchantment runtime, whose Town/District combat safezones (KNG-11) read it; the
             // constructor does no I/O.
-            RegionDomainResolver regionDomainResolver = new RegionDomainResolver(
+            this.regionDomainResolver = new RegionDomainResolver(
                 townsQueryApi,
                 districtsQueryApi,
                 structuresQueryApi,
@@ -814,7 +841,7 @@ public class KnKPlugin extends JavaPlugin {
             );
             
             // Wire tracker and listener
-            WorldGuardRegionTracker regionTracker = new WorldGuardRegionTracker(
+            this.regionTracker = new WorldGuardRegionTracker(
                 regionTransitionService,
                 regionDomainResolver,
                 regionLookupExecutor,
@@ -893,6 +920,10 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().info("Region transition service initialized with domain resolver and gate control");
 
             initializeSiege();
+
+            // Road navigation (KNG-27) Phase 3: the admin side (survey, build, review); Phase 4: /navigate.
+            initializeRoads();
+            initializeNavigation();
 
             getLogger().info("KnightsAndKings Plugin Enabled!");
             
@@ -990,6 +1021,40 @@ public class KnKPlugin extends JavaPlugin {
         }
         if (lootboxRuntime != null) {
             lootboxRuntime.stop(); // removes the (non-persistent) box entities
+        }
+        // Road navigation (KNG-27): running surveys are discarded (nothing to spool), the build queue
+        // stops (progress lives in the API's BuiltAt), the dirty tracker flushes once synchronously
+        // when the API is reachable - all before apiClient.shutdown() below.
+        if (navigationService != null) {
+            navigationService.stop();
+        }
+        if (navigationRouting != null) {
+            navigationRouting.shutdownNow();
+        }
+        if (walkSnapshots != null) {
+            walkSnapshots.stop();
+        }
+        if (walkSearches != null) {
+            walkSearches.shutdownNow();
+        }
+        if (roadSurveyService != null) {
+            roadSurveyService.shutdown();
+        }
+        if (roadBuildQueue != null) {
+            roadBuildQueue.stop();
+        }
+        if (roadOverlayRenderer != null) {
+            roadOverlayRenderer.clear();
+        }
+        if (roadNetworkCache != null) {
+            roadNetworkCache.stop();
+        }
+        if (roadDirtyTracker != null) {
+            try {
+                roadDirtyTracker.stop();
+            } catch (RuntimeException e) {
+                getLogger().log(java.util.logging.Level.WARNING, "Road dirty-tracker shutdown flush failed", e);
+            }
         }
         if (discoveryFlushTask != null) {
             // Unsent candidates and grants still in flight go to the spool, replayed on the next start.
@@ -1091,6 +1156,237 @@ public class KnKPlugin extends JavaPlugin {
         if (discoveryListener != null) {
             discoveryListener.resync(player);
         }
+    }
+
+    /**
+     * Road navigation (KNG-27, docs/specs/navigation/DESIGN.md §4, §5, §7; plan Phase 3): the network cache,
+     * the dirty tracker, the build queue, the survey service and the overlay. Only when
+     * {@code navigation.enabled}; {@code /knk road} is registered regardless and answers "disabled" otherwise.
+     * Runs after {@code initializeSiege()} because the build job reads the gate manager's closed footprints
+     * and the survey/build code reads the region tracker's WorldGuard query (R8).
+     *
+     * <p>Note: {@code cacheManager} is constructed twice in onEnable (once early, once after the API client);
+     * the road code uses the field as it is here, after the second construction. Not fixed in this phase.
+     */
+    private void initializeRoads() {
+        net.knightsandkings.knk.paper.config.NavigationConfig navigation = config.navigation();
+        if (!navigation.enabled()) {
+            getLogger().info("Road navigation disabled (navigation.enabled: false)");
+            return;
+        }
+        java.util.concurrent.Executor mainThread = MenuService.mainThreadExecutor(this);
+        ensureDomainDataAccesses();
+
+        var queryApi = apiClient.getRoadNetworkQueryApi();
+        var commandApi = apiClient.getRoadNetworkCommandApi();
+        java.nio.file.Path roadsDirectory = new java.io.File(getDataFolder(), "roads").toPath();
+        this.roadNetworkCache = new net.knightsandkings.knk.paper.roads.RoadNetworkCache(
+            this, queryApi, roadsDirectory, regionDomainResolver, mainThread);
+
+        var dirtyTiles = new net.knightsandkings.knk.paper.roads.DirtyTiles();
+        this.roadDirtyTracker = new net.knightsandkings.knk.paper.roads.RoadDirtyTracker(
+            this, commandApi, dirtyTiles, () -> apiClient != null);
+        // The dirty tracker's "does this block matter" needs the profile materials and the road cells of the
+        // current snapshot; both follow every snapshot swap.
+        roadNetworkCache.addListener(world -> {
+            dirtyTiles.setRoadMaterials(roadNetworkCache.roadMaterialNames());
+            dirtyTiles.setRoadCells(net.knightsandkings.knk.paper.roads.DirtyTiles.RoadCells.of(roadNetworkCache.snapshot(world)));
+        });
+
+        this.roadOverlayRenderer = new net.knightsandkings.knk.paper.roads.RoadOverlayRenderer(this, roadNetworkCache::snapshot);
+
+        var regionIds = regionTracker.regionIds();
+        this.roadBuildQueue = new net.knightsandkings.knk.paper.roads.RoadBuildQueue(
+            this, navigation, queryApi, commandApi, roadNetworkCache, gateManager, regionIds, regionDomainResolver,
+            mainThread, net.knightsandkings.knk.paper.utils.TickBudget.server());
+        // Curated tiles (rev. 6 Part B, plan §5.7): builds of Curated tiles become proposals to review.
+        this.roadProposals = new net.knightsandkings.knk.paper.roads.RoadProposals(
+            queryApi, commandApi, roadNetworkCache, () -> navigation.builder().buildParameters(), mainThread);
+        roadBuildQueue.setProposals(roadProposals);
+        roadOverlayRenderer.setProposals(roadProposals::pendingItems);
+        this.roadSurveyService = new net.knightsandkings.knk.paper.roads.RoadSurveyService(
+            this, navigation, queryApi, commandApi, roadNetworkCache, regionIds, mainThread,
+            player -> cacheManager.getUserCache().getStale(player.getUniqueId())
+                .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null));
+        roadSurveyService.setGateCells(world -> net.knightsandkings.knk.paper.roads.GateCellsIndex.of(gateManager, world));
+
+        roadNetworkCache.start();
+        roadDirtyTracker.start();
+        roadBuildQueue.start();
+        roadSurveyService.start();
+        getLogger().info("Road navigation (admin side) initialized: /knk road, tile cache at " + roadsDirectory);
+    }
+
+    /**
+     * Road navigation Phase 4 (docs/specs/navigation/DESIGN.md §6): {@code /navigate}. Runs after
+     * {@link #initializeRoads()} and needs its cache; the destination catalogue, the per-player access
+     * policy (gates R5/R24/R39, pass-through R25, domains R6/R7/R8 with the region tracker's
+     * knk.region.bypass predicate), eligibility (R23), trail (R9/R11), HUD, the live re-route triggers
+     * (gate listener R4, siege observer R24, domain cache refresh, network snapshot swaps) and the
+     * listener that ends sessions on quit/death/world change/teleport.
+     */
+    private void initializeNavigation() {
+        if (roadNetworkCache == null || regionTracker == null || regionDomainResolver == null || gateManager == null
+                || domainCatalogDataAccess == null) {
+            getLogger().info("/navigate not started - road navigation is disabled or its services failed to initialize");
+            return;
+        }
+        net.knightsandkings.knk.paper.config.NavigationConfig navigation = config.navigation();
+        java.util.concurrent.Executor mainThread = MenuService.mainThreadExecutor(this);
+        ensureDomainDataAccesses();
+        net.knightsandkings.knk.core.dataaccess.FetchPolicy lookup = net.knightsandkings.knk.core.dataaccess.FetchPolicy.API_THEN_CACHE_REFRESH;
+        var domainLocations = new net.knightsandkings.knk.core.navigation.DomainLocationResolver(
+            id -> locationsDataAccess.getByIdAsync(id, lookup).thenApply(r -> r != null ? r.value() : java.util.Optional.empty()),
+            id -> townsDataAccess.getByIdAsync(id, lookup).thenApply(r -> r != null ? r.value() : java.util.Optional.empty()),
+            id -> districtsDataAccess.getByIdAsync(id, lookup).thenApply(r -> r != null ? r.value() : java.util.Optional.empty()),
+            id -> structuresDataAccess.getByIdAsync(id, lookup).thenApply(r -> r != null ? r.value() : java.util.Optional.empty()));
+        this.navigationDestinations = new net.knightsandkings.knk.paper.navigation.NavigationDestinations(
+            domainCatalogDataAccess, locationsDataAccess, domainLocations, roadNetworkCache::snapshot, System::currentTimeMillis);
+        navigationDestinations.refresh();
+        cacheManager.registerRefreshHook("navigation destinations", navigationDestinations::refresh);
+
+        var access = new net.knightsandkings.knk.paper.navigation.NavigationAccess(
+            gateManager, () -> siegeGates, regionTracker.regionIds(), regionDomainResolver,
+            this::hasRegionBypass, new net.knightsandkings.knk.core.regions.DomainAccessEvaluator());
+        var eligibility = new net.knightsandkings.knk.paper.navigation.NavigationEligibility(
+            uuid -> joinLoadingGuard != null && joinLoadingGuard.isLoading(uuid),
+            uuid -> adminFreezeManager != null && adminFreezeManager.isFrozen(uuid),
+            net.knightsandkings.knk.paper.navigation.NavigationEligibility.siegeMembers(() -> siegeService));
+        this.navigationRouting = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "knk-navigation-routing");
+            t.setDaemon(true);
+            return t;
+        });
+        net.knightsandkings.knk.paper.navigation.NavigationService.Walk walk = initializeWalkPaths(navigation, access);
+        var hud = new net.knightsandkings.knk.paper.navigation.NavigationHud(
+            new net.knightsandkings.knk.core.roads.route.EtaEstimator(navigation.sessionParameters().sprintSpeed()));
+        var trail = new net.knightsandkings.knk.paper.navigation.TrailRenderer(navigation.trail(),
+            net.knightsandkings.knk.paper.utils.TickBudget.server());
+        this.liveEdgeTags = startLiveEdgeTags(mainThread);
+        this.navigationService = new net.knightsandkings.knk.paper.navigation.NavigationService(
+            new net.knightsandkings.knk.paper.navigation.NavigationService.Deps(
+                this, navigation, liveEdgeTags::snapshot, access,
+                new net.knightsandkings.knk.paper.navigation.WorldGuardRegionShapes(), eligibility, hud, trail,
+                mainThread, navigationRouting, () -> (long) org.bukkit.Bukkit.getCurrentTick(),
+                event -> getServer().getPluginManager().callEvent(event), getLogger(), walk));
+
+        // Live changes (DESIGN §6.7, plan D13): gate state (R4, fired on any thread), siege lockdowns (R24),
+        // domain cache refreshes and network snapshot swaps all re-check the active routes on the main thread.
+        gateManager.addStateListener(doorId -> mainThread.execute(() -> navigationService.onGateChanged(doorId)));
+        if (siegeService != null) {
+            siegeService.addObserver(navigationService);
+        }
+        roadNetworkCache.addListener(navigationService::onNetworkChanged);
+        cacheManager.registerRefreshHook("navigation routes", navigationService::onAvailabilityChanged);
+        getServer().getPluginManager().registerEvents(
+            new net.knightsandkings.knk.paper.navigation.NavigationListener(navigationService), this);
+        navigationService.start();
+        getLogger().info("Road navigation (/navigate) initialized");
+    }
+
+    /**
+     * Live edge tags for the router (KNG-27 live test 2026-10-08, findings N3/N4): the WorldGuard regions and
+     * gate doors each edge passes now, added to the stored tags - a domain region made after the build or a
+     * gate a recording missed counts without a rebuild. Re-tagged when a world's network changes and every
+     * minute, a budgeted number of region lookups per tick; a change re-checks the active routes.
+     */
+    private net.knightsandkings.knk.paper.roads.LiveEdgeTags startLiveEdgeTags(java.util.concurrent.Executor mainThread) {
+        var regionIds = regionTracker.regionIds();
+        var budget = net.knightsandkings.knk.paper.utils.TickBudget.server();
+        var tags = new net.knightsandkings.knk.paper.roads.LiveEdgeTags(roadNetworkCache::snapshot,
+            new net.knightsandkings.knk.paper.roads.LiveEdgeTags.Probe() {
+                @Override
+                public java.util.Set<String> regionsAt(String world, int x, int feetY, int z) {
+                    org.bukkit.World w = org.bukkit.Bukkit.getWorld(world);
+                    return w == null || regionIds == null ? java.util.Set.of() : regionIds.at(w, x, feetY, z);
+                }
+
+                @Override
+                public net.knightsandkings.knk.core.roads.build.GateCells gates(String world) {
+                    return net.knightsandkings.knk.paper.roads.GateCellsIndex.of(gateManager, world);
+                }
+            },
+            () -> budget.perTick(net.knightsandkings.knk.paper.roads.LiveEdgeTags.LOOKUPS_PER_TICK,
+                net.knightsandkings.knk.paper.roads.LiveEdgeTags.LOOKUPS_PER_TICK_LAGGING),
+            task -> org.bukkit.Bukkit.getScheduler().runTaskAsynchronously(this, task), mainThread,
+            world -> {
+                if (navigationService != null) {
+                    navigationService.onNetworkChanged(world);
+                }
+            },
+            regions -> regionDomainResolver.warmCache(regions), System::currentTimeMillis);
+        roadNetworkCache.addListener(tags::refresh);
+        org.bukkit.Bukkit.getScheduler().runTaskTimer(this, tags::tick, 1L, 1L);
+        org.bukkit.Bukkit.getScheduler().runTaskTimer(this,
+            () -> tags.refreshAll(org.bukkit.Bukkit.getWorlds().stream().map(org.bukkit.World::getName).toList()),
+            net.knightsandkings.knk.paper.roads.LiveEdgeTags.INTERVAL_TICKS, net.knightsandkings.knk.paper.roads.LiveEdgeTags.INTERVAL_TICKS);
+        return tags;
+    }
+
+    /**
+     * KNG-51 (docs/specs/navigation/LAST_MILE_PATHFINDING.md §3, §8): walkable paths for direct mode -
+     * the shared chunk capture (main thread, tick budget, TTL cache), the player's gate/door/region
+     * access and one stateless search on its own executor of {@code max-concurrent-searches} threads
+     * (not the road router's single thread: a walk search may wait for domain lookups). Null - straight
+     * lines, exactly as before KNG-51 - when {@code navigation.walk.enabled} is false (the kill switch).
+     */
+    private net.knightsandkings.knk.paper.navigation.NavigationService.Walk initializeWalkPaths(
+            net.knightsandkings.knk.paper.config.NavigationConfig navigation,
+            net.knightsandkings.knk.paper.navigation.NavigationAccess access) {
+        if (!navigation.walk().enabled()) {
+            getLogger().info("Walkable navigation paths disabled (navigation.walk.enabled: false) - direct mode draws straight lines");
+            return null;
+        }
+        this.walkSnapshots = new net.knightsandkings.knk.paper.navigation.walk.WalkSnapshotService(
+            navigation.passabilityRules(net.knightsandkings.knk.paper.roads.ChunkSnapshotSurfaceGrid.bukkitCollidable()),
+            navigation.walk(), net.knightsandkings.knk.paper.utils.TickBudget.server(), System::currentTimeMillis);
+        walkSnapshots.start(this);
+        java.util.concurrent.atomic.AtomicInteger walkThreads = new java.util.concurrent.atomic.AtomicInteger();
+        this.walkSearches = Executors.newFixedThreadPool(navigation.walk().maxConcurrentSearches(), r -> {
+            Thread t = new Thread(r, "knk-navigation-walk-" + walkThreads.incrementAndGet());
+            t.setDaemon(true);
+            return t;
+        });
+        var preparer = net.knightsandkings.knk.paper.navigation.walk.WalkLegPreparer.server(walkSnapshots,
+            net.knightsandkings.knk.paper.navigation.walk.WorldGuardWalkAccess.factory(access), navigation.walk(), gateManager);
+        return new net.knightsandkings.knk.paper.navigation.NavigationService.Walk(preparer,
+            new net.knightsandkings.knk.core.roads.walk.WalkSearch(), walkSearches);
+    }
+
+    /**
+     * R18 (road navigation plan §2): the Location/Street/District/Structure data accesses were never
+     * constructed on trunk before KNG-17 and KNG-27; both build them here, once, as fields - /spawn
+     * (KNG-17) and the road code share them. Safe to call more than once.
+     */
+    private void ensureDomainDataAccesses() {
+        if (locationsDataAccess == null) {
+            locationsDataAccess = dataAccessFactory.createLocationsDataAccess(config.cache().ttl(), locationsQueryApi);
+        }
+        if (streetsDataAccess == null) {
+            // CacheManager has no street cache (streets were never read by the plugin before): one here.
+            streetsDataAccess = dataAccessFactory.createStreetsDataAccess(
+                new net.knightsandkings.knk.core.cache.StreetCache(config.cache().ttl()), streetsQueryApi);
+        }
+        if (districtsDataAccess == null) {
+            districtsDataAccess = dataAccessFactory.createDistrictsDataAccess(cacheManager.getDistrictCache(), districtsQueryApi);
+        }
+        if (structuresDataAccess == null) {
+            structuresDataAccess = dataAccessFactory.createStructuresDataAccess(cacheManager.getStructureCache(), structuresQueryApi);
+        }
+    }
+
+    /** The road network cache (null while navigation is disabled); Phase 4's /navigate reads it. */
+    public net.knightsandkings.knk.paper.roads.RoadNetworkCache getRoadNetworkCache() {
+        return roadNetworkCache;
+    }
+
+    /** The WorldGuard region tracker (R8: its {@code regionIds()} is the shared region lookup). */
+    public WorldGuardRegionTracker getRegionTracker() {
+        return regionTracker;
+    }
+
+    public RegionDomainResolver getRegionDomainResolver() {
+        return regionDomainResolver;
     }
 
     /** Domain discovery's exclusions; null when discovery is disabled. */
@@ -1318,6 +1614,25 @@ public class KnKPlugin extends JavaPlugin {
                     }
                 );
             }
+            // Road navigation (KNG-27): /knk road …, node knk.admin.road. registerCommands() runs before
+            // initializeRoads(), so every service is read lazily; a null one means navigation is disabled.
+            var roadAdmin = new net.knightsandkings.knk.paper.roads.RoadAdminCommand(
+                apiClient.getRoadNetworkQueryApi(), apiClient.getRoadNetworkCommandApi(), streetsQueryApi,
+                MenuService.mainThreadExecutor(this),
+                (player, node) -> knkPermissible != null && knkPermissible.hasPermission(player, node),
+                () -> roadNetworkCache, () -> roadDirtyTracker, () -> roadOverlayRenderer,
+                () -> roadSurveyService, () -> roadBuildQueue);
+            roadAdmin.setNavigation(() -> navigationService, () -> navigationDestinations);
+            roadAdmin.setProposals(() -> roadProposals);
+            roadAdmin.setLiveTags(() -> liveEdgeTags);
+            knkAdminCommand.registerSubcommand(
+                net.knightsandkings.knk.paper.roads.RoadAdminCommand.metadata(), roadAdmin, roadAdmin::complete);
+            // Road navigation Phase 4: /navigate (/nav), DESIGN §6.1. The services are read lazily - they
+            // exist only when navigation.enabled and the road cache started (initializeNavigation).
+            registerTabCommand("navigate", new net.knightsandkings.knk.paper.navigation.NavigateCommand(
+                () -> navigationService, () -> navigationDestinations,
+                (player, node) -> knkPermissible != null && knkPermissible.hasPermission(player, node),
+                MenuService.mainThreadExecutor(this)));
             knkAdminCommand.setCommandPermissions(commandPermissions());
             knkCommand.setExecutor(knkAdminCommand);
             knkCommand.setTabCompleter(knkAdminCommand);
@@ -1562,12 +1877,14 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().warning("/spawn not available - the API client or caches failed to initialize");
             return null;
         }
+        // R18 (road navigation): one instance of each domain data access, shared with /navigate.
+        ensureDomainDataAccesses();
         this.spawnDestinationResolver = net.knightsandkings.knk.paper.teleport.SpawnDestinationResolver.create(
             apiClient.getGameSettingsQueryApi(),
-            dataAccessFactory.createLocationsDataAccess(config.cache().ttl(), locationsQueryApi),
+            locationsDataAccess,
             townsDataAccess,
-            dataAccessFactory.createDistrictsDataAccess(cacheManager.getDistrictCache(), districtsQueryApi),
-            dataAccessFactory.createStructuresDataAccess(cacheManager.getStructureCache(), structuresQueryApi),
+            districtsDataAccess,
+            structuresDataAccess,
             org.bukkit.Bukkit::getWorld,
             () -> org.bukkit.Bukkit.getWorlds().isEmpty() ? null : org.bukkit.Bukkit.getWorlds().get(0)
         );
@@ -1667,6 +1984,18 @@ public class KnKPlugin extends JavaPlugin {
      * Bypass: knk.region.bypass (also carried by a staff teleport, docs/specs/teleport/DESIGN.md §4 D11) and
      * WorldGuard's own region bypass. Owners and members of a region pass it.
      */
+    /**
+     * {@code knk.region.bypass}, also carried by a staff teleport (docs/specs/teleport/DESIGN.md §4 D11):
+     * who ignores domain AllowEntry/AllowExit - at the border (KNG-56) and in navigation's routes and
+     * walk paths alike.
+     */
+    private boolean hasRegionBypass(org.bukkit.entity.Player player) {
+        String bypassNode = net.knightsandkings.knk.paper.teleport.TeleportNodes.REGION_BYPASS;
+        return player != null
+            && ((knkPermissible != null && knkPermissible.hasPermission(player, bypassNode))
+                || (teleportService != null && teleportService.hasInFlightBypass(player.getUniqueId(), bypassNode)));
+    }
+
     private void wireDomainAccess() {
         if (!net.knightsandkings.knk.paper.regions.access.DomainAccessFlags.registered()) {
             getLogger().severe("[KnK Access] Domain access flags are not registered with WorldGuard; "
@@ -1685,10 +2014,7 @@ public class KnKPlugin extends JavaPlugin {
             System::currentTimeMillis,
             task -> org.bukkit.Bukkit.getScheduler().runTask(this, task));
 
-        String bypassNode = net.knightsandkings.knk.paper.teleport.TeleportNodes.REGION_BYPASS;
-        domainAccess.setBypass(player ->
-            (knkPermissible != null && knkPermissible.hasPermission(player, bypassNode))
-                || (teleportService != null && teleportService.hasInFlightBypass(player.getUniqueId(), bypassNode)));
+        domainAccess.setBypass(this::hasRegionBypass);
         domainAccess.setEnforcer(new net.knightsandkings.knk.paper.regions.access.DomainAccessService.Enforcer() {
             @Override
             public void sendToSpawn(org.bukkit.entity.Player player) {
@@ -2148,6 +2474,7 @@ public class KnKPlugin extends JavaPlugin {
         if (gateManager != null && gateHealthSystem != null) {
             var siegeGates = new net.knightsandkings.knk.paper.siege.SiegeGateController(
                 this, gateManager, gateHealthSystem, apiClient.getSiegeGatesCommandApi());
+            this.siegeGates = siegeGates;
             siegeService.addObserver(siegeGates);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeGateListener(siegeGates, gateManager), this);
             siegeGates.recoverOnStartup();
@@ -2179,6 +2506,11 @@ public class KnKPlugin extends JavaPlugin {
 
     public SiegeService getSiegeService() {
         return siegeService;
+    }
+
+    /** The siege gate controller (read-only use: locked gates, non-member carry rule); null when siege or gates didn't start. */
+    public net.knightsandkings.knk.paper.siege.SiegeGateController getSiegeGates() {
+        return siegeGates;
     }
 
     /**

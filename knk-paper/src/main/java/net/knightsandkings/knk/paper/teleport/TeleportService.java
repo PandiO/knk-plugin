@@ -27,7 +27,7 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerTeleportEvent.TeleportCause;
 
-import net.knightsandkings.knk.core.teleport.BlockProbe;
+import net.knightsandkings.knk.core.util.BlockProbe;
 import net.knightsandkings.knk.core.teleport.CombatTagBook;
 import net.knightsandkings.knk.core.teleport.SafeLocationFinder;
 import net.knightsandkings.knk.core.teleport.TeleportCooldowns;

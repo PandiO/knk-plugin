@@ -568,6 +568,7 @@ public class GateCommand implements CommandExecutor {
         gate.setIsDestroyed(false);
         persistHealthChange(gate);
         persistState(gate);
+        gateManager.fireStateChanged(gate.getId()); // R4: navigation re-checks routes through this door
         sender.sendMessage(ChatColor.GREEN + "Repaired gate '" + gate.getName() + "'. Health: " +
                 gate.getHealthCurrent() + "/" + gate.getHealthMax());
 
@@ -621,6 +622,7 @@ public class GateCommand implements CommandExecutor {
 
         gate.setIsActive(!gate.isActive());
         persistOperationalSettings(gate);
+        gateManager.fireStateChanged(gate.getId()); // R4
         sender.sendMessage(ChatColor.GREEN + "Gate '" + gate.getName() + "' active: " + gate.isActive());
         return true;
     }

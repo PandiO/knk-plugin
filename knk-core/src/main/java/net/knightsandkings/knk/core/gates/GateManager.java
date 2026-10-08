@@ -12,8 +12,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -34,6 +36,7 @@ public class GateManager {
     private final Map<Integer, CachedGateDoor> gateCache;
     private final Map<Integer, CachedGateStructure> structureCache;
     private final Map<Integer, Consumer<AnimationState>> animationCompletionCallbacks;
+    private final List<GateStateListener> stateListeners = new CopyOnWriteArrayList<>();
     private final GateSpatialIndex spatialIndex;
     private Supplier<CompletableFuture<Void>> reloadAction;
 
@@ -103,6 +106,44 @@ public class GateManager {
         if (callback != null) {
             callback.accept(state);
         }
+        fireStateChanged(gateId);
+    }
+
+    // === Multicast state listeners (R4) ===
+
+    /**
+     * Register a permanent observer of door state changes (see {@link GateStateListener} for
+     * when it fires and on which thread). Adding the same listener twice registers it once.
+     */
+    public void addStateListener(GateStateListener listener) {
+        if (listener != null && !stateListeners.contains(listener)) {
+            stateListeners.add(listener);
+        }
+    }
+
+    public void removeStateListener(GateStateListener listener) {
+        if (listener != null) {
+            stateListeners.remove(listener);
+        }
+    }
+
+    /**
+     * Tell every registered {@link GateStateListener} that a door's state may have changed.
+     * Called by this class after each of its own mutations and, from knk-paper, after the gate
+     * mutations that happen outside it (HealthSystem destroy/respawn, GateAnimationTask jam,
+     * GateCommand toggles). A listener that throws is logged and skipped so it can't stall the
+     * animation task or starve the other listeners.
+     *
+     * @param gateId the door whose state changed
+     */
+    public void fireStateChanged(int gateId) {
+        for (GateStateListener listener : stateListeners) {
+            try {
+                listener.gateStateChanged(gateId);
+            } catch (RuntimeException e) {
+                LOGGER.log(Level.WARNING, "Gate state listener failed for gate " + gateId, e);
+            }
+        }
     }
 
     /**
@@ -128,6 +169,7 @@ public class GateManager {
 
         LOGGER.info("Cached gate: " + gate.getName() + " (ID: " + gate.getId() +
                    ") with " + gate.getBlocks().size() + " blocks");
+        fireStateChanged(gate.getId());
     }
 
     /**
@@ -142,6 +184,23 @@ public class GateManager {
             return;
         }
         structureCache.put(structure.getId(), structure);
+    }
+
+    /**
+     * World positions of a gate's door blocks in its closed position (animation frame 0, the
+     * frame {@code forceGateState(id, false)} and a finished closing animation rest at), regardless
+     * of the gate's current state. This is the footprint a road build tags as gate cells (plan D9:
+     * the spatial index only holds the *current* frame, so an open gate would be missed there).
+     *
+     * @param gateId gate (door) ID
+     * @return the closed-frame block positions, or an empty list for an unknown gate
+     */
+    public List<Vector> closedFootprint(int gateId) {
+        CachedGateDoor gate = gateCache.get(gateId);
+        if (gate == null) {
+            return List.of();
+        }
+        return doorBlockPositions(gate, 0);
     }
 
     /**
@@ -283,6 +342,7 @@ public class GateManager {
         gate.setAnimationStartTime(System.currentTimeMillis());
 
         LOGGER.info("Opening gate: " + gate.getName() + " (ID: " + gateId + ")");
+        fireStateChanged(gateId);
         return true;
     }
 
@@ -319,6 +379,7 @@ public class GateManager {
         gate.setAnimationStartTime(System.currentTimeMillis());
 
         LOGGER.info("Closing gate: " + gate.getName() + " (ID: " + gateId + ")");
+        fireStateChanged(gateId);
         return true;
     }
 
@@ -371,6 +432,7 @@ public class GateManager {
         }
 
         LOGGER.info("Forced gate " + gate.getName() + " to " + (isOpened ? "OPEN" : "CLOSED"));
+        fireStateChanged(gateId);
     }
 
     /**

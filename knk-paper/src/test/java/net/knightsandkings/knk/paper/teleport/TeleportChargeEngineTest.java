@@ -8,7 +8,7 @@ import net.knightsandkings.knk.core.domain.teleport.TeleportChargeResult;
 import net.knightsandkings.knk.core.domain.teleport.TeleportRefundResult;
 import net.knightsandkings.knk.core.ports.api.TeleportDestinationsCommandApi;
 import net.knightsandkings.knk.core.ports.api.TeleportDestinationsQueryApi;
-import net.knightsandkings.knk.core.teleport.BlockProbe;
+import net.knightsandkings.knk.core.util.BlockProbe;
 import net.knightsandkings.knk.core.teleport.TeleportCharger;
 import net.knightsandkings.knk.core.teleport.TeleportDenial;
 import net.knightsandkings.knk.core.teleport.TeleportKind;

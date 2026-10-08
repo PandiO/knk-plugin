@@ -268,11 +268,8 @@ public final class SiegeGateController implements SiegeMatchObserver {
      */
     public boolean tryNonMemberPassThrough(Player player, CachedGateDoor door) {
         Lockdown lockdown = byGate.get(door.getGateStructureId());
-        if (lockdown == null || passThrough == null || lockdown.runtime.isMember(player.getUniqueId())) return false;
-        StructureSnapshot snapshot = lockdown.snapshots.get(door.getGateStructureId());
-        if (snapshot == null) return false;
-        boolean wasOpen = snapshot.doors().stream().anyMatch(d -> d.gateDoorId() == door.getId() && d.opened() && !d.destroyed());
-        if (!wasOpen || door.getCurrentState() != AnimationState.CLOSED) return false;
+        if (!canCarryNonMember(door) || lockdown.runtime.isMember(player.getUniqueId())) return false;
+        if (!wasOpenBeforeLockdown(lockdown, door) || door.getCurrentState() != AnimationState.CLOSED) return false;
         passThrough.dispatch(door, player, GatePassThroughMethod.TELEPORT);
         return true;
     }
@@ -284,8 +281,31 @@ public final class SiegeGateController implements SiegeMatchObserver {
      */
     public void carryNonMemberThrough(Player player, CachedGateDoor door) {
         Lockdown lockdown = byGate.get(door.getGateStructureId());
-        if (lockdown == null || passThrough == null || lockdown.runtime.isMember(player.getUniqueId())) return;
+        if (!canCarryNonMember(door) || lockdown.runtime.isMember(player.getUniqueId())) return;
         passThrough.dispatch(door, player, GatePassThroughMethod.TELEPORT);
+    }
+
+    /**
+     * Read-only (road navigation plan §2 R39, D2): would the siege's own non-member rule carry a
+     * non-member through this locked door? True when its structure is under an applied lockdown
+     * and the pass-through service is wired, and - with {@code NonMemberGateView = PassThroughOnly} -
+     * the door was open (and not destroyed) before the lockdown; with the default
+     * {@code PreLockdownView} non-members walk through whatever they see removed. Membership is the
+     * caller's check (a member gets no carry). The two carry paths above use this; navigation's
+     * {@code GateAvailability} reads it as {@code siegeCarries}. Main thread.
+     */
+    public boolean canCarryNonMember(CachedGateDoor door) {
+        Lockdown lockdown = byGate.get(door.getGateStructureId());
+        if (lockdown == null || passThrough == null) return false;
+        SiegeNonMemberGateView mode = lockdown.runtime.machine().configuration().nonMemberGateView();
+        return mode == SiegeNonMemberGateView.PRE_LOCKDOWN_VIEW || wasOpenBeforeLockdown(lockdown, door);
+    }
+
+    /** The lockdown's snapshot says this door stood open (and not destroyed) when the lockdown began. */
+    private static boolean wasOpenBeforeLockdown(Lockdown lockdown, CachedGateDoor door) {
+        StructureSnapshot snapshot = lockdown.snapshots.get(door.getGateStructureId());
+        if (snapshot == null) return false;
+        return snapshot.doors().stream().anyMatch(d -> d.gateDoorId() == door.getId() && d.opened() && !d.destroyed());
     }
 
     /** The lobby display name holding a locked gate, for messages. */

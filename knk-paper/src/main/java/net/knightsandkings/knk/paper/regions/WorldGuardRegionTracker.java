@@ -21,12 +21,8 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
 import org.bukkit.plugin.Plugin;
 
-import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import net.kyori.adventure.text.Component;
 import com.sk89q.worldguard.WorldGuard;
-import com.sk89q.worldguard.protection.ApplicableRegionSet;
-import com.sk89q.worldguard.protection.regions.ProtectedRegion;
-import com.sk89q.worldguard.protection.regions.RegionQuery;
 
 import net.knightsandkings.knk.core.regions.RegionTransitionDecision;
 import net.knightsandkings.knk.core.regions.RegionDomainResolver;
@@ -54,6 +50,7 @@ import net.knightsandkings.knk.paper.utils.ColorOptions;
  * so a move the tracker never saw can't make it describe the wrong border.
  */
 public class WorldGuardRegionTracker {
+    private final RegionIds regionIds;
     private final Function<Location, Set<String>> regionLookup;
     private final RegionTransitionService transitionService;
     private final RegionDomainResolver regionResolver;
@@ -71,7 +68,7 @@ public class WorldGuardRegionTracker {
     private static final long FAILED_LOOKUP_COOLDOWN_MS = 30000;  // 30 second cooldown
 
     public WorldGuardRegionTracker(RegionTransitionService transitionService, RegionDomainResolver regionResolver, Executor lookupExecutor, Plugin plugin, Logger logger, boolean enableConsoleLogging) {
-        this(worldGuardRegionLookup(), transitionService, regionResolver, lookupExecutor,
+        this(new RegionIds(), transitionService, regionResolver, lookupExecutor,
             plugin != null ? task -> Bukkit.getScheduler().runTask(plugin, task) : task -> { },
             event -> Bukkit.getPluginManager().callEvent(event), logger, enableConsoleLogging);
     }
@@ -92,6 +89,23 @@ public class WorldGuardRegionTracker {
     WorldGuardRegionTracker(Function<Location, Set<String>> regionLookup, RegionTransitionService transitionService,
                             RegionDomainResolver regionResolver, Executor lookupExecutor, Executor mainThread,
                             Consumer<Event> eventDispatcher, Logger logger, boolean enableConsoleLogging) {
+        this(null, regionLookup, transitionService, regionResolver, lookupExecutor, mainThread, eventDispatcher,
+            logger, enableConsoleLogging);
+    }
+
+    /** The server's tracker: region ids through the shared {@link RegionIds} (R8). */
+    private WorldGuardRegionTracker(RegionIds regionIds, RegionTransitionService transitionService,
+                                    RegionDomainResolver regionResolver, Executor lookupExecutor, Executor mainThread,
+                                    Consumer<Event> eventDispatcher, Logger logger, boolean enableConsoleLogging) {
+        this(regionIds, regionIds::at, transitionService, regionResolver, lookupExecutor, mainThread, eventDispatcher,
+            logger, enableConsoleLogging);
+    }
+
+    private WorldGuardRegionTracker(RegionIds regionIds, Function<Location, Set<String>> regionLookup,
+                                    RegionTransitionService transitionService, RegionDomainResolver regionResolver,
+                                    Executor lookupExecutor, Executor mainThread, Consumer<Event> eventDispatcher,
+                                    Logger logger, boolean enableConsoleLogging) {
+        this.regionIds = regionIds;
         this.regionLookup = regionLookup;
         this.transitionService = transitionService;
         this.regionResolver = regionResolver;
@@ -102,19 +116,6 @@ public class WorldGuardRegionTracker {
         this.enableConsoleLogging = enableConsoleLogging;
     }
 
-    private static Function<Location, Set<String>> worldGuardRegionLookup() {
-        RegionQuery regionQuery = WorldGuard.getInstance().getPlatform().getRegionContainer().createQuery();
-        return bukkitLocation -> {
-            com.sk89q.worldedit.util.Location wgLoc = BukkitAdapter.adapt(bukkitLocation);
-            ApplicableRegionSet set = regionQuery.getApplicableRegions(wgLoc);
-
-            Set<String> names = new HashSet<>();
-            for (ProtectedRegion region : set) {
-                names.add(region.getId());
-            }
-            return names;
-        };
-    }
 
     /**
      * Handle a player's move between WorldGuard regions (one that WorldGuard allowed).
@@ -249,11 +250,17 @@ public class WorldGuardRegionTracker {
         return decision;
     }
 
+    /** The region ids at a location (R8: delegates to {@link RegionIds#at}). */
     private Set<String> getRegionNamesAt(Location bukkitLocation) {
         if (bukkitLocation == null || bukkitLocation.getWorld() == null) {
             return Collections.emptySet();
         }
         return regionLookup.apply(bukkitLocation);
+    }
+
+    /** The shared region-id lookup, for the road builder and navigation (R8); null in the test seam. */
+    public RegionIds regionIds() {
+        return regionIds;
     }
 
     /**

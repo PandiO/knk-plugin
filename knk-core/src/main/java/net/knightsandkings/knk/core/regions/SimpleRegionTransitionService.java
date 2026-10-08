@@ -9,6 +9,7 @@ import java.util.function.Consumer;
 import java.util.logging.Logger;
 
 import net.knightsandkings.knk.core.ports.gates.GateControlPort;
+import net.knightsandkings.knk.core.regions.DomainAccessEvaluator.Denial;
 import net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot;
 import net.knightsandkings.knk.core.regions.RegionDomainResolver.RegionSnapshot;
 
@@ -28,6 +29,7 @@ public class SimpleRegionTransitionService implements RegionTransitionService {
     private final RegionDomainResolver regionResolver;
     private final GateControlPort gateControlPort;
     private final Consumer<Set<DomainSnapshot>> onDomainsEntered;
+    private final DomainAccessEvaluator accessEvaluator = new DomainAccessEvaluator();
     private final boolean accessChecks;
 
     /**
@@ -138,6 +140,15 @@ public class SimpleRegionTransitionService implements RegionTransitionService {
         return decision;
     }
 
+    /**
+     * {@inheritDoc}
+     * <p>
+     * The rules are {@link DomainAccessEvaluator}'s (road navigation plan §2 R6): the same instance
+     * the border check uses decides here, so the teleport engine's up-front refusal, the region
+     * listener and the road router can never disagree. Bypasses ({@code knk.region.bypass}) are the
+     * caller's: {@code DomainAccessService}'s bypass for the border and teleports (KNG-56), and the
+     * same predicate as {@code DomainAvailability}'s bypass for navigation.
+     */
     @Override
     public RegionTransitionDecision previewAccess(Set<String> oldRegionIds, Set<String> newRegionIds) {
         Objects.requireNonNull(oldRegionIds, "oldRegionIds");
@@ -167,13 +178,14 @@ public class SimpleRegionTransitionService implements RegionTransitionService {
     /**
      * Check if entry is denied for any entered entity.
      * Returns a deny decision if any entry is not allowed; null otherwise.
-     * Priority: Town > District > Structure.
+     * The rule itself lives in {@link DomainAccessEvaluator#entry} (shared with the road router,
+     * plan R6); this only walks the entered domains and turns the first denial into a decision.
      */
     private RegionTransitionDecision checkEntryDenials(EnteredLeftSnapshot transition) {
-        // Check entered towns first (highest priority)
         for (DomainSnapshot domain : transition.enteredDomains()) {
-            if (domain.allowEntry() != null && !domain.allowEntry()) {
-                return RegionTransitionDecision.deny(RegionTransitionType.ENTER, "You are not allowed to enter " + domain.name() + ".");
+            Optional<Denial> denial = accessEvaluator.entry(domain);
+            if (denial.isPresent()) {
+                return RegionTransitionDecision.deny(denial.get().type(), denial.get().message());
             }
         }
 
@@ -183,26 +195,16 @@ public class SimpleRegionTransitionService implements RegionTransitionService {
     /**
      * Check if exit is denied for any left entity.
      * Returns a deny decision if any exit is not allowed; null otherwise.
+     * The rule itself lives in {@link DomainAccessEvaluator#exit} (shared with the road router,
+     * plan R6). The previous three identical passes over the left domains (commented as
+     * town/district/structure priority, but never filtering by type) collapse to one; the first
+     * denial in set order wins, as before.
      */
     private RegionTransitionDecision checkExitDenials(EnteredLeftSnapshot transition) {
-        // Check left towns first (highest priority)
-        for (DomainSnapshot town : transition.leftDomains()) {
-            if (town.allowExit() != null && !town.allowExit()) {
-                return RegionTransitionDecision.deny(RegionTransitionType.EXIT, "You are not allowed to leave " + town.name() + ".");
-            }
-        }
-
-        // Check left districts (second priority)
-        for (DomainSnapshot district : transition.leftDomains()) {
-            if (district.allowExit() != null && !district.allowExit()) {
-                return RegionTransitionDecision.deny(RegionTransitionType.EXIT, "You are not allowed to leave " + district.name() + ".");
-            }
-        }
-
-        // Check left structures (third priority)
-        for (DomainSnapshot structure : transition.leftDomains()) {
-            if (structure.allowExit() != null && !structure.allowExit()) {
-                return RegionTransitionDecision.deny(RegionTransitionType.EXIT, "You are not allowed to leave " + structure.name() + ".");
+        for (DomainSnapshot domain : transition.leftDomains()) {
+            Optional<Denial> denial = accessEvaluator.exit(domain);
+            if (denial.isPresent()) {
+                return RegionTransitionDecision.deny(denial.get().type(), denial.get().message());
             }
         }
 

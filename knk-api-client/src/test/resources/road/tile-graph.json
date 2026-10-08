@@ -1,0 +1,39 @@
+{
+  "tile": {
+    "id": 7, "world": "world", "tileX": 0, "tileZ": 0, "version": 3,
+    "builtAt": "2026-09-27T19:07:50.1234567", "builderVersion": 1, "dirty": false,
+    "cellCount": 10, "nodeCount": 3, "edgeCount": 3, "levelCount": 1,
+    "warnings": ["label conflict at edge 12: Market Street vs High Street"]
+  },
+  "nodes": [
+    { "id": 1, "world": "world", "x": 0, "y": 64, "z": 100, "tileId": 7, "kind": "Boundary", "source": "Detected", "name": null, "componentId": 1, "locked": false },
+    { "id": 2, "world": "world", "x": 200, "y": 64, "z": 100, "tileId": 7, "kind": "Junction", "source": "Detected", "name": "", "componentId": 1, "locked": false },
+    { "id": 3, "world": "world", "x": 300, "y": 65, "z": 120, "tileId": 7, "kind": "Anchor", "source": "Manual", "name": "North gate", "componentId": 1, "locked": true }
+  ],
+  "edges": [
+    {
+      "id": 11, "fromNodeId": 1, "toNodeId": 2, "tileId": 7, "world": "world",
+      "geometry": [[0, 64, 100], [100, 64, 101], [200, 64, 100]], "length": 200.5,
+      "minX": 0, "minY": 64, "minZ": 100, "maxX": 200, "maxY": 64, "maxZ": 101,
+      "avgWidth": 3.5, "profileId": 1, "streetId": 4, "streetSource": "Inferred", "costMultiplier": 1.0,
+      "flags": [], "gateDoorIds": [], "domainIds": [5], "regionIds": ["town_rivia"],
+      "source": "Detected", "status": "Ok"
+    },
+    {
+      "id": 12, "fromNodeId": 2, "toNodeId": 3, "tileId": 7, "world": "world",
+      "geometry": [[200, 64, 100], [300, 65, 120]], "length": 102.0,
+      "minX": 200, "minY": 64, "minZ": 100, "maxX": 300, "maxY": 65, "maxZ": 120,
+      "avgWidth": 2.0, "profileId": null, "streetId": null, "streetSource": "None", "costMultiplier": 1.5,
+      "flags": ["Oneway", "Closed"], "gateDoorIds": [9], "domainIds": [], "regionIds": [],
+      "source": "Recorded", "status": "Stale"
+    },
+    {
+      "id": 13, "fromNodeId": 1, "toNodeId": 40, "tileId": 7, "world": "world",
+      "geometry": [[0, 64, 100], [-1, 64, 100]], "length": 1.0,
+      "minX": -1, "minY": 64, "minZ": 100, "maxX": 0, "maxY": 64, "maxZ": 100,
+      "avgWidth": 1.0, "profileId": null, "streetId": null, "streetSource": "None", "costMultiplier": 1.0,
+      "flags": ["None"], "gateDoorIds": [], "domainIds": [], "regionIds": [],
+      "source": "Stitch", "status": "Ok"
+    }
+  ]
+}

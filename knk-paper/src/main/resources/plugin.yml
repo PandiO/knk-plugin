@@ -233,6 +233,14 @@ commands:
   back:
     description: "Teleport back to where you died, or were before a warp, teleport or /spawn (for a few minutes)"
     usage: "/back | /back <player> [-s]"
+
+  # Road navigation (KNG-27, docs/specs/navigation/DESIGN.md §6.1, Phase 4): a particle trail and HUD
+  # along the road network to a Location, Town/District/Structure, street or named road node.
+  # Node knk.navigate (default true) checked in NavigateCommand.
+  navigate:
+    description: "Guide yourself along the roads to a place, town, district, structure, street or road node"
+    usage: "/navigate <destination> [spawn|region] | /navigate stop | /navigate"
+    aliases: [nav]
   lootbox:
     description: "Lootboxes: help, and what a box can give (docs/specs/lootboxes/DESIGN.md §3.4)"
     usage: "/lootbox | /lootbox odds <category> [stars]"
@@ -280,6 +288,7 @@ permissions:
       knk.admin.tp: true
       knk.admin.discovery: true
       knk.admin.currency: true
+      knk.admin.road: true
 
   knk.admin.health:
     description: Access to /knk health
@@ -946,3 +955,17 @@ permissions:
       discovered and rewarded again (no claw-back), and see the tracker/spool. The same node gates
       the web app's discovery admin page. Also granted through the in-house permission system.
     default: false
+
+  knk.admin.road:
+    description: >-
+      /knk road - road navigation admin tools (KNG-27, docs/specs/navigation/DESIGN.md §7): survey
+      walks that learn road profiles, tile builds, the particle overlay, street labels, node/edge
+      fixes and seeds. The same node gates the web app's road admin pages. Also granted through the
+      in-house permission system.
+    default: false
+
+  knk.navigate:
+    description: >-
+      /navigate - guided routes along the road network (KNG-27, Phase 4). Everyone by default; the
+      in-house permission system can take it away per group.
+    default: true
