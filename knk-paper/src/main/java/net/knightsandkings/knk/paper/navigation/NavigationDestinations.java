@@ -38,7 +38,8 @@ import net.knightsandkings.knk.core.util.NamedTargets;
  * <p>The API part is loaded once and refreshed in the background every {@link #REFRESH_MILLIS}
  * (a refresh is started by the next call that finds it stale, never awaited: tab completion stays
  * synchronous). {@link #locate} turns a target into a routable {@link Destination}: a domain's
- * spawn Location through {@link DomainLocationResolver} (R20), or its region.
+ * spawn Location through {@link DomainLocationResolver} (R20), or its region - without a mode word,
+ * whichever the domain's {@link NavTarget#defaultMode() default} is (KNG-73).
  */
 public final class NavigationDestinations {
 
@@ -47,7 +48,10 @@ public final class NavigationDestinations {
     static final int PAGE_SIZE = 200;
     static final int MAX_PAGES = 25;
 
-    /** What the player asked for after the name: the domain's spawn Location, its region, or whatever it has. */
+    /**
+     * What the player asked for after the name: the domain's spawn Location, its region, or nothing
+     * ({@code DEFAULT}: the domain's configured default, {@link NavTarget#defaultMode()}).
+     */
     public enum Mode {
         DEFAULT,
         SPAWN,
@@ -178,8 +182,9 @@ public final class NavigationDestinations {
 
     /**
      * The target as a destination for a player in {@code playerWorld}: a Location's point; a domain's
-     * spawn Location (or its region with {@code region}, or when it has no Location); a street; a node.
-     * Any thread; completes on the API client's thread for domains.
+     * spawn Location or its region (as asked, else the domain's {@link NavTarget#defaultMode() default};
+     * the other one when it lacks the first); a street; a node. Any thread; completes on the API client's
+     * thread for domains.
      */
     public CompletableFuture<Located> locate(NavTarget target, Mode mode, String playerWorld) {
         switch (target.type()) {
@@ -205,7 +210,7 @@ public final class NavigationDestinations {
             }
             default -> {
                 return domainLocations.byType(target.type().word(), target.id())
-                    .thenApply(place -> place.map(p -> locateDomain(p, mode, playerWorld))
+                    .thenApply(place -> place.map(p -> locateDomain(p, mode, target.defaultMode(), playerWorld))
                         .orElse(Located.failed(Located.Failure.NOT_FOUND)))
                     .exceptionally(ex -> {
                         LOGGER.log(Level.WARNING, "[Navigation] Could not look up " + target + ": " + ex.getMessage());
@@ -216,14 +221,17 @@ public final class NavigationDestinations {
     }
 
     /**
-     * DESIGN §6.1: the Location unless {@code region} was asked; a domain without one falls back to its region.
-     * Without {@code spawn}, a player already inside the domain's region is already there (N9).
+     * DESIGN §6.1: the Location for {@code spawn}, the region for {@code region}; without either, the domain's
+     * {@code defaultMode} (SPAWN or REGION, KNG-73). A domain without a Location falls back to its region and
+     * the other way round. Without {@code spawn}, a player already inside the domain's region is already
+     * there (N9) - whichever the default is: a region goal is reached by standing in it.
      */
-    static Located locateDomain(DomainPlace place, Mode mode, String playerWorld) {
+    static Located locateDomain(DomainPlace place, Mode mode, Mode defaultMode, String playerWorld) {
         Optional<KnkLocation> location = place.location()
             .filter(l -> l.world() != null && l.x() != null && l.y() != null && l.z() != null);
         boolean hasRegion = place.wgRegionId() != null && !place.wgRegionId().isBlank();
-        if (mode != Mode.REGION && location.isPresent()) {
+        Mode wanted = mode != Mode.DEFAULT ? mode : defaultMode == Mode.REGION ? Mode.REGION : Mode.SPAWN;
+        if (wanted == Mode.SPAWN && location.isPresent()) {
             KnkLocation l = location.get();
             if (!l.world().equalsIgnoreCase(playerWorld)) {
                 return Located.failed(Located.Failure.OTHER_WORLD);
@@ -236,7 +244,7 @@ public final class NavigationDestinations {
             // Regions carry no world in the API; the player's world is tried (WorldGuard answers "unknown" otherwise).
             return Located.of(Destination.region(place.name(), playerWorld, place.wgRegionId()));
         }
-        if (mode == Mode.REGION && location.isPresent()) {
+        if (wanted == Mode.REGION && location.isPresent()) {
             KnkLocation l = location.get();
             if (!l.world().equalsIgnoreCase(playerWorld)) {
                 return Located.failed(Located.Failure.OTHER_WORLD);
@@ -263,7 +271,8 @@ public final class NavigationDestinations {
                 for (KnkDomainSummary domain : list) {
                     NavTarget.Type type = NavTarget.Type.ofDomainType(domain.domainType());
                     if (type != null && domain.id() != null && domain.name() != null && !domain.name().isBlank()) {
-                        out.add(NavTarget.domain(type, domain.id(), domain.name(), domain.domainType()));
+                        out.add(NavTarget.domain(type, domain.id(), domain.name(), domain.domainType(),
+                            domain.navigationDefault()));
                     }
                 }
                 return out;
