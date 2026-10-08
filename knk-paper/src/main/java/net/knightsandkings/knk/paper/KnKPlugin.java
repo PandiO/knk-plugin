@@ -232,6 +232,7 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.roads.RoadNetworkCache roadNetworkCache;
     // Road navigation Phase 4 (/navigate); null while navigation is disabled.
     private net.knightsandkings.knk.paper.navigation.NavigationService navigationService;
+    private net.knightsandkings.knk.paper.roads.LiveEdgeTags liveEdgeTags;
     private net.knightsandkings.knk.paper.navigation.NavigationDestinations navigationDestinations;
     private java.util.concurrent.ExecutorService navigationRouting;
     // KNG-51 walkable last-mile paths; null while navigation.walk.enabled is false.
@@ -1257,9 +1258,10 @@ public class KnKPlugin extends JavaPlugin {
             new net.knightsandkings.knk.core.roads.route.EtaEstimator(navigation.sessionParameters().sprintSpeed()));
         var trail = new net.knightsandkings.knk.paper.navigation.TrailRenderer(navigation.trail(),
             net.knightsandkings.knk.paper.utils.TickBudget.server());
+        this.liveEdgeTags = startLiveEdgeTags(mainThread);
         this.navigationService = new net.knightsandkings.knk.paper.navigation.NavigationService(
             new net.knightsandkings.knk.paper.navigation.NavigationService.Deps(
-                this, navigation, roadNetworkCache::snapshot, access,
+                this, navigation, liveEdgeTags::snapshot, access,
                 new net.knightsandkings.knk.paper.navigation.WorldGuardRegionShapes(), eligibility, hud, trail,
                 mainThread, navigationRouting, () -> (long) org.bukkit.Bukkit.getCurrentTick(),
                 event -> getServer().getPluginManager().callEvent(event), getLogger(), walk));
@@ -1276,6 +1278,45 @@ public class KnKPlugin extends JavaPlugin {
             new net.knightsandkings.knk.paper.navigation.NavigationListener(navigationService), this);
         navigationService.start();
         getLogger().info("Road navigation (/navigate) initialized");
+    }
+
+    /**
+     * Live edge tags for the router (KNG-27 live test 2026-10-08, findings N3/N4): the WorldGuard regions and
+     * gate doors each edge passes now, added to the stored tags - a domain region made after the build or a
+     * gate a recording missed counts without a rebuild. Re-tagged when a world's network changes and every
+     * minute, a budgeted number of region lookups per tick; a change re-checks the active routes.
+     */
+    private net.knightsandkings.knk.paper.roads.LiveEdgeTags startLiveEdgeTags(java.util.concurrent.Executor mainThread) {
+        var regionIds = regionTracker.regionIds();
+        var budget = net.knightsandkings.knk.paper.utils.TickBudget.server();
+        var tags = new net.knightsandkings.knk.paper.roads.LiveEdgeTags(roadNetworkCache::snapshot,
+            new net.knightsandkings.knk.paper.roads.LiveEdgeTags.Probe() {
+                @Override
+                public java.util.Set<String> regionsAt(String world, int x, int feetY, int z) {
+                    org.bukkit.World w = org.bukkit.Bukkit.getWorld(world);
+                    return w == null || regionIds == null ? java.util.Set.of() : regionIds.at(w, x, feetY, z);
+                }
+
+                @Override
+                public net.knightsandkings.knk.core.roads.build.GateCells gates(String world) {
+                    return net.knightsandkings.knk.paper.roads.GateCellsIndex.of(gateManager, world);
+                }
+            },
+            () -> budget.perTick(net.knightsandkings.knk.paper.roads.LiveEdgeTags.LOOKUPS_PER_TICK,
+                net.knightsandkings.knk.paper.roads.LiveEdgeTags.LOOKUPS_PER_TICK_LAGGING),
+            task -> org.bukkit.Bukkit.getScheduler().runTaskAsynchronously(this, task), mainThread,
+            world -> {
+                if (navigationService != null) {
+                    navigationService.onNetworkChanged(world);
+                }
+            },
+            regions -> regionDomainResolver.warmCache(regions), System::currentTimeMillis);
+        roadNetworkCache.addListener(tags::refresh);
+        org.bukkit.Bukkit.getScheduler().runTaskTimer(this, tags::tick, 1L, 1L);
+        org.bukkit.Bukkit.getScheduler().runTaskTimer(this,
+            () -> tags.refreshAll(org.bukkit.Bukkit.getWorlds().stream().map(org.bukkit.World::getName).toList()),
+            net.knightsandkings.knk.paper.roads.LiveEdgeTags.INTERVAL_TICKS, net.knightsandkings.knk.paper.roads.LiveEdgeTags.INTERVAL_TICKS);
+        return tags;
     }
 
     /**
@@ -1579,6 +1620,7 @@ public class KnKPlugin extends JavaPlugin {
                 () -> roadSurveyService, () -> roadBuildQueue);
             roadAdmin.setNavigation(() -> navigationService, () -> navigationDestinations);
             roadAdmin.setProposals(() -> roadProposals);
+            roadAdmin.setLiveTags(() -> liveEdgeTags);
             knkAdminCommand.registerSubcommand(
                 net.knightsandkings.knk.paper.roads.RoadAdminCommand.metadata(), roadAdmin, roadAdmin::complete);
             // Road navigation Phase 4: /navigate (/nav), DESIGN §6.1. The services are read lazily - they

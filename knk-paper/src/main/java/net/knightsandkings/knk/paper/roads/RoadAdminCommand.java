@@ -97,6 +97,7 @@ public class RoadAdminCommand implements SubcommandExecutor {
     private volatile Supplier<net.knightsandkings.knk.paper.navigation.NavigationDestinations> destinations = () -> null;
     /** Rev. 6 Part B (plan §5.7): proposals of curated tiles; null until navigation started. */
     private volatile Supplier<RoadProposals> proposals = () -> null;
+    private volatile Supplier<LiveEdgeTags> liveTags = () -> null;
 
     public RoadAdminCommand(RoadNetworkQueryApi queryApi, RoadNetworkCommandApi commandApi, StreetsQueryApi streetsQueryApi,
                             Executor mainThread, BiPredicate<Player, String> knkPermission,
@@ -1345,6 +1346,11 @@ public class RoadAdminCommand implements SubcommandExecutor {
         this.proposals = proposals == null ? () -> null : proposals;
     }
 
+    /** The live edge tags, for {@code /knk road status} (null until navigation starts). */
+    public void setLiveTags(Supplier<LiveEdgeTags> liveTags) {
+        this.liveTags = liveTags == null ? () -> null : liveTags;
+    }
+
     public void setNavigation(Supplier<net.knightsandkings.knk.paper.navigation.NavigationService> navigation,
                               Supplier<net.knightsandkings.knk.paper.navigation.NavigationDestinations> destinations) {
         this.navigation = navigation == null ? () -> null : navigation;
@@ -1441,6 +1447,10 @@ public class RoadAdminCommand implements SubcommandExecutor {
         net.knightsandkings.knk.paper.navigation.NavigationService nav = navigation.get();
         if (nav != null) {
             sender.sendMessage(RoadMessages.field("walk paths", nav.walkStatus()));
+        }
+        LiveEdgeTags tags = liveTags.get();
+        if (tags != null) {
+            sender.sendMessage(RoadMessages.field("live tags", tags.describe()));
         }
     }
 

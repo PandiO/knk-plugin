@@ -56,9 +56,11 @@ public final class RoadNetworkSnapshot {
     private final Set<String> regionIds;
     private final List<Integer> unresolvedEdgeIds;
     private final SegmentIndex segmentIndex;
+    private final int bucketSize;
 
     private RoadNetworkSnapshot(Builder b) {
         this.world = b.world;
+        this.bucketSize = b.bucketSize;
         this.nodes = List.copyOf(b.nodes.values());
         this.nodeById = Map.copyOf(b.nodes);
         List<RoadEdge> kept = new ArrayList<>(b.edges.size());
@@ -101,6 +103,21 @@ public final class RoadNetworkSnapshot {
 
     public static Builder builder(String world) {
         return new Builder(world);
+    }
+
+    /**
+     * The same network with every edge passed through {@code retag} (live world tags, finding N4 of the
+     * 2026-10-08 live test): nodes, profiles, streets and the bucket size are kept. Edges whose nodes
+     * were missing were dropped when this snapshot was built and stay dropped.
+     */
+    public RoadNetworkSnapshot retag(java.util.function.UnaryOperator<RoadEdge> retag) {
+        Builder b = builder(world).bucketSize(bucketSize).addNodes(nodes);
+        for (RoadEdge edge : edges) {
+            b.addEdge(Objects.requireNonNull(retag.apply(edge), "retag"));
+        }
+        profiles.values().forEach(b::addProfile);
+        streets.values().forEach(b::addStreet);
+        return b.build();
     }
 
     /** An empty network for a world (routing refuses everything). */
