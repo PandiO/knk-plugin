@@ -468,12 +468,10 @@ public class KnKPlugin extends JavaPlugin {
             worldTaskHandlerRegistry.registerHandler(kitScanHandler);
             worldTaskHandlerRegistry.registerHandler("KitScan", kitScanHandler);
 
-            // Start lightweight HTTP server for region rename callbacks (default port 8081)
-            int httpPort = 8081;
-            try {
-                httpPort = this.getConfig().getInt("region-http.port", 8081);
-            } catch (Exception ignored) { }
-            regionHttpServer = new RegionHttpServer(this, wgRegionIdHandler, httpPort);
+            // Start lightweight HTTP server for the API's region callbacks (region-http.bind-address/port,
+            // default 127.0.0.1:8081). With api.auth.api-key set, callers must send it as X-API-Key.
+            regionHttpServer = new RegionHttpServer(this, wgRegionIdHandler,
+                config.regionHttp().bindAddress(), config.regionHttp().port(), config.api().auth().apiKey());
             regionHttpServer.start();
 
             // Start temp region retention task (14 day retention policy; never deletes a region a domain uses)
