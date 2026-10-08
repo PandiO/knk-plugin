@@ -220,6 +220,11 @@ public final class NavigationMessages {
         return warn("No conventional path to " + name + " found.");
     }
 
+    /** Direct mode found no walkable way straight there, but the roads lead there (N13). */
+    public static Component roadsInstead(String name) {
+        return info("No walkable way straight to " + name + " - following the roads instead.");
+    }
+
     /** A partial route's blocking element opened: the full route is taken. */
     public static Component reopened(String name) {
         return good("The way to " + name + " is open again - following it now.");

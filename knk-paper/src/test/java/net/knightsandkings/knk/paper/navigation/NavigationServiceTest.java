@@ -773,7 +773,8 @@ class NavigationServiceTest {
             setup.run();
             clearInvocations(trail, player);
             NavigationService walking = walkService(NavigationConfig.defaults());
-            walking.navigate(player, well());
+            moveTo(40.5, 65, 60.5); // 60 blocks from any road: the roads cannot help either (N13)
+            walking.navigate(player, Destination.point("Well", NavigationTestNetwork.WORLD, 60.5, 65, 60.5));
             runSearches();
 
             assertEquals(NavigationService.DirectLeg.Status.NO_PATH, legStatus(walking));
@@ -787,6 +788,22 @@ class NavigationServiceTest {
             assertTrue(walking.isNavigating(playerId), "the leg stays; a door may open");
             walking.stop(player);
         }
+    }
+
+    @Test
+    void aNearbyTargetTheWalkSearchCannotReachIsReachedByTheRoads() {
+        // live test 2026-10-08 run 5 (A8/A9, N13): walking back and round by road reaches it
+        walkFinder = r -> WalkResult.noPath("target unreachable", 900);
+        NavigationService walking = walkService(NavigationConfig.defaults());
+
+        walking.navigate(player, well());
+        runSearches();
+
+        assertTrue(walking.isNavigating(playerId));
+        assertFalse(walking.isDirect(playerId), "a routed navigation now");
+        assertTrue(messages().stream().anyMatch(m -> m.contains("following the roads instead")), messages().toString());
+        assertTrue(messages().stream().noneMatch(m -> m.contains("No conventional path")), messages().toString());
+        assertTrue(walking.sessionOf(playerId).orElseThrow().route().isPresent());
     }
 
     @Test
@@ -819,8 +836,10 @@ class NavigationServiceTest {
             new double[] {12.5, 64, 6.5}));
         walkFinder = r -> WalkResult.noPath("target unreachable", 900, partial);
         NavigationService walking = walkService(NavigationConfig.defaults());
+        moveTo(40.5, 65, 60.5); // away from the roads, so they cannot help (N13)
+        Destination offRoad = Destination.point("Well", NavigationTestNetwork.WORLD, 60.5, 65, 60.5);
 
-        walking.navigate(player, well());
+        walking.navigate(player, offRoad);
         runSearches();
 
         assertEquals(NavigationService.DirectLeg.Status.WALKING, legStatus(walking));
@@ -834,7 +853,7 @@ class NavigationServiceTest {
 
         walkFinder = r -> WalkResult.fallback("expansion budget", 20000, partial);
         NavigationService budget = walkService(NavigationConfig.defaults());
-        budget.navigate(player, well());
+        budget.navigate(player, offRoad);
         runSearches();
         assertEquals(NavigationService.DirectLeg.Status.WALKING, legStatus(budget), "a budget run-out uses it too");
     }
