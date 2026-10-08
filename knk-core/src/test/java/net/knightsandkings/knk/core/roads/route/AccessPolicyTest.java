@@ -82,7 +82,7 @@ class AccessPolicyTest {
 
     @Test
     void closedGateIsBlockedWithTheGateNamed() {
-        EdgeVerdict v = gates(gate(AnimationState.CLOSED, false, false, false, false, false), true).check(gateEdge);
+        EdgeVerdict v = gates(gate(AnimationState.CLOSED, false, false, false, false, false), false).check(gateEdge);
         assertTrue(v.isBlocked());
         assertEquals("the West Gate is closed", v.message());
         assertEquals(EdgeVerdict.CauseType.GATE, v.cause().type());
@@ -100,6 +100,14 @@ class AccessPolicyTest {
         EdgeVerdict denied = gates(gate(AnimationState.CLOSED, false, false, true, false, false), false)
             .check(gateEdge);
         assertTrue(denied.isBlocked());
+    }
+
+    @Test
+    void aGateAdminPassesADoorWithoutPassThrough() {
+        // live test 2026-10-08 (N11): knk.gate.admin bypasses AllowPassThrough at the door, so the route does too
+        EdgeVerdict admin = gates(gate(AnimationState.CLOSED, false, false, false, false, false), true).check(gateEdge);
+        assertTrue(admin.isPassThrough(), admin.toString());
+        assertEquals("right-click the West Gate to pass", admin.message());
     }
 
     @Test
@@ -144,14 +152,15 @@ class AccessPolicyTest {
         Map<Integer, GateAvailability.GateView> views = Map.of(
             1, new GateAvailability.GateView(1, "North", AnimationState.CLOSED, false, false, true, false, false),
             2, new GateAvailability.GateView(2, "South", AnimationState.CLOSED, false, false, false, false, false));
-        GateAvailability policy = new GateAvailability(id -> Optional.ofNullable(views.get(id)), id -> true);
+        // the pass rule as on the server for a non-admin with the use node: only door 1 allows pass-through
+        GateAvailability policy = new GateAvailability(id -> Optional.ofNullable(views.get(id)), id -> id == 1);
         EdgeVerdict v = policy.check(twoDoors);
         assertTrue(v.isBlocked());
         assertEquals("the South is closed", v.message());
         Map<Integer, GateAvailability.GateView> both = Map.of(
             1, views.get(1),
             2, new GateAvailability.GateView(2, "South", AnimationState.OPEN, false, false, false, false, false));
-        assertTrue(new GateAvailability(id -> Optional.ofNullable(both.get(id)), id -> true).check(twoDoors)
+        assertTrue(new GateAvailability(id -> Optional.ofNullable(both.get(id)), id -> id == 1).check(twoDoors)
             .isPassThrough());
     }
 

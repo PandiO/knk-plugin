@@ -18,7 +18,8 @@ import java.util.Optional;
  *   <li>OPENING / CLOSING, or jammed → BLOCKED (mid-animation, no way to know when it ends);</li>
  *   <li>siege-locked → PASS_THROUGH when the siege's non-member rule carries the player through
  *       (R39, D2), else BLOCKED;</li>
- *   <li>closed with pass-through allowed for this player → PASS_THROUGH with the hint;</li>
+ *   <li>closed and this player may pass it ({@link PassRule}: a gate admin any door, anyone else a
+ *       pass-through door with the use node - the right-click rule) → PASS_THROUGH with the hint;</li>
  *   <li>otherwise BLOCKED ("the West Gate is closed").</li>
  * </ol>
  * A door the port does not know is treated as OPEN (Phase 2d decision: the edge's tag is stale,
@@ -46,7 +47,10 @@ public final class GateAvailability implements AccessPolicy {
         Optional<GateView> gate(int doorId);
     }
 
-    /** Port: may this player pass a closed pass-through door (paper: {@code GatePassThroughRules.canPass}). */
+    /**
+     * Port: may this player pass this closed door by right-clicking it (paper: {@code GatePassThroughRules.canPass},
+     * which already checks the door's pass-through flag - a gate admin passes any door).
+     */
     @FunctionalInterface
     public interface PassRule {
         boolean canPass(int doorId);
@@ -105,7 +109,8 @@ public final class GateAvailability implements AccessPolicy {
                 ? EdgeVerdict.passThrough(String.format(SIEGE_HINT, g.displayName()), cause)
                 : EdgeVerdict.blocked(g.displayName() + " is locked for a siege", cause);
         }
-        if (g.allowPassThrough() && passRule.canPass(doorId)) {
+        if (passRule.canPass(doorId)) {
+            // the rule includes the door's AllowPassThrough: an admin passes any door (live test 2026-10-08, N11)
             return EdgeVerdict.passThrough(String.format(PASS_THROUGH_HINT, g.displayName()), cause);
         }
         return EdgeVerdict.blocked(g.displayName() + " is closed", cause);

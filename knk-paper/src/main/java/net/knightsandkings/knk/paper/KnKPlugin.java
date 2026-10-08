@@ -568,6 +568,9 @@ public class KnKPlugin extends JavaPlugin {
             );
             this.permissionsDataAccess = dataAccessFactory.createPermissionsDataAccess(permissionsApi);
             this.knkPermissible = new KnkPermissible(cacheManager.getUserCache(), permissionsDataAccess);
+            // Gate pass-through (and navigation's gate verdicts) honour KnK's permission model as well as Bukkit's.
+            net.knightsandkings.knk.paper.gates.GatePassThroughRules.setPermissionCheck((player, node) ->
+                player.hasPermission(node) || (knkPermissible != null && knkPermissible.hasPermission(player, node)));
             // A grant or group change made in the web app shows in game within the 30 s cache time;
             // /knk cache refresh applies it at once.
             cacheManager.registerRefreshHook("permissions", permissionsDataAccess::invalidateAll);

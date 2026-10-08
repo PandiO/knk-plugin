@@ -29,6 +29,22 @@ class GatePassThroughRulesTest {
         player = mock(Player.class);
     }
 
+    @org.junit.jupiter.api.AfterEach
+    void resetPermissionCheck() {
+        GatePassThroughRules.setPermissionCheck(null);
+    }
+
+    @Test
+    void knkPermissionsCountAsWellAsBukkits() {
+        // live test 2026-10-08 (N11): a node granted in KnK's permission model (or to an op) is not a Bukkit permission
+        gate.setAllowPassThrough(true);
+        assertFalse(GatePassThroughRules.canPass(player, gate), "Bukkit says no");
+        GatePassThroughRules.setPermissionCheck((p, node) -> p.hasPermission(node) || GatePassThroughRules.USE_NODE.equals(node));
+        assertTrue(GatePassThroughRules.mayUse(player));
+        assertTrue(GatePassThroughRules.canPass(player, gate));
+        assertFalse(GatePassThroughRules.isAdmin(player));
+    }
+
     @Test
     void aGateAdminPassesAnyDoor() {
         gate.setAllowPassThrough(false);

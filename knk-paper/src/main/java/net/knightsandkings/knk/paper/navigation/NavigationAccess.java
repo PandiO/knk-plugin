@@ -159,7 +159,7 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
      */
     public GateAvailability gateAvailability(Player player, Collection<Integer> doorIds) {
         boolean admin = GatePassThroughRules.isAdmin(player);
-        boolean use = player.hasPermission(GatePassThroughRules.USE_NODE);
+        boolean use = GatePassThroughRules.mayUse(player);
         SiegeGateController siege = siegeGates.get();
         Map<Integer, GateView> gates = new HashMap<>();
         Map<Integer, Boolean> passable = new HashMap<>();
