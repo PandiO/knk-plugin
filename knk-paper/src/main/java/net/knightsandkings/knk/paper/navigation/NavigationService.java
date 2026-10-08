@@ -593,6 +593,42 @@ public final class NavigationService implements SiegeMatchObserver {
         return a.region != null && a.destination.kind() == Destination.Kind.REGION && insideRegion(a.destination, a.region, feet);
     }
 
+    // ==================== components (live test 2026-10-08, N12) ====================
+
+    private static int componentOf(RoadNetworkSnapshot snapshot, SnapPoint point) {
+        return snapshot.componentOf(snapshot.requireEdge(point.edgeId()));
+    }
+
+    /**
+     * The start: the nearest road, unless it joins none of the goals' network components (a short
+     * stretch the build left on its own) and a road that does lies within the snap distance - then that
+     * one, instead of "No road connects you to X".
+     */
+    SnapPoint connectedStart(RoadNetworkSnapshot snapshot, Location feet, SnapPoint start, List<SnapPoint> goals) {
+        java.util.Set<Integer> goalComponents = new java.util.HashSet<>();
+        goals.forEach(g -> goalComponents.add(componentOf(snapshot, g)));
+        if (goalComponents.isEmpty() || goalComponents.contains(componentOf(snapshot, start))) {
+            return start;
+        }
+        return new Snapper(snapshot, routerParameters)
+            .snapFloor(feet.getX(), feet.getY() - 1, feet.getZ(), goalComponents::contains).orElse(start);
+    }
+
+    /**
+     * The goals: as resolved, unless none is in the start's component - then, for a point or a node,
+     * the target re-snapped to a road of the start's component within the snap distance.
+     */
+    List<SnapPoint> connectedGoals(RoadNetworkSnapshot snapshot, SnapPoint start, List<SnapPoint> goals, double[] target,
+                                   Destination destination) {
+        int startComponent = componentOf(snapshot, start);
+        if (target == null || goals.stream().anyMatch(g -> componentOf(snapshot, g) == startComponent)
+            || (destination.kind() != Destination.Kind.POINT && destination.kind() != Destination.Kind.NODE)) {
+            return goals;
+        }
+        return new Snapper(snapshot, routerParameters)
+            .snapFloor(target[0], target[1], target[2], c -> c == startComponent).map(List::of).orElse(goals);
+    }
+
     /** For every edge labelled {@code streetId}, its point nearest the floor position. */
     static List<SnapPoint> streetPoints(RoadNetworkSnapshot snapshot, int streetId, double x, double floorY, double z) {
         List<SnapPoint> points = new ArrayList<>();
@@ -1034,8 +1070,10 @@ public final class NavigationService implements SiegeMatchObserver {
             return;
         }
         AccessPolicy policy = deps.policies().policyFor(player, snapshot);
-        RouteRequest request = RouteRequest.of(start.get(), a.goals, policy, routerParameters)
-            .withStartSides(deps.policies().startSides(player, snapshot, start.get(), policy));
+        SnapPoint from = connectedStart(snapshot, feet, start.get(), a.goals);
+        List<SnapPoint> to = connectedGoals(snapshot, from, a.goals, a.target, a.destination);
+        RouteRequest request = RouteRequest.of(from, to, policy, routerParameters)
+            .withStartSides(deps.policies().startSides(player, snapshot, from, policy));
         a.lastRequest = request;
         int generation = a.generation;
         deps.routing().execute(() -> {
@@ -1383,8 +1421,10 @@ public final class NavigationService implements SiegeMatchObserver {
             return;
         }
         AccessPolicy policy = deps.policies().policyFor(as, snapshot);
-        RouteRequest request = RouteRequest.of(start.get(), goals.goals(), policy, routerParameters)
-            .withStartSides(deps.policies().startSides(as, snapshot, start.get(), policy));
+        SnapPoint from = connectedStart(snapshot, feet, start.get(), goals.goals());
+        List<SnapPoint> to = connectedGoals(snapshot, from, goals.goals(), goals.target(), destination);
+        RouteRequest request = RouteRequest.of(from, to, policy, routerParameters)
+            .withStartSides(deps.policies().startSides(as, snapshot, from, policy));
         deps.routing().execute(() -> {
             List<Component> lines = new ArrayList<>();
             try {

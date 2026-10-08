@@ -41,11 +41,27 @@ public final class Snapper {
     }
 
     /**
+     * Like {@link #snapFloor} on the edges of the network components {@code components} accepts only (live
+     * test 2026-10-08, N12: the nearest road was a short stretch that joins nothing, while the network the
+     * destination is on lay a few blocks further).
+     */
+    public Optional<SnapPoint> snapFloor(double x, double floorY, double z, java.util.function.IntPredicate components) {
+        return snap(snapshot, x, floorY, z, parameters.maxSnapDistance(), parameters.snapVerticalWeight(),
+            edgeIndex -> components.test(snapshot.componentOf(snapshot.edgeAt(edgeIndex))));
+    }
+
+    /**
      * The plan's signature: nearest point of {@code snapshot} to the <b>floor</b> position
      * {@code (x, y, z)} within {@code maxDistance} (weighted), height weighted × {@code verticalWeight}.
      */
     public static Optional<SnapPoint> snap(RoadNetworkSnapshot snapshot, double x, double y, double z,
                                            double maxDistance, double verticalWeight) {
+        return snap(snapshot, x, y, z, maxDistance, verticalWeight, null);
+    }
+
+    /** As above on the edges {@code edgeFilter} accepts (by edge index; null = all). */
+    public static Optional<SnapPoint> snap(RoadNetworkSnapshot snapshot, double x, double y, double z,
+                                           double maxDistance, double verticalWeight, java.util.function.IntPredicate edgeFilter) {
         if (snapshot.isEmpty()) {
             return Optional.empty();
         }
@@ -54,6 +70,9 @@ public final class Snapper {
         int[] bestRef = {-1, -1};
         double[] bestT = {0};
         snapshot.segmentIndex().forEachNear(x, z, maxDistance, (edgeIndex, segmentIndex) -> {
+            if (edgeFilter != null && !edgeFilter.test(edgeIndex)) {
+                return;
+            }
             List<int[]> pts = snapshot.polylineAt(edgeIndex).points();
             int[] a = pts.get(segmentIndex);
             int[] b = pts.get(segmentIndex + 1);

@@ -304,6 +304,35 @@ class NavigationServiceTest {
     }
 
     @Test
+    void aShortStretchThatJoinsNothingIsPassedOverForTheConnectedRoad() {
+        // live test 2026-10-08 (N12): 15 blocks from the network, "No road connects you to X" - the nearest road
+        // was a stretch the build left on its own
+        RoadNetworkSnapshot withStub = RoadNetworkSnapshot.builder(NavigationTestNetwork.WORLD)
+            .addNodes(network.snapshot.nodes()).addEdges(network.snapshot.edges())
+            .addProfile(network.snapshot.profiles().get(1))
+            .addNode(new net.knightsandkings.knk.core.domain.roads.RoadNode(90, 40, 64, 20,
+                net.knightsandkings.knk.core.domain.roads.RoadNodeKind.ENDPOINT, null, 99))
+            .addNode(new net.knightsandkings.knk.core.domain.roads.RoadNode(91, 60, 64, 20,
+                net.knightsandkings.knk.core.domain.roads.RoadNodeKind.ENDPOINT, null, 99))
+            .addEdge(new net.knightsandkings.knk.core.domain.roads.RoadEdge(90, 90, 91,
+                List.of(new int[] {40, 64, 20}, new int[] {60, 64, 20}), 20, 2, java.util.OptionalInt.empty(),
+                java.util.OptionalInt.empty(), 1.0, java.util.EnumSet.noneOf(net.knightsandkings.knk.core.domain.roads.RoadEdgeFlag.class),
+                List.of(), List.of(), List.of(), net.knightsandkings.knk.core.domain.roads.RoadEdgeSource.RECORDED, false))
+            .build();
+        service = new NavigationService(new NavigationService.Deps(null, NavigationConfig.defaults(),
+            w -> withStub, policies, shapes, eligibility, hud, trail, Runnable::run, Runnable::run, tick::get,
+            events::add, Logger.getLogger("test")));
+        moveTo(50.5, 65, 14.5); // 5.5 blocks from the stub, 14.5 from Main Street
+
+        service.navigate(player, cinixKeep());
+
+        assertTrue(service.isNavigating(playerId), messages().toString());
+        assertTrue(messages().stream().noneMatch(m -> m.contains("No road connects")), messages().toString());
+        assertEquals(NavigationTestNetwork.E_AB, service.sessionOf(playerId).orElseThrow().route().orElseThrow()
+            .steps().get(0).edge().id());
+    }
+
+    @Test
     void aGateClosingBehindThePlayerDoesNotBlockTheRoute() {
         // live test 2026-10-08 (C3, N10): through the gate, then it closes (or a /knk gate open animates it)
         service.navigate(player, Destination.point("Kardenna Castle", NavigationTestNetwork.WORLD, 200.5, 65, 200.5));
