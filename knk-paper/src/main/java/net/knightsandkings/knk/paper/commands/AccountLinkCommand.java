@@ -11,7 +11,6 @@ import net.knightsandkings.knk.api.dto.DuplicateCheckResponseDto;
 import net.knightsandkings.knk.api.dto.LinkCodeResponseDto;
 import net.knightsandkings.knk.api.dto.MergeAccountsRequestDto;
 import net.knightsandkings.knk.api.dto.UserResponseDto;
-import net.knightsandkings.knk.api.dto.ValidateLinkCodeResponseDto;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.ports.api.UserAccountApi;
 import net.knightsandkings.knk.paper.KnKPlugin;
@@ -23,7 +22,7 @@ import net.knightsandkings.knk.paper.utils.CommandCooldownManager;
 
 /**
  * Command handler for /account link.
- * Generates link codes or consumes a provided link code.
+ * Generates a link code to enter on the website; a code typed in game only gets an explanation.
  */
 public class AccountLinkCommand implements CommandExecutor {
     private final KnKPlugin plugin;
@@ -56,6 +55,12 @@ public class AccountLinkCommand implements CommandExecutor {
             return true;
         }
 
+        if (args.length == 1) {
+            // Codes only go game -> web (D1): a code typed here is never sent anywhere or logged.
+            explainWhereCodesAreEntered(player);
+            return true;
+        }
+
         PlayerUserData userData = userManager.getCachedUser(player.getUniqueId());
         if (userData == null) {
             sendPrefixed(player, "&cPlease rejoin the server and try again");
@@ -66,11 +71,8 @@ public class AccountLinkCommand implements CommandExecutor {
         if (args.length == 0) {
             plugin.getLogger().fine(player.getName() + " executing /account link (generate code)");
             generateLinkCode(player, userData);
-        } else if (args.length == 1) {
-            plugin.getLogger().fine(player.getName() + " executing /account link with code");
-            consumeLinkCode(player, userData, args[0]);
         } else {
-            sendPrefixed(player, "&cUsage: /account link [code]");
+            sendPrefixed(player, "&cUsage: /account link");
         }
 
         return true;
@@ -100,11 +102,12 @@ public class AccountLinkCommand implements CommandExecutor {
                 LinkCodeResponseDto response = (LinkCodeResponseDto) responseObj;
                 runSync(() -> {
                     String formattedCode = response.formattedCode() != null ? response.formattedCode() : response.code();
-                    String message = config.messages().linkCodeGenerated()
-                        .replace("{code}", formattedCode)
-                        .replace("{minutes}", String.valueOf(config.account().linkCodeExpiryMinutes()));
-                    sendPrefixed(player, message);
-                    plugin.getLogger().info("Link code generated for " + player.getName() + ": " + formattedCode);
+                    for (String line : LinkCodeMessage.format(config.messages().linkCodeGenerated(), formattedCode,
+                            config.account().linkCodeExpiryMinutes(), config.web().publicUrl())) {
+                        sendPrefixed(player, line);
+                    }
+                    // Never log the code itself: whoever holds it can register the player's web login.
+                    plugin.getLogger().info("Link code generated for " + player.getName());
                 });
             })
             .exceptionally(ex -> {
@@ -121,81 +124,16 @@ public class AccountLinkCommand implements CommandExecutor {
             });
     }
 
-    private void consumeLinkCode(Player player, PlayerUserData userData, String code) {
-        // Check cooldown for link code consumption
-        int cooldownSeconds = config.account().cooldowns().linkCodeConsumeSeconds();
-        if (!cooldownManager.canExecute(player.getUniqueId(), "link.consume", cooldownSeconds)) {
-            int remaining = cooldownManager.getRemainingCooldown(player.getUniqueId(), "link.consume", cooldownSeconds);
-            sendPrefixed(player, "&cPlease wait " + remaining + " seconds before trying another link code.");
-            plugin.getLogger().fine(player.getName() + " attempted link code consumption but is on cooldown (" + remaining + "s remaining)");
-            return;
+    /**
+     * {@code /account link <code>}: link codes come from the game and are entered on the website (D1), so a
+     * code typed in game is not validated or used. Tell the player where codes go instead.
+     */
+    private void explainWhereCodesAreEntered(Player player) {
+        plugin.getLogger().info(player.getName() + " tried to enter a link code in game");
+        for (String line : LinkCodeMessage.format(config.messages().linkCodeEnteredInGame(), "",
+                config.account().linkCodeExpiryMinutes(), config.web().publicUrl())) {
+            sendPrefixed(player, line);
         }
-
-        plugin.getLogger().info(player.getName() + " attempting to consume link code: " + code);
-        cooldownManager.recordExecution(player.getUniqueId(), "link.consume");
-        
-        // Validate link code (minecraft-first flow)
-        userAccountApi.validateLinkCode(code)
-            .thenAccept(validationObj -> {
-                ValidateLinkCodeResponseDto validation = (ValidateLinkCodeResponseDto) validationObj;
-                if (!Boolean.TRUE.equals(validation.isValid())) {
-                    plugin.getLogger().info("Invalid link code provided by " + player.getName() + ": " + code);
-                    runSync(() -> {
-                        sendPrefixed(player, config.messages().invalidLinkCode());
-                        // Reset cooldown on failure
-                        cooldownManager.resetCooldown(player.getUniqueId(), "link.consume");
-                    });
-                    return;
-                }
-
-                // Link code is valid - retrieve the web account user ID
-                Integer webAccountUserId = validation.userId();
-                if (webAccountUserId == null) {
-                    plugin.getLogger().warning("Link code validation returned null userId for " + player.getName());
-                    runSync(() -> {
-                        sendPrefixed(player, "&cLink code validation failed: missing account information");
-                        // Reset cooldown on failure
-                        cooldownManager.resetCooldown(player.getUniqueId(), "link.consume");
-                    });
-                    return;
-                }
-
-                plugin.getLogger().fine("Link code validated for " + player.getName() + " (web account ID: " + webAccountUserId + ")");
-                
-                // Update cached user with linked account information
-                runSync(() -> {
-                    // Create updated user data with linked account info
-                    PlayerUserData updated = new PlayerUserData(
-                        userData != null ? userData.userId() : null,
-                        validation.username() != null ? validation.username() : (userData != null ? userData.username() : player.getName()),
-                        player.getUniqueId(),
-                        validation.email(),
-                        userData != null ? userData.coins() : 0,
-                        userData != null ? userData.gems() : 0,
-                        userData != null ? userData.experiencePoints() : 0,
-                        validation.email() != null && !validation.email().isBlank(),
-                        false,
-                        null,
-                        userData != null ? userData.gatePassThroughMethodDefault() : GatePassThroughMethod.DEFAULT
-                    );
-                    
-                    userManager.updateCachedUser(player.getUniqueId(), updated);
-                    sendPrefixed(player, config.messages().accountLinked());
-                    plugin.getLogger().info("Account linked successfully for " + player.getName() + " (web account: " + validation.email() + ")");
-                });
-            })
-            .exceptionally(ex -> {
-                plugin.getLogger().severe("Failed to validate link code for " + player.getName() + ": " + ex.getMessage());
-                if (ex.getCause() != null) {
-                    plugin.getLogger().severe("  Cause: " + ex.getCause().getMessage());
-                }
-                runSync(() -> {
-                    sendPrefixed(player, "&cFailed to link account");
-                    // Reset cooldown on failure
-                    cooldownManager.resetCooldown(player.getUniqueId(), "link.consume");
-                });
-                return null;
-            });
     }
 
     private void startMergeFlow(Player player, DuplicateCheckResponseDto check) {

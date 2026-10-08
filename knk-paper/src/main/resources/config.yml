@@ -7,8 +7,9 @@ api:
   # default: it is noisy. The X-API-Key and Authorization values are redacted either way.
   debug-logging: false
   
-  # Allow untrusted SSL certificates (ONLY for development with self-signed certs)
-  allow-untrusted-ssl: true
+  # Allow untrusted SSL certificates (ONLY for development with self-signed certs). Keep false
+  # on any server that talks to the API over the internet.
+  allow-untrusted-ssl: false
   
   # Authentication configuration (KNG-22)
   #
@@ -28,6 +29,7 @@ api:
     # Bearer token (only used if type=bearer)
     bearer-token: ""
     # API key (only used if type=apikey) - must equal knk-web-api's Security:PluginApiKey.
+    # When set, the region HTTP server below also requires it (X-API-Key) on every request.
     api-key: ""
     # API key header name (only used if type=apikey). Keep X-API-Key: that's the header the
     # API reads.
@@ -38,6 +40,20 @@ api:
     connect: 10
     read: 10
     write: 10
+
+# Region HTTP server: knk-web-api calls it back for region renames and containment checks.
+region-http:
+  # Address to listen on. 127.0.0.1 (default) only accepts calls from this host. Use the Docker
+  # host IP if the API runs in a container; never 0.0.0.0 on a public server.
+  bind-address: "127.0.0.1"
+  # Port to listen on (the API's region callback URL must use the same port).
+  port: 8081
+
+# Public web app, used in player messages (e.g. where to enter a /account link code).
+web:
+  # Base URL without a trailing slash, e.g. "https://app.knightsandkings.net". Empty: messages
+  # leave the link out.
+  public-url: ""
 
 # Account management configuration (Phase 1+)
 account:
@@ -59,8 +75,8 @@ account:
     # Rate limit for /account link (no args)
     link-code-generate-seconds: 60  # 1 minute
     
-    # Cooldown for consuming link codes (seconds)
-    # Rate limit for /account link <code>
+    # Cooldown for consuming link codes (seconds). Unused since codes are entered on the
+    # website, not in game; kept so existing configs still load.
     link-code-consume-seconds: 10  # 10 seconds
     
     # Cleanup interval for expired cooldowns (minutes)
@@ -282,8 +298,13 @@ messages:
   # Accounts linked
   account-linked: "&aYour accounts have been linked!"
   
-  # Link code generated
-  link-code-generated: "&aYour link code is: &6{code}&a. Use this code in the web app. Expires in {minutes} minutes."
+  # Link code generated (/account link). Placeholders: {code}, {minutes}, {url} (web.public-url).
+  # \n starts a new chat line; lines that use {url} are left out while web.public-url is empty.
+  link-code-generated: "&aYour link code is &6{code}&a. It expires in {minutes} minutes.\n&aNew to the website? Register at &e{url}/auth/register\n&aEnter the code when you register on the website, or on your Account page if you already have a web login."
+  
+  # /account link <code>: codes are entered on the website, not in game (nothing is validated or linked).
+  # Same rules as above: \n starts a new line; lines with {url} are left out while web.public-url is empty.
+  link-code-entered-in-game: "&eLink codes are entered on the website, not in game.\n&eType &6/account link &e(without a code) to get yours.\n&eThen enter it at &6{url}/auth/register&e, or on your Account page if you already have a web login."
   
   # Invalid or expired link code
   invalid-link-code: "&cThis code is invalid or has expired. Use &6/account link &cto get a new one."
