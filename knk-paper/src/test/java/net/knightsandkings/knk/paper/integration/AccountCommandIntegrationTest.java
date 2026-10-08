@@ -134,24 +134,17 @@ class AccountCommandIntegrationTest {
             userManager.updateCachedUser(testUUID, userData);
             
             ValidateLinkCodeResponseDto validCode = new ValidateLinkCodeResponseDto(
-                true, 2, "ExistingUser", "existing@example.com", null
+                true, "ExistingUser", null
             );
             
             DuplicateCheckResponseDto noDuplicate = new DuplicateCheckResponseDto(
                 false, null, null, null
             );
             
-            UserResponseDto linkedUser = new UserResponseDto(
-                2, "TestPlayer", testUUID.toString(), "existing@example.com",
-                200, 100, 2000, true, "WEB_APP"
-            );
-            
             when(mockApi.validateLinkCode("ABC123"))
                 .thenReturn(CompletableFuture.completedFuture(validCode));
             when(mockApi.checkDuplicate(testUUID.toString(), "TestPlayer"))
                 .thenReturn(CompletableFuture.completedFuture(noDuplicate));
-            when(mockApi.linkAccount(any(LinkAccountRequestDto.class)))
-                .thenReturn(CompletableFuture.completedFuture(linkedUser));
 
             // Act
             boolean result = accountLinkCommand.onCommand(
@@ -161,13 +154,12 @@ class AccountCommandIntegrationTest {
             // Assert
             assertTrue(result);
             verify(mockApi, timeout(1000)).validateLinkCode("ABC123");
-            verify(mockApi, timeout(1000)).linkAccount(any(LinkAccountRequestDto.class));
             
-            // Verify cache updated
+            // The validate response carries no email or user id: the player's own identity stays cached
             PlayerUserData updated = userManager.getCachedUser(testUUID);
             assertNotNull(updated);
-            assertEquals("existing@example.com", updated.email());
-            assertTrue(updated.hasEmailLinked());
+            assertEquals("TestPlayer", updated.username());
+            assertEquals(1, updated.userId());
             
             // Verify success message (use String sendMessage)
             verify(mockPlayer, timeout(1000).atLeastOnce()).sendMessage(anyString());
@@ -184,7 +176,7 @@ class AccountCommandIntegrationTest {
             userManager.updateCachedUser(testUUID, userData);
             
             ValidateLinkCodeResponseDto invalidCode = new ValidateLinkCodeResponseDto(
-                false, null, null, null, "Code expired"
+                false, null, "Code expired"
             );
             
             when(mockApi.validateLinkCode("INVALID"))
@@ -214,7 +206,7 @@ class AccountCommandIntegrationTest {
             userManager.updateCachedUser(testUUID, userData);
             
             ValidateLinkCodeResponseDto validCode = new ValidateLinkCodeResponseDto(
-                true, 2, "ExistingUser", "existing@example.com", null
+                true, "ExistingUser", null
             );
             
             UserResponseDto primaryUser = new UserResponseDto(

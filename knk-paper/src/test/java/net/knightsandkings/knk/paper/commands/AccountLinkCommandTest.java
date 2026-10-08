@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
@@ -27,9 +28,11 @@ import org.bukkit.scheduler.BukkitScheduler;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
 
 import net.knightsandkings.knk.api.dto.LinkCodeResponseDto;
+import net.knightsandkings.knk.api.dto.ValidateLinkCodeResponseDto;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.ports.api.UserAccountApi;
 import net.knightsandkings.knk.core.teleport.TeleportSettings;
@@ -143,5 +146,34 @@ class AccountLinkCommandTest {
 
         assertEquals(2, sent.size(), sent.toString());
         sent.forEach(line -> assertFalse(line.contains("/auth/register"), line));
+    }
+
+    @Test
+    void aValidCodeKeepsThePlayersOwnIdentityWithoutAUserIdOrEmailFromTheApi() {
+        when(api.validateLinkCode(CODE)).thenReturn(CompletableFuture.completedFuture(
+            new ValidateLinkCodeResponseDto(true, "WebName", null)));
+
+        command("").onCommand(player, null, "link", new String[] {CODE});
+
+        ArgumentCaptor<PlayerUserData> cached = ArgumentCaptor.forClass(PlayerUserData.class);
+        verify(userManager).updateCachedUser(org.mockito.ArgumentMatchers.eq(uuid), cached.capture());
+        assertEquals(7, cached.getValue().userId());
+        assertEquals("Steve", cached.getValue().username());
+        assertEquals(null, cached.getValue().email());
+        assertFalse(cached.getValue().hasEmailLinked());
+        assertEquals(List.of("[KnK] Your accounts have been linked!"), sent);
+        logged.forEach(line -> assertFalse(line.contains(CODE), "logged the code: " + line));
+    }
+
+    @Test
+    void anInvalidCodeIsRefusedWithoutLoggingIt() {
+        when(api.validateLinkCode(CODE)).thenReturn(CompletableFuture.completedFuture(
+            new ValidateLinkCodeResponseDto(false, null, "Invalid or expired link code")));
+
+        command("").onCommand(player, null, "link", new String[] {CODE});
+
+        assertEquals(List.of("[KnK] This code is invalid or has expired."), sent);
+        assertTrue(logged.stream().anyMatch(line -> line.contains("Invalid link code provided by Steve")), logged.toString());
+        logged.forEach(line -> assertFalse(line.contains(CODE), "logged the code: " + line));
     }
 }

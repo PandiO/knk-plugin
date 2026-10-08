@@ -12,7 +12,6 @@ import net.knightsandkings.knk.api.dto.ChangePasswordRequestDto;
 import net.knightsandkings.knk.api.dto.CreateUserRequestDto;
 import net.knightsandkings.knk.api.dto.CreateUserResponseDto;
 import net.knightsandkings.knk.api.dto.DuplicateCheckResponseDto;
-import net.knightsandkings.knk.api.dto.LinkAccountRequestDto;
 import net.knightsandkings.knk.api.dto.LinkCodeResponseDto;
 import net.knightsandkings.knk.api.dto.MergeAccountsRequestDto;
 import net.knightsandkings.knk.api.dto.UserResponseDto;
@@ -94,20 +93,6 @@ public class UserAccountApiImpl extends BaseApiImpl implements UserAccountApi {
                 return parse(response, ValidateLinkCodeResponseDto.class, url);
             } catch (IOException | ApiException ex) {
                 throw new RuntimeException("Failed to validate link code", ex);
-            }
-        }, executor);
-    }
-
-    @Override
-    public CompletableFuture<Object> linkAccount(Object request) {
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                String json = objectMapper.writeValueAsString(request);
-                String url = baseUrl + "/Users/link-account";
-                String response = postJson(url, json);
-                return parse(response, UserResponseDto.class, url);
-            } catch (IOException | ApiException ex) {
-                throw new RuntimeException("Failed to link account", ex);
             }
         }, executor);
     }

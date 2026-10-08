@@ -149,40 +149,33 @@ public class AccountLinkCommand implements CommandExecutor {
                     return;
                 }
 
-                // Link code is valid - retrieve the web account user ID
-                Integer webAccountUserId = validation.userId();
-                if (webAccountUserId == null) {
-                    plugin.getLogger().warning("Link code validation returned null userId for " + player.getName());
-                    runSync(() -> {
-                        sendPrefixed(player, "&cLink code validation failed: missing account information");
-                        // Reset cooldown on failure
-                        cooldownManager.resetCooldown(player.getUniqueId(), "link.consume");
-                    });
-                    return;
-                }
+                // The API only says whether the code is valid and whose it is (no user id or email
+                // since the closed-alpha hardening), and validating doesn't link anything server-side.
+                // Keep the player's own identity in the cache: their Minecraft name stays their username.
+                plugin.getLogger().fine("Link code validated for " + player.getName()
+                    + (validation.username() != null ? " (code belongs to " + validation.username() + ")" : ""));
 
-                plugin.getLogger().fine("Link code validated for " + player.getName() + " (web account ID: " + webAccountUserId + ")");
-                
-                // Update cached user with linked account information
                 runSync(() -> {
-                    // Create updated user data with linked account info
+                    PlayerUserData current = userManager.getCachedUser(player.getUniqueId());
+                    PlayerUserData base = current != null ? current : userData;
                     PlayerUserData updated = new PlayerUserData(
-                        userData != null ? userData.userId() : null,
-                        validation.username() != null ? validation.username() : (userData != null ? userData.username() : player.getName()),
+                        base.userId(),
+                        base.username() != null ? base.username() : player.getName(),
                         player.getUniqueId(),
-                        validation.email(),
-                        userData != null ? userData.coins() : 0,
-                        userData != null ? userData.gems() : 0,
-                        userData != null ? userData.experiencePoints() : 0,
-                        validation.email() != null && !validation.email().isBlank(),
+                        base.email(),
+                        base.coins(),
+                        base.gems(),
+                        base.experiencePoints(),
+                        base.hasEmailLinked(),
                         false,
                         null,
-                        userData != null ? userData.gatePassThroughMethodDefault() : GatePassThroughMethod.DEFAULT
+                        base.gatePassThroughMethodDefault() != null
+                            ? base.gatePassThroughMethodDefault() : GatePassThroughMethod.DEFAULT
                     );
-                    
+
                     userManager.updateCachedUser(player.getUniqueId(), updated);
                     sendPrefixed(player, config.messages().accountLinked());
-                    plugin.getLogger().info("Account linked successfully for " + player.getName() + " (web account: " + validation.email() + ")");
+                    plugin.getLogger().info("Link code accepted for " + player.getName());
                 });
             })
             .exceptionally(ex -> {
