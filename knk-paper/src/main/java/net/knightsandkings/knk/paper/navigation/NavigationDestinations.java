@@ -215,7 +215,10 @@ public final class NavigationDestinations {
         }
     }
 
-    /** DESIGN §6.1: the Location unless {@code region} was asked; a domain without one falls back to its region. */
+    /**
+     * DESIGN §6.1: the Location unless {@code region} was asked; a domain without one falls back to its region.
+     * Without {@code spawn}, a player already inside the domain's region is already there (N9).
+     */
     static Located locateDomain(DomainPlace place, Mode mode, String playerWorld) {
         Optional<KnkLocation> location = place.location()
             .filter(l -> l.world() != null && l.x() != null && l.y() != null && l.z() != null);
@@ -225,7 +228,9 @@ public final class NavigationDestinations {
             if (!l.world().equalsIgnoreCase(playerWorld)) {
                 return Located.failed(Located.Failure.OTHER_WORLD);
             }
-            return Located.of(Destination.point(place.name(), l.world(), l.x(), l.y(), l.z()));
+            return Located.of(mode == Mode.DEFAULT && hasRegion
+                ? Destination.domainPoint(place.name(), l.world(), l.x(), l.y(), l.z(), place.wgRegionId())
+                : Destination.point(place.name(), l.world(), l.x(), l.y(), l.z()));
         }
         if (hasRegion) {
             // Regions carry no world in the API; the player's world is tried (WorldGuard answers "unknown" otherwise).

@@ -135,6 +135,9 @@ class NavigationDestinationsTest {
         NavTarget kardenna = destinations.resolve("Kardenna", "world").target();
         Located spawn = destinations.locate(kardenna, Mode.DEFAULT, "world").join();
         assertEquals(Destination.Kind.POINT, spawn.destination().kind());
+        assertEquals("kardenna", spawn.destination().regionId(), "default: being in the region is being there (N9)");
+        assertEquals(null, destinations.locate(kardenna, Mode.SPAWN, "world").join().destination().regionId(),
+            "spawn: to the spawn point even from inside");
         assertEquals(50.0, spawn.destination().point()[0], 1e-9);
 
         Located region = destinations.locate(kardenna, Mode.REGION, "world").join();

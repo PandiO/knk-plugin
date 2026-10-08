@@ -375,6 +375,20 @@ class NavigationServiceTest {
     }
 
     @Test
+    void aDomainAskedForWithoutSpawnIsReachedByBeingInItsRegion() {
+        // live test 2026-10-08 (B2, N9): inside Merchant's District, "/nav Merchant's District" led to its spawn
+        moveTo(195.5, 65, 195.5);
+
+        service.navigate(player, Destination.domainPoint("Kardenna Castle", NavigationTestNetwork.WORLD, 205.5, 65, 205.5,
+            NavigationTestNetwork.CASTLE_REGION));
+        assertFalse(service.isNavigating(playerId));
+        assertTrue(messages().stream().anyMatch(m -> m.contains("You are already in Kardenna Castle")), messages().toString());
+
+        service.navigate(player, Destination.point("Kardenna Castle", NavigationTestNetwork.WORLD, 205.5, 65, 205.5));
+        assertTrue(service.isNavigating(playerId), "with \"spawn\" the point is the destination");
+    }
+
+    @Test
     void aDeniedDestinationDomainGivesAPartialRouteToItsEdge() {
         castleDenied.set(true);
 

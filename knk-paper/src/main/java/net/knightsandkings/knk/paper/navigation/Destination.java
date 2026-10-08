@@ -12,7 +12,9 @@ import java.util.Objects;
  * @param kind     how the goal set is built
  * @param world    the world the destination is in
  * @param point    feet coordinates (POINT), else null
- * @param regionId the WorldGuard region id (REGION), else null
+ * @param regionId the WorldGuard region id (REGION); for a POINT that is a domain's spawn Location asked for
+ *                 without {@code spawn}, the domain's region: standing in it is "already there" (live test
+ *                 2026-10-08, N9); else null
  * @param streetId the street id (STREET), else -1
  * @param nodeId   the road node id (NODE), else -1
  */
@@ -34,6 +36,14 @@ public record Destination(String name, Kind kind, String world, double[] point, 
 
     public static Destination point(String name, String world, double x, double y, double z) {
         return new Destination(name, Kind.POINT, world, new double[] {x, y, z}, null, -1, -1);
+    }
+
+    /**
+     * A domain's spawn Location as the default destination: routed to that point, but a player already in
+     * the domain's region is already there.
+     */
+    public static Destination domainPoint(String name, String world, double x, double y, double z, String regionId) {
+        return new Destination(name, Kind.POINT, world, new double[] {x, y, z}, regionId, -1, -1);
     }
 
     public static Destination region(String name, String world, String regionId) {

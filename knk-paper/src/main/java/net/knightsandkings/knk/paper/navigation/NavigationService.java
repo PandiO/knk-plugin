@@ -483,6 +483,13 @@ public final class NavigationService implements SiegeMatchObserver {
                 if (distance(px, pFloorY, pz, floor) <= sessionParameters.arriveDistance()) {
                     return Goals.already();
                 }
+                if (destination.regionId() != null) {
+                    // a domain asked for without "spawn": being in its region is being there (N9)
+                    Optional<RegionShape> domain = deps.regionShapes().shape(destination.world(), destination.regionId());
+                    if (domain.isPresent() && insideRegion(destination, domain.get(), feet)) {
+                        return Goals.already();
+                    }
+                }
                 if (distance(px, pFloorY, pz, floor) <= maxSnap) {
                     return new Goals(List.of(), floor, null, true, null, false);
                 }
