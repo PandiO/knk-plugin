@@ -75,8 +75,8 @@ account:
     # Rate limit for /account link (no args)
     link-code-generate-seconds: 60  # 1 minute
     
-    # Cooldown for consuming link codes (seconds)
-    # Rate limit for /account link <code>
+    # Cooldown for consuming link codes (seconds). Unused since codes are entered on the
+    # website, not in game; kept so existing configs still load.
     link-code-consume-seconds: 10  # 10 seconds
     
     # Cleanup interval for expired cooldowns (minutes)
@@ -301,6 +301,10 @@ messages:
   # Link code generated (/account link). Placeholders: {code}, {minutes}, {url} (web.public-url).
   # \n starts a new chat line; lines that use {url} are left out while web.public-url is empty.
   link-code-generated: "&aYour link code is &6{code}&a. It expires in {minutes} minutes.\n&aNew to the website? Register at &e{url}/auth/register\n&aEnter the code when you register on the website, or on your Account page if you already have a web login."
+  
+  # /account link <code>: codes are entered on the website, not in game (nothing is validated or linked).
+  # Same rules as above: \n starts a new line; lines with {url} are left out while web.public-url is empty.
+  link-code-entered-in-game: "&eLink codes are entered on the website, not in game.\n&eType &6/account link &e(without a code) to get yours.\n&eThen enter it at &6{url}/auth/register&e, or on your Account page if you already have a web login."
   
   # Invalid or expired link code
   invalid-link-code: "&cThis code is invalid or has expired. Use &6/account link &cto get a new one."

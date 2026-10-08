@@ -8,7 +8,9 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
@@ -28,11 +30,9 @@ import org.bukkit.scheduler.BukkitScheduler;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
 
 import net.knightsandkings.knk.api.dto.LinkCodeResponseDto;
-import net.knightsandkings.knk.api.dto.ValidateLinkCodeResponseDto;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.ports.api.UserAccountApi;
 import net.knightsandkings.knk.core.teleport.TeleportSettings;
@@ -149,31 +149,35 @@ class AccountLinkCommandTest {
     }
 
     @Test
-    void aValidCodeKeepsThePlayersOwnIdentityWithoutAUserIdOrEmailFromTheApi() {
-        when(api.validateLinkCode(CODE)).thenReturn(CompletableFuture.completedFuture(
-            new ValidateLinkCodeResponseDto(true, "WebName", null)));
+    void aCodeTypedInGameIsExplainedNotValidated() {
+        command("https://app.knightsandkings.net").onCommand(player, null, "link", new String[] {CODE});
 
-        command("").onCommand(player, null, "link", new String[] {CODE});
-
-        ArgumentCaptor<PlayerUserData> cached = ArgumentCaptor.forClass(PlayerUserData.class);
-        verify(userManager).updateCachedUser(org.mockito.ArgumentMatchers.eq(uuid), cached.capture());
-        assertEquals(7, cached.getValue().userId());
-        assertEquals("Steve", cached.getValue().username());
-        assertEquals(null, cached.getValue().email());
-        assertFalse(cached.getValue().hasEmailLinked());
-        assertEquals(List.of("[KnK] Your accounts have been linked!"), sent);
-        logged.forEach(line -> assertFalse(line.contains(CODE), "logged the code: " + line));
+        assertEquals(List.of(
+            "[KnK] Link codes are entered on the website, not in game.",
+            "[KnK] Type /account link (without a code) to get yours.",
+            "[KnK] Then enter it at https://app.knightsandkings.net/auth/register, or on your Account page if you"
+                + " already have a web login."
+        ), sent);
+        assertNothingDoneWithTheCode();
     }
 
     @Test
-    void anInvalidCodeIsRefusedWithoutLoggingIt() {
-        when(api.validateLinkCode(CODE)).thenReturn(CompletableFuture.completedFuture(
-            new ValidateLinkCodeResponseDto(false, null, "Invalid or expired link code")));
-
+    void aCodeTypedInGameWithoutAPublicUrlLeavesTheLinkOut() {
         command("").onCommand(player, null, "link", new String[] {CODE});
 
-        assertEquals(List.of("[KnK] This code is invalid or has expired."), sent);
-        assertTrue(logged.stream().anyMatch(line -> line.contains("Invalid link code provided by Steve")), logged.toString());
+        assertEquals(List.of(
+            "[KnK] Link codes are entered on the website, not in game.",
+            "[KnK] Type /account link (without a code) to get yours."
+        ), sent);
+        assertNothingDoneWithTheCode();
+    }
+
+    private void assertNothingDoneWithTheCode() {
+        verify(api, never()).validateLinkCode(anyString());
+        verifyNoInteractions(cooldowns);
+        verify(userManager, never()).updateCachedUser(any(), any());
+        assertTrue(logged.stream().anyMatch(line -> line.contains("Steve tried to enter a link code in game")),
+            logged.toString());
         logged.forEach(line -> assertFalse(line.contains(CODE), "logged the code: " + line));
     }
 }

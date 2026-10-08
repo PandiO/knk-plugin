@@ -53,12 +53,14 @@ class LinkCodeMessageTest {
     }
 
     @Test
-    void theBundledConfigShipsTheDefaultTemplate() throws Exception {
+    void theBundledConfigShipsTheDefaultTemplates() throws Exception {
         try (InputStream in = LinkCodeMessageTest.class.getResourceAsStream("/config.yml")) {
             assertNotNull(in, "config.yml on the classpath");
             YamlConfiguration config = YamlConfiguration.loadConfiguration(new InputStreamReader(in, StandardCharsets.UTF_8));
 
             assertEquals(LinkCodeMessage.DEFAULT_TEMPLATE, config.getString("messages.link-code-generated"));
+            assertEquals(LinkCodeMessage.DEFAULT_ENTERED_IN_GAME_TEMPLATE,
+                config.getString("messages.link-code-entered-in-game"));
         }
     }
 }

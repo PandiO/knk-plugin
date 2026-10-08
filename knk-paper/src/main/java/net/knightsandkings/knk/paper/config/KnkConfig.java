@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 import org.bukkit.GameMode;
 
 import net.knightsandkings.knk.core.teleport.TeleportSettings;
+import net.knightsandkings.knk.paper.commands.LinkCodeMessage;
 
 /**
  * Plugin configuration loaded from config.yml.
@@ -419,8 +420,22 @@ public record KnkConfig(
         String linkCodeGenerated,
         String invalidLinkCode,
         String duplicateAccount,
-        String mergeComplete
+        String mergeComplete,
+        String linkCodeEnteredInGame
     ) {
+        public MessagesConfig {
+            if (linkCodeEnteredInGame == null || linkCodeEnteredInGame.isBlank()) {
+                linkCodeEnteredInGame = LinkCodeMessage.DEFAULT_ENTERED_IN_GAME_TEMPLATE;
+            }
+        }
+
+        /** Without link-code-entered-in-game: its default. */
+        public MessagesConfig(String prefix, String accountCreated, String accountLinked, String linkCodeGenerated,
+                              String invalidLinkCode, String duplicateAccount, String mergeComplete) {
+            this(prefix, accountCreated, accountLinked, linkCodeGenerated, invalidLinkCode, duplicateAccount,
+                mergeComplete, null);
+        }
+
         /**
          * Validate messages configuration.
          * Ensures all required messages are present.

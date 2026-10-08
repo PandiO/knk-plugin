@@ -109,7 +109,8 @@ public class ConfigLoader {
             messagesSection.getString("link-code-generated", LinkCodeMessage.DEFAULT_TEMPLATE),
             messagesSection.getString("invalid-link-code", "&cThis code is invalid or has expired."),
             messagesSection.getString("duplicate-account", "&cYou have two accounts. Please choose which one to keep."),
-            messagesSection.getString("merge-complete", "&aAccount merge complete. Your account now has {coins} coins, {gems} gems, and {exp} XP.")
+            messagesSection.getString("merge-complete", "&aAccount merge complete. Your account now has {coins} coins, {gems} gems, and {exp} XP."),
+            messagesSection.getString("link-code-entered-in-game", LinkCodeMessage.DEFAULT_ENTERED_IN_GAME_TEMPLATE)
         );
         
         KnkConfig knkConfig = new KnkConfig(apiConfig, cacheConfig, accountConfig, messagesConfig,

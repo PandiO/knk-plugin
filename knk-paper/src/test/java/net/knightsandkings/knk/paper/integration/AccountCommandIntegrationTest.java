@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.paper.integration;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.*;
 
 import java.util.UUID;
@@ -22,6 +23,7 @@ import net.knightsandkings.knk.core.ports.api.UsersQueryApi;
 import net.knightsandkings.knk.paper.KnKPlugin;
 import net.knightsandkings.knk.paper.chat.ChatCaptureManager;
 import net.knightsandkings.knk.paper.commands.AccountLinkCommand;
+import net.knightsandkings.knk.paper.commands.LinkCodeMessage;
 import net.knightsandkings.knk.paper.config.KnkConfig;
 import net.knightsandkings.knk.paper.user.PlayerUserData;
 import net.knightsandkings.knk.core.cache.UserCache;
@@ -124,146 +126,32 @@ class AccountCommandIntegrationTest {
         }
 
         @Test
-        @DisplayName("Should link account with valid code")
-        void shouldLinkAccountWithValidCode() {
-            // Arrange
-            PlayerUserData userData = new PlayerUserData(
-                1, "TestPlayer", testUUID, null,
-                100, 50, 1000, false, false, null, GatePassThroughMethod.DEFAULT
-            );
-            userManager.updateCachedUser(testUUID, userData);
-            
-            ValidateLinkCodeResponseDto validCode = new ValidateLinkCodeResponseDto(
-                true, "ExistingUser", null
-            );
-            
-            DuplicateCheckResponseDto noDuplicate = new DuplicateCheckResponseDto(
-                false, null, null, null
-            );
-            
-            when(mockApi.validateLinkCode("ABC123"))
-                .thenReturn(CompletableFuture.completedFuture(validCode));
-            when(mockApi.checkDuplicate(testUUID.toString(), "TestPlayer"))
-                .thenReturn(CompletableFuture.completedFuture(noDuplicate));
+        @DisplayName("A code typed in game is explained, not validated (codes go game -> web)")
+        void shouldExplainWhereCodesAreEnteredWithPublicUrl() {
+            when(mockConfig.web()).thenReturn(new KnkConfig.WebConfig("https://app.example.test"));
+            when(mockMessagesConfig.linkCodeEnteredInGame()).thenReturn(LinkCodeMessage.DEFAULT_ENTERED_IN_GAME_TEMPLATE);
 
-            // Act
-            boolean result = accountLinkCommand.onCommand(
-                mockPlayer, null, "account", new String[]{"link", "ABC123"}
-            );
+            boolean result = accountLinkCommand.onCommand(mockPlayer, null, "account", new String[]{"ABC123"});
 
-            // Assert
             assertTrue(result);
-            verify(mockApi, timeout(1000)).validateLinkCode("ABC123");
-            
-            // The validate response carries no email or user id: the player's own identity stays cached
-            PlayerUserData updated = userManager.getCachedUser(testUUID);
-            assertNotNull(updated);
-            assertEquals("TestPlayer", updated.username());
-            assertEquals(1, updated.userId());
-            
-            // Verify success message (use String sendMessage)
-            verify(mockPlayer, timeout(1000).atLeastOnce()).sendMessage(anyString());
+            verify(mockApi, never()).validateLinkCode(anyString());
+            verify(mockPlayer).sendMessage(contains("Link codes are entered on the website, not in game."));
+            verify(mockPlayer).sendMessage(contains("Type /account link (without a code) to get yours."));
+            verify(mockPlayer).sendMessage(contains("https://app.example.test/auth/register"));
         }
 
         @Test
-        @DisplayName("Should reject invalid link code")
-        void shouldRejectInvalidLinkCode() {
-            // Arrange
-            PlayerUserData userData = new PlayerUserData(
-                1, "TestPlayer", testUUID, null,
-                100, 50, 1000, false, false, null, GatePassThroughMethod.DEFAULT
-            );
-            userManager.updateCachedUser(testUUID, userData);
-            
-            ValidateLinkCodeResponseDto invalidCode = new ValidateLinkCodeResponseDto(
-                false, null, "Code expired"
-            );
-            
-            when(mockApi.validateLinkCode("INVALID"))
-                .thenReturn(CompletableFuture.completedFuture(invalidCode));
+        @DisplayName("Without web.public-url the register link is left out")
+        void shouldExplainWhereCodesAreEnteredWithoutPublicUrl() {
+            when(mockConfig.web()).thenReturn(KnkConfig.WebConfig.defaults());
+            when(mockMessagesConfig.linkCodeEnteredInGame()).thenReturn(LinkCodeMessage.DEFAULT_ENTERED_IN_GAME_TEMPLATE);
 
-            // Act
-            boolean result = accountLinkCommand.onCommand(
-                mockPlayer, null, "account", new String[]{"link", "INVALID"}
-            );
+            boolean result = accountLinkCommand.onCommand(mockPlayer, null, "account", new String[]{"ABC123"});
 
-            // Assert
             assertTrue(result);
-            verify(mockApi, timeout(1000)).validateLinkCode("INVALID");
-            
-            // Verify error message (use String sendMessage)
-            verify(mockPlayer, timeout(1000).atLeastOnce()).sendMessage(anyString());
-        }
-
-        @Test
-        @DisplayName("Should handle merge conflict during link")
-        void shouldHandleMergeConflict() {
-            // Arrange
-            PlayerUserData userData = new PlayerUserData(
-                1, "TestPlayer", testUUID, null,
-                100, 50, 1000, false, false, null, GatePassThroughMethod.DEFAULT
-            );
-            userManager.updateCachedUser(testUUID, userData);
-            
-            ValidateLinkCodeResponseDto validCode = new ValidateLinkCodeResponseDto(
-                true, "ExistingUser", null
-            );
-            
-            UserResponseDto primaryUser = new UserResponseDto(
-                1, "TestPlayer", testUUID.toString(), null,
-                100, 50, 1000, false, "MINECRAFT"
-            );
-            
-            UserResponseDto conflictingUser = new UserResponseDto(
-                2, "ExistingUser", testUUID.toString(), "existing@example.com",
-                200, 100, 2000, true, "WEB_APP"
-            );
-            
-            DuplicateCheckResponseDto duplicateFound = new DuplicateCheckResponseDto(
-                true, conflictingUser, primaryUser, "Duplicate detected"
-            );
-            
-            UserResponseDto mergedUser = new UserResponseDto(
-                1, "TestPlayer", testUUID.toString(), "existing@example.com",
-                300, 150, 3000, true, "MINECRAFT"
-            );
-            
-            when(mockApi.validateLinkCode("ABC123"))
-                .thenReturn(CompletableFuture.completedFuture(validCode));
-            when(mockApi.checkDuplicate(testUUID.toString(), "TestPlayer"))
-                .thenReturn(CompletableFuture.completedFuture(duplicateFound));
-            // Create merge request DTO
-            MergeAccountsRequestDto mergeRequest = new MergeAccountsRequestDto(1, 2);
-            when(mockApi.mergeAccounts(any()))
-                .thenReturn(CompletableFuture.completedFuture(mergedUser));
-
-            // Act - Start link command
-            accountLinkCommand.onCommand(
-                mockPlayer, null, "account", new String[]{"link", "ABC123"}
-            );
-            
-            // Wait for async processing
-            try { Thread.sleep(100); } catch (InterruptedException e) {}
-            
-            // Assert merge flow started
-            assertTrue(chatCaptureManager.isCapturingChat(testUUID));
-            
-            // Simulate choosing account A
-            chatCaptureManager.handleChatInput(mockPlayer, "A");
-            
-            // Wait for async processing
-            try { Thread.sleep(100); } catch (InterruptedException e) {}
-            
-            // Assert merge completed
-            assertFalse(chatCaptureManager.isCapturingChat(testUUID));
-            verify(mockApi, timeout(1000)).mergeAccounts(any());
-            
-            // Verify cache updated with merged data
-            PlayerUserData updated = userManager.getCachedUser(testUUID);
-            assertNotNull(updated);
-            assertEquals(300, updated.coins());
-            assertEquals(150, updated.gems());
-            assertEquals(3000, updated.experiencePoints());
+            verify(mockApi, never()).validateLinkCode(anyString());
+            verify(mockPlayer, times(2)).sendMessage(anyString());
+            verify(mockPlayer, never()).sendMessage(contains("/auth/register"));
         }
     }
 
