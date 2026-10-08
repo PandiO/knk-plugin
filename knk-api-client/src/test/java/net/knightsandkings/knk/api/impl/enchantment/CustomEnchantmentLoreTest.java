@@ -23,6 +23,20 @@ class CustomEnchantmentLoreTest {
     }
 
     @Test
+    void aDarkGrayDescription_isNeverTakenForAnEnchantment_andKeepsItsColorAndOrder() {
+        // Descriptions default to dark gray (§8) while enchantment lines are §7: detection ignores colors entirely, so
+        // neither can be mistaken for the other, and re-applying/upgrading leaves the description lines untouched.
+        List<String> darkGray = List.of("§8Forged in the last fire of a fallen dojo.", "§8Its edge never cools.", "", "§l§bGrade: ★★★");
+
+        List<String> once = CustomEnchantmentLore.apply(repository, darkGray, "poison", 2);
+        List<String> upgraded = CustomEnchantmentLore.apply(repository, once, "poison", 3);
+
+        assertEquals(List.of("§7Poison II", "", "§8Forged in the last fire of a fallen dojo.", "§8Its edge never cools.", "", "§l§bGrade: ★★★"), once);
+        assertEquals(List.of("§7Poison III", "", "§8Forged in the last fire of a fallen dojo.", "§8Its edge never cools.", "", "§l§bGrade: ★★★"), upgraded);
+        assertEquals(java.util.Map.of("poison", 3), repository.getEnchantments(upgraded).join());
+    }
+
+    @Test
     void apply_SecondEnchantmentJoinsTheBlockAtTheTop() {
         List<String> once = CustomEnchantmentLore.apply(repository, BLUEPRINT_LORE, "poison", 2);
         List<String> twice = CustomEnchantmentLore.apply(repository, once, "wither", 1);
@@ -46,6 +60,29 @@ class CustomEnchantmentLoreTest {
         List<String> lore = CustomEnchantmentLore.apply(repository, broken, "freeze", 1);
 
         assertEquals(List.of("§7Poison II", "§7Wither I", "§7Freeze I", "", "§7A fine blade", "", "§l§bGrade: ★★★", "§7Origin: Cinix (Town)"), lore);
+    }
+
+    @Test
+    void remove_TheLastEnchantmentTakesItsSpacerWithIt() {
+        List<String> enchanted = CustomEnchantmentLore.apply(repository, BLUEPRINT_LORE, "poison", 2);
+
+        assertEquals(BLUEPRINT_LORE, CustomEnchantmentLore.remove(repository, enchanted, "poison"),
+                "no blank line left at the top of the lore");
+    }
+
+    @Test
+    void remove_OneOfTwoKeepsTheBlockAndTheSpacer() {
+        List<String> two = CustomEnchantmentLore.apply(repository,
+                CustomEnchantmentLore.apply(repository, BLUEPRINT_LORE, "poison", 2), "wither", 1);
+
+        assertEquals(List.of("§7Wither I", "", "§7A fine blade", "", "§l§bGrade: ★★★", "§7Origin: Cinix (Town)"),
+                CustomEnchantmentLore.remove(repository, two, "poison"));
+    }
+
+    @Test
+    void remove_WhatIsNotThereChangesNothing_andNoLoreStaysEmpty() {
+        assertEquals(BLUEPRINT_LORE, CustomEnchantmentLore.remove(repository, BLUEPRINT_LORE, "poison"));
+        assertEquals(List.of(), CustomEnchantmentLore.remove(repository, null, "poison"));
     }
 
     @Test

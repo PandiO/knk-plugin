@@ -406,10 +406,7 @@ public class EnchantmentDefinitionsDebugCommand implements CommandExecutor {
 
         ItemMeta itemMeta = heldItem.getItemMeta();
         List<String> lore = itemMeta != null && itemMeta.hasLore() ? itemMeta.getLore() : List.of();
-        List<String> updatedLore = customEnchantmentRepository
-                .applyEnchantment(lore, customResolution.enchantmentId(), level)
-                .join();
-        updatedLore = reorderLoreEnchantmentsFirst(updatedLore);
+        List<String> updatedLore = CustomEnchantmentLore.apply(customEnchantmentRepository, lore, customResolution.enchantmentId(), level);
 
         if (itemMeta == null) {
             itemMeta = plugin.getServer().getItemFactory().getItemMeta(heldItem.getType());
@@ -427,10 +424,6 @@ public class EnchantmentDefinitionsDebugCommand implements CommandExecutor {
         sender.sendMessage(ChatColor.GREEN + "Applied custom " + ChatColor.AQUA + customResolution.enchantmentId() +
                 ChatColor.GREEN + " level " + ChatColor.AQUA + level +
                 ChatColor.GREEN + " from KnK definition to your held item.");
-    }
-
-    private List<String> reorderLoreEnchantmentsFirst(List<String> loreLines) {
-        return CustomEnchantmentLore.enchantmentsFirst(customEnchantmentRepository, loreLines);
     }
 
     private void applyVanillaEnchantment(CommandSender sender, Player player, String target, int requestedLevel) {

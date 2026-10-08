@@ -256,6 +256,9 @@ public class KnKPlugin extends JavaPlugin {
     private ExecutorService regionLookupExecutor;
     private TempRegionRetentionTask tempRegionRetentionTask;
     private ManagedRegionsBootstrap managedRegions;
+    /** KNG-56: domain AllowEntry/AllowExit as WorldGuard flags (synced from the API, enforced by a WG session handler). */
+    private net.knightsandkings.knk.paper.regions.access.DomainAccessFlagSync domainAccessSync;
+    private net.knightsandkings.knk.paper.regions.access.DomainAccessService domainAccess;
     private net.knightsandkings.knk.paper.teleport.TeleportService teleportService;
     private net.knightsandkings.knk.paper.commands.StaffTeleportCommand staffTeleportCommand;
     private net.knightsandkings.knk.paper.teleport.TeleportRequestService teleportRequestService;
@@ -277,6 +280,15 @@ public class KnKPlugin extends JavaPlugin {
     /** Kept for the siege non-member pass-through (Phase 7b, TELEPORT mode only). */
     private net.knightsandkings.knk.paper.gates.GatePassThroughService gatePassThroughService;
     
+    /**
+     * KNG-56: the domain access flags must be in WorldGuard's flag registry before it loads its
+     * regions (WorldGuard is a hard dependency, so its onLoad has run).
+     */
+    @Override
+    public void onLoad() {
+        net.knightsandkings.knk.paper.regions.access.DomainAccessFlags.register(getLogger());
+    }
+
     @Override
     public void onEnable() {
         try {
@@ -458,8 +470,17 @@ public class KnKPlugin extends JavaPlugin {
             // (docs/architecture/managed-worldguard-regions.md).
             this.managedRegions = new ManagedRegionsBootstrap(this, ManagedRegionsBootstrap.readConfig(this),
                 townsQueryApi, districtsQueryApi, structuresQueryApi, domainCatalogQueryApi);
-            wgRegionIdHandler.setRegionFinalizer(managedRegions::finalizeNewRegion);
+            // KNG-56: every domain's AllowEntry/AllowExit onto its region as flags WorldGuard saves, so the rules hold
+            // while the API is down. Startup + periodic sync; a newly finalized region is synced right away.
+            this.domainAccessSync = new net.knightsandkings.knk.paper.regions.access.DomainAccessFlagSync(this,
+                apiClient.getDomainAccessRulesApi(),
+                net.knightsandkings.knk.paper.regions.access.DomainAccessFlagSync.Settings.read(this));
+            wgRegionIdHandler.setRegionFinalizer((regionId, domainType, parentRegionId) -> {
+                managedRegions.finalizeNewRegion(regionId, domainType, parentRegionId);
+                domainAccessSync.syncNow().exceptionally(error -> null);
+            });
             managedRegions.scheduleStartupRepair();
+            domainAccessSync.schedule();
             
             // Register Location handler
             LocationTaskHandler locationHandler = new LocationTaskHandler(worldTasksApi, this);
@@ -647,9 +668,13 @@ public class KnKPlugin extends JavaPlugin {
                 playerNotificationPoller.setRankChangedHandler(userAdminService::resyncDisplay);
             }
             // Domain discovery (KNG-20): registered even with discovery.enabled false - the hub's
-            // Discoveries tile reads its root, and the menu still lists past discoveries.
+            // Discoveries tile reads its root, and the menu still lists past discoveries. Discovery staff
+            // see types switched off in the web app tagged "Disabled" in the menu head.
+            String discoveryStaffNode = net.knightsandkings.knk.paper.commands.DiscoveryAdminCommand.NODE;
             this.discoveriesMenuFeature = new net.knightsandkings.knk.paper.menu.content.DiscoveriesMenuFeature(
-                apiClient.getDiscoveriesApi(), cacheManager.getUserCache(), java.time.Clock.systemUTC()
+                apiClient.getDiscoveriesApi(), cacheManager.getUserCache(), java.time.Clock.systemUTC(),
+                player -> player.hasPermission(discoveryStaffNode)
+                    || (knkPermissible != null && knkPermissible.hasPermission(player, discoveryStaffNode))
             );
             // A discovery reset made in the web app: drop the cached menu data and re-sync the online
             // player's tracking (the same path /knk discovery reset takes, see its afterReset below).
@@ -794,6 +819,7 @@ public class KnKPlugin extends JavaPlugin {
             // argument loads a District's gates on demand the first time a player is resolved
             // into it, so a gate created/edited after server start doesn't need a manual
             // /knk gate admin reload - see DistrictGateLoader.
+            // Describe-only (accessChecks=false): WorldGuard enforces AllowEntry/AllowExit since KNG-56.
             RegionTransitionService regionTransitionService = new SimpleRegionTransitionService(
                 regionDomainResolver, gateControlPort,
                 enteredDomains -> enteredDomains.stream()
@@ -806,7 +832,8 @@ public class KnKPlugin extends JavaPlugin {
                             return;
                         }
                         districtGateLoader.loadIfNotAlreadyLoaded(domain.id());
-                    })
+                    }),
+                false
             );
             
             // Wire tracker and listener
@@ -819,7 +846,7 @@ public class KnKPlugin extends JavaPlugin {
                 true  // Enable console logging; set to false to disable
             );
             registerEvents(regionTracker);
-            wireTeleportRegionGuards(regionTracker);
+            wireDomainAccess();
 
             HealthSystem healthSystem = new HealthSystem(gateDoorsApi, this, gateDisplayManager, gateManager);
             this.gateHealthSystem = healthSystem;
@@ -1215,7 +1242,7 @@ public class KnKPlugin extends JavaPlugin {
 
         var access = new net.knightsandkings.knk.paper.navigation.NavigationAccess(
             gateManager, () -> siegeGates, regionTracker.regionIds(), regionDomainResolver,
-            regionTracker::bypassesDenials, new net.knightsandkings.knk.core.regions.DomainAccessEvaluator());
+            this::hasRegionBypass, new net.knightsandkings.knk.core.regions.DomainAccessEvaluator());
         var eligibility = new net.knightsandkings.knk.paper.navigation.NavigationEligibility(
             uuid -> joinLoadingGuard != null && joinLoadingGuard.isLoading(uuid),
             uuid -> adminFreezeManager != null && adminFreezeManager.isFrozen(uuid),
@@ -1488,7 +1515,7 @@ public class KnKPlugin extends JavaPlugin {
                 playerCurrencyService
             );
             if (managedRegions != null) {
-                var regionsCommand = new net.knightsandkings.knk.paper.commands.RegionsAdminCommand(managedRegions, this);
+                var regionsCommand = new net.knightsandkings.knk.paper.commands.RegionsAdminCommand(managedRegions, domainAccessSync, this);
                 knkAdminCommand.registerSubcommand(
                     net.knightsandkings.knk.paper.commands.RegionsAdminCommand.metadata(),
                     regionsCommand::execute,
@@ -1709,6 +1736,7 @@ public class KnKPlugin extends JavaPlugin {
         // Phase 5: warp gem prices and /tpa coin fees are charged by the web API (DESIGN.md §3.5/§3.7).
         net.knightsandkings.knk.paper.teleport.TeleportCharges charges = createTeleportCharges();
         teleportRequestService.setCharges(charges);
+        wireTeleportGroupSettings(charges);
         // Private messages' ignore list (KNG-18): a player you /ignore can't /tpa or /tpahere you.
         if (ignoreService != null) {
             teleportRequestService.setIgnoreCheck(ignoreService::ignores);
@@ -1717,10 +1745,15 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().warning("teleport.request.price-coins is " + config.teleport().request().priceCoins()
                 + " but the API client isn't available to charge it, so /tpa and /tpahere will be refused.");
         }
-        // Phase 7: /back to the last death (developer decision Q5); siege deaths are excluded through
-        // registerBackDeathExclusion.
+        // Phase 7 + KNG-42: /back to the last death or teleport origin the player's nodes allow; siege
+        // deaths are excluded through registerBackDeathExclusion. Registers itself with the engine.
         this.backService = new net.knightsandkings.knk.paper.teleport.BackService(
             teleportService, mainThread, knkPermissible::hasPermissionAsync, org.bukkit.Bukkit::getWorld);
+        backService.setCharges(charges);
+        if (config.teleport().back().isPaid() && charges == null) {
+            getLogger().warning("teleport.back.price-coins is " + config.teleport().back().priceCoins()
+                + " but the API client isn't available to charge it, so /back will be refused.");
+        }
         getServer().getScheduler().runTaskTimer(this, () -> {
             teleportService.tick(adminFreezeManager::isFrozen);
             teleportRequestService.tick();
@@ -1751,14 +1784,18 @@ public class KnKPlugin extends JavaPlugin {
         );
         // Phase 4: /spawn (DESIGN.md §3.6).
         this.spawnCommand = createSpawnCommand(support, rankCheck, targets);
+        if (spawnCommand != null) {
+            spawnCommand.setCharges(charges);
+        }
         // Phase 5: /warp, /warps (DESIGN.md §3.7).
         this.warpCommand = createWarpCommand(support, rankCheck, targets, charges);
         if (warpCommand != null) {
             // Each player's cached destination list and user id go when they leave.
             warmupListener.addQuitHook(warpCommand::forget);
         }
-        // Phase 7: /back.
-        this.backCommand = new net.knightsandkings.knk.paper.commands.BackCommand(support, backService);
+        // Phase 7 + KNG-42: /back, /back <player> [-s].
+        this.backCommand = new net.knightsandkings.knk.paper.commands.BackCommand(support, backService, rankCheck,
+            targets, modeService::isVanished);
         // Phase 6: the teleport menu (teleport.destinations) runs the same /warp, /spawn and request paths,
         // and a bare /warp opens it (the chat list while the menu isn't available).
         this.teleportMenuParts = new net.knightsandkings.knk.paper.menu.content.TeleportMenuFeature.Teleports(
@@ -1824,6 +1861,38 @@ public class KnKPlugin extends JavaPlugin {
             teleportUserIdLookup(), org.bukkit.Bukkit::getWorld, org.bukkit.Bukkit::getPlayer);
     }
 
+    /**
+     * Teleport fees and cooldowns per permission group (Linear KNG-41): each player's settings from
+     * {@code GET /api/teleport-destinations/policy}, cached like the warp list and dropped by
+     * {@code /knk cache refresh}. The engine takes the cooldowns from it; /tpa and /spawn charges ask
+     * it whether they cost anything. Without the API client everyone keeps the config defaults.
+     */
+    private void wireTeleportGroupSettings(net.knightsandkings.knk.paper.teleport.TeleportCharges charges) {
+        if (charges == null) {
+            return;
+        }
+        var lookup = teleportUserIdLookup();
+        var policies = new net.knightsandkings.knk.core.dataaccess.TeleportPolicyDataAccess(
+            apiClient.getTeleportDestinationsQueryApi(), lookup::idOf,
+            java.time.Duration.ofSeconds(config.teleport().destinationsCacheSeconds()));
+        charges.setPolicies(policies);
+        teleportService.setCooldownPolicy(new net.knightsandkings.knk.paper.teleport.TeleportService.CooldownPolicy() {
+            @Override
+            public java.util.OptionalInt cooldownSeconds(java.util.UUID player,
+                                                         net.knightsandkings.knk.core.teleport.TeleportKind kind) {
+                return policies.cachedOrDefault(player).of(kind).cooldown();
+            }
+
+            @Override
+            public void prefetch(java.util.UUID player) {
+                policies.refresh(player, net.knightsandkings.knk.core.dataaccess.TeleportPolicyDataAccess.PLAYER_READ_MAX_AGE);
+            }
+        });
+        if (cacheManager != null) {
+            cacheManager.registerRefreshHook("teleport group settings", policies::invalidateAll);
+        }
+    }
+
     /** A player's knk user id through the users cache; null when they have no account or the lookup failed. */
     private net.knightsandkings.knk.paper.teleport.TeleportAuditor.UserIdLookup teleportUserIdLookup() {
         return uuid -> usersDataAccess.getByUuidAsync(uuid).thenApply(result ->
@@ -1857,19 +1926,95 @@ public class KnKPlugin extends JavaPlugin {
     }
 
     /**
-     * AllowEntry/AllowExit on teleports: the engine refuses up front (same verdict as the region
-     * listener), and holders of knk.region.bypass - or a player moved by a staff member who holds it -
-     * pass the listener (docs/specs/teleport/DESIGN.md §4 D11).
+     * KNG-56: domain AllowEntry/AllowExit, enforced by WorldGuard from the flags on its regions (known at startup,
+     * at join and while the API is down):
+     * <ul>
+     *   <li>a WorldGuard session handler refuses walking, gliding, swimming, riding, embarking and teleporting over a
+     *       border; WorldGuard puts the player back at their last allowed position;</li>
+     *   <li>{@code DomainAccessListener} refuses mounting across a border, corrects a respawn point the player may not
+     *       reach, and moves a player who joins inside a domain they may not enter to the world spawn;</li>
+     *   <li>the teleport engine refuses up front with the same verdict.</li>
+     * </ul>
+     * Bypass: knk.region.bypass (also carried by a staff teleport, docs/specs/teleport/DESIGN.md §4 D11) and
+     * WorldGuard's own region bypass. Owners and members of a region pass it.
      */
-    private void wireTeleportRegionGuards(WorldGuardRegionTracker regionTracker) {
+    /**
+     * {@code knk.region.bypass}, also carried by a staff teleport (docs/specs/teleport/DESIGN.md §4 D11):
+     * who ignores domain AllowEntry/AllowExit - at the border (KNG-56) and in navigation's routes and
+     * walk paths alike.
+     */
+    private boolean hasRegionBypass(org.bukkit.entity.Player player) {
         String bypassNode = net.knightsandkings.knk.paper.teleport.TeleportNodes.REGION_BYPASS;
-        regionTracker.setDenialBypass(player ->
-            (knkPermissible != null && knkPermissible.hasPermission(player, bypassNode))
+        return player != null
+            && ((knkPermissible != null && knkPermissible.hasPermission(player, bypassNode))
                 || (teleportService != null && teleportService.hasInFlightBypass(player.getUniqueId(), bypassNode)));
-        if (teleportService != null) {
-            teleportService.registerRestriction(
-                new net.knightsandkings.knk.paper.teleport.RegionTeleportRestriction(regionTracker::previewAccess));
+    }
+
+    private void wireDomainAccess() {
+        if (!net.knightsandkings.knk.paper.regions.access.DomainAccessFlags.registered()) {
+            getLogger().severe("[KnK Access] Domain access flags are not registered with WorldGuard; "
+                + "domain AllowEntry/AllowExit is NOT enforced");
+            return;
         }
+        var guardSettings = new net.knightsandkings.knk.core.regions.access.RefusalGuard.Settings(
+            Math.max(0, getConfig().getLong("regions.access.message-interval-ms", 2000)),
+            getConfig().getBoolean("regions.access.load-guard.enabled", true),
+            Math.max(1, getConfig().getInt("regions.access.load-guard.max-refusals-per-second", 20)),
+            Math.max(1, getConfig().getInt("regions.access.load-guard.window-seconds", 3)) * 1000L,
+            Math.max(1, getConfig().getInt("regions.access.load-guard.escalation-window-seconds", 60)) * 1000L);
+        this.domainAccess = new net.knightsandkings.knk.paper.regions.access.DomainAccessService(
+            new net.knightsandkings.knk.paper.regions.access.WorldGuardRegionAccessLookup(),
+            new net.knightsandkings.knk.core.regions.access.RefusalGuard(guardSettings),
+            System::currentTimeMillis,
+            task -> org.bukkit.Bukkit.getScheduler().runTask(this, task));
+
+        domainAccess.setBypass(this::hasRegionBypass);
+        domainAccess.setEnforcer(new net.knightsandkings.knk.paper.regions.access.DomainAccessService.Enforcer() {
+            @Override
+            public void sendToSpawn(org.bukkit.entity.Player player) {
+                if (player.isOnline()) {
+                    domainAccess.exemptWhile(player, () -> player.teleport(player.getWorld().getSpawnLocation()));
+                }
+            }
+
+            @Override
+            public void kick(org.bukkit.entity.Player player, String reason) {
+                if (player.isOnline()) {
+                    player.kick(net.kyori.adventure.text.Component.text(reason));
+                }
+            }
+        });
+
+        com.sk89q.worldguard.WorldGuard.getInstance().getPlatform().getSessionManager().registerHandler(
+            new net.knightsandkings.knk.paper.regions.access.DomainAccessHandler.Factory(domainAccess), null);
+        getServer().getPluginManager().registerEvents(
+            new net.knightsandkings.knk.paper.regions.access.DomainAccessListener(domainAccess,
+                this::resyncWorldGuardSession,
+                player -> siegeService != null && siegeService.isParticipant(player.getUniqueId())),
+            this);
+        if (teleportService != null) {
+            teleportService.registerRestriction(new net.knightsandkings.knk.paper.teleport.RegionTeleportRestriction(
+                (player, to) -> domainAccess.preview(player, player.getLocation(), to)
+                    .map(refusal -> net.knightsandkings.knk.core.regions.RegionTransitionDecision.deny(refusal.type(), refusal.message()))
+                    .orElse(null)));
+        }
+    }
+
+    /**
+     * Next tick, make WorldGuard's session take the player's real position as their last allowed one - after a
+     * respawn point was corrected, so WorldGuard doesn't keep judging moves from the original point.
+     */
+    private void resyncWorldGuardSession(org.bukkit.entity.Player player) {
+        org.bukkit.Bukkit.getScheduler().runTask(this, () -> {
+            if (!player.isOnline()) {
+                return;
+            }
+            var localPlayer = com.sk89q.worldguard.bukkit.WorldGuardPlugin.inst().wrapPlayer(player);
+            var session = com.sk89q.worldguard.WorldGuard.getInstance().getPlatform().getSessionManager().get(localPlayer);
+            domainAccess.exemptWhile(player, () -> session.testMoveTo(localPlayer,
+                com.sk89q.worldedit.bukkit.BukkitAdapter.adapt(player.getLocation()),
+                com.sk89q.worldguard.session.MoveType.OTHER_NON_CANCELLABLE, true));
+        });
     }
 
     /**
@@ -2005,7 +2150,7 @@ public class KnKPlugin extends JavaPlugin {
                 mainThread, queryApi, commandApi, runtime::settings, userIdOf);
             var opening = new net.knightsandkings.knk.paper.lootbox.LootboxOpening(
                 this, delivery, announcer, queryApi, runtime::settings, runtime::config,
-                () -> java.util.concurrent.ThreadLocalRandom.current().nextDouble());
+                () -> java.util.concurrent.ThreadLocalRandom.current().nextDouble(), inSiege);
             pluginManager.registerEvents(opening, this);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxInteractListener(
                 runtime, new net.knightsandkings.knk.core.lootbox.ClaimGuard(), commandApi, tokenDelivery, announcer,
@@ -2081,14 +2226,15 @@ public class KnKPlugin extends JavaPlugin {
     }
 
     /**
-     * After a siege restored a player's own inventory: hand over the lootbox tokens held back during the siege, so they
-     * don't have to rejoin. A second later, so a quitting player is gone (their next join delivers them) and a player
-     * who immediately joined another siege is skipped.
+     * After a siege restored a player's own inventory: hand over the lootbox tokens held back during the siege and any
+     * reel item that came up during it, so they don't have to rejoin. A second later, so a quitting player is gone
+     * (their next join delivers them) and a player who immediately joined another siege is skipped.
      */
-    private void deliverLootboxTokensAfterSiege(org.bukkit.entity.Player player) {
+    private void deliverLootboxItemsAfterSiege(org.bukkit.entity.Player player) {
         var tokenDelivery = lootboxTokenDelivery;
+        var opening = lootboxOpening;
         // Not while disabling (siege shutdown restores everyone; scheduling then throws): their next join delivers.
-        if (tokenDelivery == null || !isEnabled()) {
+        if ((tokenDelivery == null && opening == null) || !isEnabled()) {
             return;
         }
         java.util.UUID uuid = player.getUniqueId();
@@ -2096,7 +2242,12 @@ public class KnKPlugin extends JavaPlugin {
             org.bukkit.entity.Player online = getServer().getPlayer(uuid);
             if (online != null && online.isOnline()
                 && (siegeService == null || siegeService.activeLobbyOf(uuid).isEmpty())) {
-                tokenDelivery.deliverUndelivered(online);
+                if (opening != null) {
+                    opening.deliverWaiting(online);
+                }
+                if (tokenDelivery != null) {
+                    tokenDelivery.deliverUndelivered(online);
+                }
             }
         }, 20L);
     }
@@ -2251,7 +2402,7 @@ public class KnKPlugin extends JavaPlugin {
         siegeService.addObserver(siegeBooks);
         siegeVault.setAfterRestore(player -> {
             siegeBooks.sweep(player);
-            deliverLootboxTokensAfterSiege(player);
+            deliverLootboxItemsAfterSiege(player);
         });
 
         var pluginManager = getServer().getPluginManager();

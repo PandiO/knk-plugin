@@ -22,7 +22,10 @@ import net.knightsandkings.knk.core.teleport.TeleportKind;
  * @param silent           no message to the moved/visited player
  * @param destinationLabel for log lines ("Bob", "10, 64, -3 in world")
  * @param charge           what the server must allow (and charge) before the move - a warp's gem price,
- *                         a paid request's coin fee (Phase 5); null = nothing to ask
+ *                         a paid request's coin fee (Phase 5), a paid /back (KNG-42); null = nothing to ask
+ * @param backTrip         a {@code /back}, the player's own or a staff {@code /back <player>} (KNG-42): its
+ *                         origin is never recorded for another {@code /back} (no ping-pong), and a staff one
+ *                         still looks for a safe spot (the place may be a lava death)
  */
 public record TeleportPlan(
     Player subject,
@@ -32,7 +35,8 @@ public record TeleportPlan(
     Player visited,
     boolean silent,
     String destinationLabel,
-    TeleportCharge charge
+    TeleportCharge charge,
+    boolean backTrip
 ) {
     public TeleportPlan {
         Objects.requireNonNull(subject, "subject must not be null");
@@ -40,6 +44,12 @@ public record TeleportPlan(
         Objects.requireNonNull(kind, "kind must not be null");
         actor = actor != null ? actor : subject;
         destinationLabel = destinationLabel != null ? destinationLabel : "?";
+    }
+
+    /** A plan that isn't a {@code /back}. */
+    public TeleportPlan(Player subject, Supplier<Location> destination, TeleportKind kind, CommandSender actor,
+                        Player visited, boolean silent, String destinationLabel, TeleportCharge charge) {
+        this(subject, destination, kind, actor, visited, silent, destinationLabel, charge, false);
     }
 
     /** A plan with nothing to charge. */
@@ -50,7 +60,7 @@ public record TeleportPlan(
 
     /** This plan, paid for (or authorized) by {@code charge} when it commits. */
     public TeleportPlan withCharge(TeleportCharge charge) {
-        return new TeleportPlan(subject, destination, kind, actor, visited, silent, destinationLabel, charge);
+        return new TeleportPlan(subject, destination, kind, actor, visited, silent, destinationLabel, charge, backTrip);
     }
 
     /** A staff teleport of {@code subject} to {@code visited}'s live location. */
@@ -87,12 +97,21 @@ public record TeleportPlan(
     }
 
     /**
-     * A player's own {@code /back} to where they died (Phase 7): warmup, cooldown, combat tag, every
-     * guard and the safe-spot check (the death spot may be lava or a cliff edge). {@code destination}
-     * answers null once the death's world is gone.
+     * A player's own {@code /back} (Phase 7, KNG-42): warmup, cooldown, combat tag, every guard and the
+     * safe-spot check (a death spot may be lava or a cliff edge). {@code destination} answers null once
+     * the place's world is gone.
      */
     public static TeleportPlan back(Player subject, Supplier<Location> destination, String label) {
-        return new TeleportPlan(subject, destination, TeleportKind.BACK, subject, null, false, label);
+        return new TeleportPlan(subject, destination, TeleportKind.BACK, subject, null, false, label, null, true);
+    }
+
+    /**
+     * A staff {@code /back <player>} (KNG-42): a staff teleport (instant, audited, no cooldown or combat
+     * tag) that still looks for a safe spot near the place.
+     */
+    public static TeleportPlan staffBack(CommandSender actor, Player subject, Supplier<Location> destination,
+                                         String label, boolean silent) {
+        return new TeleportPlan(subject, destination, TeleportKind.STAFF, actor, null, silent, label, null, true);
     }
 
     public boolean movesActor() {

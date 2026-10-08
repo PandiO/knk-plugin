@@ -43,8 +43,8 @@ import net.knightsandkings.knk.paper.siege.SiegeGateController;
  *   <li>{@code PassRule} ← {@link GatePassThroughRules} (R25);</li>
  *   <li>{@code DomainLookup} ← {@link RegionDomainResolver#getDomainByRegionIdNoRefresh}, falling
  *       back to the API off the main thread (R7); the player's current regions from
- *       {@link RegionIds#at} (R8); the bypass is the region tracker's {@code knk.region.bypass}
- *       predicate (KNG-17, R6).</li>
+ *       {@link RegionIds#at} (R8); the bypass is {@code KnKPlugin.hasRegionBypass} ({@code knk.region.bypass},
+ *       KNG-17, R6; shared with the KNG-56 border).</li>
  * </ul>
  * {@link #policyFor} runs on the main thread and reads every gate the network mentions once, so the
  * policy itself can be used from the routing thread without touching Bukkit or the gate cache.
@@ -66,7 +66,7 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
      * @param siegeGates  the siege gate controller when siege initialized, read per call (may return null)
      * @param regionIds   the shared WorldGuard region query (R8)
      * @param resolver    region id → domain (R7)
-     * @param bypass      who ignores AllowEntry/AllowExit ({@code WorldGuardRegionTracker.bypassesDenials})
+     * @param bypass      who ignores AllowEntry/AllowExit ({@code knk.region.bypass}, {@code KnKPlugin.hasRegionBypass})
      * @param evaluator   the shared entry/exit rule (R6)
      */
     public NavigationAccess(GateManager gateManager, Supplier<SiegeGateController> siegeGates, RegionIds regionIds,

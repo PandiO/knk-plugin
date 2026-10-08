@@ -215,17 +215,16 @@ public class ItemBlueprintsDebugCommand implements CommandExecutor {
             return;
         }
 
-        final ItemStack itemStack;
+        final BlueprintItemAssembler.Result assembled;
         try {
-            itemStack = itemAssembler.build(payload.blueprint(), payload.materialNamespaceKey());
+            assembled = itemAssembler.assembleDefaults(payload.blueprint(), payload.materialNamespaceKey(),
+                payload.enchantmentDefinitions(), null);
         } catch (Exception ex) {
             sender.sendMessage(ChatColor.RED + "Failed to map item blueprint to Bukkit item: " + ex.getMessage());
             return;
         }
 
-        BlueprintItemAssembler.Result assembled = itemAssembler.enchant(itemStack, payload.blueprint(),
-                BlueprintItemAssembler.defaultEnchantments(payload.blueprint(), payload.enchantmentDefinitions()),
-                BlueprintItemAssembler.Options.DEFAULTS);
+        final ItemStack itemStack = assembled.itemStack();
         int applied = assembled.applied();
         List<String> skipped = assembled.skipped();
 

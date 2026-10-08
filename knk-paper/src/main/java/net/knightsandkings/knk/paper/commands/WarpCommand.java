@@ -283,7 +283,8 @@ public class WarpCommand implements TabExecutor {
     /** "Kardenna (Town) - 10 gems - Available" (click to warp) or "... - Locked: Reach title X to unlock". */
     static Component listLine(KnkTeleportDestination destination, boolean bypassRequirements, boolean bypassCost) {
         String lock = destination.lockReason(bypassRequirements, bypassCost);
-        String price = destination.priceGems() > 0 && !bypassCost ? destination.priceGems() + " gems" : "free";
+        // The player's own price: the domain's gems, or their permission group's (KNG-41).
+        String price = destination.hasPrice() && !bypassCost ? destination.priceLabel() : "free";
         Component name = Component.text(destination.name(), lock == null ? NamedTextColor.GREEN : NamedTextColor.GRAY);
         if (lock == null) {
             String command = "/warp " + destination.qualifiedName();

@@ -69,4 +69,16 @@ class LootboxReelTest {
     void aWinnerIsRequired() {
         assertThrows(IllegalArgumentException.class, () -> LootboxReel.plan(ODDS, null, 3, 9, 4, () -> 0.5));
     }
+
+    @Test
+    void perSlot_dressesEveryPassingItemSeparately_butNeverTheWinner() {
+        int[] counter = {0};
+        LootboxReel<String> reel = LootboxReel.plan(ODDS, "winner", 10, 9, 8, new Random(2)::nextDouble,
+                item -> item + "#" + counter[0]++);
+
+        assertEquals("winner", reel.atMarker(reel.steps()));
+        assertEquals(18, reel.items().stream().filter(item -> item.contains("#")).count(), "every slot but the winner");
+        assertEquals(reel.items().size() - 1, reel.items().stream().distinct().filter(item -> !item.equals("winner")).count()
+                , "each passing slot got its own copy");
+    }
 }

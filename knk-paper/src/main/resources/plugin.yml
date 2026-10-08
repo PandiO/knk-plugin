@@ -228,11 +228,11 @@ commands:
     description: "List the places you can teleport to with /warp"
     usage: "/warps"
 
-  # Back to where you died (DESIGN.md Phase 7, developer decision Q5) - death location only, for a few
-  # minutes, never after a siege death. Node checked in BackCommand.
+  # Back to the latest death or teleport origin your nodes allow (DESIGN.md Phase 7, KNG-42); staff
+  # /back <player> [-s]. Nodes checked in BackCommand.
   back:
-    description: "Teleport back to where you last died (for a few minutes after the death)"
-    usage: "/back"
+    description: "Teleport back to where you died, or were before a warp, teleport or /spawn (for a few minutes)"
+    usage: "/back | /back <player> [-s]"
 
   # Road navigation (KNG-27, docs/specs/navigation/DESIGN.md §6.1, Phase 4): a particle trail and HUD
   # along the road network to a Location, Town/District/Structure, street or named road node.
@@ -851,7 +851,32 @@ permissions:
     description: >-
       /back - return to where you last died, within teleport.back.expire-seconds (5 min) of the death,
       once per death. Warmup, cooldown, combat tag and the safe-spot check apply; a siege death gives no
-      /back. Meant for the Dragon Blood premium tier.
+      /back. Meant for the Dragon Blood premium tier. With several knk.teleport.back.* kinds, /back goes
+      to the latest place among them.
+    default: op
+
+  knk.teleport.back.warps:
+    description: /back - return to where you were before your last /warp or menu warp (KNG-42).
+    default: op
+
+  knk.teleport.back.teleport:
+    description: >-
+      /back - return to where you were before your last /tpa or /tpahere (whoever moved) or your own
+      staff /tp (KNG-42). Being moved by staff isn't recorded.
+    default: op
+
+  knk.teleport.back.spawn:
+    description: /back - return to where you were before your last /spawn (KNG-42).
+    default: op
+
+  knk.teleport.back.all:
+    description: /back to every kind of place (death, warps, teleport, spawn). knk.teleport.back.* works too.
+    default: op
+
+  knk.teleport.staff.back.others:
+    description: >-
+      /back <player> [-s] - send a player you outrank back to their latest /back place of any kind.
+      Instant and audited; uses their entry up.
     default: op
 
   knk.teleport.bypass.requirements:
@@ -859,7 +884,7 @@ permissions:
     default: op
 
   knk.teleport.bypass.cost:
-    description: /warp is free (no gem price).
+    description: /warp is free (no gem price), and so is /back when teleport.back.price-coins is set.
     default: op
 
   knk.teleport.warmup.short:

@@ -11,13 +11,21 @@ import java.util.Locale;
  * The {@code discoveries} root (domain-discovery DESIGN.md §3.7): the viewer's discovery summary
  * ({@code GET …/discoveries/summary}) for the {@code discoveries.main} header and the hub tile.
  * Built from the last summary {@link DiscoveriesMenuFeature} read; "not loaded" until one arrives.
+ * A type switched off in the Discovery settings is left out, except for staff ({@code knk.admin.discovery}),
+ * who see it tagged "Disabled".
  */
 public final class DiscoveriesView {
 
     private final DiscoverySummary summary;
+    private final boolean staff;
 
     DiscoveriesView(DiscoverySummary summary) {
+        this(summary, false);
+    }
+
+    DiscoveriesView(DiscoverySummary summary, boolean staff) {
         this.summary = summary;
+        this.staff = staff;
     }
 
     static DiscoveriesView unavailable() {
@@ -28,7 +36,10 @@ public final class DiscoveriesView {
         return summary != null;
     }
 
-    /** "&7Towns: &f3&7/&f5" per type that has places (Town, District, Structure, Gate order). */
+    /**
+     * "&7Towns: &f3&7/&f5" per type that has places (Town, District, Structure, Gate order); for staff,
+     * "&7Gates: &8Disabled" for a type switched off in the Discovery settings.
+     */
     public List<String> getSummaryLines() {
         List<String> lines = new ArrayList<>();
         if (summary == null) {
@@ -36,7 +47,10 @@ public final class DiscoveriesView {
             return lines;
         }
         for (DiscoveryTypeCount count : summary.byType()) {
-            if (count.total() > 0) {
+            if (staff && !count.enabled()) {
+                lines.add("&7" + plural(count.domainType()) + ": &8Disabled"
+                        + (count.total() > 0 ? " &7(&f" + count.discovered() + "&7/&f" + count.total() + "&7)" : ""));
+            } else if (count.total() > 0) {
                 lines.add("&7" + plural(count.domainType()) + ": &f" + count.discovered() + "&7/&f" + count.total());
             }
         }

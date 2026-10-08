@@ -30,6 +30,7 @@ public class SimpleRegionTransitionService implements RegionTransitionService {
     private final GateControlPort gateControlPort;
     private final Consumer<Set<DomainSnapshot>> onDomainsEntered;
     private final DomainAccessEvaluator accessEvaluator = new DomainAccessEvaluator();
+    private final boolean accessChecks;
 
     /**
      * Construct with resolver, optional gate control, and an optional callback invoked with the
@@ -41,9 +42,26 @@ public class SimpleRegionTransitionService implements RegionTransitionService {
         GateControlPort gateControlPort,
         Consumer<Set<DomainSnapshot>> onDomainsEntered
     ) {
+        this(regionResolver, gateControlPort, onDomainsEntered, true);
+    }
+
+    /**
+     * @param accessChecks false when something else enforces AllowEntry/AllowExit (the game server
+     *     since KNG-56: WorldGuard, from flags kept on disk). Transitions are then only described -
+     *     messages, gates, the entered-domains callback - so a resident entering their own closed
+     *     district, or data the cache hasn't caught up with, can't suppress them.
+     *     {@link #previewAccess} still applies the rules.
+     */
+    public SimpleRegionTransitionService(
+        RegionDomainResolver regionResolver,
+        GateControlPort gateControlPort,
+        Consumer<Set<DomainSnapshot>> onDomainsEntered,
+        boolean accessChecks
+    ) {
         this.regionResolver = Objects.requireNonNull(regionResolver, "regionResolver");
         this.gateControlPort = gateControlPort;  // May be null if gates not implemented
         this.onDomainsEntered = onDomainsEntered;  // May be null if no listener is needed
+        this.accessChecks = accessChecks;
     }
 
     /**
@@ -93,14 +111,14 @@ public class SimpleRegionTransitionService implements RegionTransitionService {
 
         // TODO 1: Enforce entry/exit policies
         // Check entry permissions for all entered entities (Town > District > Structure priority)
-        RegionTransitionDecision entryDeny = checkEntryDenials(transition);
+        RegionTransitionDecision entryDeny = accessChecks ? checkEntryDenials(transition) : null;
         if (entryDeny != null) {
             LOGGER.info("[KnK Service] ENTRY DENIED: " + entryDeny.getMessage().orElse("(no message)"));
             return entryDeny;
         }
 
         // Check exit permissions for all left entities
-        RegionTransitionDecision exitDeny = checkExitDenials(transition);
+        RegionTransitionDecision exitDeny = accessChecks ? checkExitDenials(transition) : null;
         if (exitDeny != null) {
             LOGGER.info("[KnK Service] EXIT DENIED: " + exitDeny.getMessage().orElse("(no message)"));
             return exitDeny;
@@ -128,8 +146,8 @@ public class SimpleRegionTransitionService implements RegionTransitionService {
      * The rules are {@link DomainAccessEvaluator}'s (road navigation plan §2 R6): the same instance
      * the border check uses decides here, so the teleport engine's up-front refusal, the region
      * listener and the road router can never disagree. Bypasses ({@code knk.region.bypass}) are the
-     * caller's: {@code WorldGuardRegionTracker.bypassesDenials} for teleports and the tracker's
-     * re-validation, and the same predicate as {@code DomainAvailability}'s bypass for navigation.
+     * caller's: {@code DomainAccessService}'s bypass for the border and teleports (KNG-56), and the
+     * same predicate as {@code DomainAvailability}'s bypass for navigation.
      */
     @Override
     public RegionTransitionDecision previewAccess(Set<String> oldRegionIds, Set<String> newRegionIds) {

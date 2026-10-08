@@ -137,6 +137,7 @@ public class KnkApiClient {
     private final net.knightsandkings.knk.core.ports.api.CategoriesQueryApi categoriesQueryApi;
     private final KitsCommandApi kitsCommandApi;
     private final net.knightsandkings.knk.core.ports.api.GameSettingsQueryApi gameSettingsQueryApi;
+    private final net.knightsandkings.knk.core.ports.api.DomainAccessRulesApi domainAccessRulesApi;
     private final net.knightsandkings.knk.api.impl.TeleportDestinationsApiImpl teleportDestinationsApi;
     private final net.knightsandkings.knk.core.ports.api.LootboxesQueryApi lootboxesQueryApi;
     private final net.knightsandkings.knk.core.ports.api.LootboxesCommandApi lootboxesCommandApi;
@@ -196,6 +197,7 @@ public class KnkApiClient {
         this.currencyApi = new net.knightsandkings.knk.api.impl.CurrencyApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.categoriesQueryApi = new net.knightsandkings.knk.api.impl.CategoriesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.gameSettingsQueryApi = new net.knightsandkings.knk.api.impl.GameSettingsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.domainAccessRulesApi = new net.knightsandkings.knk.api.impl.DomainAccessRulesApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.teleportDestinationsApi = new net.knightsandkings.knk.api.impl.TeleportDestinationsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.lootboxesQueryApi = new net.knightsandkings.knk.api.impl.LootboxesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.lootboxesCommandApi = new net.knightsandkings.knk.api.impl.LootboxesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -249,6 +251,11 @@ public class KnkApiClient {
     /** Menu follow-up 2026-09-26: {@code GET /api/Categories} (catalogue category filter). */
     public net.knightsandkings.knk.core.ports.api.CategoriesQueryApi getCategoriesQueryApi() {
         return categoriesQueryApi;
+    }
+
+    /** KNG-56: {@code GET /api/Domains/access-rules} - domain AllowEntry/AllowExit for the region flag sync. */
+    public net.knightsandkings.knk.core.ports.api.DomainAccessRulesApi getDomainAccessRulesApi() {
+        return domainAccessRulesApi;
     }
 
     /** Teleport Phase 4 ({@code /spawn}): {@code GET /api/GameSettings}. */

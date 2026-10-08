@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.api.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -173,7 +174,8 @@ class DiscoveriesApiImplTest {
 
     @Test
     void summaryMapsCountsAndLatest() {
-        responseJson = "{\"byType\":[{\"domainType\":\"Town\",\"discovered\":3,\"total\":5}],"
+        responseJson = "{\"byType\":[{\"domainType\":\"Town\",\"discovered\":3,\"total\":5},"
+                + "{\"domainType\":\"Structure\",\"discovered\":0,\"total\":0,\"enabled\":false}],"
                 + "\"latest\":{\"domainId\":1,\"name\":\"Rivia\",\"domainType\":\"Town\",\"discovered\":true},"
                 + "\"totalDiscovered\":3,\"totalCoins\":100,\"totalGems\":2,\"totalExp\":40}";
 
@@ -181,6 +183,8 @@ class DiscoveriesApiImplTest {
 
         assertEquals("http://api.test/api/users/12/discoveries/summary", seen.get(0).url().toString());
         assertEquals(5, summary.byType().get(0).total());
+        assertTrue(summary.byType().get(0).enabled(), "no enabled flag (older API) counts as enabled");
+        assertFalse(summary.byType().get(1).enabled());
         assertEquals("Rivia", summary.latest().name());
         assertEquals(40, summary.totalExp());
     }

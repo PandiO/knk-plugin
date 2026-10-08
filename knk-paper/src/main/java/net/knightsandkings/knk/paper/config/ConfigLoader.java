@@ -1,8 +1,14 @@
 package net.knightsandkings.knk.paper.config;
 
+import java.util.EnumMap;
+import java.util.Map;
+import java.util.Optional;
+import java.util.logging.Logger;
+
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 
+import net.knightsandkings.knk.core.teleport.BackKind;
 import net.knightsandkings.knk.core.teleport.TeleportBackSettings;
 import net.knightsandkings.knk.core.teleport.TeleportRequestSettings;
 import net.knightsandkings.knk.core.teleport.TeleportSettings;
@@ -133,15 +139,33 @@ public class ConfigLoader {
         );
     }
 
-    /** teleport.back (DESIGN §3.11, Phase 7); missing keys fall back to the defaults. */
+    /**
+     * teleport.back (DESIGN §3.11, Phase 7; KNG-42 adds expire-seconds-by-kind and price-coins); missing
+     * keys fall back to the defaults. An unknown kind under expire-seconds-by-kind is logged and skipped.
+     */
     static TeleportBackSettings loadTeleportBackSettings(ConfigurationSection section) {
         TeleportBackSettings defaults = TeleportBackSettings.defaults();
         if (section == null) {
             return defaults;
         }
+        Map<BackKind, Integer> byKind = new EnumMap<>(BackKind.class);
+        ConfigurationSection kinds = section.getConfigurationSection("expire-seconds-by-kind");
+        if (kinds != null) {
+            for (String key : kinds.getKeys(false)) {
+                Optional<BackKind> kind = BackKind.fromConfigKey(key);
+                if (kind.isEmpty() || !kinds.isInt(key)) {
+                    Logger.getLogger(ConfigLoader.class.getName()).warning("teleport.back.expire-seconds-by-kind." + key
+                        + " ignored - kinds are death, warps, teleport and spawn, each a number of seconds");
+                    continue;
+                }
+                byKind.put(kind.get(), kinds.getInt(key));
+            }
+        }
         return new TeleportBackSettings(
             section.getBoolean("enabled", defaults.enabled()),
-            section.getInt("expire-seconds", defaults.expireSeconds())
+            section.getInt("expire-seconds", defaults.expireSeconds()),
+            byKind,
+            section.getInt("price-coins", defaults.priceCoins())
         );
     }
 

@@ -14,6 +14,8 @@ import net.knightsandkings.knk.api.dto.TeleportChargeDtos;
 import net.knightsandkings.knk.api.dto.TeleportDestinationDto;
 import net.knightsandkings.knk.api.mapper.TeleportDestinationsMapper;
 import net.knightsandkings.knk.core.domain.teleport.KnkTeleportDestination;
+import net.knightsandkings.knk.core.domain.teleport.KnkTeleportPolicy;
+import net.knightsandkings.knk.core.domain.teleport.TeleportPayment;
 import net.knightsandkings.knk.core.domain.teleport.TeleportChargeResult;
 import net.knightsandkings.knk.core.domain.teleport.TeleportRefundResult;
 import net.knightsandkings.knk.core.exception.ApiException;
@@ -52,6 +54,25 @@ public class TeleportDestinationsApiImpl extends BaseApiImpl implements Teleport
     }
 
     @Override
+    public CompletableFuture<KnkTeleportPolicy> policyForUser(int userId) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + ENDPOINT + "/policy?userId=" + userId;
+            try {
+                TeleportChargeDtos.Policy dto = parse(get(url), TeleportChargeDtos.Policy.class, url);
+                return dto == null ? KnkTeleportPolicy.DEFAULT
+                    : new KnkTeleportPolicy(kind(dto.request()), kind(dto.warp()), kind(dto.spawn()));
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to load the teleport policy of user " + userId, e);
+            }
+        }, executor);
+    }
+
+    private static KnkTeleportPolicy.Kind kind(TeleportChargeDtos.KindPolicy dto) {
+        return dto == null ? KnkTeleportPolicy.Kind.NONE : new KnkTeleportPolicy.Kind(dto.priceMode(), dto.priceMultiplier(),
+            dto.priceCoins(), dto.priceGems(), dto.priceExperience(), dto.cooldownSeconds());
+    }
+
+    @Override
     public CompletableFuture<TeleportChargeResult> chargeWarp(int domainId, int userId, String idempotencyKey,
                                                              boolean bypassRequirements, boolean bypassCost) {
         return charge(baseUrl + ENDPOINT + "/" + domainId + "/charge",
@@ -65,6 +86,21 @@ public class TeleportDestinationsApiImpl extends BaseApiImpl implements Teleport
         return charge(baseUrl + ENDPOINT + "/request-fee",
             new TeleportChargeDtos.RequestFee(userId, amountCoins, idempotencyKey, otherUserId),
             "the teleport request fee of user " + userId);
+    }
+
+    @Override
+    public CompletableFuture<TeleportChargeResult> chargeSpawnFee(int userId, String idempotencyKey) {
+        return charge(baseUrl + ENDPOINT + "/spawn-fee",
+            new TeleportChargeDtos.SpawnFee(userId, idempotencyKey),
+            "the /spawn fee of user " + userId);
+    }
+
+    @Override
+    public CompletableFuture<TeleportChargeResult> chargeBackFee(int userId, int amountCoins, String idempotencyKey,
+                                                                String backKind) {
+        return charge(baseUrl + ENDPOINT + "/back-fee",
+            new TeleportChargeDtos.BackFee(userId, amountCoins, idempotencyKey, backKind),
+            "the /back fee of user " + userId);
     }
 
     @Override
@@ -87,6 +123,18 @@ public class TeleportDestinationsApiImpl extends BaseApiImpl implements Teleport
             try {
                 String json = postJson(url, objectMapper.writeValueAsString(request));
                 TeleportChargeDtos.ChargeResult dto = parse(json, TeleportChargeDtos.ChargeResult.class, url);
+                if (dto.payments() != null) {
+                    // KNG-41: every currency the charge took (a group's price may combine them).
+                    List<TeleportPayment> payments = dto.payments().stream()
+                        .filter(p -> p != null && p.currency() != null && p.amount() != null && p.amount() > 0)
+                        .map(p -> new TeleportPayment(p.currency(), p.amount(), p.newBalance() != null ? p.newBalance() : 0L))
+                        .toList();
+                    return TeleportChargeResult.allowed(dto.currency(), payments,
+                        dto.newBalance() != null ? dto.newBalance() : 0L,
+                        Boolean.TRUE.equals(dto.replayed()),
+                        TeleportDestinationsMapper.map(dto.destination()));
+                }
+                // An API from before KNG-41: one currency.
                 return TeleportChargeResult.allowed(dto.currency(),
                     dto.charged() != null ? dto.charged() : 0L,
                     dto.newBalance() != null ? dto.newBalance() : 0L,
