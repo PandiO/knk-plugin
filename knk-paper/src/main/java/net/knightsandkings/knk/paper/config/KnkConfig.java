@@ -20,23 +20,74 @@ public record KnkConfig(
     MessagesConfig messages,
     PrivateMessagesConfig privateMessages,
     TeleportSettings teleport,
-    DiscoveryConfig discovery
+    DiscoveryConfig discovery,
+    RegionHttpConfig regionHttp,
+    WebConfig web
 ) {
     public KnkConfig {
         // No teleport: block (e.g. an older config.yml) means the DESIGN §3.11 defaults.
         teleport = teleport != null ? teleport : TeleportSettings.defaults();
+        // An older config.yml has no region-http bind address and no web: block.
+        regionHttp = regionHttp != null ? regionHttp : RegionHttpConfig.defaults();
+        web = web != null ? web : WebConfig.defaults();
     }
 
-    /** Without private-messages, teleport and discovery sections: their defaults. */
+    /** Without private-messages, teleport, discovery, region-http and web sections: their defaults. */
     public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages) {
-        this(api, cache, account, messages, PrivateMessagesConfig.defaults(), TeleportSettings.defaults(),
-            DiscoveryConfig.defaults());
+        this(api, cache, account, messages, PrivateMessagesConfig.defaults());
     }
 
-    /** Without teleport and discovery sections: their defaults. */
+    /** Without teleport, discovery, region-http and web sections: their defaults. */
     public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
                      PrivateMessagesConfig privateMessages) {
-        this(api, cache, account, messages, privateMessages, TeleportSettings.defaults(), DiscoveryConfig.defaults());
+        this(api, cache, account, messages, privateMessages, TeleportSettings.defaults(), DiscoveryConfig.defaults(),
+            RegionHttpConfig.defaults(), WebConfig.defaults());
+    }
+
+    /**
+     * The small HTTP server knk-web-api calls back for region renames and containment checks
+     * ({@code paper/http/RegionHttpServer}). It binds to {@code bindAddress} only: the loopback
+     * address by default, so nothing outside the host can reach it.
+     */
+    public record RegionHttpConfig(String bindAddress, int port) {
+        public static final String DEFAULT_BIND_ADDRESS = "127.0.0.1";
+        public static final int DEFAULT_PORT = 8081;
+
+        public RegionHttpConfig {
+            bindAddress = bindAddress == null || bindAddress.isBlank() ? DEFAULT_BIND_ADDRESS : bindAddress.trim();
+        }
+
+        public static RegionHttpConfig defaults() {
+            return new RegionHttpConfig(DEFAULT_BIND_ADDRESS, DEFAULT_PORT);
+        }
+
+        public void validate() {
+            if (port < 1 || port > 65535) {
+                throw new IllegalArgumentException("region-http.port must be between 1 and 65535 (got: " + port + ")");
+            }
+        }
+    }
+
+    /**
+     * The public web app, for player-facing messages. {@code publicUrl} is empty when unknown; it
+     * never ends with a slash, so {@code publicUrl + "/auth/register"} is always well formed.
+     */
+    public record WebConfig(String publicUrl) {
+        public WebConfig {
+            String url = publicUrl == null ? "" : publicUrl.trim();
+            while (url.endsWith("/")) {
+                url = url.substring(0, url.length() - 1);
+            }
+            publicUrl = url;
+        }
+
+        public static WebConfig defaults() {
+            return new WebConfig("");
+        }
+
+        public boolean hasPublicUrl() {
+            return !publicUrl.isEmpty();
+        }
     }
 
     public record ApiConfig(
@@ -127,6 +178,7 @@ public record KnkConfig(
             throw new IllegalArgumentException("discovery configuration is required");
         }
         discovery.validate();
+        regionHttp.validate();
     }
     
     public record CacheConfig(
@@ -356,7 +408,9 @@ public record KnkConfig(
     /**
      * Messages configuration for player-facing text.
      * All messages support Minecraft color codes (&a, &6, etc.).
-     * Placeholders: {code}, {minutes}, {coins}, {gems}, {exp}
+     * Placeholders: {code}, {minutes}, {url}, {coins}, {gems}, {exp}
+     * ({url} is web.public-url; see {@code commands/LinkCodeMessage} for how a message that
+     * uses it reads when no URL is configured.)
      */
     public record MessagesConfig(
         String prefix,

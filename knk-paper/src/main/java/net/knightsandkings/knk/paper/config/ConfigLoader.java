@@ -114,12 +114,34 @@ public class ConfigLoader {
         KnkConfig knkConfig = new KnkConfig(apiConfig, cacheConfig, accountConfig, messagesConfig,
             loadPrivateMessages(config.getConfigurationSection("private-messages")),
             loadTeleportSettings(config.getConfigurationSection("teleport")),
-            loadDiscovery(config.getConfigurationSection("discovery")));
+            loadDiscovery(config.getConfigurationSection("discovery")),
+            loadRegionHttp(config.getConfigurationSection("region-http")),
+            loadWeb(config.getConfigurationSection("web")));
         knkConfig.validate();
         
         return knkConfig;
     }
     
+    /** region-http: an older config.yml without the section (or without bind-address) gets the loopback default. */
+    static KnkConfig.RegionHttpConfig loadRegionHttp(ConfigurationSection section) {
+        KnkConfig.RegionHttpConfig defaults = KnkConfig.RegionHttpConfig.defaults();
+        if (section == null) {
+            return defaults;
+        }
+        return new KnkConfig.RegionHttpConfig(
+            section.getString("bind-address", defaults.bindAddress()),
+            section.getInt("port", defaults.port())
+        );
+    }
+
+    /** web: missing means no public URL (messages leave the link out). */
+    static KnkConfig.WebConfig loadWeb(ConfigurationSection section) {
+        if (section == null) {
+            return KnkConfig.WebConfig.defaults();
+        }
+        return new KnkConfig.WebConfig(section.getString("public-url", ""));
+    }
+
     /** The teleport: block (docs/specs/teleport/DESIGN.md §3.11); missing keys fall back to the defaults. */
     static TeleportSettings loadTeleportSettings(ConfigurationSection section) {
         TeleportSettings defaults = TeleportSettings.defaults();

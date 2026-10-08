@@ -7,8 +7,9 @@ api:
   # default: it is noisy. The X-API-Key and Authorization values are redacted either way.
   debug-logging: false
   
-  # Allow untrusted SSL certificates (ONLY for development with self-signed certs)
-  allow-untrusted-ssl: true
+  # Allow untrusted SSL certificates (ONLY for development with self-signed certs). Keep false
+  # on any server that talks to the API over the internet.
+  allow-untrusted-ssl: false
   
   # Authentication configuration (KNG-22)
   #
@@ -28,6 +29,7 @@ api:
     # Bearer token (only used if type=bearer)
     bearer-token: ""
     # API key (only used if type=apikey) - must equal knk-web-api's Security:PluginApiKey.
+    # When set, the region HTTP server below also requires it (X-API-Key) on every request.
     api-key: ""
     # API key header name (only used if type=apikey). Keep X-API-Key: that's the header the
     # API reads.
@@ -38,6 +40,20 @@ api:
     connect: 10
     read: 10
     write: 10
+
+# Region HTTP server: knk-web-api calls it back for region renames and containment checks.
+region-http:
+  # Address to listen on. 127.0.0.1 (default) only accepts calls from this host. Use the Docker
+  # host IP if the API runs in a container; never 0.0.0.0 on a public server.
+  bind-address: "127.0.0.1"
+  # Port to listen on (the API's region callback URL must use the same port).
+  port: 8081
+
+# Public web app, used in player messages (e.g. where to enter a /account link code).
+web:
+  # Base URL without a trailing slash, e.g. "https://app.knightsandkings.net". Empty: messages
+  # leave the link out.
+  public-url: ""
 
 # Account management configuration (Phase 1+)
 account:
