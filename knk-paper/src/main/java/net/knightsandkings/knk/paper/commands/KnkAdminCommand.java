@@ -377,11 +377,25 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         GateCommand gateCommand = new GateCommand(gateManager, gateStructuresApi, gateDoorsApi, userManager, usersCommandApi, districtGateLoader, gateDoorRegionCaptureHandler);
         this.gateCommand = gateCommand;
         nodesCheckedInside.put("gate", GateCommand.CHECKED_NODES);
+        nodesCheckedInside.put("gatedoor", GateCommand.CHECKED_NODES);
         nodesCheckedInside.put("user", UserManagementCommand.CHECKED_NODES);
-        registry.register(
-                new CommandMetadata("gate", "Control and inspect gate structures", "/knk gate <open|close|info|list|passthrough|admin>", null,
-                        List.of("/knk gate list", "/knk gate info <name>", "/knk gate open <name>", "/knk gate passthrough <default|instant|teleport>")),
-                (sender, args) -> gateCommand.onCommand(sender, null, "knk", args)
+        // KNG-77: two sibling roots - "gate" acts on a gate structure and all its doors, "gatedoor"
+        // on one door - also reachable as /gate and /gatedoor (plugin.yml). Null top-level
+        // permission: every subaction gates itself (knk.gate.*, knk.gatedoor.*).
+        registerSubcommand(
+                new CommandMetadata("gate", "Control a whole gate (structure and all its doors)",
+                        "/knk gate <open|close|toggle|info|list|repair|tp|override|reload|passthrough> [structure|here]", null,
+                        List.of("/gate list", "/gate toggle here", "/gate open North Gate", "/gate repair 16", "/gate passthrough <default|instant|teleport>")),
+                (sender, args) -> gateCommand.onCommand(sender, null, "knk", args),
+                gateCommand::complete
+        );
+        GateDoorCommand gateDoorCommand = gateCommand.doorCommand();
+        registerSubcommand(
+                new CommandMetadata("gatedoor", "Control one gate door",
+                        "/knk gatedoor <open|close|toggle|info|list|repair|tp|health|active|invincible|capture|redefine> [door|here]", null,
+                        List.of("/gatedoor list 16", "/gatedoor repair here", "/gatedoor toggle", "/gatedoor open North Gate Left")),
+                (sender, args) -> gateDoorCommand.onCommand(sender, null, "knk", args),
+                gateDoorCommand::complete
         );
 
         // Register user management (developer request 2026-09-25, extended with group/perm
@@ -491,6 +505,13 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
      * The permission check for every subcommand's metadata node, the help listing and tab completion
      * (KNG-24). Bukkit-only until set - KnKPlugin sets the KnkPermissible-backed one.
      */
+    /** {@code gates.here.*} / {@code gates.lookat.*} for the gate commands' implicit targets (KNG-78/79). */
+    public void setGateTargetingSettings(net.knightsandkings.knk.paper.gates.GateTargeting.Settings settings) {
+        if (gateCommand != null) {
+            gateCommand.setTargetingSettings(settings);
+        }
+    }
+
     public void setCommandPermissions(CommandPermissions permissions) {
         this.commandPermissions = java.util.Objects.requireNonNull(permissions, "permissions must not be null");
         registry.setPermissions(permissions);
@@ -556,7 +577,6 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                                 case "menu" -> filterByPrefix(List.of("open", "page", "search", "filter"), current);
                                 case "tasks" -> filterByPrefix(List.of("Pending", "Claimed", "InProgress", "Completed", "Failed"), current);
                                 case "itemscan", "kitscan" -> filterByPrefix(List.of("claim"), current);
-                                case "gate" -> filterByPrefix(List.of("open", "close", "info", "list", "passthrough", "admin", "door", "help"), current);
                                 case "tp" -> visiblePlayers.completeOthers(sender, current);
                                 default -> List.of();
                         };
@@ -584,20 +604,6 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                         }
                         if (args.length >= 3 && ("search".equalsIgnoreCase(args[0]) || "filter".equalsIgnoreCase(args[0]))) {
                                 return filterByPrefix(List.of("clear"), current);
-                        }
-                }
-                if ("gate".equals(root)) {
-                        if (args.length == 2 && "passthrough".equalsIgnoreCase(args[0])) {
-                                return filterByPrefix(List.of("default", "instant", "teleport"), current);
-                        }
-                        if (args.length == 2 && "admin".equalsIgnoreCase(args[0])) {
-                                return filterByPrefix(List.of("health", "repair", "tp", "active", "invincible"), current);
-                        }
-                        if (args.length == 2 && "door".equalsIgnoreCase(args[0])) {
-                                return filterByPrefix(List.of("capture", "redefine"), current);
-                        }
-                        if (args.length >= 3 && "door".equalsIgnoreCase(args[0])) {
-                                return filterByPrefix(List.of("closed", "opened"), current);
                         }
                 }
                 if ("tp".equals(root) && args.length == 2) {

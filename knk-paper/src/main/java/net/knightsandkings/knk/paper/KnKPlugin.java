@@ -1559,6 +1559,11 @@ public class KnKPlugin extends JavaPlugin {
                 userAdminService,
                 playerCurrencyService
             );
+            // KNG-77/78/79: /gate and /gatedoor run /knk gate|gatedoor (same permissions and warm-up);
+            // `here` radius and look-at reach from config.yml gates.here.* / gates.lookat.*.
+            knkAdminCommand.setGateTargetingSettings(gateTargetingSettings());
+            registerKnkShortcut("gate", knkAdminCommand);
+            registerKnkShortcut("gatedoor", knkAdminCommand);
             if (managedRegions != null) {
                 var regionsCommand = new net.knightsandkings.knk.paper.commands.RegionsAdminCommand(managedRegions, domainAccessSync, this);
                 knkAdminCommand.registerSubcommand(
@@ -2296,6 +2301,42 @@ public class KnKPlugin extends JavaPlugin {
                 }
             }
         }, 20L);
+    }
+
+    /** {@code /<name> ...} runs {@code /knk <name> ...}, tab completion included (KNG-77: /gate, /gatedoor). */
+    private void registerKnkShortcut(String name, KnkAdminCommand knk) {
+        registerTabCommand(name, new org.bukkit.command.TabExecutor() {
+            @Override
+            public boolean onCommand(org.bukkit.command.CommandSender sender, org.bukkit.command.Command command,
+                                     String label, String[] args) {
+                return knk.onCommand(sender, command, "knk", prepend(name, args));
+            }
+
+            @Override
+            public java.util.List<String> onTabComplete(org.bukkit.command.CommandSender sender, org.bukkit.command.Command command,
+                                                        String alias, String[] args) {
+                return knk.onTabComplete(sender, command, "knk", prepend(name, args));
+            }
+
+            private String[] prepend(String first, String[] rest) {
+                String[] all = new String[rest.length + 1];
+                all[0] = first;
+                System.arraycopy(rest, 0, all, 1, rest.length);
+                return all;
+            }
+        });
+    }
+
+    /** config.yml gates.here.* / gates.lookat.* (KNG-78/79). */
+    private net.knightsandkings.knk.paper.gates.GateTargeting.Settings gateTargetingSettings() {
+        var defaults = net.knightsandkings.knk.paper.gates.GateTargeting.Settings.defaults();
+        double radius = getConfig().getDouble("gates.here.radius", defaults.hereRadius());
+        double reach = getConfig().getDouble("gates.lookat.max-distance", defaults.lookAtMaxDistance());
+        return new net.knightsandkings.knk.paper.gates.GateTargeting.Settings(
+            radius > 0 ? radius : defaults.hereRadius(),
+            net.knightsandkings.knk.paper.gates.GateTargeting.Settings.parseNearest(getConfig().getString("gates.here.ambiguity", "prompt")),
+            getConfig().getBoolean("gates.lookat.enabled", defaults.lookAtEnabled()),
+            reach > 0 ? Math.min(reach, 64) : defaults.lookAtMaxDistance());
     }
 
     private void registerTabCommand(String name, org.bukkit.command.TabExecutor executor) {

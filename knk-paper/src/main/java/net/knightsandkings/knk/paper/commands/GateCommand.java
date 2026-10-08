@@ -7,68 +7,103 @@ import net.knightsandkings.knk.core.domain.gates.AnimationState;
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.domain.gates.CachedGateStructure;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
+import net.knightsandkings.knk.core.gates.GateCommandKeywords;
 import net.knightsandkings.knk.core.gates.GateManager;
+import net.knightsandkings.knk.core.gates.target.GateToggle;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
+import net.knightsandkings.knk.paper.commands.GateCommandSupport.Request;
 import net.knightsandkings.knk.paper.commands.support.CommandPermissions;
 import net.knightsandkings.knk.paper.gates.DistrictGateLoader;
-import net.knightsandkings.knk.paper.gates.GateDoorOpenStateMapper;
+import net.knightsandkings.knk.paper.gates.GateTargeting;
 import net.knightsandkings.knk.paper.tasks.GateDoorRegionCaptureHandler;
 import net.knightsandkings.knk.paper.user.PlayerUserData;
 import net.knightsandkings.knk.paper.user.UserManager;
-import org.bukkit.command.Command;
-import org.bukkit.command.CommandExecutor;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
-import org.bukkit.entity.Player;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
-import org.bukkit.util.Vector;
+import org.bukkit.entity.Player;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
+import java.util.stream.Stream;
+
+import static net.knightsandkings.knk.paper.commands.GateCommandSupport.STRUCTURE_ROOT;
+import static net.knightsandkings.knk.paper.commands.GateCommandSupport.doorLabel;
+import static net.knightsandkings.knk.paper.commands.GateCommandSupport.filterByPrefix;
+import static net.knightsandkings.knk.paper.commands.GateCommandSupport.structureLabel;
 
 /**
- * Gate command implementation providing player and admin gate control.
- * Supports opening/closing, status, listing, and admin operations.
+ * The structure layer of the gate commands (KNG-77): {@code /knk gate <sub> <structure>}, alias
+ * {@code /gate}. A "gate" is a GateStructure with one or more independently-animating GateDoors
+ * (item 5); every subcommand here acts on the structure and <em>all</em> of its doors. One door at
+ * a time is {@link GateDoorCommand} ({@code /knk gatedoor}, {@code /gatedoor}) - sibling roots
+ * rather than a nested {@code door} literal, so {@code /gate door} can't clash with a structure
+ * named "door" and each root completes exactly one kind of entity.
  *
- * <p>Item 5 (docs/features/gate-structure-animation/GATESTRUCTURE_QOL_IMPLEMENTATION_PLAN.md)
- * split a "gate" into a GateStructure with one or more independently-animating GateDoors. Every
- * door-addressing command (open/close/info/admin health|repair|tp|active|invincible) accepts
- * either a bare door selector (id or name - unchanged from before item 5, still works for a
- * structure with only one door or a globally-unique door name) or decision 5.0-D's two-level
- * {@code <gateStructure> <gateDoor>} form - see {@link #resolveDoor}.
+ * <p>A structure is named by its id, its name, {@code here} (KNG-78), or - for open, close,
+ * toggle, info and repair - nothing, which uses the gate the player looks at (KNG-79); see
+ * {@link GateCommandSupport}.
+ *
+ * <p>Permissions: open/close/toggle need {@code knk.gate.<open|close>.<structureId>} or
+ * {@code knk.gate.<open|close>.*}; repair, tp, override and reload need {@code knk.gate.admin};
+ * info, list and passthrough are open to everyone.
+ *
+ * <p>Deprecated, for one release: {@code /knk gate admin <action> ...} and
+ * {@code /knk gate door capture|redefine ...} still work - they meant one door, so they run the
+ * door-layer command (or the structure one for reload/override) and say which to use instead.
  */
 public class GateCommand implements CommandExecutor {
+    /** The wildcard nodes /knk gate and /knk gatedoor check from the cache; warmed before they run. */
+    public static final List<String> CHECKED_NODES = Stream.concat(
+        Stream.of(GateCommandSupport.GATE_ADMIN, "knk.gate.open.*", "knk.gate.close.*"),
+        GateDoorCommand.CHECKED_NODES.stream()).distinct().toList();
+
+    static final List<String> SUBCOMMANDS = List.of("open", "close", "toggle", "info", "list", "repair", "tp",
+        "override", "reload", "passthrough", "help");
+    static final List<String> OVERRIDE_FIELDS = List.of("active", "destroyed", "invincible", "canrespawn", "openedstate");
+
     private final GateManager gateManager;
     private final GateStructuresApi gateStructuresApi;
-    private final GateDoorsApi gateDoorsApi;
     private final UserManager userManager;
     private final UsersCommandApi usersCommandApi;
     private final DistrictGateLoader districtGateLoader;
-    private final GateDoorRegionCaptureHandler gateDoorRegionCaptureHandler;
-    private CommandPermissions permissions = CommandPermissions.bukkitOnly();
-    /** The nodes /knk gate checks synchronously (per-gate open/close nodes aside); asked for before it runs. */
-    public static final List<String> CHECKED_NODES = List.of("knk.gate.admin", "knk.gate.open.*", "knk.gate.close.*");
+    private final GateCommandSupport support;
+    private final GateDoorCommand doorCommand;
 
     public GateCommand(GateManager gateManager, GateStructuresApi gateStructuresApi, GateDoorsApi gateDoorsApi,
-                        UserManager userManager, UsersCommandApi usersCommandApi,
-                        DistrictGateLoader districtGateLoader,
-                        GateDoorRegionCaptureHandler gateDoorRegionCaptureHandler) {
+                       UserManager userManager, UsersCommandApi usersCommandApi,
+                       DistrictGateLoader districtGateLoader,
+                       GateDoorRegionCaptureHandler gateDoorRegionCaptureHandler) {
         this.gateManager = gateManager;
         this.gateStructuresApi = gateStructuresApi;
-        this.gateDoorsApi = gateDoorsApi;
         this.userManager = userManager;
         this.usersCommandApi = usersCommandApi;
         this.districtGateLoader = districtGateLoader;
-        this.gateDoorRegionCaptureHandler = gateDoorRegionCaptureHandler;
+        this.support = new GateCommandSupport(gateManager, gateStructuresApi, gateDoorsApi, new GateTargeting(gateManager));
+        this.doorCommand = new GateDoorCommand(support, gateDoorRegionCaptureHandler);
+    }
+
+    /** The door layer ({@code /knk gatedoor}), sharing this command's permissions and targeting. */
+    public GateDoorCommand doorCommand() {
+        return doorCommand;
+    }
+
+    /** {@code gates.here.*} / {@code gates.lookat.*} from config.yml (KNG-78/79). */
+    public void setTargetingSettings(GateTargeting.Settings settings) {
+        support.targeting().setSettings(settings);
     }
 
     /**
-     * Checks knk.gate.* through KnkPermissible as well as Bukkit (KNG-24; plain sender.hasPermission
-     * refused in-house grants). Bukkit-only until set.
+     * Checks knk.gate.* / knk.gatedoor.* through KnkPermissible as well as Bukkit (KNG-24; plain
+     * sender.hasPermission refused in-house grants). Bukkit-only until set.
      */
     public void setPermissions(CommandPermissions permissions) {
-        this.permissions = java.util.Objects.requireNonNull(permissions, "permissions must not be null");
+        support.permissions = java.util.Objects.requireNonNull(permissions, "permissions must not be null");
     }
 
     @Override
@@ -77,18 +112,20 @@ public class GateCommand implements CommandExecutor {
             sendHelp(sender);
             return true;
         }
-
-        String subcommand = args[0].toLowerCase();
         String[] subArgs = Arrays.copyOfRange(args, 1, args.length);
-
-        return switch (subcommand) {
+        return switch (args[0].toLowerCase(Locale.ROOT)) {
             case "open" -> executeOpen(sender, subArgs);
             case "close" -> executeClose(sender, subArgs);
+            case "toggle" -> executeToggle(sender, subArgs);
             case "info" -> executeInfo(sender, subArgs);
             case "list" -> executeList(sender, subArgs);
+            case "repair" -> executeRepair(sender, subArgs);
+            case "tp" -> executeTeleport(sender, subArgs);
+            case "override" -> executeOverride(sender, subArgs);
+            case "reload" -> executeReload(sender, subArgs);
             case "passthrough" -> executePassThrough(sender, subArgs);
-            case "admin" -> executeAdmin(sender, subArgs);
-            case "door" -> executeDoor(sender, subArgs);
+            case "admin" -> executeDeprecatedAdmin(sender, subArgs);
+            case "door" -> executeDeprecatedDoor(sender, subArgs);
             case "help", "?" -> {
                 sendHelp(sender);
                 yield true;
@@ -102,394 +139,296 @@ public class GateCommand implements CommandExecutor {
     }
 
     private void sendHelp(CommandSender sender) {
-        sender.sendMessage(ChatColor.GOLD + "━━━ Gate Commands ━━━");
-        sender.sendMessage(ChatColor.GRAY + "/knk gate open <door name|id> | <structure> <door>");
-        sender.sendMessage(ChatColor.GRAY + "/knk gate close <door name|id> | <structure> <door>");
-        sender.sendMessage(ChatColor.GRAY + "/knk gate info <door name|id> | <structure> <door>");
-        sender.sendMessage(ChatColor.GRAY + "/knk gate list");
-        sender.sendMessage(ChatColor.GRAY + "/knk gate door capture|redefine <door name|id> | <structure> <door> [closed|opened]");
-        sender.sendMessage(ChatColor.GRAY + "/knk gate passthrough <default|instant|teleport>");
-        sender.sendMessage(ChatColor.GRAY + "/knk gate admin health <door name|id> <amount>");
-        sender.sendMessage(ChatColor.GRAY + "/knk gate admin repair <door name|id>");
-        sender.sendMessage(ChatColor.GRAY + "/knk gate admin tp <door name|id>");
-        sender.sendMessage(ChatColor.GRAY + "/knk gate door capture <door name|id> | <structure> <door> [closed|opened]");
-        sender.sendMessage(ChatColor.GRAY + "/knk gate door redefine <door name|id> | <structure> <door> [closed|opened]");
-    }
-
-    /**
-     * Handle /gate door capture|redefine <door> | <structure> <door> [closed|opened] (items
-     * 6.3/6.4): draws or re-edits a WorldEdit-based region for one of a door's two region slots.
-     */
-    private boolean executeDoor(CommandSender sender, String[] args) {
-        if (args.length == 0) {
-            sendDoorHelp(sender);
-            return true;
-        }
-
-        String action = args[0].toLowerCase();
-        String[] subArgs = Arrays.copyOfRange(args, 1, args.length);
-
-        return switch (action) {
-            case "capture" -> executeDoorRegion(sender, subArgs, false);
-            case "redefine" -> executeDoorRegion(sender, subArgs, true);
-            default -> {
-                sender.sendMessage(ChatColor.RED + "Unknown gate door action: " + args[0]);
-                sendDoorHelp(sender);
-                yield true;
-            }
-        };
-    }
-
-    private void sendDoorHelp(CommandSender sender) {
-        sender.sendMessage(ChatColor.GOLD + "━━━ Gate Door Region Commands ━━━");
-        sender.sendMessage(ChatColor.GRAY + "/knk gate door capture <door name|id> | <structure> <door> [closed|opened]");
-        sender.sendMessage(ChatColor.GRAY + "/knk gate door redefine <door name|id> | <structure> <door> [closed|opened]");
-        sender.sendMessage(ChatColor.GRAY + "Draw a selection with '//sel poly' or '//sel cuboid', then type 'save' or 'cancel' in chat.");
-    }
-
-    /**
-     * Shared implementation for capture (fresh selection) and redefine (pre-loaded selection) -
-     * both just start {@link GateDoorRegionCaptureHandler}'s identical save/cancel loop, differing
-     * only in which of its two entry points is called.
-     */
-    private boolean executeDoorRegion(CommandSender sender, String[] args, boolean isRedefine) {
-        if (!permissions.has(sender, "knk.gate.admin")) {
-            sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
-            return true;
-        }
-
-        if (!(sender instanceof Player player)) {
-            sender.sendMessage(ChatColor.RED + "Only players can " + (isRedefine ? "redefine" : "capture") + " a gate door region.");
-            return true;
-        }
-
-        String usage = "Usage: /knk gate door " + (isRedefine ? "redefine" : "capture")
-            + " <door name|id> | <structure> <door> [closed|opened]";
-
-        if (args.length == 0) {
-            sender.sendMessage(ChatColor.YELLOW + usage);
-            return true;
-        }
-
-        boolean isOpenedRegion = false;
-        String[] doorArgs = args;
-        String last = args[args.length - 1].toLowerCase();
-        if (last.equals("closed") || last.equals("opened")) {
-            isOpenedRegion = last.equals("opened");
-            doorArgs = Arrays.copyOf(args, args.length - 1);
-        }
-
-        if (doorArgs.length == 0) {
-            sender.sendMessage(ChatColor.YELLOW + usage);
-            return true;
-        }
-
-        CachedGateDoor gate = resolveDoor(doorArgs);
-        if (gate == null) {
-            sender.sendMessage(ChatColor.RED + "Gate door '" + String.join(" ", doorArgs) + "' not found.");
-            return true;
-        }
-
-        if (gateDoorRegionCaptureHandler == null) {
-            sender.sendMessage(ChatColor.RED + "Region capture is not available.");
-            return true;
-        }
-
-        if (isRedefine) {
-            gateDoorRegionCaptureHandler.startRedefine(player, gate, isOpenedRegion);
-        } else {
-            gateDoorRegionCaptureHandler.startCapture(player, gate, isOpenedRegion);
-        }
-        return true;
-    }
-
-    /**
-     * Handle /gate passthrough <default|instant|teleport>: sets the sender's own preferred gate
-     * pass-through method, updating the in-memory cache immediately and persisting to the backend
-     * asynchronously (matching the persistHealthChange/persistState reload-on-failure idiom).
-     */
-    public boolean executePassThrough(CommandSender sender, String[] args) {
-        if (!(sender instanceof Player player)) {
-            sender.sendMessage(ChatColor.RED + "Only players can set a pass-through method.");
-            return true;
-        }
-
-        if (args.length < 1) {
-            sender.sendMessage(ChatColor.YELLOW + "Usage: /knk gate passthrough <default|instant|teleport>");
-            return true;
-        }
-
-        GatePassThroughMethod method = switch (args[0].toLowerCase()) {
-            case "default" -> GatePassThroughMethod.DEFAULT;
-            case "instant" -> GatePassThroughMethod.INSTANT_OPEN;
-            case "teleport" -> GatePassThroughMethod.TELEPORT;
-            default -> null;
-        };
-
-        if (method == null) {
-            sender.sendMessage(ChatColor.RED + "Unknown pass-through method '" + args[0] + "'. Use default, instant, or teleport.");
-            return true;
-        }
-
-        PlayerUserData current = userManager.getCachedUser(player.getUniqueId());
-        if (current == null || current.userId() == null) {
-            sender.sendMessage(ChatColor.RED + "Your account isn't loaded yet - try again in a moment.");
-            return true;
-        }
-
-        userManager.updateCachedUser(player.getUniqueId(), current.withGatePassThroughMethodDefault(method));
-
-        if (usersCommandApi != null) {
-            usersCommandApi.setGatePassThroughMethodById(current.userId(), method)
-                .exceptionally(error -> {
-                    sender.sendMessage(ChatColor.RED + "Failed to save your pass-through method; it may reset next time you join.");
-                    return null;
-                });
-        }
-
-        sender.sendMessage(ChatColor.GREEN + "Gate pass-through method set to " + method + ".");
-        return true;
-    }
-
-    private boolean executeAdmin(CommandSender sender, String[] args) {
-        if (args.length == 0) {
-            sendAdminHelp(sender);
-            return true;
-        }
-
-        String action = args[0].toLowerCase();
-        String[] subArgs = Arrays.copyOfRange(args, 1, args.length);
-
-        return switch (action) {
-            case "health" -> executeAdminHealth(sender, subArgs);
-            case "repair" -> executeAdminRepair(sender, subArgs);
-            case "tp" -> executeAdminTeleport(sender, subArgs);
-            case "reload" -> executeAdminReload(sender, subArgs);
-            case "active" -> executeAdminToggleActive(sender, subArgs);
-            case "invincible" -> executeAdminToggleInvincible(sender, subArgs);
-            case "override" -> executeAdminOverride(sender, subArgs);
-            default -> {
-                sender.sendMessage(ChatColor.RED + "Unknown admin gate action: " + args[0]);
-                sendAdminHelp(sender);
-                yield true;
-            }
-        };
-    }
-
-    private void sendAdminHelp(CommandSender sender) {
-        sender.sendMessage(ChatColor.GOLD + "━━━ Gate Admin Commands ━━━");
-        sender.sendMessage(ChatColor.GRAY + "/knk gate admin reload");
-        sender.sendMessage(ChatColor.GRAY + "/knk gate admin reload district <id>");
-        sender.sendMessage(ChatColor.GRAY + "/knk gate admin health <door> <amount>");
-        sender.sendMessage(ChatColor.GRAY + "/knk gate admin repair <door>");
-        sender.sendMessage(ChatColor.GRAY + "/knk gate admin tp <door>");
-        sender.sendMessage(ChatColor.GRAY + "/knk gate admin active <door>");
-        sender.sendMessage(ChatColor.GRAY + "/knk gate admin invincible <door>");
-        sender.sendMessage(ChatColor.GRAY + "/knk gate admin override <structure> <field> <value|clear>");
+        sender.sendMessage(ChatColor.GOLD + "━━━ Gate Commands (whole gate, all its doors) ━━━");
+        sender.sendMessage(ChatColor.GRAY + "<structure> = gate structure id or name, or 'here'. "
+            + "Left out on open/close/toggle/info/repair: the gate you look at.");
+        sender.sendMessage(ChatColor.GRAY + "/gate open|close|toggle [structure]");
+        sender.sendMessage(ChatColor.GRAY + "/gate info [structure]");
+        sender.sendMessage(ChatColor.GRAY + "/gate list");
+        sender.sendMessage(ChatColor.GRAY + "/gate repair [structure]");
+        sender.sendMessage(ChatColor.GRAY + "/gate tp <structure>");
+        sender.sendMessage(ChatColor.GRAY + "/gate override <structure> <field> <value|clear>");
         sender.sendMessage(ChatColor.GRAY + "  fields: active, destroyed, invincible, canrespawn, openedstate");
+        sender.sendMessage(ChatColor.GRAY + "/gate reload [district <id>]");
+        sender.sendMessage(ChatColor.GRAY + "/gate passthrough <default|instant|teleport>");
+        sender.sendMessage(ChatColor.GRAY + "One door: /gatedoor help. Long form: /knk gate ...");
     }
 
-    /**
-     * Handle /gate open <door> | <structure> <door>
-     */
+    // === open / close / toggle ===
+
     public boolean executeOpen(CommandSender sender, String[] args) {
-        if (args.length < 1) {
-            sender.sendMessage(ChatColor.YELLOW + "Usage: /knk gate open <door name|id> | <structure> <door>");
-            return true;
+        CachedGateStructure structure = support.structure(sender, args,
+            Request.of(STRUCTURE_ROOT, "open", true, "Usage: /gate open <structure name|id> | here"));
+        if (structure != null) {
+            support.withNodes(sender, GateCommandSupport.structureControlNodes(structure), () -> openAll(sender, structure, "Opening"));
         }
-
-        CachedGateDoor gate = resolveDoor(args);
-        String selector = String.join(" ", args);
-
-        if (gate == null) {
-            sender.sendMessage(ChatColor.RED + "Gate door '" + selector + "' not found.");
-            return true;
-        }
-
-        // Check permission
-        if (!checkPermission(sender, "knk.gate.open." + gate.getId()) &&
-            !checkPermission(sender, "knk.gate.open.*")) {
-            sender.sendMessage(ChatColor.RED + "You don't have permission to open this gate.");
-            return true;
-        }
-
-        // Check if gate is active
-        if (!gate.isEffectivelyActive()) {
-            sender.sendMessage(ChatColor.RED + "Gate '" + gate.getName() + "' is not active.");
-            return true;
-        }
-
-        // Check if gate is destroyed
-        if (gate.isEffectivelyDestroyed()) {
-            sender.sendMessage(ChatColor.RED + "Gate '" + gate.getName() + "' is destroyed and cannot be opened.");
-            return true;
-        }
-
-        // Try to open
-        if (gateManager.openGate(gate.getId())) {
-            gateManager.setAnimationCompletionCallback(gate.getId(), state ->
-                sender.sendMessage(ChatColor.GREEN + "Gate '" + gate.getName() + "' is now " + state + ".")
-            );
-            sender.sendMessage(ChatColor.GREEN + "Opening gate '" + gate.getName() + "'...");
-            return true;
-        } else {
-            sender.sendMessage(ChatColor.YELLOW + "Gate '" + gate.getName() + "' is already open or opening.");
-            return true;
-        }
+        return true;
     }
 
-    /**
-     * Handle /gate close <door> | <structure> <door>
-     */
     public boolean executeClose(CommandSender sender, String[] args) {
-        if (args.length < 1) {
-            sender.sendMessage(ChatColor.YELLOW + "Usage: /knk gate close <door name|id> | <structure> <door>");
-            return true;
+        CachedGateStructure structure = support.structure(sender, args,
+            Request.of(STRUCTURE_ROOT, "close", true, "Usage: /gate close <structure name|id> | here"));
+        if (structure != null) {
+            support.withNodes(sender, GateCommandSupport.structureControlNodes(structure), () -> closeAll(sender, structure, "Closing"));
         }
-
-        CachedGateDoor gate = resolveDoor(args);
-        String selector = String.join(" ", args);
-
-        if (gate == null) {
-            sender.sendMessage(ChatColor.RED + "Gate door '" + selector + "' not found.");
-            return true;
-        }
-
-        // Check permission
-        if (!checkPermission(sender, "knk.gate.close." + gate.getId()) &&
-            !checkPermission(sender, "knk.gate.close.*")) {
-            sender.sendMessage(ChatColor.RED + "You don't have permission to close this gate.");
-            return true;
-        }
-
-        // Check if gate is active
-        if (!gate.isEffectivelyActive()) {
-            sender.sendMessage(ChatColor.RED + "Gate '" + gate.getName() + "' is not active.");
-            return true;
-        }
-
-        // Try to close
-        if (gateManager.closeGate(gate.getId())) {
-            gateManager.setAnimationCompletionCallback(gate.getId(), state ->
-                sender.sendMessage(ChatColor.GREEN + "Gate '" + gate.getName() + "' is now " + state + ".")
-            );
-            sender.sendMessage(ChatColor.GREEN + "Closing gate '" + gate.getName() + "'...");
-            return true;
-        } else {
-            sender.sendMessage(ChatColor.YELLOW + "Gate '" + gate.getName() + "' is already closed or closing.");
-            return true;
-        }
-    }
-
-    /**
-     * Handle /gate info <door> | <structure> <door>
-     */
-    public boolean executeInfo(CommandSender sender, String[] args) {
-        if (args.length < 1) {
-            sender.sendMessage(ChatColor.YELLOW + "Usage: /knk gate info <door name|id> | <structure> <door>");
-            return true;
-        }
-
-        CachedGateDoor gate = resolveDoor(args);
-        String selector = String.join(" ", args);
-
-        if (gate == null) {
-            sender.sendMessage(ChatColor.RED + "Gate door '" + selector + "' not found.");
-            return true;
-        }
-
-        // Display gate information
-        sender.sendMessage(ChatColor.GOLD + "━━━ Gate Info: " + gate.getStructureName() + " / " + gate.getName() + " ━━━");
-        sender.sendMessage(ChatColor.GRAY + "ID: " + ChatColor.WHITE + gate.getId());
-        sender.sendMessage(ChatColor.GRAY + "Type: " + ChatColor.WHITE + gate.getGateType());
-        String stateLine = formatState(gate.getCurrentState());
-        if (gate.isJammed()) {
-            stateLine += " " + ChatColor.RED + "(JAMMED)";
-        }
-        sender.sendMessage(ChatColor.GRAY + "State: " + stateLine);
-        sender.sendMessage(ChatColor.GRAY + "Active: " + ChatColor.WHITE + (gate.isEffectivelyActive() ? "✓" : "✗"));
-        sender.sendMessage(ChatColor.GRAY + "Destroyed: " + ChatColor.WHITE + (gate.isEffectivelyDestroyed() ? "✓" : "✗"));
-        sender.sendMessage(ChatColor.GRAY + "Health: " + ChatColor.WHITE +
-                String.format("%.0f/%.0f", gate.getHealthCurrent(), gate.getHealthMax()));
-        sender.sendMessage(ChatColor.GRAY + "Invincible: " + ChatColor.WHITE + (gate.isEffectivelyInvincible() ? "✓" : "✗"));
-        sender.sendMessage(ChatColor.GRAY + "Blocks: " + ChatColor.WHITE + gate.getBlocks().size());
-        sender.sendMessage(ChatColor.GRAY + "Motion Type: " + ChatColor.WHITE + gate.getMotionType());
-        sender.sendMessage(ChatColor.GRAY + "Face Direction: " + ChatColor.WHITE + gate.getFaceDirection());
-
         return true;
     }
 
     /**
-     * Handle /gate list
+     * {@link GateToggle#structureOpens}: if any active door is open or opening, close them all;
+     * otherwise open them all.
      */
-    public boolean executeList(CommandSender sender, String[] args) {
-        final Location senderLoc;
-        if (sender instanceof Player) {
-            senderLoc = ((Player) sender).getLocation();
-        } else {
-            senderLoc = null;
+    public boolean executeToggle(CommandSender sender, String[] args) {
+        CachedGateStructure structure = support.structure(sender, args,
+            Request.of(STRUCTURE_ROOT, "toggle", true, "Usage: /gate toggle <structure name|id> | here"));
+        if (structure == null) {
+            return true;
         }
+        support.withNodes(sender, GateCommandSupport.structureControlNodes(structure), () -> {
+            List<AnimationState> states = support.doorsOf(structure).stream()
+                .filter(CachedGateDoor::isEffectivelyActive)
+                .map(CachedGateDoor::getCurrentState)
+                .toList();
+            if (GateToggle.structureOpens(states)) {
+                openAll(sender, structure, "Toggling: opening");
+            } else {
+                closeAll(sender, structure, "Toggling: closing");
+            }
+        });
+        return true;
+    }
 
-        List<CachedGateDoor> gates = gateManager.getAllGates().values().stream()
-            .sorted(Comparator.comparingInt(CachedGateDoor::getId))
-            .toList();
+    private void openAll(CommandSender sender, CachedGateStructure structure, String verb) {
+        if (!support.mayControlStructure(sender, "open", structure.getId())) {
+            sender.sendMessage(ChatColor.RED + "You don't have permission to open " + structureLabel(structure) + ".");
+            return;
+        }
+        List<CachedGateDoor> doors = support.doorsOf(structure);
+        if (doors.isEmpty()) {
+            sender.sendMessage(ChatColor.YELLOW + "Gate " + quoted(structure) + " has no loaded doors.");
+            return;
+        }
+        int started = 0;
+        int already = 0;
+        List<String> skipped = new ArrayList<>();
+        for (CachedGateDoor door : doors) {
+            if (!door.isEffectivelyActive()) {
+                skipped.add(door.getName() + " (not active)");
+            } else if (door.isEffectivelyDestroyed()) {
+                skipped.add(door.getName() + " (destroyed)");
+            } else if (gateManager.openGate(door.getId())) {
+                started++;
+                notifyWhenDone(sender, door);
+            } else {
+                already++;
+            }
+        }
+        report(sender, structure, verb, started, already, "already open", skipped);
+    }
 
-        if (gates.isEmpty()) {
-            sender.sendMessage(ChatColor.YELLOW + "No gates are loaded. Use /knk gate admin reload after confirming API connectivity.");
+    private void closeAll(CommandSender sender, CachedGateStructure structure, String verb) {
+        if (!support.mayControlStructure(sender, "close", structure.getId())) {
+            sender.sendMessage(ChatColor.RED + "You don't have permission to close " + structureLabel(structure) + ".");
+            return;
+        }
+        List<CachedGateDoor> doors = support.doorsOf(structure);
+        if (doors.isEmpty()) {
+            sender.sendMessage(ChatColor.YELLOW + "Gate " + quoted(structure) + " has no loaded doors.");
+            return;
+        }
+        int started = 0;
+        int already = 0;
+        List<String> skipped = new ArrayList<>();
+        for (CachedGateDoor door : doors) {
+            if (!door.isEffectivelyActive()) {
+                skipped.add(door.getName() + " (not active)");
+            } else if (gateManager.closeGate(door.getId())) {
+                started++;
+                notifyWhenDone(sender, door);
+            } else {
+                already++;
+            }
+        }
+        report(sender, structure, verb, started, already, "already closed", skipped);
+    }
+
+    private void notifyWhenDone(CommandSender sender, CachedGateDoor door) {
+        gateManager.setAnimationCompletionCallback(door.getId(), state ->
+            sender.sendMessage(ChatColor.GREEN + "Door '" + door.getName() + "' of gate '"
+                + GateCommandSupport.structureName(door) + "' is now " + state + "."));
+    }
+
+    private static void report(CommandSender sender, CachedGateStructure structure, String verb,
+                               int started, int already, String alreadyText, List<String> skipped) {
+        StringBuilder line = new StringBuilder();
+        line.append(verb).append(' ').append(structureLabel(structure)).append(": ")
+            .append(started).append(started == 1 ? " door" : " doors").append(" moving");
+        if (already > 0) {
+            line.append(", ").append(already).append(' ').append(alreadyText);
+        }
+        ChatColor color = started > 0 ? ChatColor.GREEN : ChatColor.YELLOW;
+        sender.sendMessage(color + line.toString() + ".");
+        if (!skipped.isEmpty()) {
+            sender.sendMessage(ChatColor.RED + "Skipped: " + String.join(", ", skipped) + ".");
+        }
+    }
+
+    private static String quoted(CachedGateStructure structure) {
+        return "'" + structure.getName() + "' (#" + structure.getId() + ")";
+    }
+
+    // === info / list ===
+
+    public boolean executeInfo(CommandSender sender, String[] args) {
+        CachedGateStructure structure = support.structure(sender, args,
+            Request.of(STRUCTURE_ROOT, "info", true, "Usage: /gate info <structure name|id> | here"));
+        if (structure == null) {
+            return true;
+        }
+        List<CachedGateDoor> doors = support.doorsOf(structure);
+        sender.sendMessage(ChatColor.GOLD + "━━━ Gate Info: " + structure.getName() + " ━━━");
+        sender.sendMessage(ChatColor.GRAY + "Gate structure ID: " + ChatColor.WHITE + structure.getId()
+            + ChatColor.GRAY + "  Doors: " + ChatColor.WHITE + doors.size());
+        if (structure.isSiegeObjective()) {
+            sender.sendMessage(ChatColor.GRAY + "Siege objective: " + ChatColor.WHITE + "✓");
+        }
+        List<String> overrides = new ArrayList<>();
+        addOverride(overrides, "active", structure.getIsActiveOverride());
+        addOverride(overrides, "destroyed", structure.getIsDestroyedOverride());
+        addOverride(overrides, "invincible", structure.getIsInvincibleOverride());
+        addOverride(overrides, "canrespawn", structure.getCanRespawnOverride());
+        addOverride(overrides, "openedstate", structure.getOpenedStateOverride());
+        sender.sendMessage(ChatColor.GRAY + "Overrides: " + ChatColor.WHITE + (overrides.isEmpty() ? "none" : String.join(", ", overrides)));
+        for (CachedGateDoor door : doors) {
+            String jammed = door.isJammed() ? " " + ChatColor.RED + "(JAMMED)" : "";
+            String inactive = door.isEffectivelyActive() ? "" : ChatColor.DARK_GRAY + " inactive";
+            String destroyed = door.isEffectivelyDestroyed() ? ChatColor.RED + " destroyed" : "";
+            sender.sendMessage(ChatColor.AQUA + " #" + door.getId() + " " + door.getName() + " "
+                + GateCommandSupport.formatState(door.getCurrentState()) + jammed + inactive + destroyed
+                + ChatColor.GRAY + String.format(" %.0f/%.0f HP", door.getHealthCurrent(), door.getHealthMax()));
+        }
+        sender.sendMessage(ChatColor.GRAY + "Door details: /gatedoor info <door>");
+        return true;
+    }
+
+    private static void addOverride(List<String> overrides, String field, Object value) {
+        if (value != null) {
+            overrides.add(field + "=" + value);
+        }
+    }
+
+    /** {@code /gate list}: every loaded gate structure with its doors' states. */
+    public boolean executeList(CommandSender sender, String[] args) {
+        Location senderLoc = sender instanceof Player player ? player.getLocation() : null;
+        List<CachedGateStructure> structures = new ArrayList<>(gateManager.getAllStructures().values());
+        structures.sort(Comparator.comparingInt(CachedGateStructure::getId));
+
+        if (structures.isEmpty()) {
+            sender.sendMessage(ChatColor.YELLOW + "No gates are loaded. Use /gate reload after confirming API connectivity.");
             return true;
         }
 
         sender.sendMessage(ChatColor.GOLD + "━━━ Gates ━━━");
-        for (CachedGateDoor gate : gates) {
-            String statusColor = gate.getCurrentState() == AnimationState.OPEN ? ChatColor.GREEN.toString() : ChatColor.RED.toString();
-            String distanceStr = senderLoc != null ?
-                String.format(" (%.0fm)", gate.getAnchorPoint().distance(senderLoc.toVector())) : "";
-            String jammedSuffix = gate.isJammed() ? " " + ChatColor.RED + "(JAMMED)" : "";
-
-                sender.sendMessage(ChatColor.AQUA + "#" + gate.getId() + " " + gate.getStructureName() + " / " + gate.getName() +
-                    ChatColor.GRAY + " [" + gate.getGateType() + "]" +
-                    statusColor + " " + gate.getCurrentState() + jammedSuffix + distanceStr);
+        for (CachedGateStructure structure : structures) {
+            List<CachedGateDoor> doors = support.doorsOf(structure);
+            long open = doors.stream().filter(door -> GateToggle.isOpenOrOpening(door.getCurrentState())).count();
+            String states = doors.isEmpty() ? ChatColor.DARK_GRAY + "no doors loaded"
+                : ChatColor.GREEN.toString() + open + " open" + ChatColor.GRAY + "/" + ChatColor.RED + (doors.size() - open) + " closed";
+            String distance = "";
+            if (senderLoc != null) {
+                distance = doors.stream()
+                    .filter(door -> GateDoorCommand.sameWorld(senderLoc, door))
+                    .mapToDouble(door -> door.getAnchorPoint().distance(senderLoc.toVector()))
+                    .min()
+                    .stream().mapToObj(d -> ChatColor.GRAY + String.format(" (%.0fm)", d))
+                    .findFirst().orElse("");
+            }
+            sender.sendMessage(ChatColor.AQUA + "#" + structure.getId() + " " + structure.getName()
+                + ChatColor.GRAY + " [" + doors.size() + (doors.size() == 1 ? " door] " : " doors] ") + states + distance);
         }
+        sender.sendMessage(ChatColor.GRAY + "Doors: /gatedoor list [structure]");
+        return true;
+    }
 
+    // === admin ===
+
+    /** Repairs every door of the structure (full health, not destroyed). */
+    public boolean executeRepair(CommandSender sender, String[] args) {
+        if (!requireAdmin(sender)) {
+            return true;
+        }
+        CachedGateStructure structure = support.structure(sender, args,
+            Request.of(STRUCTURE_ROOT, "repair", true, "Usage: /gate repair <structure name|id> | here"));
+        if (structure == null) {
+            return true;
+        }
+        List<CachedGateDoor> doors = support.doorsOf(structure);
+        if (doors.isEmpty()) {
+            sender.sendMessage(ChatColor.YELLOW + "Gate " + quoted(structure) + " has no loaded doors.");
+            return true;
+        }
+        doors.forEach(support::repair);
+        sender.sendMessage(ChatColor.GREEN + "Repaired " + structureLabel(structure) + ": " + doors.size()
+            + (doors.size() == 1 ? " door" : " doors") + " back to full health.");
+        if (Boolean.TRUE.equals(structure.getIsDestroyedOverride())) {
+            sender.sendMessage(ChatColor.YELLOW + "Note: the override destroyed=true still applies; clear it with /gate override "
+                + structure.getId() + " destroyed clear.");
+        }
+        return true;
+    }
+
+    /** Teleports to the structure's first door (lowest id). */
+    public boolean executeTeleport(CommandSender sender, String[] args) {
+        if (!requireAdmin(sender)) {
+            return true;
+        }
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage(ChatColor.RED + "Only players can teleport.");
+            return true;
+        }
+        CachedGateStructure structure = support.structure(sender, args,
+            Request.of(STRUCTURE_ROOT, "tp", false, "Usage: /gate tp <structure name|id> | here"));
+        if (structure == null) {
+            return true;
+        }
+        List<CachedGateDoor> doors = support.doorsOf(structure);
+        if (doors.isEmpty()) {
+            sender.sendMessage(ChatColor.YELLOW + "Gate " + quoted(structure) + " has no loaded doors to teleport to.");
+            return true;
+        }
+        support.teleportTo(player, doors.get(0));
+        sender.sendMessage(ChatColor.GREEN + "Teleported to " + structureLabel(structure) + " (" + doorLabel(doors.get(0)) + ").");
         return true;
     }
 
     /**
-     * Handle /gate admin reload [district <id>]. Bare "reload" does a full world reload (as
-     * before); "reload district <id>" force-refreshes just one district's gates via
-     * DistrictGateLoader, without needing a full world reload - a district's gates already load
-     * automatically the first time a player enters it (see KnKPlugin's region-transition
-     * wiring), this is just for forcing a refresh after editing an already-loaded district's
-     * gates in the web app.
+     * {@code /gate reload [district <id>]}. Bare "reload" does a full reload; "reload district
+     * <id>" force-refreshes one district's gates via DistrictGateLoader (a district's gates already
+     * load the first time a player enters it; this forces a refresh after editing them in the web app).
      */
-    public boolean executeAdminReload(CommandSender sender, String[] args) {
-        if (!permissions.has(sender, "knk.gate.admin")) {
-            sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
+    public boolean executeReload(CommandSender sender, String[] args) {
+        if (!requireAdmin(sender)) {
             return true;
         }
-
         if (args.length >= 2 && "district".equalsIgnoreCase(args[0])) {
-            return executeAdminReloadDistrict(sender, args[1]);
+            return reloadDistrict(sender, args[1]);
         }
-
         sender.sendMessage(ChatColor.YELLOW + "Reloading gates from API...");
         gateManager.reloadGates().thenRun(() -> {
             int gateCount = gateManager.getAllGates().size();
-            sender.sendMessage(ChatColor.GREEN + "Loaded " + gateCount + " gates from API.");
+            sender.sendMessage(ChatColor.GREEN + "Loaded " + gateCount + " gate doors from API.");
         }).exceptionally(ex -> {
             sender.sendMessage(ChatColor.RED + "Failed to reload gates: " + ex.getMessage());
             return null;
         });
-
         return true;
     }
 
-    private boolean executeAdminReloadDistrict(CommandSender sender, String districtIdArg) {
+    private boolean reloadDistrict(CommandSender sender, String districtIdArg) {
         if (districtGateLoader == null) {
             sender.sendMessage(ChatColor.RED + "District gate loading isn't configured on this server.");
             return true;
         }
-
         int districtId;
         try {
             districtId = Integer.parseInt(districtIdArg);
@@ -497,7 +436,6 @@ public class GateCommand implements CommandExecutor {
             sender.sendMessage(ChatColor.RED + "Invalid district id: " + districtIdArg);
             return true;
         }
-
         sender.sendMessage(ChatColor.YELLOW + "Reloading gates for district " + districtId + "...");
         districtGateLoader.forceReload(districtId).thenRun(() ->
             sender.sendMessage(ChatColor.GREEN + "Reloaded gates for district " + districtId + ".")
@@ -505,174 +443,36 @@ public class GateCommand implements CommandExecutor {
             sender.sendMessage(ChatColor.RED + "Failed to reload district " + districtId + ": " + ex.getMessage());
             return null;
         });
-
         return true;
     }
 
     /**
-     * Handle /gate admin health <door> <amount>
-     */
-    public boolean executeAdminHealth(CommandSender sender, String[] args) {
-        if (!permissions.has(sender, "knk.gate.admin")) {
-            sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
-            return true;
-        }
-
-        if (args.length < 2) {
-            sender.sendMessage(ChatColor.YELLOW + "Usage: /knk gate admin health <door name|id> <amount>");
-            return true;
-        }
-
-        String[] doorArgs = Arrays.copyOf(args, args.length - 1);
-        CachedGateDoor gate = resolveDoor(doorArgs);
-
-        if (gate == null) {
-            sender.sendMessage(ChatColor.RED + "Gate door '" + String.join(" ", doorArgs) + "' not found.");
-            return true;
-        }
-
-        try {
-            double amount = Double.parseDouble(args[args.length - 1]);
-            gate.setHealthCurrent(Math.max(0, Math.min(amount, gate.getHealthMax())));
-            persistHealthChange(gate);
-            sender.sendMessage(ChatColor.GREEN + "Set gate health to " + gate.getHealthCurrent());
-            return true;
-        } catch (NumberFormatException e) {
-            sender.sendMessage(ChatColor.RED + "Invalid health value: " + args[args.length - 1]);
-            return true;
-        }
-    }
-
-    /**
-     * Handle /gate admin repair <door>
-     */
-    public boolean executeAdminRepair(CommandSender sender, String[] args) {
-        if (!permissions.has(sender, "knk.gate.admin")) {
-            sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
-            return true;
-        }
-
-        if (args.length < 1) {
-            sender.sendMessage(ChatColor.YELLOW + "Usage: /knk gate admin repair <door name|id>");
-            return true;
-        }
-
-        CachedGateDoor gate = resolveDoor(args);
-
-        if (gate == null) {
-            sender.sendMessage(ChatColor.RED + "Gate door '" + String.join(" ", args) + "' not found.");
-            return true;
-        }
-
-        gate.setHealthCurrent(gate.getHealthMax());
-        gate.setIsDestroyed(false);
-        persistHealthChange(gate);
-        persistState(gate);
-        gateManager.fireStateChanged(gate.getId()); // R4: navigation re-checks routes through this door
-        sender.sendMessage(ChatColor.GREEN + "Repaired gate '" + gate.getName() + "'. Health: " +
-                gate.getHealthCurrent() + "/" + gate.getHealthMax());
-
-        return true;
-    }
-
-    /**
-     * Handle /gate admin tp <door>
-     */
-    public boolean executeAdminTeleport(CommandSender sender, String[] args) {
-        if (!permissions.has(sender, "knk.gate.admin")) {
-            sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
-            return true;
-        }
-
-        if (!(sender instanceof Player)) {
-            sender.sendMessage(ChatColor.RED + "Only players can teleport.");
-            return true;
-        }
-
-        if (args.length < 1) {
-            sender.sendMessage(ChatColor.YELLOW + "Usage: /knk gate admin tp <door name|id>");
-            return true;
-        }
-
-        CachedGateDoor gate = resolveDoor(args);
-
-        if (gate == null) {
-            sender.sendMessage(ChatColor.RED + "Gate door '" + String.join(" ", args) + "' not found.");
-            return true;
-        }
-
-        Player player = (Player) sender;
-        Vector anchorPoint = gate.getAnchorPoint();
-        Location teleportLoc = new Location(player.getWorld(),
-            anchorPoint.getX() + 0.5,
-            anchorPoint.getY() + 1,
-            anchorPoint.getZ() + 0.5);
-
-        player.teleport(teleportLoc);
-        sender.sendMessage(ChatColor.GREEN + "Teleported to gate '" + gate.getName() + "'.");
-
-        return true;
-    }
-
-    public boolean executeAdminToggleActive(CommandSender sender, String[] args) {
-        CachedGateDoor gate = findAdminGate(sender, args, "active");
-        if (gate == null) {
-            return true;
-        }
-
-        gate.setIsActive(!gate.isActive());
-        persistOperationalSettings(gate);
-        gateManager.fireStateChanged(gate.getId()); // R4
-        sender.sendMessage(ChatColor.GREEN + "Gate '" + gate.getName() + "' active: " + gate.isActive());
-        return true;
-    }
-
-    public boolean executeAdminToggleInvincible(CommandSender sender, String[] args) {
-        CachedGateDoor gate = findAdminGate(sender, args, "invincible");
-        if (gate == null) {
-            return true;
-        }
-
-        gate.setIsInvincible(!gate.isInvincible());
-        persistOperationalSettings(gate);
-        sender.sendMessage(ChatColor.GREEN + "Gate '" + gate.getName() + "' invincible: " + gate.isInvincible());
-        return true;
-    }
-
-    /**
-     * Handle /gate admin override <structure> <field> <value|clear> - decision 5.0-B's
-     * structure-level cascading override: sets/clears one of the nullable override columns on
-     * GateStructure so every child door's effective value reflects it immediately (no per-door
-     * write - see CachedGateDoor.isEffectivelyXxx()). Persists via the backend's
-     * PATCH .../overrides endpoint, then mirrors the change onto the in-memory CachedGateStructure
-     * so it takes effect immediately without waiting for a reload.
+     * {@code /gate override <structure> <field> <value|clear>} - decision 5.0-B's structure-level
+     * cascading override: sets/clears one of the nullable override columns on GateStructure so every
+     * door's effective value reflects it immediately (see CachedGateDoor.isEffectivelyXxx()).
+     * Persists via PATCH .../overrides, and mirrors onto the in-memory CachedGateStructure at once.
      *
-     * <p>Covers the fields most relevant to the two use cases named in the backlog (an admin
-     * force-state command, and the future Siege capture-destroys-all-doors event): active,
-     * destroyed, invincible, canrespawn, openedstate. The remaining cascade-overridable fields
-     * (pass-through/display settings) are supported by the underlying model and API but not yet
-     * exposed here - add a case below if/when a concrete admin or Siege use needs one.
+     * <p>Covers active, destroyed, invincible, canrespawn, openedstate - the fields the backlog's
+     * admin force-state and Siege capture-destroys-all-doors use cases need. The other
+     * cascade-overridable fields (pass-through/display) are supported by the model and API but not
+     * exposed here yet.
      */
-    public boolean executeAdminOverride(CommandSender sender, String[] args) {
-        if (!permissions.has(sender, "knk.gate.admin")) {
-            sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
+    public boolean executeOverride(CommandSender sender, String[] args) {
+        if (!requireAdmin(sender)) {
             return true;
         }
-
         if (args.length < 3) {
-            sender.sendMessage(ChatColor.YELLOW + "Usage: /knk gate admin override <structure> <field> <value|clear>");
+            sender.sendMessage(ChatColor.YELLOW + "Usage: /gate override <structure name|id> | here <field> <value|clear>");
             sender.sendMessage(ChatColor.YELLOW + "Fields: active, destroyed, invincible, canrespawn, openedstate");
             return true;
         }
 
-        String field = args[args.length - 2].toLowerCase();
+        String field = args[args.length - 2].toLowerCase(Locale.ROOT);
         String valueArg = args[args.length - 1];
-        String[] structureArgs = Arrays.copyOf(args, args.length - 2);
-        String structureSelector = String.join(" ", structureArgs);
-
-        CachedGateStructure structure = resolveStructure(structureSelector);
+        CachedGateStructure structure = support.structure(sender, Arrays.copyOf(args, args.length - 2),
+            Request.of(STRUCTURE_ROOT, "override", false, "Usage: /gate override <structure> <field> <value|clear>")
+                .withTrailing(args[args.length - 2], valueArg));
         if (structure == null) {
-            sender.sendMessage(ChatColor.RED + "Gate structure '" + structureSelector + "' not found.");
             return true;
         }
 
@@ -721,7 +521,7 @@ public class GateCommand implements CommandExecutor {
                 structure.setCanRespawnOverride(value);
             }
             case "openedstate" -> {
-                String value = clear ? null : valueArg.toUpperCase();
+                String value = clear ? null : valueArg.toUpperCase(Locale.ROOT);
                 if (!clear && !isValidOpenedState(value)) {
                     sender.sendMessage(ChatColor.RED + "Value for 'openedstate' must be CLOSED, OPEN, or clear.");
                     return true;
@@ -729,9 +529,8 @@ public class GateCommand implements CommandExecutor {
                 request.setClearOpenedStateOverride(clear);
                 request.setOpenedStateOverride(value);
                 structure.setOpenedStateOverride(value);
-                // Give the override real, immediate effect by driving each door through the
-                // normal state machine (which already resolves effective active/destroyed) -
-                // rather than leaving AnimationState stale until the door's next own trigger.
+                // Give the override real, immediate effect by driving each door through the normal
+                // state machine (which already resolves effective active/destroyed).
                 if ("OPEN".equals(value)) {
                     for (CachedGateDoor door : gateManager.getDoorsForStructure(structure.getId())) {
                         gateManager.openGate(door.getId());
@@ -757,8 +556,8 @@ public class GateCommand implements CommandExecutor {
         }
 
         sender.sendMessage(clear
-            ? ChatColor.GREEN + "Cleared " + field + " override on '" + structure.getName() + "'."
-            : ChatColor.GREEN + "Set " + field + " override on '" + structure.getName() + "' to " + valueArg + ".");
+            ? ChatColor.GREEN + "Cleared " + field + " override on " + structureLabel(structure) + "."
+            : ChatColor.GREEN + "Set " + field + " override on " + structureLabel(structure) + " to " + valueArg + ".");
         return true;
     }
 
@@ -772,144 +571,150 @@ public class GateCommand implements CommandExecutor {
         return "CLOSED".equals(value) || "OPEN".equals(value);
     }
 
-    /**
-     * Check if sender has a permission.
-     */
-    private boolean checkPermission(CommandSender sender, String permission) {
-        return permissions.has(sender, permission);
+    private boolean requireAdmin(CommandSender sender) {
+        if (support.isStructureAdmin(sender)) {
+            return true;
+        }
+        sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
+        return false;
     }
 
-    private CachedGateDoor findAdminGate(CommandSender sender, String[] args, String settingName) {
-        if (!permissions.has(sender, "knk.gate.admin")) {
-            sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
-            return null;
-        }
-        if (args.length == 0) {
-            sender.sendMessage(ChatColor.YELLOW + "Usage: /knk gate admin " + settingName + " <door name|id>");
-            return null;
-        }
-
-        CachedGateDoor gate = resolveDoor(args);
-        if (gate == null) {
-            sender.sendMessage(ChatColor.RED + "Gate door '" + String.join(" ", args) + "' not found.");
-        }
-        return gate;
-    }
-
-    private void persistOperationalSettings(CachedGateDoor gate) {
-        if (gateDoorsApi == null) {
-            return;
-        }
-
-        gateDoorsApi.updateOperationalSettings(gate.getId(), gate.isActive(), gate.isInvincible())
-            .exceptionally(error -> {
-                gateManager.reloadGates();
-                return null;
-            });
-    }
-
-    private void persistHealthChange(CachedGateDoor gate) {
-        if (gateDoorsApi == null) {
-            return;
-        }
-
-        gateDoorsApi.updateHealth(gate.getId(), gate.getHealthCurrent())
-            .exceptionally(error -> {
-                gateManager.reloadGates();
-                return null;
-            });
-    }
-
-    private void persistState(CachedGateDoor gate) {
-        if (gateDoorsApi == null) {
-            return;
-        }
-
-        String openedState = GateDoorOpenStateMapper.toWireValue(gate.getCurrentState(), gate.isJammed());
-        gateDoorsApi.updateState(gate.getId(), openedState, gate.isDestroyed())
-            .exceptionally(error -> {
-                gateManager.reloadGates();
-                return null;
-            });
-    }
+    // === passthrough ===
 
     /**
-     * Resolves a door selector to a CachedGateDoor. Tries, in order:
-     * <ol>
-     *   <li>The full joined args as a direct door id or name (unchanged from before item 5 -
-     *       still works for a structure with only one door, or a globally-unique door name).</li>
-     *   <li>If that fails and there are 2+ args: args[0] as a structure id/name, and the
-     *       remaining args (joined) as a door id/name within that structure (decision 5.0-D's
-     *       {@code <gateStructure> <gateDoor>} syntax).</li>
-     * </ol>
+     * {@code /gate passthrough <default|instant|teleport>}: sets the sender's own preferred gate
+     * pass-through method, updating the in-memory cache immediately and persisting asynchronously.
      */
-    private CachedGateDoor resolveDoor(String[] args) {
-        if (args.length == 0) {
-            return null;
+    public boolean executePassThrough(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage(ChatColor.RED + "Only players can set a pass-through method.");
+            return true;
         }
-
-        String joined = String.join(" ", args);
-        CachedGateDoor direct = findGateByIdOrName(joined);
-        if (direct != null) {
-            return direct;
+        if (args.length < 1) {
+            sender.sendMessage(ChatColor.YELLOW + "Usage: /gate passthrough <default|instant|teleport>");
+            return true;
         }
-
-        if (args.length >= 2) {
-            CachedGateStructure structure = resolveStructure(args[0]);
-            if (structure != null) {
-                String doorSelector = String.join(" ", Arrays.copyOfRange(args, 1, args.length));
-                return findDoorInStructure(structure.getId(), doorSelector);
-            }
-        }
-
-        return null;
-    }
-
-    private CachedGateStructure resolveStructure(String nameOrId) {
-        try {
-            return gateManager.getStructure(Integer.parseInt(nameOrId));
-        } catch (NumberFormatException ignored) {
-            return gateManager.getStructureByName(nameOrId);
-        }
-    }
-
-    private CachedGateDoor findDoorInStructure(int structureId, String doorNameOrId) {
-        Integer doorId = null;
-        try {
-            doorId = Integer.parseInt(doorNameOrId);
-        } catch (NumberFormatException ignored) {
-            // not an id, fall through to name matching
-        }
-
-        for (CachedGateDoor door : gateManager.getDoorsForStructure(structureId)) {
-            if ((doorId != null && door.getId() == doorId) || door.getName().equalsIgnoreCase(doorNameOrId)) {
-                return door;
-            }
-        }
-        return null;
-    }
-
-    private CachedGateDoor findGateByIdOrName(String nameOrId) {
-        try {
-            return gateManager.getGate(Integer.parseInt(nameOrId));
-        } catch (NumberFormatException ignored) {
-            return gateManager.getGateByName(nameOrId);
-        }
-    }
-
-    /**
-     * Format animation state for display.
-     */
-    private String formatState(AnimationState state) {
-        if (state == null) {
-            return ChatColor.GRAY + "UNKNOWN";
-        }
-        return switch (state) {
-            case OPEN -> ChatColor.GREEN + "OPEN";
-            case OPENING -> ChatColor.YELLOW + "OPENING";
-            case CLOSED -> ChatColor.RED + "CLOSED";
-            case CLOSING -> ChatColor.YELLOW + "CLOSING";
-            default -> ChatColor.GRAY + state.toString();
+        GatePassThroughMethod method = switch (args[0].toLowerCase(Locale.ROOT)) {
+            case "default" -> GatePassThroughMethod.DEFAULT;
+            case "instant" -> GatePassThroughMethod.INSTANT_OPEN;
+            case "teleport" -> GatePassThroughMethod.TELEPORT;
+            default -> null;
         };
+        if (method == null) {
+            sender.sendMessage(ChatColor.RED + "Unknown pass-through method '" + args[0] + "'. Use default, instant, or teleport.");
+            return true;
+        }
+
+        PlayerUserData current = userManager.getCachedUser(player.getUniqueId());
+        if (current == null || current.userId() == null) {
+            sender.sendMessage(ChatColor.RED + "Your account isn't loaded yet - try again in a moment.");
+            return true;
+        }
+        userManager.updateCachedUser(player.getUniqueId(), current.withGatePassThroughMethodDefault(method));
+        if (usersCommandApi != null) {
+            usersCommandApi.setGatePassThroughMethodById(current.userId(), method)
+                .exceptionally(error -> {
+                    sender.sendMessage(ChatColor.RED + "Failed to save your pass-through method; it may reset next time you join.");
+                    return null;
+                });
+        }
+        sender.sendMessage(ChatColor.GREEN + "Gate pass-through method set to " + method + ".");
+        return true;
+    }
+
+    // === deprecated forms (one release) ===
+
+    /**
+     * {@code /knk gate admin <action> ...} - before KNG-77 these addressed one door. reload and
+     * override were already structure-wide and are now plain {@code /gate reload|override}.
+     */
+    private boolean executeDeprecatedAdmin(CommandSender sender, String[] args) {
+        if (args.length == 0) {
+            sender.sendMessage(ChatColor.YELLOW + "'/knk gate admin' is gone: use /gate help (whole gate) or /gatedoor help (one door).");
+            return true;
+        }
+        String action = args[0].toLowerCase(Locale.ROOT);
+        String[] rest = Arrays.copyOfRange(args, 1, args.length);
+        switch (action) {
+            case "reload", "override" -> {
+                deprecated(sender, "/knk gate admin " + action, "/gate " + action);
+                return onCommand(sender, null, STRUCTURE_ROOT, prepend(action, rest));
+            }
+            case "health", "repair", "tp", "active", "invincible" -> {
+                deprecated(sender, "/knk gate admin " + action, "/gatedoor " + action + " (one door) or /gate " + action + " (whole gate)");
+                return doorCommand.onCommand(sender, null, GateCommandSupport.DOOR_ROOT, prepend(action, rest));
+            }
+            default -> {
+                sender.sendMessage(ChatColor.RED + "Unknown admin gate action: " + args[0] + ". See /gate help and /gatedoor help.");
+                return true;
+            }
+        }
+    }
+
+    /** {@code /knk gate door capture|redefine ...} - now {@code /gatedoor capture|redefine ...}. */
+    private boolean executeDeprecatedDoor(CommandSender sender, String[] args) {
+        String action = args.length == 0 ? "" : args[0].toLowerCase(Locale.ROOT);
+        deprecated(sender, "/knk gate door " + action, "/gatedoor " + action);
+        return doorCommand.onCommand(sender, null, GateCommandSupport.DOOR_ROOT, args);
+    }
+
+    private static void deprecated(CommandSender sender, String old, String replacement) {
+        sender.sendMessage(ChatColor.GOLD + old.trim() + " is deprecated; use " + replacement + ".");
+    }
+
+    private static String[] prepend(String first, String[] rest) {
+        String[] args = new String[rest.length + 1];
+        args[0] = first;
+        System.arraycopy(rest, 0, args, 1, rest.length);
+        return args;
+    }
+
+    // === tab completion ===
+
+    /** Completion for the arguments after {@code gate}; no lookups beyond the gate cache. */
+    public List<String> complete(CommandSender sender, String[] args) {
+        if (args.length == 0) {
+            return List.of();
+        }
+        String current = args[args.length - 1];
+        if (args.length == 1) {
+            return filterByPrefix(SUBCOMMANDS, current);
+        }
+        String sub = args[0].toLowerCase(Locale.ROOT);
+        switch (sub) {
+            case "open", "close", "toggle", "info", "repair", "tp" -> {
+                return args.length == 2 ? filterByPrefix(structureSelectors(), current) : List.of();
+            }
+            case "override" -> {
+                if (args.length == 2) {
+                    return filterByPrefix(structureSelectors(), current);
+                }
+                if (args.length == 3) {
+                    return filterByPrefix(OVERRIDE_FIELDS, current);
+                }
+                if (args.length == 4) {
+                    return "openedstate".equalsIgnoreCase(args[2])
+                        ? filterByPrefix(List.of("OPEN", "CLOSED", "clear"), current)
+                        : filterByPrefix(List.of("true", "false", "clear"), current);
+                }
+                return List.of();
+            }
+            case "reload" -> {
+                return args.length == 2 ? filterByPrefix(List.of("district"), current) : List.of();
+            }
+            case "passthrough" -> {
+                return args.length == 2 ? filterByPrefix(List.of("default", "instant", "teleport"), current) : List.of();
+            }
+            default -> {
+                return List.of();
+            }
+        }
+    }
+
+    private List<String> structureSelectors() {
+        List<String> selectors = new ArrayList<>();
+        selectors.add(GateCommandKeywords.HERE);
+        selectors.addAll(doorCommand.structureSelectors());
+        return selectors;
     }
 }

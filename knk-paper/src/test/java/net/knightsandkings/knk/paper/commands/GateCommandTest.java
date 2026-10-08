@@ -1,354 +1,306 @@
 package net.knightsandkings.knk.paper.commands;
 
-import net.knightsandkings.knk.api.GateStructuresApi;
 import net.knightsandkings.knk.api.GateDoorsApi;
+import net.knightsandkings.knk.api.GateStructuresApi;
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
-import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
+import net.knightsandkings.knk.core.domain.gates.CachedGateStructure;
 import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.paper.gates.DistrictGateLoader;
 import net.knightsandkings.knk.paper.user.UserManager;
-import org.bukkit.ChatColor;
 import org.bukkit.command.CommandSender;
-import org.bukkit.entity.Player;
+import org.bukkit.util.Vector;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.bukkit.util.Vector;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 /**
- * Unit tests for GateCommand player and admin commands.
+ * GateCommand - the structure layer of the gate commands (/gate, /knk gate; KNG-77): every
+ * subcommand acts on a gate structure and all of its doors.
  */
 class GateCommandTest {
     private GateCommand gateCommand;
-    private GateManager mockGateManager;
-    private GateStructuresApi mockGateStructuresApi;
-    private GateDoorsApi mockGateDoorsApi;
-    private CommandSender mockSender;
-    private Player mockPlayer;
-    private List<String> sentMessages;
+    private GateManager gateManager;
+    private GateStructuresApi structuresApi;
+    private GateDoorsApi doorsApi;
+    private CommandSender sender;
+    /** Permission checks only apply to players (the console always passes, see CommandPermissions). */
+    private org.bukkit.entity.Player player;
+    private List<String> messages;
+    private Set<String> granted;
+
+    private CachedGateStructure north;
+    private CachedGateDoor left;
+    private CachedGateDoor right;
 
     @BeforeEach
     void setUp() {
-        mockGateManager = mock(GateManager.class);
-        mockGateStructuresApi = mock(GateStructuresApi.class);
-        mockGateDoorsApi = mock(GateDoorsApi.class);
-        // GateDoorRegionCaptureHandler references WorldEdit types (compileOnly, unavailable on
-        // the test classpath - see WorldGuardIntegrationTest's identical constraint), so it can't
-        // be Mockito-mocked here; null is safe since no existing test exercises the door
-        // capture/redefine subcommand this handler backs.
-        gateCommand = new GateCommand(mockGateManager, mockGateStructuresApi, mockGateDoorsApi, mock(UserManager.class), mock(UsersCommandApi.class), mock(DistrictGateLoader.class), null);
-        mockSender = mock(CommandSender.class);
-        mockPlayer = mock(Player.class);
-        sentMessages = new ArrayList<>();
+        gateManager = mock(GateManager.class);
+        structuresApi = mock(GateStructuresApi.class);
+        doorsApi = mock(GateDoorsApi.class);
+        gateCommand = new GateCommand(gateManager, structuresApi, doorsApi, mock(UserManager.class),
+            mock(UsersCommandApi.class), mock(DistrictGateLoader.class), null);
 
-        // Capture sent messages
-        doAnswer(invocation -> {
-            sentMessages.add(invocation.getArgument(0));
-            return null;
-        }).when(mockSender).sendMessage(anyString());
+        sender = mock(CommandSender.class);
+        messages = new ArrayList<>();
+        doAnswer(inv -> messages.add(inv.getArgument(0))).when(sender).sendMessage(anyString());
+        granted = null; // null = everything granted
+        when(sender.hasPermission(anyString())).thenAnswer(inv -> granted == null || granted.contains((String) inv.getArgument(0)));
+        player = mock(org.bukkit.entity.Player.class);
+        doAnswer(inv -> messages.add(inv.getArgument(0))).when(player).sendMessage(anyString());
+        when(player.hasPermission(anyString())).thenAnswer(inv -> granted == null || granted.contains((String) inv.getArgument(0)));
 
-        doAnswer(invocation -> {
-            sentMessages.add(invocation.getArgument(0));
-            return null;
-        }).when(mockPlayer).sendMessage(anyString());
+        when(doorsApi.updateHealth(anyInt(), anyDouble())).thenReturn(CompletableFuture.completedFuture(null));
+        when(doorsApi.updateState(anyInt(), anyString(), anyBoolean())).thenReturn(CompletableFuture.completedFuture(null));
+        when(structuresApi.updateOverrides(anyInt(), any())).thenReturn(CompletableFuture.completedFuture(null));
 
-        // Default permissions
-        when(mockSender.hasPermission(anyString())).thenReturn(true);
-        when(mockPlayer.hasPermission(anyString())).thenReturn(true);
-        when(mockGateDoorsApi.updateOperationalSettings(anyInt(), anyBoolean(), anyBoolean()))
-            .thenReturn(java.util.concurrent.CompletableFuture.completedFuture(null));
-        when(mockGateDoorsApi.updateHealth(anyInt(), anyDouble()))
-            .thenReturn(java.util.concurrent.CompletableFuture.completedFuture(null));
-        when(mockGateDoorsApi.updateState(anyInt(), anyString(), anyBoolean()))
-            .thenReturn(java.util.concurrent.CompletableFuture.completedFuture(null));
-    }
-
-    // ===== Player Commands =====
-
-    @Test
-    void testExecuteOpen_Success() {
-        CachedGateDoor gate = createTestGate(1, "TestGate", true, false);
-        when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
-        when(mockGateManager.openGate(1)).thenReturn(true);
-
-        boolean result = gateCommand.executeOpen(mockSender, new String[]{"TestGate"});
-
-        assertTrue(result);
-        assertTrue(sentMessages.stream().anyMatch(m -> m.contains("Opening gate")));
-        assertTrue(sentMessages.stream().anyMatch(m -> m.contains("TestGate")));
-        verify(mockGateManager).openGate(1);
-        verify(mockGateManager).setAnimationCompletionCallback(eq(1), any());
+        north = new CachedGateStructure(3, "North Gate");
+        left = door(16, north, "Left", AnimationState.CLOSED);
+        right = door(17, north, "Right", AnimationState.CLOSED);
+        when(gateManager.getStructure(3)).thenReturn(north);
+        when(gateManager.getStructureByName("North Gate")).thenReturn(north);
+        when(gateManager.getDoorsForStructure(3)).thenReturn(List.of(right, left));
+        when(gateManager.getGate(16)).thenReturn(left);
+        when(gateManager.getGate(17)).thenReturn(right);
+        when(gateManager.getAllStructures()).thenReturn(Map.of(3, north));
+        when(gateManager.getAllGates()).thenReturn(Map.of(16, left, 17, right));
     }
 
     @Test
-    void testExecuteOpen_ResolvesGateById() {
-        CachedGateDoor gate = createTestGate(10, "Keep Gate", true, false);
-        when(mockGateManager.getGate(10)).thenReturn(gate);
-        when(mockGateManager.openGate(10)).thenReturn(true);
+    void openOpensEveryDoorOfTheStructure() {
+        when(gateManager.openGate(anyInt())).thenReturn(true);
 
-        boolean result = gateCommand.executeOpen(mockSender, new String[]{"10"});
+        gateCommand.onCommand(sender, null, "gate", new String[]{"open", "North", "Gate"});
 
-        assertTrue(result);
-        verify(mockGateManager).getGate(10);
-        verify(mockGateManager).openGate(10);
+        verify(gateManager).openGate(16);
+        verify(gateManager).openGate(17);
+        assertTrue(messages.stream().anyMatch(m -> m.contains("Opening gate 'North Gate' (#3): 2 doors moving")), messages::toString);
     }
 
     @Test
-    void testExecuteOpen_ResolvesMultiWordGateName() {
-        CachedGateDoor gate = createTestGate(10, "Keep Gate Test", true, false);
-        when(mockGateManager.getGateByName("Keep Gate Test")).thenReturn(gate);
-        when(mockGateManager.openGate(10)).thenReturn(true);
+    void openSkipsDestroyedAndInactiveDoorsAndSaysSo() {
+        right.setIsDestroyed(true);
+        when(gateManager.openGate(16)).thenReturn(true);
 
-        boolean result = gateCommand.executeOpen(mockSender, new String[]{"Keep", "Gate", "Test"});
+        gateCommand.executeOpen(sender, new String[]{"3"});
 
-        assertTrue(result);
-        verify(mockGateManager).getGateByName("Keep Gate Test");
-        verify(mockGateManager).openGate(10);
+        verify(gateManager).openGate(16);
+        verify(gateManager, never()).openGate(17);
+        assertTrue(messages.stream().anyMatch(m -> m.contains("Skipped: Right (destroyed)")), messages::toString);
     }
 
     @Test
-    void testOnCommand_DelegatesOpen() {
-        CachedGateDoor gate = createTestGate(1, "TestGate", true, false);
-        when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
-        when(mockGateManager.openGate(1)).thenReturn(true);
+    void closeClosesEveryDoor() {
+        left.setCurrentState(AnimationState.OPEN);
+        right.setCurrentState(AnimationState.OPEN);
+        when(gateManager.closeGate(anyInt())).thenReturn(true);
 
-        boolean result = gateCommand.onCommand(mockSender, null, "gate", new String[]{"open", "TestGate"});
+        gateCommand.executeClose(sender, new String[]{"3"});
 
-        assertTrue(result);
-        assertTrue(sentMessages.stream().anyMatch(m -> m.contains("Opening gate")));
-        verify(mockGateManager).openGate(1);
+        verify(gateManager).closeGate(16);
+        verify(gateManager).closeGate(17);
     }
 
     @Test
-    void testExecuteOpen_GateNotFound() {
-        when(mockGateManager.getGateByName("NonExistent")).thenReturn(null);
+    void toggleWithMixedStatesClosesAllDoors() {
+        left.setCurrentState(AnimationState.OPEN);
+        when(gateManager.closeGate(anyInt())).thenReturn(true);
 
-        boolean result = gateCommand.executeOpen(mockSender, new String[]{"NonExistent"});
+        gateCommand.executeToggle(sender, new String[]{"3"});
 
-        assertTrue(result);
-        assertTrue(sentMessages.stream().anyMatch(m -> m.contains("not found")));
+        verify(gateManager).closeGate(16);
+        verify(gateManager).closeGate(17);
+        verify(gateManager, never()).openGate(anyInt());
+        assertTrue(messages.stream().anyMatch(m -> m.contains("Toggling: closing gate 'North Gate'")), messages::toString);
     }
 
     @Test
-    void testExecuteOpen_GateNotActive() {
-        CachedGateDoor gate = createTestGate(1, "TestGate", false, false);
-        when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
+    void toggleWithEveryDoorClosedOpensAll() {
+        when(gateManager.openGate(anyInt())).thenReturn(true);
 
-        boolean result = gateCommand.executeOpen(mockSender, new String[]{"TestGate"});
+        gateCommand.executeToggle(sender, new String[]{"3"});
 
-        assertTrue(result);
-        assertTrue(sentMessages.stream().anyMatch(m -> m.contains("not active")));
+        verify(gateManager).openGate(16);
+        verify(gateManager).openGate(17);
+        verify(gateManager, never()).closeGate(anyInt());
     }
 
     @Test
-    void testExecuteOpen_GateDestroyed() {
-        CachedGateDoor gate = createTestGate(1, "TestGate", true, true);
-        when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
+    void toggleIgnoresAnInactiveOpenDoorWhenDeciding() {
+        right.setCurrentState(AnimationState.OPEN);
+        right.setIsActive(false);
+        when(gateManager.openGate(anyInt())).thenReturn(true);
 
-        boolean result = gateCommand.executeOpen(mockSender, new String[]{"TestGate"});
+        gateCommand.executeToggle(sender, new String[]{"3"});
 
-        assertTrue(result);
-        assertTrue(sentMessages.stream().anyMatch(m -> m.contains("destroyed")));
+        verify(gateManager).openGate(16);
+        verify(gateManager, never()).closeGate(anyInt());
     }
 
     @Test
-    void testExecuteOpen_AlreadyOpen() {
-        CachedGateDoor gate = createTestGate(1, "TestGate", true, false);
-        when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
-        when(mockGateManager.openGate(1)).thenReturn(false);
+    void openNeedsTheStructureNodeNotADoorNode() {
+        granted = Set.of("knk.gatedoor.open.*", "knk.gate.open.4");
 
-        boolean result = gateCommand.executeOpen(mockSender, new String[]{"TestGate"});
+        gateCommand.executeOpen(player, new String[]{"3"});
 
-        assertTrue(result);
-        assertTrue(sentMessages.stream().anyMatch(m -> m.contains("already open")));
+        verify(gateManager, never()).openGate(anyInt());
+        assertTrue(messages.stream().anyMatch(m -> m.contains("permission to open gate 'North Gate'")), messages::toString);
+
+        granted = Set.of("knk.gate.open.3");
+        messages.clear();
+        when(gateManager.openGate(anyInt())).thenReturn(true);
+        gateCommand.executeOpen(player, new String[]{"3"});
+        verify(gateManager).openGate(16);
     }
 
     @Test
-    void testExecuteClose_Success() {
-        CachedGateDoor gate = createTestGate(1, "TestGate", true, false);
-        when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
-        when(mockGateManager.closeGate(1)).thenReturn(true);
+    void anIdThatIsADoorNotAStructurePointsToGatedoor() {
+        gateCommand.executeOpen(sender, new String[]{"16"});
 
-        boolean result = gateCommand.executeClose(mockSender, new String[]{"TestGate"});
-
-        assertTrue(result);
-        assertTrue(sentMessages.stream().anyMatch(m -> m.contains("Closing gate")));
-        verify(mockGateManager).closeGate(1);
-        verify(mockGateManager).setAnimationCompletionCallback(eq(1), any());
+        verify(gateManager, never()).openGate(anyInt());
+        assertTrue(messages.stream().anyMatch(m -> m.contains("Gate structure '16' not found")));
+        assertTrue(messages.stream().anyMatch(m -> m.contains("/gatedoor open 16")), messages::toString);
     }
 
     @Test
-    void testExecuteInfo_Success() {
-        CachedGateDoor gate = createTestGate(1, "TestGate", true, false);
-        when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
+    void omittedTargetFromTheConsoleShowsUsage() {
+        gateCommand.executeOpen(sender, new String[0]);
 
-        boolean result = gateCommand.executeInfo(mockSender, new String[]{"TestGate"});
-
-        assertTrue(result);
-        assertTrue(sentMessages.stream().anyMatch(m -> m.contains("Gate Info")));
-        assertTrue(sentMessages.stream().anyMatch(m -> m.contains("TestGate")));
-        assertTrue(sentMessages.stream().anyMatch(m -> m.contains("SLIDING")));
-        assertTrue(sentMessages.stream().anyMatch(m -> m.contains("500/500")));
+        assertTrue(messages.stream().anyMatch(m -> m.contains("Usage: /gate open")));
+        verify(gateManager, never()).openGate(anyInt());
     }
 
     @Test
-    void testExecuteList_NoGates() {
-        when(mockGateManager.getAllGates()).thenReturn(java.util.Collections.emptyMap());
+    void hereFromTheConsoleIsRefused() {
+        gateCommand.executeOpen(sender, new String[]{"here"});
 
-        boolean result = gateCommand.executeList(mockSender, new String[0]);
-
-        assertTrue(result);
-        assertTrue(sentMessages.stream().anyMatch(m -> m.contains("No gates")));
-    }
-
-    // ===== Admin Commands =====
-
-    @Test
-    void testExecuteAdminHealth_Success() {
-        CachedGateDoor gate = createTestGate(1, "TestGate", true, false);
-        when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
-
-        boolean result = gateCommand.executeAdminHealth(mockSender, new String[]{"TestGate", "250"});
-
-        assertTrue(result);
-        assertEquals(250.0, gate.getHealthCurrent());
-        assertTrue(sentMessages.stream().anyMatch(m -> m.contains("health to 250")));
+        assertTrue(messages.stream().anyMatch(m -> m.contains("Only players can use 'here'")));
     }
 
     @Test
-    void testExecuteAdminHealth_ResolvesMultiWordGateName() {
-        CachedGateDoor gate = createTestGate(10, "Keep Gate Test", true, false);
-        when(mockGateManager.getGateByName("Keep Gate Test")).thenReturn(gate);
+    void repairRepairsEveryDoor() {
+        left.setHealthCurrent(10);
+        left.setIsDestroyed(true);
+        right.setHealthCurrent(20);
 
-        boolean result = gateCommand.executeAdminHealth(mockSender, new String[]{"Keep", "Gate", "Test", "250"});
+        gateCommand.executeRepair(sender, new String[]{"North Gate"});
 
-        assertTrue(result);
-        assertEquals(250.0, gate.getHealthCurrent());
-        verify(mockGateManager).getGateByName("Keep Gate Test");
+        assertEquals(500.0, left.getHealthCurrent());
+        assertFalse(left.isDestroyed());
+        assertEquals(500.0, right.getHealthCurrent());
+        verify(gateManager).fireStateChanged(16);
+        verify(gateManager).fireStateChanged(17);
+        assertTrue(messages.stream().anyMatch(m -> m.contains("Repaired gate 'North Gate' (#3): 2 doors")), messages::toString);
     }
 
     @Test
-    void testExecuteAdminToggleActive_PersistsChangeById() {
-        CachedGateDoor gate = createTestGate(11, "Keep Gate Test", false, false);
-        when(mockGateManager.getGate(11)).thenReturn(gate);
+    void repairMentionsAStillActiveDestroyedOverride() {
+        north.setIsDestroyedOverride(true);
 
-        boolean result = gateCommand.executeAdminToggleActive(mockSender, new String[]{"11"});
+        gateCommand.executeRepair(sender, new String[]{"3"});
 
-        assertTrue(result);
-        assertTrue(gate.isActive());
-        verify(mockGateDoorsApi).updateOperationalSettings(11, true, true);
+        assertTrue(messages.stream().anyMatch(m -> m.contains("override destroyed=true still applies")));
     }
 
     @Test
-    void testExecuteAdminToggleInvincible_ResolvesMultiWordName() {
-        CachedGateDoor gate = createTestGate(11, "Keep Gate Test", true, false);
-        when(mockGateManager.getGateByName("Keep Gate Test")).thenReturn(gate);
+    void repairNeedsGateAdmin() {
+        granted = Set.of("knk.gatedoor.admin");
+        left.setHealthCurrent(10);
 
-        boolean result = gateCommand.executeAdminToggleInvincible(mockSender, new String[]{"Keep", "Gate", "Test"});
+        gateCommand.executeRepair(player, new String[]{"3"});
 
-        assertTrue(result);
-        assertFalse(gate.isInvincible());
-        verify(mockGateDoorsApi).updateOperationalSettings(11, true, false);
+        assertEquals(10.0, left.getHealthCurrent());
+        verify(gateManager, never()).fireStateChanged(anyInt());
+        assertTrue(messages.stream().anyMatch(m -> m.contains("don't have permission")));
     }
 
     @Test
-    void testExecuteAdminHealth_InvalidValue() {
-        CachedGateDoor gate = createTestGate(1, "TestGate", true, false);
-        when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
+    void infoListsTheDoors() {
+        gateCommand.executeInfo(sender, new String[]{"3"});
 
-        boolean result = gateCommand.executeAdminHealth(mockSender, new String[]{"TestGate", "invalid"});
-
-        assertTrue(result);
-        assertTrue(sentMessages.stream().anyMatch(m -> m.contains("Invalid health")));
+        assertTrue(messages.stream().anyMatch(m -> m.contains("Gate Info: North Gate")));
+        assertTrue(messages.stream().anyMatch(m -> m.contains("#16 Left")));
+        assertTrue(messages.stream().anyMatch(m -> m.contains("#17 Right")));
     }
 
     @Test
-    void testExecuteAdminRepair_Success() {
-        CachedGateDoor gate = createTestGate(1, "TestGate", true, true);
-        gate.setHealthCurrent(100.0);
-        when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
+    void listListsStructures() {
+        gateCommand.executeList(sender, new String[0]);
 
-        boolean result = gateCommand.executeAdminRepair(mockSender, new String[]{"TestGate"});
-
-        assertTrue(result);
-        assertEquals(500.0, gate.getHealthCurrent());
-        assertFalse(gate.isDestroyed());
-        assertTrue(sentMessages.stream().anyMatch(m -> m.contains("Repaired gate")));
+        assertTrue(messages.stream().anyMatch(m -> m.contains("#3 North Gate") && m.contains("2 doors")), messages::toString);
     }
 
     @Test
-    void testExecuteAdminReload() {
-        // Mock the CompletableFuture return from reloadGates()
-        when(mockGateManager.reloadGates()).thenReturn(
-            java.util.concurrent.CompletableFuture.completedFuture(null)
-        );
+    void reloadReloadsEveryGate() {
+        when(gateManager.reloadGates()).thenReturn(CompletableFuture.completedFuture(null));
 
-        boolean result = gateCommand.executeAdminReload(mockSender, new String[0]);
+        gateCommand.onCommand(sender, null, "gate", new String[]{"reload"});
 
-        assertTrue(result);
-        assertTrue(sentMessages.stream().anyMatch(m -> m.contains("Reloading")));
-        verify(mockGateManager).reloadGates();
+        verify(gateManager).reloadGates();
     }
 
     @Test
-    void testExecuteAdminTeleport_Success() {
-        CachedGateDoor gate = createTestGate(1, "TestGate", true, false);
-        when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
-        when(mockPlayer.getWorld()).thenReturn(mock(org.bukkit.World.class));
+    void overrideStillWorksAndAcceptsMultiWordNames() {
+        gateCommand.onCommand(sender, null, "gate", new String[]{"override", "North", "Gate", "destroyed", "true"});
 
-        boolean result = gateCommand.executeAdminTeleport(mockPlayer, new String[]{"TestGate"});
-
-        assertTrue(result);
-        verify(mockPlayer).teleport(any(org.bukkit.Location.class));
-        assertTrue(sentMessages.stream().anyMatch(m -> m.contains("Teleported")));
+        assertEquals(Boolean.TRUE, north.getIsDestroyedOverride());
+        verify(structuresApi).updateOverrides(eq(3), any());
     }
 
     @Test
-    void testExecuteAdminTeleport_NotPlayer() {
-        CachedGateDoor gate = createTestGate(1, "TestGate", true, false);
-        when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
+    void deprecatedAdminRepairStillRepairsOneDoorAndSaysWhatToUse() {
+        left.setHealthCurrent(10);
+        right.setHealthCurrent(10);
 
-        boolean result = gateCommand.executeAdminTeleport(mockSender, new String[]{"TestGate"});
+        gateCommand.onCommand(sender, null, "gate", new String[]{"admin", "repair", "16"});
 
-        assertTrue(result);
-        assertTrue(sentMessages.stream().anyMatch(m -> m.contains("Only players")));
+        assertEquals(500.0, left.getHealthCurrent());
+        assertEquals(10.0, right.getHealthCurrent());
+        assertTrue(messages.stream().anyMatch(m -> m.contains("deprecated") && m.contains("/gatedoor repair")), messages::toString);
     }
 
-    // ===== Helper Methods =====
+    @Test
+    void deprecatedAdminReloadRunsTheStructureReload() {
+        when(gateManager.reloadGates()).thenReturn(CompletableFuture.completedFuture(null));
 
-    /**
-     * Create a test gate with sensible defaults.
-     */
-    private CachedGateDoor createTestGate(int id, String name, boolean isActive, boolean isDestroyed) {
-        CachedGateDoor gate = new CachedGateDoor(
-            id,
-            id,
-            name,
-            "SLIDING",
-            "VERTICAL",
-            "PLANE_GRID",
-            60,
-            1,
-            new Vector(100, 64, 100),
-            5,
-            3,
-            1,
-            500.0,
-            500.0,
-            isActive,
-            isDestroyed,
-            true,
-            90,
-            "north"
-        );
-        gate.setCurrentState(AnimationState.CLOSED);
-        return gate;
+        gateCommand.onCommand(sender, null, "gate", new String[]{"admin", "reload"});
+
+        verify(gateManager).reloadGates();
+        assertTrue(messages.stream().anyMatch(m -> m.contains("use /gate reload")));
+    }
+
+    @Test
+    void completionOffersSubcommandsHereAndStructures() {
+        assertTrue(gateCommand.complete(sender, new String[]{"to"}).contains("toggle"));
+        List<String> targets = gateCommand.complete(sender, new String[]{"toggle", ""});
+        assertEquals("here", targets.get(0));
+        assertTrue(targets.contains("3"));
+        assertFalse(targets.contains("16"), "door ids belong to /gatedoor");
+        assertEquals(List.of("destroyed"), gateCommand.complete(sender, new String[]{"override", "3", "des"}));
+    }
+
+    @Test
+    void doorCompletionOffersHereAndDoors() {
+        List<String> targets = gateCommand.doorCommand().complete(sender, new String[]{"repair", ""});
+        assertEquals("here", targets.get(0));
+        assertTrue(targets.containsAll(List.of("16", "Left", "17", "Right")));
+        assertEquals(List.of("opened"), gateCommand.doorCommand().complete(sender, new String[]{"capture", "16", "op"}));
+    }
+
+    private static CachedGateDoor door(int id, CachedGateStructure structure, String name, AnimationState state) {
+        CachedGateDoor door = new CachedGateDoor(id, structure.getId(), name, "SLIDING", "VERTICAL", "PLANE_GRID",
+            60, 1, new Vector(100, 64, 100), 5, 3, 1, 500.0, 500.0, true, false, true, 90, "north");
+        door.setStructure(structure);
+        door.setCurrentState(state);
+        return door;
     }
 }
