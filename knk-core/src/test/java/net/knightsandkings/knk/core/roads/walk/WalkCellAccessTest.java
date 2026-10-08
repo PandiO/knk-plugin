@@ -32,8 +32,13 @@ class WalkCellAccessTest {
             siegeCarries);
     }
 
-    private static GateAvailability availability(Map<Integer, GateAvailability.GateView> views, boolean canPass) {
-        return new GateAvailability(id -> Optional.ofNullable(views.get(id)), id -> canPass);
+    /**
+     * The server's pass rule for a non-admin: with the use node ({@code useNode}) a door that allows
+     * pass-through, without it none (an admin would pass any door - GatePassThroughRules).
+     */
+    private static GateAvailability availability(Map<Integer, GateAvailability.GateView> views, boolean useNode) {
+        return new GateAvailability(id -> Optional.ofNullable(views.get(id)),
+            id -> useNode && views.containsKey(id) && views.get(id).allowPassThrough());
     }
 
     private static DomainSnapshot domain(int id, String name, String region, Boolean allowEntry, Boolean allowExit) {
