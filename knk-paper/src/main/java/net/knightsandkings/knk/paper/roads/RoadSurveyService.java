@@ -37,6 +37,8 @@ import net.knightsandkings.knk.core.domain.roads.RoadSurvey;
 import net.knightsandkings.knk.core.domain.roads.RoadSurveyCreate;
 import net.knightsandkings.knk.core.ports.api.RoadNetworkCommandApi;
 import net.knightsandkings.knk.core.ports.api.RoadNetworkQueryApi;
+import net.knightsandkings.knk.core.roads.build.EdgeTagging;
+import net.knightsandkings.knk.core.roads.build.GateCells;
 import net.knightsandkings.knk.core.roads.build.PassabilityRules;
 import net.knightsandkings.knk.core.roads.build.Rdp;
 import net.knightsandkings.knk.core.roads.route.CoverageCheck;
@@ -90,6 +92,7 @@ public final class RoadSurveyService implements Listener {
     private final Map<UUID, RoadSurveySession> sessions = new ConcurrentHashMap<>();
     private final Map<UUID, Review> reviews = new ConcurrentHashMap<>();
     private final Map<UUID, Recording> recordings = new ConcurrentHashMap<>();
+    private volatile Function<String, GateCells> gatesOf = world -> GateCells.NONE;
     private BukkitTask ticker;
     private long tick;
 
@@ -488,7 +491,23 @@ public final class RoadSurveyService implements Listener {
         player.sendMessage(recordings.remove(player.getUniqueId()) != null ? RoadMessages.info("Recording cancelled.") : RoadMessages.warn("You are not recording."));
     }
 
-    /** Uploads the walked stretch as a Recorded edge (DESIGN §5.10), tagged with the WorldGuard regions along it. */
+    /** The gate-door cells of a world, so a recorded stretch is tagged with the gates it passes. */
+    public void setGateCells(Function<String, GateCells> gatesOf) {
+        this.gatesOf = gatesOf == null ? world -> GateCells.NONE : gatesOf;
+    }
+
+    /**
+     * The recorded edge: the simplified geometry, tagged with the regions along it and the gate doors the
+     * walked points pass (live test 2026-10-08, finding N3: the road through the South Gate was recorded
+     * without its gate, so a closed gate was invisible to the router).
+     */
+    static RoadEdgeRecord recordOf(String world, List<int[]> walked, List<int[]> geometry, List<String> regions,
+                                   OptionalInt streetId, GateCells gates) {
+        return new RoadEdgeRecord(world, geometry, OptionalDouble.of(Rdp.length(walked)), RECORD_DEFAULT_WIDTH,
+            OptionalInt.empty(), streetId, EdgeTagging.doorsAlong(walked, gates), List.of(), regions);
+    }
+
+    /** Uploads the walked stretch as a Recorded edge (DESIGN §5.10), tagged with the WorldGuard regions and gate doors along it. */
     public void stopRecord(Player player, OptionalInt streetId) {
         Recording recording = recordings.remove(player.getUniqueId());
         if (recording == null) {
@@ -509,8 +528,8 @@ public final class RoadSurveyService implements Listener {
             }
             regions.addAll(ids);
         }
-        RoadEdgeRecord record = new RoadEdgeRecord(recording.world, geometry, OptionalDouble.of(Rdp.length(recording.points)),
-            RECORD_DEFAULT_WIDTH, OptionalInt.empty(), streetId, List.of(), List.of(), regions);
+        RoadEdgeRecord record = recordOf(recording.world, recording.points, geometry, regions, streetId,
+            gatesOf.apply(recording.world));
         commandApi.recordEdge(record).whenComplete((edge, ex) -> mainThread.execute(() -> {
             if (RoadAdminCommand.failed(player, "record the stretch", ex)) {
                 return;

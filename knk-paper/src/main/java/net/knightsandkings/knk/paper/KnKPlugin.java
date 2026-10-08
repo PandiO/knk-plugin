@@ -1205,6 +1205,7 @@ public class KnKPlugin extends JavaPlugin {
             this, navigation, queryApi, commandApi, roadNetworkCache, regionIds, mainThread,
             player -> cacheManager.getUserCache().getStale(player.getUniqueId())
                 .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null));
+        roadSurveyService.setGateCells(world -> net.knightsandkings.knk.paper.roads.GateCellsIndex.of(gateManager, world));
 
         roadNetworkCache.start();
         roadDirtyTracker.start();
