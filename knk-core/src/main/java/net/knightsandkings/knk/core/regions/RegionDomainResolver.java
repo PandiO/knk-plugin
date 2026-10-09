@@ -2,8 +2,10 @@ package net.knightsandkings.knk.core.regions;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -51,6 +53,8 @@ public class RegionDomainResolver {
 
     // Local domain snapshot cache (for domain decisions, not yet in shared caches)
     private final Map<String, CachedValue<DomainSnapshot>> domainsByRegionId = new ConcurrentHashMap<>();
+    /** Regions {@link #refreshIfStale} is asking the API about right now (one request per region at a time). */
+    private final Set<String> refreshing = ConcurrentHashMap.newKeySet();
     private final DomainCache.CacheMetrics domainCacheMetrics = new DomainCache.CacheMetrics();
 
     /**
@@ -167,7 +171,7 @@ public class RegionDomainResolver {
 
         return domainsQueryApi.searchDomainRegionDecisions(query)
             .thenApply(results -> {
-                registerDomainRegionSummaries(results.values());
+                applyApiAnswer(missing, results.values());
                 RegionSnapshot snapshot = resolveRegions(regionIds);
                 LOGGER.info("[KnK Resolver] resolveRegionsFromApi completed: domains=" + snapshot.domains().size());
                 return snapshot;
@@ -180,6 +184,78 @@ public class RegionDomainResolver {
 
     private boolean isCached(String wgRegionId) {
         return getDomainByRegionId(wgRegionId).isPresent();
+    }
+
+    /**
+     * KNG-104: re-asks the API, in the background, about each of {@code regionIds} whose local entry has expired
+     * ({@code getDomainByRegionIdNoRefresh} keeps serving it meanwhile). Without this an AllowEntry/AllowExit changed
+     * in the web app reached navigation only after a restart, and a region the API no longer knows (its domain
+     * moved to another region) kept its last domain for good. One request per region (the API's answer holds at
+     * most one Town, District and Structure, so only a single-region answer tells that a region has no domain);
+     * a region already being asked about is skipped. Regions not cached locally are left to
+     * {@link #resolveRegionsFromApi}.
+     *
+     * @return completes when every request has been answered (or failed)
+     */
+    public CompletableFuture<Void> refreshIfStale(Collection<String> regionIds) {
+        if (domainsQueryApi == null || regionIds == null || regionIds.isEmpty()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        List<CompletableFuture<Void>> requests = new ArrayList<>();
+        for (String regionId : regionIds) {
+            CachedValue<DomainSnapshot> cached = regionId == null ? null : domainsByRegionId.get(regionId);
+            if (cached == null || !cached.isExpired(cacheTtl) || !refreshing.add(regionId)) {
+                continue;
+            }
+            Set<String> one = Set.of(regionId);
+            CompletableFuture<Void> request;
+            try {
+                request = domainsQueryApi.searchDomainRegionDecisions(new DomainRegionQuery(one, Boolean.TRUE))
+                    .thenAccept(results -> applyApiAnswer(one, results.values()));
+            } catch (RuntimeException e) {
+                request = CompletableFuture.failedFuture(e);
+            }
+            requests.add(request
+                .exceptionally(ex -> {
+                    LOGGER.log(Level.FINE, "[KnK Resolver] Refresh of region " + regionId + " failed: " + ex.getMessage());
+                    return null;
+                })
+                .whenComplete((v, ex) -> refreshing.remove(regionId)));
+        }
+        return CompletableFuture.allOf(requests.toArray(new CompletableFuture[0]));
+    }
+
+    /** KNG-104: forgets every locally cached region (with {@code /knk cache refresh}); the next lookup asks the API. */
+    public void clearRegionCache() {
+        domainsByRegionId.clear();
+    }
+
+    /**
+     * An API answer to a query for {@code requested}: registers what came back, and - for a single-region query,
+     * whose answer is complete - forgets the region when the API returned no domain for it (KNG-104: an orphaned
+     * region, or a domain that moved to another region, must not keep its last snapshot).
+     */
+    private void applyApiAnswer(Set<String> requested, Collection<DomainRegionSummary> results) {
+        registerDomainRegionSummaries(results);
+        if (requested.size() != 1) {
+            return;
+        }
+        String regionId = requested.iterator().next();
+        boolean answered = results != null && results.stream().anyMatch(s -> answers(s, regionId));
+        if (!answered && domainsByRegionId.remove(regionId) != null) {
+            LOGGER.info("[KnK Resolver] Region " + regionId + " has no domain any more; forgotten");
+        }
+    }
+
+    private static boolean answers(DomainRegionSummary summary, String regionId) {
+        if (summary == null) {
+            return false;
+        }
+        if (regionId.equalsIgnoreCase(summary.wgRegionId())) {
+            return true;
+        }
+        return summary.parentDomainDecisions() != null
+            && summary.parentDomainDecisions().stream().anyMatch(p -> answers(p, regionId));
     }
 
     /**
