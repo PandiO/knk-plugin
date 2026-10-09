@@ -23,7 +23,13 @@ public enum RoadNodeKind {
      * with {@code /knk road node prune}). It has no edges; the builder leaves the chain passing nearest
      * it out of every later build until it is unpruned.
      */
-    PRUNED_EDGE;
+    PRUNED_EDGE,
+    /**
+     * Routing time only, never stored (rev. 7 Part A, REV7_PROPOSAL §2): where the routing view cuts a stored
+     * edge because access changes there - at a gate door or a region border. No destination, no name; plumbing
+     * like {@link #BOUNDARY} for instructions.
+     */
+    SPLIT;
 
     /** Whether this is a tombstone ({@link #PRUNED} or {@link #PRUNED_EDGE}): no edges, never matched or routed. */
     public boolean isTombstone() {

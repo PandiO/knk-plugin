@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -1353,6 +1354,13 @@ public final class NavigationService implements SiegeMatchObserver {
         }
     }
 
+    /** An edge as admins know it: the stored id, plus the stretch for a piece of the routing view (rev. 7 Part A). */
+    static String edgeLabel(RoadNetworkSnapshot snapshot, RoadEdge edge) {
+        return snapshot.piece(edge.id())
+            .map(p -> String.format(Locale.ROOT, "#%d blocks %.0f-%.0f", p.parentEdgeId(), p.fromAlong(), p.toAlong()))
+            .orElse("#" + edge.id());
+    }
+
     /** A gate changed state (R4 listener, hopped to the main thread by the caller). */
     public void onGateChanged(int doorId) {
         long now = deps.tick().getAsLong();
@@ -1528,11 +1536,12 @@ public final class NavigationService implements SiegeMatchObserver {
                 switch (result.status()) {
                     case FOUND -> {
                         Route route = result.route();
+                        long edges = route.steps().stream().map(s -> snapshot.storedEdgeId(s.edge().id())).distinct().count();
                         lines.add(NavigationMessages.whyResult("Open route: " + EtaEstimator.formatDistance(route.length())
-                            + ", " + route.steps().size() + " edges.", true));
+                            + ", " + edges + " edges.", true));
                         for (Route.Step step : route.steps()) {
                             if (step.verdict() != null && !step.verdict().isOpen()) {
-                                lines.add(NavigationMessages.whyVerdict(step.edge().id(), step.verdict()));
+                                lines.add(NavigationMessages.whyVerdict(edgeLabel(snapshot, step.edge()), step.verdict()));
                             }
                         }
                     }
@@ -1543,7 +1552,7 @@ public final class NavigationService implements SiegeMatchObserver {
                         Route full = why.fullRoute().withVerdicts(snapshot, policy);
                         for (Route.Step step : full.steps()) {
                             if (step.verdict() != null && !step.verdict().isOpen()) {
-                                lines.add(NavigationMessages.whyVerdict(step.edge().id(), step.verdict()));
+                                lines.add(NavigationMessages.whyVerdict(edgeLabel(snapshot, step.edge()), step.verdict()));
                             }
                         }
                     }
