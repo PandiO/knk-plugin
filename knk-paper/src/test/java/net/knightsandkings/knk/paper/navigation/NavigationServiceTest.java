@@ -19,6 +19,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -87,6 +88,8 @@ class NavigationServiceTest {
 
     /** A yard 20 blocks off Main Street that no road enters (its nearest road point is (20, 64, 0)). */
     private static final String MILL_YARD_REGION = "mill_yard";
+    /** KNG-75 step 2: a meadow 240 blocks off Main Street (its nearest road point is B (100, 64, 0)). */
+    private static final String FAR_MEADOW_REGION = "far_meadow";
 
     private final NavigationTestNetwork network = new NavigationTestNetwork();
     private final AtomicLong tick = new AtomicLong(100);
@@ -138,6 +141,7 @@ class NavigationServiceTest {
         shapes = (w, id) -> switch (id) {
             case NavigationTestNetwork.CASTLE_REGION -> Optional.of(RegionShape.cuboid(190, 60, 190, 210, 80, 210));
             case MILL_YARD_REGION -> Optional.of(RegionShape.cuboid(20, 60, 20, 40, 80, 40));
+            case FAR_MEADOW_REGION -> Optional.of(RegionShape.cuboid(90, 60, -260, 110, 80, -240));
             default -> Optional.empty();
         };
         eligibility = new NavigationEligibility(uuid -> false, uuid -> false, uuid -> inSiege.get());
@@ -1111,6 +1115,221 @@ class NavigationServiceTest {
         assertEquals(1, walkTargets.size(), "the road's end hands over to the same direct leg");
         assertTrue(walkGoals.get(0).reached(30.5, 64, 30.5), "anywhere in the yard arrives");
         assertFalse(walkGoals.get(0).reached(10.5, 64, 10.5));
+    }
+
+    @Test
+    void aPlayerOffTheRoadWalksToItsStartAlongAWalkPath() {
+        // KNG-75 step 1: 30 blocks off Main Street the first leg is a walk path to the road, not a straight line
+        walkFinder = r -> found(List.of(new double[] {50.5, 64, 30.5}, new double[] {50.5, 64, 15.5},
+            new double[] {50.5, 64, 0.5}));
+        NavigationService walking = walkService(NavigationConfig.defaults());
+        moveTo(50.5, 65, 30.5);
+
+        walking.navigate(player, cinixKeep());
+
+        NavigationService.DirectLeg leg = walking.startLegOf(playerId).orElseThrow();
+        assertArrayEquals(new double[] {50.5, 64, 0}, walkTargets.get(0), 1e-6, "to where the route starts");
+        verify(trail).drawRoute(any(), any(), anyDouble(), any(), org.mockito.ArgumentMatchers.eq(true));
+        runSearches();
+        assertEquals(NavigationService.DirectLeg.Status.WALKING, leg.status);
+        verify(trail, atLeastOnce()).drawPath(any(), any());
+        verify(trail, atLeastOnce()).drawRoute(any(), any(), anyDouble(), any(), org.mockito.ArgumentMatchers.eq(false));
+
+        ticks(NavigationService.RECHECK_TICKS * 3); // still off the road: the session waits for the player
+        assertTrue(messages().stream().noneMatch(m -> m.contains("You left the road")), messages().toString());
+        assertTrue(walking.startLegOf(playerId).isPresent());
+
+        moveTo(50.5, 65, 5.5);
+        ticks(1);
+        assertTrue(walking.startLegOf(playerId).isEmpty(), "on the road: the session guides");
+        assertEquals(NavigationSession.State.GUIDING, walking.sessionOf(playerId).orElseThrow().state());
+    }
+
+    @Test
+    void walkingAwayFromTheRoadReRoutesFromTheRoadNowNearest() {
+        walkFinder = r -> found(List.of(new double[] {50.5, 64, 30.5}, new double[] {50.5, 64, 0.5}));
+        NavigationService walking = walkService(NavigationConfig.defaults());
+        moveTo(50.5, 65, 30.5);
+        walking.navigate(player, cinixKeep());
+        runSearches();
+
+        moveTo(85.5, 65, 45.5); // away from Main Street, towards D's side road (14.5 off it)
+        ticks(1);
+        assertTrue(walking.startLegOf(playerId).isEmpty(), "heading away: the leg goes, the session takes over");
+        ticks(NavigationService.RECHECK_TICKS * 2);
+
+        assertTrue(messages().stream().anyMatch(m -> m.contains("You left the road")), messages().toString());
+        NavigationService.DirectLeg again = walking.startLegOf(playerId).orElseThrow();
+        assertEquals(100, again.target[0], 1e-6, "a new walk to the road now nearest");
+    }
+
+    @Test
+    void pastAPartialPathsEndTowardsTheRoadIsNotHeadingAway() {
+        // live test 2026-10-09 S3: down the keep tower's spiral stair the budget-cut path ended; the player went on
+        // towards the road, the leg's measure grew, and "You left the road" followed
+        WalkPath partial = mock(WalkPath.class);
+        when(partial.points()).thenReturn(List.of(new double[] {50.5, 64, 30.5}, new double[] {50.5, 64, 25.5}));
+        walkFinder = r -> WalkResult.fallback("length cap", 548, partial);
+        NavigationService walking = walkService(NavigationConfig.defaults());
+        moveTo(50.5, 65, 30.5);
+        walking.navigate(player, cinixKeep());
+        runSearches();
+        assertTrue(walking.startLegOf(playerId).orElseThrow().partial);
+        // out of budget is not "no way" (S3, developer): a different message, the partial path stays
+        assertEquals(1, messages().stream().filter(m -> m.contains("Having trouble determining the route")).count());
+        assertTrue(messages().stream().noneMatch(m -> m.contains("No conventional path")), messages().toString());
+
+        moveTo(35.5, 65, 20.5); // 15.8 off the path's end, but nearer the route (25.4 from it, was 30.5)
+        ticks(NavigationService.RECHECK_TICKS * 2);
+
+        assertTrue(walking.startLegOf(playerId).isPresent(), "still walking to the road");
+        assertTrue(messages().stream().noneMatch(m -> m.contains("You left the road")), messages().toString());
+    }
+
+    @Test
+    void followingAWalkPathThatFirstLeadsAwayFromTheRoadIsNotHeadingAway() {
+        // out through the back door: 15 blocks away from Main Street, round, then to it
+        walkFinder = r -> found(List.of(new double[] {50.5, 64, 30.5}, new double[] {50.5, 64, 45.5},
+            new double[] {70.5, 64, 45.5}, new double[] {70.5, 64, 0.5}));
+        NavigationService walking = walkService(NavigationConfig.defaults());
+        moveTo(50.5, 65, 30.5);
+        walking.navigate(player, cinixKeep());
+        runSearches();
+
+        moveTo(50.5, 65, 44.5); // on the path, 44.5 from the route (was 30.5)
+        ticks(NavigationService.RECHECK_TICKS * 2);
+
+        assertTrue(walking.startLegOf(playerId).isPresent(), "following the path");
+        assertTrue(messages().stream().noneMatch(m -> m.contains("You left the road")), messages().toString());
+    }
+
+    @Test
+    void noWalkableWayToTheRoadSaysSoAndTheNavigationCarriesOn() {
+        walkFinder = r -> WalkResult.noPath("unreachable", 900);
+        NavigationService walking = walkService(NavigationConfig.defaults());
+        moveTo(50.5, 65, 30.5);
+
+        walking.navigate(player, cinixKeep());
+        runSearches();
+
+        assertEquals(NavigationService.DirectLeg.Status.NO_PATH, walking.startLegOf(playerId).orElseThrow().status);
+        assertEquals(1, messages().stream().filter(m -> m.contains("No conventional path to the road found.")).count());
+        assertTrue(messages().stream().noneMatch(m -> m.contains("following the roads instead")), messages().toString());
+        clearInvocations(trail);
+        ticks(20);
+        verify(trail, never()).drawRoute(any(), any(), anyDouble(), any(), org.mockito.ArgumentMatchers.eq(true));
+        verify(trail, atLeastOnce()).drawRoute(any(), any(), anyDouble(), any(), org.mockito.ArgumentMatchers.eq(false));
+        assertTrue(walking.isNavigating(playerId));
+
+        moveTo(50.5, 65, 2.5);
+        ticks(1);
+        assertTrue(walking.startLegOf(playerId).isEmpty());
+    }
+
+    @Test
+    void withWalkPathsAPlayerMayStartUpTo96BlocksFromARoadInPlain3d() {
+        // KNG-75: without walk paths the weighted 48 applies, as before
+        moveTo(30.5, 65, 75.5); // 69.5 blocks from the nearest road (D's side road)
+        service.navigate(player, cinixKeep());
+        assertFalse(service.isNavigating(playerId));
+        assertTrue(messages().get(0).contains("get within 48 blocks"), messages().toString());
+
+        NavigationService walking = walkService(NavigationConfig.defaults());
+        walking.navigate(player, cinixKeep());
+        assertTrue(walking.isNavigating(playerId), messages().toString());
+        assertTrue(walking.startLegOf(playerId).isPresent());
+        walking.stop(player);
+
+        moveTo(60.5, 95, 0.5); // a tower roof 30 above Main Street: 120 weighted, 30 plain
+        walking.navigate(player, cinixKeep());
+        assertTrue(walking.isNavigating(playerId), messages().toString());
+        walking.stop(player);
+
+        clearInvocations(player);
+        moveTo(-60.5, 65, 160.5); // 171 blocks from any road
+        walking.navigate(player, cinixKeep());
+        assertFalse(walking.isNavigating(playerId));
+        assertTrue(messages().get(0).contains("get within 96 blocks"), messages().toString());
+    }
+
+    @Test
+    void aDestinationBeyondTheWalkRangeGetsTheRoadThenTheArrow() {
+        // KNG-75 step 2: 150 blocks off Main Street - by road to B, then "No conventional path" and the HUD arrow
+        NavigationService walking = walkService(NavigationConfig.defaults());
+        Destination hut = Destination.point("Hermit Hut", NavigationTestNetwork.WORLD, 100.5, 65, -150.5);
+
+        walking.navigate(player, hut);
+
+        assertTrue(walking.isNavigating(playerId), messages().toString());
+        assertFalse(walking.isDirect(playerId));
+        verify(trail, atLeastOnce()).drawRoute(any(), any(), anyDouble(), isNull()); // no straight line on to the hut
+        moveTo(100.5, 65, 0.5);
+        ticks(1);
+
+        assertEquals(NavigationService.DirectLeg.Status.NO_PATH, legStatus(walking));
+        assertEquals(1, messages().stream().filter(m -> m.contains("No conventional path to Hermit Hut found.")).count());
+        assertTrue(walkTargets.isEmpty(), "no search for a leg this long");
+        clearInvocations(trail, hud);
+        ticks(NavigationService.RECHECK_TICKS);
+        verify(trail, never()).drawDirect(any(), any());
+        verify(trail, never()).drawPath(any(), any());
+        verify(hud, atLeastOnce()).arrowTowards(any(), org.mockito.ArgumentMatchers.eq(100.5),
+            org.mockito.ArgumentMatchers.eq(-150.5));
+
+        moveTo(100.5, 65, -60.5); // within the walk range now: a walk path from here
+        ticks(NavigationService.RECHECK_TICKS);
+        assertEquals(1, walkTargets.size());
+        runSearches();
+        assertEquals(NavigationService.DirectLeg.Status.WALKING, legStatus(walking));
+        assertEquals(1, messages().stream().filter(m -> m.contains("No conventional path")).count(), "said once");
+
+        moveTo(100.5, 65, -148.5);
+        ticks(1);
+        assertFalse(walking.isNavigating(playerId));
+        assertTrue(events.stream().anyMatch(e -> e instanceof NavigationArriveEvent));
+    }
+
+    @Test
+    void aDestinationWithinTheWalkRangeOfTheRoadsEndGetsAWalkLeg() {
+        // KNG-75 step 2: 80 blocks off Main Street - before, refused; now the road, then a walk path
+        service.navigate(player, Destination.point("Shepherd's Hut", NavigationTestNetwork.WORLD, 100.5, 65, -80.5));
+        assertFalse(service.isNavigating(playerId), "without walk paths: 48, as before");
+        assertTrue(messages().get(0).contains("too far from any road"));
+
+        NavigationService walking = walkService(NavigationConfig.defaults());
+        walking.navigate(player, Destination.point("Shepherd's Hut", NavigationTestNetwork.WORLD, 100.5, 65, -80.5));
+        assertTrue(walking.isNavigating(playerId));
+        moveTo(100.5, 65, 0.5);
+        ticks(1);
+
+        assertEquals(NavigationService.DirectLeg.Status.PENDING, legStatus(walking));
+        assertArrayEquals(new double[] {100.5, 64, -80.5}, walkTargets.get(0), 1e-9);
+        assertTrue(messages().stream().noneMatch(m -> m.contains("No conventional path")), messages().toString());
+    }
+
+    @Test
+    void aDestinationMoreThan256BlocksFromAnyRoadIsRefused() {
+        NavigationService walking = walkService(NavigationConfig.defaults());
+        walking.navigate(player, Destination.point("Lost Tower", NavigationTestNetwork.WORLD, 100.5, 65, -300.5));
+
+        assertFalse(walking.isNavigating(playerId));
+        assertTrue(messages().get(0).contains("Lost Tower is too far from any road"), messages().toString());
+    }
+
+    @Test
+    void aRegionFarFromAnyRoadIsReachedByRoadThenTheArrow() {
+        NavigationService walking = walkService(NavigationConfig.defaults());
+        walking.navigate(player, Destination.region("Far Meadow", NavigationTestNetwork.WORLD, FAR_MEADOW_REGION));
+
+        assertTrue(walking.isNavigating(playerId), messages().toString());
+        double[] end = walking.sessionOf(playerId).orElseThrow().route().orElseThrow().end().point();
+        assertTrue(end[0] >= 90 && end[0] <= 110 && end[2] == 0, "Main Street below the meadow: " + Arrays.toString(end));
+        moveTo(end[0] + 0.5, 65, 0.5);
+        ticks(1);
+        assertEquals(NavigationService.DirectLeg.Status.NO_PATH, legStatus(walking), "240 blocks: the arrow alone");
+        moveTo(100.5, 65, -245.5);
+        ticks(1);
+        assertFalse(walking.isNavigating(playerId), "inside the meadow");
     }
 
     @Test

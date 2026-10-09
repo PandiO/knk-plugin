@@ -49,6 +49,25 @@ class SnapperTest {
     }
 
     @Test
+    void theRankedSnapReachesARoadBelowInPlain3d() {
+        // KNG-75: 30 blocks above the boundary road (floor 94) is 120 weighted - out of reach - but 30 plain
+        assertTrue(snapper.snap(250, 95, 0).isEmpty());
+        SnapPoint s = Snapper.snapRanked(town, 250, 94, 0, 48, 4, null).orElseThrow();
+        assertEquals(E_E_BOUNDARY, s.edgeId());
+        assertEquals(30, s.distance(), 1e-9, "the plain distance");
+        assertTrue(Snapper.snapRanked(town, 250, 94, 40, 48, 4, null).isEmpty(), "plain 50 > 48");
+    }
+
+    @Test
+    void theRankedSnapStillLetsTheHeightWeightPickTheBridge() {
+        // beside the bridge at its height (floor 72): 10 blocks from it, 8 above road A–B - plain 3D would pick the road
+        SnapPoint s = Snapper.snapRanked(town, 60, 72, 0, 48, 4, null).orElseThrow();
+        assertEquals(E_BRIDGE, s.edgeId());
+        assertEquals(10, s.distance(), 1e-9);
+        assertEquals(E_AB, Snapper.snapRanked(town, 60, 72, 0, 48, 1, null).orElseThrow().edgeId(), "unweighted: the road");
+    }
+
+    @Test
     void tooFarFromAnyRoadIsEmpty() {
         assertTrue(snapper.snap(50, 65, 400).isEmpty());
         assertTrue(new Snapper(RoadNetworkSnapshot.empty("w"), RouterParameters.defaults()).snap(0, 65, 0).isEmpty());

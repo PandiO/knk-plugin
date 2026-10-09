@@ -9,12 +9,14 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * {@code navigationDefault} is where {@code /navigate <domain>} leads without {@code spawn}/{@code region}:
  * "Spawn" or "Region", the domain's override else its type's default (KNG-73); search only, null otherwise.
  * {@code roadAccess} is "Applies" or "Ignored": whether the domain's entry/exit rule keeps the road router
- * off its roads (rev. 7 Part C, KNG-92); search only, null otherwise.
+ * off its roads (rev. 7 Part C, KNG-92); search only, null otherwise. {@code wgRegionId} is the domain's
+ * WorldGuard region (search only): the routing view leaves the regions of "Ignored" domains uncut.
  */
 public record DomainSummaryDto(
         @JsonProperty("id") Integer id,
         @JsonProperty("name") String name,
         @JsonProperty("domainType") String domainType,
         @JsonProperty("navigationDefault") String navigationDefault,
-        @JsonProperty("roadAccess") String roadAccess
+        @JsonProperty("roadAccess") String roadAccess,
+        @JsonProperty("wgRegionId") String wgRegionId
 ) {}

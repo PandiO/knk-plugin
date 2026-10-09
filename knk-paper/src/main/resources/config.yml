@@ -234,12 +234,19 @@ navigation:
   overlay-materials: [SNOW, "*_CARPET", "*_PRESSURE_PLATE", RAIL, POWERED_RAIL, LEAF_LITTER, PINK_PETALS]
   # Every Domain Location within 8 blocks of a road cell seeds the build
   seed-from-domains: true
-  # Hard limit: player and destination must be this close to a road
+  # Hard limit: a destination (and, without walk paths, the player) must be this close to a road; a target
+  # this close to the player is walked to directly
   max-snap-distance: 48
   # 1 block of height counts as this many when snapping the player (a bridge vs the road below it)
   snap-vertical-weight: 4
   # The same for a destination: its last leg is a walk path, which climbs, so plain 3D (1) by default
   destination-snap-vertical-weight: 1
+  # With walk paths: the player may be this far from a road (plain 3D); the first leg is a walk path to it
+  max-start-distance: 96
+  # With walk paths: a destination may be this far from a road (plain 3D). Within destination-walk-range of the road's
+  # end the last leg is a walk path; further, "No conventional path" and the HUD arrow alone. Beyond: refused
+  max-destination-distance: 256
+  destination-walk-range: 96
   trail-length: 30
   trail-period-ticks: 10
   trail-particle: DUST
@@ -287,7 +294,7 @@ navigation:
     # straight distance + detour-allowance, whichever is longer, never above max-length
     max-expansions: 20000
     max-length-factor: 1.75
-    max-length: 96
+    max-length: 144
     # Blocks a path may always add to the straight distance: a short leg behind a building needs a detour of
     # several times its length (a 27 m leg went round in 68). 0 = the factor alone
     detour-allowance: 48

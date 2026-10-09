@@ -17,6 +17,8 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.IntSupplier;
 import java.util.function.LongSupplier;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -45,7 +47,9 @@ import net.knightsandkings.knk.core.roads.route.RoutingView.Span;
  * <p>Rev. 7 Part A (REV7_PROPOSAL §2): the pass records <em>where</em> along each edge a region or a gate
  * door is met, and the snapshot it builds is the {@link RoutingView} - every edge cut where its tags change,
  * so a gate door is its own short piece and a region border cuts the road. Navigation routes on that view;
- * the admin side keeps the stored snapshot.
+ * the admin side keeps the stored snapshot. A region whose domain's entry rule does not apply to roads (rev. 7
+ * Part C, "Ignored": a house or shop along a public street) cuts nothing: {@code cutsRoads} leaves it out of the
+ * samples, and the router ignores its rule anyway.
  */
 public final class LiveEdgeTags {
 
@@ -75,6 +79,7 @@ public final class LiveEdgeTags {
     private final Consumer<String> onChanged;
     private final Consumer<Set<String>> onRegions;
     private final LongSupplier clock;
+    private final Predicate<String> cutsRoads;
 
     private final Map<String, State> states = new ConcurrentHashMap<>();
     private final Map<String, Pass> passes = new LinkedHashMap<>();
@@ -91,6 +96,17 @@ public final class LiveEdgeTags {
      */
     public LiveEdgeTags(Function<String, RoadNetworkSnapshot> stored, Probe probe, IntSupplier budget, Executor builder,
                         Executor mainThread, Consumer<String> onChanged, Consumer<Set<String>> onRegions, LongSupplier clock) {
+        this(stored, probe, budget, builder, mainThread, onChanged, onRegions, clock, regionId -> true);
+    }
+
+    /**
+     * @param cutsRoads whether a region may cut a road (main thread, per sampled region): false for a region whose
+     *                  domain's entry rule is "Ignored" for roads (rev. 7 Part C); a region of unknown domain cuts
+     */
+    public LiveEdgeTags(Function<String, RoadNetworkSnapshot> stored, Probe probe, IntSupplier budget, Executor builder,
+                        Executor mainThread, Consumer<String> onChanged, Consumer<Set<String>> onRegions, LongSupplier clock,
+                        Predicate<String> cutsRoads) {
+        this.cutsRoads = Objects.requireNonNull(cutsRoads, "cutsRoads");
         this.stored = Objects.requireNonNull(stored, "stored");
         this.probe = Objects.requireNonNull(probe, "probe");
         this.budget = Objects.requireNonNull(budget, "budget");
@@ -242,7 +258,8 @@ public final class LiveEdgeTags {
                 }
                 while (left > 0 && sampleIndex < samples.size()) {
                     EdgeTagging.Sample s = samples.get(sampleIndex++);
-                    regions.add(new Hit<>(s.along(), probe.regionsAt(world, s.x(), s.y() + 1, s.z())));
+                    Set<String> at = probe.regionsAt(world, s.x(), s.y() + 1, s.z());
+                    regions.add(new Hit<>(s.along(), at.stream().filter(cutsRoads).collect(Collectors.toSet())));
                     left--;
                 }
                 if (sampleIndex >= samples.size()) {

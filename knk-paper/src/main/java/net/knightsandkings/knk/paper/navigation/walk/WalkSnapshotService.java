@@ -50,8 +50,11 @@ public final class WalkSnapshotService {
     public static final int CHUNKS_PER_TICK_LAGGING = 1;
     /** Cached chunks kept at most (≈ 10-20 KB each, see the Phase B measurement). */
     public static final int CACHE_MAX_CHUNKS = 256;
-    /** A box larger than this many chunks is refused (a 48-block leg + 16 margin needs at most 6 × 6). */
-    public static final int MAX_CHUNKS_PER_REQUEST = 49;
+    /**
+     * A box larger than this many chunks is refused: a 96-block leg (KNG-75's walk range) + 16 margin needs at most
+     * 8 × 8 (step 2a measurement, 2026-10-10; 49 refused 15 % of them, the diagonal ones).
+     */
+    public static final int MAX_CHUNKS_PER_REQUEST = 64;
 
     /** Port: one world's chunks, as the main thread sees them. */
     public interface WorldChunks {

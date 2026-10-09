@@ -13,7 +13,8 @@ public final class DomainCatalogMapper {
 
     public static KnkDomainSummary toCore(DomainSummaryDto dto) {
         if (dto == null) return null;
-        return new KnkDomainSummary(dto.id(), dto.name(), dto.domainType(), dto.navigationDefault(), dto.roadAccess());
+        return new KnkDomainSummary(dto.id(), dto.name(), dto.domainType(), dto.navigationDefault(), dto.roadAccess(),
+            dto.wgRegionId());
     }
 
     public static Page<KnkDomainSummary> mapPagedList(PagedResultDto<DomainSummaryDto> result) {

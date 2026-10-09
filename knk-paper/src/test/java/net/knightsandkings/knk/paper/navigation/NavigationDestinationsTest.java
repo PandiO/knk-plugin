@@ -44,7 +44,7 @@ class NavigationDestinationsTest {
         when(domains.searchAsync(any())).thenAnswer(inv -> {
             PagedQuery q = inv.getArgument(0);
             List<KnkDomainSummary> all = List.of(new KnkDomainSummary(1, "Kardenna", "Town", "Spawn"), new KnkDomainSummary(2, "Market", "Town"),
-                new KnkDomainSummary(3, "Market", "District", null, "Applies"), new KnkDomainSummary(9, "Mill House", "Structure", null, "Ignored"),
+                new KnkDomainSummary(3, "Market", "District", null, "Applies", "district_3"), new KnkDomainSummary(9, "Mill House", "Structure", null, "Ignored", "Mill_House"),
                 new KnkDomainSummary(11, "Keep Gate", "GateStructure", "Region"), new KnkDomainSummary(50, "Wild", "Kingdom", null, "ignored"));
             return CompletableFuture.completedFuture(q.pageNumber() == 1 ? new Page<>(all, all.size(), 1, q.pageSize()) : new Page<>(List.of(), all.size(), q.pageNumber(), q.pageSize()));
         });
@@ -95,6 +95,32 @@ class NavigationDestinationsTest {
                 id -> CompletableFuture.completedFuture(Optional.empty())),
             w -> network.snapshot, clock::get);
         assertFalse(notLoaded.roadAccessIgnored(9), "before the first load every rule applies");
+    }
+
+    @Test
+    void theRegionsOfIgnoredDomainsAreKnownByIdAndAChangeIsAnnounced() {
+        // rev. 7 Part C + Part A: the routing view does not cut roads at these regions
+        assertTrue(destinations.roadsIgnoreRegion("mill_house"), "region ids compare without case");
+        assertTrue(destinations.roadsIgnoreRegion("MILL_HOUSE"));
+        assertFalse(destinations.roadsIgnoreRegion("district_3"), "Applies");
+        assertFalse(destinations.roadsIgnoreRegion("unknown_region"));
+        assertFalse(destinations.roadsIgnoreRegion(null));
+
+        java.util.concurrent.atomic.AtomicInteger announced = new java.util.concurrent.atomic.AtomicInteger();
+        destinations.onRoadAccessChanged(announced::incrementAndGet);
+        destinations.refresh().join();
+        assertEquals(0, announced.get(), "the same set: nothing to recut");
+
+        org.mockito.Mockito.doAnswer(inv -> {
+            PagedQuery q = inv.getArgument(0);
+            List<KnkDomainSummary> all = List.of(new KnkDomainSummary(3, "Market", "District", null, "Ignored", "district_3"));
+            return CompletableFuture.completedFuture(q.pageNumber() == 1 ? new Page<>(all, 1, 1, q.pageSize())
+                : new Page<>(List.of(), 1, q.pageNumber(), q.pageSize()));
+        }).when(domains).searchAsync(any());
+        destinations.refresh().join();
+        assertEquals(1, announced.get());
+        assertTrue(destinations.roadsIgnoreRegion("district_3"));
+        assertFalse(destinations.roadsIgnoreRegion("mill_house"));
     }
 
     @Test

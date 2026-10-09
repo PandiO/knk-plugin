@@ -44,6 +44,9 @@ class ConfigLoaderNavigationTest {
         assertEquals(48, navigation.maxSnapDistance(), 0.0001);
         assertEquals(4, navigation.snapVerticalWeight(), 0.0001);
         assertEquals(1, navigation.destinationSnapVerticalWeight(), 0.0001);
+        assertEquals(96, navigation.maxStartDistance(), 0.0001);
+        assertEquals(256, navigation.maxDestinationDistance(), 0.0001);
+        assertEquals(96, navigation.destinationWalkRange(), 0.0001);
         assertEquals(new NavigationConfig.TrailConfig(30, 10, "DUST", "#E8C66A"), navigation.trail());
         assertEquals(8, navigation.rerouteDistance(), 0.0001);
         assertEquals(40, navigation.rerouteAfterTicks());
@@ -63,7 +66,7 @@ class ConfigLoaderNavigationTest {
         assertEquals(java.util.Set.of("enabled", "max-expansions", "max-length-factor", "max-length", "detour-allowance", "max-drop",
             "drop-penalty", "capture-margin", "chunk-ttl-seconds", "recompute-distance", "max-concurrent-searches",
             "climbables", "wall-cost"), walk.getKeys(false));
-        assertEquals(new NavigationConfig.WalkConfig(true, 20_000, 1.75, 96, 48, 3, 10, 16, 10, 6, 2, List.of("LADDER"), 1.0),
+        assertEquals(new NavigationConfig.WalkConfig(true, 20_000, 1.75, 144, 48, 3, 10, 16, 10, 6, 2, List.of("LADDER"), 1.0),
             ConfigLoader.load(yaml).navigation().walk());
     }
 
@@ -118,6 +121,41 @@ class ConfigLoaderNavigationTest {
     }
 
     @Test
+    void thePlayersStartDistanceOverridesAndMustBePositive() {
+        // KNG-75: with walk paths the player may start this far from a road
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("navigation.max-start-distance", 64);
+        NavigationConfig navigation = ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation"));
+
+        assertEquals(64, navigation.maxStartDistance(), 0.0001);
+        assertEquals(48, navigation.maxSnapDistance(), 0.0001, "the destination limit is separate");
+
+        yaml.set("navigation.max-start-distance", 0);
+        assertThrows(IllegalArgumentException.class,
+            () -> ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation")).validate());
+    }
+
+    @Test
+    void theDestinationLimitsOverrideAndMustBePositive() {
+        // KNG-75 step 2
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("navigation.max-destination-distance", 200);
+        yaml.set("navigation.destination-walk-range", 80);
+        NavigationConfig navigation = ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation"));
+
+        assertEquals(200, navigation.maxDestinationDistance(), 0.0001);
+        assertEquals(80, navigation.destinationWalkRange(), 0.0001);
+
+        yaml.set("navigation.destination-walk-range", 0);
+        assertThrows(IllegalArgumentException.class,
+            () -> ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation")).validate());
+        yaml.set("navigation.destination-walk-range", 80);
+        yaml.set("navigation.max-destination-distance", -1);
+        assertThrows(IllegalArgumentException.class,
+            () -> ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation")).validate());
+    }
+
+    @Test
     void curatedTilesCanBeSwitchedOff() throws Exception {
         assertTrue(ConfigLoader.load(bundledConfig()).navigation().builder().curatedTiles());
         YamlConfiguration yaml = new YamlConfiguration();
@@ -129,7 +167,7 @@ class ConfigLoaderNavigationTest {
     @Test
     void walkKeysDefaultToTheDesignAndOverride() {
         NavigationConfig.WalkConfig defaults = ConfigLoader.loadNavigation(null).walk();
-        assertEquals(new NavigationConfig.WalkConfig(true, 20_000, 1.75, 96, 48, 3, 10, 16, 10, 6, 2, List.of("LADDER"), 1.0),
+        assertEquals(new NavigationConfig.WalkConfig(true, 20_000, 1.75, 144, 48, 3, 10, 16, 10, 6, 2, List.of("LADDER"), 1.0),
             defaults, "KNG-51 §9 defaults");
         assertEquals(net.knightsandkings.knk.core.roads.walk.MovementProfile.PLAYER, defaults.profile());
         assertEquals(net.knightsandkings.knk.core.roads.walk.WalkBudget.DEFAULTS, defaults.budget());
@@ -148,7 +186,7 @@ class ConfigLoaderNavigationTest {
         assertEquals(4.5, walk.profile().dropPenalty(), 0.0001);
         assertEquals(java.util.Set.of("LADDER", "VINE"), walk.profile().climbables());
         assertEquals(5000, walk.budget().maxExpansions());
-        assertEquals(96, walk.budget().maxLength(), 0.0001, "unset keys keep their defaults");
+        assertEquals(144, walk.budget().maxLength(), 0.0001, "unset keys keep their defaults");
         assertEquals(8, walk.captureMargin());
         assertEquals(30, walk.chunkTtlSeconds());
         assertEquals(2, walk.maxConcurrentSearches());
