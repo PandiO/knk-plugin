@@ -29,6 +29,7 @@ import net.knightsandkings.knk.core.roads.build.GateCells;
 import net.knightsandkings.knk.core.roads.route.AccessPolicy;
 import net.knightsandkings.knk.core.roads.route.CompositeAccessPolicy;
 import net.knightsandkings.knk.core.roads.route.DomainAvailability;
+import net.knightsandkings.knk.core.roads.route.DomainAvailability.RoadRule;
 import net.knightsandkings.knk.core.roads.route.EdgePolyline;
 import net.knightsandkings.knk.core.roads.route.GateAvailability;
 import net.knightsandkings.knk.core.roads.route.GateAvailability.GateView;
@@ -53,7 +54,9 @@ import net.knightsandkings.knk.paper.siege.SiegeGateController;
  *   <li>{@code DomainLookup} ← {@link RegionDomainResolver#getDomainByRegionIdNoRefresh}, falling
  *       back to the API off the main thread (R7); the player's current regions from
  *       {@link RegionIds#at} (R8); the bypass is {@code KnKPlugin.hasRegionBypass} ({@code knk.region.bypass},
- *       KNG-17, R6; shared with the KNG-56 border).</li>
+ *       KNG-17, R6; shared with the KNG-56 border);</li>
+ *   <li>{@code RoadRule} ← {@link NavigationDestinations#roadAccessIgnored} (rev. 7 Part C, KNG-92): domains
+ *       whose rule is "Ignored" for roads are skipped.</li>
  * </ul>
  * {@link #policyFor} runs on the main thread and reads every gate the network mentions once, so the
  * policy itself can be used from the routing thread without touching Bukkit or the gate cache.
@@ -69,6 +72,7 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
     private final RegionDomainResolver resolver;
     private final Predicate<Player> bypass;
     private final DomainAccessEvaluator evaluator;
+    private final RoadRule roadRule;
 
     /**
      * @param gateManager the gate cache (R5)
@@ -80,12 +84,22 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
      */
     public NavigationAccess(GateManager gateManager, Supplier<SiegeGateController> siegeGates, RegionIds regionIds,
                             RegionDomainResolver resolver, Predicate<Player> bypass, DomainAccessEvaluator evaluator) {
+        this(gateManager, siegeGates, regionIds, resolver, bypass, evaluator, RoadRule.ALWAYS);
+    }
+
+    /**
+     * @param roadRule which domains' entry/exit rules apply to roads (rev. 7 Part C)
+     */
+    public NavigationAccess(GateManager gateManager, Supplier<SiegeGateController> siegeGates, RegionIds regionIds,
+                            RegionDomainResolver resolver, Predicate<Player> bypass, DomainAccessEvaluator evaluator,
+                            RoadRule roadRule) {
         this.gateManager = Objects.requireNonNull(gateManager, "gateManager");
         this.siegeGates = Objects.requireNonNull(siegeGates, "siegeGates");
         this.regionIds = Objects.requireNonNull(regionIds, "regionIds");
         this.resolver = Objects.requireNonNull(resolver, "resolver");
         this.bypass = Objects.requireNonNull(bypass, "bypass");
         this.evaluator = Objects.requireNonNull(evaluator, "evaluator");
+        this.roadRule = Objects.requireNonNull(roadRule, "roadRule");
     }
 
     /** Main thread: reads the player's regions, nodes and every gate of the network once. */
@@ -97,7 +111,7 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
             doorIds.addAll(edge.gateDoorIds());
         }
         return CompositeAccessPolicy.of(new StaticFlagsAvailability(), gateAvailability(player, doorIds),
-            new DomainAvailability(evaluator, this::domainByRegionId, currentRegions, bypass.test(player)));
+            new DomainAvailability(evaluator, this::domainByRegionId, roadRule, currentRegions, bypass.test(player)));
     }
 
     /**

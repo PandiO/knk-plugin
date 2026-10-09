@@ -2,11 +2,13 @@ package net.knightsandkings.knk.paper.navigation;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
@@ -122,6 +124,7 @@ public final class NavigationDestinations {
     private final LongSupplier clock;
 
     private volatile List<NavTarget> remote = List.of();
+    private volatile Set<Integer> roadAccessIgnored = Set.of();
     private volatile long loadedAt = Long.MIN_VALUE;
     private final AtomicBoolean refreshing = new AtomicBoolean();
 
@@ -260,6 +263,14 @@ public final class NavigationDestinations {
 
     // ==================== API part ====================
 
+    /**
+     * Rev. 7 Part C (KNG-92): whether the domain's entry/exit rule is lifted off the roads ("Ignored" on the
+     * API's search), as of the last catalogue load. Unknown domains, or no load yet, keep the rule.
+     */
+    public boolean roadAccessIgnored(int domainId) {
+        return roadAccessIgnored.contains(domainId);
+    }
+
     /** Force a reload of the API part (start-up, {@code /knk cache refresh}). */
     public CompletableFuture<Void> refresh() {
         if (!refreshing.compareAndSet(false, true)) {
@@ -268,13 +279,18 @@ public final class NavigationDestinations {
         CompletableFuture<List<NavTarget>> domainTargets = allPages(query -> domains.searchAsync(query))
             .thenApply(list -> {
                 List<NavTarget> out = new ArrayList<>();
+                Set<Integer> ignored = new HashSet<>();
                 for (KnkDomainSummary domain : list) {
+                    if (domain.id() != null && domain.roadAccessIgnored()) {
+                        ignored.add(domain.id());
+                    }
                     NavTarget.Type type = NavTarget.Type.ofDomainType(domain.domainType());
                     if (type != null && domain.id() != null && domain.name() != null && !domain.name().isBlank()) {
                         out.add(NavTarget.domain(type, domain.id(), domain.name(), domain.domainType(),
                             domain.navigationDefault()));
                     }
                 }
+                roadAccessIgnored = Set.copyOf(ignored);
                 return out;
             });
         CompletableFuture<List<NavTarget>> locationTargets = allPages(query -> locations.searchAsync(query))

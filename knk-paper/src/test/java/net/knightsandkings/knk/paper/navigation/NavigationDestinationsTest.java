@@ -44,8 +44,8 @@ class NavigationDestinationsTest {
         when(domains.searchAsync(any())).thenAnswer(inv -> {
             PagedQuery q = inv.getArgument(0);
             List<KnkDomainSummary> all = List.of(new KnkDomainSummary(1, "Kardenna", "Town", "Spawn"), new KnkDomainSummary(2, "Market", "Town"),
-                new KnkDomainSummary(3, "Market", "District"), new KnkDomainSummary(9, "Mill House", "Structure"),
-                new KnkDomainSummary(11, "Keep Gate", "GateStructure", "Region"), new KnkDomainSummary(50, "Wild", "Kingdom"));
+                new KnkDomainSummary(3, "Market", "District", null, "Applies"), new KnkDomainSummary(9, "Mill House", "Structure", null, "Ignored"),
+                new KnkDomainSummary(11, "Keep Gate", "GateStructure", "Region"), new KnkDomainSummary(50, "Wild", "Kingdom", null, "ignored"));
             return CompletableFuture.completedFuture(q.pageNumber() == 1 ? new Page<>(all, all.size(), 1, q.pageSize()) : new Page<>(List.of(), all.size(), q.pageNumber(), q.pageSize()));
         });
         when(locations.searchAsync(any())).thenAnswer(inv -> {
@@ -77,6 +77,24 @@ class NavigationDestinationsTest {
         assertTrue(all.stream().anyMatch(t -> t.type() == NavTarget.Type.NODE && t.name().equals("Cinix Keep")));
         assertFalse(all.stream().anyMatch(t -> t.name().equals("Wild")), "unknown domain types are skipped");
         assertEquals(5, destinations.remote().stream().filter(t -> t.type().isDomain()).count());
+    }
+
+    @Test
+    void theCatalogueKnowsWhichDomainsRulesAreLiftedOffTheRoads() {
+        // rev. 7 Part C (KNG-92): "Ignored" on the search, whatever the type; "Applies" or nothing keeps the rule
+        assertTrue(destinations.roadAccessIgnored(9));
+        assertTrue(destinations.roadAccessIgnored(50), "not a /navigate target, still a domain along a road");
+        assertFalse(destinations.roadAccessIgnored(3));
+        assertFalse(destinations.roadAccessIgnored(1));
+        assertFalse(destinations.roadAccessIgnored(999));
+
+        NavigationDestinations notLoaded = new NavigationDestinations(domains, locations,
+            new DomainLocationResolver(id -> CompletableFuture.completedFuture(Optional.empty()),
+                id -> CompletableFuture.completedFuture(Optional.empty()),
+                id -> CompletableFuture.completedFuture(Optional.empty()),
+                id -> CompletableFuture.completedFuture(Optional.empty())),
+            w -> network.snapshot, clock::get);
+        assertFalse(notLoaded.roadAccessIgnored(9), "before the first load every rule applies");
     }
 
     @Test
