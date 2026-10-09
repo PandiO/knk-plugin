@@ -788,6 +788,8 @@ public class KnKPlugin extends JavaPlugin {
             
             // Wire resolver into cache manager for metrics tracking
             cacheManager.setRegionResolver(regionDomainResolver);
+            // KNG-104: /knk cache refresh forgets the region → domain map too (registered before the navigation hooks)
+            cacheManager.registerRefreshHook("region domains", regionDomainResolver::clearRegionCache);
 
             // KNG-11: hits the siege rules allow stay exempt, so enchantments keep working in sieges fought
             // in towns. siegeService is created later (initializeSiege), so it's read per hit.
