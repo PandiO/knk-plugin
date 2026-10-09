@@ -151,6 +151,9 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
     public Optional<DomainSnapshot> domainByRegionId(String regionId) {
         Optional<DomainSnapshot> cached = resolver.getDomainByRegionIdNoRefresh(regionId);
         if (cached.isPresent()) {
+            // KNG-104: an expired entry is answered as it is and re-asked in the background, so a change made in the
+            // web app (AllowEntry/AllowExit, a domain moved to another region) reaches the next route or re-check
+            resolver.refreshIfStale(Set.of(regionId));
             return cached;
         }
         try {
