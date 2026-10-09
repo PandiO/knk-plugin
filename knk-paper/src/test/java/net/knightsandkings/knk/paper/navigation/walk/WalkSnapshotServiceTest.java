@@ -151,8 +151,12 @@ class WalkSnapshotServiceTest {
 
     @Test
     void aTooLargeBoxIsRefused() {
-        WalkBox huge = new WalkBox("world", 0, 60, 0, 16 * 8 - 1, 70, 16 * 8 - 1);
+        WalkBox huge = new WalkBox("world", 0, 60, 0, 16 * 9 - 1, 70, 16 * 9 - 1);
         assertEquals(WalkSnapshotService.Status.TOO_LARGE, service.capture(chunks, GateCells.NONE, huge).join().status());
+        // KNG-75: a 96-block diagonal leg needs 8 x 8
+        WalkBox diagonal96 = new WalkBox("world", 0, 60, 0, 16 * 8 - 1, 70, 16 * 8 - 1);
+        var capture = service.capture(chunks, GateCells.NONE, diagonal96);
+        assertTrue(!capture.isDone() || capture.join().status() != WalkSnapshotService.Status.TOO_LARGE);
     }
 
     @Test
