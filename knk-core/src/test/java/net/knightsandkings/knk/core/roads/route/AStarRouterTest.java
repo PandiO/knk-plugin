@@ -290,6 +290,45 @@ class AStarRouterTest {
         assertEquals(List.of(E_BE), edges(r.route()));
     }
 
+    @Test
+    void aGoalOnABlockedEdgeIsReachedFromItsOpenSide() {
+        // live test 2026-10-09 (N14): South Gate's spawn snaps onto the gate's road on the town side of the door
+        SnapPoint beforeTheGate = SnapPoint.onEdge(town, E_BE, 30);
+        RouteRequest req = request(SnapPoint.atNode(town, A), beforeTheGate, gate(AnimationState.CLOSED, false, false));
+        assertEquals(RouteResult.Status.NO_ROUTE, router.route(req).status(), "the whole gate edge is blocked");
+
+        RouteResult r = router.routeOrExplain(req.withGoalSides(List.of(new RouteRequest.GoalSides(true, false))));
+        assertEquals(RouteResult.Status.FOUND, r.status());
+        assertEquals(List.of(E_AB, E_BE), edges(r.route()));
+        assertEquals(130, r.route().length(), 1e-9, "B, then 30 blocks up to the goal");
+        assertTrue(r.route().steps().get(1).verdict().isOpen());
+
+        RouteResult wrongSide = router.route(req.withGoalSides(List.of(new RouteRequest.GoalSides(false, true))));
+        assertEquals(RouteResult.Status.NO_ROUTE, wrongSide.status(), "E's side is open, but E is only reached through the gate");
+    }
+
+    @Test
+    void withNoOpenRouteThePlayerIsGuidedAsCloseAsTheOpenRoadsGo() {
+        // live test 2026-10-09 (N14): in front of a denied district on the way, the goal behind a closed gate - the
+        // shortest all-open route stopped at the district's edge; the detour by road reaches the gate
+        AccessPolicy deniedDistrict = e -> e.id() == E_AB
+            ? EdgeVerdict.blocked("you may not enter Navigation Test", EdgeVerdict.Cause.domain(16, "Navigation Test"))
+            : EdgeVerdict.open();
+        RouteRequest req = request(SnapPoint.onEdge(town, E_AB, 90), SnapPoint.atNode(town, E),
+            CompositeAccessPolicy.of(gate(AnimationState.CLOSED, false, false), deniedDistrict))
+            .withStartSides(new RouteRequest.StartSides(true, false));
+
+        RouteResult r = router.routeOrExplain(req);
+
+        assertEquals(RouteResult.Status.BLOCKED, r.status());
+        assertEquals("the West Gate is closed", r.explanation().reason(), "the block on the way on from the closest point");
+        assertEquals(E_BE, r.explanation().blockedEdge().id());
+        Route guide = r.explanation().partialRoute();
+        assertEquals(100, guide.end().x(), 1e-9, "guided round to B, where the gate edge starts");
+        assertEquals(0, guide.end().z(), 1e-9);
+        assertEquals(-E_AB, edges(guide).get(0), "back along the open side first");
+    }
+
     // ---- domains -----------------------------------------------------------------------------------
 
     @Test

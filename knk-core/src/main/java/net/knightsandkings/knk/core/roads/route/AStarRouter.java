@@ -9,6 +9,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Set;
 
@@ -59,6 +60,19 @@ public final class AStarRouter {
      * {@link RouteResult.Status#BLOCKED} with the partial route, or NO_ROUTE when even an
      * all-open search fails.
      */
+    /**
+     * With the request's real policy: the route to the reached point nearest to a goal, when no goal can
+     * be reached (the explainer's "as close as the open roads go", N14); a goal's route if one is reachable
+     * after all; empty when nothing gets closer than the start.
+     */
+    public Optional<Route> routeTowards(RouteRequest request) {
+        Search search = new Search(request);
+        if (search.reachableGoals.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(search.runTowardsClosest());
+    }
+
     public RouteResult routeOrExplain(RouteRequest request) {
         RouteResult result = route(request);
         if (result.status() != RouteResult.Status.NO_ROUTE) {
@@ -198,6 +212,26 @@ public final class AStarRouter {
             }
         }
 
+        /**
+         * Goals on a blocked edge that the goal sides open from this node (N14: the closed gate lies
+         * beyond the goal): reached over the open part only, the rest of the edge stays closed.
+         */
+        void relaxGoalsBehindBlock(int nodeId, int edgeIndex, boolean forward) {
+            List<Integer> onEdge = goalsByEdgeIndex.get(edgeIndex);
+            if (onEdge == null || request.goalSides() == null) {
+                return;
+            }
+            EdgePolyline p = snapshot.polylineAt(edgeIndex);
+            double perBlock = p.length() <= 0 ? 0 : edgeCost(edgeIndex) / p.length();
+            double along = forward ? 0 : p.length();
+            for (int k : onEdge) {
+                if (request.goalOpenBySides(k, forward)) {
+                    double goalAlong = goals.get(k).along();
+                    relax(nodeId, goalState(k), Math.abs(goalAlong - along) * perBlock, edgeIndex, forward);
+                }
+            }
+        }
+
         void expandStart() {
             RoadEdge edge = snapshot.edgeAt(startEdgeIndex);
             boolean usable = verdict(startEdgeIndex).isUsable();
@@ -229,6 +263,7 @@ public final class AStarRouter {
                     continue;
                 }
                 if (!verdict(ei).isUsable()) {
+                    relaxGoalsBehindBlock(nodeId, ei, forward);
                     continue;
                 }
                 EdgePolyline p = snapshot.polylineAt(ei);
@@ -236,6 +271,49 @@ public final class AStarRouter {
                 relaxGoalsOnEdge(nodeId, ei, forward ? 0 : p.length(), forward, perBlock);
                 relax(nodeId, edge.otherNode(nodeId), edgeCost(ei), ei, forward);
             }
+        }
+
+        /**
+         * No goal reachable: the route to the reached point (the start or a node) nearest to a goal - as
+         * close as the open roads go (N14). Null when the start itself is nearest.
+         */
+        Route runTowardsClosest() {
+            g.put(START_STATE, 0.0);
+            closed.add(START_STATE);
+            expandStart();
+            int best = START_STATE;
+            double bestDistance = distanceToGoals(START_STATE);
+            while (!open.isEmpty()) {
+                Entry e = open.poll();
+                if (closed.contains(e.state)) {
+                    continue;
+                }
+                closed.add(e.state);
+                if (isGoal(e.state)) {
+                    return reconstruct(e.state, e.g);
+                }
+                double d = distanceToGoals(e.state);
+                if (d < bestDistance - 1e-9) {
+                    best = e.state;
+                    bestDistance = d;
+                }
+                expandNode(e.state);
+            }
+            if (best == START_STATE) {
+                return null;
+            }
+            return reconstructTo(best, SnapPoint.atNode(snapshot, best));
+        }
+
+        double distanceToGoals(int state) {
+            double[] p = position(state);
+            double best = Double.POSITIVE_INFINITY;
+            for (int k : reachableGoals) {
+                double[] q = goals.get(k).point();
+                double dx = q[0] - p[0], dy = q[1] - p[1], dz = q[2] - p[2];
+                best = Math.min(best, Math.sqrt(dx * dx + dy * dy + dz * dz));
+            }
+            return best;
         }
 
         Route run() {
@@ -257,9 +335,15 @@ public final class AStarRouter {
         }
 
         Route reconstruct(int goalState, double cost) {
-            SnapPoint goal = goals.get(goalIndex(goalState));
+            Route route = reconstructTo(goalState, goals.get(goalIndex(goalState)));
+            assert Math.abs(route.cost() - cost) < 1e-6 : "route cost " + route.cost() + " != search cost " + cost;
+            return route;
+        }
+
+        /** The route to a reached state: a goal (ends at its snap point) or a node (ends at the node). */
+        Route reconstructTo(int endState, SnapPoint goal) {
             List<Route.Step> steps = new ArrayList<>();
-            int state = goalState;
+            int state = endState;
             while (state != START_STATE) {
                 Arrival a = arrivals.get(state);
                 RoadEdge edge = snapshot.edgeAt(a.edgeIndex);
@@ -268,17 +352,15 @@ public final class AStarRouter {
                 double exit = isGoal(state) ? goal.along() : (a.forward ? p.length() : 0);
                 if (Math.abs(exit - entry) > 1e-9) {
                     EdgeVerdict v = verdict(a.edgeIndex);
-                    if (a.fromState == START_STATE && !v.isUsable()) {
-                        v = EdgeVerdict.open(); // the open part of a blocked start edge (start sides)
+                    if ((a.fromState == START_STATE || isGoal(state)) && !v.isUsable()) {
+                        v = EdgeVerdict.open(); // the open part of a blocked start or goal edge (start / goal sides)
                     }
                     steps.add(Route.Step.of(edge, a.forward, entry, exit, v));
                 }
                 state = a.fromState;
             }
             Collections.reverse(steps);
-            Route route = Route.build(snapshot, start, goal, steps, request.classCost());
-            assert Math.abs(route.cost() - cost) < 1e-6 : "route cost " + route.cost() + " != search cost " + cost;
-            return route;
+            return Route.build(snapshot, start, goal, steps, request.classCost());
         }
     }
 }

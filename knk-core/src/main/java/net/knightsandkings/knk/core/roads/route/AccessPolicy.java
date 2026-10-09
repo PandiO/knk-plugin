@@ -16,4 +16,14 @@ public interface AccessPolicy {
     AccessPolicy ALL_OPEN = edge -> EdgeVerdict.open();
 
     EdgeVerdict check(RoadEdge edge);
+
+    /**
+     * The verdict for a <em>part</em> of an edge - an edge object with the edge's id but its own
+     * geometry and tags (the open side of a blocked start edge, the stretch still ahead of the player).
+     * Policies that cache per edge id must not answer from that cache (live test 2026-10-09, N10/N6:
+     * the part got the whole edge's cached "the South Gate is closing").
+     */
+    default EdgeVerdict checkPart(RoadEdge part) {
+        return check(part);
+    }
 }

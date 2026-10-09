@@ -123,6 +123,64 @@ class DomainAccessServiceTest {
         verify(noble, times(2)).sendActionBar(any(Component.class));
     }
 
+    // ---- KNG-74: chat once per refusal episode, the navigation HUD yields ----
+
+    @Test
+    void theFirstRefusalOfAnEpisodeIsSaidInChatAndTheActionBar() {
+        Player noble = player(-1);
+
+        cross(noble, -1, 0);
+
+        verify(noble, times(1)).sendActionBar(any(Component.class));
+        verify(noble, times(1)).sendMessage(any(Component.class));
+    }
+
+    @Test
+    void refusalsWithinTheQuietPeriodAreNotRepeatedInChat() {
+        Player noble = player(-1);
+
+        for (int step = 0; step < 40; step++) {  // 8 s of pushing the border five times a second
+            cross(noble, -1, 0);
+            now += 200;
+        }
+
+        verify(noble, times(4)).sendActionBar(any(Component.class));
+        verify(noble, times(1)).sendMessage(any(Component.class));
+    }
+
+    @Test
+    void afterTheQuietPeriodTheRefusalIsSaidInChatAgain() {
+        Player noble = player(-1);
+        cross(noble, -1, 0);
+
+        now += 10_000;
+        cross(noble, -1, 0);
+
+        verify(noble, times(2)).sendMessage(any(Component.class));
+    }
+
+    @Test
+    void theNavigationArrowYieldsToAFreshRefusal() {
+        net.knightsandkings.knk.paper.navigation.NavigationHud hud =
+            new net.knightsandkings.knk.paper.navigation.NavigationHud(
+                net.knightsandkings.knk.core.roads.route.EtaEstimator.defaults());
+        hud.yieldActionBarWhile(access::holdsActionBar);
+        Player noble = player(-1);
+
+        cross(noble, -1, 0);
+        verify(noble, times(1)).sendActionBar(any(Component.class));
+
+        now += 500;
+        hud.arrowTowards(noble, -1, 20);
+        now += 2_000;
+        hud.arrowTowards(noble, -1, 20);
+        verify(noble, times(1)).sendActionBar(any(Component.class));
+
+        now += 500;  // 3 s after the refusal
+        hud.arrowTowards(noble, -1, 20);
+        verify(noble, times(2)).sendActionBar(any(Component.class));
+    }
+
     @Test
     void leavingAClosedDistrictIsRefused() {
         Optional<Refusal> refusal = cross(player(-150), -150, -250);

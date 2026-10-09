@@ -518,6 +518,14 @@ regions:
       retry-delay-seconds: 30
       interval-minutes: 5         # re-sync from the API this often (0 = only at startup / repair / new regions)
     message-interval-ms: 2000     # a player is told "You are not allowed to ..." at most this often
+    # KNG-74: the message is shown in the action bar (shared with the /navigate arrow), and the first one of a refusal
+    # "episode" is also sent to chat so it cannot be missed. An episode starts with a refusal after chat-quiet-period-ms
+    # without any refusal (effectively at least message-interval-ms), or with a different message than the one last
+    # sent to chat (another domain, entry vs exit). 0 = every shown message also goes to chat.
+    chat-quiet-period-ms: 10000
+    # For this long after a refusal message is shown, the /navigate action-bar arrow is not drawn over it (vanilla
+    # shows an action-bar message for about 3 s).
+    action-bar-hold-ms: 3000
     # Only a refusal RATE no honest player reaches (a client pushing a border makes a few per second) leads to an
     # action: first a teleport to the world spawn, then - if it happens again within escalation-window-seconds - a kick.
     load-guard:

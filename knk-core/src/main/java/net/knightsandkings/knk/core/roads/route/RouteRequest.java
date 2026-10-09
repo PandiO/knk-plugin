@@ -18,9 +18,12 @@ import java.util.Objects;
  * @param startSides   when the policy blocks the start edge: which of its two parts, from the start
  *                     point to each node, the player may still walk (live test 2026-10-08, N6); null
  *                     = the whole start edge follows the policy
+ * @param goalSides    per goal (same order; null entries allowed), when the policy blocks the goal's edge:
+ *                     from which node the part up to the goal may be walked (live test 2026-10-09, N14);
+ *                     null = goals on blocked edges are unreachable
  */
 public record RouteRequest(SnapPoint start, List<SnapPoint> goals, AccessPolicy accessPolicy,
-                           Map<RoadClass, Double> classCost, StartSides startSides) {
+                           Map<RoadClass, Double> classCost, StartSides startSides, List<GoalSides> goalSides) {
 
     /**
      * The open parts of a blocked start edge: the gate or the domain edge lies on one side of the
@@ -36,8 +39,27 @@ public record RouteRequest(SnapPoint start, List<SnapPoint> goals, AccessPolicy 
         }
     }
 
+    /**
+     * The open approaches to a goal on a blocked edge (the closed gate lies beyond the goal, or the
+     * denied region starts past it).
+     *
+     * @param fromFrom the part from the edge's From node up to the goal is open
+     * @param fromTo   the part from the edge's To node back to the goal is open
+     */
+    public record GoalSides(boolean fromFrom, boolean fromTo) {
+        /** Whether the goal may be reached walking in this direction ({@code forward} = from the From node). */
+        public boolean open(boolean forward) {
+            return forward ? fromFrom : fromTo;
+        }
+    }
+
     public RouteRequest(SnapPoint start, List<SnapPoint> goals, AccessPolicy accessPolicy, Map<RoadClass, Double> classCost) {
-        this(start, goals, accessPolicy, classCost, null);
+        this(start, goals, accessPolicy, classCost, null, null);
+    }
+
+    public RouteRequest(SnapPoint start, List<SnapPoint> goals, AccessPolicy accessPolicy, Map<RoadClass, Double> classCost,
+                        StartSides startSides) {
+        this(start, goals, accessPolicy, classCost, startSides, null);
     }
 
     public RouteRequest {
@@ -49,6 +71,12 @@ public record RouteRequest(SnapPoint start, List<SnapPoint> goals, AccessPolicy 
             throw new IllegalArgumentException("a route request needs at least one goal");
         }
         classCost = Map.copyOf(classCost);
+        if (goalSides != null) {
+            if (goalSides.size() != goals.size()) {
+                throw new IllegalArgumentException("goalSides must have one entry per goal");
+            }
+            goalSides = java.util.Collections.unmodifiableList(new java.util.ArrayList<>(goalSides));
+        }
     }
 
     /** Single goal with the parameters' class costs. */
@@ -63,16 +91,26 @@ public record RouteRequest(SnapPoint start, List<SnapPoint> goals, AccessPolicy 
     }
 
     public RouteRequest withPolicy(AccessPolicy policy) {
-        return new RouteRequest(start, goals, policy, classCost, startSides);
+        return new RouteRequest(start, goals, policy, classCost, startSides, goalSides);
     }
 
     /** A new start drops the start sides (they belong to the old start point). */
     public RouteRequest withStart(SnapPoint newStart) {
-        return new RouteRequest(newStart, goals, accessPolicy, classCost, null);
+        return new RouteRequest(newStart, goals, accessPolicy, classCost, null, goalSides);
     }
 
     public RouteRequest withStartSides(StartSides sides) {
-        return new RouteRequest(start, goals, accessPolicy, classCost, sides);
+        return new RouteRequest(start, goals, accessPolicy, classCost, sides, goalSides);
+    }
+
+    public RouteRequest withGoalSides(List<GoalSides> sides) {
+        return new RouteRequest(start, goals, accessPolicy, classCost, startSides, sides);
+    }
+
+    /** Whether goal {@code k} may be reached over its (blocked) edge walking in direction {@code forward}. */
+    public boolean goalOpenBySides(int k, boolean forward) {
+        GoalSides sides = goalSides == null ? null : goalSides.get(k);
+        return sides != null && sides.open(forward);
     }
 
     /**
