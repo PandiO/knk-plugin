@@ -12,14 +12,30 @@ package net.knightsandkings.knk.core.domain.settings;
  * @param leaveAnnouncement  quit broadcast for the group's members; blank = no broadcast
  * @param joinSpawnReference where the group's members join and {@code /spawn}
  * @param respawnPolicy      the group's respawn policy, in every world
+ * @param joinAtLastLocation the group's members join where they logged out, like owners (round 4); it is
+ *                           their spawn override instead of {@code joinSpawnReference}, and {@code /spawn}
+ *                           still uses the server spawn
  */
 public record KnkGroupOverride(int permissionGroupId, String groupName, int precedence, String joinAnnouncement,
                                String leaveAnnouncement, KnkSpawnReference joinSpawnReference,
-                               KnkRespawnPolicy respawnPolicy) {
+                               KnkRespawnPolicy respawnPolicy, boolean joinAtLastLocation) {
+
+    /** Without "join where they logged out" (round 3 shape). */
+    public KnkGroupOverride(int permissionGroupId, String groupName, int precedence, String joinAnnouncement,
+                            String leaveAnnouncement, KnkSpawnReference joinSpawnReference,
+                            KnkRespawnPolicy respawnPolicy) {
+        this(permissionGroupId, groupName, precedence, joinAnnouncement, leaveAnnouncement, joinSpawnReference,
+            respawnPolicy, false);
+    }
 
     /** Without a leave message override (round 2 shape). */
     public KnkGroupOverride(int permissionGroupId, String groupName, int precedence, String joinAnnouncement,
                             KnkSpawnReference joinSpawnReference, KnkRespawnPolicy respawnPolicy) {
-        this(permissionGroupId, groupName, precedence, joinAnnouncement, null, joinSpawnReference, respawnPolicy);
+        this(permissionGroupId, groupName, precedence, joinAnnouncement, null, joinSpawnReference, respawnPolicy, false);
+    }
+
+    /** Whether this group overrides the join spawn: a chosen spot, or where the player logged out. */
+    public boolean overridesJoinSpawn() {
+        return joinAtLastLocation || joinSpawnReference != null;
     }
 }

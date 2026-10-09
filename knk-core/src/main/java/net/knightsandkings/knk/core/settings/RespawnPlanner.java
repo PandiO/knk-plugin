@@ -60,6 +60,9 @@ public final class RespawnPlanner {
         if (policy == null) {
             return Plan.serverDefault("no policy");
         }
+        if (policy.mode() == KnkRespawnPolicy.Mode.SERVER_DEFAULT) {
+            return Plan.serverDefault("server-default policy");
+        }
         if (policy.mode() == KnkRespawnPolicy.Mode.WORLD_SPAWN) {
             // Forced: beds and respawn anchors are ignored (developer decision D1, 2026-10-09; a
             // player's own house/room spawn replaces the bed later).

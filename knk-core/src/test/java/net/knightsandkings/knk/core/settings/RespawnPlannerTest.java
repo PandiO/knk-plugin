@@ -46,6 +46,12 @@ class RespawnPlannerTest {
     }
 
     @Test
+    void serverDefaultPolicyLeavesItToTheServer_LikeStaff() {
+        assertEquals(Kind.SERVER_DEFAULT, RespawnPlanner.plan(policy(Mode.SERVER_DEFAULT, null, true), DEATH, null, TOWNS, null).kind());
+        assertEquals(Mode.SERVER_DEFAULT, Mode.parse("ServerDefault"));
+    }
+
+    @Test
     void joinSpawnPolicyIsSyncedWithTheJoinSpawn() {
         Plan plan = RespawnPlanner.plan(policy(Mode.JOIN_SPAWN, null, true), DEATH, null, TOWNS, null);
         assertEquals(Kind.JOIN_SPAWN, plan.kind());

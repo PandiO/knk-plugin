@@ -15,6 +15,7 @@ import org.bukkit.ChatColor;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Sound;
+import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -183,8 +184,13 @@ public class PlayerListener implements Listener {
 			// The server spawn /spawn uses, in its world's default game mode (DESIGN §3.2/§3.4). Never
 			// waits on the API: the spot was resolved in the background. JoinLoadingGuard.hold (later
 			// in this join) switches to ADVENTURE and hands this mode back when the account is loaded.
-			Location spawn = gameSettings != null ? gameSettings.joinSpawn(groupsOf(user)) : Bukkit.getWorlds().get(0).getSpawnLocation();
-			player.setGameMode(gameSettings != null && spawn != null ? gameSettings.gameModeFor(spawn.getWorld()) : GameMode.SURVIVAL);
+			// A group can have its members stay where they logged out, like owners (round 4): no teleport,
+			// the game mode of the world they are in.
+			boolean stay = gameSettings != null && gameSettings.joinsAtLastLocation(groupsOf(user));
+			Location spawn = stay ? null
+				: gameSettings != null ? gameSettings.joinSpawn(groupsOf(user)) : Bukkit.getWorlds().get(0).getSpawnLocation();
+			World arrival = spawn != null ? spawn.getWorld() : player.getWorld();
+			player.setGameMode(gameSettings != null ? gameSettings.gameModeFor(arrival) : GameMode.SURVIVAL);
 			player.setFlying(false);
 			if (spawn != null) {
 				player.teleport(spawn);

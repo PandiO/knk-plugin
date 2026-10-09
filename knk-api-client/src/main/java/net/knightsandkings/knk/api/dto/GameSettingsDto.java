@@ -32,7 +32,8 @@ public record GameSettingsDto(
             @JsonProperty("joinAnnouncement") String joinAnnouncement,
             @JsonProperty("leaveAnnouncement") String leaveAnnouncement,
             @JsonProperty("joinSpawnReference") LocationReference joinSpawnReference,
-            @JsonProperty("respawnPolicy") RespawnPolicy respawnPolicy
+            @JsonProperty("respawnPolicy") RespawnPolicy respawnPolicy,
+            @JsonProperty("joinAtLastLocation") Boolean joinAtLastLocation
     ) {}
 
     /** knk-web-api {@code LocationReferenceDto}. */

@@ -81,6 +81,23 @@ class GroupOverridesTest {
     }
 
     @Test
+    void joiningAtTheLastLocationIsTheSpawnSetting_TheFirstGroupWithEitherWins() {
+        KnkGameSettings settings = settings(
+            new KnkGroupOverride(3, "Staff", 1, null, null, null, null, true),
+            new KnkGroupOverride(2, "Noble", 2, null, null, LOUNGE, null, false));
+
+        // Staff comes first and stays where it logged out; Noble's spot doesn't apply to it.
+        assertTrue(GroupOverrides.joinsAtLastLocation(settings, List.of(STAFF, NOBLE)));
+        assertTrue(GroupOverrides.joinSpawn(settings, List.of(STAFF, NOBLE)).isEmpty());
+        // Noble alone: its spot.
+        assertTrue(!GroupOverrides.joinsAtLastLocation(settings, List.of(NOBLE)));
+        assertSame(LOUNGE, GroupOverrides.joinSpawn(settings, List.of(NOBLE)).orElseThrow().value());
+        // Noble first: its spot wins over Staff's "last location".
+        assertSame(LOUNGE, GroupOverrides.joinSpawn(settings, List.of(NOBLE, STAFF)).orElseThrow().value());
+        assertTrue(!GroupOverrides.joinsAtLastLocation(settings, List.of(NOBLE, STAFF)));
+    }
+
+    @Test
     void theLeaveMessageIsPickedOnItsOwn() {
         KnkGameSettings settings = settings(
             new KnkGroupOverride(3, "Staff", 1, "&c[Staff] {player}", null, null),

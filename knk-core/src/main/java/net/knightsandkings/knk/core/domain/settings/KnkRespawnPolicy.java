@@ -17,16 +17,18 @@ public record KnkRespawnPolicy(Mode mode, KnkSpawnReference reference, Double ma
                                boolean useWorldSpawnFallback) {
 
     public enum Mode {
-        /** The server decides: bed or respawn anchor, else the world's spawn. */
+        /** Always the world's spawn; beds and respawn anchors are ignored (D1, round 3). */
         WORLD_SPAWN,
         /** A fixed Location, or a Town/District/Structure's Location. */
         CONFIGURED_REFERENCE,
         /** The town nearest to where the player died, in the same world. */
         NEAREST_TOWN,
         /** Synced with the join spawn: where the player would join (and {@code /spawn}), group override included. */
-        JOIN_SPAWN;
+        JOIN_SPAWN,
+        /** Not redirected - the server decides: bed or respawn anchor, else the world's spawn. What staff and owners get (round 4). */
+        SERVER_DEFAULT;
 
-        /** The API's value ({@code "WorldSpawn"}, {@code "ConfiguredReference"}, {@code "NearestTown"}, {@code "JoinSpawn"}), any case. */
+        /** The API's value ({@code "WorldSpawn"}, {@code "ConfiguredReference"}, {@code "NearestTown"}, {@code "JoinSpawn"}, {@code "ServerDefault"}), any case. */
         public static Mode parse(String value) {
             if (value == null || value.isBlank()) {
                 return WORLD_SPAWN;
@@ -45,7 +47,7 @@ public record KnkRespawnPolicy(Mode mode, KnkSpawnReference reference, Double ma
         mode = mode != null ? mode : Mode.WORLD_SPAWN;
     }
 
-    /** The API's default policy: the server decides, world spawn as the fallback. */
+    /** The API's default policy: the world spawn (forced since D1), world spawn as the fallback. */
     public static KnkRespawnPolicy worldSpawn() {
         return new KnkRespawnPolicy(Mode.WORLD_SPAWN, null, null, true);
     }

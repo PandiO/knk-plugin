@@ -35,8 +35,24 @@ public final class GroupOverrides {
         return first(settings, groups, KnkGroupOverride::leaveAnnouncement);
     }
 
+    /**
+     * The spot of the player's first group that overrides the join spawn - empty when that group has
+     * its members join where they logged out ({@link #joinsAtLastLocation}), or when no group overrides it.
+     */
     public static Optional<Pick<KnkSpawnReference>> joinSpawn(KnkGameSettings settings, List<PermissionGroupRef> groups) {
-        return first(settings, groups, KnkGroupOverride::joinSpawnReference);
+        return joinSpawnOverride(settings, groups)
+            .filter(pick -> !pick.value().joinAtLastLocation())
+            .map(pick -> new Pick<>(pick.value().joinSpawnReference(), pick.group()));
+    }
+
+    /** Whether the player's first group that overrides the join spawn has them join where they logged out (round 4). */
+    public static boolean joinsAtLastLocation(KnkGameSettings settings, List<PermissionGroupRef> groups) {
+        return joinSpawnOverride(settings, groups).map(pick -> pick.value().joinAtLastLocation()).orElse(false);
+    }
+
+    /** A chosen spot and "where they logged out" are one setting: the first group with either wins. */
+    private static Optional<Pick<KnkGroupOverride>> joinSpawnOverride(KnkGameSettings settings, List<PermissionGroupRef> groups) {
+        return first(settings, groups, o -> o.overridesJoinSpawn() ? o : null);
     }
 
     public static Optional<Pick<KnkRespawnPolicy>> respawnPolicy(KnkGameSettings settings, List<PermissionGroupRef> groups) {

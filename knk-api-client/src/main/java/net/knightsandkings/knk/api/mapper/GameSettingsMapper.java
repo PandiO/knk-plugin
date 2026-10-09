@@ -41,7 +41,7 @@ public final class GameSettingsMapper {
                 }
                 groups.add(new KnkGroupOverride(o.permissionGroupId(), o.groupName(),
                     o.precedence() != null ? o.precedence() : position, o.joinAnnouncement(), o.leaveAnnouncement(),
-                    toCore(o.joinSpawnReference()), toCore(o.respawnPolicy())));
+                    toCore(o.joinSpawnReference()), toCore(o.respawnPolicy()), Boolean.TRUE.equals(o.joinAtLastLocation())));
             }
         }
         return new KnkGameSettings(dto.joinSpawnMode(), toCore(dto.joinSpawnReference()), dto.joinAnnouncement(),

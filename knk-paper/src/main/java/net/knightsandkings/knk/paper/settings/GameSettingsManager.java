@@ -366,6 +366,14 @@ public class GameSettingsManager {
     }
 
     /**
+     * Whether the player's groups have them join where they logged out (round 4): no join teleport, like
+     * owners. {@link #joinSpawn(List)} then still answers the server spawn, for {@code /spawn} and a synced respawn.
+     */
+    public boolean joinsAtLastLocation(List<PermissionGroupRef> groups) {
+        return GroupOverrides.joinsAtLastLocation(current, groups);
+    }
+
+    /**
      * The player's group spawn override as a {@code /spawn} destination, or null when their groups have
      * none (then {@code /spawn} uses the server spawn). Any thread.
      */
