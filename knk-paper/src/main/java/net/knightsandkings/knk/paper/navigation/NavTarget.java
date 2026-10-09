@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Objects;
 
 import net.knightsandkings.knk.core.domain.location.KnkLocation;
+import net.knightsandkings.knk.paper.navigation.NavigationDestinations.Mode;
 
 /**
  * One entry of the {@code /navigate} catalogue (DESIGN §6.1): a Location, a Town / District /
@@ -22,9 +23,12 @@ import net.knightsandkings.knk.core.domain.location.KnkLocation;
  * @param position a road node's floor block (type NODE only)
  * @param aliases  more type words that pick it besides {@link Type#word()}: a subtype's own word and its
  *                 nickname ({@code gatestructure}, {@code gate} for a gate); usually empty
+ * @param defaultMode where a domain leads when the player names no mode: {@link Mode#SPAWN} or
+ *                 {@link Mode#REGION}, configured per domain type with per-domain overrides in the web app
+ *                 (KNG-73); {@link Mode#SPAWN} when the API did not say, and for everything that is no domain
  */
 public record NavTarget(Type type, String name, int id, String world, KnkLocation location, double[] position,
-                        List<String> aliases) {
+                        List<String> aliases, Mode defaultMode) {
 
     /**
      * Player nicknames of the catalogue's subtype words: {@code gate:Keep Gate} as well as
@@ -77,15 +81,16 @@ public record NavTarget(Type type, String name, int id, String world, KnkLocatio
         Objects.requireNonNull(name, "name");
         position = position == null ? null : position.clone();
         aliases = aliases == null ? List.of() : List.copyOf(aliases);
+        defaultMode = defaultMode == Mode.REGION ? Mode.REGION : Mode.SPAWN;
     }
 
     public static NavTarget location(KnkLocation location) {
         return new NavTarget(Type.LOCATION, location.name() == null ? "Location #" + location.id() : location.name(),
-            location.id() == null ? -1 : location.id(), location.world(), location, null, null);
+            location.id() == null ? -1 : location.id(), location.world(), location, null, null, null);
     }
 
     public static NavTarget domain(Type type, int id, String name) {
-        return new NavTarget(type, name, id, null, null, null, null);
+        return new NavTarget(type, name, id, null, null, null, null, null);
     }
 
     /**
@@ -93,21 +98,29 @@ public record NavTarget(Type type, String name, int id, String world, KnkLocatio
      * "GateStructure" is a Structure that also answers to {@code gatestructure:} and {@code gate:}.
      */
     public static NavTarget domain(Type type, int id, String name, String domainType) {
+        return domain(type, id, name, domainType, null);
+    }
+
+    /**
+     * A domain from the catalogue with its {@code navigationDefault} ("Spawn" / "Region", any case; KNG-73):
+     * where {@code /navigate <name>} leads without {@code spawn} / {@code region}.
+     */
+    public static NavTarget domain(Type type, int id, String name, String domainType, String navigationDefault) {
         List<String> aliases = new ArrayList<>();
         String word = domainType == null ? "" : domainType.toLowerCase(Locale.ROOT);
         if (!word.isEmpty() && !word.equals(type.word())) {
             aliases.add(word);
             aliases.addAll(NICKNAMES.getOrDefault(word, List.of()));
         }
-        return new NavTarget(type, name, id, null, null, null, aliases);
+        return new NavTarget(type, name, id, null, null, null, aliases, Mode.parse(navigationDefault).orElse(Mode.SPAWN));
     }
 
     public static NavTarget street(String world, int id, String name) {
-        return new NavTarget(Type.STREET, name, id, world, null, null, null);
+        return new NavTarget(Type.STREET, name, id, world, null, null, null, null);
     }
 
     public static NavTarget node(String world, int id, String name, double[] position) {
-        return new NavTarget(Type.NODE, name, id, world, null, position, null);
+        return new NavTarget(Type.NODE, name, id, world, null, position, null, null);
     }
 
     /** {@code town:Kardenna} - the unambiguous form. */

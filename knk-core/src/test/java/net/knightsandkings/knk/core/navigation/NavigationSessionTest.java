@@ -254,6 +254,33 @@ class NavigationSessionTest {
     }
 
     @Test
+    void aNetworkChangeTakesTheNewRouteAsItIsWithTheNewInstructions() {
+        // rev. 7 Part A: the routing view's edge ids differ from the stored network's
+        NavigationSession s = guided(0);
+        List<Route> builtWith = new java.util.ArrayList<>();
+
+        ComputeRouteEffect compute = only(s.onNetworkChanged(r -> {
+            builtWith.add(r);
+            return List.of();
+        }, 10), ComputeRouteEffect.class);
+        assertEquals(RouteReason.NETWORK_CHANGED, compute.reason());
+        assertFalse(compute.keepCurrentUnlessShorter());
+
+        RouteResult same = routeAtoE(AccessPolicy.ALL_OPEN); // not shorter: an improvement would keep the old one
+        RouteAdoptedEffect adopted = only(s.onRouteResult(same, 11), RouteAdoptedEffect.class);
+        assertEquals(RouteReason.NETWORK_CHANGED, adopted.reason());
+        assertEquals(same.route(), s.route().orElseThrow());
+        assertEquals(List.of(same.route()), builtWith, "instructions from the new network's builder");
+
+        s.onNetworkChanged(maneuvers::build, 20);
+        RouteAdoptedEffect blocked = only(s.onRouteResult(routeAtoE(closedGate()), 21), RouteAdoptedEffect.class);
+        assertEquals(RouteReason.ELEMENT_BLOCKED, blocked.reason(), "the new network blocks the way: announced");
+        s.onNetworkChanged(maneuvers::build, 30);
+        RouteAdoptedEffect open = only(s.onRouteResult(routeAtoE(AccessPolicy.ALL_OPEN), 31), RouteAdoptedEffect.class);
+        assertEquals(RouteReason.REOPENED, open.reason());
+    }
+
+    @Test
     void elementOpenedAdoptsOnlyAClearlyShorterRoute() {
         NavigationSession s = guided(0);
         ComputeRouteEffect compute = only(s.onElementOpened(10), ComputeRouteEffect.class);

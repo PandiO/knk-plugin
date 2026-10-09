@@ -1247,7 +1247,9 @@ public class KnKPlugin extends JavaPlugin {
 
         var access = new net.knightsandkings.knk.paper.navigation.NavigationAccess(
             gateManager, () -> siegeGates, regionTracker.regionIds(), regionDomainResolver,
-            this::hasRegionBypass, new net.knightsandkings.knk.core.regions.DomainAccessEvaluator());
+            this::hasRegionBypass, new net.knightsandkings.knk.core.regions.DomainAccessEvaluator(),
+            // rev. 7 Part C (KNG-92): the catalogue knows which domains' rules are lifted off the roads
+            domain -> domain.id() == null || !navigationDestinations.roadAccessIgnored(domain.id()));
         var eligibility = new net.knightsandkings.knk.paper.navigation.NavigationEligibility(
             uuid -> joinLoadingGuard != null && joinLoadingGuard.isLoading(uuid),
             uuid -> adminFreezeManager != null && adminFreezeManager.isFrozen(uuid),

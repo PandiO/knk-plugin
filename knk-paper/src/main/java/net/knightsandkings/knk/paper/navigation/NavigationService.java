@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -1199,6 +1200,9 @@ public final class NavigationService implements SiegeMatchObserver {
             case REOPENED -> player.sendMessage(NavigationMessages.reopened(a.destination.name()));
             case ELEMENT_BLOCKED, OFF_ROUTE -> effect.explanation()
                 .ifPresent(why -> player.sendMessage(NavigationMessages.partialRoute(a.destination.name(), why)));
+            case NETWORK_CHANGED -> {
+                // silent: the same way on the new network
+            }
         }
         if (!a.hintShown) {
             for (Route.Step step : route.passThroughSteps()) {
@@ -1357,6 +1361,13 @@ public final class NavigationService implements SiegeMatchObserver {
         }
     }
 
+    /** An edge as admins know it: the stored id, plus the stretch for a piece of the routing view (rev. 7 Part A). */
+    static String edgeLabel(RoadNetworkSnapshot snapshot, RoadEdge edge) {
+        return snapshot.piece(edge.id())
+            .map(p -> String.format(Locale.ROOT, "#%d blocks %.0f-%.0f", p.parentEdgeId(), p.fromAlong(), p.toAlong()))
+            .orElse("#" + edge.id());
+    }
+
     /** A gate changed state (R4 listener, hopped to the main thread by the caller). */
     public void onGateChanged(int doorId) {
         long now = deps.tick().getAsLong();
@@ -1431,7 +1442,11 @@ public final class NavigationService implements SiegeMatchObserver {
                 startDirect(a);
                 continue;
             }
-            apply(a, a.session.onElementOpened(now));
+            // the route and its instructions belong to the old network, whose edge ids the routing view may not
+            // have (live test 2026-10-09, "unknown road edge 5385"): drop a route still being computed on it and
+            // take the one computed on the new network as it is
+            a.generation++;
+            apply(a, a.session.onNetworkChanged(new ManeuverBuilder(snapshot)::build, now));
         }
     }
 
@@ -1532,11 +1547,12 @@ public final class NavigationService implements SiegeMatchObserver {
                 switch (result.status()) {
                     case FOUND -> {
                         Route route = result.route();
+                        long edges = route.steps().stream().map(s -> snapshot.storedEdgeId(s.edge().id())).distinct().count();
                         lines.add(NavigationMessages.whyResult("Open route: " + EtaEstimator.formatDistance(route.length())
-                            + ", " + route.steps().size() + " edges.", true));
+                            + ", " + edges + " edges.", true));
                         for (Route.Step step : route.steps()) {
                             if (step.verdict() != null && !step.verdict().isOpen()) {
-                                lines.add(NavigationMessages.whyVerdict(step.edge().id(), step.verdict()));
+                                lines.add(NavigationMessages.whyVerdict(edgeLabel(snapshot, step.edge()), step.verdict()));
                             }
                         }
                     }
@@ -1547,7 +1563,7 @@ public final class NavigationService implements SiegeMatchObserver {
                         Route full = why.fullRoute().withVerdicts(snapshot, policy);
                         for (Route.Step step : full.steps()) {
                             if (step.verdict() != null && !step.verdict().isOpen()) {
-                                lines.add(NavigationMessages.whyVerdict(step.edge().id(), step.verdict()));
+                                lines.add(NavigationMessages.whyVerdict(edgeLabel(snapshot, step.edge()), step.verdict()));
                             }
                         }
                     }

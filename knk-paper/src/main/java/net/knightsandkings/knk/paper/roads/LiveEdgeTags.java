@@ -24,6 +24,9 @@ import net.knightsandkings.knk.core.domain.roads.RoadEdge;
 import net.knightsandkings.knk.core.roads.build.EdgeTagging;
 import net.knightsandkings.knk.core.roads.build.GateCells;
 import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
+import net.knightsandkings.knk.core.roads.route.RoutingView;
+import net.knightsandkings.knk.core.roads.route.RoutingView.Hit;
+import net.knightsandkings.knk.core.roads.route.RoutingView.Span;
 
 /**
  * Live world tags for the router (KNG-27 live test 2026-10-08, findings N3/N4): every edge's WorldGuard
@@ -38,6 +41,11 @@ import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
  * differ from the last pass, the tagged snapshot is built on {@code builder} and swapped in, and
  * {@code onChanged} lets navigation re-check its routes. Until the first pass of a snapshot finishes,
  * {@link #snapshot} answers the stored one.
+ *
+ * <p>Rev. 7 Part A (REV7_PROPOSAL §2): the pass records <em>where</em> along each edge a region or a gate
+ * door is met, and the snapshot it builds is the {@link RoutingView} - every edge cut where its tags change,
+ * so a gate door is its own short piece and a region border cuts the road. Navigation routes on that view;
+ * the admin side keeps the stored snapshot.
  */
 public final class LiveEdgeTags {
 
@@ -56,7 +64,7 @@ public final class LiveEdgeTags {
     }
 
     private record State(RoadNetworkSnapshot base, RoadNetworkSnapshot tagged, Map<Integer, String> signature,
-                         int regionsAdded, int doorsAdded, long finishedAt) {
+                         int regionsAdded, int doorsAdded, int edgesCut, int pieces, long finishedAt) {
     }
 
     private final Function<String, RoadNetworkSnapshot> stored;
@@ -146,17 +154,17 @@ public final class LiveEdgeTags {
         State previous = states.get(pass.world);
         if (previous != null && previous.base == pass.base && previous.signature.equals(pass.signature)) {
             states.put(pass.world, new State(previous.base, previous.tagged, previous.signature, previous.regionsAdded,
-                previous.doorsAdded, clock.getAsLong()));
+                previous.doorsAdded, previous.edgesCut, previous.pieces, clock.getAsLong()));
             return; // nothing changed since the last pass: no rebuild, no re-route
         }
         if (!pass.newRegions.isEmpty()) {
             onRegions.accept(Set.copyOf(pass.newRegions));
         }
-        Map<Integer, RoadEdge> changed = pass.changed;
+        Map<Integer, List<Span>> changed = pass.changed;
         builder.execute(() -> {
             RoadNetworkSnapshot tagged;
             try {
-                tagged = changed.isEmpty() ? pass.base : pass.base.retag(e -> changed.getOrDefault(e.id(), e));
+                tagged = changed.isEmpty() ? pass.base : RoutingView.build(pass.base, changed);
             } catch (RuntimeException e) {
                 LOGGER.log(Level.WARNING, "[Roads] Could not build the live-tagged network of " + pass.world, e);
                 return;
@@ -166,7 +174,7 @@ public final class LiveEdgeTags {
                     return;
                 }
                 states.put(pass.world, new State(pass.base, tagged, pass.signature, pass.regionsAdded, pass.doorsAdded,
-                    clock.getAsLong()));
+                    pass.edgesCut, pass.pieces, clock.getAsLong()));
                 if (!changed.isEmpty() || previous != null && !previous.signature.isEmpty()) {
                     onChanged.accept(pass.world);
                 }
@@ -183,8 +191,10 @@ public final class LiveEdgeTags {
         long now = clock.getAsLong();
         for (Map.Entry<String, State> e : states.entrySet()) {
             State s = e.getValue();
-            parts.add(String.format(Locale.ROOT, "%s: %d edge(s) with extra tags (+%d region, +%d gate door), %d s ago",
-                e.getKey(), s.signature.size(), s.regionsAdded, s.doorsAdded, Math.max(0, (now - s.finishedAt) / 1000)));
+            parts.add(String.format(Locale.ROOT,
+                "%s: %d edge(s) with extra tags (+%d region, +%d gate door), %d cut into %d pieces, %d s ago",
+                e.getKey(), s.signature.size(), s.regionsAdded, s.doorsAdded, s.edgesCut, s.pieces,
+                Math.max(0, (now - s.finishedAt) / 1000)));
         }
         for (Pass p : passes.values()) {
             parts.add(p.world + ": tagging " + p.edgeIndex + "/" + p.edges.size() + " edges");
@@ -198,15 +208,17 @@ public final class LiveEdgeTags {
         final RoadNetworkSnapshot base;
         final GateCells gates;
         final List<RoadEdge> edges;
-        final Map<Integer, RoadEdge> changed = new HashMap<>();
+        final Map<Integer, List<Span>> changed = new HashMap<>();
         final Map<Integer, String> signature = new HashMap<>();
         final Set<String> newRegions = new LinkedHashSet<>();
         int regionsAdded;
         int doorsAdded;
+        int edgesCut;
+        int pieces;
         int edgeIndex;
-        List<int[]> samples;
+        List<EdgeTagging.Sample> samples;
         int sampleIndex;
-        Set<String> regions;
+        List<Hit<String>> regions;
 
         Pass(String world, RoadNetworkSnapshot base, GateCells gates) {
             this.world = world;
@@ -224,13 +236,13 @@ public final class LiveEdgeTags {
             while (left > 0 && !done()) {
                 RoadEdge edge = edges.get(edgeIndex);
                 if (samples == null) {
-                    samples = EdgeTagging.samples(edge.geometry(), EdgeTagging.REGION_STEP);
+                    samples = EdgeTagging.alongSamples(edge.geometry(), EdgeTagging.REGION_STEP);
                     sampleIndex = 0;
-                    regions = new LinkedHashSet<>();
+                    regions = new ArrayList<>(samples.size());
                 }
                 while (left > 0 && sampleIndex < samples.size()) {
-                    int[] s = samples.get(sampleIndex++);
-                    regions.addAll(probe.regionsAt(world, s[0], s[1] + 1, s[2]));
+                    EdgeTagging.Sample s = samples.get(sampleIndex++);
+                    regions.add(new Hit<>(s.along(), probe.regionsAt(world, s.x(), s.y() + 1, s.z())));
                     left--;
                 }
                 if (sampleIndex >= samples.size()) {
@@ -243,18 +255,37 @@ public final class LiveEdgeTags {
         }
 
         private void finishEdge(RoadEdge edge) {
-            List<Integer> doors = EdgeTagging.doorsAlong(edge.geometry(), gates);
-            RoadEdge tagged = EdgeTagging.withExtraTags(edge, regions, doors);
-            if (tagged == edge) {
-                return;
+            List<EdgeTagging.Sample> doorSamples = EdgeTagging.alongSamples(edge.geometry(), EdgeTagging.DOOR_STEP);
+            List<Set<Integer>> doorsAt = EdgeTagging.doorsAt(doorSamples, gates);
+            List<Hit<Integer>> doors = new ArrayList<>(doorSamples.size());
+            for (int i = 0; i < doorSamples.size(); i++) {
+                doors.add(new Hit<>(doorSamples.get(i).along(), doorsAt.get(i)));
             }
-            int extraRegions = tagged.regionIds().size() - edge.regionIds().size();
-            int extraDoors = tagged.gateDoorIds().size() - edge.gateDoorIds().size();
-            regionsAdded += extraRegions;
-            doorsAdded += extraDoors;
-            newRegions.addAll(tagged.regionIds().subList(edge.regionIds().size(), tagged.regionIds().size()));
-            changed.put(edge.id(), tagged);
-            signature.put(edge.id(), tagged.regionIds() + "|" + tagged.gateDoorIds());
+            List<Span> spans = RoutingView.spans(edge, base.polyline(edge).length(), regions, doors);
+            if (spans.size() == 1 && spans.get(0).regionIds().equals(edge.regionIds())
+                && spans.get(0).gateDoorIds().equals(edge.gateDoorIds())) {
+                return; // the stored tags, the whole edge long
+            }
+            Set<String> allRegions = new LinkedHashSet<>();
+            Set<Integer> allDoors = new LinkedHashSet<>();
+            StringBuilder sig = new StringBuilder();
+            for (Span span : spans) {
+                allRegions.addAll(span.regionIds());
+                allDoors.addAll(span.gateDoorIds());
+                sig.append(String.format(Locale.ROOT, "%.1f-%.1f:%s|%s;", span.from(), span.to(), span.regionIds(),
+                    span.gateDoorIds()));
+            }
+            allRegions.removeAll(edge.regionIds());
+            allDoors.removeAll(edge.gateDoorIds());
+            regionsAdded += allRegions.size();
+            doorsAdded += allDoors.size();
+            newRegions.addAll(allRegions);
+            if (spans.size() > 1) {
+                edgesCut++;
+                pieces += spans.size();
+            }
+            changed.put(edge.id(), spans);
+            signature.put(edge.id(), sig.toString());
         }
     }
 }

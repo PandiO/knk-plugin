@@ -233,6 +233,26 @@ class AccessPolicyTest {
     }
 
     @Test
+    void aDomainWhoseRuleIsLiftedOffTheRoadsBlocksNeitherEntryNorExit() {
+        // rev. 7 Part C (KNG-92): a house or shop along a public street; the rule still holds at its border
+        DomainAvailability.RoadRule notOnRoads = d -> d.id() == null || d.id() != CASTLE_DOMAIN;
+        DomainAvailability entry = new DomainAvailability(new DomainAccessEvaluator(),
+            lookup(domain(CASTLE_DOMAIN, "Kardenna Castle", CASTLE_REGION, false, null)), notOnRoads, Set.of(), false);
+        assertTrue(entry.check(castleEdge).isOpen());
+
+        DomainAvailability exit = new DomainAvailability(new DomainAccessEvaluator(),
+            lookup(domain(CASTLE_DOMAIN, "Kardenna Castle", CASTLE_REGION, null, false)), notOnRoads,
+            Set.of(CASTLE_REGION), false);
+        assertTrue(exit.exitDeniedRegions().isEmpty());
+        assertTrue(exit.check(plainEdge).isOpen());
+
+        DomainAvailability applies = new DomainAvailability(new DomainAccessEvaluator(),
+            lookup(domain(CASTLE_DOMAIN, "Kardenna Castle", CASTLE_REGION, false, null)),
+            DomainAvailability.RoadRule.ALWAYS, Set.of(), false);
+        assertTrue(applies.check(castleEdge).isBlocked(), "a rule that applies still blocks");
+    }
+
+    @Test
     void domainLookupsAreCachedPerRegion() {
         AtomicInteger lookups = new AtomicInteger();
         DomainAvailability policy = new DomainAvailability(new DomainAccessEvaluator(), region -> {
