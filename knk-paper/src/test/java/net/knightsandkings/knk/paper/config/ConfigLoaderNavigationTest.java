@@ -45,6 +45,8 @@ class ConfigLoaderNavigationTest {
         assertEquals(4, navigation.snapVerticalWeight(), 0.0001);
         assertEquals(1, navigation.destinationSnapVerticalWeight(), 0.0001);
         assertEquals(96, navigation.maxStartDistance(), 0.0001);
+        assertEquals(256, navigation.maxDestinationDistance(), 0.0001);
+        assertEquals(96, navigation.destinationWalkRange(), 0.0001);
         assertEquals(new NavigationConfig.TrailConfig(30, 10, "DUST", "#E8C66A"), navigation.trail());
         assertEquals(8, navigation.rerouteDistance(), 0.0001);
         assertEquals(40, navigation.rerouteAfterTicks());
@@ -129,6 +131,26 @@ class ConfigLoaderNavigationTest {
         assertEquals(48, navigation.maxSnapDistance(), 0.0001, "the destination limit is separate");
 
         yaml.set("navigation.max-start-distance", 0);
+        assertThrows(IllegalArgumentException.class,
+            () -> ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation")).validate());
+    }
+
+    @Test
+    void theDestinationLimitsOverrideAndMustBePositive() {
+        // KNG-75 step 2
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("navigation.max-destination-distance", 200);
+        yaml.set("navigation.destination-walk-range", 80);
+        NavigationConfig navigation = ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation"));
+
+        assertEquals(200, navigation.maxDestinationDistance(), 0.0001);
+        assertEquals(80, navigation.destinationWalkRange(), 0.0001);
+
+        yaml.set("navigation.destination-walk-range", 0);
+        assertThrows(IllegalArgumentException.class,
+            () -> ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation")).validate());
+        yaml.set("navigation.destination-walk-range", 80);
+        yaml.set("navigation.max-destination-distance", -1);
         assertThrows(IllegalArgumentException.class,
             () -> ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation")).validate());
     }

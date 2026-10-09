@@ -284,6 +284,8 @@ public final class NavigationService implements SiegeMatchObserver {
         boolean inFlight;
         /** A gate or availability change since the last request: recompute at the next re-check. */
         boolean stale;
+        /** KNG-75 step 2: the target is beyond the walk range - no search, the HUD arrow alone ({@link #startFarLeg}). */
+        boolean beyondWalkRange;
         CompletableFuture<?> capture;
 
         DirectLeg(double[] target) {
@@ -335,7 +337,8 @@ public final class NavigationService implements SiegeMatchObserver {
     public NavigationService(Deps deps) {
         this.deps = Objects.requireNonNull(deps, "deps");
         this.routerParameters = deps.config().routerParameters();
-        this.destinationParameters = deps.config().destinationRouterParameters();
+        this.destinationParameters = deps.config().destinationRouterParameters()
+            .withSnap(destinationLimit(), deps.config().destinationSnapVerticalWeight());
         this.sessionParameters = deps.config().sessionParameters();
         this.eta = new EtaEstimator(sessionParameters.sprintSpeed());
     }
@@ -545,9 +548,9 @@ public final class NavigationService implements SiegeMatchObserver {
     /**
      * A region is reached along the roads, like a Location (fix plan 5.5 item 2, DESIGN §6.3): the
      * goals are where a road enters the region - multi-goal A* picks the one nearest <i>by road</i>
-     * - or, when no road enters it, the road's nearest approach followed by a short straight last
-     * leg (at most max-snap). A straight line to the region's edge (direct mode) only when no road
-     * helps: the region is within {@link #REGION_DIRECT_DISTANCE} blocks, no nearer than the
+     * - or, when no road enters it, the road's nearest approach followed by a last leg (at most
+     * max-destination-distance with walk paths, KNG-75; else max-snap). A straight line to the
+     * region's edge (direct mode) only when no road helps: the region is within {@link #REGION_DIRECT_DISTANCE} blocks, no nearer than the
      * nearest road, or no road comes within max-snap of it while the region does.
      */
     Goals regionGoals(Destination destination, RegionShape region, RoadNetworkSnapshot snapshot,
@@ -559,7 +562,7 @@ public final class NavigationService implements SiegeMatchObserver {
             Optional<SnapPoint> approach = RegionClosestPoint.closest(region, snapshot);
             if (approach.isPresent()) {
                 double[] p = approach.get().point();
-                if (region.distanceFromFloor(p[0], p[1], p[2]) <= maxSnap) {
+                if (region.distanceFromFloor(p[0], p[1], p[2]) <= destinationLimit()) {
                     goals = List.of(approach.get());
                     lastLeg = region.closestPointFromFloor(p[0], p[1], p[2]);
                 }
@@ -592,6 +595,22 @@ public final class NavigationService implements SiegeMatchObserver {
     }
 
     // ==================== the player's road (KNG-75) ====================
+
+    /**
+     * How far from a road a destination may be: {@code max-destination-distance} (plain 3D) with walk paths, else
+     * {@code max-snap-distance} (KNG-75 step 2).
+     */
+    double destinationLimit() {
+        return walkEnabled() ? deps.config().maxDestinationDistance() : routerParameters.maxSnapDistance();
+    }
+
+    /**
+     * How far from the road's end the last leg may be a walk leg: {@code destination-walk-range} with walk paths, else
+     * {@code max-snap-distance} (KNG-75 step 2). Further, the HUD arrow alone.
+     */
+    double lastLegRange() {
+        return walkEnabled() ? deps.config().destinationWalkRange() : routerParameters.maxSnapDistance();
+    }
 
     /** How far from a road the player may start: {@code max-start-distance} with walk paths, else {@code max-snap-distance}. */
     double startLimit() {
@@ -714,6 +733,28 @@ public final class NavigationService implements SiegeMatchObserver {
         }
     }
 
+    /**
+     * KNG-75 step 2 (decided 2026-10-09): the road's end is further than {@code destination-walk-range} from the
+     * target - too far for one walk path. "No conventional path to X found." once, no trail (no straight line across
+     * country, N8), the HUD's arrow and distance point at the target, and reaching it is the arrival. Once the player
+     * is within the walk range, the re-check turns it into an ordinary walk leg ({@link #recheckDirect}).
+     */
+    private void startFarLeg(Active a) {
+        dropLeg(a);
+        DirectLeg leg = new DirectLeg(a.target);
+        a.leg = leg;
+        Location feet = a.player.getLocation();
+        double d = distance(feet.getX(), feet.getY() - 1, feet.getZ(), leg.target);
+        leg.total = Math.max(1, d);
+        leg.best = d;
+        leg.beyondWalkRange = true;
+        leg.status = DirectLeg.Status.NO_PATH;
+        leg.noPathAnnounced = true;
+        a.player.sendMessage(NavigationMessages.noConventionalPath(a.destination.name()));
+        deps.hud().update(a.player, a.destination.name(), leg.total, 0);
+        deps.hud().arrowTowards(a.player, leg.target[0], leg.target[2]);
+    }
+
     private void tickDirect(Active a, long now) {
         DirectLeg leg = a.leg;
         Location feet = a.player.getLocation();
@@ -759,6 +800,17 @@ public final class NavigationService implements SiegeMatchObserver {
         DirectLeg leg = a.leg;
         Location feet = a.player.getLocation();
         double x = feet.getX(), floorY = feet.getY() - 1, z = feet.getZ();
+        if (leg.beyondWalkRange) {
+            // KNG-75 step 2: the arrow alone until the player is within the walk range, then a walk path (a failed
+            // search says nothing more: "No conventional path" was said for this leg)
+            if (walkEnabled() && distance(x, floorY, z, leg.target) <= lastLegRange()) {
+                leg.beyondWalkRange = false;
+                leg.status = DirectLeg.Status.PENDING;
+                leg.best = distance(x, floorY, z, leg.target);
+                requestWalk(a, leg, now);
+            }
+            return;
+        }
         double d = leg.remainingOf(x, floorY, z);
         if (d <= leg.best + sessionParameters.rerouteDistance()
             || leg.lastRecalcTick != Long.MIN_VALUE && now - leg.lastRecalcTick < sessionParameters.rerouteMinIntervalTicks()) {
@@ -1385,21 +1437,40 @@ public final class NavigationService implements SiegeMatchObserver {
     /**
      * Where the trail's last straight leg goes after the route: the target, except on a partial route -
      * its end is the closed gate or the domain's edge, and a line on to the target would cut through
-     * it (live test 2026-10-08, N5: "a trail off the bridge onto the ice").
+     * it (live test 2026-10-08, N5: "a trail off the bridge onto the ice") - and except for a target beyond the
+     * walk range of the road's end (KNG-75 step 2): no straight line across country.
      */
-    private static double[] trailTarget(Active a) {
-        return a.session != null && a.session.explanation().isPresent() ? null : a.target;
+    private double[] trailTarget(Active a) {
+        if (a.session != null && a.session.explanation().isPresent()) {
+            return null;
+        }
+        Optional<Route> route = a.route();
+        if (a.target != null && route.isPresent()) {
+            double[] end = route.get().end().point();
+            if (distance(end[0], end[1], end[2], a.target) > lastLegRange()) {
+                return null;
+            }
+        }
+        return a.target;
     }
 
-    /** The core session reached the road's end: the real arrival, or the last off-road leg to the target. */
+    /**
+     * The core session reached the road's end: the real arrival, or the last off-road leg to the target - a walk
+     * leg within {@link #lastLegRange()}, further (up to {@link #destinationLimit()}, KNG-75 step 2) the HUD arrow
+     * alone ({@link #startFarLeg}).
+     */
     private void arrivedAtRouteEnd(Active a) {
         if (a.target != null) {
             Location feet = a.player.getLocation();
             double d = distance(feet.getX(), feet.getY() - 1, feet.getZ(), a.target);
-            if (d > sessionParameters.arriveDistance() && d <= routerParameters.maxSnapDistance()) {
+            if (d > sessionParameters.arriveDistance() && d <= destinationLimit()) {
                 a.session = null;
                 a.roadsTried = true; // the roads brought the player as close as they go
-                startDirect(a);
+                if (d <= lastLegRange()) {
+                    startDirect(a);
+                } else {
+                    startFarLeg(a);
+                }
                 return;
             }
         }

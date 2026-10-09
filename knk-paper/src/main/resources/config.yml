@@ -230,6 +230,10 @@ navigation:
   destination-snap-vertical-weight: 1
   # With walk paths: the player may be this far from a road (plain 3D); the first leg is a walk path to it
   max-start-distance: 96
+  # With walk paths: a destination may be this far from a road (plain 3D). Within destination-walk-range of the road's
+  # end the last leg is a walk path; further, "No conventional path" and the HUD arrow alone. Beyond: refused
+  max-destination-distance: 256
+  destination-walk-range: 96
   trail-length: 30
   trail-period-ticks: 10
   trail-particle: DUST
