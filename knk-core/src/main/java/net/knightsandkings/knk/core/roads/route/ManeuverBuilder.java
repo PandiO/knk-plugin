@@ -19,7 +19,8 @@ import java.util.Optional;
  * blocks below the node, "Go down into the tunnel"; when it climbs more than that and comes back
  * down by its end, "Cross the bridge", otherwise "Take the stairs up" (Phase 2d decision).
  * {@code Boundary} nodes and stitch edges are plumbing and never produce a maneuver; the street
- * comparison looks through them. Unlabelled next edges say "Take the path on the left" (path
+ * comparison looks through them. So are the routing view's {@code Split} nodes (rev. 7 Part A): the level
+ * check at a node looks through them to the end of the stored edge, as before the view cut it. Unlabelled next edges say "Take the path on the left" (path
  * class) or "Take the road on the left".
  */
 public final class ManeuverBuilder {
@@ -58,7 +59,7 @@ public final class ManeuverBuilder {
                 continue;
             }
             RoadNode node = snapshot.requireNode(nodeId);
-            if (node.kind() == RoadNodeKind.BOUNDARY) {
+            if (node.kind() == RoadNodeKind.BOUNDARY || node.kind() == RoadNodeKind.SPLIT) {
                 continue;
             }
             Optional<String> nextStreet = streetOf(next);
@@ -73,7 +74,7 @@ public final class ManeuverBuilder {
                 out.add(new Maneuver(Maneuver.Kind.CONTINUE, node.position(), along, bearing, nextStreet.get(),
                     "Continue onto " + nextStreet.get()));
             }
-            Optional<Maneuver.Kind> level = levelChange(next, node.y());
+            Optional<Maneuver.Kind> level = levelChange(throughSplits(steps, i + 1), node.y());
             if (level.isPresent()) {
                 out.add(new Maneuver(level.get(), node.position(), along, 0, nextStreet.orElse(null),
                     levelText(level.get())));
@@ -132,16 +133,37 @@ public final class ManeuverBuilder {
         return "Take the " + what + " on the " + side;
     }
 
+    /** Step {@code first} and the steps after it that continue through a {@code Split} node. */
+    private List<Route.Step> throughSplits(List<Route.Step> steps, int first) {
+        List<Route.Step> out = new ArrayList<>();
+        for (int i = first; i < steps.size(); i++) {
+            Route.Step step = steps.get(i);
+            out.add(step);
+            int exit = step.exitNode(snapshot.polyline(step.edge()));
+            if (exit < 0 || i + 1 >= steps.size() || snapshot.requireNode(exit).kind() != RoadNodeKind.SPLIT) {
+                break;
+            }
+        }
+        return out;
+    }
+
     /** DOWN / UP / BRIDGE when the next step's stretch leaves the node's level by more than {@link #LEVEL_DELTA}. */
     Optional<Maneuver.Kind> levelChange(Route.Step next, double nodeY) {
-        EdgePolyline p = snapshot.polyline(next.edge());
+        return levelChange(List.of(next), nodeY);
+    }
+
+    /** {@link #levelChange(Route.Step, double)} over consecutive steps (one stored edge cut by the routing view). */
+    Optional<Maneuver.Kind> levelChange(List<Route.Step> next, double nodeY) {
         double minY = Double.POSITIVE_INFINITY;
         double maxY = Double.NEGATIVE_INFINITY;
-        for (double[] pt : p.subPolyline(next.entryAlong(), next.exitAlong())) {
-            minY = Math.min(minY, pt[1]);
-            maxY = Math.max(maxY, pt[1]);
+        for (Route.Step step : next) {
+            for (double[] pt : snapshot.polyline(step.edge()).subPolyline(step.entryAlong(), step.exitAlong())) {
+                minY = Math.min(minY, pt[1]);
+                maxY = Math.max(maxY, pt[1]);
+            }
         }
-        double exitY = p.pointAt(next.exitAlong())[1];
+        Route.Step last = next.get(next.size() - 1);
+        double exitY = snapshot.polyline(last.edge()).pointAt(last.exitAlong())[1];
         if (minY < nodeY - LEVEL_DELTA) {
             return Optional.of(Maneuver.Kind.DOWN);
         }

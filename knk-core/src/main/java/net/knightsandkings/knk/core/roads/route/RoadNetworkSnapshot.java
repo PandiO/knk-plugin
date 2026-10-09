@@ -44,6 +44,16 @@ public final class RoadNetworkSnapshot {
     public record Street(int id, String name) {
     }
 
+    /**
+     * Where an edge of a routing view lies on the stored edge it was cut from (rev. 7 Part A, {@link RoutingView}).
+     *
+     * @param parentEdgeId the stored edge's id
+     * @param fromAlong    polyline position on the stored edge where this piece starts
+     * @param toAlong      ... and where it ends ({@code > fromAlong})
+     */
+    public record EdgePiece(int parentEdgeId, double fromAlong, double toAlong) {
+    }
+
     private final String world;
     private final List<RoadNode> nodes;
     private final Map<Integer, RoadNode> nodeById;
@@ -55,6 +65,7 @@ public final class RoadNetworkSnapshot {
     private final Map<Integer, Street> streets;
     private final Set<String> regionIds;
     private final List<Integer> unresolvedEdgeIds;
+    private final Map<Integer, EdgePiece> pieces;
     private final SegmentIndex segmentIndex;
     private final int bucketSize;
 
@@ -98,6 +109,7 @@ public final class RoadNetworkSnapshot {
         this.profiles = Map.copyOf(b.profiles);
         this.streets = Map.copyOf(b.streets);
         this.regionIds = Collections.unmodifiableSet(regions);
+        this.pieces = Map.copyOf(b.pieces);
         this.segmentIndex = new SegmentIndex(decoded, b.bucketSize);
     }
 
@@ -117,7 +129,17 @@ public final class RoadNetworkSnapshot {
         }
         profiles.values().forEach(b::addProfile);
         streets.values().forEach(b::addStreet);
+        pieces.forEach(b::addPiece);
         return b.build();
+    }
+
+    /** A builder with this network's nodes, profiles, streets, pieces and bucket size, and no edges ({@link RoutingView}). */
+    Builder copyWithoutEdges() {
+        Builder b = builder(world).bucketSize(bucketSize).addNodes(nodes);
+        profiles.values().forEach(b::addProfile);
+        streets.values().forEach(b::addStreet);
+        pieces.forEach(b::addPiece);
+        return b;
     }
 
     /** An empty network for a world (routing refuses everything). */
@@ -259,6 +281,22 @@ public final class RoadNetworkSnapshot {
         return regionIds;
     }
 
+    /** Where an edge of a routing view lies on its stored edge; empty for a stored edge. */
+    public Optional<EdgePiece> piece(int edgeId) {
+        return Optional.ofNullable(pieces.get(edgeId));
+    }
+
+    /** The stored edge an edge was cut from, or the edge's own id (what admins and logs know). */
+    public int storedEdgeId(int edgeId) {
+        EdgePiece piece = pieces.get(edgeId);
+        return piece == null ? edgeId : piece.parentEdgeId();
+    }
+
+    /** Every piece of a routing view, by its edge id (empty for a stored network). */
+    public Map<Integer, EdgePiece> pieces() {
+        return pieces;
+    }
+
     /** Ids of the edges dropped because a node (of a tile not downloaded) was missing. */
     public List<Integer> unresolvedEdgeIds() {
         return unresolvedEdgeIds;
@@ -332,6 +370,7 @@ public final class RoadNetworkSnapshot {
         private final Map<Integer, RoadEdge> edges = new LinkedHashMap<>();
         private final Map<Integer, Profile> profiles = new LinkedHashMap<>();
         private final Map<Integer, Street> streets = new LinkedHashMap<>();
+        private final Map<Integer, EdgePiece> pieces = new HashMap<>();
         private int bucketSize = SegmentIndex.DEFAULT_BUCKET_SIZE;
 
         private Builder(String world) {
@@ -369,6 +408,12 @@ public final class RoadNetworkSnapshot {
 
         public Builder addStreet(Street street) {
             streets.put(street.id(), street);
+            return this;
+        }
+
+        /** Marks an edge as a piece of a stored edge (routing views, rev. 7 Part A). */
+        public Builder addPiece(int edgeId, EdgePiece piece) {
+            pieces.put(edgeId, Objects.requireNonNull(piece, "piece"));
             return this;
         }
 

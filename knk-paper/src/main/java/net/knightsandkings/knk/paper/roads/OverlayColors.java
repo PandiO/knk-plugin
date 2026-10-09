@@ -67,7 +67,7 @@ public final class OverlayColors {
         return switch (kind) {
             case JUNCTION -> JUNCTION;
             case ENDPOINT -> ENDPOINT;
-            case BOUNDARY -> BOUNDARY;
+            case BOUNDARY, SPLIT -> BOUNDARY;
             case ANCHOR -> ANCHOR;
             case PRUNED, PRUNED_EDGE -> PRUNED;
         };
