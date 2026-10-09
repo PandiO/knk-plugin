@@ -58,7 +58,18 @@ public final class BlockedExplainer {
         this.router = Objects.requireNonNull(router, "router");
     }
 
-    /** Empty when even an all-open search finds nothing (or the all-open route has no blocked edge). */
+    /** A partial route must end at least this much closer to the goal than the first block's to be preferred. */
+    public static final double MIN_CLOSER = 8.0;
+
+    /**
+     * Empty when even an all-open search finds nothing (or the all-open route has no blocked edge).
+     *
+     * <p>Two candidates (live test 2026-10-09, N14): the all-open route up to its first block, and the
+     * route the player's real policy allows to the reachable point nearest the goal. The second wins when
+     * it ends at least {@link #MIN_CLOSER} blocks closer - a detour round a denied district up to the
+     * closed gate beats stopping at the district's edge - and its reason is the first block on the
+     * all-open way on from there.
+     */
     public Optional<Explanation> explain(RouteRequest request) {
         RouteResult open = router.route(request.withPolicy(AccessPolicy.ALL_OPEN));
         if (!open.isFound()) {
@@ -67,14 +78,50 @@ public final class BlockedExplainer {
         Route full = open.route();
         RoadNetworkSnapshot snapshot = router.snapshot();
         AccessPolicy policy = request.accessPolicy();
-        for (int i = 0; i < full.steps().size(); i++) {
-            Route.Step step = full.steps().get(i);
+        Optional<Explanation> first = firstBlock(request, full, full, policy, snapshot, true, null);
+        Optional<Route> towards = router.routeTowards(request);
+        if (towards.isEmpty()) {
+            return first;
+        }
+        double viaFirst = first.map(e -> distanceToGoals(request, e.partialRoute().end().point()))
+            .orElse(distanceToGoals(request, request.start().point()));
+        double viaTowards = distanceToGoals(request, towards.get().end().point());
+        if (viaTowards > viaFirst - MIN_CLOSER) {
+            return first;
+        }
+        RouteResult onward = router.route(request.withStart(towards.get().end()).withPolicy(AccessPolicy.ALL_OPEN));
+        if (!onward.isFound()) {
+            return first;
+        }
+        Optional<Explanation> closer = firstBlock(request.withStart(towards.get().end()), onward.route(), full, policy,
+            snapshot, false, towards.get().withVerdicts(snapshot, policy));
+        return closer.isPresent() ? closer : first;
+    }
+
+    /**
+     * The first step of {@code route} the policy blocks: the explanation with the route up to it, or with
+     * {@code partial} when given.
+     */
+    private static Optional<Explanation> firstBlock(RouteRequest request, Route route, Route full, AccessPolicy policy,
+                                                    RoadNetworkSnapshot snapshot, boolean truncate, Route partial) {
+        for (int i = 0; i < route.steps().size(); i++) {
+            Route.Step step = route.steps().get(i);
             EdgeVerdict verdict = policy.check(step.edge());
             if (verdict.isBlocked() && !(i == 0 && request.startStepOpenBySides(step.edge().id(), step.forward()))) {
-                Route partial = full.truncated(snapshot, i).withVerdicts(snapshot, policy);
-                return Optional.of(new Explanation(verdict, step.edge(), partial, full));
+                Route guide = truncate ? route.truncated(snapshot, i).withVerdicts(snapshot, policy) : partial;
+                return Optional.of(new Explanation(verdict, step.edge(), guide, full));
             }
         }
         return Optional.empty();
+    }
+
+    private static double distanceToGoals(RouteRequest request, double[] p) {
+        double best = Double.POSITIVE_INFINITY;
+        for (SnapPoint g : request.goals()) {
+            double[] q = g.point();
+            double dx = q[0] - p[0], dy = q[1] - p[1], dz = q[2] - p[2];
+            best = Math.min(best, Math.sqrt(dx * dx + dy * dy + dz * dz));
+        }
+        return best;
     }
 }

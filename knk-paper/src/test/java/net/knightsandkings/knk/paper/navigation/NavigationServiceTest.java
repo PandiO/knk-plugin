@@ -48,7 +48,9 @@ import net.knightsandkings.knk.core.regions.DomainAccessEvaluator;
 import net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot;
 import net.knightsandkings.knk.core.roads.route.CompositeAccessPolicy;
 import net.knightsandkings.knk.core.roads.route.DomainAvailability;
+import net.knightsandkings.knk.core.domain.roads.RoadEdge;
 import net.knightsandkings.knk.core.roads.route.GateAvailability;
+import net.knightsandkings.knk.core.roads.route.Route;
 import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
 import net.knightsandkings.knk.core.roads.route.AccessPolicy;
 import net.knightsandkings.knk.core.roads.route.SnapPoint;
@@ -355,6 +357,120 @@ class NavigationServiceTest {
 
         assertTrue(messages().stream().noneMatch(m -> m.contains("West Gate")), messages().toString());
         assertEquals(NavigationSession.State.GUIDING, session.state());
+    }
+
+    /**
+     * The production part check, with a door on Main Street's gate edge at x = 150: the stretch is tagged by
+     * {@link NavigationAccess#partOf} and judged by the request's own (caching) policy, like NavigationAccess.
+     */
+    private NavigationService.PolicyFactory gateDoorAtX150() {
+        net.knightsandkings.knk.core.roads.build.GateCells door = (x, y, z) -> x == 150 && z == 0 && y >= 64 && y <= 66
+            ? java.util.OptionalInt.of(NavigationTestNetwork.GATE_DOOR) : java.util.OptionalInt.empty();
+        return new NavigationService.PolicyFactory() {
+            @Override
+            public AccessPolicy policyFor(Player p, RoadNetworkSnapshot snapshot) {
+                return policies.policyFor(p, snapshot);
+            }
+
+            @Override
+            public boolean partOpen(Player p, RoadNetworkSnapshot snapshot, RoadEdge edge, double fromAlong, double toAlong,
+                                    AccessPolicy policy) {
+                return NavigationAccess.partOf(edge, snapshot.polyline(edge).subPolyline(fromAlong, toAlong), b -> Set.of(), door)
+                    .map(part -> policy.checkPart(part).isUsable()).orElse(true);
+            }
+
+            @Override
+            public List<RouteRequest.GoalSides> goalSides(Player p, RoadNetworkSnapshot snapshot, List<SnapPoint> goals,
+                                                          AccessPolicy policy) {
+                List<RouteRequest.GoalSides> sides = new ArrayList<>();
+                for (SnapPoint g : goals) {
+                    RoadEdge edge = snapshot.requireEdge(g.edgeId());
+                    double length = snapshot.polyline(edge).length();
+                    sides.add(policy.check(edge).isBlocked()
+                        ? new RouteRequest.GoalSides(partOpen(p, snapshot, edge, 0, g.along(), policy),
+                            partOpen(p, snapshot, edge, length, g.along(), policy))
+                        : null);
+                }
+                return sides;
+            }
+        };
+    }
+
+    private void serviceWith(NavigationService.PolicyFactory factory) {
+        service = new NavigationService(new NavigationService.Deps(null, NavigationConfig.defaults(),
+            w -> network.snapshot, factory, shapes, eligibility, hud, trail, Runnable::run, Runnable::run, tick::get,
+            events::add, Logger.getLogger("test")));
+    }
+
+    @Test
+    void aDestinationOnTheOpenSideOfAClosedGateIsReached() {
+        // live test 2026-10-09 (A8/A9 with the gate closed, N14): South Gate's spawn snaps onto the gate's road on the
+        // town side of the door; the whole edge counted as blocked, and nothing was found
+        serviceWith(gateDoorAtX150());
+        gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.CLOSED);
+
+        service.navigate(player, Destination.point("South Gate", NavigationTestNetwork.WORLD, 135.5, 65, 0.5));
+
+        NavigationSession session = service.sessionOf(playerId).orElseThrow();
+        assertTrue(session.explanation().isEmpty(), "a full route: " + messages());
+        Route route = session.route().orElseThrow();
+        assertEquals(NavigationTestNetwork.E_BC, route.steps().get(route.steps().size() - 1).edge().id());
+        assertEquals(135, route.end().x(), 1.0);
+        ticks(NavigationService.RECHECK_TICKS + 1);
+        assertTrue(messages().stream().noneMatch(m -> m.contains("West Gate") || m.contains("No route")), messages().toString());
+    }
+
+    @Test
+    void aRouteStartingPastTheGateOnItsEdgeIsNotBlockedByIt() {
+        // live test 2026-10-08 run 5 (C3): navigation started on the town side of the South Gate, on the gate's own
+        // edge; the step walks only from the player to the node, but the whole edge's verdict was used
+        serviceWith(gateDoorAtX150());
+        moveTo(170.5, 65, 0.5);
+        service.navigate(player, Destination.point("Kardenna Castle", NavigationTestNetwork.WORLD, 200.5, 65, 200.5));
+        NavigationSession session = service.sessionOf(playerId).orElseThrow();
+        assertEquals(NavigationTestNetwork.E_BC, session.route().orElseThrow().steps().get(0).edge().id());
+
+        gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.CLOSED);
+        service.onGateChanged(NavigationTestNetwork.GATE_DOOR);
+        gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.OPENING);
+        service.onGateChanged(NavigationTestNetwork.GATE_DOOR);
+        ticks(NavigationService.RECHECK_TICKS + 1);
+
+        assertTrue(messages().stream().noneMatch(m -> m.contains("West Gate")), messages().toString());
+        assertEquals(NavigationSession.State.GUIDING, session.state());
+    }
+
+    @Test
+    void throughTheOpenGateThenItClosesBehindThePlayer() {
+        // live test 2026-10-09 (C3, the developer's procedure): /nav in front of the gate, open it, walk through,
+        // stop a little past it, close it - the part ahead was answered from the policy's cached whole-edge verdict
+        serviceWith(gateDoorAtX150());
+        moveTo(120.5, 65, 0.5);
+        service.navigate(player, Destination.point("Kardenna Castle", NavigationTestNetwork.WORLD, 200.5, 65, 200.5));
+        NavigationSession session = service.sessionOf(playerId).orElseThrow();
+        for (double x = 125.5; x <= 160.5; x += 5) {
+            moveTo(x, 65, 0.5);
+            ticks(1);
+        }
+
+        gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.CLOSING);
+        service.onGateChanged(NavigationTestNetwork.GATE_DOOR);
+        gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.CLOSED);
+        service.onGateChanged(NavigationTestNetwork.GATE_DOOR);
+        ticks(NavigationService.RECHECK_TICKS + 1);
+
+        assertTrue(messages().stream().noneMatch(m -> m.contains("West Gate")), messages().toString());
+        assertEquals(NavigationSession.State.GUIDING, session.state());
+
+        // still in front of it, the closing gate does block
+        clearInvocations(player);
+        serviceWith(gateDoorAtX150());
+        gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.OPEN);
+        moveTo(120.5, 65, 0.5);
+        service.navigate(player, Destination.point("Kardenna Castle", NavigationTestNetwork.WORLD, 200.5, 65, 200.5));
+        gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.CLOSED);
+        service.onGateChanged(NavigationTestNetwork.GATE_DOOR);
+        assertTrue(messages().stream().anyMatch(m -> m.contains("West Gate")), messages().toString());
     }
 
     @Test
@@ -736,7 +852,8 @@ class NavigationServiceTest {
             setup.run();
             clearInvocations(trail, player);
             NavigationService walking = walkService(NavigationConfig.defaults());
-            walking.navigate(player, well());
+            moveTo(40.5, 65, 60.5); // 60 blocks from any road: the roads cannot help either (N13)
+            walking.navigate(player, Destination.point("Well", NavigationTestNetwork.WORLD, 60.5, 65, 60.5));
             runSearches();
 
             assertEquals(NavigationService.DirectLeg.Status.NO_PATH, legStatus(walking));
@@ -750,6 +867,22 @@ class NavigationServiceTest {
             assertTrue(walking.isNavigating(playerId), "the leg stays; a door may open");
             walking.stop(player);
         }
+    }
+
+    @Test
+    void aNearbyTargetTheWalkSearchCannotReachIsReachedByTheRoads() {
+        // live test 2026-10-08 run 5 (A8/A9, N13): walking back and round by road reaches it
+        walkFinder = r -> WalkResult.noPath("target unreachable", 900);
+        NavigationService walking = walkService(NavigationConfig.defaults());
+
+        walking.navigate(player, well());
+        runSearches();
+
+        assertTrue(walking.isNavigating(playerId));
+        assertFalse(walking.isDirect(playerId), "a routed navigation now");
+        assertTrue(messages().stream().anyMatch(m -> m.contains("following the roads instead")), messages().toString());
+        assertTrue(messages().stream().noneMatch(m -> m.contains("No conventional path")), messages().toString());
+        assertTrue(walking.sessionOf(playerId).orElseThrow().route().isPresent());
     }
 
     @Test
@@ -782,8 +915,10 @@ class NavigationServiceTest {
             new double[] {12.5, 64, 6.5}));
         walkFinder = r -> WalkResult.noPath("target unreachable", 900, partial);
         NavigationService walking = walkService(NavigationConfig.defaults());
+        moveTo(40.5, 65, 60.5); // away from the roads, so they cannot help (N13)
+        Destination offRoad = Destination.point("Well", NavigationTestNetwork.WORLD, 60.5, 65, 60.5);
 
-        walking.navigate(player, well());
+        walking.navigate(player, offRoad);
         runSearches();
 
         assertEquals(NavigationService.DirectLeg.Status.WALKING, legStatus(walking));
@@ -797,7 +932,7 @@ class NavigationServiceTest {
 
         walkFinder = r -> WalkResult.fallback("expansion budget", 20000, partial);
         NavigationService budget = walkService(NavigationConfig.defaults());
-        budget.navigate(player, well());
+        budget.navigate(player, offRoad);
         runSearches();
         assertEquals(NavigationService.DirectLeg.Status.WALKING, legStatus(budget), "a budget run-out uses it too");
     }

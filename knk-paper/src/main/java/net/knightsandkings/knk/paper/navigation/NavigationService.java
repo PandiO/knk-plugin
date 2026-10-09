@@ -116,6 +116,16 @@ public final class NavigationService implements SiegeMatchObserver {
                                  double toAlong, AccessPolicy policy) {
             return policy.check(edge).isUsable();
         }
+
+        /**
+         * Main thread: per goal on an edge {@code policy} blocks, from which node the stretch up to the goal is
+         * open (N14: South Gate's spawn lies on the gate's road, on the town side of the door); null when no
+         * goal's edge is blocked or nothing can tell.
+         */
+        default List<RouteRequest.GoalSides> goalSides(Player player, RoadNetworkSnapshot snapshot, List<SnapPoint> goals,
+                                                       AccessPolicy policy) {
+            return null;
+        }
     }
 
     /**
@@ -232,6 +242,11 @@ public final class NavigationService implements SiegeMatchObserver {
         long lastRecheckTick;
         /** The last route request: its start sides tell the re-check which start edge part is open (N6). */
         RouteRequest lastRequest;
+        /**
+         * The roads were tried (or used) for this navigation: a direct leg whose walk search finds no way
+         * asks the road network once, never again - also not for the last leg after a road's end (N13).
+         */
+        boolean roadsTried;
 
         Active(Player player, Destination destination, long startedTick) {
             this.player = player;
@@ -892,6 +907,75 @@ public final class NavigationService implements SiegeMatchObserver {
                 + (result == null ? "" : " (" + result.reason() + ", " + result.expansions() + " cells)")
                 + (partial.isPresent() ? ", partial path" : ""));
         }
+        if (result != null && !result.isFound() && !a.roadsTried) {
+            a.roadsTried = true;
+            if (tryRoadsInstead(a, leg, generation, () -> adoptWalkResult(a, leg, result, partial))) {
+                return; // the straight line stays until the road route is known
+            }
+        }
+        adoptWalkResult(a, leg, result, partial);
+    }
+
+    /**
+     * Live test 2026-10-08 run 5 (A8/A9, finding N13): a nearby target the walk search cannot reach may still
+     * be reached by the roads - back and round. Asks the router once (from a road within the snap distance to
+     * the road nearest the leg's target); a found route turns the navigation into a routed one, whose last
+     * leg is again a walk path. False when no road is near enough; else {@code otherwise} runs on the main
+     * thread when there is no road route.
+     */
+    private boolean tryRoadsInstead(Active a, DirectLeg leg, int generation, Runnable otherwise) {
+        RoadNetworkSnapshot snapshot = a.snapshot;
+        if (snapshot == null || snapshot.isEmpty()) {
+            return false;
+        }
+        Location feet = a.player.getLocation();
+        Snapper snapper = new Snapper(snapshot, routerParameters);
+        Optional<SnapPoint> start = snapper.snap(feet.getX(), feet.getY(), feet.getZ());
+        Optional<SnapPoint> goal = snapper.snapFloor(leg.target[0], leg.target[1], leg.target[2]);
+        if (start.isEmpty() || goal.isEmpty()) {
+            return false;
+        }
+        SnapPoint from = connectedStart(snapshot, feet, start.get(), List.of(goal.get()));
+        List<SnapPoint> to = connectedGoals(snapshot, from, List.of(goal.get()), leg.target,
+            Destination.point(a.destination.name(), a.destination.world(), 0, 0, 0));
+        AccessPolicy policy = deps.policies().policyFor(a.player, snapshot);
+        RouteRequest request = RouteRequest.of(from, to, policy, routerParameters)
+            .withStartSides(deps.policies().startSides(a.player, snapshot, from, policy))
+            .withGoalSides(deps.policies().goalSides(a.player, snapshot, to, policy));
+        deps.routing().execute(() -> {
+            RouteResult result;
+            try {
+                result = new AStarRouter(snapshot).route(request);
+            } catch (RuntimeException e) {
+                deps.logger().log(Level.WARNING, "[Navigation] Road fallback routing failed for " + a.player.getName(), e);
+                result = RouteResult.noRoute();
+            }
+            RouteResult delivered = result;
+            deps.mainThread().execute(() -> {
+                if (active.get(a.player.getUniqueId()) != a || a.leg != leg || leg.generation != generation) {
+                    return;
+                }
+                if (!delivered.isFound()) {
+                    otherwise.run();
+                    return;
+                }
+                a.player.sendMessage(NavigationMessages.roadsInstead(a.destination.name()));
+                dropLeg(a);
+                a.leg = null;
+                a.goals = to;
+                a.target = leg.target;
+                a.lastRequest = request;
+                long now = deps.tick().getAsLong();
+                a.session = new NavigationSession(sessionParameters, new ManeuverBuilder(snapshot)::build, now);
+                a.session.start(); // its first computation is this one: the result is fed in below
+                apply(a, a.session.onRouteResult(delivered, now));
+            });
+        });
+        return true;
+    }
+
+    /** The walk result on the leg: the path, the partial path, or "no conventional path" (N8). */
+    private void adoptWalkResult(Active a, DirectLeg leg, WalkResult result, Optional<WalkPath> partial) {
         boolean wasWalking = leg.walking();
         if (result != null && !result.isFound() && !leg.noPathAnnounced) {
             leg.noPathAnnounced = true;
@@ -1073,7 +1157,8 @@ public final class NavigationService implements SiegeMatchObserver {
         SnapPoint from = connectedStart(snapshot, feet, start.get(), a.goals);
         List<SnapPoint> to = connectedGoals(snapshot, from, a.goals, a.target, a.destination);
         RouteRequest request = RouteRequest.of(from, to, policy, routerParameters)
-            .withStartSides(deps.policies().startSides(player, snapshot, from, policy));
+            .withStartSides(deps.policies().startSides(player, snapshot, from, policy))
+            .withGoalSides(deps.policies().goalSides(player, snapshot, to, policy));
         a.lastRequest = request;
         int generation = a.generation;
         deps.routing().execute(() -> {
@@ -1177,6 +1262,7 @@ public final class NavigationService implements SiegeMatchObserver {
             double d = distance(feet.getX(), feet.getY() - 1, feet.getZ(), a.target);
             if (d > sessionParameters.arriveDistance() && d <= routerParameters.maxSnapDistance()) {
                 a.session = null;
+                a.roadsTried = true; // the roads brought the player as close as they go
                 startDirect(a);
                 return;
             }
@@ -1244,10 +1330,16 @@ public final class NavigationService implements SiegeMatchObserver {
             EdgeVerdict verdict = policy.check(step.edge());
             boolean openSide = i == 0 && a.lastRequest != null
                 && a.lastRequest.startStepOpenBySides(step.edge().id(), step.forward());
-            if (verdict.isBlocked() && !openSide && stepStart < travelled) {
-                // on this step now: only the stretch still ahead counts
-                double here = step.entryAlong() + (step.forward() ? 1 : -1) * (travelled - stepStart);
-                openSide = deps.policies().partOpen(a.player, a.snapshot, step.edge(), here, step.exitAlong(), policy);
+            if (verdict.isBlocked() && !openSide) {
+                // only the stretch this step still walks counts: from the player (on it now) or from where it
+                // enters the edge (a route that starts or ends mid-edge) to where it leaves it (N10)
+                double from = stepStart < travelled
+                    ? step.entryAlong() + (step.forward() ? 1 : -1) * (travelled - stepStart)
+                    : step.entryAlong();
+                double edgeLength = a.snapshot.polyline(step.edge()).length();
+                boolean wholeEdge = Math.abs(step.exitAlong() - from) >= edgeLength - 1e-6;
+                openSide = !wholeEdge
+                    && deps.policies().partOpen(a.player, a.snapshot, step.edge(), from, step.exitAlong(), policy);
             }
             if (verdict.isBlocked() && !openSide) {
                 apply(a, a.session.onElementBlocked(verdict, now));
@@ -1322,6 +1414,9 @@ public final class NavigationService implements SiegeMatchObserver {
             if (goals.refusal() != null) {
                 end(a, EndReason.DESTINATION_LOST);
                 continue;
+            }
+            if (goals.direct() && a.roadsTried) {
+                continue; // following the roads because no walk path led straight there (N13): keep that route
             }
             a.snapshot = snapshot;
             a.goals = goals.goals();
@@ -1424,7 +1519,8 @@ public final class NavigationService implements SiegeMatchObserver {
         SnapPoint from = connectedStart(snapshot, feet, start.get(), goals.goals());
         List<SnapPoint> to = connectedGoals(snapshot, from, goals.goals(), goals.target(), destination);
         RouteRequest request = RouteRequest.of(from, to, policy, routerParameters)
-            .withStartSides(deps.policies().startSides(as, snapshot, from, policy));
+            .withStartSides(deps.policies().startSides(as, snapshot, from, policy))
+            .withGoalSides(deps.policies().goalSides(as, snapshot, to, policy));
         deps.routing().execute(() -> {
             List<Component> lines = new ArrayList<>();
             try {
