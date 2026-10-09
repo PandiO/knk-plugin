@@ -67,7 +67,7 @@ public record NavigationConfig(
     /** Default for {@code destination-snap-vertical-weight}: plain 3D (finding N15). */
     public static final double DEFAULT_DESTINATION_SNAP_VERTICAL_WEIGHT = 1;
 
-    /** Default for {@code max-start-distance}: the walk search's {@code max-length} (KNG-75). */
+    /** Default for {@code max-start-distance}: the walk range (KNG-75; a 96-block leg fits the 64-chunk capture). */
     public static final double DEFAULT_MAX_START_DISTANCE = 96;
 
     /** Design default for {@code overlay-materials} (DESIGN §4). */

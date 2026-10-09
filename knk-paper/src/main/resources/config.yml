@@ -277,7 +277,7 @@ navigation:
     # straight distance + detour-allowance, whichever is longer, never above max-length
     max-expansions: 20000
     max-length-factor: 1.75
-    max-length: 96
+    max-length: 144
     # Blocks a path may always add to the straight distance: a short leg behind a building needs a detour of
     # several times its length (a 27 m leg went round in 68). 0 = the factor alone
     detour-allowance: 48

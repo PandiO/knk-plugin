@@ -64,7 +64,7 @@ class ConfigLoaderNavigationTest {
         assertEquals(java.util.Set.of("enabled", "max-expansions", "max-length-factor", "max-length", "detour-allowance", "max-drop",
             "drop-penalty", "capture-margin", "chunk-ttl-seconds", "recompute-distance", "max-concurrent-searches",
             "climbables", "wall-cost"), walk.getKeys(false));
-        assertEquals(new NavigationConfig.WalkConfig(true, 20_000, 1.75, 96, 48, 3, 10, 16, 10, 6, 2, List.of("LADDER"), 1.0),
+        assertEquals(new NavigationConfig.WalkConfig(true, 20_000, 1.75, 144, 48, 3, 10, 16, 10, 6, 2, List.of("LADDER"), 1.0),
             ConfigLoader.load(yaml).navigation().walk());
     }
 
@@ -145,7 +145,7 @@ class ConfigLoaderNavigationTest {
     @Test
     void walkKeysDefaultToTheDesignAndOverride() {
         NavigationConfig.WalkConfig defaults = ConfigLoader.loadNavigation(null).walk();
-        assertEquals(new NavigationConfig.WalkConfig(true, 20_000, 1.75, 96, 48, 3, 10, 16, 10, 6, 2, List.of("LADDER"), 1.0),
+        assertEquals(new NavigationConfig.WalkConfig(true, 20_000, 1.75, 144, 48, 3, 10, 16, 10, 6, 2, List.of("LADDER"), 1.0),
             defaults, "KNG-51 §9 defaults");
         assertEquals(net.knightsandkings.knk.core.roads.walk.MovementProfile.PLAYER, defaults.profile());
         assertEquals(net.knightsandkings.knk.core.roads.walk.WalkBudget.DEFAULTS, defaults.budget());
@@ -164,7 +164,7 @@ class ConfigLoaderNavigationTest {
         assertEquals(4.5, walk.profile().dropPenalty(), 0.0001);
         assertEquals(java.util.Set.of("LADDER", "VINE"), walk.profile().climbables());
         assertEquals(5000, walk.budget().maxExpansions());
-        assertEquals(96, walk.budget().maxLength(), 0.0001, "unset keys keep their defaults");
+        assertEquals(144, walk.budget().maxLength(), 0.0001, "unset keys keep their defaults");
         assertEquals(8, walk.captureMargin());
         assertEquals(30, walk.chunkTtlSeconds());
         assertEquals(2, walk.maxConcurrentSearches());
