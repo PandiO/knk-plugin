@@ -212,6 +212,8 @@ public final class NavigationService implements SiegeMatchObserver {
 
     private final Deps deps;
     private final RouterParameters routerParameters;
+    /** Snapping a destination: no height weight by default, its last leg is a walk path (finding N15). */
+    private final RouterParameters destinationParameters;
     private final SessionParameters sessionParameters;
     private final EtaEstimator eta;
     /** The HUD arrow of a walking leg points this far ahead along the path. */
@@ -353,6 +355,7 @@ public final class NavigationService implements SiegeMatchObserver {
     public NavigationService(Deps deps) {
         this.deps = Objects.requireNonNull(deps, "deps");
         this.routerParameters = deps.config().routerParameters();
+        this.destinationParameters = deps.config().destinationRouterParameters();
         this.sessionParameters = deps.config().sessionParameters();
         this.eta = new EtaEstimator(sessionParameters.sprintSpeed());
     }
@@ -509,7 +512,7 @@ public final class NavigationService implements SiegeMatchObserver {
                 if (distance(px, pFloorY, pz, floor) <= maxSnap) {
                     return new Goals(List.of(), floor, null, true, null, false);
                 }
-                Optional<SnapPoint> goal = snapper.snapFloor(floor[0], floor[1], floor[2]);
+                Optional<SnapPoint> goal = new Snapper(snapshot, destinationParameters).snapFloor(floor[0], floor[1], floor[2]);
                 if (goal.isEmpty()) {
                     return Goals.refused(NavigationMessages.destinationTooFar(destination.name()));
                 }
@@ -632,7 +635,8 @@ public final class NavigationService implements SiegeMatchObserver {
 
     /**
      * The goals: as resolved, unless none is in the start's component - then, for a point or a node,
-     * the target re-snapped to a road of the start's component within the snap distance.
+     * the target re-snapped to a road of the start's component within the snap distance (a destination's
+     * height weight, N15).
      */
     List<SnapPoint> connectedGoals(RoadNetworkSnapshot snapshot, SnapPoint start, List<SnapPoint> goals, double[] target,
                                    Destination destination) {
@@ -641,7 +645,7 @@ public final class NavigationService implements SiegeMatchObserver {
             || (destination.kind() != Destination.Kind.POINT && destination.kind() != Destination.Kind.NODE)) {
             return goals;
         }
-        return new Snapper(snapshot, routerParameters)
+        return new Snapper(snapshot, destinationParameters)
             .snapFloor(target[0], target[1], target[2], c -> c == startComponent).map(List::of).orElse(goals);
     }
 
@@ -930,9 +934,9 @@ public final class NavigationService implements SiegeMatchObserver {
             return false;
         }
         Location feet = a.player.getLocation();
-        Snapper snapper = new Snapper(snapshot, routerParameters);
-        Optional<SnapPoint> start = snapper.snap(feet.getX(), feet.getY(), feet.getZ());
-        Optional<SnapPoint> goal = snapper.snapFloor(leg.target[0], leg.target[1], leg.target[2]);
+        Optional<SnapPoint> start = new Snapper(snapshot, routerParameters).snap(feet.getX(), feet.getY(), feet.getZ());
+        Optional<SnapPoint> goal = new Snapper(snapshot, destinationParameters).snapFloor(leg.target[0], leg.target[1],
+            leg.target[2]);
         if (start.isEmpty() || goal.isEmpty()) {
             return false;
         }

@@ -223,8 +223,10 @@ navigation:
   seed-from-domains: true
   # Hard limit: player and destination must be this close to a road
   max-snap-distance: 48
-  # 1 block of height counts as this many when snapping (a bridge vs the road below it)
+  # 1 block of height counts as this many when snapping the player (a bridge vs the road below it)
   snap-vertical-weight: 4
+  # The same for a destination: its last leg is a walk path, which climbs, so plain 3D (1) by default
+  destination-snap-vertical-weight: 1
   trail-length: 30
   trail-period-ticks: 10
   trail-particle: DUST

@@ -264,6 +264,76 @@ class NavigationServiceTest {
     }
 
     @Test
+    void aDestinationHighAboveARoadIsReachedByRoadThenItsLastLeg() {
+        // live test 2026-10-09 (N15): a tower roof 30 blocks above the road measured 120 with the height ×4
+        service.navigate(player, Destination.point("Tower Roof", NavigationTestNetwork.WORLD, 60.5, 95, 0.5));
+
+        assertTrue(service.isNavigating(playerId), messages().toString());
+        assertFalse(service.isDirect(playerId), "67 blocks away: by road first");
+        assertTrue(messages().stream().noneMatch(m -> m.contains("too far from any road")), messages().toString());
+        assertEquals(60, service.sessionOf(playerId).orElseThrow().route().orElseThrow().length(), 1.0,
+            "along Main Street to below the roof");
+    }
+
+    @Test
+    void aPlayerUnderABridgeStillStartsOnTheRoadBelow() {
+        // the start keeps the height ×4: the bridge 8 blocks overhead is nearer in plain 3D than the road 10 blocks aside
+        RoadNetworkSnapshot bridge = RoadNetworkSnapshot.builder(NavigationTestNetwork.WORLD)
+            .addProfile(network.snapshot.profiles().get(1))
+            .addNode(node(80, -60, 64, 0, 1)).addNode(node(81, 60, 64, 0, 1))
+            .addNode(node(82, 0, 72, -60, 1)).addNode(node(83, 0, 72, 60, 1))
+            .addEdge(edge(80, 80, 81, new int[] {-60, 64, 0}, new int[] {60, 64, 0}))
+            .addEdge(edge(81, 83, 82, new int[] {0, 72, 60}, new int[] {0, 72, -60}))
+            .addEdge(edge(82, 81, 83, new int[] {60, 64, 0}, new int[] {0, 72, 60}))
+            .build();
+        serviceOn(bridge);
+        moveTo(0.5, 65, 10.5);
+
+        service.navigate(player, Destination.point("South Bank", NavigationTestNetwork.WORLD, 0.5, 73, -59.5));
+
+        assertTrue(service.isNavigating(playerId), messages().toString());
+        assertEquals(80, service.sessionOf(playerId).orElseThrow().route().orElseThrow().steps().get(0).edge().id(),
+            "starts on the road below, not on the bridge");
+    }
+
+    @Test
+    void aHighDestinationReSnapsToTheStartsNetworkWithoutTheHeightWeight() {
+        // N12 with N15: the roof's nearest road is a stretch that joins nothing; Main Street is 36 blocks off (plain)
+        RoadNetworkSnapshot withStub = RoadNetworkSnapshot.builder(NavigationTestNetwork.WORLD)
+            .addNodes(network.snapshot.nodes()).addEdges(network.snapshot.edges())
+            .addProfile(network.snapshot.profiles().get(1))
+            .addNode(node(90, 55, 90, 20, 99)).addNode(node(91, 65, 90, 20, 99))
+            .addEdge(edge(90, 90, 91, new int[] {55, 90, 20}, new int[] {65, 90, 20}))
+            .build();
+        serviceOn(withStub);
+
+        service.navigate(player, Destination.point("Tower Roof", NavigationTestNetwork.WORLD, 60.5, 95, 20.5));
+
+        assertTrue(service.isNavigating(playerId), messages().toString());
+        assertTrue(messages().stream().noneMatch(m -> m.contains("No road connects")), messages().toString());
+        assertEquals(NavigationTestNetwork.E_AB, service.sessionOf(playerId).orElseThrow().route().orElseThrow()
+            .steps().get(0).edge().id());
+    }
+
+    private void serviceOn(RoadNetworkSnapshot snapshot) {
+        service = new NavigationService(new NavigationService.Deps(null, NavigationConfig.defaults(),
+            w -> snapshot, policies, shapes, eligibility, hud, trail, Runnable::run, Runnable::run, tick::get,
+            events::add, Logger.getLogger("test")));
+    }
+
+    private static net.knightsandkings.knk.core.domain.roads.RoadNode node(int id, int x, int y, int z, int component) {
+        return new net.knightsandkings.knk.core.domain.roads.RoadNode(id, x, y, z,
+            net.knightsandkings.knk.core.domain.roads.RoadNodeKind.ENDPOINT, null, component);
+    }
+
+    private static RoadEdge edge(int id, int from, int to, int[] a, int[] b) {
+        double length = Math.sqrt(Math.pow(b[0] - a[0], 2) + Math.pow(b[1] - a[1], 2) + Math.pow(b[2] - a[2], 2));
+        return new RoadEdge(id, from, to, List.of(a, b), length, 3, java.util.OptionalInt.of(1),
+            java.util.OptionalInt.empty(), 1.0, java.util.EnumSet.noneOf(net.knightsandkings.knk.core.domain.roads.RoadEdgeFlag.class),
+            List.of(), List.of(), List.of(), net.knightsandkings.knk.core.domain.roads.RoadEdgeSource.DETECTED, false);
+    }
+
+    @Test
     void aNearbyTargetUsesDirectMode() {
         service.navigate(player, Destination.point("Well", NavigationTestNetwork.WORLD, 20.5, 65, 0.5));
 
@@ -917,6 +987,20 @@ class NavigationServiceTest {
         assertTrue(messages().stream().anyMatch(m -> m.contains("following the roads instead")), messages().toString());
         assertTrue(messages().stream().noneMatch(m -> m.contains("No conventional path")), messages().toString());
         assertTrue(walking.sessionOf(playerId).orElseThrow().route().isPresent());
+    }
+
+    @Test
+    void aNearbyHighTargetTheWalkSearchCannotReachIsTriedByRoadWithoutTheHeightWeight() {
+        // N13 with N15: 30 blocks above the road, so with the height ×4 no road was near enough to try
+        walkFinder = r -> WalkResult.noPath("target unreachable", 900);
+        NavigationService walking = walkService(NavigationConfig.defaults());
+
+        walking.navigate(player, Destination.point("Tower Roof", NavigationTestNetwork.WORLD, 30.5, 95, 0.5));
+        runSearches();
+
+        assertTrue(walking.isNavigating(playerId));
+        assertFalse(walking.isDirect(playerId), "a routed navigation now");
+        assertTrue(messages().stream().anyMatch(m -> m.contains("following the roads instead")), messages().toString());
     }
 
     @Test

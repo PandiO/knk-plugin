@@ -29,7 +29,9 @@ import net.knightsandkings.knk.core.roads.walk.WalkBudget;
  * @param overlayMaterials   material names or {@code *_SUFFIX} patterns lying on a road
  * @param seedFromDomains    every Domain Location within 8 blocks of a road cell seeds the build
  * @param maxSnapDistance    player and destination must be this close to a road (hard limit)
- * @param snapVerticalWeight one block of height counts this many when snapping
+ * @param snapVerticalWeight one block of height counts this many when snapping the player's start
+ * @param destinationSnapVerticalWeight the same for a destination (finding N15): its last leg is a walk
+ *                           path, which climbs, so the default 1 measures plain 3D
  * @param trail              the guidance trail (Phase 4)
  * @param rerouteDistance    off-route distance that triggers a re-route
  * @param rerouteAfterTicks  how long the player must stay off-route first
@@ -47,6 +49,7 @@ public record NavigationConfig(
     boolean seedFromDomains,
     double maxSnapDistance,
     double snapVerticalWeight,
+    double destinationSnapVerticalWeight,
     TrailConfig trail,
     double rerouteDistance,
     int rerouteAfterTicks,
@@ -57,6 +60,9 @@ public record NavigationConfig(
     BuilderConfig builder,
     WalkConfig walk
 ) {
+    /** Default for {@code destination-snap-vertical-weight}: plain 3D (finding N15). */
+    public static final double DEFAULT_DESTINATION_SNAP_VERTICAL_WEIGHT = 1;
+
     /** Design default for {@code overlay-materials} (DESIGN §4). */
     public static final List<String> DEFAULT_OVERLAY_MATERIALS = List.of(
         "SNOW", "*_CARPET", "*_PRESSURE_PLATE", "RAIL", "POWERED_RAIL", "LEAF_LITTER", "PINK_PETALS");
@@ -296,13 +302,17 @@ public record NavigationConfig(
         walk = walk == null ? WalkConfig.defaults() : walk;
     }
 
-    /** Without a {@code walk:} block (callers from before KNG-51): the walk defaults. */
+    /**
+     * Without a {@code walk:} block (callers from before KNG-51): the walk defaults; destinations snap with
+     * the default weight.
+     */
     public NavigationConfig(boolean enabled, Map<RoadClass, Double> classCost, List<String> overlayMaterials,
                             boolean seedFromDomains, double maxSnapDistance, double snapVerticalWeight, TrailConfig trail,
                             double rerouteDistance, int rerouteAfterTicks, double arriveDistance, int maxSessionMinutes,
                             double sprintSpeed, SurveyConfig survey, BuilderConfig builder) {
-        this(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance, snapVerticalWeight, trail,
-            rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed, survey, builder, null);
+        this(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance, snapVerticalWeight,
+            DEFAULT_DESTINATION_SNAP_VERTICAL_WEIGHT, trail, rerouteDistance, rerouteAfterTicks, arriveDistance,
+            maxSessionMinutes, sprintSpeed, survey, builder, null);
     }
 
     public static NavigationConfig defaults() {
@@ -313,7 +323,7 @@ public record NavigationConfig(
     /** This config with another {@code walk:} block. */
     public NavigationConfig withWalk(WalkConfig walk) {
         return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
-            snapVerticalWeight, trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
+            snapVerticalWeight, destinationSnapVerticalWeight, trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
             survey, builder, walk);
     }
 
@@ -355,6 +365,10 @@ public record NavigationConfig(
         if (snapVerticalWeight < 0) {
             throw new IllegalArgumentException("navigation.snap-vertical-weight must not be negative (got: " + snapVerticalWeight + ")");
         }
+        if (destinationSnapVerticalWeight < 0) {
+            throw new IllegalArgumentException("navigation.destination-snap-vertical-weight must not be negative (got: "
+                + destinationSnapVerticalWeight + ")");
+        }
         if (!(rerouteDistance > 0)) {
             throw new IllegalArgumentException("navigation.reroute-distance must be positive (got: " + rerouteDistance + ")");
         }
@@ -376,9 +390,14 @@ public record NavigationConfig(
         walk.validate();
     }
 
-    /** Snapping and class costs for the router (Phases 2d/4). */
+    /** Snapping and class costs for the router (Phases 2d/4); the snap weight is the player's start's. */
     public RouterParameters routerParameters() {
         return new RouterParameters(maxSnapDistance, snapVerticalWeight, classCost);
+    }
+
+    /** {@link #routerParameters()} with the destination's snap weight (finding N15). */
+    public RouterParameters destinationRouterParameters() {
+        return routerParameters().withSnap(maxSnapDistance, destinationSnapVerticalWeight);
     }
 
     /** Session timings for {@code NavigationSession} (Phase 4); keys not in config keep the core defaults. */
