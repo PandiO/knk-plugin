@@ -21,8 +21,8 @@ public final class TrailCentring {
     public static final int MAX_HALF_WIDTH = 3;
     /** A point counts as on a slope when the trail around it rises or drops at least this much (blocks). */
     static final double SLOPE = 0.5;
-    /** Shifts are averaged over this many points either side. */
-    static final int SMOOTHING = 2;
+    /** Shifts are averaged over this many points either side (a caller centring a window adds this margin). */
+    public static final int SMOOTHING = 2;
 
     /** Port: the road surface near a trail point (main thread on the server). */
     public interface Ground {

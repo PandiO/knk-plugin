@@ -90,12 +90,11 @@ public final class TrailRenderer {
      */
     public void drawRoute(Player viewer, Route route, double along, double[] target, boolean fromPlayer) {
         double length = budget.isLagging() ? Math.max(4, config.length() / 2.0) : config.length();
-        List<double[]> trail = trailPoints(route, along, length, SPACING);
+        List<double[]> trail = ground != null && viewer.getWorld() != null
+            ? centredWindow(route, along, length, SPACING, ground.apply(viewer.getWorld()))
+            : trailPoints(route, along, length, SPACING);
         if (trail.isEmpty()) {
             return;
-        }
-        if (ground != null && viewer.getWorld() != null) {
-            trail = TrailCentring.centre(trail, ground.apply(viewer.getWorld()));
         }
         Location feet = viewer.getLocation();
         double[] first = trail.get(0);
@@ -164,6 +163,42 @@ public final class TrailRenderer {
             out.add(centre(route.pointAt(a)));
         }
         out.add(centre(route.pointAt(stop)));
+        return out;
+    }
+
+    /**
+     * KNG-76: the trail window on fixed spots of the route - every {@code spacing} blocks from its start, so a redraw
+     * puts each particle where it was - centred ({@link TrailCentring}) with {@link TrailCentring#SMOOTHING} spots of
+     * margin either side, so a spot's shift does not change as the window slides with the player (live test
+     * 2026-10-09: sliding samples made the centred trail twitch in front of the player). Starts at the first spot at or
+     * ahead of {@code along}; ends with the route's end when the window reaches it. Empty when the route is empty.
+     */
+    public static List<double[]> centredWindow(Route route, double along, double length, double spacing,
+                                               TrailCentring.Ground ground) {
+        if (route == null || route.isEmpty() || spacing <= 0) {
+            return new ArrayList<>();
+        }
+        double total = route.polylineLength();
+        double start = Math.max(0, Math.min(along, total));
+        double stop = Math.min(total, start + length);
+        int lastSpot = (int) Math.floor(total / spacing + 1e-9);
+        int first = Math.min(lastSpot, (int) Math.ceil(start / spacing - 1e-9));
+        int last = Math.max(first, Math.min(lastSpot, (int) Math.floor(stop / spacing + 1e-9)));
+        int from = Math.max(0, first - TrailCentring.SMOOTHING);
+        int to = Math.min(lastSpot, last + TrailCentring.SMOOTHING);
+        List<double[]> spots = new ArrayList<>();
+        for (int k = from; k <= to; k++) {
+            spots.add(centre(route.pointAt(k * spacing)));
+        }
+        boolean endSpot = to == lastSpot && total - lastSpot * spacing > 1e-6;
+        if (endSpot) {
+            spots.add(centre(route.pointAt(total))); // the route's end takes part in the smoothing too
+        }
+        List<double[]> centred = TrailCentring.centre(spots, ground);
+        List<double[]> out = new ArrayList<>(centred.subList(first - from, last - from + 1));
+        if (endSpot && stop >= total - 1e-9) {
+            out.add(centred.get(centred.size() - 1));
+        }
         return out;
     }
 
