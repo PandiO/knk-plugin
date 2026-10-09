@@ -125,6 +125,8 @@ public final class NavigationDestinations {
 
     private volatile List<NavTarget> remote = List.of();
     private volatile Set<Integer> roadAccessIgnored = Set.of();
+    private volatile Set<String> roadAccessIgnoredRegions = Set.of();
+    private volatile Runnable onRoadAccessChanged = () -> { };
     private volatile long loadedAt = Long.MIN_VALUE;
     private final AtomicBoolean refreshing = new AtomicBoolean();
 
@@ -271,6 +273,24 @@ public final class NavigationDestinations {
         return roadAccessIgnored.contains(domainId);
     }
 
+    /**
+     * Rev. 7 Part C meets Part A: whether a WorldGuard region belongs to a domain whose rule is "Ignored" for roads,
+     * as of the last catalogue load - the routing view does not cut roads at such a region. Read from the catalogue
+     * itself (each domain's region id), so it does not depend on the region → domain cache ({@code /knk cache
+     * refresh} clears that). Unknown regions, or no load yet: false.
+     */
+    public boolean roadsIgnoreRegion(String regionId) {
+        return regionId != null && roadAccessIgnoredRegions.contains(regionId.toLowerCase(Locale.ROOT));
+    }
+
+    /**
+     * Called (on the API thread) after a catalogue load that changed which regions are "Ignored" for roads, so the
+     * live tags can recut at once instead of at their next pass.
+     */
+    public void onRoadAccessChanged(Runnable listener) {
+        this.onRoadAccessChanged = Objects.requireNonNull(listener, "listener");
+    }
+
     /** Force a reload of the API part (start-up, {@code /knk cache refresh}). */
     public CompletableFuture<Void> refresh() {
         if (!refreshing.compareAndSet(false, true)) {
@@ -280,9 +300,13 @@ public final class NavigationDestinations {
             .thenApply(list -> {
                 List<NavTarget> out = new ArrayList<>();
                 Set<Integer> ignored = new HashSet<>();
+                Set<String> ignoredRegions = new HashSet<>();
                 for (KnkDomainSummary domain : list) {
                     if (domain.id() != null && domain.roadAccessIgnored()) {
                         ignored.add(domain.id());
+                    }
+                    if (domain.roadAccessIgnored() && domain.wgRegionId() != null && !domain.wgRegionId().isBlank()) {
+                        ignoredRegions.add(domain.wgRegionId().toLowerCase(Locale.ROOT));
                     }
                     NavTarget.Type type = NavTarget.Type.ofDomainType(domain.domainType());
                     if (type != null && domain.id() != null && domain.name() != null && !domain.name().isBlank()) {
@@ -291,6 +315,15 @@ public final class NavigationDestinations {
                     }
                 }
                 roadAccessIgnored = Set.copyOf(ignored);
+                boolean regionsChanged = !ignoredRegions.equals(roadAccessIgnoredRegions);
+                roadAccessIgnoredRegions = Set.copyOf(ignoredRegions);
+                if (regionsChanged) {
+                    try {
+                        onRoadAccessChanged.run();
+                    } catch (RuntimeException e) {
+                        LOGGER.log(Level.WARNING, "[Navigation] Road access listener failed", e);
+                    }
+                }
                 return out;
             });
         CompletableFuture<List<NavTarget>> locationTargets = allPages(query -> locations.searchAsync(query))

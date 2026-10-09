@@ -1320,8 +1320,17 @@ public class KnKPlugin extends JavaPlugin {
                     navigationService.onNetworkChanged(world);
                 }
             },
-            regions -> regionDomainResolver.warmCache(regions), System::currentTimeMillis);
+            regions -> regionDomainResolver.warmCache(regions), System::currentTimeMillis,
+            // rev. 7 Part C: a region whose domain's rule is "Ignored" for roads (houses, shops) does not cut roads;
+            // read from the /navigate catalogue, which carries each domain's region (not the region → domain cache,
+            // which /knk cache refresh clears)
+            regionId -> navigationDestinations == null || !navigationDestinations.roadsIgnoreRegion(regionId));
         roadNetworkCache.addListener(tags::refresh);
+        if (navigationDestinations != null) {
+            // a changed "Ignored" set recuts the roads at once (else at the next pass, up to a minute later)
+            navigationDestinations.onRoadAccessChanged(() -> mainThread.execute(() -> tags.refreshAll(
+                org.bukkit.Bukkit.getWorlds().stream().map(org.bukkit.World::getName).toList())));
+        }
         org.bukkit.Bukkit.getScheduler().runTaskTimer(this, tags::tick, 1L, 1L);
         org.bukkit.Bukkit.getScheduler().runTaskTimer(this,
             () -> tags.refreshAll(org.bukkit.Bukkit.getWorlds().stream().map(org.bukkit.World::getName).toList()),

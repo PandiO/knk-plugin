@@ -26,7 +26,7 @@ class DomainCatalogMapperTest {
 
         KnkDomainSummary summary = DomainCatalogMapper.toCore(dto);
 
-        assertEquals(new KnkDomainSummary(11, "Keep Gate", "GateStructure", "Region"), summary);
+        assertEquals(new KnkDomainSummary(11, "Keep Gate", "GateStructure", "Region", null, "g"), summary);
     }
 
     @Test
@@ -41,12 +41,12 @@ class DomainCatalogMapperTest {
     @Test
     void theRoadAccessIsCarriedThrough() throws Exception {
         DomainSummaryDto dto = json.readValue(
-            "{\"id\":9,\"name\":\"Mill House\",\"domainType\":\"Structure\",\"navigationDefault\":\"Spawn\",\"roadAccess\":\"Ignored\"}",
+            "{\"id\":9,\"name\":\"Mill House\",\"domainType\":\"Structure\",\"navigationDefault\":\"Spawn\",\"roadAccess\":\"Ignored\",\"wgRegionId\":\"mill_house\"}",
             DomainSummaryDto.class);
 
         KnkDomainSummary summary = DomainCatalogMapper.toCore(dto);
 
-        assertEquals(new KnkDomainSummary(9, "Mill House", "Structure", "Spawn", "Ignored"), summary);
+        assertEquals(new KnkDomainSummary(9, "Mill House", "Structure", "Spawn", "Ignored", "mill_house"), summary);
         assertTrue(summary.roadAccessIgnored());
     }
 }
