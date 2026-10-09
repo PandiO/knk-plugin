@@ -58,7 +58,7 @@ public final class NavigationSession {
     }
 
     private final SessionParameters parameters;
-    private final Function<Route, List<Maneuver>> maneuvers;
+    private Function<Route, List<Maneuver>> maneuvers;
     private final long startedTick;
 
     private State state = State.PLANNING;
@@ -167,8 +167,13 @@ public final class NavigationSession {
                 adopt(candidate, result.explanationOptional());
                 state = State.GUIDING;
                 List<NavigationEffect> effects = new ArrayList<>();
-                RouteReason announced = reason == RouteReason.IMPROVEMENT && wasPartial && explanation.isEmpty()
-                    ? RouteReason.REOPENED : reason;
+                RouteReason announced = reason;
+                boolean recomputed = reason == RouteReason.IMPROVEMENT || reason == RouteReason.NETWORK_CHANGED;
+                if (recomputed && wasPartial && explanation.isEmpty()) {
+                    announced = RouteReason.REOPENED;
+                } else if (reason == RouteReason.NETWORK_CHANGED && !wasPartial && explanation.isPresent()) {
+                    announced = RouteReason.ELEMENT_BLOCKED; // the new network blocks the way: say so
+                }
                 effects.add(new RouteAdoptedEffect(route, routeManeuvers, announced, explanation));
                 if (isAtEnd(route.start().x(), route.start().y(), route.start().z())) {
                     // already there (an empty route, or a start within arrive distance of the goal)
@@ -264,6 +269,22 @@ public final class NavigationSession {
         lastImprovementRequestTick = nowTick;
         boolean partial = explanation.isPresent();
         return List.of(requestRoute(RouteReason.IMPROVEMENT, !partial, nowTick));
+    }
+
+    /**
+     * The road network (or its routing view, rev. 7 Part A) was replaced: the current route and its instructions
+     * belong to the old one, whose edge ids may not exist any more. A new route is computed on the new network
+     * and taken as it is; {@code maneuvers} builds its instructions.
+     */
+    public List<NavigationEffect> onNetworkChanged(Function<Route, List<Maneuver>> maneuvers, long nowTick) {
+        if (state == State.ENDED || state == State.ARRIVED) {
+            return List.of();
+        }
+        this.maneuvers = Objects.requireNonNull(maneuvers, "maneuvers");
+        if (!started) {
+            return List.of(); // start() asks for the first route
+        }
+        return List.of(requestRoute(route == null ? RouteReason.INITIAL : RouteReason.NETWORK_CHANGED, false, nowTick));
     }
 
     /** End the session for a runtime reason (stop command, quit, death, teleport, siege, …). */

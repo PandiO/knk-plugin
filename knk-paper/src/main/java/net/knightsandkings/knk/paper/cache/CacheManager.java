@@ -1,9 +1,10 @@
 package net.knightsandkings.knk.paper.cache;
 
 import java.time.Duration;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import net.knightsandkings.knk.core.cache.*;
@@ -37,7 +38,8 @@ public class CacheManager {
     private final Duration cacheTtl;
     private RegionDomainResolver regionResolver; // Optional - set after initialization
     /** Caches kept outside this manager that {@code /knk cache refresh} drops, by display name. */
-    private final Map<String, Runnable> refreshHooks = new ConcurrentHashMap<>();
+    /** In registration order: the region → domain cache is cleared before navigation re-checks its routes (KNG-104). */
+    private final Map<String, Runnable> refreshHooks = Collections.synchronizedMap(new LinkedHashMap<>());
 
     /**
      * Creates a new cache manager with the specified TTL for all caches.

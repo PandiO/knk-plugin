@@ -30,6 +30,10 @@ import java.util.Set;
  * tracker uses is passed in (one source of truth). With {@code bypass} (staff, owner mode,
  * KNG-17's {@code knk.region.bypass}) everything is OPEN. Per-region decisions are cached for the
  * request.
+ *
+ * <p>Rev. 7 Part C (KNG-92, REV7_PROPOSAL §4): a domain whose {@link RoadRule} says its rule does not
+ * apply to roads (a house or shop along a public street) is skipped for entry and exit alike. The rule
+ * still holds at the border, for teleports and on the walk path to the door.
  */
 public final class DomainAvailability implements AccessPolicy {
 
@@ -39,11 +43,21 @@ public final class DomainAvailability implements AccessPolicy {
         Optional<DomainSnapshot> domainByRegionId(String regionId);
     }
 
+    /** Port (rev. 7 Part C): whether a domain's entry/exit rule keeps routes off the roads in its region. */
+    @FunctionalInterface
+    public interface RoadRule {
+        /** Every domain's rule applies: the behaviour before rev. 7 Part C, and when nothing is known. */
+        RoadRule ALWAYS = domain -> true;
+
+        boolean applies(DomainSnapshot domain);
+    }
+
     public static final String ENTRY_MESSAGE = "you may not enter %s";
     public static final String EXIT_MESSAGE = "you may not leave %s";
 
     private final DomainAccessEvaluator evaluator;
     private final DomainLookup lookup;
+    private final RoadRule roadRule;
     private final Set<String> currentRegionIds;
     private final boolean bypass;
     private final Map<String, Optional<Denial>> entryByRegion = new HashMap<>();
@@ -60,14 +74,23 @@ public final class DomainAvailability implements AccessPolicy {
      */
     public DomainAvailability(DomainAccessEvaluator evaluator, DomainLookup lookup, Set<String> currentRegionIds,
                               boolean bypass) {
+        this(evaluator, lookup, RoadRule.ALWAYS, currentRegionIds, bypass);
+    }
+
+    /**
+     * @param roadRule which domains' rules apply to roads (rev. 7 Part C); the others are skipped
+     */
+    public DomainAvailability(DomainAccessEvaluator evaluator, DomainLookup lookup, RoadRule roadRule,
+                              Set<String> currentRegionIds, boolean bypass) {
         this.evaluator = Objects.requireNonNull(evaluator, "evaluator");
         this.lookup = Objects.requireNonNull(lookup, "lookup");
+        this.roadRule = Objects.requireNonNull(roadRule, "roadRule");
         this.currentRegionIds = Set.copyOf(currentRegionIds);
         this.bypass = bypass;
         List<Exit> found = new ArrayList<>();
         if (!bypass) {
             for (String regionId : this.currentRegionIds) {
-                lookup.domainByRegionId(regionId).flatMap(evaluator::exit)
+                lookup.domainByRegionId(regionId).filter(roadRule::applies).flatMap(evaluator::exit)
                     .ifPresent(denial -> found.add(new Exit(regionId, denial)));
             }
             found.sort((a, b) -> a.regionId.compareTo(b.regionId));
@@ -97,7 +120,7 @@ public final class DomainAvailability implements AccessPolicy {
                 continue; // already inside: not an entry
             }
             Optional<Denial> denial = entryByRegion.computeIfAbsent(regionId,
-                id -> lookup.domainByRegionId(id).flatMap(evaluator::entry));
+                id -> lookup.domainByRegionId(id).filter(roadRule::applies).flatMap(evaluator::entry));
             if (denial.isPresent()) {
                 DomainSnapshot d = denial.get().domain();
                 return EdgeVerdict.blocked(String.format(ENTRY_MESSAGE, d.name()),

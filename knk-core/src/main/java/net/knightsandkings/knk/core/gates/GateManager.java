@@ -165,6 +165,7 @@ public class GateManager {
         }
 
         gateCache.put(gate.getId(), gate);
+        warnIfReservedName("Gate door", gate.getId(), gate.getName());
         spatialIndex.putAll(gate.getWorldName(), doorBlockPositions(gate, gate.getCurrentFrame()), gate.getId());
 
         LOGGER.info("Cached gate: " + gate.getName() + " (ID: " + gate.getId() +
@@ -184,6 +185,20 @@ public class GateManager {
             return;
         }
         structureCache.put(structure.getId(), structure);
+        warnIfReservedName("Gate structure", structure.getId(), structure.getName());
+    }
+
+    /**
+     * KNG-78: {@code here} is a keyword of the gate commands ("the gate/door near me"), so a gate
+     * or door literally named "here" can only be addressed by its id. knk-web-api rejects the name
+     * on create and rename; this flags names saved before that check existed.
+     */
+    private static void warnIfReservedName(String kind, int id, String name) {
+        if (GateCommandKeywords.isReserved(name)) {
+            LOGGER.warning(kind + " #" + id + " is named '" + name + "', a reserved gate command keyword"
+                + " (KNG-78): commands read '" + name + "' as the keyword, so address it by its id"
+                + " and rename it in the web app.");
+        }
     }
 
     /**
@@ -278,6 +293,15 @@ public class GateManager {
             .filter(structure -> structure.getName().equalsIgnoreCase(name))
             .findFirst()
             .orElse(null);
+    }
+
+    /**
+     * Get all cached gate structures.
+     *
+     * @return Map of gate structure ID to CachedGateStructure (a copy)
+     */
+    public Map<Integer, CachedGateStructure> getAllStructures() {
+        return new HashMap<>(structureCache);
     }
 
     /**

@@ -262,32 +262,37 @@ class AStarRouterTest {
     }
 
     @Test
-    void theOpenSideOfABlockedStartEdgeCanBeWalked() {
-        // live test 2026-10-08 (N6): standing on the gate road on B's side of the closed gate, the way back is open
-        RouteRequest req = request(SnapPoint.onEdge(town, E_BE, 50), SnapPoint.atNode(town, A),
-            gate(AnimationState.CLOSED, false, false)).withStartSides(new RouteRequest.StartSides(true, false));
-        RouteResult r = router.routeOrExplain(req);
+    void aStartAtTheNodeOfABlockedEdgeLeavesFromTheNode() {
+        // rev. 7 Part A: without start sides a blocked start edge cannot be left - except from its node, where the
+        // snapper may put a player standing on a junction (or on the split node before a door's piece)
+        AccessPolicy closed = gate(AnimationState.CLOSED, false, false);
+        RouteResult atB = router.route(request(SnapPoint.onEdge(town, E_BE, 0.3), SnapPoint.atNode(town, A), closed));
+        assertEquals(RouteResult.Status.FOUND, atB.status());
+        assertEquals(List.of(-E_AB), edges(atB.route()), "the closed gate's edge is not part of the route");
 
-        assertEquals(RouteResult.Status.FOUND, r.status());
-        assertEquals(List.of(-E_BE, -E_AB), edges(r.route()));
-        assertEquals(150, r.route().length(), 1e-9);
-        assertTrue(r.route().steps().get(0).verdict().isOpen(), "the walked part of the start edge is open");
-
-        // towards the gate it stays blocked; the explanation's partial route is empty (the player is at it)
-        RouteResult toE = router.routeOrExplain(request(SnapPoint.onEdge(town, E_BE, 50), SnapPoint.atNode(town, E),
-            gate(AnimationState.CLOSED, false, false)).withStartSides(new RouteRequest.StartSides(true, false)));
-        assertEquals(RouteResult.Status.BLOCKED, toE.status());
-        assertEquals(E_BE, toE.explanation().blockedEdge().id());
-        assertTrue(toE.route().isEmpty());
+        RouteResult inFront = router.route(request(SnapPoint.onEdge(town, E_BE, 2), SnapPoint.atNode(town, A), closed));
+        assertFalse(inFront.isFound(), "2 blocks onto the blocked edge: not at the node");
     }
 
     @Test
-    void theOpenSideLeadsOnToTheGoalWhenTheExplainerWouldOtherwiseStopAtTheStart() {
-        // the all-open route to E goes forward over the start edge; the open side is forward: no block on the way
-        RouteResult r = router.routeOrExplain(request(SnapPoint.onEdge(town, E_BE, 50), SnapPoint.atNode(town, E),
-            gate(AnimationState.CLOSED, false, false)).withStartSides(new RouteRequest.StartSides(false, true)));
-        assertEquals(RouteResult.Status.FOUND, r.status());
-        assertEquals(List.of(E_BE), edges(r.route()));
+    void withNoOpenRouteThePlayerIsGuidedAsCloseAsTheOpenRoadsGo() {
+        // live test 2026-10-09 (N14): in front of a denied district on the way, the goal behind a closed gate - the
+        // shortest all-open route stopped at the district's edge; the detour by road reaches the gate
+        AccessPolicy deniedDistrict = e -> e.id() == E_AB
+            ? EdgeVerdict.blocked("you may not enter Navigation Test", EdgeVerdict.Cause.domain(16, "Navigation Test"))
+            : EdgeVerdict.open();
+        RouteRequest req = request(SnapPoint.atNode(town, A), SnapPoint.atNode(town, E),
+            CompositeAccessPolicy.of(gate(AnimationState.CLOSED, false, false), deniedDistrict));
+
+        RouteResult r = router.routeOrExplain(req);
+
+        assertEquals(RouteResult.Status.BLOCKED, r.status());
+        assertEquals("the West Gate is closed", r.explanation().reason(), "the block on the way on from the closest point");
+        assertEquals(E_BE, r.explanation().blockedEdge().id());
+        Route guide = r.explanation().partialRoute();
+        assertEquals(100, guide.end().x(), 1e-9, "guided round to B, where the gate edge starts");
+        assertEquals(0, guide.end().z(), 1e-9);
+        assertTrue(edges(guide).stream().noneMatch(id -> Math.abs(id) == E_AB), "round the district, not into it");
     }
 
     // ---- domains -----------------------------------------------------------------------------------

@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -96,26 +97,6 @@ public final class NavigationService implements SiegeMatchObserver {
     @FunctionalInterface
     public interface PolicyFactory {
         AccessPolicy policyFor(Player player, RoadNetworkSnapshot snapshot);
-
-        /**
-         * Main thread: when {@code policy} blocks the start edge, which of its parts - from the start
-         * point to each node - the player may walk (live test 2026-10-08, N6); null when the edge is
-         * not blocked or nothing can tell.
-         */
-        default RouteRequest.StartSides startSides(Player player, RoadNetworkSnapshot snapshot, SnapPoint start,
-                                                   AccessPolicy policy) {
-            return null;
-        }
-
-        /**
-         * Main thread: whether the part of {@code edge} between two polyline positions is usable - the
-         * stretch still ahead of a player on a blocked edge (N10: a gate behind them no longer counts).
-         * Without the world side, the whole edge's verdict.
-         */
-        default boolean partOpen(Player player, RoadNetworkSnapshot snapshot, RoadEdge edge, double fromAlong,
-                                 double toAlong, AccessPolicy policy) {
-            return policy.check(edge).isUsable();
-        }
     }
 
     /**
@@ -201,6 +182,8 @@ public final class NavigationService implements SiegeMatchObserver {
 
     private final Deps deps;
     private final RouterParameters routerParameters;
+    /** Snapping a destination: no height weight by default, its last leg is a walk path (finding N15). */
+    private final RouterParameters destinationParameters;
     private final SessionParameters sessionParameters;
     private final EtaEstimator eta;
     /** The HUD arrow of a walking leg points this far ahead along the path. */
@@ -230,8 +213,11 @@ public final class NavigationService implements SiegeMatchObserver {
         int announcedManeuvers;
         boolean hintShown;
         long lastRecheckTick;
-        /** The last route request: its start sides tell the re-check which start edge part is open (N6). */
-        RouteRequest lastRequest;
+        /**
+         * The roads were tried (or used) for this navigation: a direct leg whose walk search finds no way
+         * asks the road network once, never again - also not for the last leg after a road's end (N13).
+         */
+        boolean roadsTried;
 
         Active(Player player, Destination destination, long startedTick) {
             this.player = player;
@@ -337,6 +323,7 @@ public final class NavigationService implements SiegeMatchObserver {
     public NavigationService(Deps deps) {
         this.deps = Objects.requireNonNull(deps, "deps");
         this.routerParameters = deps.config().routerParameters();
+        this.destinationParameters = deps.config().destinationRouterParameters();
         this.sessionParameters = deps.config().sessionParameters();
         this.eta = new EtaEstimator(sessionParameters.sprintSpeed());
     }
@@ -493,7 +480,7 @@ public final class NavigationService implements SiegeMatchObserver {
                 if (distance(px, pFloorY, pz, floor) <= maxSnap) {
                     return new Goals(List.of(), floor, null, true, null, false);
                 }
-                Optional<SnapPoint> goal = snapper.snapFloor(floor[0], floor[1], floor[2]);
+                Optional<SnapPoint> goal = new Snapper(snapshot, destinationParameters).snapFloor(floor[0], floor[1], floor[2]);
                 if (goal.isEmpty()) {
                     return Goals.refused(NavigationMessages.destinationTooFar(destination.name()));
                 }
@@ -616,7 +603,8 @@ public final class NavigationService implements SiegeMatchObserver {
 
     /**
      * The goals: as resolved, unless none is in the start's component - then, for a point or a node,
-     * the target re-snapped to a road of the start's component within the snap distance.
+     * the target re-snapped to a road of the start's component within the snap distance (a destination's
+     * height weight, N15).
      */
     List<SnapPoint> connectedGoals(RoadNetworkSnapshot snapshot, SnapPoint start, List<SnapPoint> goals, double[] target,
                                    Destination destination) {
@@ -625,7 +613,7 @@ public final class NavigationService implements SiegeMatchObserver {
             || (destination.kind() != Destination.Kind.POINT && destination.kind() != Destination.Kind.NODE)) {
             return goals;
         }
-        return new Snapper(snapshot, routerParameters)
+        return new Snapper(snapshot, destinationParameters)
             .snapFloor(target[0], target[1], target[2], c -> c == startComponent).map(List::of).orElse(goals);
     }
 
@@ -892,6 +880,72 @@ public final class NavigationService implements SiegeMatchObserver {
                 + (result == null ? "" : " (" + result.reason() + ", " + result.expansions() + " cells)")
                 + (partial.isPresent() ? ", partial path" : ""));
         }
+        if (result != null && !result.isFound() && !a.roadsTried) {
+            a.roadsTried = true;
+            if (tryRoadsInstead(a, leg, generation, () -> adoptWalkResult(a, leg, result, partial))) {
+                return; // the straight line stays until the road route is known
+            }
+        }
+        adoptWalkResult(a, leg, result, partial);
+    }
+
+    /**
+     * Live test 2026-10-08 run 5 (A8/A9, finding N13): a nearby target the walk search cannot reach may still
+     * be reached by the roads - back and round. Asks the router once (from a road within the snap distance to
+     * the road nearest the leg's target); a found route turns the navigation into a routed one, whose last
+     * leg is again a walk path. False when no road is near enough; else {@code otherwise} runs on the main
+     * thread when there is no road route.
+     */
+    private boolean tryRoadsInstead(Active a, DirectLeg leg, int generation, Runnable otherwise) {
+        RoadNetworkSnapshot snapshot = a.snapshot;
+        if (snapshot == null || snapshot.isEmpty()) {
+            return false;
+        }
+        Location feet = a.player.getLocation();
+        Optional<SnapPoint> start = new Snapper(snapshot, routerParameters).snap(feet.getX(), feet.getY(), feet.getZ());
+        Optional<SnapPoint> goal = new Snapper(snapshot, destinationParameters).snapFloor(leg.target[0], leg.target[1],
+            leg.target[2]);
+        if (start.isEmpty() || goal.isEmpty()) {
+            return false;
+        }
+        SnapPoint from = connectedStart(snapshot, feet, start.get(), List.of(goal.get()));
+        List<SnapPoint> to = connectedGoals(snapshot, from, List.of(goal.get()), leg.target,
+            Destination.point(a.destination.name(), a.destination.world(), 0, 0, 0));
+        AccessPolicy policy = deps.policies().policyFor(a.player, snapshot);
+        RouteRequest request = RouteRequest.of(from, to, policy, routerParameters);
+        deps.routing().execute(() -> {
+            RouteResult result;
+            try {
+                result = new AStarRouter(snapshot).route(request);
+            } catch (RuntimeException e) {
+                deps.logger().log(Level.WARNING, "[Navigation] Road fallback routing failed for " + a.player.getName(), e);
+                result = RouteResult.noRoute();
+            }
+            RouteResult delivered = result;
+            deps.mainThread().execute(() -> {
+                if (active.get(a.player.getUniqueId()) != a || a.leg != leg || leg.generation != generation) {
+                    return;
+                }
+                if (!delivered.isFound()) {
+                    otherwise.run();
+                    return;
+                }
+                a.player.sendMessage(NavigationMessages.roadsInstead(a.destination.name()));
+                dropLeg(a);
+                a.leg = null;
+                a.goals = to;
+                a.target = leg.target;
+                long now = deps.tick().getAsLong();
+                a.session = new NavigationSession(sessionParameters, new ManeuverBuilder(snapshot)::build, now);
+                a.session.start(); // its first computation is this one: the result is fed in below
+                apply(a, a.session.onRouteResult(delivered, now));
+            });
+        });
+        return true;
+    }
+
+    /** The walk result on the leg: the path, the partial path, or "no conventional path" (N8). */
+    private void adoptWalkResult(Active a, DirectLeg leg, WalkResult result, Optional<WalkPath> partial) {
         boolean wasWalking = leg.walking();
         if (result != null && !result.isFound() && !leg.noPathAnnounced) {
             leg.noPathAnnounced = true;
@@ -1072,9 +1126,7 @@ public final class NavigationService implements SiegeMatchObserver {
         AccessPolicy policy = deps.policies().policyFor(player, snapshot);
         SnapPoint from = connectedStart(snapshot, feet, start.get(), a.goals);
         List<SnapPoint> to = connectedGoals(snapshot, from, a.goals, a.target, a.destination);
-        RouteRequest request = RouteRequest.of(from, to, policy, routerParameters)
-            .withStartSides(deps.policies().startSides(player, snapshot, from, policy));
-        a.lastRequest = request;
+        RouteRequest request = RouteRequest.of(from, to, policy, routerParameters);
         int generation = a.generation;
         deps.routing().execute(() -> {
             RouteResult result;
@@ -1110,6 +1162,9 @@ public final class NavigationService implements SiegeMatchObserver {
             case REOPENED -> player.sendMessage(NavigationMessages.reopened(a.destination.name()));
             case ELEMENT_BLOCKED, OFF_ROUTE -> effect.explanation()
                 .ifPresent(why -> player.sendMessage(NavigationMessages.partialRoute(a.destination.name(), why)));
+            case NETWORK_CHANGED -> {
+                // silent: the same way on the new network
+            }
         }
         if (!a.hintShown) {
             for (Route.Step step : route.passThroughSteps()) {
@@ -1177,6 +1232,7 @@ public final class NavigationService implements SiegeMatchObserver {
             double d = distance(feet.getX(), feet.getY() - 1, feet.getZ(), a.target);
             if (d > sessionParameters.arriveDistance() && d <= routerParameters.maxSnapDistance()) {
                 a.session = null;
+                a.roadsTried = true; // the roads brought the player as close as they go
                 startDirect(a);
                 return;
             }
@@ -1241,15 +1297,9 @@ public final class NavigationService implements SiegeMatchObserver {
                 stepStart = stepEnd;
                 continue; // walked already: a gate closing behind the player is no block (live test 2026-10-08, N10)
             }
+            // on the routing view (rev. 7 Part A) a step is one access situation: a gate's door is its own piece
             EdgeVerdict verdict = policy.check(step.edge());
-            boolean openSide = i == 0 && a.lastRequest != null
-                && a.lastRequest.startStepOpenBySides(step.edge().id(), step.forward());
-            if (verdict.isBlocked() && !openSide && stepStart < travelled) {
-                // on this step now: only the stretch still ahead counts
-                double here = step.entryAlong() + (step.forward() ? 1 : -1) * (travelled - stepStart);
-                openSide = deps.policies().partOpen(a.player, a.snapshot, step.edge(), here, step.exitAlong(), policy);
-            }
-            if (verdict.isBlocked() && !openSide) {
+            if (verdict.isBlocked()) {
                 apply(a, a.session.onElementBlocked(verdict, now));
                 return;
             }
@@ -1259,6 +1309,13 @@ public final class NavigationService implements SiegeMatchObserver {
         if (why.isPresent() && !policy.check(why.get().blockedEdge()).isBlocked()) {
             apply(a, a.session.onElementOpened(now));
         }
+    }
+
+    /** An edge as admins know it: the stored id, plus the stretch for a piece of the routing view (rev. 7 Part A). */
+    static String edgeLabel(RoadNetworkSnapshot snapshot, RoadEdge edge) {
+        return snapshot.piece(edge.id())
+            .map(p -> String.format(Locale.ROOT, "#%d blocks %.0f-%.0f", p.parentEdgeId(), p.fromAlong(), p.toAlong()))
+            .orElse("#" + edge.id());
     }
 
     /** A gate changed state (R4 listener, hopped to the main thread by the caller). */
@@ -1323,6 +1380,9 @@ public final class NavigationService implements SiegeMatchObserver {
                 end(a, EndReason.DESTINATION_LOST);
                 continue;
             }
+            if (goals.direct() && a.roadsTried) {
+                continue; // following the roads because no walk path led straight there (N13): keep that route
+            }
             a.snapshot = snapshot;
             a.goals = goals.goals();
             a.target = goals.target();
@@ -1332,7 +1392,11 @@ public final class NavigationService implements SiegeMatchObserver {
                 startDirect(a);
                 continue;
             }
-            apply(a, a.session.onElementOpened(now));
+            // the route and its instructions belong to the old network, whose edge ids the routing view may not
+            // have (live test 2026-10-09, "unknown road edge 5385"): drop a route still being computed on it and
+            // take the one computed on the new network as it is
+            a.generation++;
+            apply(a, a.session.onNetworkChanged(new ManeuverBuilder(snapshot)::build, now));
         }
     }
 
@@ -1423,8 +1487,7 @@ public final class NavigationService implements SiegeMatchObserver {
         AccessPolicy policy = deps.policies().policyFor(as, snapshot);
         SnapPoint from = connectedStart(snapshot, feet, start.get(), goals.goals());
         List<SnapPoint> to = connectedGoals(snapshot, from, goals.goals(), goals.target(), destination);
-        RouteRequest request = RouteRequest.of(from, to, policy, routerParameters)
-            .withStartSides(deps.policies().startSides(as, snapshot, from, policy));
+        RouteRequest request = RouteRequest.of(from, to, policy, routerParameters);
         deps.routing().execute(() -> {
             List<Component> lines = new ArrayList<>();
             try {
@@ -1432,11 +1495,12 @@ public final class NavigationService implements SiegeMatchObserver {
                 switch (result.status()) {
                     case FOUND -> {
                         Route route = result.route();
+                        long edges = route.steps().stream().map(s -> snapshot.storedEdgeId(s.edge().id())).distinct().count();
                         lines.add(NavigationMessages.whyResult("Open route: " + EtaEstimator.formatDistance(route.length())
-                            + ", " + route.steps().size() + " edges.", true));
+                            + ", " + edges + " edges.", true));
                         for (Route.Step step : route.steps()) {
                             if (step.verdict() != null && !step.verdict().isOpen()) {
-                                lines.add(NavigationMessages.whyVerdict(step.edge().id(), step.verdict()));
+                                lines.add(NavigationMessages.whyVerdict(edgeLabel(snapshot, step.edge()), step.verdict()));
                             }
                         }
                     }
@@ -1447,7 +1511,7 @@ public final class NavigationService implements SiegeMatchObserver {
                         Route full = why.fullRoute().withVerdicts(snapshot, policy);
                         for (Route.Step step : full.steps()) {
                             if (step.verdict() != null && !step.verdict().isOpen()) {
-                                lines.add(NavigationMessages.whyVerdict(step.edge().id(), step.verdict()));
+                                lines.add(NavigationMessages.whyVerdict(edgeLabel(snapshot, step.edge()), step.verdict()));
                             }
                         }
                     }

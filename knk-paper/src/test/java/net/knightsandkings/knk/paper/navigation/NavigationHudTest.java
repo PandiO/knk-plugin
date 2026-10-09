@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -76,5 +77,24 @@ class NavigationHudTest {
         hud.arrowTowards(player, 0, 10);
 
         verify(player).sendActionBar(any(net.kyori.adventure.text.Component.class));
+    }
+
+    @Test
+    void theArrowAndTheClearOnHideYieldWhileAnotherMessageHoldsTheActionBar() {
+        World world = mock(World.class);
+        Player player = mock(Player.class);
+        UUID id = UUID.randomUUID();
+        when(player.getUniqueId()).thenReturn(id);
+        when(player.getLocation()).thenReturn(new Location(world, 0, 65, 0, 0f, 0f));
+        boolean[] held = {true};
+        hud.yieldActionBarWhile(uuid -> uuid.equals(id) && held[0]);
+
+        hud.arrowTowards(player, 0, 10);
+        hud.hide(player);
+        verify(player, never()).sendActionBar(any(net.kyori.adventure.text.Component.class));
+
+        held[0] = false;
+        hud.arrowTowards(player, 0, 10);
+        verify(player, times(1)).sendActionBar(any(net.kyori.adventure.text.Component.class));
     }
 }

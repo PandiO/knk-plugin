@@ -18,6 +18,17 @@ commands:
     # umbrella - can still reach /knk at all. Gating the whole command behind knk.admin here
     # would make that per-subcommand granularity unreachable.
 
+  gate:
+    description: "Control a whole gate (structure and all its doors) - same as /knk gate"
+    usage: "/gate <open|close|toggle|info|list|repair|tp|override|reload|passthrough> [structure|here]"
+    # No permission: here (KNG-77) - every subaction is gated on its own knk.gate.* node inside
+    # GateCommand, exactly as /knk gate (this runs /knk gate).
+
+  gatedoor:
+    description: "Control one gate door - same as /knk gatedoor"
+    usage: "/gatedoor <open|close|toggle|info|list|repair|tp|health|active|invincible|capture|redefine> [door|here]"
+    # No permission: here (KNG-77) - gated on knk.gatedoor.* / knk.gate.* inside GateDoorCommand.
+
   account:
     description: "Manage your in-game account (create, link, view status)"
     usage: "/account [create|link|status]"
@@ -769,13 +780,31 @@ permissions:
       knk-web-api through the in-house permission model.
     default: op
 
+  # KNG-77: knk.gate.* nodes are per gate STRUCTURE (/gate, all doors); knk.gatedoor.* per door
+  # (/gatedoor). A structure-level node also covers that structure's doors. Per-id forms:
+  # knk.gate.open.<structureId>, knk.gatedoor.open.<doorId> (same for close).
   knk.gate.open.*:
-    description: Permission to open any gate
+    description: Open (and toggle open) any whole gate with /gate - and so any of its doors with /gatedoor
     default: false
     
   knk.gate.close.*:
-    description: Permission to close any gate
+    description: Close (and toggle closed) any whole gate with /gate - and so any of its doors with /gatedoor
     default: false
+
+  knk.gatedoor.open.*:
+    description: Open (and toggle open) any single gate door with /gatedoor
+    default: false
+
+  knk.gatedoor.close.*:
+    description: Close (and toggle closed) any single gate door with /gatedoor
+    default: false
+
+  knk.gatedoor.admin:
+    description: Door-level gate admin commands (/gatedoor repair|tp|health|active|invincible|capture|redefine). knk.gate.admin covers these too.
+    default: op
+    children:
+      knk.gatedoor.open.*: true
+      knk.gatedoor.close.*: true
 
   knk.gate.passthrough.use:
     description: Base permission to trigger any gate pass-through mode by right-clicking a closed, pass-through-enabled gate
@@ -786,9 +815,10 @@ permissions:
     default: false
 
   knk.gate.admin:
-    description: Permission to use admin gate commands. Also grants full, unconditional gate pass-through access (bypasses AllowPassThrough and mode permissions).
+    description: Permission to use admin gate commands (/gate repair|tp|override|reload, and every /gatedoor admin command). Also grants full, unconditional gate pass-through access (bypasses AllowPassThrough and mode permissions).
     default: op
     children:
+      knk.gatedoor.admin: true
       knk.gate.open.*: true
       knk.gate.close.*: true
       knk.gate.passthrough.use: true

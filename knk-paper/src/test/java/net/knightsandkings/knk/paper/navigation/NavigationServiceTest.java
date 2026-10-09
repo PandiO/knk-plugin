@@ -28,6 +28,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.logging.Logger;
@@ -48,7 +49,9 @@ import net.knightsandkings.knk.core.regions.DomainAccessEvaluator;
 import net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot;
 import net.knightsandkings.knk.core.roads.route.CompositeAccessPolicy;
 import net.knightsandkings.knk.core.roads.route.DomainAvailability;
+import net.knightsandkings.knk.core.domain.roads.RoadEdge;
 import net.knightsandkings.knk.core.roads.route.GateAvailability;
+import net.knightsandkings.knk.core.roads.route.Route;
 import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
 import net.knightsandkings.knk.core.roads.route.AccessPolicy;
 import net.knightsandkings.knk.core.roads.route.SnapPoint;
@@ -261,6 +264,76 @@ class NavigationServiceTest {
     }
 
     @Test
+    void aDestinationHighAboveARoadIsReachedByRoadThenItsLastLeg() {
+        // live test 2026-10-09 (N15): a tower roof 30 blocks above the road measured 120 with the height ×4
+        service.navigate(player, Destination.point("Tower Roof", NavigationTestNetwork.WORLD, 60.5, 95, 0.5));
+
+        assertTrue(service.isNavigating(playerId), messages().toString());
+        assertFalse(service.isDirect(playerId), "67 blocks away: by road first");
+        assertTrue(messages().stream().noneMatch(m -> m.contains("too far from any road")), messages().toString());
+        assertEquals(60, service.sessionOf(playerId).orElseThrow().route().orElseThrow().length(), 1.0,
+            "along Main Street to below the roof");
+    }
+
+    @Test
+    void aPlayerUnderABridgeStillStartsOnTheRoadBelow() {
+        // the start keeps the height ×4: the bridge 8 blocks overhead is nearer in plain 3D than the road 10 blocks aside
+        RoadNetworkSnapshot bridge = RoadNetworkSnapshot.builder(NavigationTestNetwork.WORLD)
+            .addProfile(network.snapshot.profiles().get(1))
+            .addNode(node(80, -60, 64, 0, 1)).addNode(node(81, 60, 64, 0, 1))
+            .addNode(node(82, 0, 72, -60, 1)).addNode(node(83, 0, 72, 60, 1))
+            .addEdge(edge(80, 80, 81, new int[] {-60, 64, 0}, new int[] {60, 64, 0}))
+            .addEdge(edge(81, 83, 82, new int[] {0, 72, 60}, new int[] {0, 72, -60}))
+            .addEdge(edge(82, 81, 83, new int[] {60, 64, 0}, new int[] {0, 72, 60}))
+            .build();
+        serviceOn(bridge);
+        moveTo(0.5, 65, 10.5);
+
+        service.navigate(player, Destination.point("South Bank", NavigationTestNetwork.WORLD, 0.5, 73, -59.5));
+
+        assertTrue(service.isNavigating(playerId), messages().toString());
+        assertEquals(80, service.sessionOf(playerId).orElseThrow().route().orElseThrow().steps().get(0).edge().id(),
+            "starts on the road below, not on the bridge");
+    }
+
+    @Test
+    void aHighDestinationReSnapsToTheStartsNetworkWithoutTheHeightWeight() {
+        // N12 with N15: the roof's nearest road is a stretch that joins nothing; Main Street is 36 blocks off (plain)
+        RoadNetworkSnapshot withStub = RoadNetworkSnapshot.builder(NavigationTestNetwork.WORLD)
+            .addNodes(network.snapshot.nodes()).addEdges(network.snapshot.edges())
+            .addProfile(network.snapshot.profiles().get(1))
+            .addNode(node(90, 55, 90, 20, 99)).addNode(node(91, 65, 90, 20, 99))
+            .addEdge(edge(90, 90, 91, new int[] {55, 90, 20}, new int[] {65, 90, 20}))
+            .build();
+        serviceOn(withStub);
+
+        service.navigate(player, Destination.point("Tower Roof", NavigationTestNetwork.WORLD, 60.5, 95, 20.5));
+
+        assertTrue(service.isNavigating(playerId), messages().toString());
+        assertTrue(messages().stream().noneMatch(m -> m.contains("No road connects")), messages().toString());
+        assertEquals(NavigationTestNetwork.E_AB, service.sessionOf(playerId).orElseThrow().route().orElseThrow()
+            .steps().get(0).edge().id());
+    }
+
+    private void serviceOn(RoadNetworkSnapshot snapshot) {
+        service = new NavigationService(new NavigationService.Deps(null, NavigationConfig.defaults(),
+            w -> snapshot, policies, shapes, eligibility, hud, trail, Runnable::run, Runnable::run, tick::get,
+            events::add, Logger.getLogger("test")));
+    }
+
+    private static net.knightsandkings.knk.core.domain.roads.RoadNode node(int id, int x, int y, int z, int component) {
+        return new net.knightsandkings.knk.core.domain.roads.RoadNode(id, x, y, z,
+            net.knightsandkings.knk.core.domain.roads.RoadNodeKind.ENDPOINT, null, component);
+    }
+
+    private static RoadEdge edge(int id, int from, int to, int[] a, int[] b) {
+        double length = Math.sqrt(Math.pow(b[0] - a[0], 2) + Math.pow(b[1] - a[1], 2) + Math.pow(b[2] - a[2], 2));
+        return new RoadEdge(id, from, to, List.of(a, b), length, 3, java.util.OptionalInt.of(1),
+            java.util.OptionalInt.empty(), 1.0, java.util.EnumSet.noneOf(net.knightsandkings.knk.core.domain.roads.RoadEdgeFlag.class),
+            List.of(), List.of(), List.of(), net.knightsandkings.knk.core.domain.roads.RoadEdgeSource.DETECTED, false);
+    }
+
+    @Test
     void aNearbyTargetUsesDirectMode() {
         service.navigate(player, Destination.point("Well", NavigationTestNetwork.WORLD, 20.5, 65, 0.5));
 
@@ -357,6 +430,98 @@ class NavigationServiceTest {
         assertEquals(NavigationSession.State.GUIDING, session.state());
     }
 
+    /**
+     * Main Street's gate edge (B x=100 → C x=200) as the routing view has it (rev. 7 Part A): the door at x = 150 is
+     * its own piece (along 48.5-50.5), the stretches either side carry no door. What LiveEdgeTags builds from the world.
+     */
+    private RoadNetworkSnapshot gateView() {
+        return net.knightsandkings.knk.core.roads.route.RoutingView.build(network.snapshot, Map.of(NavigationTestNetwork.E_BC,
+            List.of(new net.knightsandkings.knk.core.roads.route.RoutingView.Span(0, 48.5, List.of(), List.of()),
+                new net.knightsandkings.knk.core.roads.route.RoutingView.Span(48.5, 50.5, List.of(),
+                    List.of(NavigationTestNetwork.GATE_DOOR)),
+                new net.knightsandkings.knk.core.roads.route.RoutingView.Span(50.5, 100, List.of(), List.of()))));
+    }
+
+    private RoadNetworkSnapshot serviceOnTheView() {
+        RoadNetworkSnapshot view = gateView();
+        service = new NavigationService(new NavigationService.Deps(null, NavigationConfig.defaults(),
+            w -> view, policies, shapes, eligibility, hud, trail, Runnable::run, Runnable::run, tick::get,
+            events::add, Logger.getLogger("test")));
+        return view;
+    }
+
+    @Test
+    void aDestinationOnTheOpenSideOfAClosedGateIsReached() {
+        // live test 2026-10-09 (A8/A9 with the gate closed, N14): South Gate's spawn snaps onto the gate's road on the
+        // town side of the door; the whole edge counted as blocked, and nothing was found. On the routing view the
+        // stretch before the door is a road of its own.
+        RoadNetworkSnapshot view = serviceOnTheView();
+        gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.CLOSED);
+
+        service.navigate(player, Destination.point("South Gate", NavigationTestNetwork.WORLD, 135.5, 65, 0.5));
+
+        NavigationSession session = service.sessionOf(playerId).orElseThrow();
+        assertTrue(session.explanation().isEmpty(), "a full route: " + messages());
+        Route route = session.route().orElseThrow();
+        assertEquals(NavigationTestNetwork.E_BC, view.storedEdgeId(route.steps().get(route.steps().size() - 1).edge().id()));
+        assertEquals(135, route.end().x(), 1.0);
+        ticks(NavigationService.RECHECK_TICKS + 1);
+        assertTrue(messages().stream().noneMatch(m -> m.contains("West Gate") || m.contains("No route")), messages().toString());
+    }
+
+    @Test
+    void aRouteStartingPastTheGateOnItsEdgeIsNotBlockedByIt() {
+        // live test 2026-10-08 run 5 (C3): navigation started on the town side of the South Gate, on the gate's own
+        // edge; the step walks only from the player to the node, but the whole edge's verdict was used
+        RoadNetworkSnapshot view = serviceOnTheView();
+        moveTo(170.5, 65, 0.5);
+        service.navigate(player, Destination.point("Kardenna Castle", NavigationTestNetwork.WORLD, 200.5, 65, 200.5));
+        NavigationSession session = service.sessionOf(playerId).orElseThrow();
+        assertEquals(NavigationTestNetwork.E_BC, view.storedEdgeId(session.route().orElseThrow().steps().get(0).edge().id()));
+
+        gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.CLOSED);
+        service.onGateChanged(NavigationTestNetwork.GATE_DOOR);
+        gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.OPENING);
+        service.onGateChanged(NavigationTestNetwork.GATE_DOOR);
+        ticks(NavigationService.RECHECK_TICKS + 1);
+
+        assertTrue(messages().stream().noneMatch(m -> m.contains("West Gate")), messages().toString());
+        assertEquals(NavigationSession.State.GUIDING, session.state());
+    }
+
+    @Test
+    void throughTheOpenGateThenItClosesBehindThePlayer() {
+        // live test 2026-10-09 (C3, the developer's procedure): /nav in front of the gate, open it, walk through,
+        // stop a little past it, close it - the part ahead was answered from the policy's cached whole-edge verdict
+        serviceOnTheView();
+        moveTo(120.5, 65, 0.5);
+        service.navigate(player, Destination.point("Kardenna Castle", NavigationTestNetwork.WORLD, 200.5, 65, 200.5));
+        NavigationSession session = service.sessionOf(playerId).orElseThrow();
+        for (double x = 125.5; x <= 160.5; x += 5) {
+            moveTo(x, 65, 0.5);
+            ticks(1);
+        }
+
+        gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.CLOSING);
+        service.onGateChanged(NavigationTestNetwork.GATE_DOOR);
+        gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.CLOSED);
+        service.onGateChanged(NavigationTestNetwork.GATE_DOOR);
+        ticks(NavigationService.RECHECK_TICKS + 1);
+
+        assertTrue(messages().stream().noneMatch(m -> m.contains("West Gate")), messages().toString());
+        assertEquals(NavigationSession.State.GUIDING, session.state());
+
+        // still in front of it, the closing gate does block
+        clearInvocations(player);
+        serviceOnTheView();
+        gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.OPEN);
+        moveTo(120.5, 65, 0.5);
+        service.navigate(player, Destination.point("Kardenna Castle", NavigationTestNetwork.WORLD, 200.5, 65, 200.5));
+        gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.CLOSED);
+        service.onGateChanged(NavigationTestNetwork.GATE_DOOR);
+        assertTrue(messages().stream().anyMatch(m -> m.contains("West Gate")), messages().toString());
+    }
+
     @Test
     void theSafetyNetRecheckCatchesAGateClosedWithoutAnEvent() {
         service.navigate(player, cinixKeep());
@@ -369,34 +534,18 @@ class NavigationServiceTest {
 
     @Test
     void standingOnTheRoadOfAClosedGateTheOpenSideLeadsToTheDetour() {
-        // live test 2026-10-08 (N6): in front of the closed gate, on its road - the way back is open
+        // live test 2026-10-08 (N6): in front of the closed gate, on its road - the way back is open. On the routing
+        // view the player stands on the stretch before the door, which the closed gate does not block.
         gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.CLOSED);
-        List<RouteRequest.StartSides> asked = new ArrayList<>();
-        NavigationService.PolicyFactory withSides = new NavigationService.PolicyFactory() {
-            @Override
-            public AccessPolicy policyFor(Player p, RoadNetworkSnapshot snapshot) {
-                return policies.policyFor(p, snapshot);
-            }
-
-            @Override
-            public RouteRequest.StartSides startSides(Player p, RoadNetworkSnapshot snapshot, SnapPoint start, AccessPolicy policy) {
-                RouteRequest.StartSides sides = new RouteRequest.StartSides(true, false);
-                asked.add(sides);
-                return sides;
-            }
-        };
-        service = new NavigationService(new NavigationService.Deps(null, NavigationConfig.defaults(),
-            w -> network.snapshot, withSides, shapes, eligibility, hud, trail, Runnable::run, Runnable::run, tick::get,
-            events::add, Logger.getLogger("test")));
+        RoadNetworkSnapshot view = serviceOnTheView();
         moveTo(140.5, 65, 0.5);
 
         service.navigate(player, cinixKeep());
 
         NavigationSession session = service.sessionOf(playerId).orElseThrow();
         assertTrue(session.explanation().isEmpty(), "a full route, not a partial one");
-        assertEquals(NavigationTestNetwork.E_BC, session.route().orElseThrow().steps().get(0).edge().id());
+        assertEquals(NavigationTestNetwork.E_BC, view.storedEdgeId(session.route().orElseThrow().steps().get(0).edge().id()));
         assertFalse(session.route().orElseThrow().steps().get(0).forward(), "back towards B");
-        assertEquals(1, asked.size());
         ticks(NavigationService.RECHECK_TICKS + 1);
         assertTrue(messages().stream().noneMatch(m -> m.contains("No open route") || m.contains("arrived")
             || m.contains("recalculating")), messages().toString());
@@ -693,6 +842,39 @@ class NavigationServiceTest {
         assertTrue(other.isNavigating(playerId), "the same network keeps the session");
     }
 
+    @Test
+    void aSwapToTheRoutingViewMovesTheRouteOntoTheView() {
+        // live test 2026-10-09: the first live-tag pass after a reload swapped the stored network for the routing
+        // view, whose edge ids differ; the session kept its old route and its old ManeuverBuilder
+        // ("unknown road edge 5385")
+        AtomicReference<net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot> current =
+            new AtomicReference<>(network.snapshot);
+        service = new NavigationService(new NavigationService.Deps(null, NavigationConfig.defaults(),
+            w -> current.get(), policies, shapes, eligibility, hud, trail, Runnable::run, Runnable::run, tick::get,
+            events::add, Logger.getLogger("test")));
+        service.navigate(player, cinixKeep());
+        var view = net.knightsandkings.knk.core.roads.route.RoutingView.build(network.snapshot,
+            Map.of(NavigationTestNetwork.E_BC, List.of(
+                new net.knightsandkings.knk.core.roads.route.RoutingView.Span(0, 48.5, List.of(), List.of()),
+                new net.knightsandkings.knk.core.roads.route.RoutingView.Span(48.5, 50.5, List.of(),
+                    List.of(NavigationTestNetwork.GATE_DOOR)),
+                new net.knightsandkings.knk.core.roads.route.RoutingView.Span(50.5, 100, List.of(), List.of()))));
+        int before = messages().size();
+
+        current.set(view);
+        service.onNetworkChanged(NavigationTestNetwork.WORLD);
+
+        assertTrue(service.isNavigating(playerId));
+        var route = service.sessionOf(playerId).orElseThrow().route().orElseThrow();
+        route.steps().forEach(step -> assertTrue(view.edge(step.edge().id()).isPresent(), "every step is a view edge"));
+        assertTrue(route.steps().stream().anyMatch(step -> view.piece(step.edge().id()).isPresent()), "through the pieces");
+        assertEquals(before, messages().size(), "the swap is silent");
+
+        moveTo(120.5, 65, 0.5);
+        ticks(100); // guidance and re-checks read the route against the view
+        assertTrue(service.isNavigating(playerId));
+    }
+
     // ==================== KNG-51 walk paths (LAST_MILE_PATHFINDING.md §7, §12) ====================
 
     @Test
@@ -736,7 +918,8 @@ class NavigationServiceTest {
             setup.run();
             clearInvocations(trail, player);
             NavigationService walking = walkService(NavigationConfig.defaults());
-            walking.navigate(player, well());
+            moveTo(40.5, 65, 60.5); // 60 blocks from any road: the roads cannot help either (N13)
+            walking.navigate(player, Destination.point("Well", NavigationTestNetwork.WORLD, 60.5, 65, 60.5));
             runSearches();
 
             assertEquals(NavigationService.DirectLeg.Status.NO_PATH, legStatus(walking));
@@ -750,6 +933,36 @@ class NavigationServiceTest {
             assertTrue(walking.isNavigating(playerId), "the leg stays; a door may open");
             walking.stop(player);
         }
+    }
+
+    @Test
+    void aNearbyTargetTheWalkSearchCannotReachIsReachedByTheRoads() {
+        // live test 2026-10-08 run 5 (A8/A9, N13): walking back and round by road reaches it
+        walkFinder = r -> WalkResult.noPath("target unreachable", 900);
+        NavigationService walking = walkService(NavigationConfig.defaults());
+
+        walking.navigate(player, well());
+        runSearches();
+
+        assertTrue(walking.isNavigating(playerId));
+        assertFalse(walking.isDirect(playerId), "a routed navigation now");
+        assertTrue(messages().stream().anyMatch(m -> m.contains("following the roads instead")), messages().toString());
+        assertTrue(messages().stream().noneMatch(m -> m.contains("No conventional path")), messages().toString());
+        assertTrue(walking.sessionOf(playerId).orElseThrow().route().isPresent());
+    }
+
+    @Test
+    void aNearbyHighTargetTheWalkSearchCannotReachIsTriedByRoadWithoutTheHeightWeight() {
+        // N13 with N15: 30 blocks above the road, so with the height ×4 no road was near enough to try
+        walkFinder = r -> WalkResult.noPath("target unreachable", 900);
+        NavigationService walking = walkService(NavigationConfig.defaults());
+
+        walking.navigate(player, Destination.point("Tower Roof", NavigationTestNetwork.WORLD, 30.5, 95, 0.5));
+        runSearches();
+
+        assertTrue(walking.isNavigating(playerId));
+        assertFalse(walking.isDirect(playerId), "a routed navigation now");
+        assertTrue(messages().stream().anyMatch(m -> m.contains("following the roads instead")), messages().toString());
     }
 
     @Test
@@ -782,8 +995,10 @@ class NavigationServiceTest {
             new double[] {12.5, 64, 6.5}));
         walkFinder = r -> WalkResult.noPath("target unreachable", 900, partial);
         NavigationService walking = walkService(NavigationConfig.defaults());
+        moveTo(40.5, 65, 60.5); // away from the roads, so they cannot help (N13)
+        Destination offRoad = Destination.point("Well", NavigationTestNetwork.WORLD, 60.5, 65, 60.5);
 
-        walking.navigate(player, well());
+        walking.navigate(player, offRoad);
         runSearches();
 
         assertEquals(NavigationService.DirectLeg.Status.WALKING, legStatus(walking));
@@ -797,7 +1012,7 @@ class NavigationServiceTest {
 
         walkFinder = r -> WalkResult.fallback("expansion budget", 20000, partial);
         NavigationService budget = walkService(NavigationConfig.defaults());
-        budget.navigate(player, well());
+        budget.navigate(player, offRoad);
         runSearches();
         assertEquals(NavigationService.DirectLeg.Status.WALKING, legStatus(budget), "a budget run-out uses it too");
     }
