@@ -220,6 +220,11 @@ public final class NavigationMessages {
         return warn("No conventional path to " + name + " found.");
     }
 
+    /** KNG-75: the walk search found no way from the player to the road the route starts on. */
+    public static Component noConventionalPathToRoad() {
+        return warn("No conventional path to the road found.");
+    }
+
     /** Direct mode found no walkable way straight there, but the roads lead there (N13). */
     public static Component roadsInstead(String name) {
         return info("No walkable way straight to " + name + " - following the roads instead.");

@@ -44,6 +44,7 @@ class ConfigLoaderNavigationTest {
         assertEquals(48, navigation.maxSnapDistance(), 0.0001);
         assertEquals(4, navigation.snapVerticalWeight(), 0.0001);
         assertEquals(1, navigation.destinationSnapVerticalWeight(), 0.0001);
+        assertEquals(96, navigation.maxStartDistance(), 0.0001);
         assertEquals(new NavigationConfig.TrailConfig(30, 10, "DUST", "#E8C66A"), navigation.trail());
         assertEquals(8, navigation.rerouteDistance(), 0.0001);
         assertEquals(40, navigation.rerouteAfterTicks());
@@ -113,6 +114,21 @@ class ConfigLoaderNavigationTest {
         assertEquals(4, navigation.routerParameters().snapVerticalWeight(), 0.0001, "the start's weight is unchanged");
 
         yaml.set("navigation.destination-snap-vertical-weight", -1);
+        assertThrows(IllegalArgumentException.class,
+            () -> ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation")).validate());
+    }
+
+    @Test
+    void thePlayersStartDistanceOverridesAndMustBePositive() {
+        // KNG-75: with walk paths the player may start this far from a road
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("navigation.max-start-distance", 64);
+        NavigationConfig navigation = ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation"));
+
+        assertEquals(64, navigation.maxStartDistance(), 0.0001);
+        assertEquals(48, navigation.maxSnapDistance(), 0.0001, "the destination limit is separate");
+
+        yaml.set("navigation.max-start-distance", 0);
         assertThrows(IllegalArgumentException.class,
             () -> ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation")).validate());
     }
