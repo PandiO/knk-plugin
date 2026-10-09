@@ -135,7 +135,7 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
 
     private boolean partOpen(RoadEdge edge, List<double[]> part, World world, GateCells gates, AccessPolicy policy) {
         Optional<RoadEdge> sub = partOf(edge, part, b -> regionIds.at(world, b[0], b[1], b[2]), gates);
-        return sub.isEmpty() || policy.check(sub.get()).isUsable(); // empty: the start point is the node
+        return sub.isEmpty() || policy.checkPart(sub.get()).isUsable(); // empty: the start point is the node
     }
 
     /**
