@@ -62,6 +62,24 @@ public final class Snapper {
     /** As above on the edges {@code edgeFilter} accepts (by edge index; null = all). */
     public static Optional<SnapPoint> snap(RoadNetworkSnapshot snapshot, double x, double y, double z,
                                            double maxDistance, double verticalWeight, java.util.function.IntPredicate edgeFilter) {
+        return snap(snapshot, x, y, z, maxDistance, verticalWeight, edgeFilter, false);
+    }
+
+    /**
+     * Like {@link #snap(RoadNetworkSnapshot, double, double, double, double, double, java.util.function.IntPredicate)},
+     * but {@code maxDistance} is plain 3D (KNG-75): the height weight only <i>ranks</i> the roads within reach, so a
+     * player beside a bridge still snaps to the bridge, while a road {@code maxDistance} blocks away is not out of
+     * reach because it lies below. The snap point's distance is the plain one.
+     */
+    public static Optional<SnapPoint> snapRanked(RoadNetworkSnapshot snapshot, double x, double y, double z,
+                                                 double maxDistance, double verticalWeight,
+                                                 java.util.function.IntPredicate edgeFilter) {
+        return snap(snapshot, x, y, z, maxDistance, verticalWeight, edgeFilter, true);
+    }
+
+    private static Optional<SnapPoint> snap(RoadNetworkSnapshot snapshot, double x, double y, double z, double maxDistance,
+                                            double verticalWeight, java.util.function.IntPredicate edgeFilter,
+                                            boolean plainLimit) {
         if (snapshot.isEmpty()) {
             return Optional.empty();
         }
@@ -89,6 +107,9 @@ public final class Snapper {
             double cy = ay + dy * t - y * w;
             double cz = az + dz * t - z;
             double d2 = cx * cx + cy * cy + cz * cz;
+            if (plainLimit && plainDistance(a, b, t, x, y, z) > maxDistance) {
+                return;
+            }
             if (d2 < best[0] || (d2 == best[0] && bestRef[0] >= 0 && lowerRef(edgeIndex, segmentIndex, bestRef))) {
                 best[0] = d2;
                 bestRef[0] = edgeIndex;
@@ -99,16 +120,26 @@ public final class Snapper {
         if (bestRef[0] < 0) {
             return Optional.empty();
         }
-        double distance = Math.sqrt(best[0]);
-        if (distance > maxDistance) {
-            return Optional.empty();
-        }
         RoadEdge edge = snapshot.edgeAt(bestRef[0]);
         EdgePolyline polyline = snapshot.polylineAt(bestRef[0]);
         int seg = bestRef[1];
         double t = bestT[0];
+        double distance = plainLimit
+            ? plainDistance(polyline.points().get(seg), polyline.points().get(seg + 1), t, x, y, z)
+            : Math.sqrt(best[0]);
+        if (distance > maxDistance) {
+            return Optional.empty();
+        }
         double[] point = EdgePolyline.interpolate(polyline.points().get(seg), polyline.points().get(seg + 1), t);
         return Optional.of(new SnapPoint(edge.id(), seg, t, point, distance, polyline.along(seg, t)));
+    }
+
+    /** Plain 3D distance from {@code (x, y, z)} to the point at {@code t} on the segment {@code a}-{@code b}. */
+    private static double plainDistance(int[] a, int[] b, double t, double x, double y, double z) {
+        double px = a[0] + (b[0] - a[0]) * t - x;
+        double py = a[1] + (b[1] - a[1]) * t - y;
+        double pz = a[2] + (b[2] - a[2]) * t - z;
+        return Math.sqrt(px * px + py * py + pz * pz);
     }
 
     /** Tie-break: the lower edge index, then the lower segment (deterministic across bucket order). */

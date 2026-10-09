@@ -60,6 +60,14 @@ public final class TrailRenderer {
      * point (floor coordinates; null when the route ends at it). Main thread.
      */
     public void drawRoute(Player viewer, Route route, double along, double[] target) {
+        drawRoute(viewer, route, along, target, true);
+    }
+
+    /**
+     * As {@link #drawRoute(Player, Route, double, double[])}; without {@code fromPlayer} no straight leg from the
+     * player to the trail - the walk leg to the road is drawn instead, or nothing when it has no way (KNG-75).
+     */
+    public void drawRoute(Player viewer, Route route, double along, double[] target, boolean fromPlayer) {
         double length = budget.isLagging() ? Math.max(4, config.length() / 2.0) : config.length();
         List<double[]> trail = trailPoints(route, along, length, SPACING);
         if (trail.isEmpty()) {
@@ -68,7 +76,7 @@ public final class TrailRenderer {
         Location feet = viewer.getLocation();
         double[] first = trail.get(0);
         double[] player = {feet.getX(), feet.getY() - 1, feet.getZ()};
-        if (distance(player, first) > LEG_MIN) {
+        if (fromPlayer && distance(player, first) > LEG_MIN) {
             drawLeg(viewer, player, first);
         }
         ParticleDraw.polyline(viewer, lifted(trail), SPACING, particle, routeData);

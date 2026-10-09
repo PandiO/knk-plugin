@@ -32,6 +32,9 @@ import net.knightsandkings.knk.core.roads.walk.WalkBudget;
  * @param snapVerticalWeight one block of height counts this many when snapping the player's start
  * @param destinationSnapVerticalWeight the same for a destination (finding N15): its last leg is a walk
  *                           path, which climbs, so the default 1 measures plain 3D
+ * @param maxStartDistance   with walk paths, the player may be this far from a road (plain 3D; KNG-75): the first
+ *                           leg is a walk path to it; {@code snap-vertical-weight} only picks the road. Without walk
+ *                           paths {@code max-snap-distance} (weighted) applies, as before
  * @param trail              the guidance trail (Phase 4)
  * @param rerouteDistance    off-route distance that triggers a re-route
  * @param rerouteAfterTicks  how long the player must stay off-route first
@@ -50,6 +53,7 @@ public record NavigationConfig(
     double maxSnapDistance,
     double snapVerticalWeight,
     double destinationSnapVerticalWeight,
+    double maxStartDistance,
     TrailConfig trail,
     double rerouteDistance,
     int rerouteAfterTicks,
@@ -62,6 +66,9 @@ public record NavigationConfig(
 ) {
     /** Default for {@code destination-snap-vertical-weight}: plain 3D (finding N15). */
     public static final double DEFAULT_DESTINATION_SNAP_VERTICAL_WEIGHT = 1;
+
+    /** Default for {@code max-start-distance}: the walk search's {@code max-length} (KNG-75). */
+    public static final double DEFAULT_MAX_START_DISTANCE = 96;
 
     /** Design default for {@code overlay-materials} (DESIGN §4). */
     public static final List<String> DEFAULT_OVERLAY_MATERIALS = List.of(
@@ -304,14 +311,14 @@ public record NavigationConfig(
 
     /**
      * Without a {@code walk:} block (callers from before KNG-51): the walk defaults; destinations snap with
-     * the default weight.
+     * the default weight; the default start distance.
      */
     public NavigationConfig(boolean enabled, Map<RoadClass, Double> classCost, List<String> overlayMaterials,
                             boolean seedFromDomains, double maxSnapDistance, double snapVerticalWeight, TrailConfig trail,
                             double rerouteDistance, int rerouteAfterTicks, double arriveDistance, int maxSessionMinutes,
                             double sprintSpeed, SurveyConfig survey, BuilderConfig builder) {
         this(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance, snapVerticalWeight,
-            DEFAULT_DESTINATION_SNAP_VERTICAL_WEIGHT, trail, rerouteDistance, rerouteAfterTicks, arriveDistance,
+            DEFAULT_DESTINATION_SNAP_VERTICAL_WEIGHT, DEFAULT_MAX_START_DISTANCE, trail, rerouteDistance, rerouteAfterTicks, arriveDistance,
             maxSessionMinutes, sprintSpeed, survey, builder, null);
     }
 
@@ -323,7 +330,7 @@ public record NavigationConfig(
     /** This config with another {@code walk:} block. */
     public NavigationConfig withWalk(WalkConfig walk) {
         return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
-            snapVerticalWeight, destinationSnapVerticalWeight, trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
+            snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
             survey, builder, walk);
     }
 
@@ -364,6 +371,9 @@ public record NavigationConfig(
         }
         if (snapVerticalWeight < 0) {
             throw new IllegalArgumentException("navigation.snap-vertical-weight must not be negative (got: " + snapVerticalWeight + ")");
+        }
+        if (!(maxStartDistance > 0)) {
+            throw new IllegalArgumentException("navigation.max-start-distance must be positive (got: " + maxStartDistance + ")");
         }
         if (destinationSnapVerticalWeight < 0) {
             throw new IllegalArgumentException("navigation.destination-snap-vertical-weight must not be negative (got: "
