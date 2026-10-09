@@ -38,7 +38,11 @@ public class UsersMapper {
             dto.gender(),
             dto.chatPrimaryColor(),
             dto.chatSecondaryColor(),
-            dto.nameColor()
+            dto.nameColor(),
+            dto.permissionGroups() == null ? java.util.List.of() : dto.permissionGroups().stream()
+                .filter(java.util.Objects::nonNull)
+                .map(g -> new net.knightsandkings.knk.core.domain.users.PermissionGroupRef(g.id(), g.name()))
+                .toList()
         );
     }
 
@@ -65,7 +69,10 @@ public class UsersMapper {
             domain.gender(),
             domain.chatPrimaryColor(),
             domain.chatSecondaryColor(),
-            domain.nameColor()
+            domain.nameColor(),
+            domain.permissionGroups().stream()
+                .map(g -> new net.knightsandkings.knk.api.dto.PermissionGroupRefDto(g.id(), g.name()))
+                .toList()
         );
     }
 

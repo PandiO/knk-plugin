@@ -265,6 +265,8 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.teleport.TeleportRequestService teleportRequestService;
     private net.knightsandkings.knk.paper.commands.TeleportRequestCommand teleportRequestCommand;
     private net.knightsandkings.knk.paper.teleport.SpawnDestinationResolver spawnDestinationResolver;
+    /** Global Game Settings (KNG-52); null without the API client. */
+    private net.knightsandkings.knk.paper.settings.GameSettingsManager gameSettingsManager;
     private net.knightsandkings.knk.paper.commands.SpawnCommand spawnCommand;
     private net.knightsandkings.knk.core.dataaccess.TeleportDestinationsDataAccess teleportDestinationsDataAccess;
     private net.knightsandkings.knk.paper.commands.WarpCommand warpCommand;
@@ -574,7 +576,10 @@ public class KnKPlugin extends JavaPlugin {
             // A grant or group change made in the web app shows in game within the 30 s cache time;
             // /knk cache refresh applies it at once.
             cacheManager.registerRefreshHook("permissions", permissionsDataAccess::invalidateAll);
-            this.joinLoadingGuard = new JoinLoadingGuard(this, knkPermissible);
+            // Hands back the world's Game Settings default mode when the hold ends; the manager is
+            // created later (initializeGameSettings), so it's read when a hold ends.
+            this.joinLoadingGuard = new JoinLoadingGuard(this, knkPermissible, player -> gameSettingsManager != null
+                ? gameSettingsManager.gameModeFor(player.getWorld()) : org.bukkit.GameMode.SURVIVAL);
             this.modeService = new ModeService(this, knkPermissible, cacheManager.getUserCache(), usersCommandApi);
             this.adminFreezeManager = new net.knightsandkings.knk.paper.user.AdminFreezeManager();
             initPrivateMessaging();
@@ -801,6 +806,10 @@ public class KnKPlugin extends JavaPlugin {
             // /knk tp delegates to /tp.
             initializeTeleports();
 
+            // Global Game Settings (docs/specs/game-settings, KNG-52) - after the teleports (it shares the
+            // /spawn resolver), before registerEvents (PlayerListener uses it).
+            initializeGameSettings();
+
             // Lootboxes Phase 3: world boxes, claims and delivery; commands registered in registerCommands().
             initializeLootboxes();
 
@@ -954,6 +963,9 @@ public class KnKPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (gameSettingsManager != null) {
+            gameSettingsManager.stop();
+        }
         // Players still loading their account would otherwise be saved in the hold's ADVENTURE
         // mode with the invulnerable flag set.
         if (joinLoadingGuard != null) {
@@ -1484,7 +1496,12 @@ public class KnKPlugin extends JavaPlugin {
         // Event registration moved to onEnable after region transition service setup
 
         pluginManager.registerEvents(new WorldGuardRegionListener(regionTracker), this);
-        pluginManager.registerEvents(new PlayerListener(usersDataAccess, townsDataAccess, this.getCacheManager(), knkPermissible, usersCommandApi, kitsCommandApi, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, ignoreService), this);
+        if (gameSettingsManager != null) {
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.GameSettingsWorldListener(this, gameSettingsManager), this);
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.GameSettingsMotdListener(gameSettingsManager), this);
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.GameSettingsWeatherCommandListener(gameSettingsManager), this);
+        }
+        pluginManager.registerEvents(new PlayerListener(usersDataAccess, gameSettingsManager, this.getCacheManager(), knkPermissible, usersCommandApi, kitsCommandApi, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, ignoreService), this);
         if (playerCurrencyService != null) {
             // Drops a leaving player's open /pay confirmation and its expiry notice.
             pluginManager.registerEvents(playerCurrencyService, this);
@@ -1912,10 +1929,45 @@ public class KnKPlugin extends JavaPlugin {
     }
 
     /**
+     * Global Game Settings (docs/specs/game-settings/DESIGN.md, KNG-52): announcements, join spawn and
+     * game mode, respawn policy, per-world time/weather/spawn, loaded-world reports. Reads
+     * {@code GET /api/GameSettings} every {@code game-settings.refresh-interval-seconds}; resolves its
+     * references through the /spawn resolver; {@code /knk cache refresh} re-reads everything.
+     */
+    private void initializeGameSettings() {
+        if (apiClient == null) {
+            getLogger().warning("Game settings not applied - the API client failed to initialize");
+            return;
+        }
+        var settingsConfig = net.knightsandkings.knk.paper.settings.GameSettingsConfig.from(getConfig());
+        this.gameSettingsManager = new net.knightsandkings.knk.paper.settings.GameSettingsManager(
+            this,
+            apiClient.getGameSettingsQueryApi(),
+            apiClient.getGameSettingsCommandApi(),
+            () -> spawnDestinationResolver,
+            townsQueryApi,
+            settingsConfig,
+            new net.knightsandkings.knk.paper.settings.GameSettingsStore(getDataFolder().toPath(), settingsConfig.backupHistoryLimit()));
+        gameSettingsManager.start();
+        if (cacheManager != null) {
+            cacheManager.registerRefreshHook("game settings", gameSettingsManager::refreshNow);
+            // /spawn honours a group's spawn override (DESIGN §3.8); the groups come from the cached summary.
+            if (spawnCommand != null) {
+                spawnCommand.setPlayerSpawn(player -> gameSettingsManager.groupSpawnPoint(
+                    cacheManager.getUserCache().getStale(player.getUniqueId())
+                        .map(net.knightsandkings.knk.core.domain.users.UserSummary::permissionGroups)
+                        .orElse(java.util.List.of())));
+            }
+        }
+        getLogger().info("Game settings initialized (refresh every " + settingsConfig.refreshIntervalSeconds()
+            + "s, world report check every " + settingsConfig.runtimeSyncIntervalSeconds() + "s)");
+    }
+
+    /**
      * {@code /spawn} (docs/specs/teleport/DESIGN.md §3.6): the spawn set on the web-app Game Settings
      * page ({@code GET /api/GameSettings}), resolved through the Location/Town/District/Structure
      * gateways and cached 5 min ({@code /knk cache refresh} drops it). Null when the API client or the
-     * caches didn't start. The join/respawn listeners still choose their own spot.
+     * caches didn't start. The join teleport uses the same resolver (GameSettingsManager).
      */
     private net.knightsandkings.knk.paper.commands.SpawnCommand createSpawnCommand(
             net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport support,
