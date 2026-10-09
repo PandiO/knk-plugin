@@ -1,6 +1,6 @@
 package net.knightsandkings.knk.paper.siege;
 
-import net.knightsandkings.knk.core.teleport.BlockProbe;
+import net.knightsandkings.knk.core.util.BlockProbe;
 import net.knightsandkings.knk.core.teleport.TeleportDenial;
 import net.knightsandkings.knk.core.teleport.TeleportKind;
 import net.knightsandkings.knk.core.teleport.TeleportOutcome;
@@ -262,12 +262,53 @@ class SiegeTeleportRestrictionTest {
         die(deaths, alice, matchDeath);
         assertTrue(restriction.backDeathExclusion().excludes(alice));
         members.remove(alice.getUniqueId());
-        assertEquals(BackService.NO_DEATH, done(back.start(alice)).code());
+        assertEquals(BackService.NOWHERE, done(back.start(alice, back.access(alice).join()).thenApply(BackService.Trip::outcome)).code());
 
         assertFalse(restriction.backDeathExclusion().excludes(alice));
         die(deaths, alice, cave);
-        assertTrue(finish(back.start(alice)).isTeleported());
+        assertTrue(finish(back.start(alice, back.access(alice).join()).thenApply(BackService.Trip::outcome)).isTeleported());
         verify(alice).teleportAsync(eq(cave), eq(TeleportCause.COMMAND));
+    }
+
+    @Test
+    void aPlaceFromBeforeTheSiegeIsUsableAfterIt_ButNotDuringIt() {
+        BackService back = new BackService(engine, Runnable::run, permissions, id -> id.equals(worldId) ? world : null);
+        back.registerDeathExclusion(restriction.backDeathExclusion());
+        BackDeathListener deaths = new BackDeathListener(back);
+        grant(alice, TeleportNodes.BACK_ALL, TeleportNodes.BYPASS_COOLDOWN);
+        Location field = alice.getLocation();
+        Location town = new Location(world, 700.5, 64, 700.5);
+        Location hub = new Location(world, 500.5, 64, 500.5);
+        when(alice.teleport(any(Location.class), any(TeleportCause.class))).thenReturn(true);
+
+        assertTrue(finish(engine.start(TeleportPlan.warp(alice, town, "Town", null))).isTeleported());
+        when(alice.getLocation()).thenReturn(town);
+        joinSiege(alice);
+        SiegeBukkit.teleport(alice, hub);           // the siege's own teleport: never recorded
+        when(alice.getLocation()).thenReturn(hub);
+        die(deaths, alice, new Location(world, 10.5, 64, 10.5)); // a match death: never recorded
+
+        TeleportOutcome during = done(back.start(alice, back.access(alice).join()).thenApply(BackService.Trip::outcome));
+        assertEquals(TeleportDenial.SIEGE, during.code());
+
+        members.remove(alice.getUniqueId());
+        SiegeBukkit.teleport(alice, town);          // returned after the match
+        when(alice.getLocation()).thenReturn(town);
+        TeleportOutcome after = finish(back.start(alice, back.access(alice).join()).thenApply(BackService.Trip::outcome));
+        assertTrue(after.isTeleported());
+        verify(alice).teleportAsync(eq(field), eq(TeleportCause.COMMAND));
+    }
+
+    @Test
+    void staffBackOfAMemberWithNothingRecordedSaysTheyAreInASiege() {
+        BackService back = new BackService(engine, Runnable::run, permissions, id -> id.equals(worldId) ? world : null);
+        joinSiege(alice);
+
+        TeleportOutcome outcome = done(back.startFor(bob, alice, false).thenApply(BackService.Trip::outcome));
+        assertSiegeDenial("Alice is in a siege match; use /siege admin kick first.", outcome);
+
+        members.remove(alice.getUniqueId());
+        assertEquals(BackService.NOWHERE, done(back.startFor(bob, alice, false).thenApply(BackService.Trip::outcome)).code());
     }
 
     private void die(BackDeathListener deaths, Player player, Location where) {

@@ -26,9 +26,27 @@ public interface TeleportDestinationsCommandApi {
     CompletableFuture<TeleportChargeResult> chargeWarp(int domainId, int userId, String idempotencyKey,
                                                       boolean bypassRequirements, boolean bypassCost);
 
-    /** Charge the coin fee of a {@code /tpa} or {@code /tpahere} to the requester. */
+    /**
+     * Charge the fee of a {@code /tpa} or {@code /tpahere} to the requester: their permission group's
+     * price (Linear KNG-41), else {@code amountCoins} ({@code teleport.request.price-coins}; 0 = free).
+     */
     CompletableFuture<TeleportChargeResult> chargeRequestFee(int userId, int amountCoins, String idempotencyKey,
                                                             Integer otherUserId);
+
+    /**
+     * Charge the flat coin fee of a player's own {@code /back} ({@code teleport.back.price-coins},
+     * Linear KNG-42).
+     *
+     * @param backKind what the player goes back to ({@code death}, {@code warps}, {@code teleport},
+     *                 {@code spawn}), for the ledger's metadata
+     */
+    CompletableFuture<TeleportChargeResult> chargeBackFee(int userId, int amountCoins, String idempotencyKey,
+                                                         String backKind);
+
+    /** Charge a {@code /spawn} as the player's permission groups price it (Linear KNG-41); free when none does. */
+    default CompletableFuture<TeleportChargeResult> chargeSpawnFee(int userId, String idempotencyKey) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("spawn fees aren't supported"));
+    }
 
     /** Give back what the charge made under {@code idempotencyKey} took; harmless to repeat. */
     CompletableFuture<TeleportRefundResult> refund(int userId, String idempotencyKey, String reason);

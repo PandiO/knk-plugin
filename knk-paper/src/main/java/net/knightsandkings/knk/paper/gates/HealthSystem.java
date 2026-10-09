@@ -167,6 +167,7 @@ public class HealthSystem {
         // Persist destruction to API
         persistGateState(gate);
         persistHealthChange(gate);
+        fireStateChanged(gate); // R4: navigation re-checks routes through this door
 
         // Schedule respawn if enabled (decision 5.0-B: a structure-level CanRespawnOverride can
         // suppress auto-respawn for every door at once, e.g. while a Siege is in progress)
@@ -325,12 +326,20 @@ public class HealthSystem {
         // Persist respawn to API
         persistGateState(gate);
         persistHealthChange(gate);
+        fireStateChanged(gate); // R4
 
         // Notify players
         Bukkit.getServer().broadcast(
             Component.text("[KnK] Gate '" + gate.getName() + "' has been restored!")
                 .color(NamedTextColor.GREEN)
         );
+    }
+
+    /** Tells the GateManager's state listeners (navigation, plan §2 R4) that this door changed outside its state machine. */
+    private void fireStateChanged(CachedGateDoor gate) {
+        if (gateManager != null) {
+            gateManager.fireStateChanged(gate.getId());
+        }
     }
 
     /**

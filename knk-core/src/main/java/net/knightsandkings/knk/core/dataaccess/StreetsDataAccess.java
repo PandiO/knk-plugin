@@ -5,7 +5,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.logging.Logger;
 
 import net.knightsandkings.knk.core.cache.StreetCache;
+import net.knightsandkings.knk.core.domain.common.Page;
+import net.knightsandkings.knk.core.domain.common.PagedQuery;
 import net.knightsandkings.knk.core.domain.streets.StreetDetail;
+import net.knightsandkings.knk.core.domain.streets.StreetSummary;
 import net.knightsandkings.knk.core.ports.api.StreetsQueryApi;
 
 /**
@@ -112,6 +115,17 @@ public class StreetsDataAccess {
         );
     }
     
+    /**
+     * Search streets by name (road navigation plan §2 R18). Straight to the API
+     * ({@code POST /api/Streets/search}); the summaries carry no detail to cache.
+     *
+     * @param query paged query with search term, filters, sort
+     * @return CompletableFuture resolving to the page of summaries
+     */
+    public CompletableFuture<Page<StreetSummary>> searchAsync(PagedQuery query) {
+        return streetsQueryApi.search(query);
+    }
+
     /**
      * Invalidate a cached street by ID.
      *

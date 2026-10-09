@@ -1,8 +1,14 @@
 package net.knightsandkings.knk.paper.config;
 
+import java.util.EnumMap;
+import java.util.Map;
+import java.util.Optional;
+import java.util.logging.Logger;
+
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 
+import net.knightsandkings.knk.core.teleport.BackKind;
 import net.knightsandkings.knk.core.teleport.TeleportBackSettings;
 import net.knightsandkings.knk.core.teleport.TeleportRequestSettings;
 import net.knightsandkings.knk.core.teleport.TeleportSettings;
@@ -108,7 +114,8 @@ public class ConfigLoader {
         KnkConfig knkConfig = new KnkConfig(apiConfig, cacheConfig, accountConfig, messagesConfig,
             loadPrivateMessages(config.getConfigurationSection("private-messages")),
             loadTeleportSettings(config.getConfigurationSection("teleport")),
-            loadDiscovery(config.getConfigurationSection("discovery")));
+            loadDiscovery(config.getConfigurationSection("discovery")),
+            loadNavigation(config.getConfigurationSection("navigation")));
         knkConfig.validate();
         
         return knkConfig;
@@ -132,15 +139,33 @@ public class ConfigLoader {
         );
     }
 
-    /** teleport.back (DESIGN §3.11, Phase 7); missing keys fall back to the defaults. */
+    /**
+     * teleport.back (DESIGN §3.11, Phase 7; KNG-42 adds expire-seconds-by-kind and price-coins); missing
+     * keys fall back to the defaults. An unknown kind under expire-seconds-by-kind is logged and skipped.
+     */
     static TeleportBackSettings loadTeleportBackSettings(ConfigurationSection section) {
         TeleportBackSettings defaults = TeleportBackSettings.defaults();
         if (section == null) {
             return defaults;
         }
+        Map<BackKind, Integer> byKind = new EnumMap<>(BackKind.class);
+        ConfigurationSection kinds = section.getConfigurationSection("expire-seconds-by-kind");
+        if (kinds != null) {
+            for (String key : kinds.getKeys(false)) {
+                Optional<BackKind> kind = BackKind.fromConfigKey(key);
+                if (kind.isEmpty() || !kinds.isInt(key)) {
+                    Logger.getLogger(ConfigLoader.class.getName()).warning("teleport.back.expire-seconds-by-kind." + key
+                        + " ignored - kinds are death, warps, teleport and spawn, each a number of seconds");
+                    continue;
+                }
+                byKind.put(kind.get(), kinds.getInt(key));
+            }
+        }
         return new TeleportBackSettings(
             section.getBoolean("enabled", defaults.enabled()),
-            section.getInt("expire-seconds", defaults.expireSeconds())
+            section.getInt("expire-seconds", defaults.expireSeconds()),
+            byKind,
+            section.getInt("price-coins", defaults.priceCoins())
         );
     }
 
@@ -198,6 +223,95 @@ public class ConfigLoader {
             effectsConfig,
             messagesConfig
         );
+    }
+
+    /**
+     * Road navigation (KNG-27, DESIGN §4); every key has a default, so a missing section means "on, with
+     * defaults". Validation happens in {@link KnkConfig#validate()} / {@link NavigationConfig#validate()}.
+     */
+    static NavigationConfig loadNavigation(ConfigurationSection section) {
+        NavigationConfig defaults = NavigationConfig.defaults();
+        if (section == null) {
+            return defaults;
+        }
+        java.util.Map<String, Double> classCost = null;
+        ConfigurationSection costSection = section.getConfigurationSection("class-cost");
+        if (costSection != null) {
+            classCost = new java.util.LinkedHashMap<>();
+            for (String key : costSection.getKeys(false)) {
+                classCost.put(key, costSection.isSet(key) ? costSection.getDouble(key) : null);
+            }
+        }
+        java.util.List<String> overlays = section.contains("overlay-materials")
+            ? section.getStringList("overlay-materials")
+            : defaults.overlayMaterials();
+
+        NavigationConfig.TrailConfig trailDefaults = defaults.trail();
+        NavigationConfig.TrailConfig trail = new NavigationConfig.TrailConfig(
+            section.getInt("trail-length", trailDefaults.length()),
+            section.getInt("trail-period-ticks", trailDefaults.periodTicks()),
+            section.getString("trail-particle", trailDefaults.particle()),
+            section.getString("trail-color", trailDefaults.color()));
+
+        NavigationConfig.SurveyConfig surveyDefaults = defaults.survey();
+        ConfigurationSection survey = section.getConfigurationSection("survey");
+        NavigationConfig.SurveyConfig surveyConfig = survey == null ? surveyDefaults
+            : new NavigationConfig.SurveyConfig(
+                survey.getInt("sample-period-ticks", surveyDefaults.samplePeriodTicks()),
+                survey.getInt("cross-section-half-width", surveyDefaults.crossSectionHalfWidth()),
+                survey.getInt("breadcrumb-seed-spacing", surveyDefaults.breadcrumbSeedSpacing()));
+
+        NavigationConfig.BuilderConfig builderDefaults = defaults.builder();
+        ConfigurationSection builder = section.getConfigurationSection("builder");
+        NavigationConfig.BuilderConfig builderConfig = builder == null ? builderDefaults
+            : new NavigationConfig.BuilderConfig(
+                builder.getInt("tile-size", builderDefaults.tileSize()),
+                builder.getInt("tile-margin", builderDefaults.tileMargin()),
+                builder.getInt("max-cells-per-tile", builderDefaults.maxCellsPerTile()),
+                builder.getInt("snapshot-chunks-per-tick", builderDefaults.snapshotChunksPerTick()),
+                builder.getInt("junction-cluster-radius", builderDefaults.junctionClusterRadius()),
+                builder.getInt("min-spur-length", builderDefaults.minSpurLength()),
+                builder.getInt("ambiguous-reach", builderDefaults.ambiguousReach()),
+                builder.getInt("plaza-growth", builderDefaults.plazaGrowth()),
+                builder.getDouble("locked-node-reach", builderDefaults.lockedNodeReach()),
+                builder.getBoolean("auto-plazas", builderDefaults.autoPlazas()),
+                builder.getBoolean("curated-tiles", builderDefaults.curatedTiles()));
+
+        NavigationConfig.WalkConfig walkDefaults = defaults.walk();
+        ConfigurationSection walk = section.getConfigurationSection("walk");
+        NavigationConfig.WalkConfig walkConfig = walk == null ? walkDefaults
+            : new NavigationConfig.WalkConfig(
+                walk.getBoolean("enabled", walkDefaults.enabled()),
+                walk.getInt("max-expansions", walkDefaults.maxExpansions()),
+                walk.getDouble("max-length-factor", walkDefaults.maxLengthFactor()),
+                walk.getDouble("max-length", walkDefaults.maxLength()),
+                walk.getDouble("detour-allowance", walkDefaults.detourAllowance()),
+                walk.getInt("max-drop", walkDefaults.maxDrop()),
+                walk.getDouble("drop-penalty", walkDefaults.dropPenalty()),
+                walk.getInt("capture-margin", walkDefaults.captureMargin()),
+                walk.getInt("chunk-ttl-seconds", walkDefaults.chunkTtlSeconds()),
+                walk.getDouble("recompute-distance", walkDefaults.recomputeDistance()),
+                walk.getInt("max-concurrent-searches", walkDefaults.maxConcurrentSearches()),
+                walk.contains("climbables") ? walk.getStringList("climbables") : walkDefaults.climbables(),
+                walk.getDouble("wall-cost", walkDefaults.wallCost()));
+
+        return new NavigationConfig(
+            section.getBoolean("enabled", defaults.enabled()),
+            NavigationConfig.parseClassCost(classCost),
+            overlays,
+            section.getBoolean("seed-from-domains", defaults.seedFromDomains()),
+            section.getDouble("max-snap-distance", defaults.maxSnapDistance()),
+            section.getDouble("snap-vertical-weight", defaults.snapVerticalWeight()),
+            section.getDouble("destination-snap-vertical-weight", defaults.destinationSnapVerticalWeight()),
+            trail,
+            section.getDouble("reroute-distance", defaults.rerouteDistance()),
+            section.getInt("reroute-after-ticks", defaults.rerouteAfterTicks()),
+            section.getDouble("arrive-distance", defaults.arriveDistance()),
+            section.getInt("max-session-minutes", defaults.maxSessionMinutes()),
+            section.getDouble("sprint-speed", defaults.sprintSpeed()),
+            surveyConfig,
+            builderConfig,
+            walkConfig);
     }
 
     /** private-messages: every key falls back to {@link KnkConfig.PrivateMessagesConfig#defaults()}. */

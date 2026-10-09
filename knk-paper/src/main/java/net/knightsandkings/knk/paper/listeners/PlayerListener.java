@@ -23,7 +23,6 @@ import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.event.player.PlayerPickupItemEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.scheduler.BukkitRunnable;
@@ -383,13 +382,5 @@ public class PlayerListener implements Listener {
 	/** The player's groups in Game Settings precedence order (KNG-52); empty when not cached yet. */
 	private static List<PermissionGroupRef> groupsOf(UserSummary user) {
 		return user != null ? user.permissionGroups() : List.of();
-	}
-
-	@EventHandler
-	public void onItemPickup(PlayerPickupItemEvent e) {
-		if (e.getPlayer().isOp()) {
-			return;
-		}
-		e.setCancelled(true);
 	}
 }

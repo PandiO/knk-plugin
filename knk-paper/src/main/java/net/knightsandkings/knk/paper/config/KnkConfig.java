@@ -20,23 +20,39 @@ public record KnkConfig(
     MessagesConfig messages,
     PrivateMessagesConfig privateMessages,
     TeleportSettings teleport,
-    DiscoveryConfig discovery
+    DiscoveryConfig discovery,
+    NavigationConfig navigation
 ) {
     public KnkConfig {
         // No teleport: block (e.g. an older config.yml) means the DESIGN §3.11 defaults.
         teleport = teleport != null ? teleport : TeleportSettings.defaults();
+        navigation = navigation != null ? navigation : NavigationConfig.defaults();
     }
 
-    /** Without private-messages, teleport and discovery sections: their defaults. */
+    /** Without private-messages, teleport, discovery and navigation sections: their defaults. */
     public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages) {
         this(api, cache, account, messages, PrivateMessagesConfig.defaults(), TeleportSettings.defaults(),
-            DiscoveryConfig.defaults());
+            DiscoveryConfig.defaults(), NavigationConfig.defaults());
     }
 
-    /** Without teleport and discovery sections: their defaults. */
+    /** Without teleport, discovery and navigation sections: their defaults. */
     public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
                      PrivateMessagesConfig privateMessages) {
-        this(api, cache, account, messages, privateMessages, TeleportSettings.defaults(), DiscoveryConfig.defaults());
+        this(api, cache, account, messages, privateMessages, TeleportSettings.defaults(), DiscoveryConfig.defaults(),
+            NavigationConfig.defaults());
+    }
+
+    /** Without teleport and navigation sections: their defaults (road navigation Phase 3's older form). */
+    public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
+                     PrivateMessagesConfig privateMessages, DiscoveryConfig discovery) {
+        this(api, cache, account, messages, privateMessages, TeleportSettings.defaults(), discovery,
+            NavigationConfig.defaults());
+    }
+
+    /** Without a navigation section: its defaults (road navigation, KNG-27). */
+    public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
+                     PrivateMessagesConfig privateMessages, TeleportSettings teleport, DiscoveryConfig discovery) {
+        this(api, cache, account, messages, privateMessages, teleport, discovery, NavigationConfig.defaults());
     }
 
     public record ApiConfig(
@@ -127,6 +143,10 @@ public record KnkConfig(
             throw new IllegalArgumentException("discovery configuration is required");
         }
         discovery.validate();
+        if (navigation == null) {
+            throw new IllegalArgumentException("navigation configuration is required");
+        }
+        navigation.validate();
     }
     
     public record CacheConfig(

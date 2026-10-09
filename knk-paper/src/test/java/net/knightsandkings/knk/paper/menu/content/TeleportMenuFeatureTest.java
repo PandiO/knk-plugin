@@ -10,7 +10,7 @@ import net.knightsandkings.knk.core.menu.MenuActionException;
 import net.knightsandkings.knk.core.menu.MenuContextParams;
 import net.knightsandkings.knk.core.menu.RuntimeMenu;
 import net.knightsandkings.knk.core.ports.api.TeleportDestinationsCommandApi;
-import net.knightsandkings.knk.core.teleport.BlockProbe;
+import net.knightsandkings.knk.core.util.BlockProbe;
 import net.knightsandkings.knk.core.teleport.TeleportCharger;
 import net.knightsandkings.knk.core.teleport.TeleportDenial;
 import net.knightsandkings.knk.core.teleport.TeleportRequestBook.Direction;
@@ -110,6 +110,9 @@ class TeleportMenuFeatureTest {
             return CompletableFuture.completedFuture(TeleportChargeResult.allowed("Gems", 10, 40, false, null));
         }
         @Override public CompletableFuture<TeleportChargeResult> chargeRequestFee(int u, int a, String k, Integer o) {
+            return CompletableFuture.completedFuture(TeleportChargeResult.allowed("Coins", 0, 0, false, null));
+        }
+        @Override public CompletableFuture<TeleportChargeResult> chargeBackFee(int u, int a, String k, String b) {
             return CompletableFuture.completedFuture(TeleportChargeResult.allowed("Coins", 0, 0, false, null));
         }
         @Override public CompletableFuture<TeleportRefundResult> refund(int u, String k, String r) {

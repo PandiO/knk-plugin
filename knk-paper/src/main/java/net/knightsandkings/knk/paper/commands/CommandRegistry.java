@@ -17,6 +17,7 @@ public class CommandRegistry {
     private final Map<String, RegisteredCommand> commands = new LinkedHashMap<>();
     private final Map<String, String> aliases = new HashMap<>();
     private CommandPermissions permissions = CommandPermissions.bukkitOnly();
+    private final Map<String, java.util.function.Predicate<CommandSender>> visibility = new HashMap<>();
 
     /** The permission check for {@link #execute} and {@link #listAvailable}; Bukkit-only until set. */
     public void setPermissions(CommandPermissions permissions) {
@@ -73,12 +74,22 @@ public class CommandRegistry {
     }
 
     /**
+     * Extra condition for listing (help, tab completion) a subcommand registered without a top-level
+     * permission because each of its actions checks its own node (e.g. /knk location): without it such
+     * a command is listed to everyone. Running it is unaffected - the actions still check their nodes.
+     */
+    public void setVisibility(String name, java.util.function.Predicate<CommandSender> visibleTo) {
+        visibility.put(name.toLowerCase(), Objects.requireNonNull(visibleTo, "visibleTo must not be null"));
+    }
+
+    /**
      * List all commands the sender has permission for (cache-only for in-house grants - see
      * {@link CommandPermissions#has}).
      */
     public List<RegisteredCommand> listAvailable(CommandSender sender) {
         return commands.values().stream()
                 .filter(cmd -> permissions.has(sender, cmd.metadata().permission()))
+                .filter(cmd -> visibility.getOrDefault(cmd.metadata().name().toLowerCase(), s -> true).test(sender))
                 .toList();
     }
 

@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.api.mapper;
 
+import net.knightsandkings.knk.core.lootbox.KnkLootboxOdds;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -216,5 +217,46 @@ public class LootboxMapperTest {
 
         assertEquals(77, odds.items().get(0).itemBlueprintId());
         assertEquals(90, odds.specials().get(0).itemBlueprintId());
+    }
+
+    @Test
+    void odds_carryTheEnchantRollsAndWhetherAnItemRollsThem() throws Exception {
+        String json = """
+                {"lootboxTypeId": 3, "lootboxTypeName": "Weapons Lootbox", "boxStars": 5, "normalRollPercent": 99.5,
+                 "itemGrades": [],
+                 "items": [{"itemBlueprintId": 77, "name": "Golemheart Sword", "stars": 5, "percent": 18.7, "quantity": 1, "rollsEnchantments": true},
+                           {"itemBlueprintId": 78, "name": "Bread", "stars": 2, "percent": 5, "quantity": 16, "rollsEnchantments": false}],
+                 "specials": [],
+                 "enchantments": [{"enchantRollId": 7, "enchantmentDefinitionId": 11, "key": "minecraft:sharpness", "isCustom": false,
+                                   "hitPercent": 60, "minLevel": 1, "maxLevel": 4, "applicableItemCount": 3, "landPercent": 41.6,
+                                   "levelsByGrade": [{"gradeId": 5, "stars": 5, "minLevel": 1, "maxLevel": 4},
+                                                     {"gradeId": 1, "stars": 1, "minLevel": null, "maxLevel": null}]}]}
+                """;
+
+        var odds = LootboxMapper.toCore(mapper.readValue(json, LootboxDtos.OddsDto.class));
+
+        assertEquals(1, odds.items().get(0).quantity());
+        assertEquals(true, odds.items().get(0).rollsEnchantments());
+        assertEquals(16, odds.items().get(1).quantity());
+        assertEquals(false, odds.items().get(1).rollsEnchantments());
+        var roll = odds.enchantments().get(0);
+        assertEquals(11, roll.definitionId());
+        assertEquals("minecraft:sharpness", roll.key());
+        assertEquals(60.0, roll.hitPercent());
+        assertEquals(new KnkLootboxOdds.LevelRange(5, 1, 4), roll.levelsByGrade().get(0));
+        assertEquals(new KnkLootboxOdds.LevelRange(1, null, null), roll.levelsByGrade().get(1));
+    }
+
+    @Test
+    void anOlderOddsResponse_withoutEnchantments_stillMaps() throws Exception {
+        String json = """
+                {"lootboxTypeId": 3, "lootboxTypeName": "Weapons Lootbox", "boxStars": 5, "normalRollPercent": 99.5,
+                 "itemGrades": [], "items": [{"itemBlueprintId": 77, "name": "Golemheart Sword", "stars": 5, "percent": 18.7}], "specials": []}
+                """;
+
+        var odds = LootboxMapper.toCore(mapper.readValue(json, LootboxDtos.OddsDto.class));
+
+        assertEquals(List.of(), odds.enchantments());
+        assertEquals(false, odds.items().get(0).rollsEnchantments());
     }
 }

@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.config;
 
+import net.knightsandkings.knk.core.teleport.BackKind;
 import net.knightsandkings.knk.core.teleport.TeleportBackSettings;
 import net.knightsandkings.knk.core.teleport.TeleportRequestSettings;
 import net.knightsandkings.knk.core.teleport.TeleportSettings;
@@ -64,6 +65,23 @@ class TeleportConfigLoaderTest {
         partial.set("teleport.back.expire-seconds", 60);
         assertEquals(new TeleportBackSettings(true, 60),
             ConfigLoader.loadTeleportSettings(partial.getConfigurationSection("teleport")).back());
+    }
+
+    @Test
+    void backKindExpiriesAndPriceAreRead_AndUnknownKindsSkipped() {
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("teleport.back.expire-seconds", 120);
+        yaml.set("teleport.back.expire-seconds-by-kind.warps", 600);
+        yaml.set("teleport.back.expire-seconds-by-kind.Spawn", 30);
+        yaml.set("teleport.back.expire-seconds-by-kind.flying", 10);
+        yaml.set("teleport.back.expire-seconds-by-kind.death", "soon");
+        yaml.set("teleport.back.price-coins", 250);
+
+        TeleportBackSettings back = ConfigLoader.loadTeleportSettings(yaml.getConfigurationSection("teleport")).back();
+
+        assertEquals(new TeleportBackSettings(true, 120, java.util.Map.of(BackKind.WARPS, 600, BackKind.SPAWN, 30), 250), back);
+        assertEquals(120, back.expireSeconds(BackKind.DEATH));
+        assertEquals(120, back.expireSeconds(BackKind.TELEPORT));
     }
 
     @Test
