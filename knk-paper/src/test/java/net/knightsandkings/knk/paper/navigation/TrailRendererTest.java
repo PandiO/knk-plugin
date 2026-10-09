@@ -54,6 +54,54 @@ class TrailRendererTest {
         assertTrue(TrailRenderer.trailPoints(Route.empty(route.start()), 0, 30, 1.5).isEmpty());
     }
 
+    /** Main Street (z = 0): a road two rows wide (z 0 and 1) up to x 60, one row after - the centred trail shifts, then not. */
+    private static net.knightsandkings.knk.core.roads.route.TrailCentring.Ground narrowingRoad() {
+        return new net.knightsandkings.knk.core.roads.route.TrailCentring.Ground() {
+            @Override
+            public java.util.OptionalInt roadFloor(int x, int z, int nearY) {
+                boolean road = z == 0 || (z == 1 && x < 60);
+                return road && Math.abs(nearY - 64) <= 1 ? java.util.OptionalInt.of(64) : java.util.OptionalInt.empty();
+            }
+
+            @Override
+            public boolean stairOrSlab(int x, int y, int z) {
+                return false;
+            }
+        };
+    }
+
+    @Test
+    void aRedrawPutsEveryParticleOfTheCentredTrailWhereItWas() {
+        // KNG-76 live test: the centred trail twitched in front of the player as the window slid with them
+        Route route = network.routeAlongMainStreet();
+        List<double[]> before = TrailRenderer.centredWindow(route, 58.0, 30, 1.5, narrowingRoad());
+        List<double[]> after = TrailRenderer.centredWindow(route, 59.3, 30, 1.5, narrowingRoad());
+
+        assertEquals(58.5 + 0.5, before.get(0)[0], 1e-9, "the first fixed spot at or ahead of the player, block-centred");
+        assertEquals(60 + 0.5, after.get(0)[0], 1e-9);
+        int shared = 0;
+        for (double[] p : after) {
+            for (double[] q : before) {
+                if (Math.abs(p[0] - q[0]) < 1e-9) {
+                    assertEquals(q[2], p[2], 1e-9, "the same spot, the same place at x " + p[0]);
+                    shared++;
+                }
+            }
+        }
+        assertTrue(shared >= 18, "most of the window is shared: " + shared);
+        assertTrue(before.get(0)[2] > 0.5, "pulled towards the second row just before x 60 (smoothed)");
+        assertEquals(0.5, after.get(after.size() - 1)[2], 1e-9, "the one row after");
+    }
+
+    @Test
+    void theCentredWindowEndsAtTheRoutesEnd() {
+        Route route = network.routeAlongMainStreet();
+        List<double[]> tail = TrailRenderer.centredWindow(route, 190, 30, 1.5, narrowingRoad());
+
+        assertEquals(200.5, tail.get(tail.size() - 1)[0], 1e-9);
+        assertTrue(TrailRenderer.centredWindow(Route.empty(route.start()), 0, 30, 1.5, narrowingRoad()).isEmpty());
+    }
+
     @Test
     void legPointsAreStraightAndSparse() {
         List<double[]> points = TrailRenderer.legPoints(new double[] {0, 64, 0}, new double[] {10, 64, 0}, 3);
