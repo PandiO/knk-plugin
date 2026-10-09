@@ -280,6 +280,13 @@ permissions:
       knk.admin.district: true
       knk.admin.locations: true
       knk.admin.location: true
+      knk.admin.location.tp: true
+      knk.admin.location.orphans: true
+      knk.admin.location.orphans.notify: true
+      knk.admin.location.orphans.keep: true
+      knk.admin.location.orphans.delete: true
+      knk.admin.location.orphans.run: true
+      knk.admin.location.retention: true
       knk.admin.enchantments: true
       knk.admin.itemblueprints: true
       knk.admin.menu: true
@@ -338,7 +345,37 @@ permissions:
     default: false
 
   knk.admin.location:
-    description: Access to /knk location
+    description: Access to /knk location here
+    default: false
+
+  # Location retention (KNG-80, knk-workspace docs/architecture/location-retention.md). Same nodes as
+  # knk-web-api's StaffPermissions; the web-only ones are listed so knk.admin covers them for ops too.
+  knk.admin.location.tp:
+    description: /knk location tp <id> - teleport to any Location by id (staff teleport, audited); see teleport commands in the web panel
+    default: false
+
+  knk.admin.location.orphans:
+    description: /knk location orphans and the web Orphaned Locations panel (read only)
+    default: false
+
+  knk.admin.location.orphans.notify:
+    description: Get the in-game digest when the weekly check finds new orphaned Locations
+    default: false
+
+  knk.admin.location.orphans.keep:
+    description: Mark an orphaned Location Kept (web panel)
+    default: false
+
+  knk.admin.location.orphans.delete:
+    description: Delete an orphaned Location (web panel; re-checked by the API first)
+    default: false
+
+  knk.admin.location.orphans.run:
+    description: Run the orphan check now (web panel)
+    default: false
+
+  knk.admin.location.retention:
+    description: Change the orphan check's schedule, grace period and Keep recheck period (web panel)
     default: false
 
   knk.admin.enchantments:
