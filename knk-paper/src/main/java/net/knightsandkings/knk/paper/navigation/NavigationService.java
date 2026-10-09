@@ -984,15 +984,16 @@ public final class NavigationService implements SiegeMatchObserver {
 
     /**
      * The walk result on the leg: the path, the partial path, or "no conventional path" (N8). The start leg
-     * (KNG-75) says "to the road" and redraws with the route.
+     * (KNG-75) says "to the road" - or, out of budget, that it has trouble (live test S3) - and redraws with the route.
      */
     private void adoptWalkResult(Active a, DirectLeg leg, WalkResult result, Optional<WalkPath> partial) {
         boolean wasWalking = leg.walking();
         boolean startLeg = leg == a.startLeg;
         if (result != null && !result.isFound() && !leg.noPathAnnounced) {
             leg.noPathAnnounced = true;
-            a.player.sendMessage(startLeg ? NavigationMessages.noConventionalPathToRoad()
-                : NavigationMessages.noConventionalPath(a.destination.name()));
+            a.player.sendMessage(!startLeg ? NavigationMessages.noConventionalPath(a.destination.name())
+                : result.status() == WalkResult.Status.FALLBACK ? NavigationMessages.troubleFindingRoad()
+                : NavigationMessages.noConventionalPathToRoad());
         }
         if (result != null && result.isFound()) {
             leg.noPathAnnounced = false;

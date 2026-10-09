@@ -1171,6 +1171,9 @@ class NavigationServiceTest {
         walking.navigate(player, cinixKeep());
         runSearches();
         assertTrue(walking.startLegOf(playerId).orElseThrow().partial);
+        // out of budget is not "no way" (S3, developer): a different message, the partial path stays
+        assertEquals(1, messages().stream().filter(m -> m.contains("Having trouble determining the route")).count());
+        assertTrue(messages().stream().noneMatch(m -> m.contains("No conventional path")), messages().toString());
 
         moveTo(35.5, 65, 20.5); // 15.8 off the path's end, but nearer the route (25.4 from it, was 30.5)
         ticks(NavigationService.RECHECK_TICKS * 2);
