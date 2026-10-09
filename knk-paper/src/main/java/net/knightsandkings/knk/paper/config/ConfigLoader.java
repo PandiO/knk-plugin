@@ -302,6 +302,7 @@ public class ConfigLoader {
             section.getBoolean("seed-from-domains", defaults.seedFromDomains()),
             section.getDouble("max-snap-distance", defaults.maxSnapDistance()),
             section.getDouble("snap-vertical-weight", defaults.snapVerticalWeight()),
+            section.getDouble("destination-snap-vertical-weight", defaults.destinationSnapVerticalWeight()),
             trail,
             section.getDouble("reroute-distance", defaults.rerouteDistance()),
             section.getInt("reroute-after-ticks", defaults.rerouteAfterTicks()),
