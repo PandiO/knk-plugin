@@ -32,22 +32,28 @@ class LiveEdgeTagsTest {
     private volatile GateCells gates = GateCells.NONE;
     private final List<String> changed = new ArrayList<>();
     private final List<Set<String>> warmed = new ArrayList<>();
-    private final LiveEdgeTags tags = new LiveEdgeTags(w -> stored.get(), new LiveEdgeTags.Probe() {
-        @Override
-        public Set<String> regionsAt(String world, int x, int feetY, int z) {
-            Set<String> out = new HashSet<>();
-            out.add("town_1");
-            if (x >= 20 && x <= 24 && feetY == 65) {
-                out.addAll(newRegionCells);
-            }
-            return out;
-        }
+    private final LiveEdgeTags tags = new LiveEdgeTags(w -> stored.get(), probe(), () -> 5, Runnable::run, Runnable::run,
+        changed::add, warmed::add, () -> 0L);
 
-        @Override
-        public GateCells gates(String world) {
-            return gates;
-        }
-    }, () -> 5, Runnable::run, Runnable::run, changed::add, warmed::add, () -> 0L);
+    /** WorldGuard as the tests set it up: town_1 everywhere, newRegionCells at x 20-24; the gate cells of {@link #gates}. */
+    private LiveEdgeTags.Probe probe() {
+        return new LiveEdgeTags.Probe() {
+            @Override
+            public Set<String> regionsAt(String world, int x, int feetY, int z) {
+                Set<String> out = new HashSet<>();
+                out.add("town_1");
+                if (x >= 20 && x <= 24 && feetY == 65) {
+                    out.addAll(newRegionCells);
+                }
+                return out;
+            }
+
+            @Override
+            public GateCells gates(String world) {
+                return gates;
+            }
+        };
+    }
 
     private static RoadNetworkSnapshot network(List<Integer> storedDoors) {
         RoadEdge road = new RoadEdge(7, 1, 2, List.of(new int[] {0, 64, 0}, new int[] {40, 64, 0}), 40, 3,
@@ -96,6 +102,26 @@ class LiveEdgeTagsTest {
         assertEquals(List.of(Set.of("domain_16")), warmed, "the domain cache learns the new region");
         assertTrue(tags.describe().contains("+1 region, +1 gate door), 1 cut into 5 pieces"), tags.describe());
         assertEquals(List.of("town_1"), stored.get().requireEdge(7).regionIds(), "the stored network is untouched");
+    }
+
+    @Test
+    void aRegionWhoseRuleIsIgnoredForRoadsCutsNothing() {
+        // rev. 7 Part C + Part A: a house or shop along a public street; only the gate cuts the road here
+        newRegionCells.add("domain_16");
+        gates = (x, y, z) -> x == 30 && z == 0 && y == 65 ? OptionalInt.of(13) : OptionalInt.empty();
+        LiveEdgeTags ignoring = new LiveEdgeTags(w -> stored.get(), probe(), () -> 5, Runnable::run, Runnable::run,
+            changed::add, warmed::add, () -> 0L, regionId -> !regionId.equals("domain_16"));
+
+        ignoring.refresh(WORLD);
+        for (int i = 0; i < 100; i++) {
+            ignoring.tick();
+        }
+
+        List<RoadEdge> pieces = pieces(ignoring.snapshot(WORLD), 7);
+        assertEquals(3, pieces.size(), "before the door, the door, after it");
+        pieces.forEach(p -> assertEquals(List.of("town_1"), p.regionIds()));
+        assertEquals(List.of(List.of(), List.of(13), List.of()), pieces.stream().map(RoadEdge::gateDoorIds).toList());
+        assertTrue(warmed.isEmpty(), "no new region to warm");
     }
 
     @Test

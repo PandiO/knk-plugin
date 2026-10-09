@@ -1320,7 +1320,13 @@ public class KnKPlugin extends JavaPlugin {
                     navigationService.onNetworkChanged(world);
                 }
             },
-            regions -> regionDomainResolver.warmCache(regions), System::currentTimeMillis);
+            regions -> regionDomainResolver.warmCache(regions), System::currentTimeMillis,
+            // rev. 7 Part C: a region whose domain's rule is "Ignored" for roads (houses, shops) does not cut roads;
+            // a region of a domain not known yet does (its next pass knows it)
+            regionId -> regionDomainResolver.getDomainByRegionIdNoRefresh(regionId)
+                .map(domain -> domain.id() == null || navigationDestinations == null
+                    || !navigationDestinations.roadAccessIgnored(domain.id()))
+                .orElse(true));
         roadNetworkCache.addListener(tags::refresh);
         org.bukkit.Bukkit.getScheduler().runTaskTimer(this, tags::tick, 1L, 1L);
         org.bukkit.Bukkit.getScheduler().runTaskTimer(this,
