@@ -96,6 +96,76 @@ class WalkReplayTest {
         Files.writeString(Path.of(RoadReplayTest.DIR + "replay/out_walk.txt"), out.toString(), StandardCharsets.UTF_8);
     }
 
+    /**
+     * KNG-75 step 2a: many legs at once with their cost - {@code replay/legs.txt}, one leg per line
+     * {@code name;startX,feetY,startZ;targetX,floorY,targetZ}, plus {@code budgets=factor/detour/max-length/expansions,…}
+     * (one column per budget; default the shipped 1.75/48/96/20000) and {@code margin}, {@code arrive-distance}. Per
+     * leg: the capture box's chunk count, the offline extraction time (Anvil reader, not the live {@code ChunkSnapshot}),
+     * and per budget the result (with the path length), expansions and search time (median of 5). Writes {@code replay/out_legs.txt}. Skipped without {@code legs.txt}.
+     */
+    @Test
+    void legs() throws IOException {
+        Path file = Path.of(RoadReplayTest.DIR + "replay/legs.txt");
+        if (!Files.exists(file)) {
+            return;
+        }
+        Map<String, String> c = RoadReplayTest.control("legs.txt");
+        int margin = Integer.parseInt(c.getOrDefault("margin", "16"));
+        double arrive = Double.parseDouble(c.getOrDefault("arrive-distance", "4"));
+        String[] budgets = c.getOrDefault("budgets", "1.75/48/96/20000").split(",");
+        MovementProfile profile = MovementProfile.PLAYER.withDrops(3, 10).withClimbables(Set.of("LADDER"));
+        WalkChunkExtractor extractor = new WalkChunkExtractor(PassabilityRules.of(PassabilityRules::curatedCollidable),
+            profile.climbables(), GateCells.NONE, -64, 320);
+        RoadReplayTest anvil = new RoadReplayTest();
+        StringBuilder out = new StringBuilder("leg | straight | box chunks | extract ms (offline) |");
+        for (String b : budgets) {
+            out.append(' ').append(b.trim()).append(": result, expansions, ms |");
+        }
+        out.append('\n');
+        for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+            String[] parts = line.split(";");
+            if (line.isBlank() || line.startsWith("#") || parts.length != 3) {
+                continue;
+            }
+            double[] start = doubles(parts[1]);
+            double[] target = doubles(parts[2]);
+            WalkBox box = WalkBox.around("world", start[0], start[1], start[2], target[0], target[1], target[2], margin, -64, 320);
+            long t0 = System.nanoTime();
+            List<WalkChunk> chunks = new ArrayList<>();
+            for (int cx = box.minChunkX(); cx <= box.maxChunkX(); cx++) {
+                for (int cz = box.minChunkZ(); cz <= box.maxChunkZ(); cz++) {
+                    RoadReplayTest.Chunk chunk = anvil.chunk(cx, cz);
+                    chunks.add(extractor.extract(chunk::at, cx, cz, box.minSection(), box.maxSection(), s -> false, 0L));
+                }
+            }
+            double extractMs = (System.nanoTime() - t0) / 1e6;
+            CapturedWalkTerrain terrain = new CapturedWalkTerrain(chunks, GateCells.NONE, -64, 320);
+            WalkGoal goal = WalkGoal.within(target[0], target[1], target[2], arrive);
+            WalkRequest request = new WalkRequest(terrain.terrain(), CellAccess.OPEN, profile, start[0], start[1], start[2],
+                target[0], target[1], target[2], goal, WalkBudget.DEFAULTS);
+            out.append(parts[0]).append(" | ").append(String.format("%.1f", request.straightDistance())).append(" | ")
+                .append(chunks.size()).append(" | ").append(String.format("%.0f", extractMs)).append(" |");
+            for (String b : budgets) {
+                double[] v = java.util.Arrays.stream(b.trim().split("/")).mapToDouble(Double::parseDouble).toArray();
+                WalkBudget budget = new WalkBudget((int) v[3], v[0], v[2], v[1], WalkBudget.DEFAULTS.startSnap(),
+                    WalkBudget.DEFAULTS.goalSnap());
+                WalkRequest r = request.withBudget(budget);
+                WalkResult result = null;
+                double[] times = new double[5];
+                for (int i = 0; i < times.length; i++) {
+                    long s = System.nanoTime();
+                    result = new WalkSearch().find(r);
+                    times[i] = (System.nanoTime() - s) / 1e6;
+                }
+                java.util.Arrays.sort(times);
+                out.append(' ').append(result.status()).append(result.path().map(p -> String.format(" %.0f", p.length())).orElse(""))
+                    .append(", ").append(result.expansions()).append(", ").append(String.format("%.1f", times[2])).append(" |");
+            }
+            out.append('\n');
+        }
+        Files.writeString(Path.of(RoadReplayTest.DIR + "replay/out_legs.txt"), out.toString(), StandardCharsets.UTF_8);
+    }
+
     private static String describe(String label, WalkResult r) {
         StringBuilder sb = new StringBuilder("\n== ").append(label).append(": ").append(r.status()).append(" (")
             .append(r.reason()).append(", ").append(r.expansions()).append(" expansions)\n");
