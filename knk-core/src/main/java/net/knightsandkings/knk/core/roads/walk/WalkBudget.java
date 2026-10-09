@@ -8,7 +8,8 @@ package net.knightsandkings.knk.core.roads.walk;
  * @param maxExpansions   cells the search may expand (config {@code max-expansions}, 20 000)
  * @param maxLengthFactor the path may be at most this many times the straight start→target distance
  *                        ({@code max-length-factor}, 1.75)
- * @param maxLength       and never longer than this many blocks ({@code max-length}, 96)
+ * @param maxLength       and never longer than this many blocks ({@code max-length}, 144: KNG-75 step 2a found the
+ *                        96 of KNG-51 cut off 5 of 9 reachable 55-96 block legs; legs up to 48 blocks are unaffected)
  * @param detourAllowance but always at least this many blocks longer than the straight distance
  *                        ({@code detour-allowance}, 48): a short leg behind a building needs a detour of
  *                        several times its straight distance (live test 2026-10-07, finding N2)
@@ -19,7 +20,7 @@ public record WalkBudget(int maxExpansions, double maxLengthFactor, double maxLe
                          int startSnap, int goalSnap) {
 
     /** The design defaults. */
-    public static final WalkBudget DEFAULTS = new WalkBudget(20_000, 1.75, 96.0, 48.0, 2, 3);
+    public static final WalkBudget DEFAULTS = new WalkBudget(20_000, 1.75, 144.0, 48.0, 2, 3);
 
     public WalkBudget {
         if (maxExpansions < 1) {

@@ -35,6 +35,11 @@ import net.knightsandkings.knk.core.roads.walk.WalkBudget;
  * @param maxStartDistance   with walk paths, the player may be this far from a road (plain 3D; KNG-75): the first
  *                           leg is a walk path to it; {@code snap-vertical-weight} only picks the road. Without walk
  *                           paths {@code max-snap-distance} (weighted) applies, as before
+ * @param maxDestinationDistance with walk paths, a destination may be this far from a road (plain 3D; KNG-75 step 2):
+ *                           beyond {@code destinationWalkRange} the last leg is the HUD arrow alone. Without walk paths
+ *                           {@code max-snap-distance}, as before
+ * @param destinationWalkRange with walk paths, a destination at most this far from the road's end gets a walk path for
+ *                           the last leg (KNG-75 step 2); without them {@code max-snap-distance}
  * @param trail              the guidance trail (Phase 4)
  * @param rerouteDistance    off-route distance that triggers a re-route
  * @param rerouteAfterTicks  how long the player must stay off-route first
@@ -54,6 +59,8 @@ public record NavigationConfig(
     double snapVerticalWeight,
     double destinationSnapVerticalWeight,
     double maxStartDistance,
+    double maxDestinationDistance,
+    double destinationWalkRange,
     TrailConfig trail,
     double rerouteDistance,
     int rerouteAfterTicks,
@@ -67,8 +74,14 @@ public record NavigationConfig(
     /** Default for {@code destination-snap-vertical-weight}: plain 3D (finding N15). */
     public static final double DEFAULT_DESTINATION_SNAP_VERTICAL_WEIGHT = 1;
 
-    /** Default for {@code max-start-distance}: the walk search's {@code max-length} (KNG-75). */
+    /** Default for {@code max-start-distance}: the walk range (KNG-75; a 96-block leg fits the 64-chunk capture). */
     public static final double DEFAULT_MAX_START_DISTANCE = 96;
+
+    /** Default for {@code max-destination-distance} (KNG-75 decision 2026-10-09). */
+    public static final double DEFAULT_MAX_DESTINATION_DISTANCE = 256;
+
+    /** Default for {@code destination-walk-range}: the walk range, as for the start (KNG-75 step 2a). */
+    public static final double DEFAULT_DESTINATION_WALK_RANGE = 96;
 
     /** Design default for {@code overlay-materials} (DESIGN §4). */
     public static final List<String> DEFAULT_OVERLAY_MATERIALS = List.of(
@@ -318,7 +331,8 @@ public record NavigationConfig(
                             double rerouteDistance, int rerouteAfterTicks, double arriveDistance, int maxSessionMinutes,
                             double sprintSpeed, SurveyConfig survey, BuilderConfig builder) {
         this(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance, snapVerticalWeight,
-            DEFAULT_DESTINATION_SNAP_VERTICAL_WEIGHT, DEFAULT_MAX_START_DISTANCE, trail, rerouteDistance, rerouteAfterTicks, arriveDistance,
+            DEFAULT_DESTINATION_SNAP_VERTICAL_WEIGHT, DEFAULT_MAX_START_DISTANCE, DEFAULT_MAX_DESTINATION_DISTANCE,
+            DEFAULT_DESTINATION_WALK_RANGE, trail, rerouteDistance, rerouteAfterTicks, arriveDistance,
             maxSessionMinutes, sprintSpeed, survey, builder, null);
     }
 
@@ -330,7 +344,8 @@ public record NavigationConfig(
     /** This config with another {@code walk:} block. */
     public NavigationConfig withWalk(WalkConfig walk) {
         return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
-            snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
+            snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
+            trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
             survey, builder, walk);
     }
 
@@ -371,6 +386,12 @@ public record NavigationConfig(
         }
         if (snapVerticalWeight < 0) {
             throw new IllegalArgumentException("navigation.snap-vertical-weight must not be negative (got: " + snapVerticalWeight + ")");
+        }
+        if (!(maxDestinationDistance > 0)) {
+            throw new IllegalArgumentException("navigation.max-destination-distance must be positive (got: " + maxDestinationDistance + ")");
+        }
+        if (!(destinationWalkRange > 0)) {
+            throw new IllegalArgumentException("navigation.destination-walk-range must be positive (got: " + destinationWalkRange + ")");
         }
         if (!(maxStartDistance > 0)) {
             throw new IllegalArgumentException("navigation.max-start-distance must be positive (got: " + maxStartDistance + ")");
