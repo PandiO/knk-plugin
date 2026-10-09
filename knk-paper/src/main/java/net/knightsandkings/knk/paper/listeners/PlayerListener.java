@@ -174,7 +174,7 @@ public class PlayerListener implements Listener {
 		// Text from the web-app Game Settings page (docs/specs/game-settings/DESIGN.md §3.1); blank = none.
 		// ModeListener (HIGHEST) still drops it for a vanished player.
 		if (gameSettings != null) {
-			e.joinMessage(gameSettings.joinMessage(player.getName(), groupsOf(user)).orElse(null));
+			e.joinMessage(gameSettings.joinMessage(player.getName(), titleOf(user), groupsOf(user)).orElse(null));
 		} else {
 			e.joinMessage(Component.text("► " + "Player " + player.getName() + " joined").color(ColorOptions.message));
 		}
@@ -253,7 +253,7 @@ public class PlayerListener implements Listener {
         reportPresence(user, false);
 
 		if (gameSettings != null) {
-			e.quitMessage(gameSettings.leaveMessage(player.getName(), groupsOf(user)).orElse(null));
+			e.quitMessage(gameSettings.leaveMessage(player.getName(), titleOf(user), groupsOf(user)).orElse(null));
 		} else {
 			e.quitMessage(Component.text(ColorOptions.messageArrow + "Player " + player.getName() + " left").color(ColorOptions.message));
 		}
@@ -380,6 +380,11 @@ public class PlayerListener implements Listener {
 	}
 
 	/** The player's groups in Game Settings precedence order (KNG-52); empty when not cached yet. */
+	/** The player's title name for {title} in join/leave messages (KNG-52 round 3); null when none or not cached yet. */
+	private static String titleOf(UserSummary user) {
+		return user != null ? user.titleName() : null;
+	}
+
 	private static List<PermissionGroupRef> groupsOf(UserSummary user) {
 		return user != null ? user.permissionGroups() : List.of();
 	}

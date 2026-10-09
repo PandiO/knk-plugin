@@ -326,20 +326,27 @@ public class GameSettingsManager {
      *
      * @param groups the player's groups in precedence order (UserSummary.permissionGroups); may be empty
      */
-    public Optional<Component> joinMessage(String playerName, List<PermissionGroupRef> groups) {
+    public Optional<Component> joinMessage(String playerName, String title, List<PermissionGroupRef> groups) {
         KnkGameSettings settings = current;
-        Optional<GroupOverrides.Pick<String>> group = GroupOverrides.joinAnnouncement(settings, groups);
-        String template = group.map(GroupOverrides.Pick::value).orElse(settings != null ? settings.joinAnnouncement() : null);
-        String groupName = group.map(pick -> pick.group().name()).orElse(GroupOverrides.primaryGroupName(groups));
-        return Announcements.render(template, Announcements.DEFAULT_JOIN, playerName, groupName)
-            .map(DisplayTextFormatter::toComponent);
+        return announcement(GroupOverrides.joinAnnouncement(settings, groups), settings != null ? settings.joinAnnouncement() : null,
+            Announcements.DEFAULT_JOIN, playerName, title, groups);
     }
 
-    /** The quit broadcast, or empty for none. {@code {group}} is the player's first group. */
-    public Optional<Component> leaveMessage(String playerName, List<PermissionGroupRef> groups) {
+    /**
+     * The quit broadcast, or empty for none: the player's first group with its own leave message
+     * (round 3), else the global one. {@code {group}} is that group, else the player's first group.
+     */
+    public Optional<Component> leaveMessage(String playerName, String title, List<PermissionGroupRef> groups) {
         KnkGameSettings settings = current;
-        return Announcements.render(settings != null ? settings.leaveAnnouncement() : null, Announcements.DEFAULT_LEAVE, playerName,
-                GroupOverrides.primaryGroupName(groups))
+        return announcement(GroupOverrides.leaveAnnouncement(settings, groups), settings != null ? settings.leaveAnnouncement() : null,
+            Announcements.DEFAULT_LEAVE, playerName, title, groups);
+    }
+
+    private static Optional<Component> announcement(Optional<GroupOverrides.Pick<String>> group, String global, String fallback,
+                                                    String playerName, String title, List<PermissionGroupRef> groups) {
+        String template = group.map(GroupOverrides.Pick::value).orElse(global);
+        String groupName = group.map(pick -> pick.group().name()).orElse(GroupOverrides.primaryGroupName(groups));
+        return Announcements.render(template, fallback, playerName, groupName, title)
             .map(DisplayTextFormatter::toComponent);
     }
 
@@ -465,18 +472,29 @@ public class GameSettingsManager {
         RespawnPlanner.Plan plan = RespawnPlanner.plan(policy, deathPoint, configured, townSpots, this::insideTownRegion);
         return switch (plan.kind()) {
             case SERVER_DEFAULT -> Optional.empty();
-            case WORLD_SPAWN -> Optional.of(deathWorld.getSpawnLocation());
+            case WORLD_SPAWN -> Optional.ofNullable(worldSpawnFor(deathWorld));
             case JOIN_SPAWN -> Optional.ofNullable(joinSpawn(groups));
             case LOCATION -> {
                 Optional<Location> spot = toBukkit(plan.location());
                 if (spot.isEmpty()) {
                     warnOnce("respawn-world:" + plan.location().world(), "Respawn spot (" + plan.reason() + ") is in world '"
                         + plan.location().world() + "', which isn't loaded");
-                    yield policy.useWorldSpawnFallback() ? Optional.of(deathWorld.getSpawnLocation()) : Optional.empty();
+                    yield policy.useWorldSpawnFallback() ? Optional.ofNullable(worldSpawnFor(deathWorld)) : Optional.empty();
                 }
                 yield spot;
             }
         };
+    }
+
+    /**
+     * The "world spawn" a death in {@code deathWorld} respawns at: that world's spawn point, but the main
+     * world's for a nether or End death - as vanilla, which never respawns anyone in those worlds.
+     */
+    private static Location worldSpawnFor(World deathWorld) {
+        if (deathWorld.getEnvironment() == World.Environment.NORMAL || Bukkit.getWorlds().isEmpty()) {
+            return deathWorld.getSpawnLocation();
+        }
+        return Bukkit.getWorlds().get(0).getSpawnLocation();
     }
 
     private boolean insideTownRegion(RespawnPlanner.TownSpot town, KnkLocation point) {
@@ -578,6 +596,11 @@ public class GameSettingsManager {
             world.setSpawnLocation(target);
             LOGGER.info(PREFIX + "Moved the spawn of " + world.getName() + " to " + reference.label());
         }
+    }
+
+    /** How often the settings are read and re-applied (seconds). */
+    public int refreshIntervalSeconds() {
+        return config.refreshIntervalSeconds();
     }
 
     /** The world's weather rule; null when it has none (or no settings are known). */

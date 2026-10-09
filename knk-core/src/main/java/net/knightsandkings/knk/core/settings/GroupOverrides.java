@@ -14,7 +14,7 @@ import net.knightsandkings.knk.core.domain.users.PermissionGroupRef;
 /**
  * Which of a player's groups supplies each Game Settings override (KNG-52,
  * docs/specs/game-settings/DESIGN.md §3.8). The player's groups arrive from the API already in
- * precedence order (hierarchy first, then weight); each setting is decided on its own - the first
+ * precedence order (the teleport fee order, KNG-41: weight first, each group followed by its parents); each setting is decided on its own - the first
  * group with an override for <em>that</em> setting wins, so one group can set the join message and
  * another the spawn.
  */
@@ -29,6 +29,10 @@ public final class GroupOverrides {
 
     public static Optional<Pick<String>> joinAnnouncement(KnkGameSettings settings, List<PermissionGroupRef> groups) {
         return first(settings, groups, KnkGroupOverride::joinAnnouncement);
+    }
+
+    public static Optional<Pick<String>> leaveAnnouncement(KnkGameSettings settings, List<PermissionGroupRef> groups) {
+        return first(settings, groups, KnkGroupOverride::leaveAnnouncement);
     }
 
     public static Optional<Pick<KnkSpawnReference>> joinSpawn(KnkGameSettings settings, List<PermissionGroupRef> groups) {

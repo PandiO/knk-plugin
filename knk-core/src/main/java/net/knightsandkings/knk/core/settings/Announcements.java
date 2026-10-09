@@ -31,13 +31,34 @@ public final class Announcements {
      * @return the text to broadcast, or empty for none
      */
     public static Optional<String> render(String template, String fallback, String playerName, String groupName) {
+        return render(template, fallback, playerName, groupName, null);
+    }
+
+    /**
+     * {@link #render(String, String, String, String)} plus the player's title (KNG-52 round 3):
+     * {@code {title}} (alias {@code {titlename}}), e.g. "Knight". An empty {@code {group}} or
+     * {@code {title}} also takes one neighbouring space, so "{group} {title} {player}" never shows
+     * a double space.
+     *
+     * @param title fills every {@code {title}}/{@code {titlename}}; null = blank
+     */
+    public static Optional<String> render(String template, String fallback, String playerName, String groupName,
+                                          String title) {
         String text = template != null ? template : fallback;
         if (text == null || text.isBlank()) {
             return Optional.empty();
         }
-        return Optional.of(text
-            .replace("{player}", playerName != null ? playerName : "Player")
-            .replace("{group}", groupName != null ? groupName : ""));
+        text = text.replace("{titlename}", "{title}");
+        text = fill(text, "{group}", groupName);
+        text = fill(text, "{title}", title);
+        return Optional.of(text.replace("{player}", playerName != null ? playerName : "Player"));
+    }
+
+    private static String fill(String text, String placeholder, String value) {
+        if (value != null && !value.isBlank()) {
+            return text.replace(placeholder, value.trim());
+        }
+        return text.replace(placeholder + " ", "").replace(" " + placeholder, "").replace(placeholder, "");
     }
 
     /**

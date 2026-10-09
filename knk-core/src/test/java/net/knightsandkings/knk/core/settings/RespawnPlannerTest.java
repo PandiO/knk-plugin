@@ -38,9 +38,10 @@ class RespawnPlannerTest {
     }
 
     @Test
-    void worldSpawnPolicyLeavesItToTheServer() {
-        Plan plan = RespawnPlanner.plan(policy(Mode.WORLD_SPAWN, null, true), DEATH, null, TOWNS, null);
-        assertEquals(Kind.SERVER_DEFAULT, plan.kind());
+    void worldSpawnPolicyForcesTheWorldSpawn_BedsIgnored() {
+        assertEquals(Kind.WORLD_SPAWN, RespawnPlanner.plan(policy(Mode.WORLD_SPAWN, null, true), DEATH, null, TOWNS, null).kind());
+        // The fallback flag doesn't matter: the world spawn is the policy itself (D1).
+        assertEquals(Kind.WORLD_SPAWN, RespawnPlanner.plan(policy(Mode.WORLD_SPAWN, null, false), DEATH, null, TOWNS, null).kind());
         assertEquals(Kind.SERVER_DEFAULT, RespawnPlanner.plan(null, DEATH, null, TOWNS, null).kind());
     }
 

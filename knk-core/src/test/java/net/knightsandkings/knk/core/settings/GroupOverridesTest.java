@@ -81,6 +81,30 @@ class GroupOverridesTest {
     }
 
     @Test
+    void theLeaveMessageIsPickedOnItsOwn() {
+        KnkGameSettings settings = settings(
+            new KnkGroupOverride(3, "Staff", 1, "&c[Staff] {player}", null, null),
+            new KnkGroupOverride(2, "Noble", 2, null, "&6{group} {player} left", null, null));
+
+        GroupOverrides.Pick<String> leave = GroupOverrides.leaveAnnouncement(settings, List.of(STAFF, NOBLE)).orElseThrow();
+        assertEquals("&6{group} {player} left", leave.value());
+        assertSame(NOBLE, leave.group());
+        assertTrue(GroupOverrides.leaveAnnouncement(settings, List.of(STAFF)).isEmpty());
+    }
+
+    @Test
+    void titlePlaceholder_AndEmptyPlaceholdersLeaveNoDoubleSpace() {
+        assertEquals(Optional.of("- Noble Knight Steve joined the server."),
+            Announcements.render("- {group} {titlename} {player} joined the server.", null, "Steve", "Noble", "Knight"));
+        assertEquals(Optional.of("- Noble Knight Steve left"),
+            Announcements.render("- {group} {title} {player} left", null, "Steve", "Noble", " Knight "));
+        assertEquals(Optional.of("- Noble Steve joined the server."),
+            Announcements.render("- {group} {title} {player} joined the server.", null, "Steve", "Noble", null));
+        assertEquals(Optional.of("- Steve joined"),
+            Announcements.render("- {group} {title} {player} joined", null, "Steve", "", ""));
+    }
+
+    @Test
     void primaryGroupNameIsTheFirstGroup() {
         assertEquals("Noble", GroupOverrides.primaryGroupName(List.of(NOBLE, DEFAULT)));
         assertEquals("", GroupOverrides.primaryGroupName(List.of()));

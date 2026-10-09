@@ -40,7 +40,7 @@ public final class GameSettingsMapper {
                     continue;
                 }
                 groups.add(new KnkGroupOverride(o.permissionGroupId(), o.groupName(),
-                    o.precedence() != null ? o.precedence() : position, o.joinAnnouncement(),
+                    o.precedence() != null ? o.precedence() : position, o.joinAnnouncement(), o.leaveAnnouncement(),
                     toCore(o.joinSpawnReference()), toCore(o.respawnPolicy())));
             }
         }

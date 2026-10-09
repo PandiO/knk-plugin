@@ -1488,6 +1488,7 @@ public class KnKPlugin extends JavaPlugin {
         if (gameSettingsManager != null) {
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.GameSettingsWorldListener(this, gameSettingsManager), this);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.GameSettingsMotdListener(gameSettingsManager), this);
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.GameSettingsWeatherCommandListener(gameSettingsManager), this);
         }
         pluginManager.registerEvents(new PlayerListener(usersDataAccess, gameSettingsManager, this.getCacheManager(), knkPermissible, usersCommandApi, kitsCommandApi, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, ignoreService), this);
         if (playerCurrencyService != null) {

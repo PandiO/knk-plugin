@@ -29,7 +29,7 @@ public final class RespawnPlanner {
         SERVER_DEFAULT,
         /** Respawn at {@link Plan#location()}. */
         LOCATION,
-        /** Respawn at the spawn point of the world the player died in. */
+        /** Respawn at the spawn point of the world the player died in (the main world's for a nether/End death). */
         WORLD_SPAWN,
         /** Respawn where the player would join ({@link KnkRespawnPolicy.Mode#JOIN_SPAWN}); the caller resolves it. */
         JOIN_SPAWN
@@ -57,8 +57,13 @@ public final class RespawnPlanner {
      */
     public static Plan plan(KnkRespawnPolicy policy, KnkLocation death, KnkLocation configured, List<TownSpot> towns,
                             RegionCheck inside) {
-        if (policy == null || policy.mode() == KnkRespawnPolicy.Mode.WORLD_SPAWN) {
-            return Plan.serverDefault("world-spawn policy");
+        if (policy == null) {
+            return Plan.serverDefault("no policy");
+        }
+        if (policy.mode() == KnkRespawnPolicy.Mode.WORLD_SPAWN) {
+            // Forced: beds and respawn anchors are ignored (developer decision D1, 2026-10-09; a
+            // player's own house/room spawn replaces the bed later).
+            return new Plan(Kind.WORLD_SPAWN, null, "world-spawn policy");
         }
         if (policy.mode() == KnkRespawnPolicy.Mode.JOIN_SPAWN) {
             return new Plan(Kind.JOIN_SPAWN, null, "same as the join spawn");

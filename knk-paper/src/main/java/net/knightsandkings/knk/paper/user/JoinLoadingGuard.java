@@ -162,10 +162,27 @@ public class JoinLoadingGuard {
 
         stopReminder(uuid);
 
-        if (player.getGameMode() == GameMode.ADVENTURE) {
+        GameMode before = player.getGameMode();
+        if (before == GameMode.ADVENTURE) {
             // If something else already changed their gamemode, leave it alone.
             GameMode mode = gameModeAfterHold.apply(player);
-            player.setGameMode(mode != null ? mode : GameMode.SURVIVAL);
+            GameMode handedBack = mode != null ? mode : GameMode.SURVIVAL;
+            player.setGameMode(handedBack);
+            plugin.getLogger().info("[KnK GameSettings] " + player.getName() + " left the loading hold in " + handedBack
+                + " (world " + (player.getWorld() != null ? player.getWorld().getName() : "?") + ")");
+            // KNG-52 smoke test step 4: a regular player ended up in SURVIVAL although the world's
+            // default was ADVENTURE. Say so if anything changes the mode right after the hold.
+            if (player.isOnline()) {
+                Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                    if (player.isOnline() && player.getGameMode() != handedBack) {
+                        plugin.getLogger().warning("[KnK GameSettings] " + player.getName() + "'s game mode changed from "
+                            + handedBack + " to " + player.getGameMode() + " within 2 s after the loading hold");
+                    }
+                }, 40L);
+            }
+        } else {
+            plugin.getLogger().info("[KnK GameSettings] " + player.getName() + " left the loading hold in " + before
+                + ", set by something else during the hold - left as it is");
         }
         player.setInvulnerable(false);
         return true;

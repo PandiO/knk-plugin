@@ -30,6 +30,7 @@ public record GameSettingsDto(
             @JsonProperty("groupName") String groupName,
             @JsonProperty("precedence") Integer precedence,
             @JsonProperty("joinAnnouncement") String joinAnnouncement,
+            @JsonProperty("leaveAnnouncement") String leaveAnnouncement,
             @JsonProperty("joinSpawnReference") LocationReference joinSpawnReference,
             @JsonProperty("respawnPolicy") RespawnPolicy respawnPolicy
     ) {}
