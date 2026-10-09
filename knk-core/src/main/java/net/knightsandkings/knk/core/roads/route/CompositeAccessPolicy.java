@@ -34,11 +34,6 @@ public final class CompositeAccessPolicy implements AccessPolicy {
         return result;
     }
 
-    /** A part of an edge shares the edge's id: evaluated without the per-id cache, and not stored in it. */
-    @Override
-    public EdgeVerdict checkPart(RoadEdge part) {
-        return evaluate(part);
-    }
 
     private EdgeVerdict evaluate(RoadEdge edge) {
         EdgeVerdict result = EdgeVerdict.open();

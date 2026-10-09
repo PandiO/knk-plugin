@@ -31,6 +31,11 @@ import java.util.Set;
 public final class AStarRouter {
 
     private static final int START_STATE = -1;
+    /**
+     * A start this close (blocks) to an end of a blocked start edge is at that node, and leaves from it (rev. 7
+     * Part A: the snapper may put a player on the split node before a door onto the door's piece).
+     */
+    static final double AT_NODE = 0.5;
 
     private final RoadNetworkSnapshot snapshot;
 
@@ -212,44 +217,26 @@ public final class AStarRouter {
             }
         }
 
-        /**
-         * Goals on a blocked edge that the goal sides open from this node (N14: the closed gate lies
-         * beyond the goal): reached over the open part only, the rest of the edge stays closed.
-         */
-        void relaxGoalsBehindBlock(int nodeId, int edgeIndex, boolean forward) {
-            List<Integer> onEdge = goalsByEdgeIndex.get(edgeIndex);
-            if (onEdge == null || request.goalSides() == null) {
-                return;
-            }
-            EdgePolyline p = snapshot.polylineAt(edgeIndex);
-            double perBlock = p.length() <= 0 ? 0 : edgeCost(edgeIndex) / p.length();
-            double along = forward ? 0 : p.length();
-            for (int k : onEdge) {
-                if (request.goalOpenBySides(k, forward)) {
-                    double goalAlong = goals.get(k).along();
-                    relax(nodeId, goalState(k), Math.abs(goalAlong - along) * perBlock, edgeIndex, forward);
-                }
-            }
-        }
-
         void expandStart() {
             RoadEdge edge = snapshot.edgeAt(startEdgeIndex);
-            boolean usable = verdict(startEdgeIndex).isUsable();
-            RouteRequest.StartSides sides = request.startSides();
-            if (!usable && sides == null) {
-                return; // Phase 2d decision: a blocked start edge cannot be left
-            }
-            boolean forwardOpen = usable || sides.towardTo();
-            boolean backwardOpen = usable || sides.towardFrom();
             EdgePolyline p = snapshot.polylineAt(startEdgeIndex);
+            if (!verdict(startEdgeIndex).isUsable()) {
+                // Phase 2d decision: a blocked start edge cannot be left. On the routing view (rev. 7 Part A) that is
+                // only the stretch of the block itself - a gate door's piece, the inside of a denied region. A start
+                // at one of its ends is at the node (a junction, or the split node before a door): leave from there.
+                if (start.along() <= AT_NODE) {
+                    relax(START_STATE, edge.fromNodeId(), 0, startEdgeIndex, false);
+                } else if (start.along() >= p.length() - AT_NODE) {
+                    relax(START_STATE, edge.toNodeId(), 0, startEdgeIndex, true);
+                }
+                return;
+            }
             double perBlock = p.length() <= 0 ? 0 : edgeCost(startEdgeIndex) / p.length();
             double along = start.along();
             // forward: towards the To node
-            if (forwardOpen) {
-                relaxGoalsOnEdge(START_STATE, startEdgeIndex, along, true, perBlock);
-                relax(START_STATE, edge.toNodeId(), (p.length() - along) * perBlock, startEdgeIndex, true);
-            }
-            if (!edge.isOneway() && backwardOpen) {
+            relaxGoalsOnEdge(START_STATE, startEdgeIndex, along, true, perBlock);
+            relax(START_STATE, edge.toNodeId(), (p.length() - along) * perBlock, startEdgeIndex, true);
+            if (!edge.isOneway()) {
                 relaxGoalsOnEdge(START_STATE, startEdgeIndex, along, false, perBlock);
                 relax(START_STATE, edge.fromNodeId(), along * perBlock, startEdgeIndex, false);
             }
@@ -263,7 +250,6 @@ public final class AStarRouter {
                     continue;
                 }
                 if (!verdict(ei).isUsable()) {
-                    relaxGoalsBehindBlock(nodeId, ei, forward);
                     continue;
                 }
                 EdgePolyline p = snapshot.polylineAt(ei);
@@ -350,11 +336,9 @@ public final class AStarRouter {
                 EdgePolyline p = snapshot.polylineAt(a.edgeIndex);
                 double entry = a.fromState == START_STATE ? start.along() : (a.forward ? 0 : p.length());
                 double exit = isGoal(state) ? goal.along() : (a.forward ? p.length() : 0);
-                if (Math.abs(exit - entry) > 1e-9) {
-                    EdgeVerdict v = verdict(a.edgeIndex);
-                    if ((a.fromState == START_STATE || isGoal(state)) && !v.isUsable()) {
-                        v = EdgeVerdict.open(); // the open part of a blocked start or goal edge (start / goal sides)
-                    }
+                EdgeVerdict v = verdict(a.edgeIndex);
+                boolean leftAtTheNode = a.fromState == START_STATE && !v.isUsable(); // the player is at its node
+                if (Math.abs(exit - entry) > 1e-9 && !leftAtTheNode) {
                     steps.add(Route.Step.of(edge, a.forward, entry, exit, v));
                 }
                 state = a.fromState;

@@ -164,23 +164,6 @@ class AccessPolicyTest {
             .isPassThrough());
     }
 
-    @Test
-    void aPartOfAnEdgeIsNotAnsweredFromTheEdgesCachedVerdict() {
-        // live test 2026-10-09 (C3): the stretch ahead of the player shares the edge's id; the composite cached
-        // the whole edge's "the West Gate is closed" and answered the part with it
-        CompositeAccessPolicy c = CompositeAccessPolicy.of(new StaticFlagsAvailability(),
-            gates(gate(AnimationState.CLOSED, false, false, false, false, false), false));
-        assertTrue(c.check(gateEdge).isBlocked());
-        RoadEdge partWithoutTheDoor = new RoadEdge(gateEdge.id(), gateEdge.fromNodeId(), gateEdge.toNodeId(),
-            gateEdge.geometry(), gateEdge.length(), gateEdge.avgWidth(), gateEdge.profileId(), gateEdge.streetId(),
-            gateEdge.costMultiplier(), gateEdge.flags(), List.of(), gateEdge.domainIds(), gateEdge.regionIds(),
-            gateEdge.source(), gateEdge.stale());
-
-        assertTrue(c.checkPart(partWithoutTheDoor).isOpen(), "the part is judged on its own tags");
-        assertTrue(c.check(gateEdge).isBlocked(), "and the edge's cached verdict is untouched");
-        assertTrue(c.checkPart(gateEdge).isBlocked());
-    }
-
     // ---- domains -------------------------------------------------------------------------------
 
     @Test

@@ -431,53 +431,31 @@ class NavigationServiceTest {
     }
 
     /**
-     * The production part check, with a door on Main Street's gate edge at x = 150: the stretch is tagged by
-     * {@link NavigationAccess#partOf} and judged by the request's own (caching) policy, like NavigationAccess.
+     * Main Street's gate edge (B x=100 → C x=200) as the routing view has it (rev. 7 Part A): the door at x = 150 is
+     * its own piece (along 48.5-50.5), the stretches either side carry no door. What LiveEdgeTags builds from the world.
      */
-    private NavigationService.PolicyFactory gateDoorAtX150() {
-        net.knightsandkings.knk.core.roads.build.GateCells door = (x, y, z) -> x == 150 && z == 0 && y >= 64 && y <= 66
-            ? java.util.OptionalInt.of(NavigationTestNetwork.GATE_DOOR) : java.util.OptionalInt.empty();
-        return new NavigationService.PolicyFactory() {
-            @Override
-            public AccessPolicy policyFor(Player p, RoadNetworkSnapshot snapshot) {
-                return policies.policyFor(p, snapshot);
-            }
-
-            @Override
-            public boolean partOpen(Player p, RoadNetworkSnapshot snapshot, RoadEdge edge, double fromAlong, double toAlong,
-                                    AccessPolicy policy) {
-                return NavigationAccess.partOf(edge, snapshot.polyline(edge).subPolyline(fromAlong, toAlong), b -> Set.of(), door)
-                    .map(part -> policy.checkPart(part).isUsable()).orElse(true);
-            }
-
-            @Override
-            public List<RouteRequest.GoalSides> goalSides(Player p, RoadNetworkSnapshot snapshot, List<SnapPoint> goals,
-                                                          AccessPolicy policy) {
-                List<RouteRequest.GoalSides> sides = new ArrayList<>();
-                for (SnapPoint g : goals) {
-                    RoadEdge edge = snapshot.requireEdge(g.edgeId());
-                    double length = snapshot.polyline(edge).length();
-                    sides.add(policy.check(edge).isBlocked()
-                        ? new RouteRequest.GoalSides(partOpen(p, snapshot, edge, 0, g.along(), policy),
-                            partOpen(p, snapshot, edge, length, g.along(), policy))
-                        : null);
-                }
-                return sides;
-            }
-        };
+    private RoadNetworkSnapshot gateView() {
+        return net.knightsandkings.knk.core.roads.route.RoutingView.build(network.snapshot, Map.of(NavigationTestNetwork.E_BC,
+            List.of(new net.knightsandkings.knk.core.roads.route.RoutingView.Span(0, 48.5, List.of(), List.of()),
+                new net.knightsandkings.knk.core.roads.route.RoutingView.Span(48.5, 50.5, List.of(),
+                    List.of(NavigationTestNetwork.GATE_DOOR)),
+                new net.knightsandkings.knk.core.roads.route.RoutingView.Span(50.5, 100, List.of(), List.of()))));
     }
 
-    private void serviceWith(NavigationService.PolicyFactory factory) {
+    private RoadNetworkSnapshot serviceOnTheView() {
+        RoadNetworkSnapshot view = gateView();
         service = new NavigationService(new NavigationService.Deps(null, NavigationConfig.defaults(),
-            w -> network.snapshot, factory, shapes, eligibility, hud, trail, Runnable::run, Runnable::run, tick::get,
+            w -> view, policies, shapes, eligibility, hud, trail, Runnable::run, Runnable::run, tick::get,
             events::add, Logger.getLogger("test")));
+        return view;
     }
 
     @Test
     void aDestinationOnTheOpenSideOfAClosedGateIsReached() {
         // live test 2026-10-09 (A8/A9 with the gate closed, N14): South Gate's spawn snaps onto the gate's road on the
-        // town side of the door; the whole edge counted as blocked, and nothing was found
-        serviceWith(gateDoorAtX150());
+        // town side of the door; the whole edge counted as blocked, and nothing was found. On the routing view the
+        // stretch before the door is a road of its own.
+        RoadNetworkSnapshot view = serviceOnTheView();
         gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.CLOSED);
 
         service.navigate(player, Destination.point("South Gate", NavigationTestNetwork.WORLD, 135.5, 65, 0.5));
@@ -485,7 +463,7 @@ class NavigationServiceTest {
         NavigationSession session = service.sessionOf(playerId).orElseThrow();
         assertTrue(session.explanation().isEmpty(), "a full route: " + messages());
         Route route = session.route().orElseThrow();
-        assertEquals(NavigationTestNetwork.E_BC, route.steps().get(route.steps().size() - 1).edge().id());
+        assertEquals(NavigationTestNetwork.E_BC, view.storedEdgeId(route.steps().get(route.steps().size() - 1).edge().id()));
         assertEquals(135, route.end().x(), 1.0);
         ticks(NavigationService.RECHECK_TICKS + 1);
         assertTrue(messages().stream().noneMatch(m -> m.contains("West Gate") || m.contains("No route")), messages().toString());
@@ -495,11 +473,11 @@ class NavigationServiceTest {
     void aRouteStartingPastTheGateOnItsEdgeIsNotBlockedByIt() {
         // live test 2026-10-08 run 5 (C3): navigation started on the town side of the South Gate, on the gate's own
         // edge; the step walks only from the player to the node, but the whole edge's verdict was used
-        serviceWith(gateDoorAtX150());
+        RoadNetworkSnapshot view = serviceOnTheView();
         moveTo(170.5, 65, 0.5);
         service.navigate(player, Destination.point("Kardenna Castle", NavigationTestNetwork.WORLD, 200.5, 65, 200.5));
         NavigationSession session = service.sessionOf(playerId).orElseThrow();
-        assertEquals(NavigationTestNetwork.E_BC, session.route().orElseThrow().steps().get(0).edge().id());
+        assertEquals(NavigationTestNetwork.E_BC, view.storedEdgeId(session.route().orElseThrow().steps().get(0).edge().id()));
 
         gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.CLOSED);
         service.onGateChanged(NavigationTestNetwork.GATE_DOOR);
@@ -515,7 +493,7 @@ class NavigationServiceTest {
     void throughTheOpenGateThenItClosesBehindThePlayer() {
         // live test 2026-10-09 (C3, the developer's procedure): /nav in front of the gate, open it, walk through,
         // stop a little past it, close it - the part ahead was answered from the policy's cached whole-edge verdict
-        serviceWith(gateDoorAtX150());
+        serviceOnTheView();
         moveTo(120.5, 65, 0.5);
         service.navigate(player, Destination.point("Kardenna Castle", NavigationTestNetwork.WORLD, 200.5, 65, 200.5));
         NavigationSession session = service.sessionOf(playerId).orElseThrow();
@@ -535,7 +513,7 @@ class NavigationServiceTest {
 
         // still in front of it, the closing gate does block
         clearInvocations(player);
-        serviceWith(gateDoorAtX150());
+        serviceOnTheView();
         gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.OPEN);
         moveTo(120.5, 65, 0.5);
         service.navigate(player, Destination.point("Kardenna Castle", NavigationTestNetwork.WORLD, 200.5, 65, 200.5));
@@ -556,34 +534,18 @@ class NavigationServiceTest {
 
     @Test
     void standingOnTheRoadOfAClosedGateTheOpenSideLeadsToTheDetour() {
-        // live test 2026-10-08 (N6): in front of the closed gate, on its road - the way back is open
+        // live test 2026-10-08 (N6): in front of the closed gate, on its road - the way back is open. On the routing
+        // view the player stands on the stretch before the door, which the closed gate does not block.
         gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.CLOSED);
-        List<RouteRequest.StartSides> asked = new ArrayList<>();
-        NavigationService.PolicyFactory withSides = new NavigationService.PolicyFactory() {
-            @Override
-            public AccessPolicy policyFor(Player p, RoadNetworkSnapshot snapshot) {
-                return policies.policyFor(p, snapshot);
-            }
-
-            @Override
-            public RouteRequest.StartSides startSides(Player p, RoadNetworkSnapshot snapshot, SnapPoint start, AccessPolicy policy) {
-                RouteRequest.StartSides sides = new RouteRequest.StartSides(true, false);
-                asked.add(sides);
-                return sides;
-            }
-        };
-        service = new NavigationService(new NavigationService.Deps(null, NavigationConfig.defaults(),
-            w -> network.snapshot, withSides, shapes, eligibility, hud, trail, Runnable::run, Runnable::run, tick::get,
-            events::add, Logger.getLogger("test")));
+        RoadNetworkSnapshot view = serviceOnTheView();
         moveTo(140.5, 65, 0.5);
 
         service.navigate(player, cinixKeep());
 
         NavigationSession session = service.sessionOf(playerId).orElseThrow();
         assertTrue(session.explanation().isEmpty(), "a full route, not a partial one");
-        assertEquals(NavigationTestNetwork.E_BC, session.route().orElseThrow().steps().get(0).edge().id());
+        assertEquals(NavigationTestNetwork.E_BC, view.storedEdgeId(session.route().orElseThrow().steps().get(0).edge().id()));
         assertFalse(session.route().orElseThrow().steps().get(0).forward(), "back towards B");
-        assertEquals(1, asked.size());
         ticks(NavigationService.RECHECK_TICKS + 1);
         assertTrue(messages().stream().noneMatch(m -> m.contains("No open route") || m.contains("arrived")
             || m.contains("recalculating")), messages().toString());

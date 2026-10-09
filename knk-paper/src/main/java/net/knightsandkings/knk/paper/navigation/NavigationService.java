@@ -97,36 +97,6 @@ public final class NavigationService implements SiegeMatchObserver {
     @FunctionalInterface
     public interface PolicyFactory {
         AccessPolicy policyFor(Player player, RoadNetworkSnapshot snapshot);
-
-        /**
-         * Main thread: when {@code policy} blocks the start edge, which of its parts - from the start
-         * point to each node - the player may walk (live test 2026-10-08, N6); null when the edge is
-         * not blocked or nothing can tell.
-         */
-        default RouteRequest.StartSides startSides(Player player, RoadNetworkSnapshot snapshot, SnapPoint start,
-                                                   AccessPolicy policy) {
-            return null;
-        }
-
-        /**
-         * Main thread: whether the part of {@code edge} between two polyline positions is usable - the
-         * stretch still ahead of a player on a blocked edge (N10: a gate behind them no longer counts).
-         * Without the world side, the whole edge's verdict.
-         */
-        default boolean partOpen(Player player, RoadNetworkSnapshot snapshot, RoadEdge edge, double fromAlong,
-                                 double toAlong, AccessPolicy policy) {
-            return policy.check(edge).isUsable();
-        }
-
-        /**
-         * Main thread: per goal on an edge {@code policy} blocks, from which node the stretch up to the goal is
-         * open (N14: South Gate's spawn lies on the gate's road, on the town side of the door); null when no
-         * goal's edge is blocked or nothing can tell.
-         */
-        default List<RouteRequest.GoalSides> goalSides(Player player, RoadNetworkSnapshot snapshot, List<SnapPoint> goals,
-                                                       AccessPolicy policy) {
-            return null;
-        }
     }
 
     /**
@@ -243,8 +213,6 @@ public final class NavigationService implements SiegeMatchObserver {
         int announcedManeuvers;
         boolean hintShown;
         long lastRecheckTick;
-        /** The last route request: its start sides tell the re-check which start edge part is open (N6). */
-        RouteRequest lastRequest;
         /**
          * The roads were tried (or used) for this navigation: a direct leg whose walk search finds no way
          * asks the road network once, never again - also not for the last leg after a road's end (N13).
@@ -944,9 +912,7 @@ public final class NavigationService implements SiegeMatchObserver {
         List<SnapPoint> to = connectedGoals(snapshot, from, List.of(goal.get()), leg.target,
             Destination.point(a.destination.name(), a.destination.world(), 0, 0, 0));
         AccessPolicy policy = deps.policies().policyFor(a.player, snapshot);
-        RouteRequest request = RouteRequest.of(from, to, policy, routerParameters)
-            .withStartSides(deps.policies().startSides(a.player, snapshot, from, policy))
-            .withGoalSides(deps.policies().goalSides(a.player, snapshot, to, policy));
+        RouteRequest request = RouteRequest.of(from, to, policy, routerParameters);
         deps.routing().execute(() -> {
             RouteResult result;
             try {
@@ -969,7 +935,6 @@ public final class NavigationService implements SiegeMatchObserver {
                 a.leg = null;
                 a.goals = to;
                 a.target = leg.target;
-                a.lastRequest = request;
                 long now = deps.tick().getAsLong();
                 a.session = new NavigationSession(sessionParameters, new ManeuverBuilder(snapshot)::build, now);
                 a.session.start(); // its first computation is this one: the result is fed in below
@@ -1161,10 +1126,7 @@ public final class NavigationService implements SiegeMatchObserver {
         AccessPolicy policy = deps.policies().policyFor(player, snapshot);
         SnapPoint from = connectedStart(snapshot, feet, start.get(), a.goals);
         List<SnapPoint> to = connectedGoals(snapshot, from, a.goals, a.target, a.destination);
-        RouteRequest request = RouteRequest.of(from, to, policy, routerParameters)
-            .withStartSides(deps.policies().startSides(player, snapshot, from, policy))
-            .withGoalSides(deps.policies().goalSides(player, snapshot, to, policy));
-        a.lastRequest = request;
+        RouteRequest request = RouteRequest.of(from, to, policy, routerParameters);
         int generation = a.generation;
         deps.routing().execute(() -> {
             RouteResult result;
@@ -1335,21 +1297,9 @@ public final class NavigationService implements SiegeMatchObserver {
                 stepStart = stepEnd;
                 continue; // walked already: a gate closing behind the player is no block (live test 2026-10-08, N10)
             }
+            // on the routing view (rev. 7 Part A) a step is one access situation: a gate's door is its own piece
             EdgeVerdict verdict = policy.check(step.edge());
-            boolean openSide = i == 0 && a.lastRequest != null
-                && a.lastRequest.startStepOpenBySides(step.edge().id(), step.forward());
-            if (verdict.isBlocked() && !openSide) {
-                // only the stretch this step still walks counts: from the player (on it now) or from where it
-                // enters the edge (a route that starts or ends mid-edge) to where it leaves it (N10)
-                double from = stepStart < travelled
-                    ? step.entryAlong() + (step.forward() ? 1 : -1) * (travelled - stepStart)
-                    : step.entryAlong();
-                double edgeLength = a.snapshot.polyline(step.edge()).length();
-                boolean wholeEdge = Math.abs(step.exitAlong() - from) >= edgeLength - 1e-6;
-                openSide = !wholeEdge
-                    && deps.policies().partOpen(a.player, a.snapshot, step.edge(), from, step.exitAlong(), policy);
-            }
-            if (verdict.isBlocked() && !openSide) {
+            if (verdict.isBlocked()) {
                 apply(a, a.session.onElementBlocked(verdict, now));
                 return;
             }
@@ -1537,9 +1487,7 @@ public final class NavigationService implements SiegeMatchObserver {
         AccessPolicy policy = deps.policies().policyFor(as, snapshot);
         SnapPoint from = connectedStart(snapshot, feet, start.get(), goals.goals());
         List<SnapPoint> to = connectedGoals(snapshot, from, goals.goals(), goals.target(), destination);
-        RouteRequest request = RouteRequest.of(from, to, policy, routerParameters)
-            .withStartSides(deps.policies().startSides(as, snapshot, from, policy))
-            .withGoalSides(deps.policies().goalSides(as, snapshot, to, policy));
+        RouteRequest request = RouteRequest.of(from, to, policy, routerParameters);
         deps.routing().execute(() -> {
             List<Component> lines = new ArrayList<>();
             try {
