@@ -144,6 +144,7 @@ public class KnkApiClient {
     private final CurrencyApi currencyApi;
     private final RoadNetworkQueryApi roadNetworkQueryApi;
     private final RoadNetworkCommandApi roadNetworkCommandApi;
+    private final net.knightsandkings.knk.core.ports.api.LocationRetentionApi locationRetentionApi;
 
     private KnkApiClient(
         String baseUrl,
@@ -203,6 +204,7 @@ public class KnkApiClient {
         this.lootboxesCommandApi = new net.knightsandkings.knk.api.impl.LootboxesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.roadNetworkQueryApi = new RoadNetworkQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.roadNetworkCommandApi = new RoadNetworkCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.locationRetentionApi = new net.knightsandkings.knk.api.impl.LocationRetentionApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
     }
     
     public HealthApi getHealthApi() {
@@ -323,6 +325,11 @@ public class KnkApiClient {
     /** Road navigation writes (KNG-27): build upload, dirty marks, profiles, surveys, seeds, node/edge review. */
     public RoadNetworkCommandApi getRoadNetworkCommandApi() {
         return roadNetworkCommandApi;
+    }
+
+    /** Location retention (KNG-80): the orphan list and teleport targets. */
+    public net.knightsandkings.knk.core.ports.api.LocationRetentionApi getLocationRetentionApi() {
+        return locationRetentionApi;
     }
 
     /** KNG-18 Phase 2: players' ignore lists. */

@@ -14,24 +14,33 @@ public record PlayerNotification(
     TitleChangeResult titleChange, // set when type is TYPE_TITLE_CHANGED
     net.knightsandkings.knk.core.domain.currency.PaymentNotice payment, // set when type is TYPE_PAYMENT_RECEIVED
     net.knightsandkings.knk.core.domain.currency.CurrencyAlertNotice currencyAlert, // set when type is TYPE_CURRENCY_ALERT
-    net.knightsandkings.knk.core.lootbox.KnkLootboxWorldChange lootboxWorldChanged // set when type is TYPE_LOOTBOX_WORLD_CHANGED
+    net.knightsandkings.knk.core.lootbox.KnkLootboxWorldChange lootboxWorldChanged, // set when type is TYPE_LOOTBOX_WORLD_CHANGED
+    net.knightsandkings.knk.core.domain.location.LocationOrphanDigest locationOrphanDigest // set when type is TYPE_LOCATION_ORPHAN_DIGEST
 ) {
+    /** Without a Location orphan digest - every type before TYPE_LOCATION_ORPHAN_DIGEST. */
+    public PlayerNotification(long id, int userId, String uuid, String username, String type, TitleChangeResult titleChange,
+                              net.knightsandkings.knk.core.domain.currency.PaymentNotice payment,
+                              net.knightsandkings.knk.core.domain.currency.CurrencyAlertNotice currencyAlert,
+                              net.knightsandkings.knk.core.lootbox.KnkLootboxWorldChange lootboxWorldChanged) {
+        this(id, userId, uuid, username, type, titleChange, payment, currencyAlert, lootboxWorldChanged, null);
+    }
+
     /** Without a lootbox world change - every type before TYPE_LOOTBOX_WORLD_CHANGED. */
     public PlayerNotification(long id, int userId, String uuid, String username, String type, TitleChangeResult titleChange,
                               net.knightsandkings.knk.core.domain.currency.PaymentNotice payment,
                               net.knightsandkings.knk.core.domain.currency.CurrencyAlertNotice currencyAlert) {
-        this(id, userId, uuid, username, type, titleChange, payment, currencyAlert, null);
+        this(id, userId, uuid, username, type, titleChange, payment, currencyAlert, null, null);
     }
 
     /** Without a payment - every type before TYPE_PAYMENT_RECEIVED. */
     public PlayerNotification(long id, int userId, String uuid, String username, String type, TitleChangeResult titleChange) {
-        this(id, userId, uuid, username, type, titleChange, null, null, null);
+        this(id, userId, uuid, username, type, titleChange, null, null, null, null);
     }
 
     /** Without a currency alert - every type before TYPE_CURRENCY_ALERT. */
     public PlayerNotification(long id, int userId, String uuid, String username, String type, TitleChangeResult titleChange,
                               net.knightsandkings.knk.core.domain.currency.PaymentNotice payment) {
-        this(id, userId, uuid, username, type, titleChange, payment, null, null);
+        this(id, userId, uuid, username, type, titleChange, payment, null, null, null);
     }
 
     public static final String TYPE_TITLE_CHANGED = "TitleChanged";
@@ -70,4 +79,10 @@ public record PlayerNotification(
      * known set and re-checks where they stand, so the reset place can be discovered again.
      */
     public static final String TYPE_DISCOVERY_RESET = "DiscoveryReset";
+    /**
+     * A Location retention run found new orphaned Locations (KNG-80), for online staff holding
+     * knk.admin.location.orphans.notify - not addressed to one player (userId 0). Payload in
+     * {@link #locationOrphanDigest()}.
+     */
+    public static final String TYPE_LOCATION_ORPHAN_DIGEST = "LocationOrphanDigest";
 }
