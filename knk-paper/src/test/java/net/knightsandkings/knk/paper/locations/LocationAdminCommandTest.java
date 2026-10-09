@@ -57,7 +57,7 @@ class LocationAdminCommandTest {
                 sender.sendMessage("no permission");
             }
         },
-        sender -> granted.contains(LocationAdminCommand.TELEPORT_NODE),
+        (sender, node) -> granted.contains(node),
         () -> teleportService,
         name -> "world".equals(name) ? world : null,
         vanished::contains,
@@ -192,6 +192,21 @@ class LocationAdminCommandTest {
         granted.add(LocationAdminCommand.HERE_NODE);
         command.execute(staff, new String[] {"here"});
         assertEquals(List.of("Staff"), shownHere);
+    }
+
+    @Test
+    void tabCompletion_andListing_onlyOfferActionsTheSenderHolds() {
+        assertFalse(command.visibleTo(staff));
+        assertEquals(List.of(), command.complete(staff, new String[] {""}));
+
+        granted.add(LocationAdminCommand.TELEPORT_NODE);
+        assertTrue(command.visibleTo(staff));
+        assertEquals(List.of("tp"), command.complete(staff, new String[] {""}));
+
+        granted.add(LocationAdminCommand.HERE_NODE);
+        granted.add(LocationAdminCommand.ORPHANS_NODE);
+        assertEquals(List.of("here", "tp", "orphans"), command.complete(staff, new String[] {""}));
+        assertEquals(List.of("orphans"), command.complete(staff, new String[] {"or"}));
     }
 
     @Test

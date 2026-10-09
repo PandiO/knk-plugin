@@ -56,19 +56,19 @@ public final class LocationAdminCommand implements SubcommandExecutor {
 
     private final LocationRetentionApi api;
     private final PermissionGate permissions;
-    private final Predicate<CommandSender> canTeleportCached;
+    private final java.util.function.BiPredicate<CommandSender, String> holdsCached;
     private final Supplier<TeleportService> teleports;
     private final Function<String, World> worlds;
     private final Predicate<Player> isVanished;
     private final Executor mainThread;
     private final Consumer<Player> showHere;
 
-    public LocationAdminCommand(LocationRetentionApi api, PermissionGate permissions, Predicate<CommandSender> canTeleportCached,
+    public LocationAdminCommand(LocationRetentionApi api, PermissionGate permissions, java.util.function.BiPredicate<CommandSender, String> holdsCached,
                                 Supplier<TeleportService> teleports, Function<String, World> worlds, Predicate<Player> isVanished,
                                 Executor mainThread, Consumer<Player> showHere) {
         this.api = api;
         this.permissions = permissions;
-        this.canTeleportCached = canTeleportCached;
+        this.holdsCached = holdsCached;
         this.teleports = teleports;
         this.worlds = worlds;
         this.isVanished = isVanished;
@@ -102,12 +102,26 @@ public final class LocationAdminCommand implements SubcommandExecutor {
         return true;
     }
 
+    /** Only the actions the sender holds the node for (cached check; running an action checks for real). */
     public List<String> complete(CommandSender sender, String[] args) {
         if (args.length == 1) {
             String prefix = args[0].toLowerCase(Locale.ROOT);
-            return List.of("here", "tp", "orphans").stream().filter(s -> s.startsWith(prefix)).toList();
+            return actionsFor(sender).stream().filter(s -> s.startsWith(prefix)).toList();
         }
         return List.of();
+    }
+
+    /** Whether /knk help and tab completion list /knk location at all: any of its nodes. */
+    public boolean visibleTo(CommandSender sender) {
+        return !actionsFor(sender).isEmpty();
+    }
+
+    private List<String> actionsFor(CommandSender sender) {
+        List<String> actions = new java.util.ArrayList<>();
+        if (holdsCached.test(sender, HERE_NODE)) actions.add("here");
+        if (holdsCached.test(sender, TELEPORT_NODE)) actions.add("tp");
+        if (holdsCached.test(sender, ORPHANS_NODE)) actions.add("orphans");
+        return actions;
     }
 
     // ===== tp =====
@@ -190,7 +204,7 @@ public final class LocationAdminCommand implements SubcommandExecutor {
         }
         sender.sendMessage(ChatColor.GOLD + "Orphaned Locations: " + ChatColor.YELLOW + result.openCount() + " open"
             + ChatColor.GRAY + " (page " + result.pageNumber() + "/" + result.totalPages() + ")");
-        boolean teleportLinks = canTeleportCached.test(sender);
+        boolean teleportLinks = holdsCached.test(sender, TELEPORT_NODE);
         for (LocationOrphanEntry entry : result.items()) {
             Component line = Component.text(String.format(Locale.ROOT, "#%d ", entry.locationId()), NamedTextColor.YELLOW)
                 .append(Component.text(String.format(Locale.ROOT, "%s %.1f %.1f %.1f", entry.world() == null ? "world" : entry.world(),

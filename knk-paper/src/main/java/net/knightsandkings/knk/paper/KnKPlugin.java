@@ -1640,7 +1640,7 @@ public class KnKPlugin extends JavaPlugin {
                 var locationAdmin = new net.knightsandkings.knk.paper.locations.LocationAdminCommand(
                     apiClient.getLocationRetentionApi(),
                     permissionGate::whenAllowed,
-                    sender -> permissionGate.has(sender, net.knightsandkings.knk.paper.locations.LocationAdminCommand.TELEPORT_NODE),
+                    permissionGate::has,
                     () -> teleportService,
                     org.bukkit.Bukkit::getWorld,
                     player -> modeService != null && modeService.isVanished(player),
@@ -1648,6 +1648,8 @@ public class KnKPlugin extends JavaPlugin {
                     player -> new net.knightsandkings.knk.paper.commands.LocationDebugCommand(this).onCommand(player, null, "knk", new String[0]));
                 knkAdminCommand.registerSubcommand(
                     net.knightsandkings.knk.paper.locations.LocationAdminCommand.metadata(), locationAdmin, locationAdmin::complete);
+                // No top-level node (each action checks its own), so only list it to holders of one of them.
+                knkAdminCommand.setSubcommandVisibility("location", locationAdmin::visibleTo);
             }
             // KNG-80: the weekly orphan check's digest, for online staff with knk.admin.location.orphans.notify
             // (or the next one to join when none is online).
