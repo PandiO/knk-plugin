@@ -1160,6 +1160,43 @@ class NavigationServiceTest {
     }
 
     @Test
+    void pastAPartialPathsEndTowardsTheRoadIsNotHeadingAway() {
+        // live test 2026-10-09 S3: down the keep tower's spiral stair the budget-cut path ended; the player went on
+        // towards the road, the leg's measure grew, and "You left the road" followed
+        WalkPath partial = mock(WalkPath.class);
+        when(partial.points()).thenReturn(List.of(new double[] {50.5, 64, 30.5}, new double[] {50.5, 64, 25.5}));
+        walkFinder = r -> WalkResult.fallback("length cap", 548, partial);
+        NavigationService walking = walkService(NavigationConfig.defaults());
+        moveTo(50.5, 65, 30.5);
+        walking.navigate(player, cinixKeep());
+        runSearches();
+        assertTrue(walking.startLegOf(playerId).orElseThrow().partial);
+
+        moveTo(35.5, 65, 20.5); // 15.8 off the path's end, but nearer the route (25.4 from it, was 30.5)
+        ticks(NavigationService.RECHECK_TICKS * 2);
+
+        assertTrue(walking.startLegOf(playerId).isPresent(), "still walking to the road");
+        assertTrue(messages().stream().noneMatch(m -> m.contains("You left the road")), messages().toString());
+    }
+
+    @Test
+    void followingAWalkPathThatFirstLeadsAwayFromTheRoadIsNotHeadingAway() {
+        // out through the back door: 15 blocks away from Main Street, round, then to it
+        walkFinder = r -> found(List.of(new double[] {50.5, 64, 30.5}, new double[] {50.5, 64, 45.5},
+            new double[] {70.5, 64, 45.5}, new double[] {70.5, 64, 0.5}));
+        NavigationService walking = walkService(NavigationConfig.defaults());
+        moveTo(50.5, 65, 30.5);
+        walking.navigate(player, cinixKeep());
+        runSearches();
+
+        moveTo(50.5, 65, 44.5); // on the path, 44.5 from the route (was 30.5)
+        ticks(NavigationService.RECHECK_TICKS * 2);
+
+        assertTrue(walking.startLegOf(playerId).isPresent(), "following the path");
+        assertTrue(messages().stream().noneMatch(m -> m.contains("You left the road")), messages().toString());
+    }
+
+    @Test
     void noWalkableWayToTheRoadSaysSoAndTheNavigationCarriesOn() {
         walkFinder = r -> WalkResult.noPath("unreachable", 900);
         NavigationService walking = walkService(NavigationConfig.defaults());

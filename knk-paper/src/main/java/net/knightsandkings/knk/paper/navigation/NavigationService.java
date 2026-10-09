@@ -219,6 +219,8 @@ public final class NavigationService implements SiegeMatchObserver {
          * in direct mode and without walk paths (then the trail's straight line to the road, as before).
          */
         DirectLeg startLeg;
+        /** The start leg's closest approach to the route (3D), for "heading away". */
+        double startLegClosestToRoute;
         int generation;
         int announcedManeuvers;
         boolean hintShown;
@@ -1260,15 +1262,18 @@ public final class NavigationService implements SiegeMatchObserver {
     private void aimStartLeg(Active a, Route route) {
         Location feet = a.player.getLocation();
         double x = feet.getX(), floorY = feet.getY() - 1, z = feet.getZ();
-        if (!walkEnabled() || route.project(x, floorY, z, 0).distance() <= sessionParameters.rerouteDistance()) {
+        double toRoute = route.project(x, floorY, z, 0).distance();
+        if (!walkEnabled() || toRoute <= sessionParameters.rerouteDistance()) {
             dropStartLeg(a);
             return;
         }
         double[] start = route.start().point();
         if (a.startLeg != null && distance(start[0], start[1], start[2], a.startLeg.target) <= 1) {
+            a.startLegClosestToRoute = Math.min(a.startLegClosestToRoute, toRoute);
             return; // the same road start: keep the leg and its path
         }
         dropStartLeg(a);
+        a.startLegClosestToRoute = toRoute;
         DirectLeg leg = new DirectLeg(start);
         double d = distance(x, floorY, z, start);
         leg.total = Math.max(1, d);
@@ -1293,17 +1298,23 @@ public final class NavigationService implements SiegeMatchObserver {
         }
         Location feet = a.player.getLocation();
         double x = feet.getX(), floorY = feet.getY() - 1, z = feet.getZ();
-        if (route.project(x, floorY, z, 0).distance() <= sessionParameters.rerouteDistance()
+        double toRoute = route.project(x, floorY, z, 0).distance();
+        if (toRoute <= sessionParameters.rerouteDistance()
             || distance(x, floorY, z, leg.target) <= sessionParameters.arriveDistance()) {
             dropStartLeg(a);
             return false;
         }
         double remaining = leg.remainingOf(x, floorY, z);
-        if (remaining > leg.best + sessionParameters.rerouteDistance()) {
+        // heading away: farther along the leg AND farther from the route. Either alone misleads - past a partial
+        // path's end the leg's measure grows while the player still nears the road (live test S3: down a spiral
+        // stair), and a walk path may first lead away from the road (out through a back door).
+        if (remaining > leg.best + sessionParameters.rerouteDistance()
+            && toRoute > a.startLegClosestToRoute + sessionParameters.rerouteDistance()) {
             dropStartLeg(a);
             return false;
         }
         leg.best = Math.min(leg.best, remaining);
+        a.startLegClosestToRoute = Math.min(a.startLegClosestToRoute, toRoute);
         long since = now - a.startedTick;
         if (since % deps.trail().periodTicks() == 0) {
             drawStartLeg(a, leg, route);
