@@ -1653,6 +1653,33 @@ public class KnKPlugin extends JavaPlugin {
                 () -> navigationService, () -> navigationDestinations,
                 (player, node) -> knkPermissible != null && knkPermissible.hasPermission(player, node),
                 MenuService.mainThreadExecutor(this)));
+            // Location retention (KNG-80): /knk location here|tp|orphans replaces the built-in /knk location here;
+            // each action checks its own knk.admin.location* node. tp goes through the KNG-17 teleport engine.
+            if (apiClient != null) {
+                var permissionGate = commandPermissions();
+                var locationAdmin = new net.knightsandkings.knk.paper.locations.LocationAdminCommand(
+                    apiClient.getLocationRetentionApi(),
+                    permissionGate::whenAllowed,
+                    permissionGate::has,
+                    () -> teleportService,
+                    org.bukkit.Bukkit::getWorld,
+                    player -> modeService != null && modeService.isVanished(player),
+                    MenuService.mainThreadExecutor(this),
+                    player -> new net.knightsandkings.knk.paper.commands.LocationDebugCommand(this).onCommand(player, null, "knk", new String[0]));
+                knkAdminCommand.registerSubcommand(
+                    net.knightsandkings.knk.paper.locations.LocationAdminCommand.metadata(), locationAdmin, locationAdmin::complete);
+                // No top-level node (each action checks its own), so only list it to holders of one of them.
+                knkAdminCommand.setSubcommandVisibility("location", locationAdmin::visibleTo);
+            }
+            // KNG-80: the weekly orphan check's digest, for online staff with knk.admin.location.orphans.notify
+            // (or the next one to join when none is online).
+            if (playerNotificationPoller != null && knkPermissible != null) {
+                var orphanNotifier = new net.knightsandkings.knk.paper.locations.LocationOrphanNotifier(
+                    knkPermissible::checkAsync, org.bukkit.Bukkit::getOnlinePlayers, MenuService.mainThreadExecutor(this));
+                playerNotificationPoller.setServerNotificationHandler(
+                    net.knightsandkings.knk.core.domain.users.PlayerNotification.TYPE_LOCATION_ORPHAN_DIGEST, orphanNotifier::handle);
+                getServer().getPluginManager().registerEvents(orphanNotifier, this);
+            }
             knkAdminCommand.setCommandPermissions(commandPermissions());
             knkCommand.setExecutor(knkAdminCommand);
             knkCommand.setTabCompleter(knkAdminCommand);

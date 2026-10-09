@@ -468,6 +468,11 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         }
     }
 
+    /** See {@link CommandRegistry#setVisibility}. */
+    public void setSubcommandVisibility(String name, java.util.function.Predicate<CommandSender> visibleTo) {
+        registry.setVisibility(name, visibleTo);
+    }
+
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length == 0) {
