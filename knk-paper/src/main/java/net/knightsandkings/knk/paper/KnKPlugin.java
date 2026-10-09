@@ -1260,6 +1260,8 @@ public class KnKPlugin extends JavaPlugin {
         net.knightsandkings.knk.paper.navigation.NavigationService.Walk walk = initializeWalkPaths(navigation, access);
         var hud = new net.knightsandkings.knk.paper.navigation.NavigationHud(
             new net.knightsandkings.knk.core.roads.route.EtaEstimator(navigation.sessionParameters().sprintSpeed()));
+        // KNG-74: the arrow keeps off the action bar while a domain-access refusal there is fresh.
+        hud.yieldActionBarWhile(uuid -> domainAccess != null && domainAccess.holdsActionBar(uuid));
         var trail = new net.knightsandkings.knk.paper.navigation.TrailRenderer(navigation.trail(),
             net.knightsandkings.knk.paper.utils.TickBudget.server());
         this.liveEdgeTags = startLiveEdgeTags(mainThread);
@@ -2007,7 +2009,11 @@ public class KnKPlugin extends JavaPlugin {
             getConfig().getBoolean("regions.access.load-guard.enabled", true),
             Math.max(1, getConfig().getInt("regions.access.load-guard.max-refusals-per-second", 20)),
             Math.max(1, getConfig().getInt("regions.access.load-guard.window-seconds", 3)) * 1000L,
-            Math.max(1, getConfig().getInt("regions.access.load-guard.escalation-window-seconds", 60)) * 1000L);
+            Math.max(1, getConfig().getInt("regions.access.load-guard.escalation-window-seconds", 60)) * 1000L,
+            Math.max(0, getConfig().getLong("regions.access.chat-quiet-period-ms",
+                net.knightsandkings.knk.core.regions.access.RefusalGuard.Settings.DEFAULT_CHAT_QUIET_PERIOD_MILLIS)),
+            Math.max(0, getConfig().getLong("regions.access.action-bar-hold-ms",
+                net.knightsandkings.knk.core.regions.access.RefusalGuard.Settings.DEFAULT_ACTION_BAR_HOLD_MILLIS)));
         this.domainAccess = new net.knightsandkings.knk.paper.regions.access.DomainAccessService(
             new net.knightsandkings.knk.paper.regions.access.WorldGuardRegionAccessLookup(),
             new net.knightsandkings.knk.core.regions.access.RefusalGuard(guardSettings),
