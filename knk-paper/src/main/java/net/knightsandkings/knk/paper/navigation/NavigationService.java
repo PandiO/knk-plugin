@@ -907,12 +907,6 @@ public final class NavigationService implements SiegeMatchObserver {
                 + (result == null ? "" : " (" + result.reason() + ", " + result.expansions() + " cells)")
                 + (partial.isPresent() ? ", partial path" : ""));
         }
-        if (result != null && !result.isFound()) {
-            // live-test diagnostics (A8/A9, 2026-10-09): remove after the re-test
-            deps.logger().info("[Navigation] Walk path " + a.player.getName() + " -> " + a.destination.name() + ": "
-                + count + " (" + result.reason() + ", " + result.expansions() + " cells), partial: " + partial.isPresent()
-                + ", roads tried before: " + a.roadsTried + ", routed session: " + (a.session != null));
-        }
         if (result != null && !result.isFound() && !a.roadsTried) {
             a.roadsTried = true;
             if (tryRoadsInstead(a, leg, generation, () -> adoptWalkResult(a, leg, result, partial))) {
@@ -939,8 +933,6 @@ public final class NavigationService implements SiegeMatchObserver {
         Optional<SnapPoint> start = snapper.snap(feet.getX(), feet.getY(), feet.getZ());
         Optional<SnapPoint> goal = snapper.snapFloor(leg.target[0], leg.target[1], leg.target[2]);
         if (start.isEmpty() || goal.isEmpty()) {
-            deps.logger().info("[Navigation] Roads instead " + a.player.getName() + ": no road within the snap distance of the "
-                + (start.isEmpty() ? "player" : "target")); // live-test diagnostics, remove after the re-test
             return false;
         }
         SnapPoint from = connectedStart(snapshot, feet, start.get(), List.of(goal.get()));
@@ -960,9 +952,6 @@ public final class NavigationService implements SiegeMatchObserver {
             }
             RouteResult delivered = result;
             deps.mainThread().execute(() -> {
-                deps.logger().info("[Navigation] Roads instead " + a.player.getName() + ": " + delivered.status()
-                    + " from edge #" + from.edgeId() + " to edge #" + to.get(0).edgeId()
-                    + (delivered.isFound() ? " (" + fmt(delivered.route().length()) + " blocks)" : "")); // diagnostics
                 if (active.get(a.player.getUniqueId()) != a || a.leg != leg || leg.generation != generation) {
                     return;
                 }
@@ -1352,14 +1341,6 @@ public final class NavigationService implements SiegeMatchObserver {
                 openSide = !wholeEdge
                     && deps.policies().partOpen(a.player, a.snapshot, step.edge(), from, step.exitAlong(), policy);
             }
-            if (verdict.isBlocked()) {
-                // live-test diagnostics (C3, 2026-10-09): remove after the re-test
-                deps.logger().info("[Navigation] Re-check " + a.player.getName() + " -> " + a.destination.name()
-                    + ": step " + i + "/" + route.steps().size() + " edge #" + step.edge().id()
-                    + (step.forward() ? " forward" : " backward") + " along " + fmt(step.entryAlong()) + ".." + fmt(step.exitAlong())
-                    + ", step starts at " + fmt(stepStart) + " of the route, walked " + fmt(travelled)
-                    + ", blocked: " + verdict.message() + " -> " + (openSide ? "open (part walked)" : "BLOCKS the route"));
-            }
             if (verdict.isBlocked() && !openSide) {
                 apply(a, a.session.onElementBlocked(verdict, now));
                 return;
@@ -1584,10 +1565,6 @@ public final class NavigationService implements SiegeMatchObserver {
             return a.leg.remainingOf(feet.getX(), feet.getY() - 1, feet.getZ());
         }
         return a.session == null ? 0 : a.session.remainingBlocks();
-    }
-
-    private static String fmt(double v) {
-        return String.format(java.util.Locale.ROOT, "%.1f", v);
     }
 
     static double distance(double x, double y, double z, double[] p) {
