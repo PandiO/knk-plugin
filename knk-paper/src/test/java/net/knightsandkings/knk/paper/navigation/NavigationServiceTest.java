@@ -28,6 +28,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.logging.Logger;
@@ -807,6 +808,39 @@ class NavigationServiceTest {
 
         other.onNetworkChanged(NavigationTestNetwork.WORLD);
         assertTrue(other.isNavigating(playerId), "the same network keeps the session");
+    }
+
+    @Test
+    void aSwapToTheRoutingViewMovesTheRouteOntoTheView() {
+        // live test 2026-10-09: the first live-tag pass after a reload swapped the stored network for the routing
+        // view, whose edge ids differ; the session kept its old route and its old ManeuverBuilder
+        // ("unknown road edge 5385")
+        AtomicReference<net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot> current =
+            new AtomicReference<>(network.snapshot);
+        service = new NavigationService(new NavigationService.Deps(null, NavigationConfig.defaults(),
+            w -> current.get(), policies, shapes, eligibility, hud, trail, Runnable::run, Runnable::run, tick::get,
+            events::add, Logger.getLogger("test")));
+        service.navigate(player, cinixKeep());
+        var view = net.knightsandkings.knk.core.roads.route.RoutingView.build(network.snapshot,
+            Map.of(NavigationTestNetwork.E_BC, List.of(
+                new net.knightsandkings.knk.core.roads.route.RoutingView.Span(0, 48.5, List.of(), List.of()),
+                new net.knightsandkings.knk.core.roads.route.RoutingView.Span(48.5, 50.5, List.of(),
+                    List.of(NavigationTestNetwork.GATE_DOOR)),
+                new net.knightsandkings.knk.core.roads.route.RoutingView.Span(50.5, 100, List.of(), List.of()))));
+        int before = messages().size();
+
+        current.set(view);
+        service.onNetworkChanged(NavigationTestNetwork.WORLD);
+
+        assertTrue(service.isNavigating(playerId));
+        var route = service.sessionOf(playerId).orElseThrow().route().orElseThrow();
+        route.steps().forEach(step -> assertTrue(view.edge(step.edge().id()).isPresent(), "every step is a view edge"));
+        assertTrue(route.steps().stream().anyMatch(step -> view.piece(step.edge().id()).isPresent()), "through the pieces");
+        assertEquals(before, messages().size(), "the swap is silent");
+
+        moveTo(120.5, 65, 0.5);
+        ticks(100); // guidance and re-checks read the route against the view
+        assertTrue(service.isNavigating(playerId));
     }
 
     // ==================== KNG-51 walk paths (LAST_MILE_PATHFINDING.md §7, §12) ====================

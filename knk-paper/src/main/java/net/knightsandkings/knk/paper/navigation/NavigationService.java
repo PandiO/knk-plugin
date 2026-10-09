@@ -1196,6 +1196,9 @@ public final class NavigationService implements SiegeMatchObserver {
             case REOPENED -> player.sendMessage(NavigationMessages.reopened(a.destination.name()));
             case ELEMENT_BLOCKED, OFF_ROUTE -> effect.explanation()
                 .ifPresent(why -> player.sendMessage(NavigationMessages.partialRoute(a.destination.name(), why)));
+            case NETWORK_CHANGED -> {
+                // silent: the same way on the new network
+            }
         }
         if (!a.hintShown) {
             for (Route.Step step : route.passThroughSteps()) {
@@ -1435,7 +1438,11 @@ public final class NavigationService implements SiegeMatchObserver {
                 startDirect(a);
                 continue;
             }
-            apply(a, a.session.onElementOpened(now));
+            // the route and its instructions belong to the old network, whose edge ids the routing view may not
+            // have (live test 2026-10-09, "unknown road edge 5385"): drop a route still being computed on it and
+            // take the one computed on the new network as it is
+            a.generation++;
+            apply(a, a.session.onNetworkChanged(new ManeuverBuilder(snapshot)::build, now));
         }
     }
 

@@ -27,7 +27,12 @@ public sealed interface NavigationEffect {
         /** Something opened; the new route is taken only when clearly shorter (DESIGN §6.7). */
         IMPROVEMENT,
         /** What blocked a partial route opened: the full route is taken (live test 2026-10-08, N5). */
-        REOPENED
+        REOPENED,
+        /**
+         * The road network or its routing view was replaced (rev. 7 Part A): the route is computed again on the new
+         * one and taken as it is; silent unless it opens or blocks the way.
+         */
+        NETWORK_CHANGED
     }
 
     /** Why a session ended. */
