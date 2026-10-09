@@ -50,6 +50,7 @@ import net.knightsandkings.knk.core.roads.route.CompositeAccessPolicy;
 import net.knightsandkings.knk.core.roads.route.DomainAvailability;
 import net.knightsandkings.knk.core.domain.roads.RoadEdge;
 import net.knightsandkings.knk.core.roads.route.GateAvailability;
+import net.knightsandkings.knk.core.roads.route.Route;
 import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
 import net.knightsandkings.knk.core.roads.route.AccessPolicy;
 import net.knightsandkings.knk.core.roads.route.SnapPoint;
@@ -377,6 +378,21 @@ class NavigationServiceTest {
                 return NavigationAccess.partOf(edge, snapshot.polyline(edge).subPolyline(fromAlong, toAlong), b -> Set.of(), door)
                     .map(part -> policy.checkPart(part).isUsable()).orElse(true);
             }
+
+            @Override
+            public List<RouteRequest.GoalSides> goalSides(Player p, RoadNetworkSnapshot snapshot, List<SnapPoint> goals,
+                                                          AccessPolicy policy) {
+                List<RouteRequest.GoalSides> sides = new ArrayList<>();
+                for (SnapPoint g : goals) {
+                    RoadEdge edge = snapshot.requireEdge(g.edgeId());
+                    double length = snapshot.polyline(edge).length();
+                    sides.add(policy.check(edge).isBlocked()
+                        ? new RouteRequest.GoalSides(partOpen(p, snapshot, edge, 0, g.along(), policy),
+                            partOpen(p, snapshot, edge, length, g.along(), policy))
+                        : null);
+                }
+                return sides;
+            }
         };
     }
 
@@ -384,6 +400,24 @@ class NavigationServiceTest {
         service = new NavigationService(new NavigationService.Deps(null, NavigationConfig.defaults(),
             w -> network.snapshot, factory, shapes, eligibility, hud, trail, Runnable::run, Runnable::run, tick::get,
             events::add, Logger.getLogger("test")));
+    }
+
+    @Test
+    void aDestinationOnTheOpenSideOfAClosedGateIsReached() {
+        // live test 2026-10-09 (A8/A9 with the gate closed, N14): South Gate's spawn snaps onto the gate's road on the
+        // town side of the door; the whole edge counted as blocked, and nothing was found
+        serviceWith(gateDoorAtX150());
+        gateStates.put(NavigationTestNetwork.GATE_DOOR, AnimationState.CLOSED);
+
+        service.navigate(player, Destination.point("South Gate", NavigationTestNetwork.WORLD, 135.5, 65, 0.5));
+
+        NavigationSession session = service.sessionOf(playerId).orElseThrow();
+        assertTrue(session.explanation().isEmpty(), "a full route: " + messages());
+        Route route = session.route().orElseThrow();
+        assertEquals(NavigationTestNetwork.E_BC, route.steps().get(route.steps().size() - 1).edge().id());
+        assertEquals(135, route.end().x(), 1.0);
+        ticks(NavigationService.RECHECK_TICKS + 1);
+        assertTrue(messages().stream().noneMatch(m -> m.contains("West Gate") || m.contains("No route")), messages().toString());
     }
 
     @Test

@@ -121,6 +121,39 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
         return new RouteRequest.StartSides(towardFrom, towardTo);
     }
 
+    /**
+     * Main thread (N14): for each goal on an edge the policy blocks, whether the stretch from the From node
+     * and from the To node up to the goal is open - tagged from the world like the start sides. Null when
+     * no goal's edge is blocked.
+     */
+    @Override
+    public List<RouteRequest.GoalSides> goalSides(Player player, RoadNetworkSnapshot snapshot, List<SnapPoint> goals,
+                                                  AccessPolicy policy) {
+        World world = player.getWorld();
+        if (world == null) {
+            return null;
+        }
+        List<RouteRequest.GoalSides> sides = new java.util.ArrayList<>(goals.size());
+        boolean any = false;
+        GateCells gates = null;
+        for (SnapPoint goal : goals) {
+            RoadEdge edge = snapshot.edge(goal.edgeId()).orElse(null);
+            if (edge == null || !policy.check(edge).isBlocked()) {
+                sides.add(null);
+                continue;
+            }
+            if (gates == null) {
+                gates = GateCellsIndex.of(gateManager, world.getName());
+            }
+            EdgePolyline polyline = snapshot.polyline(edge);
+            boolean fromFrom = partOpen(edge, polyline.subPolyline(0, goal.along()), world, gates, policy);
+            boolean fromTo = partOpen(edge, polyline.subPolyline(polyline.length(), goal.along()), world, gates, policy);
+            sides.add(new RouteRequest.GoalSides(fromFrom, fromTo));
+            any = true;
+        }
+        return any ? sides : null;
+    }
+
     /** Main thread: the stretch of {@code edge} between two polyline positions, tagged from the world, checked alone. */
     @Override
     public boolean partOpen(Player player, RoadNetworkSnapshot snapshot, RoadEdge edge, double fromAlong, double toAlong,
