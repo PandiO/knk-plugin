@@ -139,6 +139,7 @@ public class KnkApiClient {
     private final net.knightsandkings.knk.core.ports.api.GameSettingsQueryApi gameSettingsQueryApi;
     private final net.knightsandkings.knk.core.ports.api.GameSettingsCommandApi gameSettingsCommandApi;
     private final net.knightsandkings.knk.core.ports.api.DomainAccessRulesApi domainAccessRulesApi;
+    private final net.knightsandkings.knk.core.ports.api.DomainWorldBackfillApi domainWorldBackfillApi;
     private final net.knightsandkings.knk.api.impl.TeleportDestinationsApiImpl teleportDestinationsApi;
     private final net.knightsandkings.knk.core.ports.api.LootboxesQueryApi lootboxesQueryApi;
     private final net.knightsandkings.knk.core.ports.api.LootboxesCommandApi lootboxesCommandApi;
@@ -201,6 +202,7 @@ public class KnkApiClient {
         this.gameSettingsQueryApi = new net.knightsandkings.knk.api.impl.GameSettingsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.gameSettingsCommandApi = new net.knightsandkings.knk.api.impl.GameSettingsCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.domainAccessRulesApi = new net.knightsandkings.knk.api.impl.DomainAccessRulesApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.domainWorldBackfillApi = new net.knightsandkings.knk.api.impl.DomainWorldBackfillApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.teleportDestinationsApi = new net.knightsandkings.knk.api.impl.TeleportDestinationsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.lootboxesQueryApi = new net.knightsandkings.knk.api.impl.LootboxesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.lootboxesCommandApi = new net.knightsandkings.knk.api.impl.LootboxesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -260,6 +262,11 @@ public class KnkApiClient {
     /** KNG-56: {@code GET /api/Domains/access-rules} - domain AllowEntry/AllowExit for the region flag sync. */
     public net.knightsandkings.knk.core.ports.api.DomainAccessRulesApi getDomainAccessRulesApi() {
         return domainAccessRulesApi;
+    }
+
+    /** KNG-112: fills the world of domains created before the API stored one. */
+    public net.knightsandkings.knk.core.ports.api.DomainWorldBackfillApi getDomainWorldBackfillApi() {
+        return domainWorldBackfillApi;
     }
 
     /** Teleport Phase 4 ({@code /spawn}): {@code GET /api/GameSettings}. */

@@ -90,15 +90,29 @@ public class SimpleRegionTransitionService implements RegionTransitionService {
 
     @Override
     public RegionTransitionDecision handleRegionTransition(UUID playerId, Set<String> oldRegionIds, Set<String> newRegionIds) {
+        return handleRegionTransition(playerId, null, oldRegionIds, null, newRegionIds);
+    }
+
+    /**
+     * {@inheritDoc}
+     * <p>
+     * Each side resolves in its own world, so a same-named region in another world is another domain: leaving the hub's
+     * {@code town_1} for the gameplay world's {@code town_1} leaves one town and enters the other.
+     */
+    @Override
+    public RegionTransitionDecision handleRegionTransition(UUID playerId, String oldWorld, Set<String> oldRegionIds,
+                                                           String newWorld, Set<String> newRegionIds) {
         Objects.requireNonNull(playerId, "playerId");
         Objects.requireNonNull(oldRegionIds, "oldRegionIds");
         Objects.requireNonNull(newRegionIds, "newRegionIds");
 
-        LOGGER.info("[KnK Service] handleRegionTransition called: oldRegionIds=" + oldRegionIds + ", newRegionIds=" + newRegionIds);
+        LOGGER.info("[KnK Service] handleRegionTransition called: oldRegionIds=" + oldRegionIds
+            + (oldWorld == null ? "" : " (" + oldWorld + ")") + ", newRegionIds=" + newRegionIds
+            + (newWorld == null ? "" : " (" + newWorld + ")"));
 
         // Resolve domain entities from WG region IDs
-        RegionSnapshot oldSnapshot = regionResolver.resolveRegions(oldRegionIds);
-        RegionSnapshot newSnapshot = regionResolver.resolveRegions(newRegionIds);
+        RegionSnapshot oldSnapshot = regionResolver.resolveRegions(oldWorld, oldRegionIds);
+        RegionSnapshot newSnapshot = regionResolver.resolveRegions(newWorld, newRegionIds);
 
         LOGGER.info("[KnK Service] Resolved: oldSnapshot=(domains=" + oldSnapshot.domains().size() + 
                     "), newSnapshot=(domains=" + newSnapshot.domains().size() + ")");
@@ -151,10 +165,17 @@ public class SimpleRegionTransitionService implements RegionTransitionService {
      */
     @Override
     public RegionTransitionDecision previewAccess(Set<String> oldRegionIds, Set<String> newRegionIds) {
+        return previewAccess(null, oldRegionIds, null, newRegionIds);
+    }
+
+    /** {@inheritDoc} Each side resolves in its own world (KNG-112). */
+    @Override
+    public RegionTransitionDecision previewAccess(String oldWorld, Set<String> oldRegionIds,
+                                                  String newWorld, Set<String> newRegionIds) {
         Objects.requireNonNull(oldRegionIds, "oldRegionIds");
         Objects.requireNonNull(newRegionIds, "newRegionIds");
         EnteredLeftSnapshot transition = computeTransition(
-            regionResolver.resolveRegions(oldRegionIds), regionResolver.resolveRegions(newRegionIds));
+            regionResolver.resolveRegions(oldWorld, oldRegionIds), regionResolver.resolveRegions(newWorld, newRegionIds));
         RegionTransitionDecision entryDeny = checkEntryDenials(transition);
         return entryDeny != null ? entryDeny : checkExitDenials(transition);
     }

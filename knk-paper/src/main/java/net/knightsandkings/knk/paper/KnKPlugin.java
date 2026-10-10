@@ -484,6 +484,9 @@ public class KnKPlugin extends JavaPlugin {
             });
             managedRegions.scheduleStartupRepair();
             domainAccessSync.schedule();
+            // KNG-112: domains from before the API stored worlds get theirs from where their regions are.
+            new net.knightsandkings.knk.paper.regions.DomainWorldBackfillReporter(this, apiClient.getDomainWorldBackfillApi())
+                .schedule(net.knightsandkings.knk.paper.regions.access.DomainAccessFlagSync.Settings.read(this).delayTicks());
             
             // Register Location handler
             LocationTaskHandler locationHandler = new LocationTaskHandler(worldTasksApi, this);

@@ -613,7 +613,16 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      * region is {@code parentRegionId}.
      */
     public boolean renameRegion(String oldRegionId, String newRegionId, String domainType, String parentRegionId) {
-        boolean renamed = renameRegionInternal(oldRegionId, newRegionId);
+        return renameRegion(oldRegionId, newRegionId, domainType, parentRegionId, null);
+    }
+
+    /**
+     * KNG-112: as {@link #renameRegion(String, String, String, String)}, renaming the region in {@code world} only (a
+     * region id is unique per world). Null searches the loaded worlds, as before.
+     */
+    public boolean renameRegion(String oldRegionId, String newRegionId, String domainType, String parentRegionId,
+                                String world) {
+        boolean renamed = renameRegionInternal(oldRegionId, newRegionId, world);
         RegionFinalizer finalizer = regionFinalizer;
         if (renamed && finalizer != null && domainType != null && !domainType.isBlank()) {
             try {
@@ -626,7 +635,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
         return renamed;
     }
 
-    private boolean renameRegionInternal(String oldRegionId, String newRegionId) {
+    private boolean renameRegionInternal(String oldRegionId, String newRegionId, String worldName) {
         if (oldRegionId == null || oldRegionId.trim().isEmpty() || 
             newRegionId == null || newRegionId.trim().isEmpty()) {
             LOGGER.warning("Cannot rename region: oldRegionId or newRegionId is null/empty");
@@ -639,8 +648,8 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
         }
         
         try {
-            // Find the world containing this region
-            World world = findWorldByRegion(oldRegionId);
+            // Find the world containing this region (KNG-112: the named one only, when given)
+            World world = findWorldByRegion(oldRegionId, worldName);
             if (world == null) {
                 LOGGER.warning("Failed to rename region: could not find world containing region " + oldRegionId);
                 return false;
@@ -764,6 +773,12 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      * @return true if the child is contained within the parent (or if requireFullContainment is false), false otherwise
      */
     public boolean checkRegionContainment(String parentRegionId, String childRegionId, boolean requireFullContainment) {
+        return checkRegionContainment(parentRegionId, childRegionId, requireFullContainment, null);
+    }
+
+    /** KNG-112: as {@link #checkRegionContainment(String, String, boolean)} in {@code world} only (null: any). */
+    public boolean checkRegionContainment(String parentRegionId, String childRegionId, boolean requireFullContainment,
+                                          String worldName) {
         if (parentRegionId == null || parentRegionId.trim().isEmpty() || 
             childRegionId == null || childRegionId.trim().isEmpty()) {
             LOGGER.warning("Cannot check region containment: parentRegionId or childRegionId is null/empty");
@@ -771,8 +786,8 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
         }
 
         try {
-            // Find the world containing the parent region
-            World world = findWorldByRegion(parentRegionId);
+            // Find the world containing the parent region (KNG-112: the named one only, when given)
+            World world = findWorldByRegion(parentRegionId, worldName);
             if (world == null) {
                 LOGGER.warning("Cannot check region containment: parent region not found: " + parentRegionId);
                 return false;
@@ -824,8 +839,19 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      * @param regionId The region ID to search for
      * @return The world containing the region, or null if not found
      */
-    private World findWorldByRegion(String regionId) {
+    private World findWorldByRegion(String regionId, String worldName) {
         try {
+            if (worldName != null && !worldName.isBlank()) {
+                // KNG-112: the same id can exist in several worlds; never fall through to another world's region.
+                World named = plugin.getServer().getWorld(worldName.trim());
+                if (named == null) {
+                    LOGGER.warning("World " + worldName + " is not loaded (looking for region " + regionId + ")");
+                    return null;
+                }
+                RegionManager regionManager = WorldGuard.getInstance().getPlatform().getRegionContainer()
+                    .get(BukkitAdapter.adapt(named));
+                return regionManager != null && regionManager.getRegion(regionId) != null ? named : null;
+            }
             for (World world : plugin.getServer().getWorlds()) {
                 RegionManager regionManager = WorldGuard.getInstance().getPlatform().getRegionContainer()
                     .get(BukkitAdapter.adapt(world));

@@ -75,6 +75,8 @@ public class WorldGuardCombatSafezones implements CombatSafezoneCheck {
         if (regions.regionIds().isEmpty()) {
             return false;
         }
-        return CombatSafezone.isSafezone(regionResolver.resolveRegions(regions.regionIds()).domains(), regions.pvpFlag());
+        // KNG-112: the victim's world's domains; a same-named region in another world is another domain.
+        return CombatSafezone.isSafezone(
+            regionResolver.resolveRegions(location.getWorld().getName(), regions.regionIds()).domains(), regions.pvpFlag());
     }
 }

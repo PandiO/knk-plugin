@@ -28,7 +28,8 @@ public class DomainAccessRulesApiImpl extends BaseApiImpl implements DomainAcces
         @JsonProperty("wgRegionId") String wgRegionId,
         @JsonProperty("allowEntry") boolean allowEntry,
         @JsonProperty("allowExit") boolean allowExit,
-        @JsonProperty("domainType") String domainType
+        @JsonProperty("domainType") String domainType,
+        @JsonProperty("worldName") String worldName
     ) {}
 
     public DomainAccessRulesApiImpl(String baseUrl, OkHttpClient httpClient, ObjectMapper objectMapper,
@@ -43,7 +44,8 @@ public class DomainAccessRulesApiImpl extends BaseApiImpl implements DomainAcces
             try {
                 List<RuleDto> rules = parse(get(url), new TypeReference<List<RuleDto>>() { }, url);
                 return rules == null ? List.<DomainAccessRule>of() : rules.stream()
-                    .map(r -> new DomainAccessRule(r.id(), r.name(), r.wgRegionId(), r.allowEntry(), r.allowExit(), r.domainType()))
+                    .map(r -> new DomainAccessRule(r.id(), r.name(), r.wgRegionId(), r.allowEntry(), r.allowExit(), r.domainType(),
+                        r.worldName()))
                     .toList();
             } catch (ApiException | IOException e) {
                 throw new RuntimeException("Failed to read the domain access rules", e);
