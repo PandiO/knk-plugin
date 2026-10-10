@@ -106,6 +106,17 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
     }
 
     /**
+     * KNG-110: the router's entry rule per region ({@link DomainAvailability#mayEnter}) for the trail, with the domain
+     * cache only - the trail is drawn on the main thread, and a region of unknown domain is open, as for the router.
+     */
+    @Override
+    public Predicate<String> mayEnter(Player player) {
+        DomainAvailability rule = new DomainAvailability(evaluator, resolver::getDomainByRegionIdNoRefresh, roadRule,
+            regionIds.at(player.getLocation()), bypass.test(player));
+        return rule::mayEnter;
+    }
+
+    /**
      * Main thread: the router's gate rule for {@code doorIds}, each door read once from the gate cache
      * and the siege controller — the policy's gate part, shared with the walk search's gate cells
      * (KNG-51 §6). The result can be used from any thread.

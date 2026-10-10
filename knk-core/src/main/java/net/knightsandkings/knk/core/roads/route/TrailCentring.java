@@ -34,6 +34,14 @@ public final class TrailCentring {
 
         /** Whether the floor block at {@code (x, y, z)} is a stair or a slab. */
         boolean stairOrSlab(int x, int y, int z);
+
+        /**
+         * KNG-110: whether the player may not stand on the road cell with floor {@code (x, y, z)} (a region they may
+         * not enter covers it). The trail keeps to the free part of the road. None by default.
+         */
+        default boolean blocked(int x, int y, int z) {
+            return false;
+        }
     }
 
     private TrailCentring() {
@@ -94,7 +102,7 @@ public final class TrailCentring {
      * slab cells among them, if any. 0 when the point is not on a road cell.
      */
     static double offset(double[] p, double[] normal, boolean sloped, Ground ground) {
-        List<Cell> cells = across(p, normal, ground);
+        List<Cell> cells = freeRun(across(p, normal, ground), ground);
         if (cells.isEmpty()) {
             return 0;
         }
@@ -110,6 +118,47 @@ public final class TrailCentring {
             return stairSum / stairs;
         }
         return (cells.get(0).k() + cells.get(cells.size() - 1).k()) / 2.0;
+    }
+
+    /**
+     * KNG-110: the part of the road across a point that the trail keeps to - the run of cells that are not
+     * {@linkplain Ground#blocked blocked} around the point's own cell; when that one is blocked, the nearest free run
+     * (the wider one on a tie, then the one the normal points to). Empty when no cell is free.
+     */
+    static List<Cell> freeRun(List<Cell> cells, Ground ground) {
+        int own = -1;
+        boolean[] free = new boolean[cells.size()];
+        for (int i = 0; i < cells.size(); i++) {
+            Cell c = cells.get(i);
+            free[i] = !ground.blocked(c.x(), c.y(), c.z());
+            if (c.k() == 0) {
+                own = i;
+            }
+        }
+        int bestFrom = -1;
+        int bestTo = -1;
+        int bestDistance = Integer.MAX_VALUE;
+        for (int i = 0; i < cells.size(); i++) {
+            if (!free[i] || (i > 0 && free[i - 1])) {
+                continue; // not the start of a free run
+            }
+            int j = i;
+            while (j + 1 < cells.size() && free[j + 1]) {
+                j++;
+            }
+            if (i <= own && own <= j) {
+                return cells.subList(i, j + 1); // the point's own cell is free: its run
+            }
+            int distance = j < own ? -cells.get(j).k() : cells.get(i).k();
+            boolean better = distance < bestDistance
+                || distance == bestDistance && (j - i > bestTo - bestFrom || j - i == bestTo - bestFrom && i > own);
+            if (better) {
+                bestFrom = i;
+                bestTo = j;
+                bestDistance = distance;
+            }
+        }
+        return bestFrom < 0 ? List.of() : cells.subList(bestFrom, bestTo + 1);
     }
 
     /**

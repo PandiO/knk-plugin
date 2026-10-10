@@ -14,6 +14,7 @@ import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -102,6 +103,14 @@ public final class NavigationService implements SiegeMatchObserver {
     @FunctionalInterface
     public interface PolicyFactory {
         AccessPolicy policyFor(Player player, RoadNetworkSnapshot snapshot);
+
+        /**
+         * KNG-110: the regions the player may stand in on a road, by the router's entry rule - the trail keeps off the
+         * road cells of the others. Main thread, without blocking lookups. Every region by default.
+         */
+        default Predicate<String> mayEnter(Player player) {
+            return regionId -> true;
+        }
     }
 
     /**
@@ -367,6 +376,17 @@ public final class NavigationService implements SiegeMatchObserver {
 
     public int activeCount() {
         return active.size();
+    }
+
+    /**
+     * KNG-110: the regions a navigating player may stand in on a road, for the trail ({@link TrailRenderer} keeps off
+     * the road cells of the others); every region for a player who is not navigating. Main thread.
+     */
+    public Predicate<String> trailRule(Player player) {
+        if (!active.containsKey(player.getUniqueId())) {
+            return regionId -> true;
+        }
+        return deps.policies().mayEnter(player);
     }
 
     public EtaEstimator eta() {

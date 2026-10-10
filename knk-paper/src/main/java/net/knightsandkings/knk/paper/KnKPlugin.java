@@ -1278,10 +1278,14 @@ public class KnKPlugin extends JavaPlugin {
             new net.knightsandkings.knk.core.roads.route.EtaEstimator(navigation.sessionParameters().sprintSpeed()));
         // KNG-74: the arrow keeps off the action bar while a domain-access refusal there is fresh.
         hud.yieldActionBarWhile(uuid -> domainAccess != null && domainAccess.holdsActionBar(uuid));
-        // KNG-76: the route trail keeps to the middle of the road (road cells = the profiles' floor materials)
+        // KNG-76: the route trail keeps to the middle of the road (road cells = the profiles' floor materials);
+        // KNG-110: of its free part, where a region the player may not enter covers part of the road
+        var trailRegions = regionTracker.regionIds();
         var trail = new net.knightsandkings.knk.paper.navigation.TrailRenderer(navigation.trail(),
             net.knightsandkings.knk.paper.utils.TickBudget.server(),
-            net.knightsandkings.knk.paper.navigation.TrailRenderer.roadSurface(roadNetworkCache::roadMaterialNames));
+            net.knightsandkings.knk.paper.navigation.TrailRenderer.roadSurface(roadNetworkCache::roadMaterialNames),
+            trailRegions == null ? null : trailRegions::at,
+            player -> navigationService == null ? null : navigationService.trailRule(player), System::currentTimeMillis);
         this.liveEdgeTags = startLiveEdgeTags(mainThread);
         this.navigationService = new net.knightsandkings.knk.paper.navigation.NavigationService(
             new net.knightsandkings.knk.paper.navigation.NavigationService.Deps(

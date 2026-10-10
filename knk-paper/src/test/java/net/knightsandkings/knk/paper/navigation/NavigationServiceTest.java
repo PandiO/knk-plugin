@@ -237,6 +237,30 @@ class NavigationServiceTest {
     }
 
     @Test
+    void theTrailRuleIsThePlayersEntryRuleWhileNavigating() {
+        // KNG-110: the trail keeps off the road cells of the regions this rule refuses
+        NavigationService.PolicyFactory castleRefused = new NavigationService.PolicyFactory() {
+            @Override
+            public AccessPolicy policyFor(Player p, RoadNetworkSnapshot snapshot) {
+                return policies.policyFor(p, snapshot);
+            }
+
+            @Override
+            public java.util.function.Predicate<String> mayEnter(Player p) {
+                return regionId -> !regionId.equals(NavigationTestNetwork.CASTLE_REGION);
+            }
+        };
+        service = new NavigationService(new NavigationService.Deps(null, NavigationConfig.defaults(),
+            w -> network.snapshot, castleRefused, shapes, eligibility, hud, trail, Runnable::run, Runnable::run, tick::get,
+            events::add, Logger.getLogger("test")));
+
+        assertTrue(service.trailRule(player).test(NavigationTestNetwork.CASTLE_REGION), "not navigating: every region");
+        service.navigate(player, cinixKeep());
+        assertFalse(service.trailRule(player).test(NavigationTestNetwork.CASTLE_REGION));
+        assertTrue(service.trailRule(player).test("town_1"));
+    }
+
+    @Test
     void startsARoutedSessionAlongTheRoad() {
         service.navigate(player, cinixKeep());
 

@@ -135,18 +135,31 @@ public final class DomainAvailability implements AccessPolicy {
             EdgeVerdict.Cause.domain(d.id() == null ? -1 : d.id(), d.name()));
     }
 
+    /**
+     * KNG-110: whether the player may stand in {@code regionId} on a road - {@link #check}'s entry rule for one region,
+     * so the trail keeps off the road cells of the others. True with bypass, when already inside, and for a domain
+     * whose rule does not apply to roads.
+     */
+    public boolean mayEnter(String regionId) {
+        return bypass || currentRegionIds.contains(regionId) || entryDenial(regionId).isEmpty();
+    }
+
     /** The first region of a lane the player may not enter, if any. */
     private Optional<Denial> laneDenial(List<String> lane) {
         for (String regionId : lane) {
             if (currentRegionIds.contains(regionId)) {
                 continue; // already inside: not an entry
             }
-            Optional<Denial> denial = entryByRegion.computeIfAbsent(regionId,
-                id -> lookup.domainByRegionId(id).filter(roadRule::applies).flatMap(evaluator::entry));
+            Optional<Denial> denial = entryDenial(regionId);
             if (denial.isPresent()) {
                 return denial;
             }
         }
         return Optional.empty();
+    }
+
+    private Optional<Denial> entryDenial(String regionId) {
+        return entryByRegion.computeIfAbsent(regionId,
+            id -> lookup.domainByRegionId(id).filter(roadRule::applies).flatMap(evaluator::entry));
     }
 }

@@ -112,6 +112,82 @@ class TrailRendererTest {
         assertEquals(1, TrailRenderer.legPoints(new double[] {1, 2, 3}, new double[] {1, 2, 3}, 3).size());
     }
 
+    // ---- KNG-110: a region the player may not enter over part of the road -----------------------------
+
+    /** Main Street three rows wide (z -1..1); district_9 over rows 0 and 1 for x 0-60, the centre line included. */
+    private final java.util.concurrent.atomic.AtomicInteger regionLookups = new java.util.concurrent.atomic.AtomicInteger();
+    private long now;
+
+    private TrailRenderer districtTrail(java.util.function.Predicate<String> mayEnter) {
+        net.knightsandkings.knk.core.roads.route.TrailCentring.Ground road =
+            new net.knightsandkings.knk.core.roads.route.TrailCentring.Ground() {
+                @Override
+                public java.util.OptionalInt roadFloor(int x, int z, int nearY) {
+                    return Math.abs(z) <= 1 ? java.util.OptionalInt.of(64) : java.util.OptionalInt.empty();
+                }
+
+                @Override
+                public boolean stairOrSlab(int x, int y, int z) {
+                    return false;
+                }
+            };
+        TrailRenderer.CellRegions regions = (world, x, feetY, z) -> {
+            regionLookups.incrementAndGet();
+            return x >= 0 && x <= 60 && z >= 0 && z <= 1 && feetY == 65 ? java.util.Set.of("town_1", "district_9")
+                : java.util.Set.of("town_1");
+        };
+        return new TrailRenderer(NavigationConfig.TrailConfig.defaults(), new TickBudget(() -> 20.0), w -> road, regions,
+            player -> mayEnter, () -> now);
+    }
+
+    private static Player viewerIn(World world) {
+        Player viewer = mock(Player.class);
+        when(viewer.getWorld()).thenReturn(world);
+        when(world.getUID()).thenReturn(java.util.UUID.randomUUID());
+        return viewer;
+    }
+
+    @Test
+    void theTrailKeepsToTheFreeRowBesideARegionThePlayerMayNotEnter() {
+        Player viewer = viewerIn(mock(World.class));
+        TrailRenderer renderer = districtTrail(regionId -> !regionId.equals("district_9"));
+
+        net.knightsandkings.knk.core.roads.route.TrailCentring.Ground surface = renderer.surfaceFor(viewer);
+        assertTrue(surface.blocked(10, 64, 0) && surface.blocked(10, 64, 1));
+        assertTrue(!surface.blocked(10, 64, -1), "the free row");
+
+        List<double[]> window = TrailRenderer.centredWindow(network.routeAlongMainStreet(), 10, 20, 1.5, surface);
+        window.forEach(p -> assertEquals(-0.5, p[2], 1e-9, "on row z = -1, past the district"));
+    }
+
+    @Test
+    void aPlayerWhoMayEnterOrIsNotNavigatingKeepsTheMiddle() {
+        Player viewer = viewerIn(mock(World.class));
+
+        net.knightsandkings.knk.core.roads.route.TrailCentring.Ground none = districtTrail(null).surfaceFor(viewer);
+        assertTrue(!none.blocked(10, 64, 0), "no rule: the world's surface as it is");
+        assertEquals(0, regionLookups.get(), "and no region lookups");
+
+        net.knightsandkings.knk.core.roads.route.TrailCentring.Ground bypass = districtTrail(regionId -> true).surfaceFor(viewer);
+        assertTrue(!bypass.blocked(10, 64, 0));
+        TrailRenderer.centredWindow(network.routeAlongMainStreet(), 10, 20, 1.5, bypass)
+            .forEach(p -> assertEquals(0.5, p[2], 1e-9));
+    }
+
+    @Test
+    void theRegionsOfACellAreRememberedForAFewSeconds() {
+        Player viewer = viewerIn(mock(World.class));
+        TrailRenderer renderer = districtTrail(regionId -> !regionId.equals("district_9"));
+
+        renderer.surfaceFor(viewer).blocked(10, 64, 0);
+        renderer.surfaceFor(viewer).blocked(10, 64, 0);
+        assertEquals(1, regionLookups.get());
+
+        now += TrailRenderer.REGION_CACHE_MILLIS + 1;
+        renderer.surfaceFor(viewer).blocked(10, 64, 0);
+        assertEquals(2, regionLookups.get(), "asked again after the cache's time");
+    }
+
     @Test
     void drawRouteSpawnsParticlesOnlyForTheNavigatingPlayer() {
         World world = mock(World.class);
