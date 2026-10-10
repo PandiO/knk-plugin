@@ -127,6 +127,18 @@ class TrailCentringTest {
     }
 
     @Test
+    void theCellsAcrossTheRoadAreTheRoadsWidth() {
+        // KNG-110: the live region tags look across the road the same way; rows 10-12, a ledge at row 9
+        Road road = new Road().cells(0, 20, 10, 12, 64).cells(0, 20, 9, 9, 66);
+
+        List<TrailCentring.Cell> cells = TrailCentring.across(new double[] {5.5, 64, 10.5}, new double[] {0, 1}, road);
+
+        assertEquals(List.of(new TrailCentring.Cell(0, 5, 64, 10), new TrailCentring.Cell(1, 5, 64, 11),
+            new TrailCentring.Cell(2, 5, 64, 12)), cells);
+        assertEquals(List.of(), TrailCentring.across(new double[] {5.5, 64, 30.5}, new double[] {0, 1}, road), "off the road");
+    }
+
+    @Test
     void onTheFlatTheStairsDoNotPull() {
         Road road = new Road().cells(0, 20, 10, 12, 64);
         for (int x = 0; x <= 20; x++) {

@@ -94,17 +94,49 @@ public final class TrailCentring {
      * slab cells among them, if any. 0 when the point is not on a road cell.
      */
     static double offset(double[] p, double[] normal, boolean sloped, Ground ground) {
+        List<Cell> cells = across(p, normal, ground);
+        if (cells.isEmpty()) {
+            return 0;
+        }
+        double stairSum = 0; // the own cell sits at 0
+        int stairs = 0;
+        for (Cell cell : cells) {
+            if (ground.stairOrSlab(cell.x(), cell.y(), cell.z())) {
+                stairSum += cell.k();
+                stairs++;
+            }
+        }
+        if (sloped && stairs > 0) {
+            return stairSum / stairs;
+        }
+        return (cells.get(0).k() + cells.get(cells.size() - 1).k()) / 2.0;
+    }
+
+    /**
+     * A road cell across the road from a point.
+     *
+     * @param k how many steps along the normal from the point (negative: the other side; 0: the point's own cell)
+     * @param y the cell's floor y
+     */
+    public record Cell(int k, int x, int y, int z) {
+    }
+
+    /**
+     * The road cells across the road at {@code p} (block-centred x/z, floor y), from the point's own cell each side
+     * along {@code normal} (a unit vector in x/z) until a non-road cell, up to {@link #MAX_HALF_WIDTH} steps; ordered
+     * by {@link Cell#k}. A diagonal normal can meet a cell twice: it counts once. Empty when the point's own cell is no
+     * road. Also the road's width for the live region tags (KNG-110).
+     */
+    public static List<Cell> across(double[] p, double[] normal, Ground ground) {
         int y = (int) Math.round(p[1]);
         int ownX = (int) Math.floor(p[0]);
         int ownZ = (int) Math.floor(p[2]);
         OptionalInt own = ground.roadFloor(ownX, ownZ, y);
         if (own.isEmpty()) {
-            return 0;
+            return List.of();
         }
-        double low = 0;
-        double high = 0;
-        double stairSum = 0; // the own cell sits at 0
-        int stairs = ground.stairOrSlab(ownX, own.getAsInt(), ownZ) ? 1 : 0;
+        List<Cell> low = new ArrayList<>();
+        List<Cell> high = new ArrayList<>();
         for (int side = -1; side <= 1; side += 2) {
             int floor = own.getAsInt();
             int lastX = ownX;
@@ -122,20 +154,15 @@ public final class TrailCentring {
                 floor = cell.getAsInt();
                 lastX = x;
                 lastZ = z;
-                if (side < 0) {
-                    low = -k;
-                } else {
-                    high = k;
-                }
-                if (ground.stairOrSlab(x, floor, z)) {
-                    stairSum += side * k;
-                    stairs++;
-                }
+                (side < 0 ? low : high).add(new Cell(side * k, x, floor, z));
             }
         }
-        if (sloped && stairs > 0) {
-            return stairSum / stairs;
+        List<Cell> out = new ArrayList<>(low.size() + 1 + high.size());
+        for (int i = low.size() - 1; i >= 0; i--) {
+            out.add(low.get(i));
         }
-        return (low + high) / 2;
+        out.add(new Cell(0, ownX, own.getAsInt(), ownZ));
+        out.addAll(high);
+        return out;
     }
 }

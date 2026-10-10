@@ -1313,6 +1313,8 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.roads.LiveEdgeTags startLiveEdgeTags(java.util.concurrent.Executor mainThread) {
         var regionIds = regionTracker.regionIds();
         var budget = net.knightsandkings.knk.paper.utils.TickBudget.server();
+        var surface = net.knightsandkings.knk.paper.navigation.TrailRenderer.roadSurface(roadNetworkCache::roadMaterialNames);
+        var evaluator = new net.knightsandkings.knk.core.regions.DomainAccessEvaluator();
         var tags = new net.knightsandkings.knk.paper.roads.LiveEdgeTags(roadNetworkCache::snapshot,
             new net.knightsandkings.knk.paper.roads.LiveEdgeTags.Probe() {
                 @Override
@@ -1324,6 +1326,36 @@ public class KnKPlugin extends JavaPlugin {
                 @Override
                 public net.knightsandkings.knk.core.roads.build.GateCells gates(String world) {
                     return net.knightsandkings.knk.paper.roads.GateCellsIndex.of(gateManager, world);
+                }
+
+                // KNG-110: the road's width where a region covers part of it - the trail's road cells
+                @Override
+                public net.knightsandkings.knk.core.roads.route.TrailCentring.Ground ground(String world) {
+                    org.bukkit.World w = org.bukkit.Bukkit.getWorld(world);
+                    return w == null ? null : surface.apply(w);
+                }
+
+                @Override
+                public boolean loaded(String world, int x, int z) {
+                    org.bukkit.World w = org.bukkit.Bukkit.getWorld(world);
+                    return w != null && w.isChunkLoaded(x >> 4, z >> 4);
+                }
+
+                @Override
+                public void load(String world, int x, int z, Runnable then) {
+                    org.bukkit.World w = org.bukkit.Bukkit.getWorld(world);
+                    if (w == null) {
+                        then.run();
+                        return;
+                    }
+                    // Paper completes on the main thread: read the chunk at once, before it may unload again
+                    w.getChunkAtAsync(x >> 4, z >> 4, false).whenComplete((chunk, error) -> {
+                        if (org.bukkit.Bukkit.isPrimaryThread()) {
+                            then.run();
+                        } else {
+                            mainThread.execute(then);
+                        }
+                    });
                 }
             },
             () -> budget.perTick(net.knightsandkings.knk.paper.roads.LiveEdgeTags.LOOKUPS_PER_TICK,
@@ -1338,7 +1370,11 @@ public class KnKPlugin extends JavaPlugin {
             // rev. 7 Part C: a region whose domain's rule is "Ignored" for roads (houses, shops) does not cut roads;
             // read from the /navigate catalogue, which carries each domain's region (not the region → domain cache,
             // which /knk cache refresh clears)
-            regionId -> navigationDestinations == null || !navigationDestinations.roadsIgnoreRegion(regionId));
+            regionId -> navigationDestinations == null || !navigationDestinations.roadsIgnoreRegion(regionId),
+            // KNG-110: only a region whose domain keeps someone off the road (as far as the domain cache knows) makes
+            // the pass look across the road; elsewhere the centre line decides, as before
+            regionId -> regionDomainResolver.getDomainByRegionIdNoRefresh(regionId)
+                .map(domain -> evaluator.entry(domain).isPresent() || evaluator.exit(domain).isPresent()).orElse(false));
         roadNetworkCache.addListener(tags::refresh);
         if (navigationDestinations != null) {
             // a changed "Ignored" set recuts the roads at once (else at the next pass, up to a minute later)

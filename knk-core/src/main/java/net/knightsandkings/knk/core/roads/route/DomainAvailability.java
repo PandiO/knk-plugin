@@ -34,6 +34,11 @@ import java.util.Set;
  * <p>Rev. 7 Part C (KNG-92, REV7_PROPOSAL §4): a domain whose {@link RoadRule} says its rule does not
  * apply to roads (a house or shop along a public street) is skipped for entry and exit alike. The rule
  * still holds at the border, for teleports and on the walk path to the door.
+ *
+ * <p>KNG-110 (P4): entry looks at the road's width. An edge whose {@link RoadEdge#lanes lanes} are known (a region
+ * covers part of the road there) is open when the player may enter every region of one lane - a free gap a block
+ * wide is enough. Exit stays on the centre line ({@code regionIds}, decided 2026-10-10): a stretch whose middle is in
+ * the region still counts as inside it.
  */
 public final class DomainAvailability implements AccessPolicy {
 
@@ -115,18 +120,33 @@ public final class DomainAvailability implements AccessPolicy {
                     EdgeVerdict.Cause.domain(d.id() == null ? -1 : d.id(), d.name()));
             }
         }
-        for (String regionId : edge.regionIds()) {
+        Optional<Denial> first = Optional.empty();
+        for (List<String> lane : edge.lanes().isEmpty() ? List.of(edge.regionIds()) : edge.lanes()) {
+            Optional<Denial> denial = laneDenial(lane);
+            if (denial.isEmpty()) {
+                return EdgeVerdict.open();
+            }
+            if (first.isEmpty()) {
+                first = denial;
+            }
+        }
+        DomainSnapshot d = first.orElseThrow().domain();
+        return EdgeVerdict.blocked(String.format(ENTRY_MESSAGE, d.name()),
+            EdgeVerdict.Cause.domain(d.id() == null ? -1 : d.id(), d.name()));
+    }
+
+    /** The first region of a lane the player may not enter, if any. */
+    private Optional<Denial> laneDenial(List<String> lane) {
+        for (String regionId : lane) {
             if (currentRegionIds.contains(regionId)) {
                 continue; // already inside: not an entry
             }
             Optional<Denial> denial = entryByRegion.computeIfAbsent(regionId,
                 id -> lookup.domainByRegionId(id).filter(roadRule::applies).flatMap(evaluator::entry));
             if (denial.isPresent()) {
-                DomainSnapshot d = denial.get().domain();
-                return EdgeVerdict.blocked(String.format(ENTRY_MESSAGE, d.name()),
-                    EdgeVerdict.Cause.domain(d.id() == null ? -1 : d.id(), d.name()));
+                return denial;
             }
         }
-        return EdgeVerdict.open();
+        return Optional.empty();
     }
 }
