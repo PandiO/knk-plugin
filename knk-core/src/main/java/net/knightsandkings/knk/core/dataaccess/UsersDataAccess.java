@@ -10,6 +10,8 @@ import java.util.logging.Logger;
 import net.knightsandkings.knk.core.cache.UserCache;
 import net.knightsandkings.knk.core.domain.users.UserDetail;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
+import net.knightsandkings.knk.core.domain.users.ActiveMode;
+import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.core.ports.api.UsersQueryApi;
 
@@ -189,12 +191,25 @@ public class UsersDataAccess {
                 LOGGER.log(Level.INFO, "Creating new user for uuid={0}", uuid);
                 return usersCommandApi.create(seed).thenApply(created -> {
                     if (created != null) {
-                        // Convert to summary and cache
+                        // Convert to summary and cache. isNewUser = true: this call just created the
+                        // account (AsyncPlayerPreLoginEvent for a brand-new player), and PlayerListener.onJoin
+                        // reads this cached summary to run the first-join kit grant (kits DESIGN §4.4, KNG-81).
+                        // The grant is idempotent in the API, so a relog that reads it again grants nothing.
                         UserSummary summary = new UserSummary(
                             created.id(),
                             created.username(),
                             created.uuid(),
-                            created.coins()
+                            null,
+                            created.coins(),
+                            0,
+                            0,
+                            false,
+                            true,
+                            GatePassThroughMethod.DEFAULT,
+                            ActiveMode.NONE,
+                            null,
+                            null,
+                            0
                         );
                         userCache.put(summary);
                         answerListener.found(summary);
