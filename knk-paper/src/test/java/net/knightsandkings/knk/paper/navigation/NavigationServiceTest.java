@@ -1351,7 +1351,7 @@ class NavigationServiceTest {
         events.clear();
         tick.set(100);
         service = walkService(NavigationConfig.defaults().withWalk(new NavigationConfig.WalkConfig(false, 20000, 1.75, 96, 48,
-            3, 10, 16, 10, 6, 2, List.of("LADDER"), 0.5)));
+            5, 3, 10, 16, 10, 6, 2, List.of("LADDER"), 0.5)));
         scenario.run();
 
         assertEquals(today, transcript(), "navigation.walk.enabled: false = before KNG-51");
