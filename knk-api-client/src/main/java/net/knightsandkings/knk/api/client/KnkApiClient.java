@@ -153,7 +153,9 @@ public class KnkApiClient {
         ObjectMapper objectMapper,
         AuthProvider authProvider,
         ExecutorService executor,
-        boolean debugLogging
+        boolean debugLogging,
+        String healthRootUrl,
+        Duration healthProbeTimeout
     ) {
         this.baseUrl = baseUrl;
         this.httpClient = httpClient;
@@ -162,7 +164,10 @@ public class KnkApiClient {
         this.executor = executor;
         
         // Initialize API implementations
-        this.healthApi = new HealthApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.healthApi = new HealthApiImpl(
+            healthRootUrl != null && !healthRootUrl.isBlank() ? healthRootUrl : HealthApiImpl.deriveHealthRootUrl(baseUrl),
+            healthProbeTimeout != null ? healthProbeTimeout : HealthApiImpl.DEFAULT_PROBE_TIMEOUT,
+            httpClient, objectMapper, authProvider, executor, debugLogging);
         this.townsQueryApi = new TownsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.locationsQueryApi = new LocationsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.enchantmentDefinitionsQueryApi = new EnchantmentDefinitionsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -433,6 +438,8 @@ public class KnkApiClient {
         private boolean shutdownExecutorOnClose = false;
         private boolean debugLogging = false;
         private boolean allowUntrustedSsl = false;
+        private String healthRootUrl;
+        private Duration healthProbeTimeout;
         
         public Builder baseUrl(String baseUrl) {
             this.baseUrl = baseUrl;
@@ -475,6 +482,21 @@ public class KnkApiClient {
             return this;
         }
         
+        /**
+         * API root for {@code /health/ready} (KNG-115); null or blank derives it from baseUrl by
+         * dropping a trailing {@code /api}.
+         */
+        public Builder healthRootUrl(String healthRootUrl) {
+            this.healthRootUrl = healthRootUrl;
+            return this;
+        }
+
+        /** Whole-call timeout of one readiness probe (default 5 s). */
+        public Builder healthProbeTimeout(Duration timeout) {
+            this.healthProbeTimeout = timeout;
+            return this;
+        }
+
         public KnkApiClient build() {
             if (baseUrl == null || baseUrl.isBlank()) {
                 throw new IllegalArgumentException("baseUrl is required");
@@ -518,7 +540,8 @@ public class KnkApiClient {
                 shutdownExecutorOnClose = true;
             }
             
-            return new KnkApiClient(baseUrl, httpClient, objectMapper, authProvider, finalExecutor, debugLogging);
+            return new KnkApiClient(baseUrl, httpClient, objectMapper, authProvider, finalExecutor, debugLogging,
+                healthRootUrl, healthProbeTimeout);
         }
     }
     

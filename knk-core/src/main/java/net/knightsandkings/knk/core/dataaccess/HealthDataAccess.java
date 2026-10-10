@@ -17,6 +17,11 @@ import java.time.Duration;
  * Health checks are typically fast and should be checked frequently.
  * <p>
  * Thread-safe: All public methods are async and do not block the calling thread.
+ * <p>
+ * Not a reachability signal (KNG-115): a cached "healthy" says nothing about whether the API
+ * answers now. For up/down decisions use the plugin's {@code ApiConnectivity} state, which is fed
+ * by direct probes; use {@link #refreshAsync()} or {@code FetchPolicy.API_ONLY} here if a fresh
+ * reading is needed.
  */
 public class HealthDataAccess {
     

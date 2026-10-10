@@ -280,6 +280,7 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.core.siege.SiegeMatchRecorder siegeMatchRecorder;
     /** Kept for the siege gate controller (Phase 7a), which respawns doors a match destroyed. */
     private HealthSystem gateHealthSystem;
+    private net.knightsandkings.knk.paper.connectivity.ApiConnectivityMonitor apiConnectivityMonitor;
     /** Kept for the siege non-member pass-through (Phase 7b, TELEPORT mode only). */
     private net.knightsandkings.knk.paper.gates.GatePassThroughService gatePassThroughService;
     
@@ -305,6 +306,7 @@ public class KnKPlugin extends JavaPlugin {
             AuthProvider authProvider = createAuthProvider(config.api().auth());
             
             // Build API client
+            var apiConnectivitySettings = net.knightsandkings.knk.paper.connectivity.ApiConnectivitySettings.fromConfig(getConfig());
             apiClient = KnkApiClient.builder()
                 .baseUrl(config.api().baseUrl())
                 .authProvider(authProvider)
@@ -313,9 +315,14 @@ public class KnKPlugin extends JavaPlugin {
                 .writeTimeout(config.api().timeouts().writeDuration())
                 .debugLogging(config.api().debugLogging())
                 .allowUntrustedSsl(config.api().allowUntrustedSsl())
+                .healthRootUrl(apiConnectivitySettings.healthRootUrl())
+                .healthProbeTimeout(apiConnectivitySettings.probeTimeout())
                 .build();
             
             getLogger().info("API client initialized");
+            // KNG-115: one service-wide UP/DOWN view of the API (ApiConnectivityChangedEvent on change)
+            apiConnectivityMonitor = net.knightsandkings.knk.paper.connectivity.ApiConnectivityMonitor.start(
+                this, apiClient.getHealthApi(), apiConnectivitySettings);
             if (config.api().allowUntrustedSsl()) {
                 getLogger().warning("WARNING: SSL certificate validation is DISABLED. Only use in development!");
             }
@@ -963,6 +970,9 @@ public class KnKPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (apiConnectivityMonitor != null) {
+            apiConnectivityMonitor.stop();
+        }
         if (gameSettingsManager != null) {
             gameSettingsManager.stop();
         }
@@ -1524,6 +1534,12 @@ public class KnKPlugin extends JavaPlugin {
         }
     }
     
+    /** KNG-115 service-wide API up/down state; null when api.connectivity.enabled is false. */
+    public net.knightsandkings.knk.core.connectivity.ApiConnectivity getApiConnectivity() {
+        var monitor = apiConnectivityMonitor;
+        return monitor == null ? null : monitor.connectivity();
+    }
+
     /** Private messages waiting for knk-web-api's PM log (/knk health); -1 when that sink is off. */
     public int privateMessageLogQueueDepth() {
         var apiLog = apiPrivateMessageLog;

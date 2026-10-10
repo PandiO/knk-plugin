@@ -39,6 +39,22 @@ api:
     read: 10
     write: 10
 
+  # Service-wide API connectivity (KNG-115). The plugin probes knk-web-api's GET /health/ready
+  # (which also checks MySQL) on an async timer and keeps one UP/DOWN state with hysteresis.
+  # Each change fires ApiConnectivityChangedEvent on the main thread; /knk health shows it.
+  connectivity:
+    enabled: true
+    probe-interval-seconds: 10
+    # Whole-call timeout of one probe (the API's own database check gives up after 3 s)
+    probe-timeout-seconds: 5
+    # Consecutive failed probes (unreachable, timeout, HTTP 503 unhealthy) before UP -> DOWN
+    failures-to-down: 3
+    # Consecutive passing probes (healthy or degraded) before DOWN -> UP
+    successes-to-up: 2
+    # API root that serves /health/ready. Empty = base-url without its trailing /api
+    # (http://localhost:5294/api -> http://localhost:5294/health/ready).
+    health-root-url: ""
+
 # Account management configuration (Phase 1+)
 account:
   # Link code expiry time (in minutes)
@@ -703,7 +719,7 @@ cache:
     health:
       ttl-seconds: 30          # Health uses seconds (short TTL)
       max-ttl-seconds: 120
-      default-policy: CACHE_FIRST
+      default-policy: API_ONLY # KNG-115: a cached "healthy" must not stand in for "reachable now"
       allow-stale: false       # Don't serve stale health checks
       retry-attempts: 2        # Fewer retries for health checks
       retry-backoff-ms: 50

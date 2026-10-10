@@ -41,6 +41,17 @@ class HealthStatusTest {
         assertTrue(new HealthStatus("OK", null).isHealthy());
         assertTrue(new HealthStatus("ok", null).isHealthy());
         assertFalse(new HealthStatus("DOWN", null).isHealthy());
-        assertFalse(new HealthStatus("DEGRADED", null).isHealthy());
+    }
+
+    @Test
+    void shouldReadTheApiReadinessValuesCaseInsensitively() {
+        assertTrue(new HealthStatus("healthy", null).isHealthy());
+        assertTrue(new HealthStatus("Healthy", null).isHealthy());
+        assertTrue(new HealthStatus("degraded", null).isHealthy());
+        assertTrue(new HealthStatus("DEGRADED", null).isDegraded());
+        assertFalse(new HealthStatus("healthy", null).isDegraded());
+        assertFalse(new HealthStatus("unhealthy", null).isHealthy());
+        assertFalse(new HealthStatus("Unhealthy", null).isHealthy());
+        assertFalse(new HealthStatus("DOWN", null).isHealthy());
     }
 }
