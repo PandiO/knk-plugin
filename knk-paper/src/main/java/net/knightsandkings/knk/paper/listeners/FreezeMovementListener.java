@@ -5,6 +5,7 @@ import org.bukkit.Location;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 
 public class FreezeMovementListener implements Listener {
@@ -34,5 +35,14 @@ public class FreezeMovementListener implements Listener {
         }
 
         event.setTo(from);
+    }
+
+    /**
+     * Death ends a freeze: a player frozen when they died could otherwise not move after respawning
+     * until the freeze ran out, and a dead creature's entry would linger.
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onDeath(EntityDeathEvent event) {
+        frozenPlayerTracker.unfreeze(event.getEntity().getUniqueId());
     }
 }
