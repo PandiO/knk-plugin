@@ -20,6 +20,8 @@ import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Boat;
+import org.bukkit.entity.Horse;
+import org.bukkit.entity.Minecart;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
@@ -261,6 +263,38 @@ class StatisticsListenersTest {
         assertEquals(5.0, batch.counters().get(0).value(), 1e-9);
         assertEquals(2.0, batch.counters().get(1).value(), 1e-9);
         assertEquals(1.5, batch.counters().get(2).value(), 1e-9);
+    }
+
+    @Test
+    void ridingAMountCountsFromTheRidersMove_ABoatOnlyFromItsVehicleMove() {
+        // Paper fires no VehicleMoveEvent for a player-steered mount, only the rider's
+        // PlayerMoveEvent; boats and minecarts fire both (smoke test finding 4).
+        service.sessionStarted(player, 42);
+        MovementStatisticsListener listener = new MovementStatisticsListener(service, 10.0);
+
+        Horse horse = mock(Horse.class);
+        when(horse.getPassengers()).thenReturn(List.of(player));
+        when(player.getVehicle()).thenReturn(horse);
+        when(player.isInsideVehicle()).thenReturn(true);
+        listener.onMove(new PlayerMoveEvent(player, at(0, 64, 0), at(3, 64, 4)));
+        listener.onVehicleMove(new VehicleMoveEvent(horse, at(0, 64, 0), at(3, 64, 4))); // not counted twice
+
+        Boat boat = mock(Boat.class);
+        when(boat.getPassengers()).thenReturn(List.of(player));
+        when(player.getVehicle()).thenReturn(boat);
+        listener.onMove(new PlayerMoveEvent(player, at(0, 62, 0), at(0, 62, 2))); // counted from the boat's event
+        listener.onVehicleMove(new VehicleMoveEvent(boat, at(0, 62, 0), at(0, 62, 2)));
+
+        Minecart cart = mock(Minecart.class);
+        when(cart.getPassengers()).thenReturn(List.of(player));
+        when(player.getVehicle()).thenReturn(cart);
+        listener.onVehicleMove(new VehicleMoveEvent(cart, at(0, 64, 0), at(1, 64, 0)));
+
+        service.accrueAll();
+        StatisticsBatch batch = drain();
+
+        assertEquals(List.of("distance.vehicle"), batch.counters().stream().map(StatisticsBatch.ValueEntry::metric).toList());
+        assertEquals(8.0, batch.counters().get(0).value(), 1e-9);
     }
 
     @Test

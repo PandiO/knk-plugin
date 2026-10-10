@@ -1,7 +1,9 @@
 package net.knightsandkings.knk.paper.statistics;
 
 import org.bukkit.Location;
+import org.bukkit.entity.Boat;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.Minecart;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -13,8 +15,9 @@ import net.knightsandkings.knk.core.statistics.MovementClassifier;
 
 /**
  * Distance per mode (DESIGN.md §F.9): every {@link PlayerMoveEvent} is one segment - foot (swimming
- * also counts as swim), flying (elytra or flight) - and every {@link VehicleMoveEvent} one vehicle
- * segment for each player riding it. Not counted: teleports (their own event), world changes,
+ * also counts as swim), flying (elytra or flight), vehicle when riding a mount - and every boat or
+ * minecart {@link VehicleMoveEvent} one vehicle segment for each player riding it. Not counted:
+ * teleports (their own event), world changes,
  * segments longer than {@code statistics.movement.max-segment-blocks}, AFK players and the excluded
  * game modes. Cheap early-outs first (look-only moves, no session); no allocation per event.
  */
@@ -42,10 +45,13 @@ public final class MovementStatisticsListener implements Listener {
             return;
         }
         Player player = event.getPlayer();
-        if (player.isInsideVehicle() || !eligible(player) || from.getWorld() != to.getWorld()) {
-            return; // riding: counted from the vehicle's own move event
+        Entity vehicle = player.getVehicle();
+        if (firesVehicleMoveEvents(vehicle) || !eligible(player) || from.getWorld() != to.getWorld()) {
+            return; // boat or minecart: counted from the vehicle's own move event
         }
-        MovementClassifier.Mode mode = MovementClassifier.classify(false, player.isGliding(), player.isFlying(),
+        // A mount (horse, pig, strider, camel ...) fires no VehicleMoveEvent: Paper only fires the
+        // rider's PlayerMoveEvent for it (smoke test finding 4).
+        MovementClassifier.Mode mode = MovementClassifier.classify(vehicle != null, player.isGliding(), player.isFlying(),
                 player.isInWater(), MovementClassifier.length(dx, dy, dz), maxSegmentBlocks);
         if (mode != null) {
             service.addDistance(player.getUniqueId(), mode, MovementClassifier.length(dx, dy, dz));
@@ -56,8 +62,8 @@ public final class MovementStatisticsListener implements Listener {
     public void onVehicleMove(VehicleMoveEvent event) {
         Location from = event.getFrom();
         Location to = event.getTo();
-        if (from.getWorld() != to.getWorld()) {
-            return;
+        if (!firesVehicleMoveEvents(event.getVehicle()) || from.getWorld() != to.getWorld()) {
+            return; // a mount is counted from its rider's PlayerMoveEvent, never twice
         }
         double length = MovementClassifier.length(to.getX() - from.getX(), to.getY() - from.getY(), to.getZ() - from.getZ());
         if (!(length > 0)) {
@@ -71,6 +77,14 @@ public final class MovementStatisticsListener implements Listener {
                 }
             }
         }
+    }
+
+    /**
+     * Boats and minecarts fire {@link VehicleMoveEvent} from their own tick (Paper 1.21.10); a
+     * player-steered mount doesn't, only its rider's {@link PlayerMoveEvent}.
+     */
+    static boolean firesVehicleMoveEvents(Entity vehicle) {
+        return vehicle instanceof Boat || vehicle instanceof Minecart;
     }
 
     private boolean eligible(Player player) {
