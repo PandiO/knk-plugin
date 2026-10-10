@@ -54,6 +54,23 @@ class TelemetryEmitterTest {
     }
 
     @Test
+    void aRememberedUserIdOutlivesTheUserCache_untilTheyLeave() {
+        // Smoke test finding 5: the user cache expires entries while the player is online.
+        UUID carol = UUID.fromString("00000000-0000-0000-0000-0000000000c0");
+        emitter.updateConfig(config(Set.of(9), List.of(), Set.of()));
+        assertNull(emitter.userIdOf(carol));
+
+        emitter.rememberUser(carol, 9);
+        emitter.event(TelemetryEventNames.COMMAND_RESULT).player(carol).outcome(TelemetryEvent.Outcome.INFO).emit();
+        assertEquals(9, only().userId());
+        assertTrue(emitter.isEnhanced(carol));
+
+        emitter.forgetUser(carol);
+        assertNull(emitter.userIdOf(carol));
+        assertEquals(7, emitter.userIdOf(ALICE)); // the cache still answers for everyone else
+    }
+
+    @Test
     void baselineEvents_areStamped() {
         emitter.updateConfig(config(Set.of(), List.of(4), Set.of()));
 

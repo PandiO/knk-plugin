@@ -5,6 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.regex.Pattern;
@@ -35,6 +36,7 @@ public final class TelemetryEmitter {
     private final AtomicLong sequence = new AtomicLong();
     private volatile TelemetryClientConfig config = TelemetryClientConfig.initial();
     private volatile Function<UUID, Integer> userIds = id -> null;
+    private final Map<UUID, Integer> onlineUserIds = new ConcurrentHashMap<>();
     private volatile Function<UUID, UUID> sessionKeys = id -> null;
 
     public TelemetryEmitter(TelemetryBuffer buffer, Clock clock, String serverName, String appVersion) {
@@ -59,9 +61,27 @@ public final class TelemetryEmitter {
         }
     }
 
-    /** How a player's user id is found (the plugin's user cache). */
+    /** How a player's user id is found when it wasn't remembered at join (the plugin's user cache). */
     public void setUserIds(Function<UUID, Integer> userIds) {
         this.userIds = userIds == null ? id -> null : userIds;
+    }
+
+    /**
+     * Remembers an online player's user id from their join until {@link #forgetUser}. The user
+     * cache alone isn't enough: its entries expire while the player is online, and events then lost
+     * their user id (smoke test finding 5).
+     */
+    public void rememberUser(UUID playerId, int userId) {
+        if (playerId != null) {
+            onlineUserIds.put(playerId, userId);
+        }
+    }
+
+    /** The player left (after their {@code session.leave} was emitted). */
+    public void forgetUser(UUID playerId) {
+        if (playerId != null) {
+            onlineUserIds.remove(playerId);
+        }
     }
 
     /** How a player's statistics session key is found (null when statistics are off). */
@@ -70,8 +90,15 @@ public final class TelemetryEmitter {
     }
 
     public Integer userIdOf(UUID playerId) {
+        if (playerId == null) {
+            return null;
+        }
+        Integer remembered = onlineUserIds.get(playerId);
+        if (remembered != null) {
+            return remembered;
+        }
         try {
-            return playerId == null ? null : userIds.apply(playerId);
+            return userIds.apply(playerId);
         } catch (RuntimeException e) {
             return null;
         }

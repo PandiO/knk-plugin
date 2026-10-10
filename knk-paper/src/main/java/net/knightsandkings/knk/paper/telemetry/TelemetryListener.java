@@ -50,6 +50,7 @@ public final class TelemetryListener implements Listener {
     @EventHandler(priority = EventPriority.MONITOR)
     public void onUserDataLoaded(UserDataLoadedEvent event) {
         Player player = event.getPlayer();
+        emitter.rememberUser(player.getUniqueId(), event.getUserId());
         emitter.event(TelemetryEventNames.SESSION_JOIN)
             .player(player.getUniqueId())
             .user(event.getUserId())
@@ -75,6 +76,7 @@ public final class TelemetryListener implements Listener {
             .reason(wasKicked ? "kick" : "quit")
             .put("reason", wasKicked ? "kick" : "quit")
             .emit();
+        emitter.forgetUser(id);
     }
 
     /**
