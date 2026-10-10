@@ -430,7 +430,7 @@ public class KnKPlugin extends JavaPlugin {
                             this,
                             userAccountApi,
                             usersQueryApi,
-                            cacheManager.getUserCache(),  // Legacy cache for PlayerListener compatibility
+                            cacheManager.getUserCache(),  // the same user cache PlayerListener and usersDataAccess use
                             getLogger(),
                             config.account(),
                             config.messages()
@@ -542,8 +542,9 @@ public class KnKPlugin extends JavaPlugin {
             
             getLogger().info("WorldTaskHandlerRegistry initialized with handlers");
             
-            // Initialize cache manager and data access factory from config
-            this.cacheManager = new CacheManager(config.cache().ttl());
+            // Data access factory over the one CacheManager built above. A second CacheManager used to be
+            // created here: UserManager kept the first one's user cache while everything else (usersDataAccess,
+            // PlayerListener, KnkPermissible, ModeService, metrics, clearAll) used this one (KNG-81).
             this.dataAccessFactory = new DataAccessFactory(config.cache().entities());
             this.usersDataAccess = dataAccessFactory.createUsersDataAccess(
                 cacheManager.getUserCache(),
@@ -1188,8 +1189,6 @@ public class KnKPlugin extends JavaPlugin {
      * Runs after {@code initializeSiege()} because the build job reads the gate manager's closed footprints
      * and the survey/build code reads the region tracker's WorldGuard query (R8).
      *
-     * <p>Note: {@code cacheManager} is constructed twice in onEnable (once early, once after the API client);
-     * the road code uses the field as it is here, after the second construction. Not fixed in this phase.
      */
     private void initializeRoads() {
         net.knightsandkings.knk.paper.config.NavigationConfig navigation = config.navigation();

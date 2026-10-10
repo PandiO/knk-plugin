@@ -177,6 +177,30 @@ public class UsersDataAccessTest {
         assertEquals(testUser, result.value().orElse(null));
     }
     
+    // KNG-81: the account created at pre-login is cached as a new user, so PlayerListener.onJoin runs the
+    // first-join kit grant for it; an account that already existed is not new.
+    @Test
+    void testGetOrCreate_CreatedAccount_IsCachedAsNewUser() throws Exception {
+        UUID newUuid = UUID.randomUUID();
+        UserDetail seed = new UserDetail(77, "Newcomer", newUuid, null, 250, new Date());
+
+        FetchResult<UserSummary> result = gateway.getOrCreateAsync(newUuid, true, seed).get();
+
+        assertTrue(result.isSuccess());
+        assertTrue(result.value().orElseThrow().isNewUser());
+        assertTrue(cache.getByUuid(newUuid).orElseThrow().isNewUser());
+        assertEquals(77, cache.getByUuid(newUuid).orElseThrow().id());
+    }
+
+    @Test
+    void testGetOrCreate_ExistingAccount_IsNotNewUser() throws Exception {
+        UserDetail seed = new UserDetail(0, "TestPlayer", testUuid, "test@example.com", 250, new Date());
+
+        FetchResult<UserSummary> result = gateway.getOrCreateAsync(testUuid, true, seed).get();
+
+        assertFalse(result.value().orElseThrow().isNewUser());
+    }
+
     @Test
     void testGetOrCreate_NotFoundAndCreateFalse() throws Exception {
         // Arrange: User doesn't exist, create=false
