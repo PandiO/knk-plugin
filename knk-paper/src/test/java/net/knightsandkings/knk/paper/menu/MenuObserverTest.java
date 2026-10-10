@@ -132,6 +132,33 @@ class MenuObserverTest {
     }
 
     @Test
+    void escapeClosingTheMenuInventory_reportsTheClosedMenusKey() {
+        // KNG-34 smoke test finding 12: the listener removed the open context before telling the
+        // observers, so every Escape close arrived without a key and the funnels dropped it.
+        OpenMenuContextRegistry contexts = new OpenMenuContextRegistry();
+        MenuService service = service(contexts, new MenuSessionRegistry());
+        Recorder recorder = new Recorder();
+        service.addObserver(recorder);
+        org.bukkit.inventory.Inventory inventory = mock(org.bukkit.inventory.Inventory.class);
+        OpenMenuContext open = mock(OpenMenuContext.class);
+        RuntimeMenu menu = mock(RuntimeMenu.class);
+        when(menu.key()).thenReturn("statistics.main");
+        when(open.menu()).thenReturn(menu);
+        when(open.inventory()).thenReturn(inventory);
+        contexts.register(ID, open);
+        Player player = mock(Player.class);
+        when(player.getUniqueId()).thenReturn(ID);
+        org.bukkit.event.inventory.InventoryCloseEvent close = mock(org.bukkit.event.inventory.InventoryCloseEvent.class);
+        when(close.getPlayer()).thenReturn(player);
+        when(close.getInventory()).thenReturn(inventory);
+
+        new MenuLifecycleListener(service, contexts).onInventoryClose(close);
+
+        assertEquals(List.of("closed statistics.main"), recorder.calls);
+        assertTrue(contexts.get(ID).isEmpty(), "the context is gone afterwards");
+    }
+
+    @Test
     void menuService_withoutObservers_looksNothingUp() {
         OpenMenuContextRegistry contexts = mock(OpenMenuContextRegistry.class);
         service(contexts, new MenuSessionRegistry()).onMenuInventoryClosed(ID);
