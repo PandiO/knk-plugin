@@ -6,14 +6,17 @@ import java.util.Objects;
 import java.util.UUID;
 
 import org.bukkit.entity.Player;
+import org.bukkit.scoreboard.Scoreboard;
+import org.bukkit.scoreboard.Team;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 
 /**
  * What a player sees of their AFK state (DESIGN.md §F.2): a private message when entering/leaving
- * AFK and - with {@code statistics.afk.tab-list-marker} - the marker appended to their tab-list name.
- * The previous name is remembered and put back when they leave AFK, unless something else (e.g. the
+ * AFK and - with {@code statistics.afk.tab-list-marker} - the marker appended to their tab-list name,
+ * which keeps their group color (scoreboard team). The previous custom name (none, usually) is
+ * remembered and put back when they leave AFK, unless something else (e.g. the
  * Siege scoreboard) has redrawn the name meanwhile - then it is left alone. Not carried over from V1:
  * Siege removal, armour stands, kicks. Main thread.
  */
@@ -66,8 +69,8 @@ public final class AfkPresentation {
         if (!tabListMarker || marked.containsKey(player.getUniqueId())) {
             return;
         }
-        Component previous = player.playerListName();
-        Component withMarker = (previous == null ? Component.text(player.getName()) : previous)
+        Component previous = customListName(player);
+        Component withMarker = (previous == null ? teamStyledName(player) : previous)
                 .append(Component.space()).append(marker);
         player.playerListName(withMarker);
         marked.put(player.getUniqueId(), new Marked(previous, withMarker));
@@ -79,7 +82,35 @@ public final class AfkPresentation {
             return;
         }
         if (Objects.equals(player.playerListName(), remembered.marked())) {
+            // null clears the custom name, so the client draws the team-colored name again.
             player.playerListName(remembered.previous());
         }
+    }
+
+    /**
+     * The custom tab-list name, or null when there is none - Paper then reports the plain name,
+     * and putting that back as a custom name would hide the scoreboard team's color (finding 3).
+     */
+    static Component customListName(Player player) {
+        Component current = player.playerListName();
+        return current == null || current.equals(Component.text(player.getName())) ? null : current;
+    }
+
+    /**
+     * The name as the tab list draws it without a custom name: the scoreboard team's prefix, color
+     * and suffix (KNG-7 group colors, ScoreboardUtil). A custom name skips the team formatting on
+     * the client, so the marked name has to carry it itself.
+     */
+    static Component teamStyledName(Player player) {
+        Component name = Component.text(player.getName());
+        Scoreboard scoreboard = player.getScoreboard();
+        Team team = scoreboard == null ? null : scoreboard.getEntryTeam(player.getName());
+        if (team == null) {
+            return name;
+        }
+        if (team.hasColor()) {
+            name = name.color(team.color());
+        }
+        return Component.empty().append(team.prefix()).append(name).append(team.suffix());
     }
 }
