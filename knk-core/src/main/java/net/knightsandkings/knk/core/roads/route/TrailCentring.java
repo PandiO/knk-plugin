@@ -63,6 +63,25 @@ public final class TrailCentring {
         }
         double[] shift = new double[n];
         double[][] normal = new double[n][];
+        boolean[] anyBlocked = {false};
+        Ground seen = new Ground() {
+            @Override
+            public OptionalInt roadFloor(int x, int z, int nearY) {
+                return ground.roadFloor(x, z, nearY);
+            }
+
+            @Override
+            public boolean stairOrSlab(int x, int y, int z) {
+                return ground.stairOrSlab(x, y, z);
+            }
+
+            @Override
+            public boolean blocked(int x, int y, int z) {
+                boolean blocked = ground.blocked(x, y, z);
+                anyBlocked[0] |= blocked;
+                return blocked;
+            }
+        };
         for (int i = 0; i < n; i++) {
             double[] before = points.get(Math.max(0, i - 1));
             double[] after = points.get(Math.min(n - 1, i + 1));
@@ -74,7 +93,7 @@ public final class TrailCentring {
             }
             normal[i] = new double[] {-dz / len, dx / len};
             boolean sloped = Math.abs(after[1] - before[1]) >= SLOPE;
-            shift[i] = offset(points.get(i), normal[i], sloped, ground);
+            shift[i] = offset(points.get(i), normal[i], sloped, seen);
         }
         for (int i = 0; i < n; i++) {
             double[] p = points.get(i).clone();
@@ -88,12 +107,21 @@ public final class TrailCentring {
                     }
                 }
                 double s = sum / count;
+                if (anyBlocked[0] && s != shift[i] && blockedAt(p, normal[i], s, ground)
+                    && !blockedAt(p, normal[i], shift[i], ground)) {
+                    s = shift[i]; // KNG-110: smoothing must not pull the trail back onto a cell the player may not enter
+                }
                 p[0] += normal[i][0] * s;
                 p[2] += normal[i][1] * s;
             }
             out.add(p);
         }
         return out;
+    }
+
+    private static boolean blockedAt(double[] p, double[] normal, double shift, Ground ground) {
+        return ground.blocked((int) Math.floor(p[0] + normal[0] * shift), (int) Math.round(p[1]),
+            (int) Math.floor(p[2] + normal[1] * shift));
     }
 
     /**

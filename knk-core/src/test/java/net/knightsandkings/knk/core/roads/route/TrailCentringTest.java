@@ -177,6 +177,21 @@ class TrailCentringTest {
     }
 
     @Test
+    void smoothingDoesNotPullTheTrailBackIntoTheRegionAtItsEdge() {
+        // offline on #5228 (2026-10-10): the first point inside domain_17 was smoothed back onto a blocked cell.
+        // Rows 10-13 before x = 5 (the trail half a block towards row 12), rows 10-12 after, the region over rows 11-12
+        Road road = new Road().cells(0, 4, 10, 13, 64).cells(5, 20, 10, 12, 64).blocked(5, 20, 11, 12);
+
+        List<double[]> centred = TrailCentring.centre(eastward(0, 20, 11, 64), road);
+
+        for (double[] p : centred) {
+            if (p[0] >= 5) {
+                assertEquals(10, (int) Math.floor(p[2]), "x " + p[0] + ": on the free row, z " + p[2]);
+            }
+        }
+    }
+
+    @Test
     void overTheWholeWidthTheTrailStaysInTheMiddle() {
         // the router does not route there; when it does (bypass, or the destination is inside), nothing moves
         Road road = new Road().cells(0, 20, 10, 12, 64).blocked(0, 20, 10, 12);
