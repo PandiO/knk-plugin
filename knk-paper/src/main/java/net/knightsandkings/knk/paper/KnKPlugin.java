@@ -1375,10 +1375,10 @@ public class KnKPlugin extends JavaPlugin {
             // read from the /navigate catalogue, which carries each domain's region (not the region → domain cache,
             // which /knk cache refresh clears)
             regionId -> navigationDestinations == null || !navigationDestinations.roadsIgnoreRegion(regionId),
-            // KNG-110: only a region whose domain keeps someone off the road (as far as the domain cache knows) makes
+            // KNG-110: a region whose domain keeps someone off the road, or one the domain cache does not know, makes
             // the pass look across the road; elsewhere the centre line decides, as before
-            regionId -> regionDomainResolver.getDomainByRegionIdNoRefresh(regionId)
-                .map(domain -> evaluator.entry(domain).isPresent() || evaluator.exit(domain).isPresent()).orElse(false));
+            net.knightsandkings.knk.paper.roads.LiveEdgeTags.restrictsByDomain(
+                regionDomainResolver::getDomainByRegionIdNoRefresh, evaluator));
         roadNetworkCache.addListener(tags::refresh);
         if (navigationDestinations != null) {
             // a changed "Ignored" set recuts the roads at once (else at the next pass, up to a minute later)

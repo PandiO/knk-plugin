@@ -275,6 +275,35 @@ class LiveEdgeTagsTest {
     }
 
     @Test
+    void aRegionTheDomainCacheDoesNotKnowIsLookedAcrossToo() {
+        // live test 2026-10-10 (G2): after /knk cache refresh the cache did not know domain_17, and the road stayed shut
+        java.util.Map<String, net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot> cache =
+            new java.util.HashMap<>();
+        cache.put("town_1", domain("town_1", true, true));
+        cache.put("jail_2", domain("jail_2", true, false));
+        cache.put("keep_3", domain("keep_3", false, true));
+        java.util.function.Predicate<String> restricts = LiveEdgeTags.restrictsByDomain(
+            regionId -> java.util.Optional.ofNullable(cache.get(regionId)),
+            new net.knightsandkings.knk.core.regions.DomainAccessEvaluator());
+
+        assertTrue(!restricts.test("town_1"), "open both ways: the centre line is enough");
+        assertTrue(restricts.test("jail_2") && restricts.test("keep_3"));
+        assertTrue(restricts.test("district_9"), "not known: look across");
+
+        districtRows.addAll(Set.of(0, 1));
+        LiveEdgeTags tags = new LiveEdgeTags(w -> stored.get(), wideProbe(), () -> 5, Runnable::run, Runnable::run,
+            changed::add, warmed::add, () -> 0L, regionId -> true, restricts);
+        run(tags);
+        assertEquals(List.of(List.of("town_1")), pieces(tags.snapshot(WORLD), 7).get(1).lanes());
+    }
+
+    private static net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot domain(String region,
+                                                                                                 boolean entry, boolean exit) {
+        return new net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot(1, region, null, region,
+            entry, exit, "District", Set.of(), Set.of(), Set.of(), Set.of());
+    }
+
+    @Test
     void aCrossSectionInUnloadedChunksLoadsThemAndIsRememberedForTheNextPass() {
         districtRows.addAll(Set.of(0, 1));
         chunksLoaded = false;

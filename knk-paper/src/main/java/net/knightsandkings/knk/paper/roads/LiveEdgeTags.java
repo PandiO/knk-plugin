@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
@@ -23,6 +24,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import net.knightsandkings.knk.core.domain.roads.RoadEdge;
+import net.knightsandkings.knk.core.regions.DomainAccessEvaluator;
+import net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot;
 import net.knightsandkings.knk.core.roads.build.EdgeTagging;
 import net.knightsandkings.knk.core.roads.build.GateCells;
 import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
@@ -159,6 +162,22 @@ public final class LiveEdgeTags {
         this.onChanged = Objects.requireNonNull(onChanged, "onChanged");
         this.onRegions = Objects.requireNonNull(onRegions, "onRegions");
         this.clock = Objects.requireNonNull(clock, "clock");
+    }
+
+    /**
+     * KNG-110: the {@code restricts} rule from the domain cache - a region whose domain denies entry or exit, and a
+     * region the cache does not know. Live test 2026-10-10 (G2): after {@code /knk cache refresh} and a reload, the
+     * cache did not know {@code domain_17} (a batch warm-up answers one district only), so the pass judged it on the
+     * centre line and the road stayed blocked until a route had looked the region up. Looking across at an unknown
+     * region costs a few lookups; the lanes it finds only open roads the region's rule would close.
+     *
+     * @param domains the cached domain of a region (main thread, no API call)
+     */
+    public static Predicate<String> restrictsByDomain(Function<String, Optional<DomainSnapshot>> domains,
+                                                     DomainAccessEvaluator evaluator) {
+        return regionId -> domains.apply(regionId)
+            .map(domain -> evaluator.entry(domain).isPresent() || evaluator.exit(domain).isPresent())
+            .orElse(true);
     }
 
     /** The world's network with live tags (any thread); the stored one until its first pass is done. */
