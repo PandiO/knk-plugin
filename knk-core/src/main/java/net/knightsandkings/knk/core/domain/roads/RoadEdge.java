@@ -36,11 +36,23 @@ import java.util.Set;
  * @param stale          {@code Status == Stale}: the tile is dirty; still routable
  * @param confirmed      an admin kept this detected edge when a proposal wanted to remove it (plan
  *                       §5.7 D4): later proposals never remove it; the router ignores it
+ * @param lanes          KNG-110 (P4), routing view only: where a region covers part of the road's width, the region
+ *                       sets of the road cells across it - a player may pass when they may enter every region of one
+ *                       lane. Empty: one lane, {@code regionIds} (the centre line), as stored edges always are
  */
 public record RoadEdge(int id, int fromNodeId, int toNodeId, List<int[]> geometry, double length, double avgWidth,
                        OptionalInt profileId, OptionalInt streetId, double costMultiplier, Set<RoadEdgeFlag> flags,
                        List<Integer> gateDoorIds, List<Integer> domainIds, List<String> regionIds,
-                       RoadEdgeSource source, boolean stale, boolean confirmed) {
+                       RoadEdgeSource source, boolean stale, boolean confirmed, List<List<String>> lanes) {
+
+    /** An edge with one lane, its centre line's regions (every stored edge). */
+    public RoadEdge(int id, int fromNodeId, int toNodeId, List<int[]> geometry, double length, double avgWidth,
+                    OptionalInt profileId, OptionalInt streetId, double costMultiplier, Set<RoadEdgeFlag> flags,
+                    List<Integer> gateDoorIds, List<Integer> domainIds, List<String> regionIds,
+                    RoadEdgeSource source, boolean stale, boolean confirmed) {
+        this(id, fromNodeId, toNodeId, geometry, length, avgWidth, profileId, streetId, costMultiplier, flags,
+            gateDoorIds, domainIds, regionIds, source, stale, confirmed, List.of());
+    }
 
     /** An unconfirmed edge (what the router and its fixtures build). */
     public RoadEdge(int id, int fromNodeId, int toNodeId, List<int[]> geometry, double length, double avgWidth,
@@ -60,6 +72,7 @@ public record RoadEdge(int id, int fromNodeId, int toNodeId, List<int[]> geometr
         Objects.requireNonNull(domainIds, "domainIds");
         Objects.requireNonNull(regionIds, "regionIds");
         Objects.requireNonNull(source, "source");
+        Objects.requireNonNull(lanes, "lanes");
         if (geometry.size() < 2) {
             throw new IllegalArgumentException("edge " + id + ": geometry needs at least two points");
         }
@@ -81,6 +94,7 @@ public record RoadEdge(int id, int fromNodeId, int toNodeId, List<int[]> geometr
         gateDoorIds = List.copyOf(gateDoorIds);
         domainIds = List.copyOf(domainIds);
         regionIds = List.copyOf(regionIds);
+        lanes = lanes.stream().<List<String>>map(List::copyOf).toList();
     }
 
     public boolean hasFlag(RoadEdgeFlag flag) {

@@ -330,6 +330,26 @@ class AStarRouterTest {
     }
 
     @Test
+    void aRegionThePlayerCouldNotLeaveAgainIsRoutedAroundOrExplained() {
+        // KNG-110: from C to TWENTY, past the castle (entry allowed, leaving not) or round by D
+        DomainAvailability trap = new DomainAvailability(new DomainAccessEvaluator(),
+            AccessPolicyTest.lookup(AccessPolicyTest.domain(CASTLE_DOMAIN, "Kardenna Castle", CASTLE_REGION, null, false)),
+            DomainAvailability.RoadRule.ALWAYS, Set.of(), Set.of("meadow"), false);
+        RouteResult around = router.route(request(SnapPoint.atNode(town, C), SnapPoint.atNode(town, TWENTY), trap));
+        assertTrue(around.isFound());
+        assertEquals(List.of(E_CD, E_D20), edges(around.route()));
+
+        // the way round closed (and longer, so the explainer's way is past the castle): no route, and why
+        RoadNetworkSnapshot closedRound = NetworkFixture.townBuilder()
+            .addEdge(edge(E_D20, D, TWENTY, line(0, 64, 100, 0, 64, 200)).length(400).profile(PROFILE_MAIN)
+                .flags(RoadEdgeFlag.CLOSED).build()).build();
+        RouteResult none = new AStarRouter(closedRound).routeOrExplain(RouteRequest.of(SnapPoint.atNode(closedRound, C),
+            SnapPoint.atNode(closedRound, TWENTY), CompositeAccessPolicy.of(new StaticFlagsAvailability(), trap), params));
+        assertEquals(RouteResult.Status.BLOCKED, none.status());
+        assertEquals("you could not leave Kardenna Castle again", none.explanation().reason());
+    }
+
+    @Test
     void closedFlagIsRoutedAroundOrExplained() {
         RoadNetworkSnapshot closedDiagonal = NetworkFixture.townBuilder()
             .addEdge(edge(E_AC, A, C, List.of(p(0, 64, 0), p(50, 64, 50), p(100, 64, 100))).length(150)

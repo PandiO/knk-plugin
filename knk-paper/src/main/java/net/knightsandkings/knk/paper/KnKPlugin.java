@@ -145,6 +145,8 @@ public class KnKPlugin extends JavaPlugin {
     private RegionHttpServer regionHttpServer;
     private KnkConfig config;
     private CacheManager cacheManager;
+    /** KNG-58: last-known account, freeze, mode and permission answers on disk, for when the API is down. */
+    private net.knightsandkings.knk.core.offline.OfflineSecurityStore offlineSecurity;
     private DataAccessFactory dataAccessFactory;
     private TownsQueryApi townsQueryApi;
     private LocationsQueryApi locationsQueryApi;
@@ -569,7 +571,8 @@ public class KnKPlugin extends JavaPlugin {
                 menuTemplatesQueryApi
             );
             this.permissionsDataAccess = dataAccessFactory.createPermissionsDataAccess(permissionsApi);
-            this.knkPermissible = new KnkPermissible(cacheManager.getUserCache(), permissionsDataAccess);
+            this.offlineSecurity = createOfflineSecurity();
+            this.knkPermissible = new KnkPermissible(cacheManager.getUserCache(), permissionsDataAccess, offlineSecurity);
             // Gate pass-through (and navigation's gate verdicts) honour KnK's permission model as well as Bukkit's.
             net.knightsandkings.knk.paper.gates.GatePassThroughRules.setPermissionCheck((player, node) ->
                 player.hasPermission(node) || (knkPermissible != null && knkPermissible.hasPermission(player, node)));
@@ -582,6 +585,9 @@ public class KnKPlugin extends JavaPlugin {
                 ? gameSettingsManager.gameModeFor(player.getWorld()) : org.bukkit.GameMode.SURVIVAL);
             this.modeService = new ModeService(this, knkPermissible, cacheManager.getUserCache(), usersCommandApi);
             this.adminFreezeManager = new net.knightsandkings.knk.paper.user.AdminFreezeManager();
+            modeService.setOfflineStore(offlineSecurity);
+            adminFreezeManager.setOfflineStore(offlineSecurity);
+            startOfflineSecurityTasks();
             initPrivateMessaging();
             this.rankHierarchy = new net.knightsandkings.knk.paper.commands.support.RankHierarchy(usersQueryApi);
             this.minecraftMaterialRefsDataAccess = dataAccessFactory.createMinecraftMaterialRefsDataAccess(
@@ -1075,6 +1081,9 @@ public class KnKPlugin extends JavaPlugin {
             discoveryFlushTask.stop();
             discoveryFlushTask.spoolEverything();
         }
+        if (offlineSecurity != null) {
+            offlineSecurity.flushIfDirty();
+        }
         if (cacheManager != null) {
             getLogger().info("Logging final cache metrics...");
             cacheManager.logMetrics();
@@ -1278,10 +1287,14 @@ public class KnKPlugin extends JavaPlugin {
             new net.knightsandkings.knk.core.roads.route.EtaEstimator(navigation.sessionParameters().sprintSpeed()));
         // KNG-74: the arrow keeps off the action bar while a domain-access refusal there is fresh.
         hud.yieldActionBarWhile(uuid -> domainAccess != null && domainAccess.holdsActionBar(uuid));
-        // KNG-76: the route trail keeps to the middle of the road (road cells = the profiles' floor materials)
+        // KNG-76: the route trail keeps to the middle of the road (road cells = the profiles' floor materials);
+        // KNG-110: of its free part, where a region the player may not enter covers part of the road
+        var trailRegions = regionTracker.regionIds();
         var trail = new net.knightsandkings.knk.paper.navigation.TrailRenderer(navigation.trail(),
             net.knightsandkings.knk.paper.utils.TickBudget.server(),
-            net.knightsandkings.knk.paper.navigation.TrailRenderer.roadSurface(roadNetworkCache::roadMaterialNames));
+            net.knightsandkings.knk.paper.navigation.TrailRenderer.roadSurface(roadNetworkCache::roadMaterialNames),
+            trailRegions == null ? null : trailRegions::at,
+            player -> navigationService == null ? null : navigationService.trailRule(player), System::currentTimeMillis);
         this.liveEdgeTags = startLiveEdgeTags(mainThread);
         this.navigationService = new net.knightsandkings.knk.paper.navigation.NavigationService(
             new net.knightsandkings.knk.paper.navigation.NavigationService.Deps(
@@ -1313,6 +1326,8 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.roads.LiveEdgeTags startLiveEdgeTags(java.util.concurrent.Executor mainThread) {
         var regionIds = regionTracker.regionIds();
         var budget = net.knightsandkings.knk.paper.utils.TickBudget.server();
+        var surface = net.knightsandkings.knk.paper.navigation.TrailRenderer.roadSurface(roadNetworkCache::roadMaterialNames);
+        var evaluator = new net.knightsandkings.knk.core.regions.DomainAccessEvaluator();
         var tags = new net.knightsandkings.knk.paper.roads.LiveEdgeTags(roadNetworkCache::snapshot,
             new net.knightsandkings.knk.paper.roads.LiveEdgeTags.Probe() {
                 @Override
@@ -1324,6 +1339,36 @@ public class KnKPlugin extends JavaPlugin {
                 @Override
                 public net.knightsandkings.knk.core.roads.build.GateCells gates(String world) {
                     return net.knightsandkings.knk.paper.roads.GateCellsIndex.of(gateManager, world);
+                }
+
+                // KNG-110: the road's width where a region covers part of it - the trail's road cells
+                @Override
+                public net.knightsandkings.knk.core.roads.route.TrailCentring.Ground ground(String world) {
+                    org.bukkit.World w = org.bukkit.Bukkit.getWorld(world);
+                    return w == null ? null : surface.apply(w);
+                }
+
+                @Override
+                public boolean loaded(String world, int x, int z) {
+                    org.bukkit.World w = org.bukkit.Bukkit.getWorld(world);
+                    return w != null && w.isChunkLoaded(x >> 4, z >> 4);
+                }
+
+                @Override
+                public void load(String world, int x, int z, Runnable then) {
+                    org.bukkit.World w = org.bukkit.Bukkit.getWorld(world);
+                    if (w == null) {
+                        then.run();
+                        return;
+                    }
+                    // Paper completes on the main thread: read the chunk at once, before it may unload again
+                    w.getChunkAtAsync(x >> 4, z >> 4, false).whenComplete((chunk, error) -> {
+                        if (org.bukkit.Bukkit.isPrimaryThread()) {
+                            then.run();
+                        } else {
+                            mainThread.execute(then);
+                        }
+                    });
                 }
             },
             () -> budget.perTick(net.knightsandkings.knk.paper.roads.LiveEdgeTags.LOOKUPS_PER_TICK,
@@ -1338,7 +1383,11 @@ public class KnKPlugin extends JavaPlugin {
             // rev. 7 Part C: a region whose domain's rule is "Ignored" for roads (houses, shops) does not cut roads;
             // read from the /navigate catalogue, which carries each domain's region (not the region → domain cache,
             // which /knk cache refresh clears)
-            regionId -> navigationDestinations == null || !navigationDestinations.roadsIgnoreRegion(regionId));
+            regionId -> navigationDestinations == null || !navigationDestinations.roadsIgnoreRegion(regionId),
+            // KNG-110: a region whose domain keeps someone off the road, or one the domain cache does not know, makes
+            // the pass look across the road; elsewhere the centre line decides, as before
+            net.knightsandkings.knk.paper.roads.LiveEdgeTags.restrictsByDomain(
+                regionDomainResolver::getDomainByRegionIdNoRefresh, evaluator));
         roadNetworkCache.addListener(tags::refresh);
         if (navigationDestinations != null) {
             // a changed "Ignored" set recuts the roads at once (else at the next pass, up to a minute later)
@@ -2070,6 +2119,77 @@ public class KnKPlugin extends JavaPlugin {
             new net.knightsandkings.knk.paper.commands.WarpCommand.Deps(support, rankCheck, targets, teleportService,
                 teleportDestinationsDataAccess, charges, teleportUserIdLookup(), knkPermissible::hasPermissionAsync,
                 org.bukkit.Bukkit::getWorld, modeService::isVanished));
+    }
+
+    /**
+     * KNG-58: the offline security cache ({@code offline-cache} in config.yml). Every user and
+     * permission answer the API gives is recorded; a UUID the API no longer knows, or a permission
+     * check for an unknown user, deletes what is kept about that player. Null when disabled.
+     */
+    private net.knightsandkings.knk.core.offline.OfflineSecurityStore createOfflineSecurity() {
+        var cfg = getConfig();
+        if (!cfg.getBoolean("offline-cache.enabled", true)) {
+            getLogger().warning("[KnK Offline] offline-cache.enabled=false: permissions, freeze and modes are not "
+                + "enforced from the last known state while the API is down");
+            return null;
+        }
+        var settings = new net.knightsandkings.knk.core.offline.OfflineSecurityStore.Settings(
+            java.time.Duration.ofDays(Math.max(1, Math.min(30, cfg.getInt("offline-cache.identity-max-age-days", 30)))),
+            java.time.Duration.ofHours(Math.max(1, cfg.getInt("offline-cache.permission-max-age-hours", 72))));
+        var store = new net.knightsandkings.knk.core.offline.OfflineSecurityStore(
+            new java.io.File(getDataFolder(), cfg.getString("offline-cache.file", "offline-security.json")).toPath(),
+            settings, java.time.Clock.systemUTC());
+        store.load();
+        getLogger().info("[KnK Offline] Loaded " + store.identityCount() + " account(s) and "
+            + store.permissionCount() + " permission answer(s) from the offline security cache");
+
+        usersDataAccess.setAnswerListener(new net.knightsandkings.knk.core.dataaccess.UsersDataAccess.UserAnswerListener() {
+            @Override
+            public void found(net.knightsandkings.knk.core.domain.users.UserSummary user) {
+                store.recordUser(user);
+            }
+
+            @Override
+            public void notFound(java.util.UUID uuid) {
+                store.forgetUser(uuid);
+            }
+        });
+        permissionsDataAccess.setAnswerListener((userId, node, result) -> {
+            if (result == null) {
+                store.forgetUserId(userId);
+            } else {
+                store.recordPermission(userId, node, result.isAllowed());
+            }
+        });
+        return store;
+    }
+
+    /**
+     * KNG-58: write the offline security cache every {@code flush-seconds}, prune entries past their
+     * max age hourly, and re-check accounts the API hasn't confirmed for {@code verify-after-hours}
+     * (an erased account is deleted). All off the main thread.
+     */
+    private void startOfflineSecurityTasks() {
+        if (offlineSecurity == null) {
+            return;
+        }
+        var cfg = getConfig();
+        long flushTicks = Math.max(1, cfg.getLong("offline-cache.flush-seconds", 10)) * 20L;
+        java.time.Duration verifyAfter = java.time.Duration.ofHours(Math.max(1, cfg.getInt("offline-cache.verify-after-hours", 6)));
+        var verifier = new net.knightsandkings.knk.core.offline.OfflineIdentityVerifier(offlineSecurity, usersQueryApi::getByUuid);
+        var scheduler = getServer().getScheduler();
+        scheduler.runTaskTimerAsynchronously(this, offlineSecurity::flushIfDirty, flushTicks, flushTicks);
+        scheduler.runTaskTimerAsynchronously(this, () -> {
+            int pruned = offlineSecurity.prune();
+            if (pruned > 0) {
+                getLogger().info("[KnK Offline] Pruned " + pruned + " offline security entr(y/ies) past their max age");
+            }
+            var result = verifier.run(verifyAfter);
+            if (result.forgotten() > 0) {
+                getLogger().info("[KnK Offline] Deleted the offline data of " + result.forgotten()
+                    + " account(s) the API no longer knows under that UUID");
+            }
+        }, 20L * 120, 20L * 3600);
     }
 
     /**
