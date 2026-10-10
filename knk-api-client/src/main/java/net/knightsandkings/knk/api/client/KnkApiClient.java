@@ -137,6 +137,7 @@ public class KnkApiClient {
     private final net.knightsandkings.knk.core.ports.api.CategoriesQueryApi categoriesQueryApi;
     private final KitsCommandApi kitsCommandApi;
     private final net.knightsandkings.knk.core.ports.api.GameSettingsQueryApi gameSettingsQueryApi;
+    private final net.knightsandkings.knk.core.ports.api.GameSettingsCommandApi gameSettingsCommandApi;
     private final net.knightsandkings.knk.core.ports.api.DomainAccessRulesApi domainAccessRulesApi;
     private final net.knightsandkings.knk.api.impl.TeleportDestinationsApiImpl teleportDestinationsApi;
     private final net.knightsandkings.knk.core.ports.api.LootboxesQueryApi lootboxesQueryApi;
@@ -144,6 +145,7 @@ public class KnkApiClient {
     private final CurrencyApi currencyApi;
     private final RoadNetworkQueryApi roadNetworkQueryApi;
     private final RoadNetworkCommandApi roadNetworkCommandApi;
+    private final net.knightsandkings.knk.core.ports.api.LocationRetentionApi locationRetentionApi;
 
     private KnkApiClient(
         String baseUrl,
@@ -197,12 +199,14 @@ public class KnkApiClient {
         this.currencyApi = new net.knightsandkings.knk.api.impl.CurrencyApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.categoriesQueryApi = new net.knightsandkings.knk.api.impl.CategoriesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.gameSettingsQueryApi = new net.knightsandkings.knk.api.impl.GameSettingsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.gameSettingsCommandApi = new net.knightsandkings.knk.api.impl.GameSettingsCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.domainAccessRulesApi = new net.knightsandkings.knk.api.impl.DomainAccessRulesApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.teleportDestinationsApi = new net.knightsandkings.knk.api.impl.TeleportDestinationsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.lootboxesQueryApi = new net.knightsandkings.knk.api.impl.LootboxesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.lootboxesCommandApi = new net.knightsandkings.knk.api.impl.LootboxesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.roadNetworkQueryApi = new RoadNetworkQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.roadNetworkCommandApi = new RoadNetworkCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.locationRetentionApi = new net.knightsandkings.knk.api.impl.LocationRetentionApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
     }
     
     public HealthApi getHealthApi() {
@@ -261,6 +265,11 @@ public class KnkApiClient {
     /** Teleport Phase 4 ({@code /spawn}): {@code GET /api/GameSettings}. */
     public net.knightsandkings.knk.core.ports.api.GameSettingsQueryApi getGameSettingsQueryApi() {
         return gameSettingsQueryApi;
+    }
+
+    /** Game settings (KNG-52): {@code PUT /api/GameSettings/runtime-worlds}. */
+    public net.knightsandkings.knk.core.ports.api.GameSettingsCommandApi getGameSettingsCommandApi() {
+        return gameSettingsCommandApi;
     }
 
     /** Teleport Phase 5 ({@code /warp}): {@code GET /api/teleport-destinations?userId=}. */
@@ -323,6 +332,11 @@ public class KnkApiClient {
     /** Road navigation writes (KNG-27): build upload, dirty marks, profiles, surveys, seeds, node/edge review. */
     public RoadNetworkCommandApi getRoadNetworkCommandApi() {
         return roadNetworkCommandApi;
+    }
+
+    /** Location retention (KNG-80): the orphan list and teleport targets. */
+    public net.knightsandkings.knk.core.ports.api.LocationRetentionApi getLocationRetentionApi() {
+        return locationRetentionApi;
     }
 
     /** KNG-18 Phase 2: players' ignore lists. */

@@ -4,6 +4,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Predicate;
 
 import org.bukkit.entity.Player;
 
@@ -17,6 +18,10 @@ import net.kyori.adventure.text.format.NamedTextColor;
  * ~1 min" and the progress travelled / total, and an action-bar arrow towards the trail point ahead
  * for players with minimal particles. One boss bar per player, shown on the first update and hidden
  * on {@link #hide}. Main thread. The arrow maths is pure ({@link #arrow}) for the tests.
+ *
+ * <p>The action bar is shared: while {@link #yieldActionBarWhile another feature holds it} (KNG-74:
+ * a fresh domain-access refusal), the arrow is not sent and {@link #hide} does not clear it, so the
+ * other message stays readable; the arrow resumes on the next HUD tick after the hold.
  */
 public final class NavigationHud {
 
@@ -25,9 +30,15 @@ public final class NavigationHud {
 
     private final EtaEstimator eta;
     private final Map<UUID, BossBar> bars = new ConcurrentHashMap<>();
+    private volatile Predicate<UUID> actionBarHeld = id -> false;
 
     public NavigationHud(EtaEstimator eta) {
         this.eta = Objects.requireNonNull(eta, "eta");
+    }
+
+    /** Keep off a player's action bar while {@code held} is true for them (e.g. a fresh refusal message). */
+    public void yieldActionBarWhile(Predicate<UUID> held) {
+        this.actionBarHeld = held != null ? held : id -> false;
     }
 
     /**
@@ -52,19 +63,21 @@ public final class NavigationHud {
     public void arrowTowards(Player player, double x, double z) {
         double dx = x - player.getLocation().getX();
         double dz = z - player.getLocation().getZ();
-        if (dx * dx + dz * dz < 0.25) {
+        if (dx * dx + dz * dz < 0.25 || actionBarHeld.test(player.getUniqueId())) {
             return;
         }
         player.sendActionBar(Component.text(arrow(player.getLocation().getYaw(), dx, dz), NamedTextColor.GOLD));
     }
 
-    /** Hide and forget the player's boss bar and clear the action bar. */
+    /** Hide and forget the player's boss bar and clear the action bar (unless another message holds it). */
     public void hide(Player player) {
         BossBar bar = bars.remove(player.getUniqueId());
         if (bar != null) {
             player.hideBossBar(bar);
         }
-        player.sendActionBar(Component.empty());
+        if (!actionBarHeld.test(player.getUniqueId())) {
+            player.sendActionBar(Component.empty());
+        }
     }
 
     public void forget(UUID playerId) {

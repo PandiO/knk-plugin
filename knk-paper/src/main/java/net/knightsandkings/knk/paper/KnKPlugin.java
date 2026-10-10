@@ -267,6 +267,8 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.teleport.TeleportRequestService teleportRequestService;
     private net.knightsandkings.knk.paper.commands.TeleportRequestCommand teleportRequestCommand;
     private net.knightsandkings.knk.paper.teleport.SpawnDestinationResolver spawnDestinationResolver;
+    /** Global Game Settings (KNG-52); null without the API client. */
+    private net.knightsandkings.knk.paper.settings.GameSettingsManager gameSettingsManager;
     private net.knightsandkings.knk.paper.commands.SpawnCommand spawnCommand;
     private net.knightsandkings.knk.core.dataaccess.TeleportDestinationsDataAccess teleportDestinationsDataAccess;
     private net.knightsandkings.knk.paper.commands.WarpCommand warpCommand;
@@ -577,7 +579,10 @@ public class KnKPlugin extends JavaPlugin {
             // A grant or group change made in the web app shows in game within the 30 s cache time;
             // /knk cache refresh applies it at once.
             cacheManager.registerRefreshHook("permissions", permissionsDataAccess::invalidateAll);
-            this.joinLoadingGuard = new JoinLoadingGuard(this, knkPermissible);
+            // Hands back the world's Game Settings default mode when the hold ends; the manager is
+            // created later (initializeGameSettings), so it's read when a hold ends.
+            this.joinLoadingGuard = new JoinLoadingGuard(this, knkPermissible, player -> gameSettingsManager != null
+                ? gameSettingsManager.gameModeFor(player.getWorld()) : org.bukkit.GameMode.SURVIVAL);
             this.modeService = new ModeService(this, knkPermissible, cacheManager.getUserCache(), usersCommandApi);
             this.adminFreezeManager = new net.knightsandkings.knk.paper.user.AdminFreezeManager();
             modeService.setOfflineStore(offlineSecurity);
@@ -794,6 +799,8 @@ public class KnKPlugin extends JavaPlugin {
             
             // Wire resolver into cache manager for metrics tracking
             cacheManager.setRegionResolver(regionDomainResolver);
+            // KNG-104: /knk cache refresh forgets the region → domain map too (registered before the navigation hooks)
+            cacheManager.registerRefreshHook("region domains", regionDomainResolver::clearRegionCache);
 
             // KNG-11: hits the siege rules allow stay exempt, so enchantments keep working in sieges fought
             // in towns. siegeService is created later (initializeSiege), so it's read per hit.
@@ -804,6 +811,10 @@ public class KnKPlugin extends JavaPlugin {
             // Teleport engine + staff teleports (docs/specs/teleport, Phase 1) - before the commands,
             // /knk tp delegates to /tp.
             initializeTeleports();
+
+            // Global Game Settings (docs/specs/game-settings, KNG-52) - after the teleports (it shares the
+            // /spawn resolver), before registerEvents (PlayerListener uses it).
+            initializeGameSettings();
 
             // Lootboxes Phase 3: world boxes, claims and delivery; commands registered in registerCommands().
             initializeLootboxes();
@@ -958,6 +969,9 @@ public class KnKPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (gameSettingsManager != null) {
+            gameSettingsManager.stop();
+        }
         // Players still loading their account would otherwise be saved in the hold's ADVENTURE
         // mode with the invulnerable flag set.
         if (joinLoadingGuard != null) {
@@ -1256,7 +1270,9 @@ public class KnKPlugin extends JavaPlugin {
 
         var access = new net.knightsandkings.knk.paper.navigation.NavigationAccess(
             gateManager, () -> siegeGates, regionTracker.regionIds(), regionDomainResolver,
-            this::hasRegionBypass, new net.knightsandkings.knk.core.regions.DomainAccessEvaluator());
+            this::hasRegionBypass, new net.knightsandkings.knk.core.regions.DomainAccessEvaluator(),
+            // rev. 7 Part C (KNG-92): the catalogue knows which domains' rules are lifted off the roads
+            domain -> domain.id() == null || !navigationDestinations.roadAccessIgnored(domain.id()));
         var eligibility = new net.knightsandkings.knk.paper.navigation.NavigationEligibility(
             uuid -> joinLoadingGuard != null && joinLoadingGuard.isLoading(uuid),
             uuid -> adminFreezeManager != null && adminFreezeManager.isFrozen(uuid),
@@ -1269,8 +1285,16 @@ public class KnKPlugin extends JavaPlugin {
         net.knightsandkings.knk.paper.navigation.NavigationService.Walk walk = initializeWalkPaths(navigation, access);
         var hud = new net.knightsandkings.knk.paper.navigation.NavigationHud(
             new net.knightsandkings.knk.core.roads.route.EtaEstimator(navigation.sessionParameters().sprintSpeed()));
+        // KNG-74: the arrow keeps off the action bar while a domain-access refusal there is fresh.
+        hud.yieldActionBarWhile(uuid -> domainAccess != null && domainAccess.holdsActionBar(uuid));
+        // KNG-76: the route trail keeps to the middle of the road (road cells = the profiles' floor materials);
+        // KNG-110: of its free part, where a region the player may not enter covers part of the road
+        var trailRegions = regionTracker.regionIds();
         var trail = new net.knightsandkings.knk.paper.navigation.TrailRenderer(navigation.trail(),
-            net.knightsandkings.knk.paper.utils.TickBudget.server());
+            net.knightsandkings.knk.paper.utils.TickBudget.server(),
+            net.knightsandkings.knk.paper.navigation.TrailRenderer.roadSurface(roadNetworkCache::roadMaterialNames),
+            trailRegions == null ? null : trailRegions::at,
+            player -> navigationService == null ? null : navigationService.trailRule(player), System::currentTimeMillis);
         this.liveEdgeTags = startLiveEdgeTags(mainThread);
         this.navigationService = new net.knightsandkings.knk.paper.navigation.NavigationService(
             new net.knightsandkings.knk.paper.navigation.NavigationService.Deps(
@@ -1302,6 +1326,8 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.roads.LiveEdgeTags startLiveEdgeTags(java.util.concurrent.Executor mainThread) {
         var regionIds = regionTracker.regionIds();
         var budget = net.knightsandkings.knk.paper.utils.TickBudget.server();
+        var surface = net.knightsandkings.knk.paper.navigation.TrailRenderer.roadSurface(roadNetworkCache::roadMaterialNames);
+        var evaluator = new net.knightsandkings.knk.core.regions.DomainAccessEvaluator();
         var tags = new net.knightsandkings.knk.paper.roads.LiveEdgeTags(roadNetworkCache::snapshot,
             new net.knightsandkings.knk.paper.roads.LiveEdgeTags.Probe() {
                 @Override
@@ -1314,6 +1340,36 @@ public class KnKPlugin extends JavaPlugin {
                 public net.knightsandkings.knk.core.roads.build.GateCells gates(String world) {
                     return net.knightsandkings.knk.paper.roads.GateCellsIndex.of(gateManager, world);
                 }
+
+                // KNG-110: the road's width where a region covers part of it - the trail's road cells
+                @Override
+                public net.knightsandkings.knk.core.roads.route.TrailCentring.Ground ground(String world) {
+                    org.bukkit.World w = org.bukkit.Bukkit.getWorld(world);
+                    return w == null ? null : surface.apply(w);
+                }
+
+                @Override
+                public boolean loaded(String world, int x, int z) {
+                    org.bukkit.World w = org.bukkit.Bukkit.getWorld(world);
+                    return w != null && w.isChunkLoaded(x >> 4, z >> 4);
+                }
+
+                @Override
+                public void load(String world, int x, int z, Runnable then) {
+                    org.bukkit.World w = org.bukkit.Bukkit.getWorld(world);
+                    if (w == null) {
+                        then.run();
+                        return;
+                    }
+                    // Paper completes on the main thread: read the chunk at once, before it may unload again
+                    w.getChunkAtAsync(x >> 4, z >> 4, false).whenComplete((chunk, error) -> {
+                        if (org.bukkit.Bukkit.isPrimaryThread()) {
+                            then.run();
+                        } else {
+                            mainThread.execute(then);
+                        }
+                    });
+                }
             },
             () -> budget.perTick(net.knightsandkings.knk.paper.roads.LiveEdgeTags.LOOKUPS_PER_TICK,
                 net.knightsandkings.knk.paper.roads.LiveEdgeTags.LOOKUPS_PER_TICK_LAGGING),
@@ -1323,8 +1379,21 @@ public class KnKPlugin extends JavaPlugin {
                     navigationService.onNetworkChanged(world);
                 }
             },
-            regions -> regionDomainResolver.warmCache(regions), System::currentTimeMillis);
+            regions -> regionDomainResolver.warmCache(regions), System::currentTimeMillis,
+            // rev. 7 Part C: a region whose domain's rule is "Ignored" for roads (houses, shops) does not cut roads;
+            // read from the /navigate catalogue, which carries each domain's region (not the region → domain cache,
+            // which /knk cache refresh clears)
+            regionId -> navigationDestinations == null || !navigationDestinations.roadsIgnoreRegion(regionId),
+            // KNG-110: a region whose domain keeps someone off the road, or one the domain cache does not know, makes
+            // the pass look across the road; elsewhere the centre line decides, as before
+            net.knightsandkings.knk.paper.roads.LiveEdgeTags.restrictsByDomain(
+                regionDomainResolver::getDomainByRegionIdNoRefresh, evaluator));
         roadNetworkCache.addListener(tags::refresh);
+        if (navigationDestinations != null) {
+            // a changed "Ignored" set recuts the roads at once (else at the next pass, up to a minute later)
+            navigationDestinations.onRoadAccessChanged(() -> mainThread.execute(() -> tags.refreshAll(
+                org.bukkit.Bukkit.getWorlds().stream().map(org.bukkit.World::getName).toList())));
+        }
         org.bukkit.Bukkit.getScheduler().runTaskTimer(this, tags::tick, 1L, 1L);
         org.bukkit.Bukkit.getScheduler().runTaskTimer(this,
             () -> tags.refreshAll(org.bukkit.Bukkit.getWorlds().stream().map(org.bukkit.World::getName).toList()),
@@ -1476,7 +1545,12 @@ public class KnKPlugin extends JavaPlugin {
         // Event registration moved to onEnable after region transition service setup
 
         pluginManager.registerEvents(new WorldGuardRegionListener(regionTracker), this);
-        pluginManager.registerEvents(new PlayerListener(usersDataAccess, townsDataAccess, this.getCacheManager(), knkPermissible, usersCommandApi, kitsCommandApi, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, ignoreService), this);
+        if (gameSettingsManager != null) {
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.GameSettingsWorldListener(this, gameSettingsManager), this);
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.GameSettingsMotdListener(gameSettingsManager), this);
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.GameSettingsWeatherCommandListener(gameSettingsManager), this);
+        }
+        pluginManager.registerEvents(new PlayerListener(usersDataAccess, gameSettingsManager, this.getCacheManager(), knkPermissible, usersCommandApi, kitsCommandApi, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, ignoreService), this);
         if (playerCurrencyService != null) {
             // Drops a leaving player's open /pay confirmation and its expiry notice.
             pluginManager.registerEvents(playerCurrencyService, this);
@@ -1568,6 +1642,11 @@ public class KnKPlugin extends JavaPlugin {
                 userAdminService,
                 playerCurrencyService
             );
+            // KNG-77/78/79: /gate and /gatedoor run /knk gate|gatedoor (same permissions and warm-up);
+            // `here` radius and look-at reach from config.yml gates.here.* / gates.lookat.*.
+            knkAdminCommand.setGateTargetingSettings(gateTargetingSettings());
+            registerKnkShortcut("gate", knkAdminCommand);
+            registerKnkShortcut("gatedoor", knkAdminCommand);
             if (managedRegions != null) {
                 var regionsCommand = new net.knightsandkings.knk.paper.commands.RegionsAdminCommand(managedRegions, domainAccessSync, this);
                 knkAdminCommand.registerSubcommand(
@@ -1642,6 +1721,33 @@ public class KnKPlugin extends JavaPlugin {
                 () -> navigationService, () -> navigationDestinations,
                 (player, node) -> knkPermissible != null && knkPermissible.hasPermission(player, node),
                 MenuService.mainThreadExecutor(this)));
+            // Location retention (KNG-80): /knk location here|tp|orphans replaces the built-in /knk location here;
+            // each action checks its own knk.admin.location* node. tp goes through the KNG-17 teleport engine.
+            if (apiClient != null) {
+                var permissionGate = commandPermissions();
+                var locationAdmin = new net.knightsandkings.knk.paper.locations.LocationAdminCommand(
+                    apiClient.getLocationRetentionApi(),
+                    permissionGate::whenAllowed,
+                    permissionGate::has,
+                    () -> teleportService,
+                    org.bukkit.Bukkit::getWorld,
+                    player -> modeService != null && modeService.isVanished(player),
+                    MenuService.mainThreadExecutor(this),
+                    player -> new net.knightsandkings.knk.paper.commands.LocationDebugCommand(this).onCommand(player, null, "knk", new String[0]));
+                knkAdminCommand.registerSubcommand(
+                    net.knightsandkings.knk.paper.locations.LocationAdminCommand.metadata(), locationAdmin, locationAdmin::complete);
+                // No top-level node (each action checks its own), so only list it to holders of one of them.
+                knkAdminCommand.setSubcommandVisibility("location", locationAdmin::visibleTo);
+            }
+            // KNG-80: the weekly orphan check's digest, for online staff with knk.admin.location.orphans.notify
+            // (or the next one to join when none is online).
+            if (playerNotificationPoller != null && knkPermissible != null) {
+                var orphanNotifier = new net.knightsandkings.knk.paper.locations.LocationOrphanNotifier(
+                    knkPermissible::checkAsync, org.bukkit.Bukkit::getOnlinePlayers, MenuService.mainThreadExecutor(this));
+                playerNotificationPoller.setServerNotificationHandler(
+                    net.knightsandkings.knk.core.domain.users.PlayerNotification.TYPE_LOCATION_ORPHAN_DIGEST, orphanNotifier::handle);
+                getServer().getPluginManager().registerEvents(orphanNotifier, this);
+            }
             knkAdminCommand.setCommandPermissions(commandPermissions());
             knkCommand.setExecutor(knkAdminCommand);
             knkCommand.setTabCompleter(knkAdminCommand);
@@ -1872,10 +1978,45 @@ public class KnKPlugin extends JavaPlugin {
     }
 
     /**
+     * Global Game Settings (docs/specs/game-settings/DESIGN.md, KNG-52): announcements, join spawn and
+     * game mode, respawn policy, per-world time/weather/spawn, loaded-world reports. Reads
+     * {@code GET /api/GameSettings} every {@code game-settings.refresh-interval-seconds}; resolves its
+     * references through the /spawn resolver; {@code /knk cache refresh} re-reads everything.
+     */
+    private void initializeGameSettings() {
+        if (apiClient == null) {
+            getLogger().warning("Game settings not applied - the API client failed to initialize");
+            return;
+        }
+        var settingsConfig = net.knightsandkings.knk.paper.settings.GameSettingsConfig.from(getConfig());
+        this.gameSettingsManager = new net.knightsandkings.knk.paper.settings.GameSettingsManager(
+            this,
+            apiClient.getGameSettingsQueryApi(),
+            apiClient.getGameSettingsCommandApi(),
+            () -> spawnDestinationResolver,
+            townsQueryApi,
+            settingsConfig,
+            new net.knightsandkings.knk.paper.settings.GameSettingsStore(getDataFolder().toPath(), settingsConfig.backupHistoryLimit()));
+        gameSettingsManager.start();
+        if (cacheManager != null) {
+            cacheManager.registerRefreshHook("game settings", gameSettingsManager::refreshNow);
+            // /spawn honours a group's spawn override (DESIGN §3.8); the groups come from the cached summary.
+            if (spawnCommand != null) {
+                spawnCommand.setPlayerSpawn(player -> gameSettingsManager.groupSpawnPoint(
+                    cacheManager.getUserCache().getStale(player.getUniqueId())
+                        .map(net.knightsandkings.knk.core.domain.users.UserSummary::permissionGroups)
+                        .orElse(java.util.List.of())));
+            }
+        }
+        getLogger().info("Game settings initialized (refresh every " + settingsConfig.refreshIntervalSeconds()
+            + "s, world report check every " + settingsConfig.runtimeSyncIntervalSeconds() + "s)");
+    }
+
+    /**
      * {@code /spawn} (docs/specs/teleport/DESIGN.md §3.6): the spawn set on the web-app Game Settings
      * page ({@code GET /api/GameSettings}), resolved through the Location/Town/District/Structure
      * gateways and cached 5 min ({@code /knk cache refresh} drops it). Null when the API client or the
-     * caches didn't start. The join/respawn listeners still choose their own spot.
+     * caches didn't start. The join teleport uses the same resolver (GameSettingsManager).
      */
     private net.knightsandkings.knk.paper.commands.SpawnCommand createSpawnCommand(
             net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport support,
@@ -2087,7 +2228,11 @@ public class KnKPlugin extends JavaPlugin {
             getConfig().getBoolean("regions.access.load-guard.enabled", true),
             Math.max(1, getConfig().getInt("regions.access.load-guard.max-refusals-per-second", 20)),
             Math.max(1, getConfig().getInt("regions.access.load-guard.window-seconds", 3)) * 1000L,
-            Math.max(1, getConfig().getInt("regions.access.load-guard.escalation-window-seconds", 60)) * 1000L);
+            Math.max(1, getConfig().getInt("regions.access.load-guard.escalation-window-seconds", 60)) * 1000L,
+            Math.max(0, getConfig().getLong("regions.access.chat-quiet-period-ms",
+                net.knightsandkings.knk.core.regions.access.RefusalGuard.Settings.DEFAULT_CHAT_QUIET_PERIOD_MILLIS)),
+            Math.max(0, getConfig().getLong("regions.access.action-bar-hold-ms",
+                net.knightsandkings.knk.core.regions.access.RefusalGuard.Settings.DEFAULT_ACTION_BAR_HOLD_MILLIS)));
         this.domainAccess = new net.knightsandkings.knk.paper.regions.access.DomainAccessService(
             new net.knightsandkings.knk.paper.regions.access.WorldGuardRegionAccessLookup(),
             new net.knightsandkings.knk.core.regions.access.RefusalGuard(guardSettings),
@@ -2376,6 +2521,42 @@ public class KnKPlugin extends JavaPlugin {
                 }
             }
         }, 20L);
+    }
+
+    /** {@code /<name> ...} runs {@code /knk <name> ...}, tab completion included (KNG-77: /gate, /gatedoor). */
+    private void registerKnkShortcut(String name, KnkAdminCommand knk) {
+        registerTabCommand(name, new org.bukkit.command.TabExecutor() {
+            @Override
+            public boolean onCommand(org.bukkit.command.CommandSender sender, org.bukkit.command.Command command,
+                                     String label, String[] args) {
+                return knk.onCommand(sender, command, "knk", prepend(name, args));
+            }
+
+            @Override
+            public java.util.List<String> onTabComplete(org.bukkit.command.CommandSender sender, org.bukkit.command.Command command,
+                                                        String alias, String[] args) {
+                return knk.onTabComplete(sender, command, "knk", prepend(name, args));
+            }
+
+            private String[] prepend(String first, String[] rest) {
+                String[] all = new String[rest.length + 1];
+                all[0] = first;
+                System.arraycopy(rest, 0, all, 1, rest.length);
+                return all;
+            }
+        });
+    }
+
+    /** config.yml gates.here.* / gates.lookat.* (KNG-78/79). */
+    private net.knightsandkings.knk.paper.gates.GateTargeting.Settings gateTargetingSettings() {
+        var defaults = net.knightsandkings.knk.paper.gates.GateTargeting.Settings.defaults();
+        double radius = getConfig().getDouble("gates.here.radius", defaults.hereRadius());
+        double reach = getConfig().getDouble("gates.lookat.max-distance", defaults.lookAtMaxDistance());
+        return new net.knightsandkings.knk.paper.gates.GateTargeting.Settings(
+            radius > 0 ? radius : defaults.hereRadius(),
+            net.knightsandkings.knk.paper.gates.GateTargeting.Settings.parseNearest(getConfig().getString("gates.here.ambiguity", "prompt")),
+            getConfig().getBoolean("gates.lookat.enabled", defaults.lookAtEnabled()),
+            reach > 0 ? Math.min(reach, 64) : defaults.lookAtMaxDistance());
     }
 
     private void registerTabCommand(String name, org.bukkit.command.TabExecutor executor) {

@@ -29,6 +29,13 @@ public final class CompositeAccessPolicy implements AccessPolicy {
         if (cached != null) {
             return cached;
         }
+        EdgeVerdict result = evaluate(edge);
+        cache.put(edge.id(), result);
+        return result;
+    }
+
+
+    private EdgeVerdict evaluate(RoadEdge edge) {
         EdgeVerdict result = EdgeVerdict.open();
         for (AccessPolicy policy : policies) {
             EdgeVerdict v = policy.check(edge);
@@ -38,7 +45,6 @@ public final class CompositeAccessPolicy implements AccessPolicy {
             }
             result = EdgeVerdict.stricter(result, v);
         }
-        cache.put(edge.id(), result);
         return result;
     }
 

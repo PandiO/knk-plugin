@@ -273,7 +273,7 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
         String regionDataJson = useOpenAnchor ? gate.getOpenedRegionData() : gate.getClosedRegionData();
         if (regionDataJson == null || regionDataJson.isBlank()) {
             fail(taskId, "Gate '" + gate.getName() + "' has no " + (useOpenAnchor ? "opened" : "closed")
-                + " region captured yet - use '/knk gate door capture' first.", onFinished);
+                + " region captured yet - use '/gatedoor capture' first.", onFinished);
             return;
         }
 

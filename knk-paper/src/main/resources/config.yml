@@ -117,6 +117,19 @@ player-notifications:
   # How often the plugin polls the API for them (skipped while no players are online)
   poll-interval-seconds: 2
 
+# Global Game Settings from the web app's Game Settings page (docs/specs/game-settings/DESIGN.md §4, KNG-52):
+# announcements, join spawn and game mode, respawn policy, per-world time lock, weather and spawn point.
+# The settings themselves are edited on the web app; these keys only tune how the plugin follows them.
+game-settings:
+  # How often the settings are read from the API (seconds, min 5). /knk cache refresh reads them at once.
+  refresh-interval-seconds: 30
+  # How often the loaded worlds are checked; they are reported to the API only when they changed
+  # (or every 10 minutes). Seconds, min 5. The report needs the plugin API key (api.auth.type: apikey).
+  runtime-sync-interval-seconds: 30
+  # Earlier versions of the settings kept in plugins/KnightsAndKings/game-settings-backups/ (0 = none).
+  # The latest version is always cached in game-settings-cache.json and used when the API is down at startup.
+  backup-history-limit: 48
+
 # Teleport engine (docs/specs/teleport/DESIGN.md §3.11, knk-workspace). Staff teleports (/tp,
 # /tphere, /knk tp) are instant and skip warmup, cooldown, combat tag and the safe-spot check; the
 # settings below apply to player teleports (/tpa, /tpahere, /spawn, /warp, /back).
@@ -221,10 +234,19 @@ navigation:
   overlay-materials: [SNOW, "*_CARPET", "*_PRESSURE_PLATE", RAIL, POWERED_RAIL, LEAF_LITTER, PINK_PETALS]
   # Every Domain Location within 8 blocks of a road cell seeds the build
   seed-from-domains: true
-  # Hard limit: player and destination must be this close to a road
+  # Hard limit: a destination (and, without walk paths, the player) must be this close to a road; a target
+  # this close to the player is walked to directly
   max-snap-distance: 48
-  # 1 block of height counts as this many when snapping (a bridge vs the road below it)
+  # 1 block of height counts as this many when snapping the player (a bridge vs the road below it)
   snap-vertical-weight: 4
+  # The same for a destination: its last leg is a walk path, which climbs, so plain 3D (1) by default
+  destination-snap-vertical-weight: 1
+  # With walk paths: the player may be this far from a road (plain 3D); the first leg is a walk path to it
+  max-start-distance: 96
+  # With walk paths: a destination may be this far from a road (plain 3D). Within destination-walk-range of the road's
+  # end the last leg is a walk path; further, "No conventional path" and the HUD arrow alone. Beyond: refused
+  max-destination-distance: 256
+  destination-walk-range: 96
   trail-length: 30
   trail-period-ticks: 10
   trail-particle: DUST
@@ -272,7 +294,7 @@ navigation:
     # straight distance + detour-allowance, whichever is longer, never above max-length
     max-expansions: 20000
     max-length-factor: 1.75
-    max-length: 96
+    max-length: 144
     # Blocks a path may always add to the straight distance: a short leg behind a building needs a detour of
     # several times its length (a 27 m leg went round in 68). 0 = the factor alone
     detour-allowance: 48
@@ -305,6 +327,20 @@ currency:
 
 # Gate structure state synchronization
 gates:
+  # Gate command targets (KNG-78/KNG-79). A door's "region" is the box its door blocks span in the
+  # closed position plus its captured closed/opened regions - so an open gate counts too.
+  here:
+    # '/gate toggle here', '/gatedoor repair here': doors whose region is within this many blocks
+    # of you (measured to the region's closest point; standing inside it = 0).
+    radius: 15
+    # Several gates/doors in range: 'prompt' lists them as clickable chat lines (sorted by
+    # distance); 'nearest' just picks the closest.
+    ambiguity: prompt
+  lookat:
+    # Leave the target out of /gate|/gatedoor open, close, toggle, info or repair and the gate door
+    # you are looking at is used (then 'here', then the usage message). One ray trace per command.
+    enabled: true
+    max-distance: 12
   # How often (seconds) the plugin pushes the current open/closed/destroyed state of every
   # gate to the API, as a safety net for state changes that were never persisted (e.g. a crash
   # mid-animation). The state is also pushed once immediately after every open/close animation
@@ -518,6 +554,14 @@ regions:
       retry-delay-seconds: 30
       interval-minutes: 5         # re-sync from the API this often (0 = only at startup / repair / new regions)
     message-interval-ms: 2000     # a player is told "You are not allowed to ..." at most this often
+    # KNG-74: the message is shown in the action bar (shared with the /navigate arrow), and the first one of a refusal
+    # "episode" is also sent to chat so it cannot be missed. An episode starts with a refusal after chat-quiet-period-ms
+    # without any refusal (effectively at least message-interval-ms), or with a different message than the one last
+    # sent to chat (another domain, entry vs exit). 0 = every shown message also goes to chat.
+    chat-quiet-period-ms: 10000
+    # For this long after a refusal message is shown, the /navigate action-bar arrow is not drawn over it (vanilla
+    # shows an action-bar message for about 3 s).
+    action-bar-hold-ms: 3000
     # Only a refusal RATE no honest player reaches (a client pushing a border makes a few per second) leads to an
     # action: first a teleport to the world spawn, then - if it happens again within escalation-window-seconds - a kick.
     load-guard:

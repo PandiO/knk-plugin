@@ -1,17 +1,24 @@
 package net.knightsandkings.knk.paper.navigation;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
+import java.util.function.LongSupplier;
 
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.Particle;
+import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.util.Vector;
 
 import net.knightsandkings.knk.core.roads.route.Route;
+import net.knightsandkings.knk.core.roads.route.TrailCentring;
 import net.knightsandkings.knk.paper.config.NavigationConfig;
 import net.knightsandkings.knk.paper.utils.KnkLocations;
 import net.knightsandkings.knk.paper.utils.ParticleDraw;
@@ -25,6 +32,9 @@ import net.knightsandkings.knk.paper.utils.TickBudget;
  * to the destination - are straight, sparser ({@link #LEG_SPACING}) and in another colour, with
  * their heights snapped to the floor ({@link KnkLocations#floorOf}, R28). Under lag
  * ({@link TickBudget}) the trail is drawn at half length. The point maths is pure for the tests.
+ * With a road surface ({@link TrailCentring}, KNG-76) the route trail keeps to the middle of the road and, on a
+ * slope, to its stairs and slabs. Where a region the player may not enter covers part of the road (KNG-110), it keeps
+ * to the middle of the free part, so the region's border does not push the player back.
  */
 public final class TrailRenderer {
 
@@ -41,13 +51,63 @@ public final class TrailRenderer {
     private final Particle particle;
     private final Object routeData;
     private final Object legData;
+    private final java.util.function.Function<World, TrailCentring.Ground> ground;
+    private final CellRegions cellRegions;
+    private final java.util.function.Function<Player, java.util.function.Predicate<String>> rules;
+    private final LongSupplier clock;
+    private final Map<Cell, Set<String>> regionCache = new HashMap<>();
+    private long regionCacheSince;
+
+    /** KNG-110: the WorldGuard regions at a block, feet level (main thread). */
+    @FunctionalInterface
+    public interface CellRegions {
+        Set<String> at(World world, int x, int feetY, int z);
+    }
+
+    private record Cell(UUID world, int x, int y, int z) {
+    }
+
+    /** Regions per cell are remembered this long (millis): the window is centred again every redraw. */
+    static final long REGION_CACHE_MILLIS = 5_000;
+    static final int REGION_CACHE_MAX = 8_192;
 
     public TrailRenderer(NavigationConfig.TrailConfig config, TickBudget budget) {
+        this(config, budget, null);
+    }
+
+    /**
+     * @param ground the road surface of a world for centring the route trail (KNG-76); null draws the trail on the
+     *               edge geometry as it is
+     */
+    public TrailRenderer(NavigationConfig.TrailConfig config, TickBudget budget,
+                         java.util.function.Function<World, TrailCentring.Ground> ground) {
+        this(config, budget, ground, null, null, System::currentTimeMillis);
+    }
+
+    /**
+     * @param cellRegions the regions at a road cell (KNG-110); null: the trail does not look at regions
+     * @param rules       the regions a player may stand in on a road ({@code NavigationService.trailRule}); the trail
+     *                    keeps to the road cells outside the others, through the free part of the road
+     * @param clock       millis, for the region cache
+     */
+    public TrailRenderer(NavigationConfig.TrailConfig config, TickBudget budget,
+                         java.util.function.Function<World, TrailCentring.Ground> ground, CellRegions cellRegions,
+                         java.util.function.Function<Player, java.util.function.Predicate<String>> rules, LongSupplier clock) {
+        this.ground = ground;
+        this.cellRegions = cellRegions;
+        this.rules = rules;
+        this.clock = Objects.requireNonNull(clock, "clock");
         this.config = Objects.requireNonNull(config, "config");
         this.budget = Objects.requireNonNull(budget, "budget");
         this.particle = particleOf(config.particle());
         this.routeData = particle == Particle.DUST ? new Particle.DustOptions(Color.fromRGB(config.rgb()), 1.0f) : null;
         this.legData = particle == Particle.DUST ? new Particle.DustOptions(Color.fromRGB(LEG_COLOR), 0.8f) : null;
+    }
+
+    /** The road surface of a world for {@link #TrailRenderer(NavigationConfig.TrailConfig, TickBudget, java.util.function.Function)}. */
+    public static java.util.function.Function<World, TrailCentring.Ground> roadSurface(
+            java.util.function.Supplier<java.util.Set<String>> roadMaterials) {
+        return world -> new RoadSurfaceGround(world, roadMaterials.get());
     }
 
     public int periodTicks() {
@@ -60,15 +120,25 @@ public final class TrailRenderer {
      * point (floor coordinates; null when the route ends at it). Main thread.
      */
     public void drawRoute(Player viewer, Route route, double along, double[] target) {
+        drawRoute(viewer, route, along, target, true);
+    }
+
+    /**
+     * As {@link #drawRoute(Player, Route, double, double[])}; without {@code fromPlayer} no straight leg from the
+     * player to the trail - the walk leg to the road is drawn instead, or nothing when it has no way (KNG-75).
+     */
+    public void drawRoute(Player viewer, Route route, double along, double[] target, boolean fromPlayer) {
         double length = budget.isLagging() ? Math.max(4, config.length() / 2.0) : config.length();
-        List<double[]> trail = trailPoints(route, along, length, SPACING);
+        List<double[]> trail = ground != null && viewer.getWorld() != null
+            ? centredWindow(route, along, length, SPACING, surfaceFor(viewer))
+            : trailPoints(route, along, length, SPACING);
         if (trail.isEmpty()) {
             return;
         }
         Location feet = viewer.getLocation();
         double[] first = trail.get(0);
         double[] player = {feet.getX(), feet.getY() - 1, feet.getZ()};
-        if (distance(player, first) > LEG_MIN) {
+        if (fromPlayer && distance(player, first) > LEG_MIN) {
             drawLeg(viewer, player, first);
         }
         ParticleDraw.polyline(viewer, lifted(trail), SPACING, particle, routeData);
@@ -103,6 +173,51 @@ public final class TrailRenderer {
         ParticleDraw.polyline(viewer, lifted(window), LEG_SPACING, particle, legData);
     }
 
+    /**
+     * The viewer's road surface: the world's, with the road cells in a region the viewer may not enter blocked
+     * (KNG-110), so the centred trail keeps to the free part of a road a region covers in part.
+     */
+    TrailCentring.Ground surfaceFor(Player viewer) {
+        World world = viewer.getWorld();
+        TrailCentring.Ground surface = ground.apply(world);
+        java.util.function.Predicate<String> mayEnter = rules == null ? null : rules.apply(viewer);
+        if (cellRegions == null || mayEnter == null) {
+            return surface;
+        }
+        return new TrailCentring.Ground() {
+            @Override
+            public java.util.OptionalInt roadFloor(int x, int z, int nearY) {
+                return surface.roadFloor(x, z, nearY);
+            }
+
+            @Override
+            public boolean stairOrSlab(int x, int y, int z) {
+                return surface.stairOrSlab(x, y, z);
+            }
+
+            @Override
+            public boolean blocked(int x, int y, int z) {
+                for (String regionId : regionsAt(world, x, y + 1, z)) {
+                    if (!mayEnter.test(regionId)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        };
+    }
+
+    /** The regions at a cell, remembered a few seconds (the window is centred again on every redraw). */
+    private Set<String> regionsAt(World world, int x, int feetY, int z) {
+        long now = clock.getAsLong();
+        if (now - regionCacheSince > REGION_CACHE_MILLIS || regionCache.size() > REGION_CACHE_MAX) {
+            regionCache.clear();
+            regionCacheSince = now;
+        }
+        return regionCache.computeIfAbsent(new Cell(world.getUID(), x, feetY, z),
+            c -> Set.copyOf(cellRegions.at(world, x, feetY, z)));
+    }
+
     private void drawLeg(Player viewer, double[] from, double[] to) {
         List<double[]> points = legPoints(from, to, LEG_SPACING);
         List<Vector> lifted = new ArrayList<>(points.size());
@@ -132,6 +247,42 @@ public final class TrailRenderer {
             out.add(centre(route.pointAt(a)));
         }
         out.add(centre(route.pointAt(stop)));
+        return out;
+    }
+
+    /**
+     * KNG-76: the trail window on fixed spots of the route - every {@code spacing} blocks from its start, so a redraw
+     * puts each particle where it was - centred ({@link TrailCentring}) with {@link TrailCentring#SMOOTHING} spots of
+     * margin either side, so a spot's shift does not change as the window slides with the player (live test
+     * 2026-10-09: sliding samples made the centred trail twitch in front of the player). Starts at the first spot at or
+     * ahead of {@code along}; ends with the route's end when the window reaches it. Empty when the route is empty.
+     */
+    public static List<double[]> centredWindow(Route route, double along, double length, double spacing,
+                                               TrailCentring.Ground ground) {
+        if (route == null || route.isEmpty() || spacing <= 0) {
+            return new ArrayList<>();
+        }
+        double total = route.polylineLength();
+        double start = Math.max(0, Math.min(along, total));
+        double stop = Math.min(total, start + length);
+        int lastSpot = (int) Math.floor(total / spacing + 1e-9);
+        int first = Math.min(lastSpot, (int) Math.ceil(start / spacing - 1e-9));
+        int last = Math.max(first, Math.min(lastSpot, (int) Math.floor(stop / spacing + 1e-9)));
+        int from = Math.max(0, first - TrailCentring.SMOOTHING);
+        int to = Math.min(lastSpot, last + TrailCentring.SMOOTHING);
+        List<double[]> spots = new ArrayList<>();
+        for (int k = from; k <= to; k++) {
+            spots.add(centre(route.pointAt(k * spacing)));
+        }
+        boolean endSpot = to == lastSpot && total - lastSpot * spacing > 1e-6;
+        if (endSpot) {
+            spots.add(centre(route.pointAt(total))); // the route's end takes part in the smoothing too
+        }
+        List<double[]> centred = TrailCentring.centre(spots, ground);
+        List<double[]> out = new ArrayList<>(centred.subList(first - from, last - from + 1));
+        if (endSpot && stop >= total - 1e-9) {
+            out.add(centred.get(centred.size() - 1));
+        }
         return out;
     }
 

@@ -220,6 +220,24 @@ public final class NavigationMessages {
         return warn("No conventional path to " + name + " found.");
     }
 
+    /** KNG-75: the walk search found no way from the player to the road the route starts on. */
+    public static Component noConventionalPathToRoad() {
+        return warn("No conventional path to the road found.");
+    }
+
+    /**
+     * KNG-75 (live test S3, developer): the walk search to the road ran out of budget - a long way round, such as
+     * a spiral stair - rather than finding no way; the partial path, if any, is shown.
+     */
+    public static Component troubleFindingRoad() {
+        return warn("Having trouble determining the route - guiding you to the nearest road.");
+    }
+
+    /** Direct mode found no walkable way straight there, but the roads lead there (N13). */
+    public static Component roadsInstead(String name) {
+        return info("No walkable way straight to " + name + " - following the roads instead.");
+    }
+
     /** A partial route's blocking element opened: the full route is taken. */
     public static Component reopened(String name) {
         return good("The way to " + name + " is open again - following it now.");
@@ -273,9 +291,14 @@ public final class NavigationMessages {
     }
 
     public static Component whyVerdict(int edgeId, EdgeVerdict verdict) {
+        return whyVerdict("#" + edgeId, verdict);
+    }
+
+    /** @param edge the stored edge as admins know it: "#10139", or "#10139 blocks 31-34" for a piece of the routing view */
+    public static Component whyVerdict(String edge, EdgeVerdict verdict) {
         NamedTextColor colour = verdict.isBlocked() ? RoadMessages.BAD : verdict.isPassThrough() ? RoadMessages.WARN : RoadMessages.GOOD;
         String kind = verdict.kind().name().toLowerCase(Locale.ROOT).replace('_', '-');
-        Component line = Component.text("  edge #" + edgeId + " ", RoadMessages.INFO)
+        Component line = Component.text("  edge " + edge + " ", RoadMessages.INFO)
             .append(Component.text(kind, colour));
         if (verdict.message() != null && !verdict.message().isBlank()) {
             line = line.append(Component.text(" - " + verdict.message(), RoadMessages.INFO));

@@ -1,7 +1,7 @@
 # Road build offline replay (KNG-27)
 
 **Status:** Committed tooling (plan §5.7 decision D7). First used for finding L, 2026-10-04.
-**Last updated:** 2026-10-07
+**Last updated:** 2026-10-09
 
 Runs the real `TileBuilder` on **copies** of the dev world's region files, with the build inputs exported read-only
 from the dev DB. Use it to reproduce a live build exactly, then change one input at a time: tombstones on or off, a
@@ -75,6 +75,14 @@ on the same copied region files. Use it when `/knk road status` counts a request
    `arrive-distance`.
 3. Run as above with `--tests "*WalkReplayTest*"` and read `replay/out_walk.txt`: the result with the configured budget,
    the same search without length cap (the real path, if any), and the map with the path drawn.
+
+**Many legs at once (KNG-75 step 2a):** write `replay/legs.txt` - one leg per line
+`name;startX,feetY,startZ;targetX,floorY,targetZ`, plus `budgets=factor/detour/max-length/expansions,…` (one column per
+budget; default the shipped `1.75/48/96/20000`) and optionally `margin`, `arrive-distance` - and run with
+`--tests "*WalkReplayTest.legs"`. `replay/out_legs.txt` has per leg the capture box's chunk count, the offline extraction
+time (the Anvil reader, not the live `ChunkSnapshot`), and per budget the result with the path length, the expansions
+and the search time (median of 5). A budget like `100/0/10000/400000` is "no length cap": it tells a leg the cap cuts
+off from one that is unreachable inside the box.
 
 The server's login line (`logged in with entity id … at (…)`) gives a start position. Gate doors and WorldGuard access
 are not replayed (open access), and passability uses the curated collidable list, not Bukkit's.

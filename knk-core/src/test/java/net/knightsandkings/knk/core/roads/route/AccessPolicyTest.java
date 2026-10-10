@@ -216,6 +216,113 @@ class AccessPolicyTest {
     }
 
     @Test
+    void aDomainWhoseRuleIsLiftedOffTheRoadsBlocksNeitherEntryNorExit() {
+        // rev. 7 Part C (KNG-92): a house or shop along a public street; the rule still holds at its border
+        DomainAvailability.RoadRule notOnRoads = d -> d.id() == null || d.id() != CASTLE_DOMAIN;
+        DomainAvailability entry = new DomainAvailability(new DomainAccessEvaluator(),
+            lookup(domain(CASTLE_DOMAIN, "Kardenna Castle", CASTLE_REGION, false, null)), notOnRoads, Set.of(), false);
+        assertTrue(entry.check(castleEdge).isOpen());
+
+        DomainAvailability exit = new DomainAvailability(new DomainAccessEvaluator(),
+            lookup(domain(CASTLE_DOMAIN, "Kardenna Castle", CASTLE_REGION, null, false)), notOnRoads,
+            Set.of(CASTLE_REGION), false);
+        assertTrue(exit.exitDeniedRegions().isEmpty());
+        assertTrue(exit.check(plainEdge).isOpen());
+
+        DomainAvailability applies = new DomainAvailability(new DomainAccessEvaluator(),
+            lookup(domain(CASTLE_DOMAIN, "Kardenna Castle", CASTLE_REGION, false, null)),
+            DomainAvailability.RoadRule.ALWAYS, Set.of(), false);
+        assertTrue(applies.check(castleEdge).isBlocked(), "a rule that applies still blocks");
+    }
+
+    // KNG-110 (P4): a region over part of the road's width; lanes = the region sets of the road cells across it
+
+    private RoadEdge laned(List<String> centre, List<List<String>> lanes) {
+        RoadEdge e = castleEdge;
+        return new RoadEdge(e.id(), e.fromNodeId(), e.toNodeId(), e.geometry(), e.length(), e.avgWidth(), e.profileId(),
+            e.streetId(), e.costMultiplier(), e.flags(), e.gateDoorIds(), e.domainIds(), centre, e.source(), e.stale(),
+            e.confirmed(), lanes);
+    }
+
+    @Test
+    void aDeniedRegionOverPartOfTheWidthIsPassedThroughTheFreeLane() {
+        DomainAvailability policy = new DomainAvailability(new DomainAccessEvaluator(),
+            lookup(domain(CASTLE_DOMAIN, "Kardenna Castle", CASTLE_REGION, false, null)), Set.of(), false);
+
+        // two of three rows, the centre included: the third row is free
+        assertTrue(policy.check(laned(List.of("town", CASTLE_REGION), List.of(List.of("town")))).isOpen());
+        // the centre only, a one-block gap on one side
+        assertTrue(policy.check(laned(List.of(CASTLE_REGION), List.of(List.of()))).isOpen());
+        // every lane goes through the castle: the whole width
+        EdgeVerdict v = policy.check(laned(List.of("town", CASTLE_REGION),
+            List.of(List.of(CASTLE_REGION, "town"), List.of(CASTLE_REGION, "market"))));
+        assertTrue(v.isBlocked());
+        assertEquals("you may not enter Kardenna Castle", v.message());
+        // no lanes: the centre line decides, as before
+        assertTrue(policy.check(laned(List.of("town", CASTLE_REGION), List.of())).isBlocked());
+    }
+
+    @Test
+    void theFreeLaneMustBeFreeOfEveryDeniedRegion() {
+        DomainAvailability policy = new DomainAvailability(new DomainAccessEvaluator(),
+            lookup(domain(CASTLE_DOMAIN, "Kardenna Castle", CASTLE_REGION, false, null),
+                domain(43, "Old Mill", "old_mill", false, null)), Set.of(), false);
+
+        // the castle on two rows, the mill on the third
+        EdgeVerdict v = policy.check(laned(List.of(CASTLE_REGION), List.of(List.of(CASTLE_REGION), List.of("old_mill"))));
+        assertTrue(v.isBlocked());
+        assertEquals("you may not enter Kardenna Castle", v.message(), "the first lane's reason");
+        // inside the mill already: its row is open
+        DomainAvailability inMill = new DomainAvailability(new DomainAccessEvaluator(),
+            lookup(domain(CASTLE_DOMAIN, "Kardenna Castle", CASTLE_REGION, false, null),
+                domain(43, "Old Mill", "old_mill", false, null)), Set.of("old_mill"), false);
+        assertTrue(inMill.check(laned(List.of(CASTLE_REGION), List.of(List.of(CASTLE_REGION), List.of("old_mill")))).isOpen());
+    }
+
+    @Test
+    void exitStaysOnTheCentreLineWhenTheRegionCoversPartOfTheWidth() {
+        // decided 2026-10-10: a stretch whose middle is in the region still counts as inside it
+        DomainAvailability jailed = new DomainAvailability(new DomainAccessEvaluator(),
+            lookup(domain(CASTLE_DOMAIN, "Kardenna Castle", CASTLE_REGION, null, false)), Set.of(CASTLE_REGION), false);
+
+        assertTrue(jailed.check(laned(List.of(CASTLE_REGION), List.of(List.of()))).isOpen(), "the middle is inside");
+        assertTrue(jailed.check(laned(List.of(), List.of(List.of(CASTLE_REGION), List.of()))).isBlocked(),
+            "only the side is inside: leaving");
+    }
+
+    // KNG-110 (decided 2026-10-10): a region the player may enter but not leave, with the destination beyond it
+
+    private static DomainAvailability trap(Set<String> current, Set<String> destination, boolean bypass) {
+        return new DomainAvailability(new DomainAccessEvaluator(),
+            lookup(domain(CASTLE_DOMAIN, "Kardenna Castle", CASTLE_REGION, null, false)), DomainAvailability.RoadRule.ALWAYS,
+            current, destination, bypass);
+    }
+
+    @Test
+    void aRegionThePlayerCouldNotLeaveAgainBlocksTheWayToADestinationOutsideIt() {
+        EdgeVerdict v = trap(Set.of(), Set.of("town"), false).check(castleEdge);
+        assertTrue(v.isBlocked());
+        assertEquals("you could not leave Kardenna Castle again", v.message());
+        assertEquals(EdgeVerdict.CauseType.DOMAIN, v.cause().type());
+        assertFalse(trap(Set.of(), Set.of("town"), false).mayEnter(CASTLE_REGION), "the trail keeps off it too");
+        assertTrue(trap(Set.of(), Set.of("town"), false).check(plainEdge).isOpen());
+    }
+
+    @Test
+    void itIsOpenWhenTheDestinationIsInsideItOrUnknownOrThePlayerIsInsideOrBypasses() {
+        assertTrue(trap(Set.of(), Set.of(CASTLE_REGION), false).check(castleEdge).isOpen(), "the destination is inside");
+        assertTrue(trap(Set.of(), Set.of(CASTLE_REGION), false).mayEnter(CASTLE_REGION));
+        assertTrue(trap(Set.of(), null, false).check(castleEdge).isOpen(), "no destination known: as before");
+        assertTrue(trap(Set.of(CASTLE_REGION), Set.of(), false).check(castleEdge).isOpen(), "inside: the exit rule applies");
+        assertTrue(trap(Set.of(), Set.of(), true).check(castleEdge).isOpen(), "bypass");
+    }
+
+    @Test
+    void aFreeLaneBesideItIsTheWayPast() {
+        assertTrue(trap(Set.of(), Set.of(), false).check(laned(List.of(CASTLE_REGION), List.of(List.of()))).isOpen());
+    }
+
+    @Test
     void domainLookupsAreCachedPerRegion() {
         AtomicInteger lookups = new AtomicInteger();
         DomainAvailability policy = new DomainAvailability(new DomainAccessEvaluator(), region -> {

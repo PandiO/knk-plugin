@@ -9,6 +9,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Set;
 
@@ -30,6 +31,11 @@ import java.util.Set;
 public final class AStarRouter {
 
     private static final int START_STATE = -1;
+    /**
+     * A start this close (blocks) to an end of a blocked start edge is at that node, and leaves from it (rev. 7
+     * Part A: the snapper may put a player on the split node before a door onto the door's piece).
+     */
+    static final double AT_NODE = 0.5;
 
     private final RoadNetworkSnapshot snapshot;
 
@@ -59,6 +65,19 @@ public final class AStarRouter {
      * {@link RouteResult.Status#BLOCKED} with the partial route, or NO_ROUTE when even an
      * all-open search fails.
      */
+    /**
+     * With the request's real policy: the route to the reached point nearest to a goal, when no goal can
+     * be reached (the explainer's "as close as the open roads go", N14); a goal's route if one is reachable
+     * after all; empty when nothing gets closer than the start.
+     */
+    public Optional<Route> routeTowards(RouteRequest request) {
+        Search search = new Search(request);
+        if (search.reachableGoals.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(search.runTowardsClosest());
+    }
+
     public RouteResult routeOrExplain(RouteRequest request) {
         RouteResult result = route(request);
         if (result.status() != RouteResult.Status.NO_ROUTE) {
@@ -200,22 +219,24 @@ public final class AStarRouter {
 
         void expandStart() {
             RoadEdge edge = snapshot.edgeAt(startEdgeIndex);
-            boolean usable = verdict(startEdgeIndex).isUsable();
-            RouteRequest.StartSides sides = request.startSides();
-            if (!usable && sides == null) {
-                return; // Phase 2d decision: a blocked start edge cannot be left
-            }
-            boolean forwardOpen = usable || sides.towardTo();
-            boolean backwardOpen = usable || sides.towardFrom();
             EdgePolyline p = snapshot.polylineAt(startEdgeIndex);
+            if (!verdict(startEdgeIndex).isUsable()) {
+                // Phase 2d decision: a blocked start edge cannot be left. On the routing view (rev. 7 Part A) that is
+                // only the stretch of the block itself - a gate door's piece, the inside of a denied region. A start
+                // at one of its ends is at the node (a junction, or the split node before a door): leave from there.
+                if (start.along() <= AT_NODE) {
+                    relax(START_STATE, edge.fromNodeId(), 0, startEdgeIndex, false);
+                } else if (start.along() >= p.length() - AT_NODE) {
+                    relax(START_STATE, edge.toNodeId(), 0, startEdgeIndex, true);
+                }
+                return;
+            }
             double perBlock = p.length() <= 0 ? 0 : edgeCost(startEdgeIndex) / p.length();
             double along = start.along();
             // forward: towards the To node
-            if (forwardOpen) {
-                relaxGoalsOnEdge(START_STATE, startEdgeIndex, along, true, perBlock);
-                relax(START_STATE, edge.toNodeId(), (p.length() - along) * perBlock, startEdgeIndex, true);
-            }
-            if (!edge.isOneway() && backwardOpen) {
+            relaxGoalsOnEdge(START_STATE, startEdgeIndex, along, true, perBlock);
+            relax(START_STATE, edge.toNodeId(), (p.length() - along) * perBlock, startEdgeIndex, true);
+            if (!edge.isOneway()) {
                 relaxGoalsOnEdge(START_STATE, startEdgeIndex, along, false, perBlock);
                 relax(START_STATE, edge.fromNodeId(), along * perBlock, startEdgeIndex, false);
             }
@@ -238,6 +259,49 @@ public final class AStarRouter {
             }
         }
 
+        /**
+         * No goal reachable: the route to the reached point (the start or a node) nearest to a goal - as
+         * close as the open roads go (N14). Null when the start itself is nearest.
+         */
+        Route runTowardsClosest() {
+            g.put(START_STATE, 0.0);
+            closed.add(START_STATE);
+            expandStart();
+            int best = START_STATE;
+            double bestDistance = distanceToGoals(START_STATE);
+            while (!open.isEmpty()) {
+                Entry e = open.poll();
+                if (closed.contains(e.state)) {
+                    continue;
+                }
+                closed.add(e.state);
+                if (isGoal(e.state)) {
+                    return reconstruct(e.state, e.g);
+                }
+                double d = distanceToGoals(e.state);
+                if (d < bestDistance - 1e-9) {
+                    best = e.state;
+                    bestDistance = d;
+                }
+                expandNode(e.state);
+            }
+            if (best == START_STATE) {
+                return null;
+            }
+            return reconstructTo(best, SnapPoint.atNode(snapshot, best));
+        }
+
+        double distanceToGoals(int state) {
+            double[] p = position(state);
+            double best = Double.POSITIVE_INFINITY;
+            for (int k : reachableGoals) {
+                double[] q = goals.get(k).point();
+                double dx = q[0] - p[0], dy = q[1] - p[1], dz = q[2] - p[2];
+                best = Math.min(best, Math.sqrt(dx * dx + dy * dy + dz * dz));
+            }
+            return best;
+        }
+
         Route run() {
             g.put(START_STATE, 0.0);
             closed.add(START_STATE);
@@ -257,28 +321,30 @@ public final class AStarRouter {
         }
 
         Route reconstruct(int goalState, double cost) {
-            SnapPoint goal = goals.get(goalIndex(goalState));
+            Route route = reconstructTo(goalState, goals.get(goalIndex(goalState)));
+            assert Math.abs(route.cost() - cost) < 1e-6 : "route cost " + route.cost() + " != search cost " + cost;
+            return route;
+        }
+
+        /** The route to a reached state: a goal (ends at its snap point) or a node (ends at the node). */
+        Route reconstructTo(int endState, SnapPoint goal) {
             List<Route.Step> steps = new ArrayList<>();
-            int state = goalState;
+            int state = endState;
             while (state != START_STATE) {
                 Arrival a = arrivals.get(state);
                 RoadEdge edge = snapshot.edgeAt(a.edgeIndex);
                 EdgePolyline p = snapshot.polylineAt(a.edgeIndex);
                 double entry = a.fromState == START_STATE ? start.along() : (a.forward ? 0 : p.length());
                 double exit = isGoal(state) ? goal.along() : (a.forward ? p.length() : 0);
-                if (Math.abs(exit - entry) > 1e-9) {
-                    EdgeVerdict v = verdict(a.edgeIndex);
-                    if (a.fromState == START_STATE && !v.isUsable()) {
-                        v = EdgeVerdict.open(); // the open part of a blocked start edge (start sides)
-                    }
+                EdgeVerdict v = verdict(a.edgeIndex);
+                boolean leftAtTheNode = a.fromState == START_STATE && !v.isUsable(); // the player is at its node
+                if (Math.abs(exit - entry) > 1e-9 && !leftAtTheNode) {
                     steps.add(Route.Step.of(edge, a.forward, entry, exit, v));
                 }
                 state = a.fromState;
             }
             Collections.reverse(steps);
-            Route route = Route.build(snapshot, start, goal, steps, request.classCost());
-            assert Math.abs(route.cost() - cost) < 1e-6 : "route cost " + route.cost() + " != search cost " + cost;
-            return route;
+            return Route.build(snapshot, start, goal, steps, request.classCost());
         }
     }
 }

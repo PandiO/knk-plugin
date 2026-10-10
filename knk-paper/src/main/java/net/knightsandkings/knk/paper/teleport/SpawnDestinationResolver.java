@@ -17,6 +17,7 @@ import net.knightsandkings.knk.core.dataaccess.LocationsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.StructuresDataAccess;
 import net.knightsandkings.knk.core.dataaccess.TownsDataAccess;
 import net.knightsandkings.knk.core.domain.location.KnkLocation;
+import net.knightsandkings.knk.core.domain.settings.KnkSpawnReference;
 import net.knightsandkings.knk.core.navigation.DomainLocationResolver;
 import net.knightsandkings.knk.core.ports.api.GameSettingsQueryApi;
 import net.knightsandkings.knk.core.teleport.SpawnPoint;
@@ -29,7 +30,8 @@ import net.knightsandkings.knk.core.teleport.SpawnPointResolver;
  * else the main world's spawn. Resolution, caching (5 min, dropped by {@code /knk cache refresh}) and
  * the fallbacks live in {@link SpawnPointResolver}; this class adds the gateways and the world lookup.
  * <p>
- * Only {@code /spawn} uses it; the join and respawn listeners still pick their own spot.
+ * {@code /spawn} and the join teleport use it ({@code GameSettingsManager}, KNG-52), which also resolves the
+ * per-world spawn and respawn references through {@link #resolveReference}.
  */
 public class SpawnDestinationResolver {
 
@@ -77,6 +79,14 @@ public class SpawnDestinationResolver {
     /** The current spawn; any thread, never completes exceptionally. */
     public CompletableFuture<SpawnPoint> resolve() {
         return points.resolve();
+    }
+
+    /**
+     * Another Game Settings reference (a world spawn, a respawn spot), looked up now through the same
+     * gateways and fallbacks; not cached. Any thread, never completes exceptionally.
+     */
+    public CompletableFuture<SpawnPoint> resolveReference(KnkSpawnReference reference) {
+        return points.resolveReference(reference);
     }
 
     /** Forget the cached spawn ({@code /knk cache refresh}, or after changing it on the Game Settings page). */

@@ -43,9 +43,9 @@ class NavigationDestinationsTest {
     void setUp() {
         when(domains.searchAsync(any())).thenAnswer(inv -> {
             PagedQuery q = inv.getArgument(0);
-            List<KnkDomainSummary> all = List.of(new KnkDomainSummary(1, "Kardenna", "Town"), new KnkDomainSummary(2, "Market", "Town"),
-                new KnkDomainSummary(3, "Market", "District"), new KnkDomainSummary(9, "Mill House", "Structure"),
-                new KnkDomainSummary(11, "Keep Gate", "GateStructure"), new KnkDomainSummary(50, "Wild", "Kingdom"));
+            List<KnkDomainSummary> all = List.of(new KnkDomainSummary(1, "Kardenna", "Town", "Spawn"), new KnkDomainSummary(2, "Market", "Town"),
+                new KnkDomainSummary(3, "Market", "District", null, "Applies", "district_3"), new KnkDomainSummary(9, "Mill House", "Structure", null, "Ignored", "Mill_House"),
+                new KnkDomainSummary(11, "Keep Gate", "GateStructure", "Region"), new KnkDomainSummary(50, "Wild", "Kingdom", null, "ignored"));
             return CompletableFuture.completedFuture(q.pageNumber() == 1 ? new Page<>(all, all.size(), 1, q.pageSize()) : new Page<>(List.of(), all.size(), q.pageNumber(), q.pageSize()));
         });
         when(locations.searchAsync(any())).thenAnswer(inv -> {
@@ -77,6 +77,50 @@ class NavigationDestinationsTest {
         assertTrue(all.stream().anyMatch(t -> t.type() == NavTarget.Type.NODE && t.name().equals("Cinix Keep")));
         assertFalse(all.stream().anyMatch(t -> t.name().equals("Wild")), "unknown domain types are skipped");
         assertEquals(5, destinations.remote().stream().filter(t -> t.type().isDomain()).count());
+    }
+
+    @Test
+    void theCatalogueKnowsWhichDomainsRulesAreLiftedOffTheRoads() {
+        // rev. 7 Part C (KNG-92): "Ignored" on the search, whatever the type; "Applies" or nothing keeps the rule
+        assertTrue(destinations.roadAccessIgnored(9));
+        assertTrue(destinations.roadAccessIgnored(50), "not a /navigate target, still a domain along a road");
+        assertFalse(destinations.roadAccessIgnored(3));
+        assertFalse(destinations.roadAccessIgnored(1));
+        assertFalse(destinations.roadAccessIgnored(999));
+
+        NavigationDestinations notLoaded = new NavigationDestinations(domains, locations,
+            new DomainLocationResolver(id -> CompletableFuture.completedFuture(Optional.empty()),
+                id -> CompletableFuture.completedFuture(Optional.empty()),
+                id -> CompletableFuture.completedFuture(Optional.empty()),
+                id -> CompletableFuture.completedFuture(Optional.empty())),
+            w -> network.snapshot, clock::get);
+        assertFalse(notLoaded.roadAccessIgnored(9), "before the first load every rule applies");
+    }
+
+    @Test
+    void theRegionsOfIgnoredDomainsAreKnownByIdAndAChangeIsAnnounced() {
+        // rev. 7 Part C + Part A: the routing view does not cut roads at these regions
+        assertTrue(destinations.roadsIgnoreRegion("mill_house"), "region ids compare without case");
+        assertTrue(destinations.roadsIgnoreRegion("MILL_HOUSE"));
+        assertFalse(destinations.roadsIgnoreRegion("district_3"), "Applies");
+        assertFalse(destinations.roadsIgnoreRegion("unknown_region"));
+        assertFalse(destinations.roadsIgnoreRegion(null));
+
+        java.util.concurrent.atomic.AtomicInteger announced = new java.util.concurrent.atomic.AtomicInteger();
+        destinations.onRoadAccessChanged(announced::incrementAndGet);
+        destinations.refresh().join();
+        assertEquals(0, announced.get(), "the same set: nothing to recut");
+
+        org.mockito.Mockito.doAnswer(inv -> {
+            PagedQuery q = inv.getArgument(0);
+            List<KnkDomainSummary> all = List.of(new KnkDomainSummary(3, "Market", "District", null, "Ignored", "district_3"));
+            return CompletableFuture.completedFuture(q.pageNumber() == 1 ? new Page<>(all, 1, 1, q.pageSize())
+                : new Page<>(List.of(), 1, q.pageNumber(), q.pageSize()));
+        }).when(domains).searchAsync(any());
+        destinations.refresh().join();
+        assertEquals(1, announced.get());
+        assertTrue(destinations.roadsIgnoreRegion("district_3"));
+        assertFalse(destinations.roadsIgnoreRegion("mill_house"));
     }
 
     @Test
@@ -164,7 +208,62 @@ class NavigationDestinationsTest {
     @Test
     void locateDomainWithoutAnythingFails() {
         DomainPlace bare = new DomainPlace(7, "Ruin", "Structure", null, Optional.empty());
-        assertEquals(Located.Failure.NO_LOCATION, NavigationDestinations.locateDomain(bare, Mode.DEFAULT, "world").failure());
+        assertEquals(Located.Failure.NO_LOCATION, NavigationDestinations.locateDomain(bare, Mode.DEFAULT, Mode.SPAWN, "world").failure());
+        assertEquals(Located.Failure.NO_LOCATION, NavigationDestinations.locateDomain(bare, Mode.DEFAULT, Mode.REGION, "world").failure());
+    }
+
+    @Test
+    void theCatalogueCarriesEachDomainsDefaultMode() {
+        assertEquals(Mode.SPAWN, destinations.resolve("Kardenna", "world").target().defaultMode());
+        assertEquals(Mode.REGION, destinations.resolve("Keep Gate", "world").target().defaultMode());
+        assertEquals(Mode.SPAWN, destinations.resolve("town:Market", "world").target().defaultMode(),
+            "an API without the field: the spawn Location, as before KNG-73");
+        assertEquals(Mode.SPAWN, destinations.resolve("Main Street", "world").target().defaultMode());
+        assertEquals(Mode.REGION, NavTarget.domain(NavTarget.Type.TOWN, 1, "Kardenna", "Town", "region").defaultMode());
+        assertEquals(Mode.SPAWN, NavTarget.domain(NavTarget.Type.TOWN, 1, "Kardenna", "Town", "Nearest").defaultMode());
+    }
+
+    @Test
+    void aRegionDefaultGoesToTheRegionAndSpawnStillForcesTheSpawnLocation() {
+        DomainPlace kardenna = new DomainPlace(1, "Kardenna", "Town", "kardenna", Optional.of(
+            new KnkLocation(5, "Kardenna Spawn", 50.0, 65.0, 5.0, 0f, 0f, "world")));
+
+        Located byDefault = NavigationDestinations.locateDomain(kardenna, Mode.DEFAULT, Mode.REGION, "world");
+        assertEquals(Destination.Kind.REGION, byDefault.destination().kind(), "standing in a region goal is already there (N9)");
+        assertEquals("kardenna", byDefault.destination().regionId());
+
+        Located spawn = NavigationDestinations.locateDomain(kardenna, Mode.SPAWN, Mode.REGION, "world");
+        assertEquals(Destination.Kind.POINT, spawn.destination().kind());
+        assertEquals(null, spawn.destination().regionId(), "spawn: to the spawn point even from inside");
+
+        Located spawnDefault = NavigationDestinations.locateDomain(kardenna, Mode.DEFAULT, Mode.SPAWN, "world");
+        assertEquals(Destination.Kind.POINT, spawnDefault.destination().kind());
+        assertEquals("kardenna", spawnDefault.destination().regionId(), "a spawn default keeps the already-there check");
+
+        Located region = NavigationDestinations.locateDomain(kardenna, Mode.REGION, Mode.SPAWN, "world");
+        assertEquals(Destination.Kind.REGION, region.destination().kind());
+    }
+
+    @Test
+    void aRegionDefaultWithoutARegionFallsBackToTheSpawnLocation() {
+        DomainPlace noRegion = new DomainPlace(4, "Well", "Structure", " ", Optional.of(
+            new KnkLocation(6, "Well", 10.0, 64.0, 10.0, 0f, 0f, "world")));
+
+        Located located = NavigationDestinations.locateDomain(noRegion, Mode.DEFAULT, Mode.REGION, "world");
+        assertEquals(Destination.Kind.POINT, located.destination().kind());
+        assertEquals(10.0, located.destination().point()[0], 1e-9);
+        assertEquals(Located.Failure.OTHER_WORLD,
+            NavigationDestinations.locateDomain(noRegion, Mode.DEFAULT, Mode.REGION, "world_nether").failure());
+    }
+
+    @Test
+    void locatingATargetUsesItsDefaultMode() {
+        NavTarget kardenna = destinations.resolve("Kardenna", "world").target();
+        NavTarget byRegion = NavTarget.domain(kardenna.type(), kardenna.id(), kardenna.name(), "Town", "Region");
+
+        assertEquals(Destination.Kind.POINT, destinations.locate(kardenna, Mode.DEFAULT, "world").join().destination().kind());
+        assertEquals(Destination.Kind.REGION, destinations.locate(byRegion, Mode.DEFAULT, "world").join().destination().kind());
+        assertEquals(Destination.Kind.POINT, destinations.locate(byRegion, Mode.SPAWN, "world").join().destination().kind());
     }
 
     @Test

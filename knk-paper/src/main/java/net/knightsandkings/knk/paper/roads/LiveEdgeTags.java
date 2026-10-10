@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
@@ -17,13 +18,21 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.IntSupplier;
 import java.util.function.LongSupplier;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import net.knightsandkings.knk.core.domain.roads.RoadEdge;
+import net.knightsandkings.knk.core.regions.DomainAccessEvaluator;
+import net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot;
 import net.knightsandkings.knk.core.roads.build.EdgeTagging;
 import net.knightsandkings.knk.core.roads.build.GateCells;
 import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
+import net.knightsandkings.knk.core.roads.route.RoutingView;
+import net.knightsandkings.knk.core.roads.route.RoutingView.Hit;
+import net.knightsandkings.knk.core.roads.route.RoutingView.Span;
+import net.knightsandkings.knk.core.roads.route.TrailCentring;
 
 /**
  * Live world tags for the router (KNG-27 live test 2026-10-08, findings N3/N4): every edge's WorldGuard
@@ -38,6 +47,20 @@ import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
  * differ from the last pass, the tagged snapshot is built on {@code builder} and swapped in, and
  * {@code onChanged} lets navigation re-check its routes. Until the first pass of a snapshot finishes,
  * {@link #snapshot} answers the stored one.
+ *
+ * <p>Rev. 7 Part A (REV7_PROPOSAL §2): the pass records <em>where</em> along each edge a region or a gate
+ * door is met, and the snapshot it builds is the {@link RoutingView} - every edge cut where its tags change,
+ * so a gate door is its own short piece and a region border cuts the road. Navigation routes on that view;
+ * the admin side keeps the stored snapshot. A region whose domain's entry rule does not apply to roads (rev. 7
+ * Part C, "Ignored": a house or shop along a public street) cuts nothing: {@code cutsRoads} leaves it out of the
+ * samples, and the router ignores its rule anyway.
+ *
+ * <p>KNG-110 (P4): where a sample's centre is in a region whose domain keeps someone off the road
+ * ({@code restricts}), the pass also looks across the road - the trail's road cells ({@link TrailCentring#across},
+ * up to {@link TrailCentring#MAX_HALF_WIDTH} each side) and the regions at each - and records the road's
+ * {@linkplain net.knightsandkings.knk.core.domain.roads.RoadEdge#lanes lanes} when they differ from the centre's, so
+ * a region over part of the width blocks the road only where it leaves no free gap. A cross-section is remembered
+ * once its chunks were loaded ({@link CrossSections}). Each region lookup across counts against the budget.
  */
 public final class LiveEdgeTags {
 
@@ -53,10 +76,31 @@ public final class LiveEdgeTags {
         Set<String> regionsAt(String world, int x, int feetY, int z);
 
         GateCells gates(String world);
+
+        /**
+         * KNG-110: the road surface of a world (the trail's road-cell rule, {@code RoadSurfaceGround}); null judges
+         * regions on the centre line only. It may answer only in loaded chunks.
+         */
+        default TrailCentring.Ground ground(String world) {
+            return null;
+        }
+
+        /** KNG-110: whether the chunk holding block {@code (x, z)} is loaded. */
+        default boolean loaded(String world, int x, int z) {
+            return true;
+        }
+
+        /**
+         * KNG-110: loads the chunk holding block {@code (x, z)} in the background, without generating it; {@code then}
+         * runs on the main thread when that is done (or failed).
+         */
+        default void load(String world, int x, int z, Runnable then) {
+            then.run();
+        }
     }
 
     private record State(RoadNetworkSnapshot base, RoadNetworkSnapshot tagged, Map<Integer, String> signature,
-                         int regionsAdded, int doorsAdded, long finishedAt) {
+                         int regionsAdded, int doorsAdded, int edgesCut, int pieces, int laned, long finishedAt) {
     }
 
     private final Function<String, RoadNetworkSnapshot> stored;
@@ -67,6 +111,9 @@ public final class LiveEdgeTags {
     private final Consumer<String> onChanged;
     private final Consumer<Set<String>> onRegions;
     private final LongSupplier clock;
+    private final Predicate<String> cutsRoads;
+    private final Predicate<String> restricts;
+    private final CrossSections crossSections;
 
     private final Map<String, State> states = new ConcurrentHashMap<>();
     private final Map<String, Pass> passes = new LinkedHashMap<>();
@@ -83,6 +130,30 @@ public final class LiveEdgeTags {
      */
     public LiveEdgeTags(Function<String, RoadNetworkSnapshot> stored, Probe probe, IntSupplier budget, Executor builder,
                         Executor mainThread, Consumer<String> onChanged, Consumer<Set<String>> onRegions, LongSupplier clock) {
+        this(stored, probe, budget, builder, mainThread, onChanged, onRegions, clock, regionId -> true);
+    }
+
+    /**
+     * @param cutsRoads whether a region may cut a road (main thread, per sampled region): false for a region whose
+     *                  domain's entry rule is "Ignored" for roads (rev. 7 Part C); a region of unknown domain cuts
+     */
+    public LiveEdgeTags(Function<String, RoadNetworkSnapshot> stored, Probe probe, IntSupplier budget, Executor builder,
+                        Executor mainThread, Consumer<String> onChanged, Consumer<Set<String>> onRegions, LongSupplier clock,
+                        Predicate<String> cutsRoads) {
+        this(stored, probe, budget, builder, mainThread, onChanged, onRegions, clock, cutsRoads, regionId -> true);
+    }
+
+    /**
+     * @param restricts whether a region's domain keeps anyone off the road (main thread, per sampled region; KNG-110):
+     *                  only where the centre line meets such a region is the road's width looked at, with the
+     *                  {@linkplain Probe#ground road surface}
+     */
+    public LiveEdgeTags(Function<String, RoadNetworkSnapshot> stored, Probe probe, IntSupplier budget, Executor builder,
+                        Executor mainThread, Consumer<String> onChanged, Consumer<Set<String>> onRegions, LongSupplier clock,
+                        Predicate<String> cutsRoads, Predicate<String> restricts) {
+        this.cutsRoads = Objects.requireNonNull(cutsRoads, "cutsRoads");
+        this.restricts = Objects.requireNonNull(restricts, "restricts");
+        this.crossSections = new CrossSections(Objects.requireNonNull(probe, "probe"));
         this.stored = Objects.requireNonNull(stored, "stored");
         this.probe = Objects.requireNonNull(probe, "probe");
         this.budget = Objects.requireNonNull(budget, "budget");
@@ -91,6 +162,22 @@ public final class LiveEdgeTags {
         this.onChanged = Objects.requireNonNull(onChanged, "onChanged");
         this.onRegions = Objects.requireNonNull(onRegions, "onRegions");
         this.clock = Objects.requireNonNull(clock, "clock");
+    }
+
+    /**
+     * KNG-110: the {@code restricts} rule from the domain cache - a region whose domain denies entry or exit, and a
+     * region the cache does not know. Live test 2026-10-10 (G2): after {@code /knk cache refresh} and a reload, the
+     * cache did not know {@code domain_17} (a batch warm-up answers one district only), so the pass judged it on the
+     * centre line and the road stayed blocked until a route had looked the region up. Looking across at an unknown
+     * region costs a few lookups; the lanes it finds only open roads the region's rule would close.
+     *
+     * @param domains the cached domain of a region (main thread, no API call)
+     */
+    public static Predicate<String> restrictsByDomain(Function<String, Optional<DomainSnapshot>> domains,
+                                                     DomainAccessEvaluator evaluator) {
+        return regionId -> domains.apply(regionId)
+            .map(domain -> evaluator.entry(domain).isPresent() || evaluator.exit(domain).isPresent())
+            .orElse(true);
     }
 
     /** The world's network with live tags (any thread); the stored one until its first pass is done. */
@@ -146,17 +233,17 @@ public final class LiveEdgeTags {
         State previous = states.get(pass.world);
         if (previous != null && previous.base == pass.base && previous.signature.equals(pass.signature)) {
             states.put(pass.world, new State(previous.base, previous.tagged, previous.signature, previous.regionsAdded,
-                previous.doorsAdded, clock.getAsLong()));
+                previous.doorsAdded, previous.edgesCut, previous.pieces, previous.laned, clock.getAsLong()));
             return; // nothing changed since the last pass: no rebuild, no re-route
         }
         if (!pass.newRegions.isEmpty()) {
             onRegions.accept(Set.copyOf(pass.newRegions));
         }
-        Map<Integer, RoadEdge> changed = pass.changed;
+        Map<Integer, List<Span>> changed = pass.changed;
         builder.execute(() -> {
             RoadNetworkSnapshot tagged;
             try {
-                tagged = changed.isEmpty() ? pass.base : pass.base.retag(e -> changed.getOrDefault(e.id(), e));
+                tagged = changed.isEmpty() ? pass.base : RoutingView.build(pass.base, changed);
             } catch (RuntimeException e) {
                 LOGGER.log(Level.WARNING, "[Roads] Could not build the live-tagged network of " + pass.world, e);
                 return;
@@ -166,7 +253,7 @@ public final class LiveEdgeTags {
                     return;
                 }
                 states.put(pass.world, new State(pass.base, tagged, pass.signature, pass.regionsAdded, pass.doorsAdded,
-                    clock.getAsLong()));
+                    pass.edgesCut, pass.pieces, pass.laned, clock.getAsLong()));
                 if (!changed.isEmpty() || previous != null && !previous.signature.isEmpty()) {
                     onChanged.accept(pass.world);
                 }
@@ -183,8 +270,10 @@ public final class LiveEdgeTags {
         long now = clock.getAsLong();
         for (Map.Entry<String, State> e : states.entrySet()) {
             State s = e.getValue();
-            parts.add(String.format(Locale.ROOT, "%s: %d edge(s) with extra tags (+%d region, +%d gate door), %d s ago",
-                e.getKey(), s.signature.size(), s.regionsAdded, s.doorsAdded, Math.max(0, (now - s.finishedAt) / 1000)));
+            parts.add(String.format(Locale.ROOT,
+                "%s: %d edge(s) with extra tags (+%d region, +%d gate door), %d cut into %d pieces, %d with lanes (%d cross-sections known), %d s ago",
+                e.getKey(), s.signature.size(), s.regionsAdded, s.doorsAdded, s.edgesCut, s.pieces, s.laned, crossSections.size(),
+                Math.max(0, (now - s.finishedAt) / 1000)));
         }
         for (Pass p : passes.values()) {
             parts.add(p.world + ": tagging " + p.edgeIndex + "/" + p.edges.size() + " edges");
@@ -198,21 +287,27 @@ public final class LiveEdgeTags {
         final RoadNetworkSnapshot base;
         final GateCells gates;
         final List<RoadEdge> edges;
-        final Map<Integer, RoadEdge> changed = new HashMap<>();
+        final Map<Integer, List<Span>> changed = new HashMap<>();
         final Map<Integer, String> signature = new HashMap<>();
         final Set<String> newRegions = new LinkedHashSet<>();
         int regionsAdded;
         int doorsAdded;
+        int edgesCut;
+        int pieces;
+        int laned;
         int edgeIndex;
-        List<int[]> samples;
+        final TrailCentring.Ground ground;
+        List<EdgeTagging.Sample> samples;
         int sampleIndex;
-        Set<String> regions;
+        List<Hit<String>> regions;
+        List<Hit<List<String>>> lanes;
 
         Pass(String world, RoadNetworkSnapshot base, GateCells gates) {
             this.world = world;
             this.base = base;
             this.gates = gates == null ? GateCells.NONE : gates;
             this.edges = base.edges();
+            this.ground = probe.ground(world);
         }
 
         boolean done() {
@@ -224,14 +319,24 @@ public final class LiveEdgeTags {
             while (left > 0 && !done()) {
                 RoadEdge edge = edges.get(edgeIndex);
                 if (samples == null) {
-                    samples = EdgeTagging.samples(edge.geometry(), EdgeTagging.REGION_STEP);
+                    samples = EdgeTagging.alongSamples(edge.geometry(), EdgeTagging.REGION_STEP);
                     sampleIndex = 0;
-                    regions = new LinkedHashSet<>();
+                    regions = new ArrayList<>(samples.size());
+                    lanes = new ArrayList<>(samples.size());
                 }
                 while (left > 0 && sampleIndex < samples.size()) {
-                    int[] s = samples.get(sampleIndex++);
-                    regions.addAll(probe.regionsAt(world, s[0], s[1] + 1, s[2]));
+                    EdgeTagging.Sample s = samples.get(sampleIndex);
+                    Set<String> at = regionsAt(s.x(), s.y(), s.z());
+                    regions.add(new Hit<>(s.along(), at));
                     left--;
+                    Set<List<String>> across = Set.of();
+                    if (ground != null && at.stream().anyMatch(restricts)) {
+                        List<TrailCentring.Cell> cells = crossSections.at(world, ground, samples, sampleIndex);
+                        left -= cells.size();
+                        across = lanesAcross(at, cells);
+                    }
+                    lanes.add(new Hit<>(s.along(), across));
+                    sampleIndex++;
                 }
                 if (sampleIndex >= samples.size()) {
                     finishEdge(edge);
@@ -242,19 +347,61 @@ public final class LiveEdgeTags {
             return left;
         }
 
-        private void finishEdge(RoadEdge edge) {
-            List<Integer> doors = EdgeTagging.doorsAlong(edge.geometry(), gates);
-            RoadEdge tagged = EdgeTagging.withExtraTags(edge, regions, doors);
-            if (tagged == edge) {
-                return;
+        /** The regions that may cut a road at a floor block (feet level). */
+        private Set<String> regionsAt(int x, int floorY, int z) {
+            return probe.regionsAt(world, x, floorY + 1, z).stream().filter(cutsRoads).collect(Collectors.toSet());
+        }
+
+        /**
+         * KNG-110: the lanes of a sample whose centre has {@code centre}, from the road cells across it; none when the
+         * centre line decides anyway (every cell has the centre's regions, or the width is not known).
+         */
+        private Set<List<String>> lanesAcross(Set<String> centre, List<TrailCentring.Cell> cells) {
+            if (cells.size() < 2) {
+                return Set.of();
             }
-            int extraRegions = tagged.regionIds().size() - edge.regionIds().size();
-            int extraDoors = tagged.gateDoorIds().size() - edge.gateDoorIds().size();
-            regionsAdded += extraRegions;
-            doorsAdded += extraDoors;
-            newRegions.addAll(tagged.regionIds().subList(edge.regionIds().size(), tagged.regionIds().size()));
-            changed.put(edge.id(), tagged);
-            signature.put(edge.id(), tagged.regionIds() + "|" + tagged.gateDoorIds());
+            List<Set<String>> sets = new ArrayList<>(cells.size());
+            for (TrailCentring.Cell cell : cells) {
+                sets.add(cell.k() == 0 ? centre : regionsAt(cell.x(), cell.y(), cell.z()));
+            }
+            List<List<String>> minimal = RoutingView.minimalLanes(sets);
+            return minimal.equals(List.of(centre.stream().sorted().toList())) ? Set.of() : Set.copyOf(minimal);
+        }
+
+        private void finishEdge(RoadEdge edge) {
+            List<EdgeTagging.Sample> doorSamples = EdgeTagging.alongSamples(edge.geometry(), EdgeTagging.DOOR_STEP);
+            List<Set<Integer>> doorsAt = EdgeTagging.doorsAt(doorSamples, gates);
+            List<Hit<Integer>> doors = new ArrayList<>(doorSamples.size());
+            for (int i = 0; i < doorSamples.size(); i++) {
+                doors.add(new Hit<>(doorSamples.get(i).along(), doorsAt.get(i)));
+            }
+            List<Span> spans = RoutingView.spans(edge, base.polyline(edge).length(), regions, lanes, doors);
+            if (spans.size() == 1 && spans.get(0).regionIds().equals(edge.regionIds())
+                && spans.get(0).gateDoorIds().equals(edge.gateDoorIds()) && spans.get(0).lanes().isEmpty()) {
+                return; // the stored tags, the whole edge long
+            }
+            Set<String> allRegions = new LinkedHashSet<>();
+            Set<Integer> allDoors = new LinkedHashSet<>();
+            StringBuilder sig = new StringBuilder();
+            for (Span span : spans) {
+                allRegions.addAll(span.regionIds());
+                span.lanes().forEach(allRegions::addAll);
+                allDoors.addAll(span.gateDoorIds());
+                sig.append(String.format(Locale.ROOT, "%.1f-%.1f:%s|%s|%s;", span.from(), span.to(), span.regionIds(),
+                    span.gateDoorIds(), span.lanes()));
+            }
+            allRegions.removeAll(edge.regionIds());
+            allDoors.removeAll(edge.gateDoorIds());
+            regionsAdded += allRegions.size();
+            doorsAdded += allDoors.size();
+            newRegions.addAll(allRegions);
+            if (spans.size() > 1) {
+                edgesCut++;
+                pieces += spans.size();
+            }
+            laned += (int) spans.stream().filter(span -> !span.lanes().isEmpty()).count();
+            changed.put(edge.id(), spans);
+            signature.put(edge.id(), sig.toString());
         }
     }
 }

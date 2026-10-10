@@ -54,6 +54,54 @@ class TrailRendererTest {
         assertTrue(TrailRenderer.trailPoints(Route.empty(route.start()), 0, 30, 1.5).isEmpty());
     }
 
+    /** Main Street (z = 0): a road two rows wide (z 0 and 1) up to x 60, one row after - the centred trail shifts, then not. */
+    private static net.knightsandkings.knk.core.roads.route.TrailCentring.Ground narrowingRoad() {
+        return new net.knightsandkings.knk.core.roads.route.TrailCentring.Ground() {
+            @Override
+            public java.util.OptionalInt roadFloor(int x, int z, int nearY) {
+                boolean road = z == 0 || (z == 1 && x < 60);
+                return road && Math.abs(nearY - 64) <= 1 ? java.util.OptionalInt.of(64) : java.util.OptionalInt.empty();
+            }
+
+            @Override
+            public boolean stairOrSlab(int x, int y, int z) {
+                return false;
+            }
+        };
+    }
+
+    @Test
+    void aRedrawPutsEveryParticleOfTheCentredTrailWhereItWas() {
+        // KNG-76 live test: the centred trail twitched in front of the player as the window slid with them
+        Route route = network.routeAlongMainStreet();
+        List<double[]> before = TrailRenderer.centredWindow(route, 58.0, 30, 1.5, narrowingRoad());
+        List<double[]> after = TrailRenderer.centredWindow(route, 59.3, 30, 1.5, narrowingRoad());
+
+        assertEquals(58.5 + 0.5, before.get(0)[0], 1e-9, "the first fixed spot at or ahead of the player, block-centred");
+        assertEquals(60 + 0.5, after.get(0)[0], 1e-9);
+        int shared = 0;
+        for (double[] p : after) {
+            for (double[] q : before) {
+                if (Math.abs(p[0] - q[0]) < 1e-9) {
+                    assertEquals(q[2], p[2], 1e-9, "the same spot, the same place at x " + p[0]);
+                    shared++;
+                }
+            }
+        }
+        assertTrue(shared >= 18, "most of the window is shared: " + shared);
+        assertTrue(before.get(0)[2] > 0.5, "pulled towards the second row just before x 60 (smoothed)");
+        assertEquals(0.5, after.get(after.size() - 1)[2], 1e-9, "the one row after");
+    }
+
+    @Test
+    void theCentredWindowEndsAtTheRoutesEnd() {
+        Route route = network.routeAlongMainStreet();
+        List<double[]> tail = TrailRenderer.centredWindow(route, 190, 30, 1.5, narrowingRoad());
+
+        assertEquals(200.5, tail.get(tail.size() - 1)[0], 1e-9);
+        assertTrue(TrailRenderer.centredWindow(Route.empty(route.start()), 0, 30, 1.5, narrowingRoad()).isEmpty());
+    }
+
     @Test
     void legPointsAreStraightAndSparse() {
         List<double[]> points = TrailRenderer.legPoints(new double[] {0, 64, 0}, new double[] {10, 64, 0}, 3);
@@ -62,6 +110,82 @@ class TrailRendererTest {
         assertEquals(9, points.get(3)[0], 1e-9);
         assertEquals(10, points.get(4)[0], 1e-9);
         assertEquals(1, TrailRenderer.legPoints(new double[] {1, 2, 3}, new double[] {1, 2, 3}, 3).size());
+    }
+
+    // ---- KNG-110: a region the player may not enter over part of the road -----------------------------
+
+    /** Main Street three rows wide (z -1..1); district_9 over rows 0 and 1 for x 0-60, the centre line included. */
+    private final java.util.concurrent.atomic.AtomicInteger regionLookups = new java.util.concurrent.atomic.AtomicInteger();
+    private long now;
+
+    private TrailRenderer districtTrail(java.util.function.Predicate<String> mayEnter) {
+        net.knightsandkings.knk.core.roads.route.TrailCentring.Ground road =
+            new net.knightsandkings.knk.core.roads.route.TrailCentring.Ground() {
+                @Override
+                public java.util.OptionalInt roadFloor(int x, int z, int nearY) {
+                    return Math.abs(z) <= 1 ? java.util.OptionalInt.of(64) : java.util.OptionalInt.empty();
+                }
+
+                @Override
+                public boolean stairOrSlab(int x, int y, int z) {
+                    return false;
+                }
+            };
+        TrailRenderer.CellRegions regions = (world, x, feetY, z) -> {
+            regionLookups.incrementAndGet();
+            return x >= 0 && x <= 60 && z >= 0 && z <= 1 && feetY == 65 ? java.util.Set.of("town_1", "district_9")
+                : java.util.Set.of("town_1");
+        };
+        return new TrailRenderer(NavigationConfig.TrailConfig.defaults(), new TickBudget(() -> 20.0), w -> road, regions,
+            player -> mayEnter, () -> now);
+    }
+
+    private static Player viewerIn(World world) {
+        Player viewer = mock(Player.class);
+        when(viewer.getWorld()).thenReturn(world);
+        when(world.getUID()).thenReturn(java.util.UUID.randomUUID());
+        return viewer;
+    }
+
+    @Test
+    void theTrailKeepsToTheFreeRowBesideARegionThePlayerMayNotEnter() {
+        Player viewer = viewerIn(mock(World.class));
+        TrailRenderer renderer = districtTrail(regionId -> !regionId.equals("district_9"));
+
+        net.knightsandkings.knk.core.roads.route.TrailCentring.Ground surface = renderer.surfaceFor(viewer);
+        assertTrue(surface.blocked(10, 64, 0) && surface.blocked(10, 64, 1));
+        assertTrue(!surface.blocked(10, 64, -1), "the free row");
+
+        List<double[]> window = TrailRenderer.centredWindow(network.routeAlongMainStreet(), 10, 20, 1.5, surface);
+        window.forEach(p -> assertEquals(-0.5, p[2], 1e-9, "on row z = -1, past the district"));
+    }
+
+    @Test
+    void aPlayerWhoMayEnterOrIsNotNavigatingKeepsTheMiddle() {
+        Player viewer = viewerIn(mock(World.class));
+
+        net.knightsandkings.knk.core.roads.route.TrailCentring.Ground none = districtTrail(null).surfaceFor(viewer);
+        assertTrue(!none.blocked(10, 64, 0), "no rule: the world's surface as it is");
+        assertEquals(0, regionLookups.get(), "and no region lookups");
+
+        net.knightsandkings.knk.core.roads.route.TrailCentring.Ground bypass = districtTrail(regionId -> true).surfaceFor(viewer);
+        assertTrue(!bypass.blocked(10, 64, 0));
+        TrailRenderer.centredWindow(network.routeAlongMainStreet(), 10, 20, 1.5, bypass)
+            .forEach(p -> assertEquals(0.5, p[2], 1e-9));
+    }
+
+    @Test
+    void theRegionsOfACellAreRememberedForAFewSeconds() {
+        Player viewer = viewerIn(mock(World.class));
+        TrailRenderer renderer = districtTrail(regionId -> !regionId.equals("district_9"));
+
+        renderer.surfaceFor(viewer).blocked(10, 64, 0);
+        renderer.surfaceFor(viewer).blocked(10, 64, 0);
+        assertEquals(1, regionLookups.get());
+
+        now += TrailRenderer.REGION_CACHE_MILLIS + 1;
+        renderer.surfaceFor(viewer).blocked(10, 64, 0);
+        assertEquals(2, regionLookups.get(), "asked again after the cache's time");
     }
 
     @Test

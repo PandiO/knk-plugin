@@ -88,7 +88,9 @@ class WalkTypesTest {
     void theLengthCapIsTheFactorOrTheDetourAllowanceUpToTheMaximum() {
         assertEquals(58.0, WalkBudget.DEFAULTS.lengthCap(10), 1e-9, "short legs: straight + 48");
         assertEquals(75.5, WalkBudget.DEFAULTS.lengthCap(27.5), 1e-9, "the 2026-10-07 Merchant Square leg");
-        assertEquals(96.0, WalkBudget.DEFAULTS.lengthCap(80), 1e-9);
+        assertEquals(96.0, WalkBudget.DEFAULTS.lengthCap(48), 1e-9, "legs up to 48 blocks: as before KNG-75");
+        assertEquals(140.0, WalkBudget.DEFAULTS.lengthCap(80), 1e-9, "KNG-75 step 2a: the factor, no longer cut at 96");
+        assertEquals(144.0, WalkBudget.DEFAULTS.lengthCap(96), 1e-9, "never above max-length");
         WalkBudget factorOnly = new WalkBudget(20_000, 1.75, 96, 0, 2, 3);
         assertEquals(17.5, factorOnly.lengthCap(10), 1e-9, "allowance 0: the factor alone, as before");
         assertEquals(84.0, new WalkBudget(20_000, 1.75, 200, 10, 2, 3).lengthCap(48), 1e-9, "long legs: the factor");
