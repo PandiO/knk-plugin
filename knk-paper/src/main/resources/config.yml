@@ -654,6 +654,17 @@ regions:
       max-refusals-per-second: 20
       window-seconds: 3
       escalation-window-seconds: 60
+# Offline security cache (KNG-58). The last account (UUID -> knk user id), freeze, owner/staff mode and permission
+# answers knk-web-api gave are kept in one file, so permissions, freezes and vanish still apply after a restart while
+# the API is down. Used ONLY when the API can't be asked; every API answer overwrites it. Holds no email or balances.
+# Erasure (KNG-34): an account the API no longer knows under that UUID is deleted from the file by the hourly check.
+offline-cache:
+  enabled: true
+  file: offline-security.json      # in the plugin folder
+  identity-max-age-days: 30        # an account unconfirmed for longer is forgotten (at most 30: the GDPR erasure deadline)
+  permission-max-age-hours: 72     # an older permission answer counts as "no"
+  verify-after-hours: 6            # hourly, accounts the API hasn't confirmed for this long are re-checked
+  flush-seconds: 10                # how often changes are written to the file
 cache:
   # Global time-to-live for cached API responses (in seconds)
   # After this duration, cached data is considered stale and will be refetched
