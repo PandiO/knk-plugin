@@ -185,20 +185,121 @@ class RegionDomainResolverTest {
         assertEquals(2, api.queries.size(), "asked again once the first answer is in");
     }
 
+    // ---- KNG-122: one request per region ------------------------------------------------------------
+
+    /**
+     * The API's answer as {@code DomainService.SearchDomainRegionDecisionAsync} gives it: of the regions asked about
+     * that have a domain, at most one Town, one District and one Structure (the least nested of each).
+     */
+    private static Function<Set<String>, CompletableFuture<HashMap<Integer, DomainRegionSummary>>> likeTheApi(
+            DomainRegionSummary... known) {
+        return asked -> {
+            HashMap<Integer, DomainRegionSummary> out = new HashMap<>();
+            Set<String> types = new java.util.HashSet<>();
+            for (DomainRegionSummary s : known) {
+                if (asked.contains(s.wgRegionId()) && types.add(s.domainType())) {
+                    out.put(out.size(), s);
+                }
+            }
+            return CompletableFuture.completedFuture(out);
+        };
+    }
+
     @Test
-    void aSeveralRegionAnswerDoesNotForgetWhatItLeftOut() {
-        // the API answers at most one Town, District and Structure per query: a region missing from a
-        // multi-region answer may still have a domain
+    void warmingSeveralDistrictsCachesEveryOne() {
+        // live test 2026-10-10 (KNG-110 G2): "preloading 4 regions: [district_1000004, district_1000006, domain_16,
+        // domain_17]" cached 1 domain, and domain_17 stayed unknown
         FakeDomainsApi api = new FakeDomainsApi();
-        RegionDomainResolver resolver = resolver(api, Duration.ofSeconds(-1));
+        api.answer = likeTheApi(summary(4, "district_1000004", true), summary(6, "district_1000006", true),
+            summary(16, "domain_16", false), summary(17, "domain_17", false));
+        RegionDomainResolver resolver = resolver(api, Duration.ofMinutes(1));
+
+        resolver.warmCache(List.of("district_1000004", "district_1000006", "domain_16", "domain_17")).join();
+
+        for (String region : List.of("district_1000004", "district_1000006", "domain_16", "domain_17")) {
+            assertTrue(resolver.getDomainByRegionIdNoRefresh(region).isPresent(), region);
+        }
+        assertEquals(List.of(Set.of("district_1000004"), Set.of("district_1000006"), Set.of("domain_16"),
+            Set.of("domain_17")), api.queries, "one request per region");
+    }
+
+    @Test
+    void resolvingTwoNestedDistrictsAtOneSpotReturnsBoth() {
+        FakeDomainsApi api = new FakeDomainsApi();
+        api.answer = likeTheApi(summary(4, "district_1000004", true), summary(17, "domain_17", false));
+        RegionDomainResolver resolver = resolver(api, Duration.ofMinutes(1));
+
+        RegionSnapshot snapshot = resolver.resolveRegionsFromApi(Set.of("district_1000004", "domain_17")).join();
+
+        assertEquals(Set.of(4, 17), snapshot.domains().stream().map(DomainSnapshot::id).collect(
+            java.util.stream.Collectors.toSet()));
+    }
+
+    @Test
+    void aRegionWithoutADomainIsLeftOutAndACachedOneIsNotAskedAgain() {
+        FakeDomainsApi api = new FakeDomainsApi();
+        api.answer = likeTheApi(summary(17, "domain_17", false));
+        RegionDomainResolver resolver = resolver(api, Duration.ofMinutes(1));
         DomainSnapshot keep = districtSnapshot(16, "domain_16");
         resolver.registerDomain(keep);
-        api.answer = q -> FakeDomainsApi.of(summary(17, "domain_17", true));
 
-        resolver.resolveRegionsFromApi(Set.of("domain_16", "domain_17")).join();
+        RegionSnapshot snapshot = resolver.resolveRegionsFromApi(Set.of("domain_16", "domain_17", "lootbox_test")).join();
 
+        assertEquals(2, snapshot.domains().size());
         assertSame(keep, resolver.getDomainByRegionIdNoRefresh("domain_16").orElseThrow());
+        assertTrue(resolver.getDomainByRegionIdNoRefresh("lootbox_test").isEmpty());
+        assertEquals(List.of(Set.of("domain_17"), Set.of("lootbox_test")), api.queries);
+    }
+
+    @Test
+    void atMostFourRequestsAreInFlight() {
+        FakeDomainsApi api = new FakeDomainsApi();
+        List<CompletableFuture<HashMap<Integer, DomainRegionSummary>>> pending = new ArrayList<>();
+        api.answer = q -> {
+            CompletableFuture<HashMap<Integer, DomainRegionSummary>> f = new CompletableFuture<>();
+            pending.add(f);
+            return f;
+        };
+        RegionDomainResolver resolver = resolver(api, Duration.ofMinutes(1));
+
+        CompletableFuture<Void> warm = resolver.warmCache(List.of("r1", "r2", "r3", "r4", "r5", "r6"));
+        assertEquals(RegionDomainResolver.MAX_REQUESTS_IN_FLIGHT, api.queries.size());
+
+        pending.get(0).complete(new HashMap<>());
+        assertEquals(5, api.queries.size(), "the next one starts when one is answered");
+        assertFalse(warm.isDone());
+        for (int i = 1; i < 6; i++) {
+            pending.get(i).complete(new HashMap<>());
+        }
+        assertTrue(warm.isDone());
+        assertEquals(6, api.queries.size());
+    }
+
+    @Test
+    void aFailedRequestDoesNotStopTheOthers() {
+        FakeDomainsApi api = new FakeDomainsApi();
+        api.answer = q -> q.contains("domain_16") ? CompletableFuture.failedFuture(new RuntimeException("API down"))
+            : likeTheApi(summary(17, "domain_17", false)).apply(q);
+        RegionDomainResolver resolver = resolver(api, Duration.ofMinutes(1));
+
+        RegionSnapshot snapshot = resolver.resolveRegionsFromApi(Set.of("domain_16", "domain_17")).join();
+
+        assertEquals(1, snapshot.domains().size());
         assertTrue(resolver.getDomainByRegionIdNoRefresh("domain_17").isPresent());
+        resolver.warmCache(List.of("domain_16")).join(); // completes, does not throw
+    }
+
+    @Test
+    void aFailedRefreshCompletesAndKeepsTheOldEntry() {
+        FakeDomainsApi api = new FakeDomainsApi();
+        api.answer = q -> CompletableFuture.failedFuture(new RuntimeException("API down"));
+        RegionDomainResolver resolver = resolver(api, Duration.ofSeconds(-1));
+        DomainSnapshot keep = districtSnapshot(17, "domain_17");
+        resolver.registerDomain(keep);
+
+        resolver.refreshIfStale(Set.of("domain_17")).join(); // does not throw
+
+        assertSame(keep, resolver.getDomainByRegionIdNoRefresh("domain_17").orElseThrow());
     }
 
     @Test
