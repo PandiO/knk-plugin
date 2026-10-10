@@ -136,7 +136,7 @@ public final class WalkSearch implements WalkPathfinder {
             if (nearest(request.targetX(), request.targetFloorY(), request.targetZ(), budget.goalSnap()) == null) {
                 return WalkResult.noPath("no walkable cell near the target", 0);
             }
-            cap = budget.lengthCap(request.straightDistance());
+            cap = budget.lengthCap(request.straightDistance(), request.heightDifference());
             startDistance = targetDistance(start);
             nodes.put(start.key, start);
             push(start);
