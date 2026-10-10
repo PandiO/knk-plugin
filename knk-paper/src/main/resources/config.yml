@@ -351,6 +351,12 @@ gates:
   # Runs in addition to the one-shot cleanup at startup, so a duplicate that appears while the
   # server is running gets fixed without needing a restart.
   display-cleanup-interval-seconds: 60
+  # KNG-106: moving gate doors move players, mobs, items and vehicles out of their way (to a safe
+  # spot on their own side when there is room) before the blocks land, and anyone found inside door
+  # blocks (after a teleport, on join) is moved out. Decision for review: door blocks cause no
+  # suffocation damage (false); true keeps the vanilla damage on top of the move.
+  safety:
+    door-suffocation-damage: false
   # Continuous damage ("fire") system: a gate door block set alight by a flaming projectile or
   # fire charge burns for fire-duration-seconds, dealing fire-damage-per-tick HealthCurrent
   # damage to its owning gate every fire-tick-interval-seconds for each door block still burning

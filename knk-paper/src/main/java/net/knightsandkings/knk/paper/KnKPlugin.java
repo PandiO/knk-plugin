@@ -894,6 +894,9 @@ public class KnKPlugin extends JavaPlugin {
                     .runTaskTimer(this, 1L, 1L);
             }
             new GateDisplayUpdateTask(gateDisplayManager, gateManager).runTaskTimer(this, 20L, 20L);
+            // KNG-106: anyone found inside gate door blocks is moved out instead of suffocating.
+            getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.gates.GateSuffocationGuard(
+                this, gateManager, getConfig().getBoolean("gates.safety.door-suffocation-damage", false)), this);
 
             int gateDisplayCleanupIntervalSeconds = getConfig().getInt("gates.display-cleanup-interval-seconds", 60);
             long gateDisplayCleanupIntervalTicks = Math.max(20L, gateDisplayCleanupIntervalSeconds * 20L);
