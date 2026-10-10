@@ -205,6 +205,37 @@ class StatisticsVisibilityMenuFeatureTest {
     }
 
     @Test
+    void aConfirmSendsWhatThePreviewShowed_soAWebChangeMeanwhileIsAConflict() {
+        // Smoke test finding 8: the repaint after the preview re-read the settings (web change:
+        // Friends → Everyone), and Confirm used to recompute the changes from that read.
+        java.util.concurrent.atomic.AtomicLong now = new java.util.concurrent.atomic.AtomicLong(1_000_000L);
+        Clock clock = new Clock() {
+            @Override public java.time.ZoneId getZone() { return java.time.ZoneOffset.UTC; }
+            @Override public Clock withZone(java.time.ZoneId zone) { return this; }
+            @Override public java.time.Instant instant() { return java.time.Instant.ofEpochMilli(now.get()); }
+        };
+        StatisticsVisibilityMenuFeature timed = new StatisticsVisibilityMenuFeature(api, cache, Runnable::run, clock);
+        MenuFeatureRegistries timedRegistries = ContentFeatures.all(timed);
+        when(api.getVisibility(9, 9)).thenReturn(
+                CompletableFuture.completedFuture(settings(StatisticVisibility.FRIENDS, StatisticVisibility.NOBODY)),
+                CompletableFuture.completedFuture(settings(StatisticVisibility.EVERYONE, StatisticVisibility.NOBODY)));
+        timedRegistries.actions().execute(StatisticsVisibilityMenuFeature.SELECT_GROUP_ACTION, action(null, null), Map.of("group", "combat"));
+        timed.fetchRows(rowsContext(), new PagedQuery(1, 27, null, null, false, Map.of())).join();
+        MenuSession session = new MenuSessionRegistry().open(uuid);
+        timedRegistries.actions().execute(StatisticsVisibilityMenuFeature.GROUP_ACTION, action(session, null), Map.of("value", "Nobody"));
+
+        now.addAndGet(StatisticsVisibilityMenuFeature.FRESH_MILLIS + 1);
+        timed.fetchRows(rowsContext(), new PagedQuery(1, 27, null, null, false, Map.of())).join(); // repaint: re-read
+        when(api.updateVisibility(eq(9), eq(9), anyList())).thenReturn(CompletableFuture.failedFuture(new java.util.concurrent.CompletionException(
+                new StatisticsVisibilityConflictException("changed", settings(StatisticVisibility.EVERYONE, StatisticVisibility.NOBODY)))));
+        timedRegistries.actions().execute("menu.confirm.accept", action(session, null), Map.of());
+
+        verify(api).updateVisibility(9, 9, List.of(
+                new StatisticsVisibilitySettings.Change("pvp_kills", "", StatisticVisibility.FRIENDS, StatisticVisibility.NOBODY)));
+        verify(player).sendMessage(contains("changed elsewhere"));
+    }
+
+    @Test
     void aGroupActionWithNothingToChangeAsksNothing() {
         when(api.getVisibility(9, 9)).thenReturn(CompletableFuture.completedFuture(settings(StatisticVisibility.NOBODY, StatisticVisibility.NOBODY)));
         loadRows();

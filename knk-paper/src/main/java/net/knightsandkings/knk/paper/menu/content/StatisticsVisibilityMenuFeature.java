@@ -74,6 +74,10 @@ public final class StatisticsVisibilityMenuFeature implements MenuFeature, org.b
     private record Cached(long fetchedAtMillis, StatisticsVisibilitySettings settings) {
     }
 
+    /** The changes a group-action preview showed, applied as they are on Confirm. */
+    private record PendingGroup(String group, StatisticVisibility value, List<StatisticsVisibilitySettings.Change> changes) {
+    }
+
     private final StatisticsApi api;
     private final UserCache userCache;
     private final Executor mainThread;
@@ -81,6 +85,7 @@ public final class StatisticsVisibilityMenuFeature implements MenuFeature, org.b
     private final Map<UUID, String> selectedGroup = new ConcurrentHashMap<>();
     private final Map<UUID, Cached> settings = new ConcurrentHashMap<>();
     private final Map<UUID, List<String>> previews = new ConcurrentHashMap<>();
+    private final Map<UUID, PendingGroup> pendingGroups = new ConcurrentHashMap<>();
 
     public StatisticsVisibilityMenuFeature(StatisticsApi api, UserCache userCache, Executor mainThread, Clock clock) {
         this.api = api;
@@ -243,6 +248,7 @@ public final class StatisticsVisibilityMenuFeature implements MenuFeature, org.b
         }
         List<String> preview = previewLines(cached.settings(), group, value);
         previews.put(uuid, preview);
+        pendingGroups.put(uuid, new PendingGroup(group, value, List.copyOf(changes)));
         String prompt = "Set " + changes.size() + " " + groupLabel(group) + " setting(s) to " + plain(value)
                 + "? Click Confirm or Cancel.";
         context.session().setPendingConfirmation(new MenuSession.PendingConfirmation(APPLY_GROUP_ACTION,
@@ -254,25 +260,29 @@ public final class StatisticsVisibilityMenuFeature implements MenuFeature, org.b
         refresh(context.menuService(), player);
     }
 
-    /** Confirmed group action: one atomic update with the values the preview showed as expected. */
+    /**
+     * Confirmed group action: one atomic update with the values the preview showed as expected -
+     * the changes remembered at the preview, not recomputed from settings the menu re-read since
+     * (that let a web change made meanwhile pass unnoticed, smoke test finding 8).
+     */
     private void applyGroup(MenuActionContext context, Map<String, String> params) {
         Player player = context.player();
         UUID uuid = player.getUniqueId();
         String group = params.getOrDefault("group", group(uuid)).toLowerCase(Locale.ROOT);
         StatisticVisibility value = parseVisibility(params.get("value"), APPLY_GROUP_ACTION);
         previews.remove(uuid);
+        PendingGroup pending = pendingGroups.remove(uuid);
         Integer userId = userId(uuid);
-        Cached cached = settings.get(uuid);
-        if (userId == null || cached == null) {
+        if (userId == null || settings.get(uuid) == null) {
             player.sendMessage(ChatColor.RED + "Your settings aren't loaded - reopen the menu.");
             return;
         }
-        List<StatisticsVisibilitySettings.Change> changes = groupChanges(cached.settings(), group, value);
-        if (changes.isEmpty()) {
-            player.sendMessage(ChatColor.GRAY + "Nothing to change.");
+        if (pending == null || !pending.group().equals(group) || pending.value() != value) {
+            player.sendMessage(ChatColor.GRAY + "That change wasn't previewed - choose the group action again.");
             refresh(context.menuService(), player);
             return;
         }
+        List<StatisticsVisibilitySettings.Change> changes = pending.changes();
         update(context.menuService(), player, userId, changes,
                 ChatColor.GRAY + "Set " + changes.size() + " " + groupLabel(group) + " setting(s) to " + plain(value) + ".");
     }
@@ -418,6 +428,7 @@ public final class StatisticsVisibilityMenuFeature implements MenuFeature, org.b
             context.session().clearPendingConfirmation();
         }
         previews.remove(context.player().getUniqueId());
+        pendingGroups.remove(context.player().getUniqueId());
     }
 
     @org.bukkit.event.EventHandler(priority = org.bukkit.event.EventPriority.MONITOR)
@@ -430,6 +441,7 @@ public final class StatisticsVisibilityMenuFeature implements MenuFeature, org.b
         selectedGroup.remove(uuid);
         settings.remove(uuid);
         previews.remove(uuid);
+        pendingGroups.remove(uuid);
     }
 
     private Integer userId(UUID uuid) {
