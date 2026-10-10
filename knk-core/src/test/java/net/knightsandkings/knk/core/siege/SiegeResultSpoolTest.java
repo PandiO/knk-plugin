@@ -27,7 +27,9 @@ class SiegeResultSpoolTest {
 
     static Completion completion() {
         return new Completion(SiegeEndReason.INSTANT_VICTORY, 2,
-                List.of(new ParticipantResult(7, 202, 3, 1, 2, 1), new ParticipantResult(8, 201, 0, 2, 0, 0)),
+                List.of(new ParticipantResult(7, 202, 3, 1, 2, 1), new ParticipantResult(8, 201, 0, 2, 0, 0),
+                        // KNG-34: a departed member round-trips with its leftAt
+                        new ParticipantResult(9, 201, 1, 1, 1, 0, Instant.parse("2026-09-26T21:01:00Z"))),
                 List.of(new ObjectiveResult(501, 202, 7, Instant.parse("2026-09-26T21:05:00Z")),
                         new ObjectiveResult(502, 201, null, null)));
     }

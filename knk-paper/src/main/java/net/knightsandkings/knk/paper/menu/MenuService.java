@@ -68,6 +68,8 @@ public final class MenuService {
     private final Map<String, String> blockedMenus = new ConcurrentHashMap<>();
     /** Keys that passed {@link MenuDefinitionValidationRunner} at startup (content port CP1, {@code menu-available}). */
     private final Set<String> validatedMenus = ConcurrentHashMap.newKeySet();
+    /** Diagnostic telemetry / funnel hooks (KNG-34 link 6); empty unless a feature registers one. */
+    private final MenuObservers observers = new MenuObservers();
 
     public MenuService(
             Plugin plugin,
@@ -108,6 +110,16 @@ public final class MenuService {
         openMenu(player, templateKey, MenuContextParams.EMPTY);
     }
 
+    /** Registers a {@link MenuObserver} (main thread, at enable). */
+    public void addObserver(MenuObserver observer) {
+        observers.add(observer);
+    }
+
+    /** The registered observers, for {@link MenuClickListener}. */
+    public MenuObservers observers() {
+        return observers;
+    }
+
     /**
      * InventoryMenu Phase 9 (E1): opens {@code templateKey} with context
      * parameters - the entry point for commands ({@code /siege info 3}) and for
@@ -128,12 +140,14 @@ public final class MenuService {
 
             mainThread.execute(() -> {
                 MenuSession session = sessionRegistry.open(player.getUniqueId());
+                String parentKey = fromOpenMenu ? session.currentMenuKey().orElse(null) : null;
                 if (fromOpenMenu) {
                     session.navigateTo(menu.key(), ctx, menu.title());
                 } else {
                     session.openAsRoot(menu.key(), ctx, menu.title());
                 }
                 renderAndShow(player, menu, session, materialKeys);
+                observers.opened(player, menu.key(), parentKey);
             });
         });
     }
@@ -145,6 +159,7 @@ public final class MenuService {
      */
     public void goBack(Player player) {
         Optional<MenuSession> sessionOpt = sessionRegistry.get(player.getUniqueId());
+        String fromKey = sessionOpt.flatMap(MenuSession::currentMenuKey).orElse(null);
         Optional<MenuSession.NavigationEntry> previous = sessionOpt.flatMap(MenuSession::goBackEntry);
         if (previous.isEmpty()) {
             sessionOpt.ifPresent(MenuSession::resetNavigation);
@@ -154,6 +169,7 @@ public final class MenuService {
 
         MenuSession session = sessionOpt.get();
         String key = previous.get().key();
+        observers.back(player, fromKey, key);
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             RuntimeMenu menu = loadAndAssemble(player, key);
             if (menu == null) {
@@ -490,6 +506,9 @@ public final class MenuService {
 
     /** Called when a KnK menu Inventory is closed: stop auto-refreshing it (the session itself survives). */
     public void onMenuInventoryClosed(UUID playerId) {
+        if (!observers.isEmpty()) {
+            observers.closed(playerId, openMenuContextRegistry.get(playerId).map(c -> c.menu().key()).orElse(null));
+        }
         refreshSchedule.untrack(playerId);
     }
 

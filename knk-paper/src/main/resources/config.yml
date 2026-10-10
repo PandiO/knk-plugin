@@ -224,6 +224,91 @@ discovery:
     # Shown instead when discoveries made while the API was down are granted later
     replay-summary: "&bWhile the server was busy you discovered &a{count}&b place(s):"
 
+# Player statistics (KNG-34, knk-workspace docs/specs/player-statistics/IMPLEMENTATION_PLAN.md §5.1):
+# sessions/logins, active and AFK playtime, distance per mode and the highest survived fall,
+# buffered in memory and sent to the API in batches off the main thread. While the API can't take
+# them (down, 503 statistics disabled, API key mismatch) batches are spooled to disk and replayed.
+# enabled: false registers no statistics listener, task or command (/afk) - today's behaviour.
+# The privacy menu (/stats settings, Profile → Statistics privacy) works either way.
+statistics:
+  enabled: true
+  flush-interval-seconds: 60
+  # Entries per batch (the API takes at most 2000)
+  max-batch-entries: 2000
+  # Under the plugin folder; one file per undelivered batch
+  spool-directory: statistics-spool
+  replay-interval-seconds: 60
+  # No combat, distance or fall statistics in these game modes (playtime still counts)
+  excluded-game-modes: [CREATIVE, SPECTATOR]
+  afk:
+    # false: every online second is active time; no /afk, no automatic AFK, no marker
+    enabled: true
+    # Automatic AFK after this long without looking around, walking (not in a vehicle or water),
+    # chatting, commands, building, interacting, inventory clicks, attacking or sneak/sprint toggles
+    idle-seconds: 300
+    command-enabled: true
+    tab-list-marker: true
+    marker-text: "&7[AFK]"
+  movement:
+    enabled: true
+    # A longer single move is a relocation, not travel
+    max-segment-blocks: 10.0
+  fall:
+    enabled: true
+  combat:
+    # false: no kills, deaths, damage, arrows, headshots or open-world killstreaks are recorded
+    enabled: true
+    # Plugin-dealt damage (e.g. Chaos enchant procs) would be counted twice; leave off
+    count-custom-damage: false
+    # Creatures spawned like this are farmed: killing them is no PvE kill
+    pve-excluded-spawn-reasons: [SPAWNER, SPAWNER_EGG, BREEDING, EGG, DISPENSE_EGG]
+  gates:
+    # false: gate-door damage is not credited to players (gate HP works exactly the same either way)
+    enabled: true
+    # Credit fire damage to whoever set each burning door block alight
+    fire-attribution: true
+  siege:
+    # Report members who left a match early (with their kills/deaths/streak/captures) when it ends;
+    # they still get no reward. false = the completion payload as before
+    report-departed-members: true
+
+# Diagnostic telemetry (KNG-34 link 6, docs/specs/player-statistics DESIGN.md §F.12): a timeline of
+# meaningful actions and outcomes (joins, menus, command labels, Siege lobby/match steps, failed API
+# calls) that only the owner can read in the web app. Never chat, command arguments, IPs or tokens.
+# Enhanced detail (position samples, menu clicks, hits) is only sent for players/test runs the owner
+# picks. Events are buffered and dropped when the API is down - never spooled; gameplay never waits.
+telemetry:
+  # false: no diagnostic events at all (today's behaviour)
+  enabled: true
+  # Events held between flushes; beyond this the oldest are dropped (and counted)
+  max-buffer-events: 5000
+  flush-interval-seconds: 10
+  # How often the owner's choices (enhanced players, test runs) are read from the API
+  config-poll-seconds: 60
+  # Position sample interval for enhanced players
+  enhanced-movement-sample-seconds: 5
+
+# World analytics (KNG-34 link 7, knk-workspace docs/specs/player-statistics): anonymous movement
+# heatmaps, menu funnels and domain interactions for the owner's /owner/analytics page. Aggregated in
+# memory (no user ids or names leave the plugin), posted every flush-interval-seconds, never across a
+# local midnight of the API's statistics time zone. Kept in memory while the API is unreachable (up
+# to max-pending-batches windows), never spooled to disk.
+world-analytics:
+  # false: no sampler, menu observer, region listener or task (today's behaviour)
+  enabled: true
+  # One position sample per online, non-AFK player this often (at least 10)
+  movement-sample-seconds: 10
+  # Heatmap cell edge in blocks
+  cell-size: 16
+  flush-interval-seconds: 300
+  # Part switches
+  movement: true
+  menu-funnels: true
+  domain-interactions: true
+  # Players in these game modes are not sampled (spectators never are)
+  excluded-game-modes: [CREATIVE, SPECTATOR]
+  max-pending-batches: 12
+
 # Road navigation (KNG-27, docs/specs/navigation/DESIGN.md §4). Road materials live in the API's road
 # profiles (learned by /knk road survey, edited in the web app), not here. Every key has a default.
 navigation:
