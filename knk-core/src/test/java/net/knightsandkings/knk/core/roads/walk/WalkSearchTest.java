@@ -425,6 +425,42 @@ class WalkSearchTest {
             new WalkBudget(20_000, 1.75, 96, 0, 2, 3))).status(), "the old cap");
     }
 
+    /**
+     * A tower 12 high whose only way down is a long stair (KNG-108, the Keep Tower Roof of 2026-10-09): a roof at 76
+     * over (0, 0); a 1-wide walkway east along z = 0 that steps down a block every 5 blocks, a landing at (30, 1),
+     * and back west along z = 2 down to the ground at 64. Nothing below the walkways: no drop shortcuts it.
+     */
+    private static WalkFixture tallTower() {
+        WalkFixture f = new WalkFixture().block(0, 76, 0, GridFixture.STONE).block(0, 64, 2, GridFixture.STONE)
+            .block(30, 70, 1, GridFixture.STONE);
+        for (int x = 1; x <= 30; x++) {
+            f.block(x, 75 - (x - 1) / 5, 0, GridFixture.STONE);
+            f.block(x, 64 + (x - 1) / 5, 2, GridFixture.STONE);
+        }
+        return f;
+    }
+
+    @Test
+    void theClimbAllowanceLetsAStairDownATallTowerThroughTheLengthCap() {
+        WalkBudget noClimb = new WalkBudget(20_000, 1.75, 144, 0, 0, 2, 3);
+        WalkBudget climb = new WalkBudget(20_000, 1.75, 144, 0, 5, 2, 3);
+        WalkRequest down = tallTower().request(0, 76, 0, 0, 64, 2);
+        assertEquals(12.0, down.heightDifference(), 1e-9);
+
+        assertEquals(WalkResult.Status.FALLBACK, new WalkSearch().find(down.withBudget(noClimb)).status(),
+            "the factor alone (1.75 × 12.2 = 21.3) cuts the stair off");
+        WalkPath path = found(new WalkSearch().find(down.withBudget(climb)));
+        assertTrue(path.length() > noClimb.lengthCap(down.straightDistance(), down.heightDifference()),
+            "longer than the cap without the allowance: " + path.length());
+        assertTrue(path.length() <= climb.lengthCap(down.straightDistance(), down.heightDifference()) + 1e-9);
+        assertTrue(visits(path, 30, 70, 1), "round the landing: " + cells(path));
+
+        WalkRequest up = tallTower().request(0, 64, 2, 0, 76, 0);
+        assertEquals(12.0, up.heightDifference(), 1e-9, "up counts as down");
+        assertTrue(new WalkSearch().find(up.withBudget(climb)).isFound(), "the last leg up to a roof");
+        assertTrue(new WalkSearch().find(down.withBudget(WalkBudget.DEFAULTS)).isFound(), "the shipped defaults");
+    }
+
     @Test
     void theWallCostRoundsAnOuterCornerABlockWide() {
         // live test 2026-10-08 (N7): the trail hugged corners so tightly it seemed to stop. A building in the

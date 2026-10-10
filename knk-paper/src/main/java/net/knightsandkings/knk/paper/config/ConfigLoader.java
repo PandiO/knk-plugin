@@ -389,6 +389,7 @@ public class ConfigLoader {
                 walk.getDouble("max-length-factor", walkDefaults.maxLengthFactor()),
                 walk.getDouble("max-length", walkDefaults.maxLength()),
                 walk.getDouble("detour-allowance", walkDefaults.detourAllowance()),
+                walk.getDouble("climb-allowance", walkDefaults.climbAllowance()),
                 walk.getInt("max-drop", walkDefaults.maxDrop()),
                 walk.getDouble("drop-penalty", walkDefaults.dropPenalty()),
                 walk.getInt("capture-margin", walkDefaults.captureMargin()),
