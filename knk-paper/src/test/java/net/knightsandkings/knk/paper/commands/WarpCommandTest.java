@@ -108,6 +108,9 @@ class WarpCommandTest {
 
     WarpCommandTest() {
         when(world.getName()).thenReturn("world");
+        // The cached answer tab completion reads (KNG-107); same grants.
+        when(permissible.hasPermission(any(Player.class), anyString()))
+            .thenAnswer(inv -> granted.contains(inv.<String>getArgument(1)));
         when(permissible.hasPermissionAsync(any(), anyString())).thenAnswer(inv ->
             CompletableFuture.completedFuture(granted.contains((String) inv.getArgument(1))));
         // PlayerCommandSupport asks checkAsync (allowed / denied / API unreachable); same grants.
@@ -240,7 +243,16 @@ class WarpCommandTest {
 
         assertEquals(List.of("Residential"), command.onTabComplete(alice, mock(Command.class), "warp", new String[] {"res"}));
         assertEquals(List.of("District"), command.onTabComplete(alice, mock(Command.class), "warp", new String[] {"Residential", ""}));
+        // KNG-107: the staff form's player only with knk.teleport.staff.others.
+        assertEquals(List.of(), command.onTabComplete(alice, mock(Command.class), "warp", new String[] {"Residential", "District", "b"}));
+        granted.add(TeleportNodes.STAFF_OTHERS);
         assertEquals(List.of("Bob"), command.onTabComplete(alice, mock(Command.class), "warp", new String[] {"Residential", "District", "b"}));
+    }
+
+    @Test
+    void tabCompletion_withoutTheWarpNode_suggestsNothing() {
+        assertEquals(List.of(), command.onTabComplete(alice, mock(Command.class), "warp", new String[] {""}));
+        assertEquals(List.of(), command.onTabComplete(alice, mock(Command.class), "warp", new String[] {"Kardenna", ""}));
     }
 
     @Test

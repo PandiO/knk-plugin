@@ -91,4 +91,24 @@ class CurrencyAdminCommandTest {
         assertEquals(List.of("alerts"), command.complete(sender, new String[] {"al"}));
         assertEquals(List.of("all", "ack"), command.complete(sender, new String[] {"alerts", "a"}));
     }
+
+    // ===== KNG-107: only the actions the sender holds =====
+
+    @Test
+    void completion_withoutNodes_suggestsNothing() {
+        CurrencyAdminCommand gated = new CurrencyAdminCommand(service, (s, node) -> false);
+        assertEquals(List.of(), gated.complete(sender, new String[] {""}));
+        assertEquals(List.of(), gated.complete(sender, new String[] {"history", ""}));
+        assertEquals(List.of(), gated.complete(sender, new String[] {"alerts", ""}));
+        verify(service, never()).visiblePlayers();
+    }
+
+    @Test
+    void completion_withOneNode_offersOnlyItsActions() {
+        CurrencyAdminCommand gated = new CurrencyAdminCommand(service,
+                (s, node) -> PlayerCurrencyService.CURRENCY_LOCK_NODE.equals(node));
+        assertEquals(List.of("lock", "unlock"), gated.complete(sender, new String[] {""}));
+        assertEquals(List.of(), gated.complete(sender, new String[] {"reverse", "01M3", "--"}));
+        assertEquals(List.of(), gated.complete(sender, new String[] {"history", ""}));
+    }
 }

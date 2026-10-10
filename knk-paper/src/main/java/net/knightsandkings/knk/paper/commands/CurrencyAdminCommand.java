@@ -4,10 +4,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.function.BiPredicate;
 
 import org.bukkit.command.CommandSender;
 
 import net.knightsandkings.knk.core.domain.users.BalanceCurrency;
+import net.knightsandkings.knk.paper.commands.support.CommandPermissions;
 import net.knightsandkings.knk.paper.currency.PlayerCurrencyService;
 
 /**
@@ -22,10 +25,29 @@ public class CurrencyAdminCommand {
     static final List<String> ACTIONS = List.of("reverse", "history", "lock", "unlock", "alerts");
     private static final String PARTIAL_FLAG = "--partial";
 
+    /** The node each action checks (inside {@link PlayerCurrencyService}); completion offers only the held ones. */
+    static final Map<String, String> NODE_BY_ACTION = Map.of(
+            "reverse", PlayerCurrencyService.CURRENCY_REVERSE_NODE,
+            "history", PlayerCurrencyService.CURRENCY_HISTORY_NODE,
+            "lock", PlayerCurrencyService.CURRENCY_LOCK_NODE,
+            "unlock", PlayerCurrencyService.CURRENCY_LOCK_NODE,
+            "alerts", PlayerCurrencyService.CURRENCY_ALERTS_NODE);
+    /** Every action node: /knk currency is listed to holders of at least one (KNG-107). */
+    public static final List<String> NODES = List.of(PlayerCurrencyService.CURRENCY_REVERSE_NODE,
+            PlayerCurrencyService.CURRENCY_HISTORY_NODE, PlayerCurrencyService.CURRENCY_LOCK_NODE,
+            PlayerCurrencyService.CURRENCY_ALERTS_NODE);
+
     private final PlayerCurrencyService currencyService;
+    private final BiPredicate<CommandSender, String> holdsCached;
 
     public CurrencyAdminCommand(PlayerCurrencyService currencyService) {
+        this(currencyService, CommandPermissions.bukkitOnly()::has);
+    }
+
+    /** {@code holdsCached}: the immediate (cache-only) node check used for tab completion. */
+    public CurrencyAdminCommand(PlayerCurrencyService currencyService, BiPredicate<CommandSender, String> holdsCached) {
         this.currencyService = currencyService;
+        this.holdsCached = holdsCached;
     }
 
     public boolean execute(CommandSender sender, String[] args) {
@@ -115,13 +137,19 @@ public class CurrencyAdminCommand {
         return true;
     }
 
-    /** Suggestions after {@code /knk currency}: the action, then a visible player's name where one goes. */
+    /**
+     * Suggestions after {@code /knk currency}: the actions whose node the sender holds (cached check,
+     * KNG-107), then a visible player's name where one goes - nothing for an action they can't run.
+     */
     public List<String> complete(CommandSender sender, String[] args) {
         if (args.length <= 1) {
             String prefix = args.length == 0 ? "" : args[0].toLowerCase(Locale.ROOT);
-            return ACTIONS.stream().filter(a -> a.startsWith(prefix)).toList();
+            return ACTIONS.stream().filter(a -> a.startsWith(prefix) && holds(sender, a)).toList();
         }
         String action = args[0].toLowerCase(Locale.ROOT);
+        if (!ACTIONS.contains(action) || !holds(sender, action)) {
+            return List.of();
+        }
         if ("alerts".equals(action)) {
             return args.length == 2
                 ? List.of("all", "ack").stream().filter(o -> o.startsWith(args[1].toLowerCase(Locale.ROOT))).toList()
@@ -137,6 +165,10 @@ public class CurrencyAdminCommand {
             return PARTIAL_FLAG.startsWith(args[2].toLowerCase(Locale.ROOT)) ? List.of(PARTIAL_FLAG) : List.of();
         }
         return List.of();
+    }
+
+    private boolean holds(CommandSender sender, String action) {
+        return holdsCached.test(sender, NODE_BY_ACTION.get(action));
     }
 
     static BalanceCurrency parseCurrency(String value) {

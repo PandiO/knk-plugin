@@ -108,10 +108,15 @@ public class FlyCommand implements TabExecutor {
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        // KNG-107: on/off with knk.fly, player names with knk.fly.others (cached checks).
+        boolean self = support.holds(sender, NODE);
+        boolean others = support.holds(sender, NODE_OTHERS);
         if (args.length == 1) {
-            return support.completePlayers(sender, args[0], STATES.toArray(String[]::new));
+            List<String> states = self || others ? STATES : List.of();
+            return others ? support.completePlayers(sender, args[0], states.toArray(String[]::new))
+                : PlayerCommandSupport.completeWords(args[0], states);
         }
-        if (args.length == 2 && parseState(args[0]) != null) {
+        if (args.length == 2 && others && parseState(args[0]) != null) {
             return support.completePlayers(sender, args[1]);
         }
         return Collections.emptyList();

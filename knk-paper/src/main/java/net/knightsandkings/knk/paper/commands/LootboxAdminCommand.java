@@ -503,11 +503,25 @@ public final class LootboxAdminCommand {
         return LootboxRejectedException.unwrap(ex).getMessage();
     }
 
+    /** Every {@code knk.lootbox.admin.<action>} node: /knk lootbox is listed to holders of at least one (KNG-107). */
+    public static List<String> nodes() {
+        return SUBCOMMANDS.stream().map(sub -> NODE_PREFIX + sub).toList();
+    }
+
+    /** Whether /knk help and tab completion list /knk lootbox at all: any action's node (cached check). */
+    public boolean visibleTo(CommandSender sender) {
+        return SUBCOMMANDS.stream().anyMatch(sub -> allowed(sender, sub));
+    }
+
+    /** The actions the sender holds the node for, then their arguments - nothing for an action they can't run. */
     public List<String> tabComplete(CommandSender sender, String[] args) {
         if (args.length == 1) {
             return LootboxCommand.filter(SUBCOMMANDS.stream().filter(s -> allowed(sender, s)).toList(), args[0]);
         }
         String sub = args[0].toLowerCase(Locale.ROOT);
+        if (!SUBCOMMANDS.contains(sub) || !allowed(sender, sub)) {
+            return List.of();
+        }
         if ("area".equals(sub)) {
             return areaCommand.tabComplete(Arrays.copyOfRange(args, 1, args.length));
         }

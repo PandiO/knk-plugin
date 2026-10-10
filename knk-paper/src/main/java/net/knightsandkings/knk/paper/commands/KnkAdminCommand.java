@@ -81,6 +81,9 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         private final AtomicBoolean knkIdRefreshInProgress = new AtomicBoolean(false);
 
         private static final long KNK_ID_REFRESH_INTERVAL_MS = 30_000L;
+        /** Under the permission cache TTL (config.yml cache.entities.permissions.ttl-seconds, 30). */
+        private static final long COMPLETION_WARM_INTERVAL_MS = 20_000L;
+        private final java.util.Map<java.util.UUID, Long> lastCompletionWarm = new java.util.concurrent.ConcurrentHashMap<>();
         private static final int KNK_ID_PAGE_SIZE = 100;
 
     public KnkAdminCommand(
@@ -414,7 +417,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         // Currency ledger Phase 4/5: /knk currency reverse|history|lock|unlock|alerts. Null top-level
         // permission like /knk user: each action checks its own knk.admin.currency.* node.
         if (playerCurrencyService != null) {
-            currencyAdminCommand = new CurrencyAdminCommand(playerCurrencyService);
+            currencyAdminCommand = new CurrencyAdminCommand(playerCurrencyService, (sender, node) -> commandPermissions.has(sender, node));
             registry.register(
                     new CommandMetadata("currency", "Reverse ledger transactions, read a player's history, lock payments, see anomaly alerts",
                             "/knk currency reverse <txId> [--partial] <reason> | history <player> [coins|gems|xp] [page] | lock <player> <reason> | unlock <player> | alerts [all] [page] | alerts ack <id>", null,
@@ -442,6 +445,13 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                         List.of("/knk help", "/knk help towns")),
                 (sender, args) -> helpSubcommand.execute(sender, args)
         );
+        // KNG-107: offered only to senders who are offered something else; running it is unchanged.
+        registry.setVisibility("help", sender -> registry.anyListedExcept(sender, "help"));
+        // Each action checks its own node (the metadata carries none): listed only to holders of one.
+        registry.setVisibleToAny("user", UserManagementCommand.CHECKED_NODES);
+        if (currencyAdminCommand != null) {
+            registry.setVisibleToAny("currency", CurrencyAdminCommand.NODES);
+        }
 
         refreshVanillaEnchantmentTokens();
                 refreshRegistryCustomEnchantmentTokens();
@@ -471,6 +481,17 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
     /** See {@link CommandRegistry#setVisibility}. */
     public void setSubcommandVisibility(String name, java.util.function.Predicate<CommandSender> visibleTo) {
         registry.setVisibility(name, visibleTo);
+    }
+
+    /** See {@link CommandRegistry#setVisibility(String, java.util.function.Predicate, java.util.Collection)}. */
+    public void setSubcommandVisibility(String name, java.util.function.Predicate<CommandSender> visibleTo,
+                                       java.util.Collection<String> nodes) {
+        registry.setVisibility(name, visibleTo, nodes);
+    }
+
+    /** See {@link CommandRegistry#setVisibleToAny}. */
+    public void setSubcommandVisibleToAny(String name, java.util.Collection<String> nodes) {
+        registry.setVisibleToAny(name, nodes);
     }
 
     @Override
@@ -532,6 +553,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                         return Collections.emptyList();
                 }
 
+                warmForCompletion(sender);
                 if (args.length == 1) {
                         List<String> rootCommands = registry.listAvailable(sender).stream()
                                         .map(c -> c.metadata().name())
@@ -540,9 +562,11 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                         return filterByPrefix(rootCommands, args[0]);
                 }
 
+                // KNG-107: nothing past a subcommand the sender isn't offered (its node, or for a
+                // nodeless one its visibility - none of its action nodes held).
                 String enteredRoot = args[0].toLowerCase(Locale.ROOT);
                 var rootCommand = registry.get(enteredRoot);
-                if (rootCommand.isEmpty() || !commandPermissions.has(sender, rootCommand.get().metadata().permission())) {
+                if (rootCommand.isEmpty() || !registry.isListed(sender, rootCommand.get())) {
                         return Collections.emptyList();
                 }
                 String root = rootCommand.get().metadata().name().toLowerCase(Locale.ROOT);
@@ -564,6 +588,24 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                         plugin.getLogger().warning("Tab completion failed for /knk: " + ex.getMessage());
                         return Collections.emptyList();
                 }
+        }
+
+        /**
+         * Tab completion reads cached answers only (never waits on knk-web-api). For a player, asks
+         * for every listed node in the background - at most every {@link #COMPLETION_WARM_INTERVAL_MS}
+         * - so a cold or expired cache shows their real grants from the next keystroke on (KNG-107).
+         */
+        private void warmForCompletion(CommandSender sender) {
+                if (!(sender instanceof Player player)) {
+                        return;
+                }
+                long now = System.currentTimeMillis();
+                Long last = lastCompletionWarm.get(player.getUniqueId());
+                if (last != null && now - last < COMPLETION_WARM_INTERVAL_MS) {
+                        return;
+                }
+                lastCompletionWarm.put(player.getUniqueId(), now);
+                commandPermissions.warm(sender, registry.permissionNodes(), () -> { });
         }
 
         private List<String> completeBuiltIn(CommandSender sender, String root, String[] args) {
@@ -847,7 +889,9 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         }
 
         // /knk user <player> info|coins|gems|xp <set|add|remove> <amount> - userArgs is args
-        // with "user" already stripped, so userArgs[0] is the player name.
+        // with "user" already stripped, so userArgs[0] is the player name. KNG-107: only the
+        // properties whose knk.admin.user.<property> node the sender holds (info: any of them);
+        // the visibility check in onTabComplete already left out senders holding none.
         private List<String> completeUserSubcommand(CommandSender sender, String[] userArgs) {
                 if (userArgs.length == 0) {
                         return Collections.emptyList();
@@ -855,8 +899,12 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                 if (userArgs.length == 1) {
                         return visiblePlayers.complete(sender, userArgs[0]);
                 }
+                List<String> held = UserManagementCommand.propertiesHeld(sender, commandPermissions::has);
                 if (userArgs.length == 2) {
-                        return filterByPrefix(List.of("info", "coins", "gems", "xp", "history", "group", "perm"), userArgs[1]);
+                        return filterByPrefix(held, userArgs[1]);
+                }
+                if (!held.contains(userArgs[1].toLowerCase(Locale.ROOT))) {
+                        return Collections.emptyList();
                 }
                 if (userArgs.length == 3 && "history".equalsIgnoreCase(userArgs[1])) {
                         return filterByPrefix(List.of("coins", "gems", "xp"), userArgs[2]);

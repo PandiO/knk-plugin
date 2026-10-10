@@ -222,10 +222,15 @@ public class SpawnCommand implements TabExecutor {
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        // KNG-107: the <player> form and its -s only for staff holding their nodes (cached check).
+        if (!support.holds(sender, TeleportNodes.STAFF_OTHERS)) {
+            return Collections.emptyList();
+        }
         if (args.length == 1) {
             return targets.complete(sender, args[0]);
         }
-        if (args.length == 2 && "-s".startsWith(args[1].toLowerCase(Locale.ROOT))) {
+        if (args.length == 2 && "-s".startsWith(args[1].toLowerCase(Locale.ROOT))
+                && support.holds(sender, TeleportNodes.STAFF_SILENT)) {
             return List.of("-s");
         }
         return Collections.emptyList();

@@ -123,11 +123,18 @@ public class InventoryCommand implements TabExecutor {
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        // KNG-107: open with knk.inventory.open, clear with knk.inventory.clear (cached checks).
+        boolean open = support.holds(sender, NODE_OPEN);
+        boolean clear = support.holds(sender, NODE_CLEAR);
         if (args.length == 1) {
             String prefix = args[0].toLowerCase(Locale.ROOT);
-            return Stream.of("open", "clear").filter(s -> s.startsWith(prefix)).toList();
+            return Stream.of("open", "clear")
+                .filter(s -> s.startsWith(prefix) && ("open".equals(s) ? open : clear)).toList();
         }
         String sub = args[0].toLowerCase(Locale.ROOT);
+        if (OPEN_ALIASES.contains(sub) ? !open : !(CLEAR.equals(sub) && clear)) {
+            return Collections.emptyList();
+        }
         if (args.length == 2 && (OPEN_ALIASES.contains(sub) || CLEAR.equals(sub))) {
             return support.completeKnownPlayers(sender, args[1]);
         }

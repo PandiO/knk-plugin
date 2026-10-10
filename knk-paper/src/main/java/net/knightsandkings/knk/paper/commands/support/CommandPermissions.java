@@ -75,6 +75,21 @@ public final class CommandPermissions {
     }
 
     /**
+     * {@link #has} for tab completion (KNG-107): on a "no" for a player it also asks the in-house
+     * model in the background (never waited on), so a cold or expired cache shows the real answer
+     * from the next keystroke on. A cached "no" is answered from the cache without an API call.
+     */
+    public boolean hasForCompletion(CommandSender sender, String node) {
+        if (has(sender, node)) {
+            return true;
+        }
+        if (asyncCheck != null && sender instanceof Player player) {
+            decide(player, node);
+        }
+        return false;
+    }
+
+    /**
      * Runs {@code onAllowed} if the sender may use {@code node} - straight away for the console, a
      * Bukkit grant or a null node, otherwise on the main thread once the in-house check answers.
      * Refusals are told to the sender ({@link #NO_PERMISSION_MESSAGE}, or

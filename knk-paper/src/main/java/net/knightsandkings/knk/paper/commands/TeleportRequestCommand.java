@@ -136,12 +136,15 @@ public class TeleportRequestCommand implements TabExecutor {
         return switch (form) {
             case TPA -> {
                 if (args.length == 1) {
-                    yield targets.complete(sender, last, "accept", "deny");
+                    // KNG-107: player names only with the request node; accept/deny need none.
+                    yield support.holds(sender, TeleportNodes.REQUEST)
+                        ? targets.complete(sender, last, "accept", "deny") : prefixed(List.of("accept", "deny"), last);
                 }
                 yield args.length == 2 && isAnswer(args[0]) ? prefixed(requests.pendingRequesterNames(player), last)
                     : Collections.emptyList();
             }
-            case TPAHERE -> args.length == 1 ? targets.complete(sender, last) : Collections.emptyList();
+            case TPAHERE -> args.length == 1 && support.holds(sender, TeleportNodes.REQUEST_HERE)
+                ? targets.complete(sender, last) : Collections.emptyList();
             case ACCEPT, DENY -> args.length == 1 ? prefixed(requests.pendingRequesterNames(player), last)
                 : Collections.emptyList();
             case CANCEL -> Collections.emptyList();

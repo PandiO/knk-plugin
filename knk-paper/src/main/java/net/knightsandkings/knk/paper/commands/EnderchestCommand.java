@@ -83,6 +83,10 @@ public class EnderchestCommand implements TabExecutor {
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        // KNG-107: every argument opens another player's ender chest - knk.enderchest.open only.
+        if (!support.holds(sender, NODE_OPEN)) {
+            return Collections.emptyList();
+        }
         if (args.length == 1) {
             return support.completeKnownPlayers(sender, args[0], SUBCOMMANDS.toArray(String[]::new));
         }

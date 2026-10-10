@@ -51,7 +51,7 @@ public class BaltopCommand implements TabExecutor {
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        if (args.length == 1) {
+        if (args.length == 1 && currency.holds(sender, PlayerCurrencyService.BALTOP_NODE)) { // KNG-107
             return List.of("coins", "gems").stream().filter(c -> c.startsWith(args[0].toLowerCase(Locale.ROOT))).toList();
         }
         return List.of();

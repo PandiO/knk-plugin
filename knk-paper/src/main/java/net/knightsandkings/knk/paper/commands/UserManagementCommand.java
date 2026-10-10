@@ -241,6 +241,19 @@ public class UserManagementCommand implements CommandExecutor {
             + ChatColor.GRAY + "  Title: " + ChatColor.WHITE + (target.titleName() != null ? target.titleName() : "-"));
     }
 
+    /**
+     * The properties whose {@code knk.admin.user.<property>} node the sender holds per
+     * {@code holdsCached}, for tab completion (KNG-107); {@code info} needs any of them.
+     */
+    public static List<String> propertiesHeld(CommandSender sender, java.util.function.BiPredicate<CommandSender, String> holdsCached) {
+        List<String> held = new java.util.ArrayList<>(PROPERTIES.stream()
+                .filter(property -> holdsCached.test(sender, UserAdminService.NODE_PREFIX + property)).toList());
+        if (!held.isEmpty() && !held.contains("info")) {
+            held.add(0, "info");
+        }
+        return held;
+    }
+
     private boolean hasAnyUserPermission(CommandSender sender) {
         return PROPERTIES.stream().anyMatch(property -> userAdminService.hasPermission(sender, UserAdminService.NODE_PREFIX + property));
     }

@@ -164,4 +164,16 @@ class CommandPermissionsTest {
         var gated = new PermissionGatedCommand(NODE, mock(CommandExecutor.class), permissions);
         assertEquals(List.of(), gated.onTabComplete(staff, mock(Command.class), "freeze", new String[] {""}));
     }
+
+    // KNG-107: completion reads the cache only; a miss is asked in the background for the next keystroke.
+    @Test
+    void hasForCompletion_answersFromTheCache_andAsksAMissInTheBackground() {
+        inHouse(PermissionDecision.ALLOWED);
+        assertFalse(permissions.hasForCompletion(staff, NODE));
+        verify(permissible).checkAsync(staff, NODE);
+
+        when(permissible.hasPermission(staff, NODE)).thenReturn(true);
+        assertTrue(permissions.hasForCompletion(staff, NODE));
+        assertTrue(permissions.hasForCompletion(mock(ConsoleCommandSender.class), NODE));
+    }
 }

@@ -106,6 +106,9 @@ class SpawnCommandTest {
             .hasPermissionAsync(inv.getArgument(0), inv.getArgument(1))
             .thenApply(net.knightsandkings.knk.core.domain.permissions.PermissionDecision::of));
         when(teleportService.start(any())).thenReturn(CompletableFuture.completedFuture(TeleportOutcome.teleported()));
+        // The cached answer tab completion reads (KNG-107); same grants.
+        when(permissible.hasPermission(any(Player.class), anyString()))
+            .thenAnswer(inv -> granted.contains(inv.<String>getArgument(1)));
     }
 
     private static Player player(String name) {
@@ -353,7 +356,18 @@ class SpawnCommandTest {
 
     @Test
     void tabCompletesPlayersThenTheSilentFlag() {
+        grant(TeleportNodes.STAFF_OTHERS, TeleportNodes.STAFF_SILENT);
         assertEquals(List.of("Alice"), command.onTabComplete(staff, mock(Command.class), "spawn", new String[]{"al"}));
         assertEquals(List.of("-s"), command.onTabComplete(staff, mock(Command.class), "spawn", new String[]{"Bob", ""}));
+    }
+
+    // KNG-107: the <player> form and -s only for staff holding their nodes.
+    @Test
+    void tabCompletion_withoutNodes_suggestsNothing_withOthersOnly_noSilentFlag() {
+        grant(TeleportNodes.SPAWN);
+        assertEquals(List.of(), command.onTabComplete(staff, mock(Command.class), "spawn", new String[]{"al"}));
+        grant(TeleportNodes.STAFF_OTHERS);
+        assertEquals(List.of("Alice"), command.onTabComplete(staff, mock(Command.class), "spawn", new String[]{"al"}));
+        assertEquals(List.of(), command.onTabComplete(staff, mock(Command.class), "spawn", new String[]{"Bob", ""}));
     }
 }

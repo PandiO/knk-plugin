@@ -44,7 +44,8 @@ public class HelpSubcommand {
     private void showCommandDetail(CommandSender sender, String commandName) {
         var cmd = registry.get(commandName);
         
-        if (cmd.isEmpty()) {
+        // KNG-107: a subcommand the sender isn't offered is "unknown" here too, not described.
+        if (cmd.isEmpty() || !registry.isListed(sender, cmd.get())) {
             sender.sendMessage(ChatColor.RED + "Unknown command: " + commandName);
             sender.sendMessage(ChatColor.GRAY + "Use " + ChatColor.WHITE + "/knk help" + 
                     ChatColor.GRAY + " to see available commands");

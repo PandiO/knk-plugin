@@ -28,6 +28,8 @@ public class BalanceCommand implements TabExecutor {
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        return args.length == 1 ? currency.visiblePlayers().names(sender, args[0]) : List.of();
+        // KNG-107: other players' names only with knk.balance.others (cached check).
+        return args.length == 1 && currency.holds(sender, PlayerCurrencyService.BALANCE_OTHERS_NODE)
+            ? currency.visiblePlayers().names(sender, args[0]) : List.of();
     }
 }

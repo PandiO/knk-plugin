@@ -40,7 +40,15 @@ public class ModeCommand implements CommandExecutor, TabCompleter {
     private final ModeService modeService;
     private final ActiveMode mode;
 
+    /** The immediate (cache-only) node check for tab completion (KNG-107). */
+    private final java.util.function.BiPredicate<CommandSender, String> holdsCached;
+
     public ModeCommand(ModeService modeService, ActiveMode mode) {
+        this(modeService, mode, net.knightsandkings.knk.paper.commands.support.CommandPermissions.bukkitOnly()::has);
+    }
+
+    public ModeCommand(ModeService modeService, ActiveMode mode, java.util.function.BiPredicate<CommandSender, String> holdsCached) {
+        this.holdsCached = holdsCached;
         this.modeService = Objects.requireNonNull(modeService, "modeService must not be null");
         if (mode == null || mode == ActiveMode.NONE) {
             throw new IllegalArgumentException("ModeCommand needs a concrete mode, got " + mode);
@@ -182,6 +190,10 @@ public class ModeCommand implements CommandExecutor, TabCompleter {
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        // KNG-107: only for holders of the mode's node (knk.mode.owner / knk.mode.staff).
+        if (!holdsCached.test(sender, ModeService.nodeFor(mode))) {
+            return List.of();
+        }
         if (args.length == 1) {
             return filter(List.of("on", "off", "enable", "disable", "help"), args[0]);
         }

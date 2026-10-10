@@ -340,4 +340,38 @@ class StaffTeleportCommandTest {
         verify(staff).sendMessage("§cCan't teleport Alice: Alice is in a siege match.");
         verify(alice, never()).sendMessage(anyString());
     }
+
+    // ===== KNG-107: tab completion offers only what the sender can run =====
+
+    private List<String> complete(StaffTeleportCommand command, String... args) {
+        when(permissible.hasPermission(any(Player.class), anyString()))
+            .thenAnswer(inv -> granted.contains(inv.<String>getArgument(1)));
+        return command.onTabComplete(staff, mock(Command.class), "tp", args);
+    }
+
+    @Test
+    void completion_withoutNodes_suggestsNothing() {
+        assertEquals(List.of(), complete(tp, "a"));
+        assertEquals(List.of(), complete(tp, "Alice", ""));
+        assertEquals(List.of(), complete(tp, "10", ""));
+        assertEquals(List.of(), complete(tphere, "a"));
+    }
+
+    @Test
+    void completion_withTheStaffNodeOnly_namesButNoSecondPlayerOrSilentFlag() {
+        grant(TeleportNodes.STAFF);
+        assertEquals(List.of("Alice"), complete(tp, "a"));
+        assertEquals(List.of(), complete(tp, "Alice", ""));
+        assertEquals(List.of("~"), complete(tp, "10", ""));
+        assertEquals(List.of(), complete(tphere, "a"));
+    }
+
+    @Test
+    void completion_withOthersAndSilent_everything() {
+        grant(TeleportNodes.STAFF_OTHERS, TeleportNodes.STAFF_SILENT);
+        assertEquals(List.of("Bob"), complete(tp, "Alice", "b"));
+        assertEquals(List.of("-s"), complete(tp, "Alice", "-"));
+        assertEquals(List.of("Alice"), complete(tphere, "a"));
+        assertEquals(List.of("-s"), complete(tphere, "Alice", ""));
+    }
 }

@@ -700,6 +700,8 @@ public class KnKPlugin extends JavaPlugin {
                 // The /pay confirmation expiry notice (main thread; cancelled when settled or on quit).
                 (delay, task) -> getServer().getScheduler().runTaskLater(this, task, Math.max(1L, delay.toMillis() / 50L))::cancel
             );
+            // KNG-107: tab completion offers only what the player holds (cached; a miss is asked in the background).
+            this.playerCurrencyService.setCachedPermissions(commandPermissions()::hasForCompletion);
             if (playerNotificationPoller != null) {
                 // "You received N coins from X" - right away when online, else on the next join.
                 var paymentHandler = new net.knightsandkings.knk.paper.currency.PaymentNotificationHandler(
@@ -1619,6 +1621,8 @@ public class KnKPlugin extends JavaPlugin {
                             "/knk lootbox area create spawn", "/knk lootbox area delete spawn")),
                     lootboxAdmin::execute,
                     lootboxAdmin::tabComplete);
+                knkAdminCommand.setSubcommandVisibility("lootbox", lootboxAdmin::visibleTo,
+                    net.knightsandkings.knk.paper.commands.LootboxAdminCommand.nodes()); // KNG-107
             }
             if (userAdminService != null) {
                 // Domain discovery (KNG-20): /knk discovery list|reset|status, node knk.admin.discovery.
@@ -1652,6 +1656,8 @@ public class KnKPlugin extends JavaPlugin {
                         return java.util.List.of();
                     }
                 );
+                knkAdminCommand.setSubcommandVisibleToAny("discovery",
+                    java.util.List.of(net.knightsandkings.knk.paper.commands.DiscoveryAdminCommand.NODE)); // KNG-107
             }
             // Road navigation (KNG-27): /knk road …, node knk.admin.road. registerCommands() runs before
             // initializeRoads(), so every service is read lazily; a null one means navigation is disabled.
@@ -1666,6 +1672,8 @@ public class KnKPlugin extends JavaPlugin {
             roadAdmin.setLiveTags(() -> liveEdgeTags);
             knkAdminCommand.registerSubcommand(
                 net.knightsandkings.knk.paper.roads.RoadAdminCommand.metadata(), roadAdmin, roadAdmin::complete);
+            knkAdminCommand.setSubcommandVisibleToAny("road",
+                java.util.List.of(net.knightsandkings.knk.paper.roads.RoadAdminCommand.NODE)); // KNG-107
             // Road navigation Phase 4: /navigate (/nav), DESIGN §6.1. The services are read lazily - they
             // exist only when navigation.enabled and the road cache started (initializeNavigation).
             registerTabCommand("navigate", new net.knightsandkings.knk.paper.navigation.NavigateCommand(
@@ -1688,7 +1696,8 @@ public class KnKPlugin extends JavaPlugin {
                 knkAdminCommand.registerSubcommand(
                     net.knightsandkings.knk.paper.locations.LocationAdminCommand.metadata(), locationAdmin, locationAdmin::complete);
                 // No top-level node (each action checks its own), so only list it to holders of one of them.
-                knkAdminCommand.setSubcommandVisibility("location", locationAdmin::visibleTo);
+                knkAdminCommand.setSubcommandVisibility("location", locationAdmin::visibleTo,
+                    net.knightsandkings.knk.paper.locations.LocationAdminCommand.NODES);
             }
             // KNG-80: the weekly orphan check's digest, for online staff with knk.admin.location.orphans.notify
             // (or the next one to join when none is online).
@@ -2491,7 +2500,7 @@ public class KnKPlugin extends JavaPlugin {
     private void registerModeCommand(String name, ActiveMode mode) {
         PluginCommand modeCommand = getCommand(name);
         if (modeCommand != null) {
-            ModeCommand executor = new ModeCommand(modeService, mode);
+            ModeCommand executor = new ModeCommand(modeService, mode, commandPermissions()::hasForCompletion);
             modeCommand.setExecutor(executor);
             modeCommand.setTabCompleter(executor);
             getLogger().info("Registered /" + name + " command");

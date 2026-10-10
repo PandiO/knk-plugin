@@ -46,6 +46,8 @@ public final class LocationAdminCommand implements SubcommandExecutor {
     public static final String HERE_NODE = "knk.admin.location";
     public static final String TELEPORT_NODE = "knk.admin.location.tp";
     public static final String ORPHANS_NODE = "knk.admin.location.orphans";
+    /** Every action node, asked for before a /knk listing reads them from the cache (KNG-107). */
+    public static final List<String> NODES = List.of(HERE_NODE, TELEPORT_NODE, ORPHANS_NODE);
     static final int PAGE_SIZE = 8;
 
     /** CommandPermissions' check-then-run, as a seam for tests. */

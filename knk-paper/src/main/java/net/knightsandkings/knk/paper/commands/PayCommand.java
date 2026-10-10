@@ -78,6 +78,10 @@ public class PayCommand implements TabExecutor {
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        // KNG-107: nothing without knk.pay, "gems" only with knk.pay.gems (cached checks).
+        if (!currency.holds(sender, PlayerCurrencyService.PAY_NODE)) {
+            return List.of();
+        }
         if (args.length == 1) {
             List<String> options = new ArrayList<>(currency.visiblePlayers().names(sender, args[0]));
             for (String word : List.of("confirm", "cancel")) {
@@ -88,7 +92,8 @@ public class PayCommand implements TabExecutor {
             return options;
         }
         if (args.length == 3) {
-            return List.of("coins", "gems").stream().filter(c -> c.startsWith(args[2].toLowerCase(Locale.ROOT))).toList();
+            List<String> currencies = currency.holds(sender, PlayerCurrencyService.PAY_GEMS_NODE) ? List.of("coins", "gems") : List.of("coins");
+            return currencies.stream().filter(c -> c.startsWith(args[2].toLowerCase(Locale.ROOT))).toList();
         }
         return List.of();
     }

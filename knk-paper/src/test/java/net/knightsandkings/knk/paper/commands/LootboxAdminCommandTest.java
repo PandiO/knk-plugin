@@ -145,8 +145,21 @@ class LootboxAdminCommandTest {
     void tabComplete_offersOnlyAllowedActions() {
         granted.add("knk.lootbox.admin.list");
         assertEquals(List.of("list"), command.tabComplete(admin, new String[]{""}));
+        // KNG-107: no arguments for an action the sender can't run.
+        assertEquals(List.of(), command.tabComplete(admin, new String[]{"spawn", "w"}));
+        granted.add("knk.lootbox.admin.spawn");
         assertEquals(List.of("weapons"), command.tabComplete(admin, new String[]{"spawn", "w"}));
         verify(api, never()).despawn(isNull(), anyInt());
+    }
+
+    @Test
+    void withoutAnyNode_noSuggestionsAndNotVisible() {
+        assertEquals(List.of(), command.tabComplete(admin, new String[]{""}));
+        assertEquals(List.of(), command.tabComplete(admin, new String[]{"give", ""}));
+        assertEquals(false, command.visibleTo(admin));
+        granted.add("knk.lootbox.admin.give");
+        assertEquals(true, command.visibleTo(admin));
+        assertEquals(List.of("give"), command.tabComplete(admin, new String[]{""}));
     }
 
     // ===== token (Phase 5) =====
