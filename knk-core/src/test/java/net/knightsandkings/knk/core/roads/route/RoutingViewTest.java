@@ -211,6 +211,81 @@ class RoutingViewTest {
         assertEquals(38, into.explanation().partialRoute().end().x(), 1e-9, "guided to the district's edge");
     }
 
+    // ---- KNG-110: a region over part of the road's width -------------------------------------------
+
+    /** E_AB with the castle region on its centre line between x = 40 and 60, and the given lanes across the road. */
+    private List<Span> partSpans(Function<EdgeTagging.Sample, Set<List<String>>> lanes) {
+        return RoutingView.spans(town.requireEdge(E_AB), 100,
+            hits(town, E_AB, EdgeTagging.REGION_STEP, s -> s.x() >= 40 && s.x() <= 60 ? Set.of(CASTLE_REGION) : Set.of()),
+            hits(town, E_AB, EdgeTagging.REGION_STEP, lanes),
+            hits(town, E_AB, EdgeTagging.DOOR_STEP, none()));
+    }
+
+    /** A free row beside the castle (no region there) between x = 40 and {@code to}. */
+    private static Function<EdgeTagging.Sample, Set<List<String>>> freeRow(int to) {
+        return s -> s.x() >= 40 && s.x() <= to ? Set.of(List.of()) : Set.of();
+    }
+
+    @Test
+    void minimalLanesDropCellsThatHoldAnotherCellsRegions() {
+        assertEquals(List.of(List.of("town"), List.of("a", "b")), RoutingView.minimalLanes(
+            List.of(Set.of("town", CASTLE_REGION), Set.of("town"), Set.of("b", "a"), Set.of("town"))));
+        assertEquals(List.of(List.of()), RoutingView.minimalLanes(List.of(Set.of(CASTLE_REGION), Set.of())));
+    }
+
+    @Test
+    void aRegionOverPartOfTheWidthKeepsItsTagAndTheFreeLane() {
+        List<Span> spans = partSpans(freeRow(60));
+
+        assertEquals(3, spans.size());
+        assertEquals(List.of(CASTLE_REGION), spans.get(1).regionIds(), "the centre line is still in the region (exit)");
+        assertEquals(List.of(List.of()), spans.get(1).lanes(), "a free row beside it");
+        assertEquals(38, spans.get(1).from(), 1e-9);
+        assertEquals(62, spans.get(1).to(), 1e-9);
+        assertTrue(spans.get(0).lanes().isEmpty() && spans.get(2).lanes().isEmpty());
+    }
+
+    @Test
+    void whereTheRegionCoversTheWholeWidthThePieceHasNoLanes() {
+        List<Span> spans = partSpans(freeRow(50)); // the whole width from x = 52
+
+        assertEquals(4, spans.size());
+        assertEquals(List.of(List.of()), spans.get(1).lanes());
+        assertEquals(52, spans.get(1).to(), 1e-9, "widened to the first sample without the gap");
+        assertEquals(List.of(CASTLE_REGION), spans.get(2).regionIds());
+        assertTrue(spans.get(2).lanes().isEmpty(), "the centre line decides: blocked");
+        assertEquals(62, spans.get(2).to(), 1e-9);
+    }
+
+    @Test
+    void aStoredRegionFoundNowhereJoinsEveryLane() {
+        RoadEdge castleRoad = town.requireEdge(E_C_CASTLE); // stored: region kardenna_castle
+        List<Span> spans = RoutingView.spans(castleRoad, 100, hits(town, E_C_CASTLE, 2.0, s -> Set.of("town")),
+            hits(town, E_C_CASTLE, 2.0, s -> Set.of(List.of("town"), List.of("market"))), hits(town, E_C_CASTLE, 0.5, none()));
+
+        assertEquals(1, spans.size());
+        assertEquals(List.of(List.of(CASTLE_REGION, "market"), List.of(CASTLE_REGION, "town")), spans.get(0).lanes());
+    }
+
+    @Test
+    void aDeniedRegionOverPartOfTheWidthLeavesTheRoadOpen() {
+        AccessPolicy denied = AStarRouterTest.castle(false, null, Set.of());
+
+        RoadNetworkSnapshot gap = RoutingView.build(town, Map.of(E_AB, partSpans(freeRow(60))));
+        RouteResult through = new AStarRouter(gap).route(
+            RouteRequest.of(SnapPoint.atNode(gap, A), SnapPoint.atNode(gap, B), denied, params));
+        assertTrue(through.isFound());
+        assertEquals(100, through.route().length(), 1e-9, "straight along the road, past the region");
+        assertEquals(List.of(List.of()), pieces(gap, E_AB).get(1).lanes(), "the piece carries its lanes");
+
+        RoadNetworkSnapshot whole = RoutingView.build(town, Map.of(E_AB, partSpans(none())));
+        RouteResult around = new AStarRouter(whole).route(
+            RouteRequest.of(SnapPoint.atNode(whole, A), SnapPoint.atNode(whole, B), denied, params));
+        assertTrue(around.isFound());
+        assertTrue(around.route().steps().stream().noneMatch(s -> whole.storedEdgeId(s.edge().id()) == E_AB),
+            "the whole width covered: the way round");
+    }
+
     // ---- instructions ----------------------------------------------------------------------------
 
     @Test
