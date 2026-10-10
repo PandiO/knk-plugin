@@ -900,6 +900,9 @@ public class KnKPlugin extends JavaPlugin {
                     .runTaskTimer(this, 1L, 1L);
             }
             new GateDisplayUpdateTask(gateDisplayManager, gateManager).runTaskTimer(this, 20L, 20L);
+            // KNG-106: anyone found inside gate door blocks is moved out instead of suffocating.
+            getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.gates.GateSuffocationGuard(
+                this, gateManager, getConfig().getBoolean("gates.safety.door-suffocation-damage", false)), this);
 
             int gateDisplayCleanupIntervalSeconds = getConfig().getInt("gates.display-cleanup-interval-seconds", 60);
             long gateDisplayCleanupIntervalTicks = Math.max(20L, gateDisplayCleanupIntervalSeconds * 20L);
@@ -1645,6 +1648,8 @@ public class KnKPlugin extends JavaPlugin {
             // KNG-77/78/79: /gate and /gatedoor run /knk gate|gatedoor (same permissions and warm-up);
             // `here` radius and look-at reach from config.yml gates.here.* / gates.lookat.*.
             knkAdminCommand.setGateTargetingSettings(gateTargetingSettings());
+            // KNG-105: /gate tp goes to the structure's own spawn point (its Domain Location) when set.
+            knkAdminCommand.setGateSpawnLookup(gateSpawnLookup(), MenuService.mainThreadExecutor(this));
             registerKnkShortcut("gate", knkAdminCommand);
             registerKnkShortcut("gatedoor", knkAdminCommand);
             if (managedRegions != null) {
@@ -2545,6 +2550,25 @@ public class KnKPlugin extends JavaPlugin {
                 return all;
             }
         });
+    }
+
+    /**
+     * KNG-105: a gate structure's spawn point - a GateStructure is a Structure (TPT), so its Location
+     * comes through the Structure/Location data accesses like {@code /spawn}'s; null without them.
+     */
+    private net.knightsandkings.knk.paper.commands.GateCommandSupport.StructureSpawnLookup gateSpawnLookup() {
+        if (dataAccessFactory == null || cacheManager == null || locationsQueryApi == null || structuresQueryApi == null
+                || townsDataAccess == null || districtsQueryApi == null) {
+            return null;
+        }
+        ensureDomainDataAccesses();
+        net.knightsandkings.knk.core.dataaccess.FetchPolicy lookup = net.knightsandkings.knk.core.dataaccess.FetchPolicy.API_THEN_CACHE_REFRESH;
+        var structures = new net.knightsandkings.knk.core.navigation.DomainLocationResolver(
+            id -> locationsDataAccess.getByIdAsync(id, lookup).thenApply(r -> r != null ? r.value() : java.util.Optional.empty()),
+            id -> townsDataAccess.getByIdAsync(id, lookup).thenApply(r -> r != null ? r.value() : java.util.Optional.empty()),
+            id -> districtsDataAccess.getByIdAsync(id, lookup).thenApply(r -> r != null ? r.value() : java.util.Optional.empty()),
+            id -> structuresDataAccess.getByIdAsync(id, lookup).thenApply(r -> r != null ? r.value() : java.util.Optional.empty()));
+        return structures::structureLocation;
     }
 
     /** config.yml gates.here.* / gates.lookat.* (KNG-78/79). */

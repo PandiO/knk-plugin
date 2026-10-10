@@ -6,6 +6,7 @@ import net.knightsandkings.knk.api.dto.GateStructureOverridesUpdateDto;
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.domain.gates.CachedGateStructure;
+import net.knightsandkings.knk.core.domain.location.KnkLocation;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.gates.GateCommandKeywords;
 import net.knightsandkings.knk.core.gates.GateManager;
@@ -20,6 +21,7 @@ import net.knightsandkings.knk.paper.user.PlayerUserData;
 import net.knightsandkings.knk.paper.user.UserManager;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
+import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -30,6 +32,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 import static net.knightsandkings.knk.paper.commands.GateCommandSupport.STRUCTURE_ROOT;
@@ -65,6 +68,8 @@ public class GateCommand implements CommandExecutor {
 
     static final List<String> SUBCOMMANDS = List.of("open", "close", "toggle", "info", "list", "repair", "tp",
         "override", "reload", "passthrough", "help");
+    /** How long {@code /gate tp} waits for the spawn point before using a door instead. */
+    static final long SPAWN_LOOKUP_TIMEOUT_SECONDS = 5;
     static final List<String> OVERRIDE_FIELDS = List.of("active", "destroyed", "invincible", "canrespawn", "openedstate");
 
     private final GateManager gateManager;
@@ -91,6 +96,20 @@ public class GateCommand implements CommandExecutor {
     /** The door layer ({@code /knk gatedoor}), sharing this command's permissions and targeting. */
     public GateDoorCommand doorCommand() {
         return doorCommand;
+    }
+
+    /**
+     * {@code /gate tp}'s spawn point lookup (KNG-105) and the main-thread executor its answer is
+     * handled on. Unset, {@code /gate tp} goes straight to a door.
+     */
+    public void setStructureSpawnLookup(GateCommandSupport.StructureSpawnLookup lookup, java.util.concurrent.Executor mainThread) {
+        support.spawnLookup = lookup;
+        support.mainThread = java.util.Objects.requireNonNull(mainThread, "mainThread must not be null");
+    }
+
+    /** The shared selector/teleport support, for tests. */
+    GateCommandSupport support() {
+        return support;
     }
 
     /** {@code gates.here.*} / {@code gates.lookat.*} from config.yml (KNG-78/79). */
@@ -389,7 +408,12 @@ public class GateCommand implements CommandExecutor {
         return true;
     }
 
-    /** Teleports to the structure's first door (lowest id). */
+    /**
+     * {@code /gate tp <structure>} (KNG-105): the structure's spawn point - a GateStructure is a
+     * Domain, so its {@code Location}, the point {@code /warp} and {@code /navigate ... spawn} use -
+     * when it has one; otherwise a safe spot next to its first door (lowest id). The reply says
+     * which was used and why.
+     */
     public boolean executeTeleport(CommandSender sender, String[] args) {
         if (!requireAdmin(sender)) {
             return true;
@@ -403,15 +427,51 @@ public class GateCommand implements CommandExecutor {
         if (structure == null) {
             return true;
         }
-        List<CachedGateDoor> doors = support.doorsOf(structure);
-        if (doors.isEmpty()) {
-            sender.sendMessage(ChatColor.YELLOW + "Gate " + quoted(structure) + " has no loaded doors to teleport to.");
+        if (support.spawnLookup == null) {
+            teleportToFirstDoor(player, structure, "the spawn point lookup isn't available");
             return true;
         }
-        if (support.teleportTo(player, doors.get(0))) {
-            sender.sendMessage(ChatColor.GREEN + "Teleported to " + structureLabel(structure) + " (" + doorLabel(doors.get(0)) + ").");
-        }
+        support.spawnLookup.find(structure.getId())
+            .orTimeout(SPAWN_LOOKUP_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .handle((location, error) -> error != null ? null : location)
+            .thenAcceptAsync(location -> {
+                if (!player.isOnline()) {
+                    return;
+                }
+                if (location == null) {
+                    teleportToFirstDoor(player, structure, "its spawn point couldn't be looked up");
+                } else if (location.isEmpty()) {
+                    teleportToFirstDoor(player, structure, "it has no spawn point set");
+                } else {
+                    teleportToSpawn(player, structure, location.get());
+                }
+            }, support.mainThread);
         return true;
+    }
+
+    private void teleportToSpawn(Player player, CachedGateStructure structure, KnkLocation spawn) {
+        World world = spawn.world() != null && player.getServer() != null ? player.getServer().getWorld(spawn.world()) : null;
+        if (world == null || spawn.x() == null || spawn.y() == null || spawn.z() == null) {
+            teleportToFirstDoor(player, structure, "its spawn point is in world '" + spawn.world() + "', which isn't loaded");
+            return;
+        }
+        player.teleport(new Location(world, spawn.x(), spawn.y(), spawn.z(),
+            spawn.yaw() != null ? spawn.yaw() : 0f, spawn.pitch() != null ? spawn.pitch() : 0f));
+        player.sendMessage(ChatColor.GREEN + "Teleported to the spawn point of " + structureLabel(structure) + ".");
+    }
+
+    /** The fallback: a safe spot next to the first door (lowest id); {@code reason} says why. */
+    private void teleportToFirstDoor(Player player, CachedGateStructure structure, String reason) {
+        List<CachedGateDoor> doors = support.doorsOf(structure);
+        if (doors.isEmpty()) {
+            player.sendMessage(ChatColor.YELLOW + "Can't teleport to " + structureLabel(structure) + ": " + reason
+                + " and it has no loaded doors.");
+            return;
+        }
+        CachedGateDoor door = doors.get(0);
+        if (support.teleportTo(player, door)) {
+            player.sendMessage(ChatColor.GREEN + "Teleported next to " + doorLabel(door) + " (" + reason + ").");
+        }
     }
 
     /**

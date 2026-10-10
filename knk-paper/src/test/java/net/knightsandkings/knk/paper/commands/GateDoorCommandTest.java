@@ -28,6 +28,7 @@ import static org.mockito.Mockito.*;
  */
 class GateDoorCommandTest {
     private GateDoorCommand gateCommand;
+    private GateCommand structureCommand;
     private GateManager mockGateManager;
     private GateStructuresApi mockGateStructuresApi;
     private GateDoorsApi mockGateDoorsApi;
@@ -46,7 +47,8 @@ class GateDoorCommandTest {
         // the test classpath - see WorldGuardIntegrationTest's identical constraint), so it can't
         // be Mockito-mocked here; null is safe since no existing test exercises the door
         // capture/redefine subcommand this handler backs.
-        gateCommand = new GateCommand(mockGateManager, mockGateStructuresApi, mockGateDoorsApi, mock(UserManager.class), mock(UsersCommandApi.class), mock(DistrictGateLoader.class), null).doorCommand();
+        structureCommand = new GateCommand(mockGateManager, mockGateStructuresApi, mockGateDoorsApi, mock(UserManager.class), mock(UsersCommandApi.class), mock(DistrictGateLoader.class), null);
+        gateCommand = structureCommand.doorCommand();
         mockSender = mock(CommandSender.class);
         mockPlayer = mock(Player.class);
         sentMessages = new ArrayList<>();
@@ -291,12 +293,31 @@ class GateDoorCommandTest {
         CachedGateDoor gate = createTestGate(1, "TestGate", true, false);
         when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
         when(mockPlayer.getWorld()).thenReturn(world);
+        org.bukkit.Location spot = new org.bukkit.Location(world, 3.5, 64, 7.5);
+        structureCommand.support().doorSpots = (w, door, manager) -> java.util.Optional.of(spot);
 
         boolean result = gateCommand.executeTeleport(mockPlayer, new String[]{"TestGate"});
 
         assertTrue(result);
-        verify(mockPlayer).teleport(any(org.bukkit.Location.class));
-        assertTrue(sentMessages.stream().anyMatch(m -> m.contains("Teleported")));
+        // KNG-105: the safe spot next to the door, never the anchor inside a closed door's blocks
+        verify(mockPlayer).teleport(spot);
+        assertTrue(sentMessages.stream().anyMatch(m -> m.contains("Teleported next to door 'TestGate'")), sentMessages::toString);
+    }
+
+    @Test
+    void testExecuteTeleport_NoSafeSpotRefuses() {
+        CachedGateDoor gate = createTestGate(1, "TestGate", true, false);
+        when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
+        when(mockPlayer.getWorld()).thenReturn(world);
+        structureCommand.support().doorSpots = (w, door, manager) -> java.util.Optional.empty();
+
+        boolean result = gateCommand.executeTeleport(mockPlayer, new String[]{"TestGate"});
+
+        assertTrue(result);
+        verify(mockPlayer, never()).teleport(any(org.bukkit.Location.class));
+        assertTrue(sentMessages.stream().anyMatch(m -> m.contains("No safe spot to stand within 4 blocks of door 'TestGate'")),
+            sentMessages::toString);
+        assertFalse(sentMessages.stream().anyMatch(m -> m.contains("Teleported")));
     }
 
     @Test

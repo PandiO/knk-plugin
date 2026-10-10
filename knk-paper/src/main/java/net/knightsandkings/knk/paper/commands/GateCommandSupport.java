@@ -5,12 +5,14 @@ import net.knightsandkings.knk.api.GateStructuresApi;
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.domain.gates.CachedGateStructure;
+import net.knightsandkings.knk.core.domain.location.KnkLocation;
 import net.knightsandkings.knk.core.gates.GateCommandKeywords;
 import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.core.gates.target.GateTargetMath.DoorCandidate;
 import net.knightsandkings.knk.core.gates.target.GateTargetMath.StructureCandidate;
 import net.knightsandkings.knk.paper.commands.support.CommandPermissions;
 import net.knightsandkings.knk.paper.gates.GateDoorOpenStateMapper;
+import net.knightsandkings.knk.paper.gates.GateSafeSpots;
 import net.knightsandkings.knk.paper.gates.GateTargeting;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -21,7 +23,6 @@ import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
-import org.bukkit.util.Vector;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -31,6 +32,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * What {@link GateCommand} ({@code /knk gate}, {@code /gate}: gate structures) and
@@ -458,26 +461,55 @@ public class GateCommandSupport {
     }
 
     /**
-     * Teleports the player onto the door's anchor, in the door's own world when it is loaded.
+     * Where {@code /gatedoor tp} puts the player next to a door (KNG-105): {@link GateSafeSpots#nextToDoor}
+     * in production; tests swap it out.
+     */
+    @FunctionalInterface
+    interface DoorSpotFinder {
+        Optional<Location> find(World world, CachedGateDoor door, GateManager gateManager);
+    }
+
+    /** A gate structure's own spawn point - its {@code Domain.Location}, as {@code /warp} uses it (KNG-105). */
+    @FunctionalInterface
+    public interface StructureSpawnLookup {
+        CompletableFuture<Optional<KnkLocation>> find(int structureId);
+    }
+
+    DoorSpotFinder doorSpots = GateSafeSpots::nextToDoor;
+    /** Null until the plugin wires it: {@code /gate tp} then goes straight to a door. */
+    StructureSpawnLookup spawnLookup;
+    /** Where the spawn lookup's answer is handled; the server's main thread in production. */
+    Executor mainThread = Runnable::run;
+
+    /**
+     * Teleports the player next to the door (KNG-105): the nearest standable spot outside the door's
+     * region, preferring its front and back faces, in the door's own world when it is loaded. The
+     * door's anchor is inside the blocks of a closed door, so it is never used directly.
      *
-     * @return false (and nothing happens) when the door has no anchor point
+     * @return false (and nothing happens, the player is told why) when no safe spot is near the door
      */
     public boolean teleportTo(Player player, CachedGateDoor door) {
-        if (door.getAnchorPoint() == null) {
-            player.sendMessage(ChatColor.RED + capitalise(doorLabel(door)) + " has no anchor point to teleport to.");
+        World world = doorWorld(player, door);
+        Optional<Location> spot = world == null ? Optional.empty() : doorSpots.find(world, door, gateManager);
+        if (spot.isEmpty()) {
+            player.sendMessage(ChatColor.RED + "No safe spot to stand within " + GateSafeSpots.TELEPORT_RADIUS
+                + " blocks of " + doorLabel(door) + "; not teleporting.");
             return false;
         }
-        World world = null;
+        player.teleport(spot.get());
+        return true;
+    }
+
+    /** The door's own world when it is loaded, else the player's. */
+    static World doorWorld(Player player, CachedGateDoor door) {
         String worldName = door.getWorldName();
         if (worldName != null && !worldName.isBlank() && player.getServer() != null) {
-            world = player.getServer().getWorld(worldName);
+            World world = player.getServer().getWorld(worldName);
+            if (world != null) {
+                return world;
+            }
         }
-        if (world == null) {
-            world = player.getWorld();
-        }
-        Vector anchor = door.getAnchorPoint();
-        player.teleport(new Location(world, anchor.getX() + 0.5, anchor.getY() + 1, anchor.getZ() + 0.5));
-        return true;
+        return player.getWorld();
     }
 
     static String capitalise(String text) {
