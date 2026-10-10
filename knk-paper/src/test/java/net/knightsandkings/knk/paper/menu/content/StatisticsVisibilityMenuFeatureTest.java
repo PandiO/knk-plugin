@@ -103,15 +103,17 @@ class StatisticsVisibilityMenuFeatureTest {
         registries.actions().execute(StatisticsVisibilityMenuFeature.SELECT_GROUP_ACTION, action(null, null), Map.of("group", "combat"));
         List<StatisticsVisibilityRow> rows = loadRows();
 
-        assertEquals(4, rows.size());
+        // Finding 9: context rows only for overrides (Siege), not the inherited Open world one.
+        assertEquals(3, rows.size());
         assertEquals("&fPlayer kills", rows.get(0).getName());
         assertEquals("Everyone", rows.get(0).getVisibility());
+        assertTrue(rows.get(0).getLoreLines().contains(StatisticsVisibilityRow.PER_GAME_NOTE));
         assertEquals("&fPlayer kills &7— &fSiege", rows.get(1).getName());
         assertEquals("siege", rows.get(1).getContext());
         assertEquals("Nobody", rows.get(1).getVisibility());
         assertTrue(rows.get(1).getLoreLines().contains("&7Set for Siege only"));
-        assertTrue(rows.get(2).getLoreLines().contains("&7Same as Player kills (inherited)"));
-        assertEquals("deaths", rows.get(3).getSettingKey());
+        assertEquals("deaths", rows.get(2).getSettingKey());
+        assertFalse(rows.get(2).getLoreLines().contains(StatisticsVisibilityRow.PER_GAME_NOTE), "not contextual");
         verify(api, times(1)).getVisibility(9, 9); // the second read reused the fresh settings
         verify(menuService).refreshOpenMenu(player);
     }
@@ -126,7 +128,13 @@ class StatisticsVisibilityMenuFeatureTest {
 
         assertEquals("HIGHLIGHT", view.getCombatMode());
         assertEquals("NORMAL", view.getActivityMode());
-        assertEquals(List.of("&7Showing: &fCombat", "&cNobody &f1 &8| &bFriends &f0 &8| &aEveryone &f1"), view.getGroupSummaryLines());
+        // Finding 9: the open group is named, not only highlighted.
+        assertEquals("&e&l▶ Combat ◀", view.getCombatName());
+        assertEquals("&7Activity", view.getActivityName());
+        assertEquals("&eShown below", view.getCombatHint());
+        assertEquals("&eClick: &7show these settings", view.getProgressionHint());
+        assertEquals("&eCombat &7— who may see these", view.getInfoTitle());
+        assertEquals(List.of("&cNobody &f1 &8| &bFriends &f0 &8| &aEveryone &f1"), view.getGroupSummaryLines());
     }
 
     @Test

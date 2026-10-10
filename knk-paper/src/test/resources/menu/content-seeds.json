@@ -5981,8 +5981,8 @@
                 "id": 615,
                 "targetProperty": "Name",
                 "sortOrder": 0,
-                "expression": "&fActivity",
-                "refreshPolicy": "Static",
+                "expression": "$statsvis.getActivityName$",
+                "refreshPolicy": "OnDirty",
                 "ttlTicks": null
               },
               {
@@ -5997,8 +5997,8 @@
                 "id": 617,
                 "targetProperty": "Lore",
                 "sortOrder": 1,
-                "expression": "&eClick: &7show these settings",
-                "refreshPolicy": "Static",
+                "expression": "$statsvis.getActivityHint$",
+                "refreshPolicy": "OnDirty",
                 "ttlTicks": null
               }
             ],
@@ -6046,8 +6046,8 @@
                 "id": 620,
                 "targetProperty": "Name",
                 "sortOrder": 0,
-                "expression": "&fCombat",
-                "refreshPolicy": "Static",
+                "expression": "$statsvis.getCombatName$",
+                "refreshPolicy": "OnDirty",
                 "ttlTicks": null
               },
               {
@@ -6062,8 +6062,8 @@
                 "id": 622,
                 "targetProperty": "Lore",
                 "sortOrder": 1,
-                "expression": "&eClick: &7show these settings",
-                "refreshPolicy": "Static",
+                "expression": "$statsvis.getCombatHint$",
+                "refreshPolicy": "OnDirty",
                 "ttlTicks": null
               }
             ],
@@ -6111,8 +6111,8 @@
                 "id": 625,
                 "targetProperty": "Name",
                 "sortOrder": 0,
-                "expression": "&fMinigames",
-                "refreshPolicy": "Static",
+                "expression": "$statsvis.getMinigamesName$",
+                "refreshPolicy": "OnDirty",
                 "ttlTicks": null
               },
               {
@@ -6127,8 +6127,8 @@
                 "id": 627,
                 "targetProperty": "Lore",
                 "sortOrder": 1,
-                "expression": "&eClick: &7show these settings",
-                "refreshPolicy": "Static",
+                "expression": "$statsvis.getMinigamesHint$",
+                "refreshPolicy": "OnDirty",
                 "ttlTicks": null
               }
             ],
@@ -6176,8 +6176,8 @@
                 "id": 630,
                 "targetProperty": "Name",
                 "sortOrder": 0,
-                "expression": "&fExploration",
-                "refreshPolicy": "Static",
+                "expression": "$statsvis.getExplorationName$",
+                "refreshPolicy": "OnDirty",
                 "ttlTicks": null
               },
               {
@@ -6192,8 +6192,8 @@
                 "id": 632,
                 "targetProperty": "Lore",
                 "sortOrder": 1,
-                "expression": "&eClick: &7show these settings",
-                "refreshPolicy": "Static",
+                "expression": "$statsvis.getExplorationHint$",
+                "refreshPolicy": "OnDirty",
                 "ttlTicks": null
               }
             ],
@@ -6241,8 +6241,8 @@
                 "id": 635,
                 "targetProperty": "Name",
                 "sortOrder": 0,
-                "expression": "&fProgression",
-                "refreshPolicy": "Static",
+                "expression": "$statsvis.getProgressionName$",
+                "refreshPolicy": "OnDirty",
                 "ttlTicks": null
               },
               {
@@ -6257,8 +6257,8 @@
                 "id": 637,
                 "targetProperty": "Lore",
                 "sortOrder": 1,
-                "expression": "&eClick: &7show these settings",
-                "refreshPolicy": "Static",
+                "expression": "$statsvis.getProgressionHint$",
+                "refreshPolicy": "OnDirty",
                 "ttlTicks": null
               }
             ],
@@ -6275,8 +6275,8 @@
           },
           {
             "id": 195,
-            "sortOrder": 5,
-            "slotOverride": 5,
+            "sortOrder": 8,
+            "slotOverride": 8,
             "materialRefId": null,
             "amount": 1,
             "chatColorName": null,
@@ -6290,7 +6290,7 @@
                 "id": 638,
                 "targetProperty": "Material",
                 "sortOrder": 0,
-                "expression": "RED_DYE",
+                "expression": "BARRIER",
                 "refreshPolicy": "Static",
                 "ttlTicks": null
               },
@@ -6298,215 +6298,12 @@
                 "id": 639,
                 "targetProperty": "Name",
                 "sortOrder": 0,
-                "expression": "&cSet all listed to Nobody",
-                "refreshPolicy": "Static",
-                "ttlTicks": null
-              },
-              {
-                "id": 640,
-                "targetProperty": "Lore",
-                "sortOrder": 0,
-                "expression": "&7Every setting of the shown group",
-                "refreshPolicy": "Static",
-                "ttlTicks": null
-              },
-              {
-                "id": 641,
-                "targetProperty": "Lore",
-                "sortOrder": 1,
-                "expression": "&7(context overrides stay as they are)",
-                "refreshPolicy": "Static",
-                "ttlTicks": null
-              },
-              {
-                "id": 642,
-                "targetProperty": "Lore",
-                "sortOrder": 2,
-                "expression": "&eClick: &7preview, then Confirm",
-                "refreshPolicy": "Static",
-                "ttlTicks": null
-              }
-            ],
-            "actions": [
-              {
-                "id": 124,
-                "actionTypeId": "statistics.visibility.group",
-                "paramsJson": "{\"value\":\"Nobody\"}",
-                "sortOrder": 0,
-                "conditions": []
-              }
-            ],
-            "conditions": []
-          },
-          {
-            "id": 196,
-            "sortOrder": 6,
-            "slotOverride": 6,
-            "materialRefId": null,
-            "amount": 1,
-            "chatColorName": null,
-            "chatColorDescription": null,
-            "displayMode": "Normal",
-            "visibilityPermission": null,
-            "actionPermission": null,
-            "isRowTemplate": false,
-            "variableBindings": [
-              {
-                "id": 643,
-                "targetProperty": "Material",
-                "sortOrder": 0,
-                "expression": "LIGHT_BLUE_DYE",
-                "refreshPolicy": "Static",
-                "ttlTicks": null
-              },
-              {
-                "id": 644,
-                "targetProperty": "Name",
-                "sortOrder": 0,
-                "expression": "&bSet all listed to Friends",
-                "refreshPolicy": "Static",
-                "ttlTicks": null
-              },
-              {
-                "id": 645,
-                "targetProperty": "Lore",
-                "sortOrder": 0,
-                "expression": "&7Every setting of the shown group",
-                "refreshPolicy": "Static",
-                "ttlTicks": null
-              },
-              {
-                "id": 646,
-                "targetProperty": "Lore",
-                "sortOrder": 1,
-                "expression": "&7(context overrides stay as they are)",
-                "refreshPolicy": "Static",
-                "ttlTicks": null
-              },
-              {
-                "id": 647,
-                "targetProperty": "Lore",
-                "sortOrder": 2,
-                "expression": "&eClick: &7preview, then Confirm",
-                "refreshPolicy": "Static",
-                "ttlTicks": null
-              },
-              {
-                "id": 648,
-                "targetProperty": "Lore",
-                "sortOrder": 3,
-                "expression": "&8Friends-only shows nothing until the friends system exists",
-                "refreshPolicy": "Static",
-                "ttlTicks": null
-              }
-            ],
-            "actions": [
-              {
-                "id": 125,
-                "actionTypeId": "statistics.visibility.group",
-                "paramsJson": "{\"value\":\"Friends\"}",
-                "sortOrder": 0,
-                "conditions": []
-              }
-            ],
-            "conditions": []
-          },
-          {
-            "id": 197,
-            "sortOrder": 7,
-            "slotOverride": 7,
-            "materialRefId": null,
-            "amount": 1,
-            "chatColorName": null,
-            "chatColorDescription": null,
-            "displayMode": "Normal",
-            "visibilityPermission": null,
-            "actionPermission": null,
-            "isRowTemplate": false,
-            "variableBindings": [
-              {
-                "id": 649,
-                "targetProperty": "Material",
-                "sortOrder": 0,
-                "expression": "LIME_DYE",
-                "refreshPolicy": "Static",
-                "ttlTicks": null
-              },
-              {
-                "id": 650,
-                "targetProperty": "Name",
-                "sortOrder": 0,
-                "expression": "&aSet all listed to Everyone",
-                "refreshPolicy": "Static",
-                "ttlTicks": null
-              },
-              {
-                "id": 651,
-                "targetProperty": "Lore",
-                "sortOrder": 0,
-                "expression": "&7Every setting of the shown group",
-                "refreshPolicy": "Static",
-                "ttlTicks": null
-              },
-              {
-                "id": 652,
-                "targetProperty": "Lore",
-                "sortOrder": 1,
-                "expression": "&7(context overrides stay as they are)",
-                "refreshPolicy": "Static",
-                "ttlTicks": null
-              },
-              {
-                "id": 653,
-                "targetProperty": "Lore",
-                "sortOrder": 2,
-                "expression": "&eClick: &7preview, then Confirm",
-                "refreshPolicy": "Static",
-                "ttlTicks": null
-              }
-            ],
-            "actions": [
-              {
-                "id": 126,
-                "actionTypeId": "statistics.visibility.group",
-                "paramsJson": "{\"value\":\"Everyone\"}",
-                "sortOrder": 0,
-                "conditions": []
-              }
-            ],
-            "conditions": []
-          },
-          {
-            "id": 198,
-            "sortOrder": 8,
-            "slotOverride": 8,
-            "materialRefId": null,
-            "amount": 1,
-            "chatColorName": null,
-            "chatColorDescription": null,
-            "displayMode": "Normal",
-            "visibilityPermission": null,
-            "actionPermission": null,
-            "isRowTemplate": false,
-            "variableBindings": [
-              {
-                "id": 654,
-                "targetProperty": "Material",
-                "sortOrder": 0,
-                "expression": "BARRIER",
-                "refreshPolicy": "Static",
-                "ttlTicks": null
-              },
-              {
-                "id": 655,
-                "targetProperty": "Name",
-                "sortOrder": 0,
                 "expression": "&c$menu.getBackLabel$",
                 "refreshPolicy": "OnDirty",
                 "ttlTicks": null
               },
               {
-                "id": 656,
+                "id": 640,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "&7$menu.getBackHint$",
@@ -6516,7 +6313,7 @@
             ],
             "actions": [
               {
-                "id": 127,
+                "id": 124,
                 "actionTypeId": "menu.back",
                 "paramsJson": "{}",
                 "sortOrder": 0,
@@ -6549,7 +6346,7 @@
         "contentSourceParamsJson": "{}",
         "items": [
           {
-            "id": 199,
+            "id": 196,
             "sortOrder": 9,
             "slotOverride": 13,
             "materialRefId": null,
@@ -6562,7 +6359,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 657,
+                "id": 641,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "SPYGLASS",
@@ -6570,15 +6367,15 @@
                 "ttlTicks": null
               },
               {
-                "id": 658,
+                "id": 642,
                 "targetProperty": "Name",
                 "sortOrder": 0,
-                "expression": "&eWho may see your statistics",
-                "refreshPolicy": "Static",
+                "expression": "$statsvis.getInfoTitle$",
+                "refreshPolicy": "OnDirty",
                 "ttlTicks": null
               },
               {
-                "id": 659,
+                "id": 643,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "$statsvis.getGroupSummaryLines$",
@@ -6586,7 +6383,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 660,
+                "id": 644,
                 "targetProperty": "Lore",
                 "sortOrder": 1,
                 "expression": "",
@@ -6594,7 +6391,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 661,
+                "id": 645,
                 "targetProperty": "Lore",
                 "sortOrder": 2,
                 "expression": "&7Click a setting to change it.",
@@ -6602,7 +6399,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 662,
+                "id": 646,
                 "targetProperty": "Lore",
                 "sortOrder": 3,
                 "expression": "&7Active/AFK time, XP and your title",
@@ -6610,7 +6407,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 663,
+                "id": 647,
                 "targetProperty": "Lore",
                 "sortOrder": 4,
                 "expression": "&7are always public.",
@@ -6645,7 +6442,7 @@
         "contentSourceParamsJson": "{}",
         "items": [
           {
-            "id": 200,
+            "id": 197,
             "sortOrder": 0,
             "slotOverride": null,
             "materialRefId": null,
@@ -6658,7 +6455,7 @@
             "isRowTemplate": true,
             "variableBindings": [
               {
-                "id": 664,
+                "id": 648,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "$row.getMaterial$",
@@ -6666,7 +6463,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 665,
+                "id": 649,
                 "targetProperty": "DisplayMode",
                 "sortOrder": 0,
                 "expression": "$row.getDisplayMode$",
@@ -6674,7 +6471,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 666,
+                "id": 650,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "$row.getName$",
@@ -6682,7 +6479,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 667,
+                "id": 651,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "$row.getLoreLines$",
@@ -6692,7 +6489,7 @@
             ],
             "actions": [
               {
-                "id": 128,
+                "id": 125,
                 "actionTypeId": "statistics.visibility.cycle",
                 "paramsJson": "{\"settingKey\":\"$row.getSettingKey$\",\"context\":\"$row.getContext$\",\"expected\":\"$row.getVisibility$\"}",
                 "sortOrder": 0,
@@ -6702,7 +6499,7 @@
             "conditions": []
           },
           {
-            "id": 201,
+            "id": 198,
             "sortOrder": 145,
             "slotOverride": 45,
             "materialRefId": null,
@@ -6715,7 +6512,7 @@
             "isRowTemplate": false,
             "variableBindings": [
               {
-                "id": 668,
+                "id": 652,
                 "targetProperty": "Material",
                 "sortOrder": 0,
                 "expression": "ARROW",
@@ -6723,7 +6520,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 669,
+                "id": 653,
                 "targetProperty": "Name",
                 "sortOrder": 0,
                 "expression": "&aPrevious page",
@@ -6731,7 +6528,7 @@
                 "ttlTicks": null
               },
               {
-                "id": 670,
+                "id": 654,
                 "targetProperty": "Lore",
                 "sortOrder": 0,
                 "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
@@ -6741,7 +6538,7 @@
             ],
             "actions": [
               {
-                "id": 129,
+                "id": 126,
                 "actionTypeId": "menu.page.prev",
                 "paramsJson": "{}",
                 "sortOrder": 0,
@@ -6751,9 +6548,212 @@
             "conditions": []
           },
           {
-            "id": 202,
+            "id": 199,
+            "sortOrder": 146,
+            "slotOverride": 46,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 655,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "RED_DYE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 656,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&cSet all listed to Nobody",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 657,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Every setting of the shown group",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 658,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "&7(context overrides stay as they are)",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 659,
+                "targetProperty": "Lore",
+                "sortOrder": 2,
+                "expression": "&eClick: &7preview, then Confirm",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 127,
+                "actionTypeId": "statistics.visibility.group",
+                "paramsJson": "{\"value\":\"Nobody\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 200,
+            "sortOrder": 147,
+            "slotOverride": 47,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 660,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "LIGHT_BLUE_DYE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 661,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&bSet all listed to Friends",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 662,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Every setting of the shown group",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 663,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "&7(context overrides stay as they are)",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 664,
+                "targetProperty": "Lore",
+                "sortOrder": 2,
+                "expression": "&eClick: &7preview, then Confirm",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 665,
+                "targetProperty": "Lore",
+                "sortOrder": 3,
+                "expression": "&8Friends-only shows nothing until the friends system exists",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 128,
+                "actionTypeId": "statistics.visibility.group",
+                "paramsJson": "{\"value\":\"Friends\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 201,
             "sortOrder": 148,
             "slotOverride": 48,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 666,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "LIME_DYE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 667,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aSet all listed to Everyone",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 668,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Every setting of the shown group",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 669,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "&7(context overrides stay as they are)",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 670,
+                "targetProperty": "Lore",
+                "sortOrder": 2,
+                "expression": "&eClick: &7preview, then Confirm",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 129,
+                "actionTypeId": "statistics.visibility.group",
+                "paramsJson": "{\"value\":\"Everyone\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 202,
+            "sortOrder": 150,
+            "slotOverride": 50,
             "materialRefId": null,
             "amount": 1,
             "chatColorName": null,
@@ -6809,8 +6809,8 @@
           },
           {
             "id": 203,
-            "sortOrder": 150,
-            "slotOverride": 50,
+            "sortOrder": 151,
+            "slotOverride": 51,
             "materialRefId": null,
             "amount": 1,
             "chatColorName": null,

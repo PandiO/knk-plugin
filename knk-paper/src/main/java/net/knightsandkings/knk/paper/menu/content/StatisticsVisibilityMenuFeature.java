@@ -40,7 +40,7 @@ import net.knightsandkings.knk.paper.menu.MenuService;
  *   group action's preview; never I/O);</li>
  *   <li>row source {@code statistics.visibility.rows} → {@link StatisticsVisibilityRow}: the selected
  *   group's settings from {@code GET api/statistics/users/{id}/visibility} (acting as the viewer), each
- *   followed by its contexts with an override or with data;</li>
+ *   followed by its context overrides (new per-game values are set on the website);</li>
  *   <li>actions {@code statistics.visibility.select-group} {@code {group}},
  *   {@code statistics.visibility.cycle} (the clicked row: one change with the shown value as
  *   expected), {@code statistics.visibility.group} {@code {value}} (stores a
@@ -167,8 +167,12 @@ public final class StatisticsVisibilityMenuFeature implements MenuFeature, org.b
             }
             rows.add(StatisticsVisibilityRow.of(setting, loaded.friendsAvailable()));
             if (setting.contextual()) {
+                // Overrides only (finding 9: inherited per-game rows made the menu crowded); a new
+                // per-game value is set on the website.
                 for (StatisticsVisibilitySettings.ContextValue value : setting.contexts()) {
-                    rows.add(StatisticsVisibilityRow.of(setting, value, loaded.friendsAvailable()));
+                    if (value.isOverride()) {
+                        rows.add(StatisticsVisibilityRow.of(setting, value, loaded.friendsAvailable()));
+                    }
                 }
             }
         }

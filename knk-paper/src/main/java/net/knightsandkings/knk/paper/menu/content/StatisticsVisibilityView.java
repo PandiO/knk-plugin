@@ -55,7 +55,62 @@ public final class StatisticsVisibilityView {
         return group.equalsIgnoreCase(selectedGroup) ? "HIGHLIGHT" : "NORMAL";
     }
 
-    /** "&7Nobody &f3 &8| &7Friends &f0 &8| &7Everyone &f1" over the selected group's settings. */
+    // Selector names and hints (finding 9: the open group must be obvious, not only a glint).
+
+    public String getActivityName() {
+        return name("activity", "Activity");
+    }
+
+    public String getCombatName() {
+        return name("combat", "Combat");
+    }
+
+    public String getMinigamesName() {
+        return name("minigames", "Minigames");
+    }
+
+    public String getExplorationName() {
+        return name("exploration", "Exploration");
+    }
+
+    public String getProgressionName() {
+        return name("progression", "Progression");
+    }
+
+    public String getActivityHint() {
+        return hint("activity");
+    }
+
+    public String getCombatHint() {
+        return hint("combat");
+    }
+
+    public String getMinigamesHint() {
+        return hint("minigames");
+    }
+
+    public String getExplorationHint() {
+        return hint("exploration");
+    }
+
+    public String getProgressionHint() {
+        return hint("progression");
+    }
+
+    private String name(String group, String label) {
+        return group.equalsIgnoreCase(selectedGroup) ? "&e&l▶ " + label + " ◀" : "&7" + label;
+    }
+
+    private String hint(String group) {
+        return group.equalsIgnoreCase(selectedGroup) ? "&eShown below" : "&eClick: &7show these settings";
+    }
+
+    /** The info item's name: "&eCombat &7— who may see these". */
+    public String getInfoTitle() {
+        return "&e" + selectedLabel + " &7— who may see these";
+    }
+
+    /** "&cNobody &f3 &8| &bFriends &f0 &8| &aEveryone &f1" over the selected group's settings. */
     public List<String> getGroupSummaryLines() {
         List<String> lines = new ArrayList<>();
         if (settings == null) {
@@ -68,7 +123,6 @@ public final class StatisticsVisibilityView {
                 counts[setting.visibility().ordinal()]++;
             }
         }
-        lines.add("&7Showing: &f" + selectedLabel);
         lines.add("&cNobody &f" + counts[0] + " &8| &bFriends &f" + counts[1] + " &8| &aEveryone &f" + counts[2]);
         return lines;
     }

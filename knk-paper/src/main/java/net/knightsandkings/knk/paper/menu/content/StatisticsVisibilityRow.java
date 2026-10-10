@@ -9,8 +9,8 @@ import net.knightsandkings.knk.core.domain.statistics.StatisticsVisibilitySettin
 
 /**
  * One row of {@code statistics.visibility} (row source {@code statistics.visibility.rows}): a
- * setting's metric-level value, or one context of a contextual setting ({@code Player kills — Siege})
- * with its override or the inherited value. Clicking cycles Nobody → Friends → Everyone
+ * setting's metric-level value, or one context override of a contextual setting
+ * ({@code Player kills — Siege}; new per-game values are set on the website). Clicking cycles Nobody → Friends → Everyone
  * ({@code statistics.visibility.cycle} with {@link #getSettingKey()}, {@link #getContext()} and the
  * shown value {@link #getVisibility()} as the expected one).
  */
@@ -22,25 +22,35 @@ public final class StatisticsVisibilityRow {
     private final String context;
     private final String label;
     private final StatisticVisibility visibility;
+    static final String PER_GAME_NOTE = "&8Per game (e.g. Siege only): on the website, /account";
+
     private final boolean override;
     private final boolean friendsAvailable;
+    private final boolean contextual;
 
     StatisticsVisibilityRow(String settingKey, String context, String label, StatisticVisibility visibility,
                             boolean override, boolean friendsAvailable) {
+        this(settingKey, context, label, visibility, override, friendsAvailable, false);
+    }
+
+    private StatisticsVisibilityRow(String settingKey, String context, String label, StatisticVisibility visibility,
+                                    boolean override, boolean friendsAvailable, boolean contextual) {
         this.settingKey = settingKey;
         this.context = context == null ? "" : context;
         this.label = label;
         this.visibility = visibility == null ? StatisticVisibility.NOBODY : visibility;
         this.override = override;
         this.friendsAvailable = friendsAvailable;
+        this.contextual = contextual;
     }
 
     /** The metric-level row of a setting. */
     static StatisticsVisibilityRow of(StatisticsVisibilitySettings.Setting setting, boolean friendsAvailable) {
-        return new StatisticsVisibilityRow(setting.settingKey(), "", setting.label(), setting.visibility(), false, friendsAvailable);
+        return new StatisticsVisibilityRow(setting.settingKey(), "", setting.label(), setting.visibility(), false, friendsAvailable,
+                setting.contextual());
     }
 
-    /** One context row of a contextual setting. */
+    /** One context row of a contextual setting (the menu lists overrides only). */
     static StatisticsVisibilityRow of(StatisticsVisibilitySettings.Setting setting, StatisticsVisibilitySettings.ContextValue value,
                                       boolean friendsAvailable) {
         return new StatisticsVisibilityRow(setting.settingKey(), value.context(), setting.label(), value.visibility(),
@@ -93,6 +103,9 @@ public final class StatisticsVisibilityRow {
         }
         if (visibility == StatisticVisibility.FRIENDS && !friendsAvailable) {
             lore.add(FRIENDS_NOTE);
+        }
+        if (contextual && !isContextRow()) {
+            lore.add(PER_GAME_NOTE);
         }
         lore.add("");
         lore.add("&eClick: &7change to " + colored(visibility.next()));
