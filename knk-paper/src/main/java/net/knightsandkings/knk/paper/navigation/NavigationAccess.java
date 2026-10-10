@@ -96,13 +96,20 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
     /** Main thread: reads the player's regions, nodes and every gate of the network once. */
     @Override
     public AccessPolicy policyFor(Player player, RoadNetworkSnapshot snapshot) {
+        return policyFor(player, snapshot, null);
+    }
+
+    /** As {@link #policyFor(Player, RoadNetworkSnapshot)}, knowing the destination's regions (KNG-110); null: unknown. */
+    @Override
+    public AccessPolicy policyFor(Player player, RoadNetworkSnapshot snapshot, Set<String> destinationRegions) {
         Set<String> currentRegions = regionIds.at(player.getLocation());
         Set<Integer> doorIds = new HashSet<>();
         for (RoadEdge edge : snapshot.edges()) {
             doorIds.addAll(edge.gateDoorIds());
         }
         return CompositeAccessPolicy.of(new StaticFlagsAvailability(), gateAvailability(player, doorIds),
-            new DomainAvailability(evaluator, this::domainByRegionId, roadRule, currentRegions, bypass.test(player)));
+            new DomainAvailability(evaluator, this::domainByRegionId, roadRule, currentRegions, destinationRegions,
+                bypass.test(player)));
     }
 
     /**
@@ -111,9 +118,21 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
      */
     @Override
     public Predicate<String> mayEnter(Player player) {
+        return mayEnter(player, null);
+    }
+
+    @Override
+    public Predicate<String> mayEnter(Player player, Set<String> destinationRegions) {
         DomainAvailability rule = new DomainAvailability(evaluator, resolver::getDomainByRegionIdNoRefresh, roadRule,
-            regionIds.at(player.getLocation()), bypass.test(player));
+            regionIds.at(player.getLocation()), destinationRegions, bypass.test(player));
         return rule::mayEnter;
+    }
+
+    /** KNG-110: the WorldGuard regions at a floor point, at feet level. */
+    @Override
+    public Set<String> regionsAt(org.bukkit.World world, double[] floorPoint) {
+        return regionIds.at(world, (int) Math.floor(floorPoint[0]), (int) Math.floor(floorPoint[1]) + 1,
+            (int) Math.floor(floorPoint[2]));
     }
 
     /**

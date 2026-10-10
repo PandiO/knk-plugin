@@ -261,6 +261,47 @@ class NavigationServiceTest {
     }
 
     @Test
+    void theRouterAndTheTrailKnowTheRegionsTheDestinationIsIn() {
+        // KNG-110: a region the player may enter but not leave blocks the way only when the destination is outside it
+        List<Set<String>> routed = new ArrayList<>();
+        List<Set<String>> trailed = new ArrayList<>();
+        NavigationService.PolicyFactory knowing = new NavigationService.PolicyFactory() {
+            @Override
+            public AccessPolicy policyFor(Player p, RoadNetworkSnapshot snapshot) {
+                throw new AssertionError("the destination is known");
+            }
+
+            @Override
+            public AccessPolicy policyFor(Player p, RoadNetworkSnapshot snapshot, Set<String> destinationRegions) {
+                routed.add(destinationRegions);
+                return policies.policyFor(p, snapshot);
+            }
+
+            @Override
+            public java.util.function.Predicate<String> mayEnter(Player p, Set<String> destinationRegions) {
+                trailed.add(destinationRegions);
+                return regionId -> true;
+            }
+
+            @Override
+            public Set<String> regionsAt(World w, double[] floorPoint) {
+                return floorPoint[0] >= 150 ? Set.of("town_1", "keep_court") : Set.of("town_1");
+            }
+        };
+        service = new NavigationService(new NavigationService.Deps(null, NavigationConfig.defaults(),
+            w -> network.snapshot, knowing, shapes, eligibility, hud, trail, Runnable::run, Runnable::run, tick::get,
+            events::add, Logger.getLogger("test")));
+
+        service.navigate(player, cinixKeep()); // at x 200
+        assertEquals(Set.of("town_1", "keep_court"), routed.get(0));
+        service.trailRule(player);
+        assertEquals(Set.of("town_1", "keep_court"), trailed.get(trailed.size() - 1));
+
+        service.navigate(player, castleRegion());
+        assertTrue(routed.get(routed.size() - 1).contains(NavigationTestNetwork.CASTLE_REGION), "a region destination's own");
+    }
+
+    @Test
     void startsARoutedSessionAlongTheRoad() {
         service.navigate(player, cinixKeep());
 

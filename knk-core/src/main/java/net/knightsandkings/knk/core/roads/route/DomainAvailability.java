@@ -3,6 +3,7 @@ package net.knightsandkings.knk.core.roads.route;
 import net.knightsandkings.knk.core.domain.roads.RoadEdge;
 import net.knightsandkings.knk.core.regions.DomainAccessEvaluator;
 import net.knightsandkings.knk.core.regions.DomainAccessEvaluator.Denial;
+import net.knightsandkings.knk.core.regions.RegionTransitionType;
 import net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot;
 
 import java.util.ArrayList;
@@ -23,6 +24,9 @@ import java.util.Set;
  *       ({@link DomainAccessEvaluator#exit}), an edge that does not pass that region is BLOCKED
  *       (it leaves the domain). Phase 2d decision: an edge that lists the region counts as staying
  *       inside, so the route ends on the last edge inside the domain.</li>
+ *   <li><b>No way out</b> (KNG-110, decided 2026-10-10): an edge that passes a region the player is not in, whose
+ *       domain allows entry but denies leaving, is BLOCKED as an entry when the destination lies outside that
+ *       region - the player could not leave it again. Only with the destination's regions known.</li>
  * </ul>
  * Domains are looked up <b>by WorldGuard region id</b> (D11) through the {@link DomainLookup}
  * port (paper: {@code RegionDomainResolver.getDomainByRegionIdNoRefresh}, falling back to
@@ -59,11 +63,14 @@ public final class DomainAvailability implements AccessPolicy {
 
     public static final String ENTRY_MESSAGE = "you may not enter %s";
     public static final String EXIT_MESSAGE = "you may not leave %s";
+    /** KNG-110: a region the player may enter but not leave, with the destination outside it. */
+    public static final String TRAP_MESSAGE = "you could not leave %s again";
 
     private final DomainAccessEvaluator evaluator;
     private final DomainLookup lookup;
     private final RoadRule roadRule;
     private final Set<String> currentRegionIds;
+    private final Set<String> destinationRegionIds;
     private final boolean bypass;
     private final Map<String, Optional<Denial>> entryByRegion = new HashMap<>();
     private final List<Exit> exits;
@@ -87,10 +94,21 @@ public final class DomainAvailability implements AccessPolicy {
      */
     public DomainAvailability(DomainAccessEvaluator evaluator, DomainLookup lookup, RoadRule roadRule,
                               Set<String> currentRegionIds, boolean bypass) {
+        this(evaluator, lookup, roadRule, currentRegionIds, null, bypass);
+    }
+
+    /**
+     * @param destinationRegionIds the regions the destination lies in (KNG-110): a region the player may enter but
+     *                             not leave blocks entry unless it is one of them - the player would be stuck in it.
+     *                             Null when the destination is not known: no such rule
+     */
+    public DomainAvailability(DomainAccessEvaluator evaluator, DomainLookup lookup, RoadRule roadRule,
+                              Set<String> currentRegionIds, Set<String> destinationRegionIds, boolean bypass) {
         this.evaluator = Objects.requireNonNull(evaluator, "evaluator");
         this.lookup = Objects.requireNonNull(lookup, "lookup");
         this.roadRule = Objects.requireNonNull(roadRule, "roadRule");
         this.currentRegionIds = Set.copyOf(currentRegionIds);
+        this.destinationRegionIds = destinationRegionIds == null ? null : Set.copyOf(destinationRegionIds);
         this.bypass = bypass;
         List<Exit> found = new ArrayList<>();
         if (!bypass) {
@@ -130,8 +148,10 @@ public final class DomainAvailability implements AccessPolicy {
                 first = denial;
             }
         }
-        DomainSnapshot d = first.orElseThrow().domain();
-        return EdgeVerdict.blocked(String.format(ENTRY_MESSAGE, d.name()),
+        Denial denial = first.orElseThrow();
+        DomainSnapshot d = denial.domain();
+        String message = denial.type() == RegionTransitionType.EXIT ? TRAP_MESSAGE : ENTRY_MESSAGE;
+        return EdgeVerdict.blocked(String.format(message, d.name()),
             EdgeVerdict.Cause.domain(d.id() == null ? -1 : d.id(), d.name()));
     }
 
@@ -158,8 +178,17 @@ public final class DomainAvailability implements AccessPolicy {
         return Optional.empty();
     }
 
+    /** Why the player may not go into {@code regionId}: its entry rule, else its exit rule unless the destination is in it. */
     private Optional<Denial> entryDenial(String regionId) {
-        return entryByRegion.computeIfAbsent(regionId,
-            id -> lookup.domainByRegionId(id).filter(roadRule::applies).flatMap(evaluator::entry));
+        return entryByRegion.computeIfAbsent(regionId, id -> lookup.domainByRegionId(id).filter(roadRule::applies)
+            .flatMap(domain -> evaluator.entry(domain).or(() -> trap(id, domain))));
+    }
+
+    /** KNG-110: a region the player may enter but not leave, when the destination is known to lie outside it. */
+    private Optional<Denial> trap(String regionId, DomainSnapshot domain) {
+        if (destinationRegionIds == null || destinationRegionIds.contains(regionId)) {
+            return Optional.empty();
+        }
+        return evaluator.exit(domain);
     }
 }

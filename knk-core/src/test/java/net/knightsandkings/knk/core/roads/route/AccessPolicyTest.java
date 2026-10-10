@@ -290,6 +290,38 @@ class AccessPolicyTest {
             "only the side is inside: leaving");
     }
 
+    // KNG-110 (decided 2026-10-10): a region the player may enter but not leave, with the destination beyond it
+
+    private static DomainAvailability trap(Set<String> current, Set<String> destination, boolean bypass) {
+        return new DomainAvailability(new DomainAccessEvaluator(),
+            lookup(domain(CASTLE_DOMAIN, "Kardenna Castle", CASTLE_REGION, null, false)), DomainAvailability.RoadRule.ALWAYS,
+            current, destination, bypass);
+    }
+
+    @Test
+    void aRegionThePlayerCouldNotLeaveAgainBlocksTheWayToADestinationOutsideIt() {
+        EdgeVerdict v = trap(Set.of(), Set.of("town"), false).check(castleEdge);
+        assertTrue(v.isBlocked());
+        assertEquals("you could not leave Kardenna Castle again", v.message());
+        assertEquals(EdgeVerdict.CauseType.DOMAIN, v.cause().type());
+        assertFalse(trap(Set.of(), Set.of("town"), false).mayEnter(CASTLE_REGION), "the trail keeps off it too");
+        assertTrue(trap(Set.of(), Set.of("town"), false).check(plainEdge).isOpen());
+    }
+
+    @Test
+    void itIsOpenWhenTheDestinationIsInsideItOrUnknownOrThePlayerIsInsideOrBypasses() {
+        assertTrue(trap(Set.of(), Set.of(CASTLE_REGION), false).check(castleEdge).isOpen(), "the destination is inside");
+        assertTrue(trap(Set.of(), Set.of(CASTLE_REGION), false).mayEnter(CASTLE_REGION));
+        assertTrue(trap(Set.of(), null, false).check(castleEdge).isOpen(), "no destination known: as before");
+        assertTrue(trap(Set.of(CASTLE_REGION), Set.of(), false).check(castleEdge).isOpen(), "inside: the exit rule applies");
+        assertTrue(trap(Set.of(), Set.of(), true).check(castleEdge).isOpen(), "bypass");
+    }
+
+    @Test
+    void aFreeLaneBesideItIsTheWayPast() {
+        assertTrue(trap(Set.of(), Set.of(), false).check(laned(List.of(CASTLE_REGION), List.of(List.of()))).isOpen());
+    }
+
     @Test
     void domainLookupsAreCachedPerRegion() {
         AtomicInteger lookups = new AtomicInteger();
