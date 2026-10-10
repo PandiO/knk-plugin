@@ -196,6 +196,14 @@ public final class LeaderboardsMenuFeature implements MenuFeature, Listener {
         return periods.getOrDefault(uuid, "weekly");
     }
 
+    /** {@code /lb <board> <period>}: the board menu opens on this period. Ignores unknown periods. */
+    public void selectPeriod(UUID uuid, String period) {
+        String normalized = period == null ? null : period.toLowerCase(Locale.ROOT);
+        if (PERIODS.contains(normalized)) {
+            periods.put(uuid, normalized);
+        }
+    }
+
     private String boardMetric(String boardKey) {
         int at = boardKey.indexOf('@');
         return at < 0 ? boardKey : boardKey.substring(0, at);

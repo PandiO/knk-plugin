@@ -84,6 +84,41 @@ class LeaderboardCommandTest {
     }
 
     @Test
+    void aBoardOpensItsMenuForPlayers_onTheGivenPeriod() {
+        Player alice = alice();
+        List<String> opened = new java.util.ArrayList<>();
+        command.setBoardMenuOpener((player, board, period) -> opened.add(board + "|" + period));
+
+        command.onCommand(alice, mock(Command.class), "lb", new String[]{"PVP_KILLS@siege", "Monthly"});
+        command.onCommand(alice, mock(Command.class), "lb", new String[]{"active_playtime"});
+
+        assertEquals(List.of("pvp_kills@siege|monthly", "active_playtime|weekly"), opened);
+        verify(api, never()).getBoard(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void withoutMenusOrForAnUnknownBoardOrTheConsole_theBoardIsPrintedInChat() {
+        Player alice = alice();
+        command.setBoardMenuOpener((player, board, period) -> false); // menus unavailable
+        when(api.getBoard("pvp_kills@siege", "monthly", 10, 9)).thenReturn(CompletableFuture.completedFuture(
+                view(new LeaderboardView.ViewerEntry(2, 30))));
+        command.onCommand(alice, mock(Command.class), "lb", new String[]{"pvp_kills@siege", "monthly"});
+        assertTrue(joined(alice).contains("#1 §fdave"));
+
+        command.setBoardMenuOpener((player, board, period) -> { throw new AssertionError("not for " + board); });
+        when(api.getBoard("nope", "weekly", 10, 9)).thenReturn(CompletableFuture.failedFuture(
+                new RuntimeException(new ApiException("u", 404, "Not Found", ""))));
+        command.onCommand(alice, mock(Command.class), "lb", new String[]{"nope"});
+        assertTrue(joined(alice).contains("No leaderboard 'nope'."));
+
+        ConsoleCommandSender console = mock(ConsoleCommandSender.class);
+        when(api.getBoard("active_playtime", "weekly", 10, null)).thenReturn(CompletableFuture.completedFuture(view(null)));
+        command.onCommand(console, mock(Command.class), "lb", new String[]{"active_playtime"});
+        assertTrue(joined(console).contains("#1 §fdave"));
+    }
+
+    @Test
     void badInputAndRefusalsAreExplained() {
         Player alice = alice();
         command.onCommand(alice, mock(Command.class), "lb", new String[]{"active_playtime", "daily"});

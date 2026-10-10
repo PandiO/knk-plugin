@@ -29,8 +29,10 @@ import net.knightsandkings.knk.core.statistics.StatisticsLines;
  * <ul>
  *   <li>No board: a player gets the {@code statistics.leaderboards} menu (when menus are available),
  *   the console the board keys.</li>
- *   <li>A board: the top 10 of the period (default weekly) in chat plus the viewer's own rank. The
- *   console reads as an anonymous visitor, so only always-public boards answer there.</li>
+ *   <li>A board: a player gets that board's {@code statistics.leaderboard} menu on the period
+ *   (default weekly); without menus, for an unknown board and for the console, the top 10 in chat
+ *   plus the viewer's own rank. The console reads as an anonymous visitor, so only always-public
+ *   boards answer there.</li>
  * </ul>
  */
 public final class LeaderboardCommand implements TabExecutor {
@@ -46,6 +48,14 @@ public final class LeaderboardCommand implements TabExecutor {
     private final Executor mainThread;
     /** Opens the board list menu; null when menus aren't available. */
     private volatile Consumer<Player> menuOpener;
+    /** Opens one board's menu; null when menus aren't available. */
+    private volatile BoardMenuOpener boardMenuOpener;
+
+    /** Opens {@code statistics.leaderboard} on a board and period; false when it couldn't (no menus). */
+    @FunctionalInterface
+    public interface BoardMenuOpener {
+        boolean open(Player player, String boardKey, String period);
+    }
 
     public LeaderboardCommand(LeaderboardsApi api, Supplier<java.util.concurrent.CompletableFuture<List<LeaderboardBoard>>> boards,
                               Supplier<List<LeaderboardBoard>> cachedBoards, Function<UUID, Integer> userIdOf, Executor mainThread) {
@@ -58,6 +68,10 @@ public final class LeaderboardCommand implements TabExecutor {
 
     public void setMenuOpener(Consumer<Player> opener) {
         this.menuOpener = opener;
+    }
+
+    public void setBoardMenuOpener(BoardMenuOpener opener) {
+        this.boardMenuOpener = opener;
     }
 
     @Override
@@ -80,6 +94,14 @@ public final class LeaderboardCommand implements TabExecutor {
             return true;
         }
         String board = args[0];
+        // Smoke test 2026-10-10 (developer): a player gets the board's menu, like plain /lb gets the list.
+        BoardMenuOpener opener = boardMenuOpener;
+        if (sender instanceof Player player && opener != null) {
+            String known = knownBoard(board);
+            if (known != null && opener.open(player, known, period)) {
+                return true;
+            }
+        }
         Integer viewer = sender instanceof Player player ? userIdOf.apply(player.getUniqueId()) : null;
         if (sender instanceof Player && viewer == null) {
             sender.sendMessage(ChatColor.RED + "Your account isn't loaded yet - try again in a moment.");
@@ -103,6 +125,16 @@ public final class LeaderboardCommand implements TabExecutor {
             }
         }));
         return true;
+    }
+
+    /** The board key as the API names it, or null when it isn't a known board (the chat path explains). */
+    private String knownBoard(String board) {
+        for (LeaderboardBoard known : cachedBoards.get()) {
+            if (known.boardKey().equalsIgnoreCase(board)) {
+                return known.boardKey();
+            }
+        }
+        return null;
     }
 
     private void listBoards(CommandSender sender, String label) {

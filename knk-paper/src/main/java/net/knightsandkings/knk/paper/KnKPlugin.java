@@ -2604,6 +2604,16 @@ public class KnKPlugin extends JavaPlugin {
                     player.performCommand("leaderboard " + "active_playtime");
                 }
             });
+            leaderboardCommand.setBoardMenuOpener((player, board, period) -> {
+                String key = net.knightsandkings.knk.paper.menu.content.LeaderboardsMenuFeature.BOARD_MENU_KEY;
+                if (menuService == null || lists == null || !menuService.isMenuAvailable(key)) {
+                    return false;
+                }
+                lists.selectPeriod(player.getUniqueId(), period);
+                menuService.openMenu(player, key, net.knightsandkings.knk.core.menu.MenuContextParams.of(
+                    java.util.Map.of(net.knightsandkings.knk.paper.menu.content.LeaderboardsMenuFeature.CTX_BOARD, board)));
+                return true;
+            });
             registerTabCommand("leaderboard", leaderboardCommand);
         }
 
