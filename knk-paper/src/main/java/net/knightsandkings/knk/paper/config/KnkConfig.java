@@ -21,6 +21,7 @@ public record KnkConfig(
     PrivateMessagesConfig privateMessages,
     TeleportSettings teleport,
     DiscoveryConfig discovery,
+    NavigationConfig navigation,
     StatisticsConfig statistics,
     TelemetryConfig telemetry,
     WorldAnalyticsConfig worldAnalytics
@@ -28,6 +29,7 @@ public record KnkConfig(
     public KnkConfig {
         // No teleport: block (e.g. an older config.yml) means the DESIGN §3.11 defaults.
         teleport = teleport != null ? teleport : TeleportSettings.defaults();
+        navigation = navigation != null ? navigation : NavigationConfig.defaults();
         // No statistics: block means "on, with defaults" (player statistics, KNG-34).
         statistics = statistics != null ? statistics : StatisticsConfig.defaults();
         // No telemetry: block means "on, with defaults" (diagnostic telemetry, KNG-34 link 6).
@@ -36,7 +38,15 @@ public record KnkConfig(
         worldAnalytics = worldAnalytics != null ? worldAnalytics : WorldAnalyticsConfig.defaults();
     }
 
-    /** Without a world-analytics section: its defaults. */
+    /** Without a navigation section: its defaults (the KNG-34 statistics/telemetry/analytics form). */
+    public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
+                     PrivateMessagesConfig privateMessages, TeleportSettings teleport, DiscoveryConfig discovery,
+                     StatisticsConfig statistics, TelemetryConfig telemetry, WorldAnalyticsConfig worldAnalytics) {
+        this(api, cache, account, messages, privateMessages, teleport, discovery, NavigationConfig.defaults(),
+            statistics, telemetry, worldAnalytics);
+    }
+
+    /** Without navigation and world-analytics sections: their defaults. */
     public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
                      PrivateMessagesConfig privateMessages, TeleportSettings teleport, DiscoveryConfig discovery,
                      StatisticsConfig statistics, TelemetryConfig telemetry) {
@@ -44,30 +54,45 @@ public record KnkConfig(
             WorldAnalyticsConfig.defaults());
     }
 
-    /** Without a telemetry section: its defaults. */
+    /** Without navigation, telemetry and world-analytics sections: their defaults. */
     public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
                      PrivateMessagesConfig privateMessages, TeleportSettings teleport, DiscoveryConfig discovery,
                      StatisticsConfig statistics) {
         this(api, cache, account, messages, privateMessages, teleport, discovery, statistics, TelemetryConfig.defaults());
     }
 
-    /** Without private-messages, teleport, discovery and statistics sections: their defaults. */
-    public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages) {
-        this(api, cache, account, messages, PrivateMessagesConfig.defaults(), TeleportSettings.defaults(),
-            DiscoveryConfig.defaults(), StatisticsConfig.defaults());
+    /** Without the KNG-34 sections: their defaults (road navigation, KNG-27). */
+    public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
+                     PrivateMessagesConfig privateMessages, TeleportSettings teleport, DiscoveryConfig discovery,
+                     NavigationConfig navigation) {
+        this(api, cache, account, messages, privateMessages, teleport, discovery, navigation,
+            StatisticsConfig.defaults(), TelemetryConfig.defaults(), WorldAnalyticsConfig.defaults());
     }
 
-    /** Without teleport, discovery and statistics sections: their defaults. */
+    /** Without private-messages, teleport, discovery, navigation and KNG-34 sections: their defaults. */
+    public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages) {
+        this(api, cache, account, messages, PrivateMessagesConfig.defaults(), TeleportSettings.defaults(),
+            DiscoveryConfig.defaults(), NavigationConfig.defaults());
+    }
+
+    /** Without teleport, discovery, navigation and KNG-34 sections: their defaults. */
     public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
                      PrivateMessagesConfig privateMessages) {
         this(api, cache, account, messages, privateMessages, TeleportSettings.defaults(), DiscoveryConfig.defaults(),
-            StatisticsConfig.defaults());
+            NavigationConfig.defaults());
     }
 
-    /** Without a statistics section: its defaults. */
+    /** Without teleport, navigation and KNG-34 sections: their defaults (road navigation Phase 3's older form). */
+    public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
+                     PrivateMessagesConfig privateMessages, DiscoveryConfig discovery) {
+        this(api, cache, account, messages, privateMessages, TeleportSettings.defaults(), discovery,
+            NavigationConfig.defaults());
+    }
+
+    /** Without navigation and KNG-34 sections: their defaults. */
     public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
                      PrivateMessagesConfig privateMessages, TeleportSettings teleport, DiscoveryConfig discovery) {
-        this(api, cache, account, messages, privateMessages, teleport, discovery, StatisticsConfig.defaults());
+        this(api, cache, account, messages, privateMessages, teleport, discovery, NavigationConfig.defaults());
     }
 
     public record ApiConfig(
@@ -158,6 +183,10 @@ public record KnkConfig(
             throw new IllegalArgumentException("discovery configuration is required");
         }
         discovery.validate();
+        if (navigation == null) {
+            throw new IllegalArgumentException("navigation configuration is required");
+        }
+        navigation.validate();
         statistics.validate();
         telemetry.validate();
         worldAnalytics.validate();

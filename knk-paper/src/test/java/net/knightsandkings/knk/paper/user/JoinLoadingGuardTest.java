@@ -66,6 +66,29 @@ class JoinLoadingGuardTest {
     }
 
     @Test
+    void releaseHandsBackTheWorldsGameSettingsMode() {
+        JoinLoadingGuard settingsGuard = new JoinLoadingGuard(plugin, permissible, p -> GameMode.CREATIVE);
+        settingsGuard.hold(player);
+        when(player.getGameMode()).thenReturn(GameMode.ADVENTURE);
+
+        settingsGuard.release(player);
+
+        verify(player).setGameMode(GameMode.CREATIVE);
+        verify(player, never()).setGameMode(GameMode.SURVIVAL);
+    }
+
+    @Test
+    void aMissingGameSettingsModeMeansSurvival() {
+        JoinLoadingGuard settingsGuard = new JoinLoadingGuard(plugin, permissible, p -> null);
+        settingsGuard.hold(player);
+        when(player.getGameMode()).thenReturn(GameMode.ADVENTURE);
+
+        settingsGuard.release(player);
+
+        verify(player).setGameMode(GameMode.SURVIVAL);
+    }
+
+    @Test
     void releaseRestoresSurvivalAndClearsInvulnerability() {
         holdPlayer();
 

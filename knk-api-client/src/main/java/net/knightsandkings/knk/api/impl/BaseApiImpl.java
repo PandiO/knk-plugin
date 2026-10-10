@@ -181,6 +181,65 @@ public class BaseApiImpl {
         return execute(request, url);
     }
 
+    /** Header a conditional GET sends the cached copy's ETag in (road navigation, plan R17). */
+    public static final String IF_NONE_MATCH_HEADER = "If-None-Match";
+
+    /**
+     * The outcome of {@link #getConditional}: either the server answered 304 Not Modified
+     * ({@code notModified}, no body) or it sent a fresh body. {@code etag} is the response's
+     * {@code ETag} header verbatim (quoted, e.g. {@code "3"}); on a 304 without one it is the
+     * tag the caller sent.
+     */
+    public record ConditionalResponse(boolean notModified, String body, String etag) {}
+
+    /**
+     * A GET with {@code If-None-Match: etag} (plan R17, road navigation tile downloads). Unlike
+     * {@link #execute}, a 304 is not an error here; every other non-2xx still throws
+     * {@link ApiException}. The etag goes back to the server verbatim (weak tags included).
+     *
+     * @param etag the ETag of the caller's cached copy, or {@code null} for an unconditional GET
+     */
+    protected ConditionalResponse getConditional(String url, String etag) throws ApiException, IOException {
+        Request.Builder builder = newRequest(url).get();
+        if (etag != null && !etag.isBlank()) {
+            builder.header(IF_NONE_MATCH_HEADER, etag);
+        }
+        Request request = builder.build();
+        if (debugLogging) {
+            LOGGER.info("API Request: GET " + url + (etag == null ? "" : " (" + IF_NONE_MATCH_HEADER + ": " + etag + ")"));
+        }
+        long startTime = System.currentTimeMillis();
+        try (Response response = httpClient.newCall(request).execute()) {
+            long latency = System.currentTimeMillis() - startTime;
+            String responseBody = response.body() != null ? response.body().string() : "";
+            String responseEtag = response.header("ETag");
+
+            if (response.code() == 304) {
+                if (debugLogging) {
+                    LOGGER.info(String.format("API Response: GET %s [304 Not Modified] in %dms", url, latency));
+                }
+                return new ConditionalResponse(true, null, responseEtag != null ? responseEtag : etag);
+            }
+            if (!response.isSuccessful()) {
+                LOGGER.warning(String.format("API Error: GET %s -> [%d] %s in %dms",
+                    url, response.code(), response.message(), latency));
+                LOGGER.warning("  Request headers:\n" + loggableHeaders(request.headers()));
+                LOGGER.warning("  Response headers:\n" + loggableHeaders(response.headers()));
+                LOGGER.warning("  Response body: " + snippet(responseBody));
+                throw new ApiException(url, response.code(), "Request failed", snippet(responseBody));
+            }
+            if (debugLogging) {
+                LOGGER.info(String.format("API Response: GET %s [%d] in %dms", url, response.code(), latency));
+                LOGGER.info("  Response headers:\n" + loggableHeaders(response.headers()));
+                LOGGER.info("  Response body: " + snippet(responseBody));
+            }
+            if (responseBody.isEmpty()) {
+                throw new ApiException(url, response.code(), "Empty response body", "");
+            }
+            return new ConditionalResponse(false, responseBody, responseEtag);
+        }
+    }
+
     protected String postJson(String url, String json) throws ApiException, IOException {
         return postJson(url, json, true);
     }

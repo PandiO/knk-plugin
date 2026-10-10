@@ -13,6 +13,7 @@ import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.PermissionGroupsQueryApi;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.paper.chat.RewardMessageFormat;
+import net.knightsandkings.knk.paper.commands.support.CommandPermissions;
 import net.knightsandkings.knk.paper.commands.support.PromotionEffects;
 import net.knightsandkings.knk.paper.commands.support.RankHierarchy;
 import net.knightsandkings.knk.paper.modes.ModeService;
@@ -76,6 +77,8 @@ public final class UserAdminService {
     private final AdminFreezeManager freezeManager;
     /** Re-renders an online player's tab-list team and footer from a fresh summary (KNG-7). */
     private final BiConsumer<Player, UserSummary> displayRefresher;
+    /** Bukkit-or-in-house node checks (KNG-24); Bukkit-only until KnKPlugin sets the KnkPermissible one. */
+    private CommandPermissions permissions = CommandPermissions.bukkitOnly();
 
     public UserAdminService(Executor mainThread, UsersDataAccess usersDataAccess, UsersCommandApi usersCommandApi,
                             PermissionGroupsQueryApi permissionGroupsQueryApi, RankHierarchy rankHierarchy,
@@ -100,9 +103,22 @@ public final class UserAdminService {
 
     // ===== permission, target, actor, rank =====
 
+    /**
+     * Checks the knk.admin.user.* nodes through KnkPermissible as well as Bukkit (KNG-24): before,
+     * only Bukkit grants (ops) passed, never in-house group grants or wildcards.
+     */
+    public void setPermissions(CommandPermissions permissions) {
+        this.permissions = java.util.Objects.requireNonNull(permissions, "permissions must not be null");
+    }
+
+    /** Bukkit grant or cached in-house grant; see {@link CommandPermissions#has}. */
+    public boolean hasPermission(CommandSender sender, String node) {
+        return permissions.has(sender, node);
+    }
+
     /** {@link #XP_RAISE_NODES} on the sender (the console holds all); tells them when missing. */
     public boolean requireXpRaise(CommandSender sender) {
-        if (XP_RAISE_NODES.stream().allMatch(sender::hasPermission)) {
+        if (XP_RAISE_NODES.stream().allMatch(node -> permissions.has(sender, node))) {
             return true;
         }
         sender.sendMessage(XP_RAISE_REFUSED);
@@ -127,7 +143,7 @@ public final class UserAdminService {
 
     /** {@code knk.admin.user.<property>} on the sender; tells them when missing. */
     public boolean requireProperty(CommandSender sender, String property) {
-        if (sender.hasPermission(NODE_PREFIX + property)) {
+        if (permissions.has(sender, NODE_PREFIX + property)) {
             return true;
         }
         sender.sendMessage(ChatColor.RED + "You don't have permission to manage this player's " + property + ".");
@@ -176,11 +192,10 @@ public final class UserAdminService {
                 });
                 return;
             }
-            if (bypassesRankCheck(sender)) {
-                mainThread.execute(() -> onAllowed.accept(usersCommandApi.withActor(actor.id())));
-                return;
-            }
-            rankHierarchy.actorOutranks(actor.id(), target.id()).thenAccept(outranks -> mainThread.execute(() -> {
+            // Live check (KNG-24): /freeze and the Player manager reach this without a warmed cache.
+            permissions.hasAsync(senderPlayer, MANAGE_ALL_NODE).thenCompose(bypass -> bypass
+                    ? CompletableFuture.completedFuture(true)
+                    : rankHierarchy.actorOutranks(actor.id(), target.id())).thenAccept(outranks -> mainThread.execute(() -> {
                 if (!outranks) {
                     sender.sendMessage(ChatColor.RED + "You cannot act on a player of equal or higher rank.");
                     onDenied.run();
@@ -201,11 +216,6 @@ public final class UserAdminService {
             });
             return null;
         });
-    }
-
-    /** Holders of {@link #MANAGE_ALL_NODE} may edit anyone, themselves included; the console always may. */
-    public static boolean bypassesRankCheck(CommandSender sender) {
-        return !(sender instanceof Player) || sender.hasPermission(MANAGE_ALL_NODE);
     }
 
     /** Whether {@code actorUserId} outranks {@code targetUserId} (the menu's click condition reads a cached answer). */

@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -26,7 +27,7 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerTeleportEvent.TeleportCause;
 
-import net.knightsandkings.knk.core.teleport.BlockProbe;
+import net.knightsandkings.knk.core.util.BlockProbe;
 import net.knightsandkings.knk.core.teleport.CombatTagBook;
 import net.knightsandkings.knk.core.teleport.SafeLocationFinder;
 import net.knightsandkings.knk.core.teleport.TeleportCooldowns;
@@ -54,12 +55,14 @@ import net.kyori.adventure.text.Component;
  *   <li><b>Commit</b>: guards again (things change during a warmup), destination re-read, then - for
  *       a plan with a {@link TeleportCharge} (warps, paid requests) - the server authorizes and
  *       charges it (and it is refunded if the teleport then doesn't happen), safe spot
- *       (player teleports only - staff land exactly where they asked), then
+ *       (player teleports and a staff {@code /back <player>} - other staff teleports land exactly where
+ *       they asked), then
  *       {@code teleportAsync(loc, TeleportCause.COMMAND)} - never the default {@code PLUGIN} cause,
  *       so the region listener sees these teleports like vanilla ones (the siege's own teleports use
  *       {@code PLUGIN} and stay outside the engine).</li>
- *   <li><b>After</b>: cooldown (player teleports), a log line (INFO for staff teleports), and for
- *       staff teleports an audit entry in the web API ({@link TeleportAuditor}, Phase 2).</li>
+ *   <li><b>After</b>: cooldown (player teleports; a permission group may set its own, {@link CooldownPolicy}), a log line (INFO for staff teleports), for
+ *       staff teleports an audit entry in the web API ({@link TeleportAuditor}, Phase 2), and the
+ *       {@link TeleportArrivalListener}s ({@code /back} origins, KNG-42).</li>
  * </ol>
  * The returned future completes on the main thread with the {@link TeleportOutcome}; the caller
  * reports it. Warmup notices and cancel reasons are sent to the moving player by the engine itself.
@@ -76,6 +79,21 @@ public class TeleportService {
     private static final Set<String> PLAYER_KIND_NODES = Set.of(
         TeleportNodes.WARMUP_SHORT, TeleportNodes.BYPASS_WARMUP, TeleportNodes.BYPASS_COOLDOWN, TeleportNodes.BYPASS_COMBAT);
 
+    /**
+     * The cooldown a player's permission groups set for a kind of teleport (Linear KNG-41), replacing
+     * {@code teleport.cooldown-seconds}. Must not block: answered from a cache.
+     */
+    public interface CooldownPolicy {
+        /** No group sets a cooldown. */
+        CooldownPolicy NONE = (player, kind) -> OptionalInt.empty();
+
+        OptionalInt cooldownSeconds(UUID player, TeleportKind kind);
+
+        /** A player-initiated teleport is starting: refresh their cached settings if they're old. */
+        default void prefetch(UUID player) {
+        }
+    }
+
     /** Async permission check, e.g. {@code KnkPermissible::hasPermissionAsync}. */
     @FunctionalInterface
     public interface PermissionLookup {
@@ -90,6 +108,7 @@ public class TeleportService {
     private final TeleportCooldowns cooldowns = new TeleportCooldowns();
     private final WarmupBook<Warmup> warmups = new WarmupBook<>();
     private final List<TeleportRestriction> restrictions = new CopyOnWriteArrayList<>();
+    private final List<TeleportArrivalListener> arrivalListeners = new CopyOnWriteArrayList<>();
     /** Authority of teleports whose {@code teleportAsync} is in flight, for the region listener's bypass. */
     private final Map<UUID, Authority> inFlight = new ConcurrentHashMap<>();
     /** Charges asked for (or answered) whose teleport hasn't been handed to Bukkit yet - refunded on shutdown. */
@@ -98,6 +117,7 @@ public class TeleportService {
     private volatile WarmupPolicy warmupPolicy;
     /** Null when the API client isn't available - staff teleports are then only logged locally. */
     private volatile TeleportAuditor auditor;
+    private volatile CooldownPolicy cooldownPolicy = CooldownPolicy.NONE;
     private long lastPurgeMillis;
 
     public TeleportService(Executor mainThread, PermissionLookup permissions, TeleportSettings settings,
@@ -115,6 +135,16 @@ public class TeleportService {
     /** Add a guard (see {@link TeleportRestriction}); later registrations are checked after earlier ones. */
     public void registerRestriction(TeleportRestriction restriction) {
         restrictions.add(Objects.requireNonNull(restriction, "restriction must not be null"));
+    }
+
+    /** Tell {@code listener} about every teleport that happens (KNG-42: {@code /back} origins). */
+    public void addArrivalListener(TeleportArrivalListener listener) {
+        arrivalListeners.add(Objects.requireNonNull(listener, "listener must not be null"));
+    }
+
+    /** Where per-group cooldowns come from (KNG-41); null = {@code teleport.cooldown-seconds} for everyone. */
+    public void setCooldownPolicy(CooldownPolicy cooldownPolicy) {
+        this.cooldownPolicy = cooldownPolicy != null ? cooldownPolicy : CooldownPolicy.NONE;
     }
 
     /** Where staff teleports are audited (docs/specs/teleport/DESIGN.md §3.10); null turns auditing off. */
@@ -288,6 +318,10 @@ public class TeleportService {
             result.complete(TeleportOutcome.denied(denial.get()));
             return;
         }
+        if (!plan.kind().isStaff()) {
+            // Fresh group settings by the time the cooldown starts (after the warmup).
+            prefetchPolicy(subject.getUniqueId());
+        }
 
         int seconds = warmupPolicy.warmupSeconds(plan.kind(),
             authority.has(TeleportNodes.WARMUP_SHORT), authority.has(TeleportNodes.BYPASS_WARMUP));
@@ -299,6 +333,39 @@ public class TeleportService {
         warmups.start(subject.getUniqueId(), warmup, clock.getAsLong(), seconds)
             .ifPresent(previous -> finishCancelled(previous.payload(), WarmupCancelReason.REPLACED));
         subject.sendMessage(ChatColor.YELLOW + "You need to wait " + seconds + " seconds before teleporting... Don't move.");
+        announcePrice(plan);
+    }
+
+    /**
+     * During the warmup, tell the payer what the teleport will cost (KNG-41: the price may come from
+     * their permission group). Only teleports with a warmup get it; nothing for a free one.
+     */
+    private void announcePrice(TeleportPlan plan) {
+        TeleportCharge charge = plan.charge();
+        if (charge == null) {
+            return;
+        }
+        CompletableFuture<Optional<TeleportCharge.PriceNotice>> notice;
+        try {
+            notice = charge.priceNotice();
+        } catch (RuntimeException ex) {
+            LOGGER.log(Level.FINE, "Could not work out the price of " + plan.subject().getName() + "'s teleport", ex);
+            return;
+        }
+        Player subject = plan.subject();
+        notice.whenComplete((answer, ex) -> mainThread.execute(() -> {
+            if (ex != null || answer == null || answer.isEmpty() || !warmups.isWarmingUp(subject.getUniqueId())) {
+                return;
+            }
+            Player payer = answer.get().payer();
+            if (payer == null || !payer.isOnline()) {
+                return;
+            }
+            String price = answer.get().price();
+            payer.sendMessage(ChatColor.GRAY + (payer.getUniqueId().equals(subject.getUniqueId())
+                ? "This teleport costs you " + price + ", paid when you arrive."
+                : "You pay " + price + " when " + subject.getName() + " arrives."));
+        }));
     }
 
     private void commit(TeleportPlan plan, Authority authority, CompletableFuture<TeleportOutcome> result, boolean recheck) {
@@ -319,7 +386,7 @@ public class TeleportService {
                 return;
             }
         }
-        if (plan.kind().isStaff()) {
+        if (plan.kind().isStaff() && !plan.backTrip()) {
             teleport(plan, authority, to, result);
             return;
         }
@@ -433,7 +500,7 @@ public class TeleportService {
                 return;
             }
             if (!plan.kind().isStaff()) {
-                cooldowns.start(id, plan.kind(), clock.getAsLong(), settings.cooldownSeconds());
+                cooldowns.start(id, plan.kind(), clock.getAsLong(), cooldownSeconds(id, plan.kind()));
             }
             if (plan.charge() != null) {
                 try {
@@ -446,8 +513,32 @@ public class TeleportService {
             if (plan.kind().isStaff()) {
                 audit(plan, from, to);
             }
+            arrived(plan, from, to);
             result.complete(TeleportOutcome.teleported());
         })));
+    }
+
+    /**
+     * The cooldown after {@code player}'s teleport of {@code kind}: their permission group's for
+     * /tpa, /warp and /spawn when one sets it (KNG-41), else {@code teleport.cooldown-seconds}.
+     */
+    int cooldownSeconds(UUID player, TeleportKind kind) {
+        OptionalInt group;
+        try {
+            group = cooldownPolicy.cooldownSeconds(player, kind);
+        } catch (RuntimeException ex) {
+            LOGGER.log(Level.WARNING, "[KnK Teleport] Could not read the group cooldown of " + player, ex);
+            group = OptionalInt.empty();
+        }
+        return group != null && group.isPresent() ? Math.max(0, group.getAsInt()) : settings.cooldownSeconds();
+    }
+
+    private void prefetchPolicy(UUID player) {
+        try {
+            cooldownPolicy.prefetch(player);
+        } catch (RuntimeException ex) {
+            LOGGER.log(Level.FINE, "Could not refresh the teleport settings of " + player, ex);
+        }
     }
 
     /** Hands a finished staff teleport to the auditor; a failure there never touches the teleport's outcome. */
@@ -460,6 +551,18 @@ public class TeleportService {
             current.record(plan, from, to);
         } catch (RuntimeException ex) {
             LOGGER.log(Level.WARNING, "[KnK Teleport] Could not audit the teleport of " + plan.subject().getName(), ex);
+        }
+    }
+
+    /** Hands a finished teleport to the arrival listeners; a failure there never touches the outcome. */
+    private void arrived(TeleportPlan plan, Location from, Location to) {
+        for (TeleportArrivalListener listener : arrivalListeners) {
+            try {
+                listener.arrived(plan, from, to);
+            } catch (RuntimeException ex) {
+                LOGGER.log(Level.WARNING, "[KnK Teleport] Arrival listener " + listener.getClass().getName()
+                    + " failed for " + plan.subject().getName(), ex);
+            }
         }
     }
 

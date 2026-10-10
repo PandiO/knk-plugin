@@ -117,15 +117,30 @@ player-notifications:
   # How often the plugin polls the API for them (skipped while no players are online)
   poll-interval-seconds: 2
 
+# Global Game Settings from the web app's Game Settings page (docs/specs/game-settings/DESIGN.md §4, KNG-52):
+# announcements, join spawn and game mode, respawn policy, per-world time lock, weather and spawn point.
+# The settings themselves are edited on the web app; these keys only tune how the plugin follows them.
+game-settings:
+  # How often the settings are read from the API (seconds, min 5). /knk cache refresh reads them at once.
+  refresh-interval-seconds: 30
+  # How often the loaded worlds are checked; they are reported to the API only when they changed
+  # (or every 10 minutes). Seconds, min 5. The report needs the plugin API key (api.auth.type: apikey).
+  runtime-sync-interval-seconds: 30
+  # Earlier versions of the settings kept in plugins/KnightsAndKings/game-settings-backups/ (0 = none).
+  # The latest version is always cached in game-settings-cache.json and used when the API is down at startup.
+  backup-history-limit: 48
+
 # Teleport engine (docs/specs/teleport/DESIGN.md §3.11, knk-workspace). Staff teleports (/tp,
 # /tphere, /knk tp) are instant and skip warmup, cooldown, combat tag and the safe-spot check; the
-# settings below apply to player teleports (/tpa, /tpahere, /spawn, /warp; /back in a later phase).
+# settings below apply to player teleports (/tpa, /tpahere, /spawn, /warp, /back).
 teleport:
   # Seconds a player waits before teleporting; moving to another block or taking damage cancels it
   warmup-seconds: 5            # v1 default
   # Warmup for holders of knk.teleport.warmup.short (granted to the Noble premium tier and up)
   warmup-short-seconds: 3      # v1 premium
-  # Seconds after a player teleport before the same kind of teleport can be used again
+  # Seconds after a player teleport before the same kind of teleport can be used again. A permission
+  # group can set its own cooldown for /tpa, /warp and /spawn in the web app (Linear KNG-41); that
+  # replaces this value for its members.
   cooldown-seconds: 30
   # A PvP hit (dealt or taken) blocks player teleports for this long
   combat-tag-seconds: 10       # v1 Main.combat
@@ -140,7 +155,9 @@ teleport:
     # Pending requests one player can have; the oldest is dropped past this
     max-incoming: 5
     # Coins a request costs the requester (0 = free). Charged by the web API when the teleport
-    # happens (after the warmup) and refunded if it then fails.
+    # happens (after the warmup) and refunded if it then fails. The requester's permission group can
+    # replace it in the web app (KNG-41: a multiple of this value, or a fixed price in coins, gems
+    # and/or XP); /spawn and /warp can be priced there too.
     price-coins: 0             # v1 intended 10000, never charged
   # /warp <destination> and /warps (knk.teleport.warp): Towns, Districts and Structures staff
   # enabled as destinations in the web app. The web API checks the title / premium tier /
@@ -148,12 +165,24 @@ teleport:
   destinations:
     # Seconds a player's destination list (names, prices, locks) is cached
     cache-seconds: 60
-  # /back (knk.teleport.back, meant for Dragon Blood): back to where you last died, once per death.
-  # Warmup, cooldown, combat tag and the safe-spot check apply; a siege death gives no /back.
+  # /back (Linear KNG-42): back to the latest place among the kinds the player's nodes allow -
+  # where they died (knk.teleport.back, meant for Dragon Blood), or where they were before a /warp
+  # (knk.teleport.back.warps), a /tpa, /tpahere or their own staff /tp (knk.teleport.back.teleport)
+  # or a /spawn (knk.teleport.back.spawn); knk.teleport.back.all allows every kind. Each place is
+  # single use. Warmup, cooldown, combat tag and the safe-spot check apply. Siege deaths and siege
+  # teleports are never recorded; places from before a siege stay usable after it while they last.
+  # Staff: /back <player> [-s] (knk.teleport.staff.back.others) - instant, audited, free.
   back:
     enabled: true
-    # Seconds after a death during which /back can be started
+    # Seconds after the death or teleport during which /back can be started (every kind)
     expire-seconds: 300        # developer decision Q5: 5 minutes
+    # Optional per-kind overrides of expire-seconds (death, warps, teleport, spawn)
+    # expire-seconds-by-kind:
+    #   warps: 600
+    #   spawn: 120
+    # Coins a player's own /back costs (0 = free; knk.teleport.bypass.cost pays nothing). Charged by
+    # the web API when the teleport happens (after the warmup) and refunded if it then fails.
+    price-coins: 0
 
 # Domain discovery (Linear KNG-20, knk-workspace docs/specs/domain-discovery/DESIGN.md §3.6):
 # the first time a player enters a Town, District or Structure it is recorded and rewarded once.
@@ -280,6 +309,96 @@ world-analytics:
   excluded-game-modes: [CREATIVE, SPECTATOR]
   max-pending-batches: 12
 
+# Road navigation (KNG-27, docs/specs/navigation/DESIGN.md §4). Road materials live in the API's road
+# profiles (learned by /knk road survey, edited in the web app), not here. Every key has a default.
+navigation:
+  enabled: true
+  # Routing cost per road class; lower is preferred
+  class-cost: { Main: 0.9, Road: 1.0, Path: 1.15 }
+  # Thin blocks that may lie ON a road (the road cell is the block beneath); *_SUFFIX patterns allowed
+  overlay-materials: [SNOW, "*_CARPET", "*_PRESSURE_PLATE", RAIL, POWERED_RAIL, LEAF_LITTER, PINK_PETALS]
+  # Every Domain Location within 8 blocks of a road cell seeds the build
+  seed-from-domains: true
+  # Hard limit: a destination (and, without walk paths, the player) must be this close to a road; a target
+  # this close to the player is walked to directly
+  max-snap-distance: 48
+  # 1 block of height counts as this many when snapping the player (a bridge vs the road below it)
+  snap-vertical-weight: 4
+  # The same for a destination: its last leg is a walk path, which climbs, so plain 3D (1) by default
+  destination-snap-vertical-weight: 1
+  # With walk paths: the player may be this far from a road (plain 3D); the first leg is a walk path to it
+  max-start-distance: 96
+  # With walk paths: a destination may be this far from a road (plain 3D). Within destination-walk-range of the road's
+  # end the last leg is a walk path; further, "No conventional path" and the HUD arrow alone. Beyond: refused
+  max-destination-distance: 256
+  destination-walk-range: 96
+  trail-length: 30
+  trail-period-ticks: 10
+  trail-particle: DUST
+  trail-color: "#E8C66A"
+  reroute-distance: 8
+  reroute-after-ticks: 40
+  arrive-distance: 4
+  max-session-minutes: 30
+  # Blocks per second for the ETA ("3 min = 1000 blocks")
+  sprint-speed: 5.6
+  survey:
+    sample-period-ticks: 4
+    cross-section-half-width: 7
+    breadcrumb-seed-spacing: 32
+  builder:
+    tile-size: 512
+    tile-margin: 32
+    max-cells-per-tile: 250000
+    # Chunks extracted per tick on the main thread while a tile is captured (fewer under lag)
+    snapshot-chunks-per-tick: 4
+    junction-cluster-radius: 3
+    min-spur-length: 4
+    # An ambiguous material (cobblestone, planks) only counts within this many cells of a sure road cell
+    ambiguous-reach: 3
+    # A plaza (wider than its profile's width-max) reaches this many cells beyond its wide core, so
+    # the corners and bumps of an irregular square join its one junction instead of forking into more
+    plaza-growth: 2
+    # A node an admin locked (edited, merged into, recorded through) absorbs rebuilt junctions and
+    # dead ends within this many blocks, so manual cleanup survives a rebuild
+    locked-node-reach: 8.0
+    # Wide road areas become one plaza junction on their own (true), or only where an admin designed a
+    # plaza with /knk road node plaza <radius> (false). Designed plazas always apply (DESIGN §5.6 step 4)
+    auto-plazas: true
+    # Curated tiles (rev. 6 Part B, plan §5.7): once a tile has been built, a rebuild only proposes changes
+    # (/knk road proposal) instead of replacing the stored graph. false = every build is uploaded directly,
+    # as before (the kill switch). /knk road tile uncurate lets one tile's next build write directly.
+    curated-tiles: true
+  # Walkable last-mile paths (KNG-51, docs/specs/navigation/LAST_MILE_PATHFINDING.md §9): direct mode
+  # (a target within max-snap-distance, and the last leg after a road's end) follows a path a player
+  # can walk instead of a straight line through terrain. No path found -> the straight line.
+  walk:
+    # false = straight lines exactly as before (the kill switch)
+    enabled: true
+    # Cells one search may expand, and the longest path it may return: factor x the straight distance or the
+    # straight distance + detour-allowance, whichever is longer, never above max-length
+    max-expansions: 20000
+    max-length-factor: 1.75
+    max-length: 144
+    # Blocks a path may always add to the straight distance: a short leg behind a building needs a detour of
+    # several times its length (a 27 m leg went round in 68). 0 = the factor alone
+    detour-allowance: 48
+    # Deepest drop taken (3 = no fall damage) and the extra cost per block dropped (drops only when needed)
+    max-drop: 3
+    drop-penalty: 10
+    # Blocks captured around the player->target box (also up and down); loaded chunks only
+    capture-margin: 16
+    # A captured chunk is reused this long; a path is also recomputed after this age
+    chunk-ttl-seconds: 10
+    # The path is recomputed when the player strays this far from it
+    recompute-distance: 6
+    # Walk searches running at once, server-wide (their own threads)
+    max-concurrent-searches: 2
+    # Materials climbed like a ladder
+    climbables: [LADDER]
+    # Extra cost of a step beside a wall: paths keep a block from walls and round corners wider (0 = hug them)
+    wall-cost: 1.0
+
 # Player payments (currency ledger Phase 3, docs/specs/currency-payments/DESIGN.md §3.6). Every
 # limit that matters (min/max, daily caps, cooldown, confirmation threshold, who may send) lives in
 # the API's currency policy; these only shape the in-game experience.
@@ -293,6 +412,20 @@ currency:
 
 # Gate structure state synchronization
 gates:
+  # Gate command targets (KNG-78/KNG-79). A door's "region" is the box its door blocks span in the
+  # closed position plus its captured closed/opened regions - so an open gate counts too.
+  here:
+    # '/gate toggle here', '/gatedoor repair here': doors whose region is within this many blocks
+    # of you (measured to the region's closest point; standing inside it = 0).
+    radius: 15
+    # Several gates/doors in range: 'prompt' lists them as clickable chat lines (sorted by
+    # distance); 'nearest' just picks the closest.
+    ambiguity: prompt
+  lookat:
+    # Leave the target out of /gate|/gatedoor open, close, toggle, info or repair and the gate door
+    # you are looking at is used (then 'here', then the usage message). One ray trace per command.
+    enabled: true
+    max-distance: 12
   # How often (seconds) the plugin pushes the current open/closed/destroyed state of every
   # gate to the API, as a safety net for state changes that were never persisted (e.g. a crash
   # mid-animation). The state is also pushed once immediately after every open/close animation
@@ -494,6 +627,33 @@ regions:
     extra-regions: []
     #  - { region: arena_2, kind: arena, parent: district_2 }
     #  - { region: arena_2-battleground, kind: battleground, parent: arena_2 }
+  # Domain AllowEntry/AllowExit (KNG-56). The rules are written onto each domain's WorldGuard region as the flags
+  # knk-allow-entry / knk-allow-exit / knk-domain-name, which WorldGuard saves - so they are enforced at startup, at
+  # join and while the API is down (the last synced values). WorldGuard enforces them for every way of moving;
+  # owners and members of a region, knk.region.bypass and WorldGuard's region bypass pass.
+  access:
+    sync:
+      enabled: true
+      delay-ticks: 100            # first sync after enable (WorldGuard must have loaded its regions)
+      attempts: 3                 # retries while the API is still starting
+      retry-delay-seconds: 30
+      interval-minutes: 5         # re-sync from the API this often (0 = only at startup / repair / new regions)
+    message-interval-ms: 2000     # a player is told "You are not allowed to ..." at most this often
+    # KNG-74: the message is shown in the action bar (shared with the /navigate arrow), and the first one of a refusal
+    # "episode" is also sent to chat so it cannot be missed. An episode starts with a refusal after chat-quiet-period-ms
+    # without any refusal (effectively at least message-interval-ms), or with a different message than the one last
+    # sent to chat (another domain, entry vs exit). 0 = every shown message also goes to chat.
+    chat-quiet-period-ms: 10000
+    # For this long after a refusal message is shown, the /navigate action-bar arrow is not drawn over it (vanilla
+    # shows an action-bar message for about 3 s).
+    action-bar-hold-ms: 3000
+    # Only a refusal RATE no honest player reaches (a client pushing a border makes a few per second) leads to an
+    # action: first a teleport to the world spawn, then - if it happens again within escalation-window-seconds - a kick.
+    load-guard:
+      enabled: true
+      max-refusals-per-second: 20
+      window-seconds: 3
+      escalation-window-seconds: 60
 cache:
   # Global time-to-live for cached API responses (in seconds)
   # After this duration, cached data is considered stale and will be refetched

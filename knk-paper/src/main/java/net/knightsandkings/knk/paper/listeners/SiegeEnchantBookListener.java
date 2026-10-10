@@ -24,8 +24,7 @@ import org.bukkit.inventory.PlayerInventory;
 /**
  * Siege enchantment books in the world and in the inventory (DESIGN §9.3–9.4, siege Phase 5c).
  * <ul>
- *   <li><b>Pickup</b> ({@code HIGHEST}, after {@code PlayerListener.onItemPickup} and the siege inventory
- *       guard): a siege book is picked up only by a member of the match it dropped in - un-cancelled
+ *   <li><b>Pickup</b> ({@code HIGHEST}, after the siege inventory guard): a siege book is picked up only by a member of the match it dropped in - un-cancelled
  *       for them, cancelled for everyone else. Mobs, allays and hoppers never take one.</li>
  *   <li><b>Applying:</b> right-click the book in hand to pick an item from a chooser ({@link SiegeEnchantMenu}),
  *       or click the book held on the cursor onto an item in your own inventory ({@link SiegeEnchantBooks#apply});
@@ -68,7 +67,7 @@ public class SiegeEnchantBookListener implements Listener {
         if (event.getView().getTopInventory().getHolder(false) instanceof SiegeEnchantMenu.Holder) event.setCancelled(true);
     }
 
-    @SuppressWarnings("deprecation") // the same event PlayerListener.onItemPickup cancels
+    @SuppressWarnings("deprecation") // the same event the siege inventory guard cancels
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onPlayerPickup(PlayerPickupItemEvent event) {
         String token = books.bookToken(event.getItem().getItemStack());

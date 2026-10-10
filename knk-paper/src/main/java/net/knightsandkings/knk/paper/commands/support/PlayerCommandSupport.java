@@ -39,14 +39,23 @@ public final class PlayerCommandSupport {
     private final Executor mainThread;
     private final Function<String, Player> onlinePlayerByName;
     private final Supplier<Collection<? extends Player>> onlinePlayers;
+    private final Supplier<? extends Collection<String>> knownPlayerNames;
 
     public PlayerCommandSupport(KnkPermissible knkPermissible, Executor mainThread,
                                 Function<String, Player> onlinePlayerByName,
                                 Supplier<Collection<? extends Player>> onlinePlayers) {
+        this(knkPermissible, mainThread, onlinePlayerByName, onlinePlayers, List::of);
+    }
+
+    public PlayerCommandSupport(KnkPermissible knkPermissible, Executor mainThread,
+                                Function<String, Player> onlinePlayerByName,
+                                Supplier<Collection<? extends Player>> onlinePlayers,
+                                Supplier<? extends Collection<String>> knownPlayerNames) {
         this.knkPermissible = Objects.requireNonNull(knkPermissible, "knkPermissible must not be null");
         this.mainThread = Objects.requireNonNull(mainThread, "mainThread must not be null");
         this.onlinePlayerByName = Objects.requireNonNull(onlinePlayerByName, "onlinePlayerByName must not be null");
         this.onlinePlayers = Objects.requireNonNull(onlinePlayers, "onlinePlayers must not be null");
+        this.knownPlayerNames = Objects.requireNonNull(knownPlayerNames, "knownPlayerNames must not be null");
     }
 
     /** Told instead of "no permission" when the permission service couldn't be asked. */
@@ -77,6 +86,17 @@ public final class PlayerCommandSupport {
                         sender.sendMessage(UNAVAILABLE_MESSAGE);
                     }
                 }));
+    }
+
+    /** Whether {@code player} holds {@code node}, quietly: false when it couldn't be checked. Any thread. */
+    public CompletableFuture<Boolean> hasAsync(Player player, String node) {
+        try {
+            return knkPermissible.checkAsync(player, node)
+                    .thenApply(decision -> decision == PermissionDecision.ALLOWED)
+                    .exceptionally(ex -> false);
+        } catch (RuntimeException ex) {
+            return CompletableFuture.completedFuture(false);
+        }
     }
 
     /**
@@ -158,12 +178,32 @@ public final class PlayerCommandSupport {
         return mainThread;
     }
 
-    /** Online player names starting with {@code prefix} (case-insensitive), plus any {@code extra} options. */
-    public List<String> completePlayers(String prefix, String... extra) {
+    /** Vanish-safe online player names starting with {@code prefix}, plus any fixed options. */
+    public List<String> completePlayers(CommandSender sender, String prefix, String... extra) {
+        return completePlayers(sender, prefix, false, extra);
+    }
+
+    /**
+     * Vanish-safe online players plus cached account names for commands that support offline targets.
+     */
+    public List<String> completeKnownPlayers(CommandSender sender, String prefix, String... extra) {
+        return completePlayers(sender, prefix, true, extra);
+    }
+
+    private List<String> completePlayers(CommandSender sender, String prefix, boolean includeKnownOffline,
+                                         String... extra) {
         String lower = prefix.toLowerCase(Locale.ROOT);
-        Stream<String> names = onlinePlayers().stream().map(Player::getName);
-        return Stream.concat(Arrays.stream(extra), names)
+        Collection<? extends Player> online = onlinePlayers();
+        Stream<String> visibleOnline = online.stream()
+                .filter(player -> VisiblePlayers.canSee(sender, player))
+                .map(Player::getName);
+        Stream<String> knownOffline = includeKnownOffline
+                ? knownPlayerNames.get().stream()
+                        .filter(name -> online.stream().noneMatch(player -> player.getName().equalsIgnoreCase(name)))
+                : Stream.empty();
+        return Stream.of(Arrays.stream(extra), visibleOnline, knownOffline).flatMap(stream -> stream)
                 .filter(name -> name.toLowerCase(Locale.ROOT).startsWith(lower))
+                .distinct()
                 .sorted(String.CASE_INSENSITIVE_ORDER)
                 .toList();
     }

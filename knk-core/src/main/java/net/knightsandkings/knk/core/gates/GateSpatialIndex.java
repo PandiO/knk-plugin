@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.core.gates;
 
+import net.knightsandkings.knk.core.util.BlockKey;
 import org.bukkit.util.Vector;
 
 import java.util.List;
@@ -22,10 +23,12 @@ import java.util.concurrent.ConcurrentHashMap;
 public class GateSpatialIndex {
     private final Map<String, Map<Long, Integer>> cellsByWorld = new ConcurrentHashMap<>();
 
+    /**
+     * Packed key of a block position - the 26/12/26-bit layout now lives in
+     * {@link BlockKey#pack(int, int, int)} (shared with the road builder); this delegates.
+     */
     public static long packCell(int x, int y, int z) {
-        return (((long) x & 0x3FFFFFFL) << 38)
-            | (((long) y & 0xFFFL) << 26)
-            | ((long) z & 0x3FFFFFFL);
+        return BlockKey.pack(x, y, z);
     }
 
     public static long packCell(Vector position) {

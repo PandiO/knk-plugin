@@ -18,6 +18,17 @@ commands:
     # umbrella - can still reach /knk at all. Gating the whole command behind knk.admin here
     # would make that per-subcommand granularity unreachable.
 
+  gate:
+    description: "Control a whole gate (structure and all its doors) - same as /knk gate"
+    usage: "/gate <open|close|toggle|info|list|repair|tp|override|reload|passthrough> [structure|here]"
+    # No permission: here (KNG-77) - every subaction is gated on its own knk.gate.* node inside
+    # GateCommand, exactly as /knk gate (this runs /knk gate).
+
+  gatedoor:
+    description: "Control one gate door - same as /knk gatedoor"
+    usage: "/gatedoor <open|close|toggle|info|list|repair|tp|health|active|invincible|capture|redefine> [door|here]"
+    # No permission: here (KNG-77) - gated on knk.gatedoor.* / knk.gate.* inside GateDoorCommand.
+
   account:
     description: "Manage your in-game account (create, link, view status)"
     usage: "/account [create|link|status]"
@@ -46,18 +57,21 @@ commands:
   freeze:
     description: "Freeze a player - locks movement/chat/commands/damage until unfrozen (rebuild of v1's FreezeCommands, a dead no-op stub there)"
     usage: "/freeze <player> <reason...>"
-    permission: knk.freeze
+    # No permission: here (KNG-24) - gated on knk.freeze through KnkPermissible inside the executor
+    # and hidden from players lacking it by GatedCommandVisibilityListener.
 
   unfreeze:
     description: "Unfreeze a previously-frozen player"
     usage: "/unfreeze <player>"
-    permission: knk.unfreeze
+    # No permission: here (KNG-24) - gated on knk.unfreeze through KnkPermissible inside the executor
+    # and hidden from players lacking it by GatedCommandVisibilityListener.
 
   staffchat:
     description: "Broadcast a message to online staff (rebuild of v1's StaffChatCommand)"
     usage: "/staffchat <message>"
     aliases: [sc]
-    permission: knk.staffchat
+    # No permission: here (KNG-24) - gated on knk.staffchat through KnkPermissible inside the executor
+    # and hidden from players lacking it by GatedCommandVisibilityListener.
 
   msg:
     description: "Send a private message to another player (rebuild of v1's MessageCommands)"
@@ -237,11 +251,19 @@ commands:
     description: "List the places you can teleport to with /warp"
     usage: "/warps"
 
-  # Back to where you died (DESIGN.md Phase 7, developer decision Q5) - death location only, for a few
-  # minutes, never after a siege death. Node checked in BackCommand.
+  # Back to the latest death or teleport origin your nodes allow (DESIGN.md Phase 7, KNG-42); staff
+  # /back <player> [-s]. Nodes checked in BackCommand.
   back:
-    description: "Teleport back to where you last died (for a few minutes after the death)"
-    usage: "/back"
+    description: "Teleport back to where you died, or were before a warp, teleport or /spawn (for a few minutes)"
+    usage: "/back | /back <player> [-s]"
+
+  # Road navigation (KNG-27, docs/specs/navigation/DESIGN.md §6.1, Phase 4): a particle trail and HUD
+  # along the road network to a Location, Town/District/Structure, street or named road node.
+  # Node knk.navigate (default true) checked in NavigateCommand.
+  navigate:
+    description: "Guide yourself along the roads to a place, town, district, structure, street or road node"
+    usage: "/navigate <destination> [spawn|region] | /navigate stop | /navigate"
+    aliases: [nav]
   lootbox:
     description: "Lootboxes: help, and what a box can give (docs/specs/lootboxes/DESIGN.md §3.4)"
     usage: "/lootbox | /lootbox odds <category> [stars]"
@@ -270,6 +292,13 @@ permissions:
       knk.admin.district: true
       knk.admin.locations: true
       knk.admin.location: true
+      knk.admin.location.tp: true
+      knk.admin.location.orphans: true
+      knk.admin.location.orphans.notify: true
+      knk.admin.location.orphans.keep: true
+      knk.admin.location.orphans.delete: true
+      knk.admin.location.orphans.run: true
+      knk.admin.location.retention: true
       knk.admin.enchantments: true
       knk.admin.itemblueprints: true
       knk.admin.menu: true
@@ -289,6 +318,7 @@ permissions:
       knk.admin.tp: true
       knk.admin.discovery: true
       knk.admin.currency: true
+      knk.admin.road: true
 
   knk.admin.health:
     description: Access to /knk health
@@ -327,7 +357,37 @@ permissions:
     default: false
 
   knk.admin.location:
-    description: Access to /knk location
+    description: Access to /knk location here
+    default: false
+
+  # Location retention (KNG-80, knk-workspace docs/architecture/location-retention.md). Same nodes as
+  # knk-web-api's StaffPermissions; the web-only ones are listed so knk.admin covers them for ops too.
+  knk.admin.location.tp:
+    description: /knk location tp <id> - teleport to any Location by id (staff teleport, audited); see teleport commands in the web panel
+    default: false
+
+  knk.admin.location.orphans:
+    description: /knk location orphans and the web Orphaned Locations panel (read only)
+    default: false
+
+  knk.admin.location.orphans.notify:
+    description: Get the in-game digest when the weekly check finds new orphaned Locations
+    default: false
+
+  knk.admin.location.orphans.keep:
+    description: Mark an orphaned Location Kept (web panel)
+    default: false
+
+  knk.admin.location.orphans.delete:
+    description: Delete an orphaned Location (web panel; re-checked by the API first)
+    default: false
+
+  knk.admin.location.orphans.run:
+    description: Run the orphan check now (web panel)
+    default: false
+
+  knk.admin.location.retention:
+    description: Change the orphan check's schedule, grace period and Keep recheck period (web panel)
     default: false
 
   knk.admin.enchantments:
@@ -732,13 +792,31 @@ permissions:
       knk-web-api through the in-house permission model.
     default: op
 
+  # KNG-77: knk.gate.* nodes are per gate STRUCTURE (/gate, all doors); knk.gatedoor.* per door
+  # (/gatedoor). A structure-level node also covers that structure's doors. Per-id forms:
+  # knk.gate.open.<structureId>, knk.gatedoor.open.<doorId> (same for close).
   knk.gate.open.*:
-    description: Permission to open any gate
+    description: Open (and toggle open) any whole gate with /gate - and so any of its doors with /gatedoor
     default: false
     
   knk.gate.close.*:
-    description: Permission to close any gate
+    description: Close (and toggle closed) any whole gate with /gate - and so any of its doors with /gatedoor
     default: false
+
+  knk.gatedoor.open.*:
+    description: Open (and toggle open) any single gate door with /gatedoor
+    default: false
+
+  knk.gatedoor.close.*:
+    description: Close (and toggle closed) any single gate door with /gatedoor
+    default: false
+
+  knk.gatedoor.admin:
+    description: Door-level gate admin commands (/gatedoor repair|tp|health|active|invincible|capture|redefine). knk.gate.admin covers these too.
+    default: op
+    children:
+      knk.gatedoor.open.*: true
+      knk.gatedoor.close.*: true
 
   knk.gate.passthrough.use:
     description: Base permission to trigger any gate pass-through mode by right-clicking a closed, pass-through-enabled gate
@@ -749,9 +827,10 @@ permissions:
     default: false
 
   knk.gate.admin:
-    description: Permission to use admin gate commands. Also grants full, unconditional gate pass-through access (bypasses AllowPassThrough and mode permissions).
+    description: Permission to use admin gate commands (/gate repair|tp|override|reload, and every /gatedoor admin command). Also grants full, unconditional gate pass-through access (bypasses AllowPassThrough and mode permissions).
     default: op
     children:
+      knk.gatedoor.admin: true
       knk.gate.open.*: true
       knk.gate.close.*: true
       knk.gate.passthrough.use: true
@@ -851,7 +930,32 @@ permissions:
     description: >-
       /back - return to where you last died, within teleport.back.expire-seconds (5 min) of the death,
       once per death. Warmup, cooldown, combat tag and the safe-spot check apply; a siege death gives no
-      /back. Meant for the Dragon Blood premium tier.
+      /back. Meant for the Dragon Blood premium tier. With several knk.teleport.back.* kinds, /back goes
+      to the latest place among them.
+    default: op
+
+  knk.teleport.back.warps:
+    description: /back - return to where you were before your last /warp or menu warp (KNG-42).
+    default: op
+
+  knk.teleport.back.teleport:
+    description: >-
+      /back - return to where you were before your last /tpa or /tpahere (whoever moved) or your own
+      staff /tp (KNG-42). Being moved by staff isn't recorded.
+    default: op
+
+  knk.teleport.back.spawn:
+    description: /back - return to where you were before your last /spawn (KNG-42).
+    default: op
+
+  knk.teleport.back.all:
+    description: /back to every kind of place (death, warps, teleport, spawn). knk.teleport.back.* works too.
+    default: op
+
+  knk.teleport.staff.back.others:
+    description: >-
+      /back <player> [-s] - send a player you outrank back to their latest /back place of any kind.
+      Instant and audited; uses their entry up.
     default: op
 
   knk.teleport.bypass.requirements:
@@ -859,7 +963,7 @@ permissions:
     default: op
 
   knk.teleport.bypass.cost:
-    description: /warp is free (no gem price).
+    description: /warp is free (no gem price), and so is /back when teleport.back.price-coins is set.
     default: op
 
   knk.teleport.warmup.short:
@@ -930,3 +1034,17 @@ permissions:
       discovered and rewarded again (no claw-back), and see the tracker/spool. The same node gates
       the web app's discovery admin page. Also granted through the in-house permission system.
     default: false
+
+  knk.admin.road:
+    description: >-
+      /knk road - road navigation admin tools (KNG-27, docs/specs/navigation/DESIGN.md §7): survey
+      walks that learn road profiles, tile builds, the particle overlay, street labels, node/edge
+      fixes and seeds. The same node gates the web app's road admin pages. Also granted through the
+      in-house permission system.
+    default: false
+
+  knk.navigate:
+    description: >-
+      /navigate - guided routes along the road network (KNG-27, Phase 4). Everyone by default; the
+      in-house permission system can take it away per group.
+    default: true

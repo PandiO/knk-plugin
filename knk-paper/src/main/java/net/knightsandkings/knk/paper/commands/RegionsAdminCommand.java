@@ -8,21 +8,26 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.plugin.Plugin;
 
 import net.knightsandkings.knk.core.regions.managed.RepairReport;
+import net.knightsandkings.knk.paper.regions.access.DomainAccessFlagSync;
 import net.knightsandkings.knk.paper.regions.managed.ManagedRegionsBootstrap;
 
 /**
- * {@code /knk regions repair}: runs the managed-region repair that also runs at startup, e.g. after a Town or Structure was
- * created in the web app (their regions are set up by the next repair, not at creation). Safe to repeat.
+ * {@code /knk regions repair}: runs the managed-region repair that also runs at startup, e.g. after regions were edited by
+ * hand or a domain's rename could not reach the server. Never renames a region (the API's
+ * {@code POST /api/Regions/finalize-temp-names} does that). Safe to repeat. Also re-syncs every domain's
+ * AllowEntry/AllowExit flags from the API (KNG-56).
  */
 public class RegionsAdminCommand {
 
     public static final String PERMISSION = "knk.admin.regions";
 
     private final ManagedRegionsBootstrap managedRegions;
+    private final DomainAccessFlagSync accessSync;
     private final Plugin plugin;
 
-    public RegionsAdminCommand(ManagedRegionsBootstrap managedRegions, Plugin plugin) {
+    public RegionsAdminCommand(ManagedRegionsBootstrap managedRegions, DomainAccessFlagSync accessSync, Plugin plugin) {
         this.managedRegions = managedRegions;
+        this.accessSync = accessSync;
         this.plugin = plugin;
     }
 
@@ -55,6 +60,19 @@ public class RegionsAdminCommand {
                         .forEach(entry -> sender.sendMessage(ChatColor.RED + entry.regionId() + ": " + entry.detail()));
             }
         }));
+        if (accessSync != null) {
+            accessSync.syncNow().whenComplete((report, error) -> Bukkit.getScheduler().runTask(plugin, () -> {
+                if (error != null) {
+                    Throwable cause = error.getCause() != null ? error.getCause() : error;
+                    sender.sendMessage(ChatColor.RED + "Domain access sync could not run: " + cause.getMessage()
+                            + " (the rules last saved on the regions stay in force)");
+                    return;
+                }
+                sender.sendMessage((report.failures().isEmpty() ? ChatColor.GREEN : ChatColor.YELLOW)
+                        + "Domain access sync: " + report.summary());
+                report.failures().stream().limit(5).forEach(failure -> sender.sendMessage(ChatColor.RED + failure));
+            }));
+        }
         return true;
     }
 }

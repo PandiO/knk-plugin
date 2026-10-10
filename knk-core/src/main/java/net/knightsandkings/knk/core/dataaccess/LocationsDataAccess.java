@@ -5,6 +5,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.logging.Logger;
 
 import net.knightsandkings.knk.core.cache.BaseCache;
+import net.knightsandkings.knk.core.domain.common.Page;
+import net.knightsandkings.knk.core.domain.common.PagedQuery;
 import net.knightsandkings.knk.core.domain.location.KnkLocation;
 import net.knightsandkings.knk.core.ports.api.LocationsQueryApi;
 
@@ -127,6 +129,26 @@ public class LocationsDataAccess {
         );
     }
     
+    /**
+     * Search locations (road navigation plan §2 R18: the {@code /navigate} catalogue). Straight to
+     * the API ({@code POST /api/Locations/search}); every location returned is cached by id.
+     *
+     * @param query paged query with search term, filters, sort
+     * @return CompletableFuture resolving to the page
+     */
+    public CompletableFuture<Page<KnkLocation>> searchAsync(PagedQuery query) {
+        return locationsQueryApi.search(query).thenApply(page -> {
+            if (page != null && page.items() != null) {
+                for (KnkLocation location : page.items()) {
+                    if (location != null && location.id() != null) {
+                        locationCache.put(location);
+                    }
+                }
+            }
+            return page;
+        });
+    }
+
     /**
      * Invalidate a cached location by ID.
      *

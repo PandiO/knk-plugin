@@ -7,7 +7,6 @@ import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
-import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -27,6 +26,7 @@ import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.core.ports.api.UsersQueryApi;
 import net.knightsandkings.knk.core.statistics.StatisticsLines;
 import net.knightsandkings.knk.paper.menu.content.ProfileView;
+import net.knightsandkings.knk.paper.commands.support.VisiblePlayers;
 
 /**
  * {@code /user statistics|stats [player]}, and the shortcut {@code /stats [player]} - port of v2's
@@ -59,7 +59,7 @@ public class UserCommand implements TabExecutor {
     private final UsersDataAccess usersDataAccess;
     private final UserCache userCache;
     private final TitleBracketsDataAccess titleBrackets;
-    private final Supplier<List<String>> onlinePlayerNames;
+    private final VisiblePlayers visiblePlayers;
     /** Opens the statistics privacy menu ({@code /stats settings}, KNG-34); null until wired. */
     private volatile java.util.function.Consumer<Player> settingsOpener;
     /** (target user id, acting user id or null) → the viewer-filtered statistics (KNG-34); null = not shown. */
@@ -67,13 +67,13 @@ public class UserCommand implements TabExecutor {
 
     public UserCommand(Executor mainThread, UsersQueryApi usersQueryApi, UsersDataAccess usersDataAccess,
                        UserCache userCache, TitleBracketsDataAccess titleBrackets,
-                       Supplier<List<String>> onlinePlayerNames) {
+                       VisiblePlayers visiblePlayers) {
         this.mainThread = mainThread;
         this.usersQueryApi = usersQueryApi;
         this.usersDataAccess = usersDataAccess;
         this.userCache = userCache;
         this.titleBrackets = titleBrackets;
-        this.onlinePlayerNames = onlinePlayerNames;
+        this.visiblePlayers = visiblePlayers;
     }
 
     /**
@@ -268,14 +268,12 @@ public class UserCommand implements TabExecutor {
             return SUBCOMMANDS.stream().filter(s -> s.startsWith(prefix)).toList();
         }
         if (args.length == 2 && SUBCOMMANDS.contains(args[0].toLowerCase(Locale.ROOT))) {
+            List<String> names = visiblePlayers.complete(sender, args[1]);
             String prefix = args[1].toLowerCase(Locale.ROOT);
-            java.util.stream.Stream<String> names = onlinePlayerNames.get().stream()
-                    .filter(name -> name.toLowerCase(Locale.ROOT).startsWith(prefix))
-                    .sorted(String.CASE_INSENSITIVE_ORDER);
             if (sender instanceof Player && settingsOpener != null && SETTINGS.startsWith(prefix)) {
-                return java.util.stream.Stream.concat(java.util.stream.Stream.of(SETTINGS), names).toList();
+                return java.util.stream.Stream.concat(java.util.stream.Stream.of(SETTINGS), names.stream()).toList();
             }
-            return names.toList();
+            return names;
         }
         return Collections.emptyList();
     }

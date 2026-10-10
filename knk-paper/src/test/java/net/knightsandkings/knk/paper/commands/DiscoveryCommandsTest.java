@@ -109,7 +109,8 @@ class DiscoveryCommandsTest {
     @Test
     void listShowsCountsRewardsAndNewestDiscoveriesWithIds() {
         DiscoverySummary summary = new DiscoverySummary(List.of(new DiscoveryTypeCount("Town", 1, 2),
-                new DiscoveryTypeCount("Structure", 0, 0)), null, 12, 500, 5, 60);
+                new DiscoveryTypeCount("Structure", 0, 0), new DiscoveryTypeCount("GateStructure", 0, 0, false)),
+                null, 12, 500, 5, 60);
         OffsetDateTime when = OffsetDateTime.of(2026, 9, 20, 10, 0, 0, 0, ZoneOffset.UTC);
         when(api.summary(7)).thenReturn(CompletableFuture.completedFuture(summary));
         when(api.progress(eq(7), any())).thenReturn(CompletableFuture.completedFuture(new Page<>(List.of(
@@ -122,7 +123,7 @@ class DiscoveryCommandsTest {
         assertEquals(Map.of("status", "discovered"), query.getValue().filters());
         assertEquals("discoveredAt", query.getValue().sortBy());
         assertTrue(query.getValue().sortDescending());
-        verify(staff).sendMessage("§6Discoveries of Steve§7 - Town 1/2");
+        verify(staff).sendMessage("§6Discoveries of Steve§7 - Town 1/2, GateStructure disabled");
         verify(staff).sendMessage("§7Earned: §f500 coins, 5 gems, 60 XP");
         verify(staff).sendMessage("§7 #14 §fMarket§7 (District in Rivia) - 2026-09-20");
         verify(staff).sendMessage("§7Page 1/2 - /knk discovery list Steve 2");

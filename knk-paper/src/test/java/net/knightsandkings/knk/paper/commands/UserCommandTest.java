@@ -9,6 +9,7 @@ import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.domain.users.TitleBracket;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.core.ports.api.UsersQueryApi;
+import net.knightsandkings.knk.paper.commands.support.VisiblePlayers;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -24,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
@@ -43,11 +45,16 @@ class UserCommandTest {
     private final UsersDataAccess usersDataAccess = mock(UsersDataAccess.class);
     private final UserCache userCache = mock(UserCache.class);
     private final TitleBracketsDataAccess titleBrackets = mock(TitleBracketsDataAccess.class);
+    private final VisiblePlayers visiblePlayers = mock(VisiblePlayers.class);
     private final UserCommand command = new UserCommand(Runnable::run, usersQueryApi, usersDataAccess, userCache,
-            titleBrackets, () -> List.of("Alice", "Bob"));
+            titleBrackets, visiblePlayers);
 
     UserCommandTest() {
         when(titleBrackets.listAsync()).thenReturn(CompletableFuture.completedFuture(BRACKETS));
+        when(visiblePlayers.complete(any(), anyString())).thenAnswer(invocation -> {
+            String prefix = invocation.getArgument(1, String.class).toLowerCase();
+            return List.of("Alice", "Bob").stream().filter(name -> name.toLowerCase().startsWith(prefix)).toList();
+        });
     }
 
     private static UserSummary user(String name, int coins, int xp, Integer bracketId, ActiveMode mode, boolean fullAccount) {

@@ -3,6 +3,7 @@ package net.knightsandkings.knk.paper.listeners;
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.paper.events.GateDoorInteractEvent;
+import net.knightsandkings.knk.paper.gates.GatePassThroughRules;
 import net.knightsandkings.knk.paper.gates.GatePassThroughService;
 import net.knightsandkings.knk.paper.user.PlayerUserData;
 import net.knightsandkings.knk.paper.user.UserManager;
@@ -36,12 +37,10 @@ public class GatePassThroughConsequenceListener implements Listener {
 
         CachedGateDoor gate = event.getGate();
         Player player = event.getPlayer();
-        boolean isAdmin = player.hasPermission("knk.gate.admin");
+        boolean isAdmin = GatePassThroughRules.isAdmin(player);
 
-        if (!gate.isEffectivelyAllowPassThrough() && !isAdmin) {
-            return;
-        }
-        if (!isAdmin && !player.hasPermission("knk.gate.passthrough.use")) {
+        // R25: the same predicate navigation uses to decide whether a gate edge is open for a player.
+        if (!GatePassThroughRules.canPass(player, gate)) {
             return;
         }
 

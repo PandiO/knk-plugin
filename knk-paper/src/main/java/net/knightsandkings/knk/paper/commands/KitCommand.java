@@ -10,6 +10,7 @@ import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
+import org.bukkit.command.TabExecutor;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
@@ -18,6 +19,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import net.knightsandkings.knk.paper.commands.support.VisiblePlayers;
 
 /**
  * {@code /kit} - the complete grant surface (docs/specs/kits/DESIGN.md §4.3): list/get/give/
@@ -34,16 +36,80 @@ import java.util.concurrent.CompletableFuture;
  * {@code kits.overview} menu uses (Kits DESIGN.md §7, CONTENT_PORT_PLAN.md CP2); this class only
  * parses arguments and resolves the kit by name.
  */
-public class KitCommand implements CommandExecutor {
+public class KitCommand implements TabExecutor {
 
     private final Plugin plugin;
     private final KitsDataAccess kitsDataAccess;
     private final KitGrantFlow kitGrantFlow;
+    private final VisiblePlayers visiblePlayers;
+    private volatile List<String> cachedKitNames = List.of();
 
     public KitCommand(Plugin plugin, KitsDataAccess kitsDataAccess, KitGrantFlow kitGrantFlow) {
+        this(plugin, kitsDataAccess, kitGrantFlow, VisiblePlayers.bukkit());
+    }
+
+    public KitCommand(Plugin plugin, KitsDataAccess kitsDataAccess, KitGrantFlow kitGrantFlow,
+                      VisiblePlayers visiblePlayers) {
         this.plugin = plugin;
         this.kitsDataAccess = kitsDataAccess;
         this.kitGrantFlow = kitGrantFlow;
+        this.visiblePlayers = visiblePlayers;
+        refreshKitNames();
+    }
+
+    @Override
+    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        if (args.length == 1) {
+            List<String> actions = new java.util.ArrayList<>();
+            if (canSuggest(sender, "knk.kit.list")) actions.add("list");
+            if (canSuggest(sender, "knk.kit.get")) actions.add("get");
+            if (canSuggest(sender, "knk.kit.give")) actions.add("give");
+            if (canSuggest(sender, "knk.kit.purchase")) actions.addAll(List.of("purchase", "buy"));
+            if (canSuggest(sender, "knk.kit.manage")) actions.add("manage");
+            return filter(actions, args[0]);
+        }
+        String sub = args[0].toLowerCase(Locale.ROOT);
+        if (args.length == 2 && "give".equals(sub)) {
+            return canSuggest(sender, "knk.kit.give")
+                    ? visiblePlayers.completeOthers(sender, args[1]) : List.of();
+        }
+        if (args.length == 2 && List.of("get", "purchase", "buy").contains(sub)) {
+            String node = "get".equals(sub) ? "knk.kit.get" : "knk.kit.purchase";
+            if (!canSuggest(sender, node)) return List.of();
+            refreshKitNames();
+            return filter(cachedKitNames, args[1]);
+        }
+        if (args.length == 2 && "manage".equals(sub)) {
+            return canSuggest(sender, "knk.kit.manage")
+                    ? filter(List.of("create", "set", "content", "delete"), args[1]) : List.of();
+        }
+        if (args.length >= 3 && "give".equals(sub)) {
+            if (!canSuggest(sender, "knk.kit.give")) return List.of();
+            refreshKitNames();
+            return filter(cachedKitNames, args[args.length - 1]);
+        }
+        return List.of();
+    }
+
+    private void refreshKitNames() {
+        CompletableFuture<net.knightsandkings.knk.core.domain.common.Page<KnkKit>> load = kitsDataAccess.listAsync(1, 100);
+        if (load == null) return; // Test doubles and a disabled gateway may have no catalog future.
+        load.thenAccept(page -> {
+            if (page != null && page.items() != null) {
+                cachedKitNames = page.items().stream().map(KnkKit::name)
+                        .filter(name -> name != null && !name.isBlank())
+                        .distinct().sorted(String.CASE_INSENSITIVE_ORDER).toList();
+            }
+        }).exceptionally(ex -> null);
+    }
+
+    private boolean canSuggest(CommandSender sender, String node) {
+        return !(sender instanceof Player player) || kitGrantFlow.hasPermission(player, node);
+    }
+
+    private static List<String> filter(List<String> values, String prefix) {
+        String lower = prefix == null ? "" : prefix.toLowerCase(Locale.ROOT);
+        return values.stream().filter(value -> value.toLowerCase(Locale.ROOT).startsWith(lower)).toList();
     }
 
     @Override

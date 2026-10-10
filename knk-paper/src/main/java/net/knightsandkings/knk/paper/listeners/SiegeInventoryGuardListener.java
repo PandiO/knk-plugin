@@ -51,7 +51,7 @@ import java.util.function.Predicate;
  *   <li>placing storage blocks (containers, shulker boxes, ender chests), item-holding blocks
  *       (lecterns, jukeboxes, chiseled bookshelves, decorated pots, campfires, composters, flower pots)
  *       and placeable entities/hangings (minecarts, boats, armour stands, item frames, paintings);</li>
- *   <li>item pickup, for OPs as well ({@code PlayerListener.onItemPickup} already blocks non-OPs) -
+ *   <li>item pickup, for OPs as well -
  *       except siege enchantment books of the member's own match, which the 5c book listener
  *       un-cancels at {@code HIGHEST}.</li>
  * </ul>
@@ -193,7 +193,7 @@ public class SiegeInventoryGuardListener implements Listener {
      * DESIGN §9.3: members pick up nothing during a match, OPs included. Siege books of the member's
      * own match are un-cancelled afterwards by the 5c book listener at {@code HIGHEST}.
      */
-    @SuppressWarnings("deprecation") // PlayerListener uses the same event; the book listener must see the same one
+    @SuppressWarnings("deprecation") // the book listener must see the same event
     @EventHandler(priority = EventPriority.HIGH)
     public void onPickup(PlayerPickupItemEvent event) {
         if (guarded(event.getPlayer())) event.setCancelled(true);

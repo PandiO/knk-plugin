@@ -49,7 +49,7 @@ class PlayerUtilityCommandsTest {
     private final Player bob = player("Bob");
     private final Map<String, Player> online = Map.of("alice", alice, "bob", bob);
     private final PlayerCommandSupport support = new PlayerCommandSupport(permissible, Runnable::run,
-            name -> online.get(name.toLowerCase()), () -> List.of(alice, bob));
+            name -> online.get(name.toLowerCase()), () -> List.of(alice, bob), () -> List.of("Alice", "Bob", "Carol"));
 
     private static final UUID CAROL_ID = UUID.nameUUIDFromBytes("Carol".getBytes());
 
@@ -85,6 +85,7 @@ class PlayerUtilityCommandsTest {
     };
 
     PlayerUtilityCommandsTest() {
+        when(alice.canSee(bob)).thenReturn(true);
         when(permissible.checkAsync(any(), anyString())).thenAnswer(inv -> {
             String node = inv.getArgument(1);
             checkedNodes.add(node);
@@ -424,5 +425,20 @@ class PlayerUtilityCommandsTest {
                 new InventoryCommand(support, rankCheck, offlineStorage).onTabComplete(alice, mock(Command.class), "inventory", new String[]{"clear", "Bob", "c"}));
         assertFalse(new EnderchestCommand(support, rankCheck, offlineStorage)
                 .onTabComplete(alice, mock(Command.class), "ec", new String[]{""}).isEmpty());
+        assertEquals(List.of("Carol"),
+                new InventoryCommand(support, rankCheck, offlineStorage)
+                        .onTabComplete(alice, mock(Command.class), "inventory", new String[]{"open", "c"}));
+        assertTrue(new FlyCommand(support)
+                .onTabComplete(alice, mock(Command.class), "fly", new String[]{"c"}).isEmpty());
+    }
+
+    @Test
+    void tabCompletionHidesPlayersTheSenderCannotSee() {
+        when(alice.canSee(bob)).thenReturn(false);
+
+        assertTrue(new FlyCommand(support)
+                .onTabComplete(alice, mock(Command.class), "fly", new String[]{"b"}).isEmpty());
+        assertTrue(new InventoryCommand(support, rankCheck, offlineStorage)
+                .onTabComplete(alice, mock(Command.class), "inventory", new String[]{"open", "b"}).isEmpty());
     }
 }

@@ -23,6 +23,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
+import net.knightsandkings.knk.paper.commands.support.VisiblePlayers;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -43,7 +44,7 @@ class UserCommandStatisticsTest {
     private final UserCache userCache = mock(UserCache.class);
     private final TitleBracketsDataAccess titleBrackets = mock(TitleBracketsDataAccess.class);
     private final UserCommand command = new UserCommand(Runnable::run, usersQueryApi, usersDataAccess, userCache,
-            titleBrackets, () -> List.of("Alice", "Bob"));
+            titleBrackets, mock(VisiblePlayers.class));
     private final List<Integer[]> reads = new ArrayList<>();
 
     UserCommandStatisticsTest() {

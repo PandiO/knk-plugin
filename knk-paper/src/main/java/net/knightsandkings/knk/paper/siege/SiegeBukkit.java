@@ -4,32 +4,23 @@ import net.knightsandkings.knk.core.domain.location.KnkLocation;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeTeam;
 import net.knightsandkings.knk.core.siege.SiegeDisplayText;
 import net.knightsandkings.knk.core.siege.SiegeFloor;
+import net.knightsandkings.knk.paper.utils.KnkLocations;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
-import org.bukkit.Bukkit;
 import org.bukkit.Location;
-import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerTeleportEvent.TeleportCause;
 
 import java.util.Locale;
 import java.util.Optional;
-import java.util.OptionalDouble;
 
 /** Small conversions between siege domain values and Bukkit/Adventure types. */
 public final class SiegeBukkit {
     private SiegeBukkit() {}
 
-    /** A runtime-config location in a loaded world, or empty (missing coordinates or world not loaded). */
+    /** A runtime-config location in a loaded world, or empty (delegates to {@link KnkLocations#toLocation}, R10). */
     public static Optional<Location> toLocation(KnkLocation location) {
-        if (location == null || location.x() == null || location.y() == null || location.z() == null) {
-            return Optional.empty();
-        }
-        World world = location.world() != null ? Bukkit.getWorld(location.world()) : null;
-        if (world == null) return Optional.empty();
-        return Optional.of(new Location(world, location.x(), location.y(), location.z(),
-                location.yaw() != null ? location.yaw() : 0f,
-                location.pitch() != null ? location.pitch() : 0f));
+        return KnkLocations.toLocation(location);
     }
 
     /**
@@ -45,21 +36,11 @@ public final class SiegeBukkit {
     /**
      * The capture point snapped to the floor under it (playtest 2026-09-26, {@link SiegeFloor}): the
      * capture ring and the capture distance use it, so a point captured in the air still sits on the
-     * ground. Unchanged when the chunk isn't loaded or no floor is within reach.
+     * ground. Unchanged when the chunk isn't loaded or no floor is within reach. Delegates to
+     * {@link KnkLocations#floorOf} (road navigation R10).
      */
     public static Location floorOf(Location point) {
-        World world = point.getWorld();
-        if (world == null) return point;
-        int x = point.getBlockX();
-        int z = point.getBlockZ();
-        if (!world.isChunkLoaded(x >> 4, z >> 4)) return point;
-        OptionalDouble floor = SiegeFloor.floorY(point.getY(),
-                by -> by >= world.getMinHeight() && by < world.getMaxHeight() && !world.getBlockAt(x, by, z).isPassable(),
-                by -> world.getBlockAt(x, by, z).getBoundingBox().getMaxY());
-        if (floor.isEmpty()) return point;
-        Location snapped = point.clone();
-        snapped.setY(floor.getAsDouble());
-        return snapped;
+        return KnkLocations.floorOf(point);
     }
 
     /** A Bukkit ChatColor name (e.g. {@code DARK_RED}) as an Adventure colour; white when unknown. */

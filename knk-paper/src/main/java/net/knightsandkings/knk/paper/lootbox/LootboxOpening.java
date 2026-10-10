@@ -2,6 +2,7 @@ package net.knightsandkings.knk.paper.lootbox;
 
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxClaimResult;
+import net.knightsandkings.knk.core.lootbox.LootboxDecoyRolls;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxOdds;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxRuntimeConfig;
 import net.knightsandkings.knk.core.lootbox.LootboxReel;
@@ -38,6 +39,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.DoubleSupplier;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.logging.Logger;
 
@@ -49,9 +51,13 @@ import java.util.logging.Logger;
  * <p>
  * The reel is only a presentation of a result that is already stored: closing the menu early hands the item over at
  * once, a player who quits mid-spin gets it when they rejoin (and, failing that, through the API's pending claims),
- * and a server stop hands every spinning item over first. The passing items follow the box's real odds (the odds
+ * and a server stop hands every spinning item over first. An item that comes up while the player is in a siege (hub
+ * or match) is held until the siege restores their own inventory ({@link #deliverWaiting}), because the siege
+ * inventory is replaced afterwards and the item would be lost with it; nothing is confirmed to the API meanwhile, so
+ * the claim stays redeliverable through its pending claims. The passing items follow the box's real odds (the odds
  * preview, cached for a few minutes) and are fetched with a short timeout; without them the reel shows only the
- * winner. {@code opening.style: instant} skips the reel.
+ * winner. Each passing item is dressed like a real drop of that box (its default enchantments plus freshly rolled
+ * ones, {@link LootboxDecoyRolls}), so the winner isn't the only enchanted item on the reel. {@code opening.style: instant} skips the reel.
  */
 public final class LootboxOpening implements Listener {
 
@@ -70,21 +76,42 @@ public final class LootboxOpening implements Listener {
     private final Supplier<LootboxSettings> settings;
     private final Supplier<KnkLootboxRuntimeConfig> config;
     private final DoubleSupplier random;
+    private final Predicate<UUID> inSiege;
 
     // Main thread only.
     private final Map<UUID, Spin> spins = new HashMap<>();
-    private final Map<UUID, List<Pending>> interrupted = new HashMap<>();
+    // Items waiting for their player: they quit mid-spin, or are in a siege that replaces their inventory.
+    private final Map<UUID, List<Pending>> waiting = new HashMap<>();
     private final Map<String, CachedOdds> odds = new HashMap<>();
-    private final Map<Integer, ItemStack> previews = new HashMap<>();
+    private final Map<Integer, LootboxDelivery.DecoySource> sources = new HashMap<>();
 
-    private record Pending(LootboxDelivery.Prepared prepared, String giftedBy) {
+    private record Pending(LootboxDelivery.Prepared prepared, String giftedBy, boolean heldForSiege) {
+        Pending(LootboxDelivery.Prepared prepared, String giftedBy) {
+            this(prepared, giftedBy, false);
+        }
     }
 
-    private record CachedOdds(Instant fetchedAt, List<LootboxReel.Weighted<Integer>> blueprints) {
+    private record CachedOdds(Instant fetchedAt, KnkLootboxOdds odds) {
+    }
+
+    /** What a passing item stands for: a pool item of the box, as the box gives it. */
+    record Candidate(int blueprintId, int itemStars, int quantity, boolean rollsEnchantments) {
+    }
+
+    /** One slot of the reel: the item shown, and (for a passing item) what it stands for. */
+    record Face(ItemStack stack, Candidate candidate) {
+    }
+
+    /** What may pass by, and the box's enchant rolls the passing items are dressed with. */
+    private record Candidates(List<LootboxReel.Weighted<Face>> faces, List<KnkLootboxOdds.Enchantment> enchantRolls) {
+        static Candidates none() {
+            return new Candidates(List.of(), List.of());
+        }
     }
 
     public LootboxOpening(Plugin plugin, LootboxDelivery delivery, LootboxAnnouncer announcer, LootboxesQueryApi queryApi,
-                          Supplier<LootboxSettings> settings, Supplier<KnkLootboxRuntimeConfig> config, DoubleSupplier random) {
+                          Supplier<LootboxSettings> settings, Supplier<KnkLootboxRuntimeConfig> config, DoubleSupplier random,
+                          Predicate<UUID> inSiege) {
         this.plugin = plugin;
         this.delivery = delivery;
         this.announcer = announcer;
@@ -92,6 +119,7 @@ public final class LootboxOpening implements Listener {
         this.settings = settings;
         this.config = config;
         this.random = random;
+        this.inSiege = inSiege != null ? inSiege : id -> false;
     }
 
     /**
@@ -150,11 +178,12 @@ public final class LootboxOpening implements Listener {
 
     // ===== The reel =====
 
-    private void spin(Player player, LootboxDelivery.Prepared prepared, String giftedBy, List<LootboxReel.Weighted<ItemStack>> candidates) {
+    private void spin(Player player, LootboxDelivery.Prepared prepared, String giftedBy, Candidates candidates) {
         LootboxSettings current = settings.get();
         KnkLootboxClaimResult claim = prepared.claim();
-        LootboxReel<ItemStack> reel = LootboxReel.plan(candidates, prepared.item(), current.opening().reelSteps(), VISIBLE,
-                current.opening().slowestStepTicks(), random);
+        LootboxReel<Face> reel = LootboxReel.plan(candidates.faces(), new Face(prepared.item(), null),
+                current.opening().reelSteps(), VISIBLE, current.opening().slowestStepTicks(), random,
+                face -> dress(face, candidates.enchantRolls()));
         Spin spin = new Spin(player.getUniqueId(), prepared, giftedBy, reel);
         String title = current.coloredLabel(claim.boxLabel(), claim.boxStars());
         spin.inventory = Bukkit.createInventory(spin, ROWS * 9, LEGACY.deserialize(title));
@@ -194,10 +223,10 @@ public final class LootboxOpening implements Listener {
     }
 
     private void render(Spin spin) {
-        List<ItemStack> window = spin.reel.window(spin.step);
+        List<Face> window = spin.reel.window(spin.step);
         for (int i = 0; i < VISIBLE; i++) {
-            ItemStack shown = window.get(i);
-            spin.inventory.setItem(ROW_START + i, shown == null ? null : shown.clone());
+            Face shown = window.get(i);
+            spin.inventory.setItem(ROW_START + i, shown == null || shown.stack() == null ? null : shown.stack().clone());
         }
     }
 
@@ -221,8 +250,16 @@ public final class LootboxOpening implements Listener {
         }, Math.max(1, showFor));
     }
 
-    /** Hands the item over and says what it was (and, for an announced drop, broadcasts it). */
+    /**
+     * Hands the item over and says what it was (and, for an announced drop, broadcasts it). In a siege the item is held
+     * instead: it would land in the siege inventory, which is replaced when the siege ends.
+     */
     private void finish(Player player, LootboxDelivery.Prepared prepared, String giftedBy, LootboxSettings current) {
+        if (inSiege.test(player.getUniqueId())) {
+            remember(player.getUniqueId(), new Pending(prepared, giftedBy, true));
+            player.sendMessage(LootboxMessages.HELD_DURING_SIEGE);
+            return;
+        }
         LootboxDelivery.Outcome outcome = delivery.handOver(player, prepared, false);
         KnkLootboxClaimResult claim = prepared.claim();
         if (outcome.given()) {
@@ -259,79 +296,95 @@ public final class LootboxOpening implements Listener {
 
     // ===== What passes by =====
 
-    /** The box's pool as display items weighted by their real chance; empty when it can't be read quickly. */
-    private CompletableFuture<List<LootboxReel.Weighted<ItemStack>>> candidates(KnkLootboxClaimResult claim) {
-        CompletableFuture<List<LootboxReel.Weighted<ItemStack>>> done = new CompletableFuture<>();
-        oddsFor(claim.lootboxTypeId(), claim.boxStars()).thenAccept(weighted -> {
-            List<CompletableFuture<LootboxReel.Weighted<ItemStack>>> items = new ArrayList<>();
-            for (LootboxReel.Weighted<Integer> entry : weighted) {
-                items.add(previewOf(entry.value()).thenApply(stack -> stack == null ? null : new LootboxReel.Weighted<>(stack, entry.weight())));
+    /** The box's pool as items weighted by their real chance; empty when it can't be read quickly. */
+    private CompletableFuture<Candidates> candidates(KnkLootboxClaimResult claim) {
+        CompletableFuture<Candidates> done = new CompletableFuture<>();
+        oddsFor(claim.lootboxTypeId(), claim.boxStars()).thenAccept(boxOdds -> {
+            List<LootboxReel.Weighted<Candidate>> weighted = weighted(boxOdds);
+            List<CompletableFuture<LootboxReel.Weighted<Face>>> items = new ArrayList<>();
+            for (LootboxReel.Weighted<Candidate> entry : weighted) {
+                items.add(sourceOf(entry.value().blueprintId()).thenApply(source ->
+                        source == null ? null : new LootboxReel.Weighted<>(new Face(null, entry.value()), entry.weight())));
             }
             CompletableFuture.allOf(items.toArray(new CompletableFuture[0])).whenComplete((ignored, ex) ->
-                    Bukkit.getScheduler().runTask(plugin, () -> done.complete(items.stream()
-                            .map(f -> f.getNow(null)).filter(Objects::nonNull).toList())));
+                    Bukkit.getScheduler().runTask(plugin, () -> done.complete(new Candidates(
+                            items.stream().map(f -> f.getNow(null)).filter(Objects::nonNull).toList(),
+                            boxOdds.enchantments()))));
         });
         // Never keep the player waiting on a slow API: the reel then shows the winner only.
-        CompletableFuture<List<LootboxReel.Weighted<ItemStack>>> bounded = new CompletableFuture<>();
-        Bukkit.getScheduler().runTaskLater(plugin, () -> bounded.complete(List.of()), CANDIDATE_TIMEOUT_MILLIS / 50);
+        CompletableFuture<Candidates> bounded = new CompletableFuture<>();
+        Bukkit.getScheduler().runTaskLater(plugin, () -> bounded.complete(Candidates.none()), CANDIDATE_TIMEOUT_MILLIS / 50);
         done.thenAccept(bounded::complete);
         return bounded;
     }
 
-    /** Main thread: blueprint id → chance, from the odds preview (cached {@link #ODDS_TTL}). */
-    private CompletableFuture<List<LootboxReel.Weighted<Integer>>> oddsFor(int typeId, int boxStars) {
+    /** Main thread: a passing item dressed like a real drop - default enchantments plus freshly rolled ones. */
+    private Face dress(Face face, List<KnkLootboxOdds.Enchantment> enchantRolls) {
+        Candidate candidate = face.candidate();
+        LootboxDelivery.DecoySource source = candidate == null ? null : sources.get(candidate.blueprintId());
+        if (source == null) {
+            return face;
+        }
+        ItemStack dressed = delivery.decoy(source, candidate.itemStars(), candidate.quantity(), candidate.rollsEnchantments(),
+                candidate.rollsEnchantments() ? LootboxDecoyRolls.roll(enchantRolls, candidate.itemStars(), random) : List.of());
+        return new Face(dressed != null ? dressed : new ItemStack(Material.PAPER), candidate);
+    }
+
+    /** Main thread: the box's odds (cached {@link #ODDS_TTL}); an empty preview when it can't be read quickly. */
+    private CompletableFuture<KnkLootboxOdds> oddsFor(int typeId, int boxStars) {
         String key = typeId + ":" + boxStars;
         CachedOdds cached = odds.get(key);
         if (cached != null && cached.fetchedAt().plus(ODDS_TTL).isAfter(Instant.now())) {
-            return CompletableFuture.completedFuture(cached.blueprints());
+            return CompletableFuture.completedFuture(cached.odds());
         }
-        CompletableFuture<List<LootboxReel.Weighted<Integer>>> done = new CompletableFuture<>();
+        CompletableFuture<KnkLootboxOdds> done = new CompletableFuture<>();
         queryApi.getOdds(typeId, boxStars).orTimeout(CANDIDATE_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
                 .whenComplete((result, ex) -> Bukkit.getScheduler().runTask(plugin, () -> {
                     if (ex != null || result == null) {
-                        done.complete(List.of());
+                        done.complete(new KnkLootboxOdds(typeId, null, boxStars, 0, List.of(), List.of(), List.of()));
                         return;
                     }
-                    List<LootboxReel.Weighted<Integer>> weighted = weighted(result);
-                    odds.put(key, new CachedOdds(Instant.now(), weighted));
-                    done.complete(weighted);
+                    odds.put(key, new CachedOdds(Instant.now(), result));
+                    done.complete(result);
                 }));
         return done;
     }
 
-    static List<LootboxReel.Weighted<Integer>> weighted(KnkLootboxOdds odds) {
-        List<LootboxReel.Weighted<Integer>> weighted = new ArrayList<>();
+    static List<LootboxReel.Weighted<Candidate>> weighted(KnkLootboxOdds odds) {
+        List<LootboxReel.Weighted<Candidate>> weighted = new ArrayList<>();
         for (KnkLootboxOdds.Item item : odds.items()) {
             if (item.itemBlueprintId() != null && item.percent() > 0) {
-                weighted.add(new LootboxReel.Weighted<>(item.itemBlueprintId(), item.percent()));
+                weighted.add(new LootboxReel.Weighted<>(
+                        new Candidate(item.itemBlueprintId(), item.stars(), item.quantity(), item.rollsEnchantments()), item.percent()));
             }
         }
         for (KnkLootboxOdds.Special special : odds.specials()) {
             if (special.itemBlueprintId() != null && special.percent() > 0) {
-                weighted.add(new LootboxReel.Weighted<>(special.itemBlueprintId(), special.percent()));
+                // A special keeps its blueprint's own grade, quantity and (default) enchantments; it rolls nothing.
+                weighted.add(new LootboxReel.Weighted<>(new Candidate(special.itemBlueprintId(), 0, 0, false), special.percent()));
             }
         }
         return weighted;
     }
 
-    /** Main thread: a display copy of a blueprint, built once per server run. */
-    private CompletableFuture<ItemStack> previewOf(int blueprintId) {
-        ItemStack cached = previews.get(blueprintId);
+    /** Main thread: a pool item's blueprint and material, resolved once per server run. */
+    private CompletableFuture<LootboxDelivery.DecoySource> sourceOf(int blueprintId) {
+        LootboxDelivery.DecoySource cached = sources.get(blueprintId);
         if (cached != null) {
             return CompletableFuture.completedFuture(cached);
         }
-        return delivery.preview(blueprintId).thenApply(stack -> {
-            if (stack != null) {
-                previews.put(blueprintId, stack);
+        return delivery.decoySource(blueprintId).thenApply(source -> {
+            if (source != null) {
+                sources.put(blueprintId, source);
             }
-            return stack;
+            return source;
         });
     }
 
-    /** Main thread: forget cached odds and item looks (a {@code /knk lootbox reload}). */
+    /** Main thread: forget cached odds and item sources (a {@code /knk lootbox reload}). */
     public void clearCaches() {
         odds.clear();
-        previews.clear();
+        sources.clear();
     }
 
     // ===== The menu is look-only =====
@@ -385,24 +438,41 @@ public final class LootboxOpening implements Listener {
     @EventHandler(priority = EventPriority.MONITOR)
     public void onJoin(PlayerJoinEvent event) {
         UUID id = event.getPlayer().getUniqueId();
-        List<Pending> waiting = interrupted.remove(id);
-        if (waiting == null || waiting.isEmpty()) {
+        if (!waiting.containsKey(id)) {
             return;
         }
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
             Player player = Bukkit.getPlayer(id);
-            if (player == null) {
-                interrupted.computeIfAbsent(id, ignored -> new ArrayList<>()).addAll(waiting);
-                return;
-            }
-            for (Pending pending : waiting) {
-                finish(player, pending.prepared(), pending.giftedBy(), settings.get());
+            if (player != null) {
+                deliverWaiting(player);
             }
         }, 40L);
     }
 
+    /**
+     * Main thread: hands over the items waiting for {@code player} (a spin cut short by a quit, or held during a
+     * siege), unless they are in a siege right now: those stay until the next call (the siege's inventory restore).
+     * An item held for a siege says so first.
+     */
+    public void deliverWaiting(Player player) {
+        UUID id = player.getUniqueId();
+        if (!player.isOnline() || inSiege.test(id)) {
+            return;
+        }
+        List<Pending> pendings = waiting.remove(id);
+        if (pendings == null) {
+            return;
+        }
+        for (Pending pending : pendings) {
+            if (pending.heldForSiege()) {
+                player.sendMessage(LootboxMessages.ARRIVED_AFTER_SIEGE);
+            }
+            finish(player, pending.prepared(), pending.giftedBy(), settings.get());
+        }
+    }
+
     private void remember(UUID playerId, Pending pending) {
-        interrupted.computeIfAbsent(playerId, ignored -> new ArrayList<>()).add(pending);
+        waiting.computeIfAbsent(playerId, ignored -> new ArrayList<>()).add(pending);
     }
 
     // ===== Looks =====
@@ -434,13 +504,13 @@ public final class LootboxOpening implements Listener {
         final UUID playerId;
         final LootboxDelivery.Prepared prepared;
         final String giftedBy;
-        final LootboxReel<ItemStack> reel;
+        final LootboxReel<Face> reel;
         Inventory inventory;
         BukkitTask task;
         int step;
         boolean finished;
 
-        Spin(UUID playerId, LootboxDelivery.Prepared prepared, String giftedBy, LootboxReel<ItemStack> reel) {
+        Spin(UUID playerId, LootboxDelivery.Prepared prepared, String giftedBy, LootboxReel<Face> reel) {
             this.playerId = playerId;
             this.prepared = prepared;
             this.giftedBy = giftedBy;

@@ -25,6 +25,7 @@ import net.knightsandkings.knk.paper.menu.MenuService;
 import net.knightsandkings.knk.paper.tasks.GateDoorRegionCaptureHandler;
 import net.knightsandkings.knk.paper.tasks.WorldTaskHandlerRegistry;
 import net.knightsandkings.knk.paper.cache.CacheManager;
+import net.knightsandkings.knk.paper.commands.support.VisiblePlayers;
 import net.knightsandkings.knk.paper.user.UserManager;
 import org.bukkit.Bukkit;
 import org.bukkit.NamespacedKey;
@@ -49,14 +50,21 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import net.knightsandkings.knk.paper.commands.support.CommandPermissions;
+
 /**
  * Root /knk command dispatcher using CommandRegistry.
  */
 public class KnkAdminCommand implements CommandExecutor, TabCompleter {
     private final CommandRegistry registry = new CommandRegistry();
+    private CommandPermissions commandPermissions = CommandPermissions.bukkitOnly();
+    /** Nodes a subcommand checks synchronously inside its executor; asked for before it runs (KNG-24). */
+    private final java.util.Map<String, List<String>> nodesCheckedInside = new java.util.HashMap<>();
+    private GateCommand gateCommand;
     private final java.util.Map<String, java.util.function.BiFunction<CommandSender, String[], List<String>>> extraTabCompleters =
             new java.util.HashMap<>();
     private final HelpSubcommand helpSubcommand;
+    private final VisiblePlayers visiblePlayers = VisiblePlayers.bukkit();
     /** /knk currency (currency Phase 4); null when the currency service isn't available. */
     private CurrencyAdminCommand currencyAdminCommand;
         private final Plugin plugin;
@@ -367,10 +375,27 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         );
 
         GateCommand gateCommand = new GateCommand(gateManager, gateStructuresApi, gateDoorsApi, userManager, usersCommandApi, districtGateLoader, gateDoorRegionCaptureHandler);
-        registry.register(
-                new CommandMetadata("gate", "Control and inspect gate structures", "/knk gate <open|close|info|list|passthrough|admin>", null,
-                        List.of("/knk gate list", "/knk gate info <name>", "/knk gate open <name>", "/knk gate passthrough <default|instant|teleport>")),
-                (sender, args) -> gateCommand.onCommand(sender, null, "knk", args)
+        this.gateCommand = gateCommand;
+        nodesCheckedInside.put("gate", GateCommand.CHECKED_NODES);
+        nodesCheckedInside.put("gatedoor", GateCommand.CHECKED_NODES);
+        nodesCheckedInside.put("user", UserManagementCommand.CHECKED_NODES);
+        // KNG-77: two sibling roots - "gate" acts on a gate structure and all its doors, "gatedoor"
+        // on one door - also reachable as /gate and /gatedoor (plugin.yml). Null top-level
+        // permission: every subaction gates itself (knk.gate.*, knk.gatedoor.*).
+        registerSubcommand(
+                new CommandMetadata("gate", "Control a whole gate (structure and all its doors)",
+                        "/knk gate <open|close|toggle|info|list|repair|tp|override|reload|passthrough> [structure|here]", null,
+                        List.of("/gate list", "/gate toggle here", "/gate open North Gate", "/gate repair 16", "/gate passthrough <default|instant|teleport>")),
+                (sender, args) -> gateCommand.onCommand(sender, null, "knk", args),
+                gateCommand::complete
+        );
+        GateDoorCommand gateDoorCommand = gateCommand.doorCommand();
+        registerSubcommand(
+                new CommandMetadata("gatedoor", "Control one gate door",
+                        "/knk gatedoor <open|close|toggle|info|list|repair|tp|health|active|invincible|capture|redefine> [door|here]", null,
+                        List.of("/gatedoor list 16", "/gatedoor repair here", "/gatedoor toggle", "/gatedoor open 3 Left")),
+                (sender, args) -> gateDoorCommand.onCommand(sender, null, "knk", args),
+                gateDoorCommand::complete
         );
 
         // Register user management (developer request 2026-09-25, extended with group/perm
@@ -443,11 +468,17 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         }
     }
 
+    /** See {@link CommandRegistry#setVisibility}. */
+    public void setSubcommandVisibility(String name, java.util.function.Predicate<CommandSender> visibleTo) {
+        registry.setVisibility(name, visibleTo);
+    }
+
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length == 0) {
             // Show help when no args
-            return helpSubcommand.execute(sender, new String[0]);
+            commandPermissions.warm(sender, registry.permissionNodes(), () -> helpSubcommand.execute(sender, new String[0]));
+            return true;
         }
 
         String subcommandName = args[0].toLowerCase();
@@ -462,14 +493,36 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         }
 
         CommandRegistry.RegisteredCommand cmd = registered.get();
-        
-        // Check permission
-        if (cmd.metadata().permission() != null && !sender.hasPermission(cmd.metadata().permission())) {
-            sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
+        if ("help".equals(cmd.metadata().name())) {
+            // The listing reads cached answers; ask for every node first so in-house grants show.
+            commandPermissions.warm(sender, registry.permissionNodes(), () -> registry.execute(sender, cmd, subArgs));
             return true;
         }
 
-        return cmd.executor().execute(sender, subArgs);
+        // KNG-24: the metadata permission through KnkPermissible (in-house grants and wildcards, ops),
+        // after asking for the nodes the executor checks from the cache.
+        List<String> inside = nodesCheckedInside.getOrDefault(cmd.metadata().name().toLowerCase(Locale.ROOT), List.of());
+        commandPermissions.warm(sender, inside, () -> registry.execute(sender, cmd, subArgs));
+        return true;
+    }
+
+    /** {@code gates.here.*} / {@code gates.lookat.*} for the gate commands' implicit targets (KNG-78/79). */
+    public void setGateTargetingSettings(net.knightsandkings.knk.paper.gates.GateTargeting.Settings settings) {
+        if (gateCommand != null) {
+            gateCommand.setTargetingSettings(settings);
+        }
+    }
+
+    /**
+     * The permission check for every subcommand's metadata node, the help listing and tab completion
+     * (KNG-24). Bukkit-only until set - KnKPlugin sets the KnkPermissible-backed one.
+     */
+    public void setCommandPermissions(CommandPermissions permissions) {
+        this.commandPermissions = java.util.Objects.requireNonNull(permissions, "permissions must not be null");
+        registry.setPermissions(permissions);
+        if (gateCommand != null) {
+            gateCommand.setPermissions(permissions);
+        }
     }
 
         @Override
@@ -487,26 +540,81 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                         return filterByPrefix(rootCommands, args[0]);
                 }
 
-                String root = args[0].toLowerCase(Locale.ROOT);
+                String enteredRoot = args[0].toLowerCase(Locale.ROOT);
+                var rootCommand = registry.get(enteredRoot);
+                if (rootCommand.isEmpty() || !commandPermissions.has(sender, rootCommand.get().metadata().permission())) {
+                        return Collections.emptyList();
+                }
+                String root = rootCommand.get().metadata().name().toLowerCase(Locale.ROOT);
                 var extra = extraTabCompleters.get(root);
                 if (extra != null) {
                         return extra.apply(sender, Arrays.copyOfRange(args, 1, args.length));
                 }
                 if ("user".equals(root)) {
-                        return completeUserSubcommand(Arrays.copyOfRange(args, 1, args.length));
+                        return completeUserSubcommand(sender, Arrays.copyOfRange(args, 1, args.length));
                 }
                 if ("currency".equals(root) && currencyAdminCommand != null) {
                         return currencyAdminCommand.complete(sender, Arrays.copyOfRange(args, 1, args.length));
                 }
-                if (!"item".equals(root)) {
-                        return Collections.emptyList();
+                if ("item".equals(root)) {
+                        return completeItemSubcommand(Arrays.copyOfRange(args, 1, args.length));
                 }
-
-                return completeItemSubcommand(Arrays.copyOfRange(args, 1, args.length));
+                return completeBuiltIn(sender, root, Arrays.copyOfRange(args, 1, args.length));
                 } catch (Exception ex) {
                         plugin.getLogger().warning("Tab completion failed for /knk: " + ex.getMessage());
                         return Collections.emptyList();
                 }
+        }
+
+        private List<String> completeBuiltIn(CommandSender sender, String root, String[] args) {
+                if (args.length == 0) return List.of();
+                String current = args[args.length - 1];
+                if (args.length == 1) {
+                        return switch (root) {
+                                case "help" -> filterByPrefix(registry.listAvailable(sender).stream()
+                                                .map(command -> command.metadata().name()).toList(), current);
+                                case "cache" -> filterByPrefix(List.of("refresh", "reload"), current);
+                                case "clans" -> filterByPrefix(List.of("list", "info", "banner", "design"), current);
+                                case "towns", "districts", "streets" -> filterByPrefix(List.of("list"), current);
+                                case "locations" -> filterByPrefix(List.of("list"), current);
+                                case "location" -> filterByPrefix(List.of("here"), current);
+                                case "itemblueprints" -> filterByPrefix(List.of("list", "search", "get", "give"), current);
+                                case "menu" -> filterByPrefix(List.of("open", "page", "search", "filter"), current);
+                                case "tasks" -> filterByPrefix(List.of("Pending", "Claimed", "InProgress", "Completed", "Failed"), current);
+                                case "itemscan", "kitscan" -> filterByPrefix(List.of("claim"), current);
+                                case "tp" -> visiblePlayers.completeOthers(sender, current);
+                                default -> List.of();
+                        };
+                }
+                if ("itemblueprints".equals(root)) {
+                        String sub = args[0].toLowerCase(Locale.ROOT);
+                        if (args.length == 2 && "search".equals(sub)) {
+                                return filterByPrefix(List.of("id", "name", "displayName"), current);
+                        }
+                        if (args.length == 3 && "give".equals(sub)) {
+                                return visiblePlayers.complete(sender, current);
+                        }
+                        if (("list".equals(sub) && args.length == 2)
+                                        || ("search".equals(sub) && args.length == 4)) {
+                                return filterByPrefix(List.of("1", "2", "3", "4", "5"), current);
+                        }
+                        if (("list".equals(sub) && args.length == 3)
+                                        || ("search".equals(sub) && args.length == 5)) {
+                                return filterByPrefix(List.of("10", "25", "50", "100"), current);
+                        }
+                }
+                if ("menu".equals(root)) {
+                        if (args.length == 2 && "page".equalsIgnoreCase(args[0])) {
+                                return filterByPrefix(List.of("next", "prev"), current);
+                        }
+                        if (args.length >= 3 && ("search".equalsIgnoreCase(args[0]) || "filter".equalsIgnoreCase(args[0]))) {
+                                return filterByPrefix(List.of("clear"), current);
+                        }
+                }
+                if ("tp".equals(root) && args.length == 2) {
+                        return filterByPrefix(List.of("-s"), current);
+                }
+                return List.of();
         }
 
         // /knk item rename|lore|enchantments - itemArgs is args with "item" already stripped, so
@@ -740,21 +848,24 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
 
         // /knk user <player> info|coins|gems|xp <set|add|remove> <amount> - userArgs is args
         // with "user" already stripped, so userArgs[0] is the player name.
-        private List<String> completeUserSubcommand(String[] userArgs) {
+        private List<String> completeUserSubcommand(CommandSender sender, String[] userArgs) {
                 if (userArgs.length == 0) {
                         return Collections.emptyList();
                 }
                 if (userArgs.length == 1) {
-                        List<String> onlineNames = Bukkit.getOnlinePlayers().stream()
-                                        .map(Player::getName)
-                                        .toList();
-                        return filterByPrefix(onlineNames, userArgs[0]);
+                        return visiblePlayers.complete(sender, userArgs[0]);
                 }
                 if (userArgs.length == 2) {
-                        return filterByPrefix(List.of("info", "coins", "gems", "xp", "history"), userArgs[1]);
+                        return filterByPrefix(List.of("info", "coins", "gems", "xp", "history", "group", "perm"), userArgs[1]);
                 }
                 if (userArgs.length == 3 && "history".equalsIgnoreCase(userArgs[1])) {
                         return filterByPrefix(List.of("coins", "gems", "xp"), userArgs[2]);
+                }
+                if (userArgs.length == 3 && "group".equalsIgnoreCase(userArgs[1])) {
+                        return filterByPrefix(List.of("add", "remove"), userArgs[2]);
+                }
+                if (userArgs.length == 3 && "perm".equalsIgnoreCase(userArgs[1])) {
+                        return filterByPrefix(List.of("grant", "revoke"), userArgs[2]);
                 }
                 if (userArgs.length == 3 && !"info".equalsIgnoreCase(userArgs[1])) {
                         return filterByPrefix(List.of("set", "add", "remove"), userArgs[2]);

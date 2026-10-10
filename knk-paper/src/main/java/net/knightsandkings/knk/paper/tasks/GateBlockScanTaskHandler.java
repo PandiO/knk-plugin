@@ -12,6 +12,7 @@ import net.knightsandkings.knk.api.dto.GateDoorDto;
 import net.knightsandkings.knk.api.dto.WorldTaskDto;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
 import net.knightsandkings.knk.core.util.CoordinateParser;
+import net.knightsandkings.knk.paper.utils.TickBudget;
 import net.knightsandkings.knk.core.util.VectorMath;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
@@ -52,7 +53,6 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
     private static final String OPENED_TASK_TYPE = "GateOpenedBlockScan";
     private static final int BLOCKS_PER_TICK = 200;
     private static final int BLOCKS_PER_TICK_WHEN_LAGGING = 50;
-    private static final double LAG_TPS_THRESHOLD = 15.0;
     private static final int DEFAULT_SCAN_MAX_BLOCKS = 500; // matches GateStructure.ScanMaxBlocks default
     private static final int DEFAULT_SCAN_MAX_RADIUS = 20; // matches GateStructure.ScanMaxRadius default
     private static final int ABSOLUTE_MAX_CELLS = 20000; // hard ceiling regardless of gate configuration
@@ -273,7 +273,7 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
         String regionDataJson = useOpenAnchor ? gate.getOpenedRegionData() : gate.getClosedRegionData();
         if (regionDataJson == null || regionDataJson.isBlank()) {
             fail(taskId, "Gate '" + gate.getName() + "' has no " + (useOpenAnchor ? "opened" : "closed")
-                + " region captured yet - use '/knk gate door capture' first.", onFinished);
+                + " region captured yet - use '/gatedoor capture' first.", onFinished);
             return;
         }
 
@@ -545,11 +545,7 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
         }
 
         private boolean isServerLagging() {
-            try {
-                return Bukkit.getTPS()[0] < LAG_TPS_THRESHOLD;
-            } catch (Exception e) {
-                return false;
-            }
+            return TickBudget.isServerLagging(); // R11: the shared lag check
         }
 
         private void finish() {
@@ -711,11 +707,7 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
         }
 
         private boolean isServerLagging() {
-            try {
-                return Bukkit.getTPS()[0] < LAG_TPS_THRESHOLD;
-            } catch (Exception e) {
-                return false;
-            }
+            return TickBudget.isServerLagging(); // R11: the shared lag check
         }
 
         private void finish() {
@@ -843,11 +835,7 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
         }
 
         private boolean isServerLagging() {
-            try {
-                return Bukkit.getTPS()[0] < LAG_TPS_THRESHOLD;
-            } catch (Exception e) {
-                return false;
-            }
+            return TickBudget.isServerLagging(); // R11: the shared lag check
         }
 
         private void finish() {

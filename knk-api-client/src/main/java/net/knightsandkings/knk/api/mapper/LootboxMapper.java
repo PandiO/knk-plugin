@@ -146,8 +146,11 @@ public final class LootboxMapper {
         }
         return new KnkLootboxOdds(dto.lootboxTypeId(), dto.lootboxTypeName(), dto.boxStars(), dto.normalRollPercent(),
                 map(dto.itemGrades(), g -> new KnkLootboxOdds.Grade(g.name(), g.stars(), g.percent(), g.itemCount())),
-                map(dto.items(), i -> new KnkLootboxOdds.Item(i.name(), i.stars(), i.percent(), i.itemBlueprintId())),
-                map(dto.specials(), s -> new KnkLootboxOdds.Special(s.name(), s.percent(), s.itemBlueprintId())));
+                map(dto.items(), i -> new KnkLootboxOdds.Item(i.name(), i.stars(), i.percent(), i.itemBlueprintId(),
+                        i.quantity() != null ? i.quantity() : 0, Boolean.TRUE.equals(i.rollsEnchantments()))),
+                map(dto.specials(), s -> new KnkLootboxOdds.Special(s.name(), s.percent(), s.itemBlueprintId())),
+                map(dto.enchantments(), e -> new KnkLootboxOdds.Enchantment(e.enchantmentDefinitionId(), e.key(), e.isCustom(),
+                        e.hitPercent(), map(e.levelsByGrade(), l -> new KnkLootboxOdds.LevelRange(l.stars(), l.minLevel(), l.maxLevel())))));
     }
 
     static List<String> splitCsv(String csv) {

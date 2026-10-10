@@ -22,8 +22,8 @@ import net.knightsandkings.knk.paper.teleport.BackService;
  * really happened (Paper lets a plugin cancel a {@code PlayerDeathEvent}):
  * <ol>
  *   <li>LOWEST: ask the {@link BackDeathExclusion}s, remember the verdict.</li>
- *   <li>MONITOR: if the death went through, record it (or, for an excluded death, forget any older
- *       one); the verdict is dropped either way.</li>
+ *   <li>MONITOR: if the death went through and isn't excluded, record it; the verdict is dropped
+ *       either way.</li>
  * </ol>
  */
 public class BackDeathListener implements Listener {

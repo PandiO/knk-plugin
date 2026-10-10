@@ -4,8 +4,12 @@ import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
+import org.bukkit.command.TabExecutor;
+
+import java.util.List;
 
 import net.knightsandkings.knk.paper.user.UserAdminService;
+import net.knightsandkings.knk.paper.commands.support.VisiblePlayers;
 
 /**
  * /freeze &lt;player&gt; &lt;reason...&gt; and /unfreeze &lt;player&gt; - rebuild of v1's
@@ -16,13 +20,19 @@ import net.knightsandkings.knk.paper.user.UserAdminService;
  * include v1's (also never built) 7-day quit-ban - no ban system exists in v3, developer-confirmed
  * out of scope for this round.
  */
-public class FreezeCommand implements CommandExecutor {
+public class FreezeCommand implements TabExecutor {
     private final UserAdminService userAdminService;
     private final boolean freezing;
+    private final VisiblePlayers visiblePlayers;
 
     public FreezeCommand(UserAdminService userAdminService, boolean freezing) {
+        this(userAdminService, freezing, VisiblePlayers.bukkit());
+    }
+
+    public FreezeCommand(UserAdminService userAdminService, boolean freezing, VisiblePlayers visiblePlayers) {
         this.userAdminService = userAdminService;
         this.freezing = freezing;
+        this.visiblePlayers = visiblePlayers;
     }
 
     @Override
@@ -38,5 +48,10 @@ public class FreezeCommand implements CommandExecutor {
         // shared with the in-game Player manager (InventoryMenu content port CP8).
         userAdminService.resolveTarget(sender, targetName, target -> userAdminService.setFrozen(sender, target, freezing, reason));
         return true;
+    }
+
+    @Override
+    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        return args.length == 1 ? visiblePlayers.completeOthers(sender, args[0]) : List.of();
     }
 }

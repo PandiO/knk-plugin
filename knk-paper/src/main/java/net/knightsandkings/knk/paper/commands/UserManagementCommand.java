@@ -24,9 +24,10 @@ import net.knightsandkings.knk.paper.user.UserAdminService;
  * gap, see docs/specs/legacy/commands-v1.md's /user default|staff|builder|co-owner|owner).
  * Each property is gated on its own permission node (knk.admin.user.&lt;property&gt;) rather than
  * one umbrella, matching /knk gate's precedent of null top-level metadata permission + internal
- * per-action checks via sender.hasPermission - not KnkPermissible, since every other /knk admin
- * subcommand's permission checks (including gate's) are plain Bukkit nodes, not the REST-backed
- * grant system.
+ * per-action checks. Those checks accept a Bukkit grant or an in-house one through
+ * {@link UserAdminService#hasPermission} (KNG-24 - plain sender.hasPermission refused every
+ * in-house grant); /knk asks for these nodes before running the subcommand so the cached answers
+ * they read are fresh.
  * <p>
  * "set" (coins/gems/xp) is implemented as a computed delta against the target's current value
  * fetched fresh from knk-web-api (not the local cache, which can be stale/absent for an offline
@@ -51,7 +52,11 @@ import net.knightsandkings.knk.paper.user.UserAdminService;
  * methods the in-game Player manager calls; this class only parses arguments.
  */
 public class UserManagementCommand implements CommandExecutor {
+
     private static final List<String> PROPERTIES = List.of("info", "coins", "gems", "xp", "group", "perm", "history");
+    /** Every node this command checks synchronously; /knk asks for them before it runs (KNG-24). */
+    public static final List<String> CHECKED_NODES = PROPERTIES.stream()
+            .map(property -> UserAdminService.NODE_PREFIX + property).toList();
     private static final List<String> BALANCE_ACTIONS = List.of("set", "add", "remove");
     private static final List<String> REASON_REQUIRED = List.of("coins", "gems");
     private static final List<String> GROUP_ACTIONS = List.of("add", "remove");
@@ -237,13 +242,7 @@ public class UserManagementCommand implements CommandExecutor {
     }
 
     private boolean hasAnyUserPermission(CommandSender sender) {
-        return sender.hasPermission("knk.admin.user.info")
-            || sender.hasPermission("knk.admin.user.coins")
-            || sender.hasPermission("knk.admin.user.gems")
-            || sender.hasPermission("knk.admin.user.xp")
-            || sender.hasPermission("knk.admin.user.group")
-            || sender.hasPermission("knk.admin.user.perm")
-            || sender.hasPermission("knk.admin.user.history");
+        return PROPERTIES.stream().anyMatch(property -> userAdminService.hasPermission(sender, UserAdminService.NODE_PREFIX + property));
     }
 
     private void sendUsage(CommandSender sender) {

@@ -45,8 +45,8 @@ public final class TeleportDestinationRow implements MenuRowKey {
                                             boolean bypassRequirements, boolean bypassCost) {
         List<String> lore = new ArrayList<>();
         lore.add("&7" + DiscoveryRow.typeName(destination.domainType()));
-        boolean free = destination.priceGems() <= 0 || bypassCost;
-        lore.add(free ? "&7Price: &afree" : "&7Price: &f" + destination.priceGems() + " gems");
+        boolean free = !destination.hasPrice() || bypassCost;
+        lore.add(free ? "&7Price: &afree" : "&7Price: &f" + destination.priceLabel());
         if (hasText(destination.minTitleName())) {
             lore.add("&7Title: &f" + destination.minTitleName());
         }

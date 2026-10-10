@@ -3,6 +3,7 @@ package net.knightsandkings.knk.core.lootbox;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.DoubleSupplier;
+import java.util.function.UnaryOperator;
 
 /**
  * The opening animation's reel (docs/specs/lootboxes/DESIGN.md §3.9): a row of items that scrolls past a marker,
@@ -61,6 +62,16 @@ public record LootboxReel<T>(List<T> items, int visible, List<Integer> delays) {
      */
     public static <T> LootboxReel<T> plan(List<Weighted<T>> candidates, T winner, int steps, int visible, int maxStepTicks,
                                           DoubleSupplier random) {
+        return plan(candidates, winner, steps, visible, maxStepTicks, random, UnaryOperator.identity());
+    }
+
+    /**
+     * As {@link #plan(List, Object, int, int, int, DoubleSupplier)}, with {@code perSlot} applied to every drawn
+     * (non-winner) item, so a candidate can come out differently each time it passes (the opening dresses each one
+     * with freshly rolled enchantments, like the real drop it stands for).
+     */
+    public static <T> LootboxReel<T> plan(List<Weighted<T>> candidates, T winner, int steps, int visible, int maxStepTicks,
+                                          DoubleSupplier random, UnaryOperator<T> perSlot) {
         if (winner == null) {
             throw new IllegalArgumentException("winner is required");
         }
@@ -75,7 +86,7 @@ public record LootboxReel<T>(List<T> items, int visible, List<Integer> delays) {
 
         List<T> strip = new ArrayList<>(length);
         for (int i = 0; i < length; i++) {
-            strip.add(i == winnerIndex ? winner : draw(usable, total, winner, random));
+            strip.add(i == winnerIndex ? winner : perSlot.apply(draw(usable, total, winner, random)));
         }
         return new LootboxReel<>(strip, slots, easeOut(stepCount, Math.max(1, maxStepTicks)));
     }
