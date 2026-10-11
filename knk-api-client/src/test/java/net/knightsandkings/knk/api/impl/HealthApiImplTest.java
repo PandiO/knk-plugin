@@ -77,6 +77,16 @@ class HealthApiImplTest {
     }
 
     @Test
+    void readsTheApisPascalCaseBody() {
+        // Exact body from the KNG-115 live test (2026-10-11).
+        responseJson = "{\"Status\":\"degraded\",\"Timestamp\":\"2026-10-11T00:27:29.5129994Z\",\"Checks\":{\"self\":\"healthy\",\"database\":\"degraded\"},\"Version\":\"1.2.3\"}";
+        HealthStatus health = api("http://api.test/api").getHealth().join();
+        assertEquals("degraded", health.status());
+        assertEquals("1.2.3", health.version());
+        assertTrue(health.isDegraded());
+    }
+
+    @Test
     void explicitHealthRootIsUsedAsIs() {
         HealthApiImpl api = new HealthApiImpl("http://other.test:8080/", Duration.ofSeconds(2), client, mapper,
                 new NoAuthProvider(), executor, false);
