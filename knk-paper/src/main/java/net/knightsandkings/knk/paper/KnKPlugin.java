@@ -318,6 +318,12 @@ public class KnKPlugin extends JavaPlugin {
             config = ConfigLoader.load(getConfig());
             getLogger().info("Configuration loaded successfully");
             getLogger().info("API Base URL: " + config.api().baseUrl());
+            if (config.web().hasPublicUrl()) {
+                getLogger().info("Web app: " + config.web().publicUrl());
+            } else {
+                getLogger().warning("web.public-url is not set: /account link can't tell players where to register."
+                    + " Add a top-level 'web:' section with 'public-url:' to config.yml.");
+            }
             
             // Create auth provider based on config
             AuthProvider authProvider = createAuthProvider(config.api().auth());
