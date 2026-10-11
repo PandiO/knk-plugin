@@ -508,12 +508,15 @@ public class KnKPlugin extends JavaPlugin {
             this.domainAccessSync = new net.knightsandkings.knk.paper.regions.access.DomainAccessFlagSync(this,
                 apiClient.getDomainAccessRulesApi(),
                 net.knightsandkings.knk.paper.regions.access.DomainAccessFlagSync.Settings.read(this));
-            wgRegionIdHandler.setRegionFinalizer((regionId, domainType, parentRegionId) -> {
-                managedRegions.finalizeNewRegion(regionId, domainType, parentRegionId);
+            wgRegionIdHandler.setRegionFinalizer((regionId, domainType, parentRegionId, world) -> {
+                managedRegions.finalizeNewRegion(regionId, domainType, parentRegionId, world);
                 domainAccessSync.syncNow().exceptionally(error -> null);
             });
             managedRegions.scheduleStartupRepair();
             domainAccessSync.schedule();
+            // KNG-112: domains from before the API stored worlds get theirs from where their regions are.
+            new net.knightsandkings.knk.paper.regions.DomainWorldBackfillReporter(this, apiClient.getDomainWorldBackfillApi())
+                .schedule(net.knightsandkings.knk.paper.regions.access.DomainAccessFlagSync.Settings.read(this).delayTicks());
             
             // Register Location handler
             LocationTaskHandler locationHandler = new LocationTaskHandler(worldTasksApi, this);
@@ -1614,14 +1617,14 @@ public class KnKPlugin extends JavaPlugin {
                     navigationService.onNetworkChanged(world);
                 }
             },
-            regions -> regionDomainResolver.warmCache(regions), System::currentTimeMillis,
+            (world, regions) -> regionDomainResolver.warmCache(world, regions), System::currentTimeMillis,
             // rev. 7 Part C: a region whose domain's rule is "Ignored" for roads (houses, shops) does not cut roads;
             // read from the /navigate catalogue, which carries each domain's region (not the region → domain cache,
             // which /knk cache refresh clears)
             regionId -> navigationDestinations == null || !navigationDestinations.roadsIgnoreRegion(regionId),
             // KNG-110: a region whose domain keeps someone off the road, or one the domain cache does not know, makes
             // the pass look across the road; elsewhere the centre line decides, as before
-            net.knightsandkings.knk.paper.roads.LiveEdgeTags.restrictsByDomain(
+            net.knightsandkings.knk.paper.roads.LiveEdgeTags.restrictsByDomainInWorld(
                 regionDomainResolver::getDomainByRegionIdNoRefresh, evaluator));
         roadNetworkCache.addListener(tags::refresh);
         if (navigationDestinations != null) {

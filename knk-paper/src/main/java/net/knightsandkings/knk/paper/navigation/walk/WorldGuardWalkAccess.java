@@ -2,7 +2,9 @@ package net.knightsandkings.knk.paper.navigation.walk;
 
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.TreeMap;
+import java.util.function.BiFunction;
 
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -19,6 +21,7 @@ import com.sk89q.worldguard.protection.managers.RegionManager;
 import com.sk89q.worldguard.protection.regions.ProtectedCuboidRegion;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 
+import net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot;
 import net.knightsandkings.knk.core.roads.route.RegionShape;
 import net.knightsandkings.knk.paper.navigation.NavigationAccess;
 import net.knightsandkings.knk.paper.navigation.WorldGuardRegionShapes;
@@ -37,7 +40,8 @@ public final class WorldGuardWalkAccess {
     public static WalkAccessFactory factory(NavigationAccess access) {
         Objects.requireNonNull(access, "access");
         return new WalkAccessFactory(access::gateAvailability, access::regionsAt, access::bypasses,
-            WorldGuardWalkAccess::regions, WorldGuardWalkAccess::mayUseDoor, access::domainByRegionId,
+            WorldGuardWalkAccess::regions, WorldGuardWalkAccess::mayUseDoor,
+            (BiFunction<String, String, Optional<DomainSnapshot>>) access::domainByRegionId,
             access.evaluator());
     }
 

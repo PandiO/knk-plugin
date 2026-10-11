@@ -5,6 +5,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -14,6 +15,7 @@ import org.bukkit.World;
 import org.bukkit.entity.Player;
 
 import net.knightsandkings.knk.core.regions.DomainAccessEvaluator;
+import net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot;
 import net.knightsandkings.knk.core.roads.build.GateCells;
 import net.knightsandkings.knk.core.roads.route.DomainAvailability;
 import net.knightsandkings.knk.core.roads.route.GateAvailability;
@@ -84,7 +86,7 @@ public final class WalkAccessFactory {
     private final Predicate<Player> bypass;
     private final RegionsInBox regionsInBox;
     private final DoorUse doorUse;
-    private final DomainAvailability.DomainLookup lookup;
+    private final BiFunction<String, String, Optional<DomainSnapshot>> lookup;
     private final DomainAccessEvaluator evaluator;
 
     /**
@@ -100,6 +102,21 @@ public final class WalkAccessFactory {
                              Function<Player, Set<String>> moverRegions, Predicate<Player> bypass,
                              RegionsInBox regionsInBox, DoorUse doorUse, DomainAvailability.DomainLookup lookup,
                              DomainAccessEvaluator evaluator) {
+        this(gateRule, moverRegions, bypass, regionsInBox, doorUse,
+            (BiFunction<String, String, Optional<DomainSnapshot>>) (world, regionId) -> lookup.domainByRegionId(regionId),
+            evaluator);
+        Objects.requireNonNull(lookup, "lookup");
+    }
+
+    /**
+     * KNG-112: as above, looking a region's domain up in the walk's world - a region id names one region per world.
+     *
+     * @param lookup domain by world and region id ({@link NavigationAccess#domainByRegionId(String, String)})
+     */
+    public WalkAccessFactory(BiFunction<Player, Collection<Integer>, GateAvailability> gateRule,
+                             Function<Player, Set<String>> moverRegions, Predicate<Player> bypass,
+                             RegionsInBox regionsInBox, DoorUse doorUse,
+                             BiFunction<String, String, Optional<DomainSnapshot>> lookup, DomainAccessEvaluator evaluator) {
         this.gateRule = Objects.requireNonNull(gateRule, "gateRule");
         this.moverRegions = Objects.requireNonNull(moverRegions, "moverRegions");
         this.bypass = Objects.requireNonNull(bypass, "bypass");
@@ -149,7 +166,9 @@ public final class WalkAccessFactory {
             regionsInBox.regions(world, box).forEach((id, shape) ->
                 candidates.add(new DeniedRegionAccess.Candidate(id, shape, inside.contains(id))));
         }
-        return new WalkAccess(gateAccess, doorAccess, candidates, bypasses, lookup, evaluator);
+        String worldName = world == null ? null : world.getName();
+        return new WalkAccess(gateAccess, doorAccess, candidates, bypasses,
+            regionId -> lookup.apply(worldName, regionId), evaluator);
     }
 
     /** Door ids of a {@link GateCells} that is not an index (tests): scan the box. */
