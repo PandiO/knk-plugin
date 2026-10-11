@@ -636,7 +636,7 @@ lootboxes:
 #                0,64,0 (for a hub that is built, not generated). Applied at every load, so keep it the same.
 #   create:      create the world when its folder does not exist yet (default false)
 #   required:    while it is missing, only operators may join (default true)
-# Teleport to a loaded world as an operator with: /execute in minecraft:<name> run tp @s 2 65 2
+# Go to a loaded world with KnK's staff teleport: /tp 2 65 2 <name> (a void world's platform is at 0..4, 64, 0..4).
 worlds:
   load: []
   #  - { name: hub, environment: normal, generator: void, create: true, required: true }
