@@ -1782,6 +1782,7 @@ public class KnKPlugin extends JavaPlugin {
         pluginManager.registerEvents(new JoinLoadingRestrictionListener(joinLoadingGuard), this);
         pluginManager.registerEvents(new ModeListener(modeService), this);
         getLogger().info("Registered ModeListener for owner/staff mode restore");
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.VanishServerListListener(modeService::isVanished), this);
         pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.AdminFreezeListener(this, adminFreezeManager, usersDataAccess), this);
         getLogger().info("Registered AdminFreezeListener for /freeze enforcement");
         pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.PrivateMessageSessionListener(
