@@ -36,7 +36,8 @@ public class StructuresMapper {
             dto.streetId(),
             dto.streetName(),
             dto.districtId(),
-            dto.districtName()
+            dto.districtName(),
+            dto.worldName()
         );
     }
 

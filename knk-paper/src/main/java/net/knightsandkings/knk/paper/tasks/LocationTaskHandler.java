@@ -20,6 +20,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.logging.Logger;
 
@@ -620,13 +621,27 @@ public class LocationTaskHandler implements IWorldTaskHandler {
      * Used by RegionHttpServer endpoint: /api/regions/{regionId}/contains
      */
     public static boolean checkLocationInsideRegion(String regionId, double x, double z, boolean allowBoundary) {
+        return checkLocationInsideRegion(regionId, x, z, allowBoundary, null);
+    }
+
+    /**
+     * KNG-112: as {@link #checkLocationInsideRegion(String, double, double, boolean)}, against the region in
+     * {@code worldName} only (a region id is unique per world). Null checks the first loaded world that has it.
+     */
+    public static boolean checkLocationInsideRegion(String regionId, double x, double z, boolean allowBoundary,
+                                                    String worldName) {
         if (regionId == null || regionId.trim().isEmpty()) {
             LOGGER.warning("Cannot check location containment: regionId is null/empty");
             return false;
         }
 
         try {
-            for (World world : Bukkit.getWorlds()) {
+            List<World> worlds = Bukkit.getWorlds();
+            if (worldName != null && !worldName.isBlank()) {
+                World named = Bukkit.getWorld(worldName.trim());
+                worlds = named == null ? List.of() : List.of(named);
+            }
+            for (World world : worlds) {
                 RegionManager regionManager = WorldGuard.getInstance().getPlatform().getRegionContainer()
                     .get(BukkitAdapter.adapt(world));
 

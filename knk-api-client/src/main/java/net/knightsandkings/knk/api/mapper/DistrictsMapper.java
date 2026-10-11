@@ -47,7 +47,8 @@ public class DistrictsMapper {
             dto.description(),
             dto.wgRegionId(),
             dto.townId(),
-            dto.townName()
+            dto.townName(),
+            dto.worldName()
         );
     }
     

@@ -13,6 +13,7 @@ import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import org.bukkit.Location;
 import org.bukkit.entity.Player;
 
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
@@ -42,8 +43,8 @@ import net.knightsandkings.knk.paper.siege.SiegeGateController;
  *       <i>effective</i> accessors (R5), {@link SiegeGateController#isLocked} and
  *       {@link SiegeGateController#canCarryNonMember} (R24, R39, D2);</li>
  *   <li>{@code PassRule} ← {@link GatePassThroughRules} (R25);</li>
- *   <li>{@code DomainLookup} ← {@link RegionDomainResolver#getDomainByRegionIdNoRefresh}, falling
- *       back to the API off the main thread (R7); the player's current regions from
+ *   <li>{@code DomainLookup} ← {@link RegionDomainResolver#getDomainByRegionIdNoRefresh} in the network's
+ *       world (KNG-112), falling back to the API off the main thread (R7); the player's current regions from
  *       {@link RegionIds#at} (R8); the bypass is {@code KnKPlugin.hasRegionBypass} ({@code knk.region.bypass},
  *       KNG-17, R6; shared with the KNG-56 border);</li>
  *   <li>{@code RoadRule} ← {@link NavigationDestinations#roadAccessIgnored} (rev. 7 Part C, KNG-92): domains
@@ -103,12 +104,14 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
     @Override
     public AccessPolicy policyFor(Player player, RoadNetworkSnapshot snapshot, Set<String> destinationRegions) {
         Set<String> currentRegions = regionIds.at(player.getLocation());
+        String world = snapshot.world() != null ? snapshot.world() : worldOf(player);
         Set<Integer> doorIds = new HashSet<>();
         for (RoadEdge edge : snapshot.edges()) {
             doorIds.addAll(edge.gateDoorIds());
         }
         return CompositeAccessPolicy.of(new StaticFlagsAvailability(), gateAvailability(player, doorIds),
-            new DomainAvailability(evaluator, this::domainByRegionId, roadRule, currentRegions, destinationRegions,
+            new DomainAvailability(evaluator, regionId -> domainByRegionId(world, regionId), roadRule, currentRegions,
+                destinationRegions,
                 bypass.test(player)));
     }
 
@@ -123,7 +126,9 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
 
     @Override
     public Predicate<String> mayEnter(Player player, Set<String> destinationRegions) {
-        DomainAvailability rule = new DomainAvailability(evaluator, resolver::getDomainByRegionIdNoRefresh, roadRule,
+        String world = worldOf(player);
+        DomainAvailability rule = new DomainAvailability(evaluator,
+            regionId -> resolver.getDomainByRegionIdNoRefresh(world, regionId), roadRule,
             regionIds.at(player.getLocation()), destinationRegions, bypass.test(player));
         return rule::mayEnter;
     }
@@ -177,22 +182,37 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
         return regionIds.at(player.getLocation());
     }
 
-    /** The domain of a region: the cache, else the API (any thread; blocks briefly off the main thread). */
+    /** The domain of a region in any world (world-blind; see {@link #domainByRegionId(String, String)}). */
     public Optional<DomainSnapshot> domainByRegionId(String regionId) {
-        Optional<DomainSnapshot> cached = resolver.getDomainByRegionIdNoRefresh(regionId);
+        return domainByRegionId(null, regionId);
+    }
+
+    /**
+     * The domain of a region of a world: the cache, else the API (any thread; blocks briefly off the main thread).
+     * KNG-112: a region id names one region per world, so the hub's {@code town_1} is never the gameplay town.
+     *
+     * @param world the region's world (null: world-blind - answered only when the id is in one world)
+     */
+    public Optional<DomainSnapshot> domainByRegionId(String world, String regionId) {
+        Optional<DomainSnapshot> cached = resolver.getDomainByRegionIdNoRefresh(world, regionId);
         if (cached.isPresent()) {
             // KNG-104: an expired entry is answered as it is and re-asked in the background, so a change made in the
             // web app (AllowEntry/AllowExit, a domain moved to another region) reaches the next route or re-check
-            resolver.refreshIfStale(Set.of(regionId));
+            resolver.refreshIfStale(world, Set.of(regionId));
             return cached;
         }
         try {
-            resolver.resolveRegionsFromApi(Set.of(regionId)).get(API_FALLBACK_SECONDS, TimeUnit.SECONDS);
+            resolver.resolveRegionsFromApi(world, Set.of(regionId)).get(API_FALLBACK_SECONDS, TimeUnit.SECONDS);
         } catch (Exception e) {
             LOGGER.log(Level.FINE, "[Navigation] Domain of region " + regionId + " not resolvable now: " + e.getMessage());
             return Optional.empty();
         }
-        return resolver.getDomainByRegionIdNoRefresh(regionId);
+        return resolver.getDomainByRegionIdNoRefresh(world, regionId);
+    }
+
+    private static String worldOf(Player player) {
+        Location location = player.getLocation();
+        return location == null || location.getWorld() == null ? null : location.getWorld().getName();
     }
 
     static String gateName(CachedGateDoor door) {

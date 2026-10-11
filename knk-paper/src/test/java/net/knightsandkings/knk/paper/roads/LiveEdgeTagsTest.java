@@ -297,6 +297,37 @@ class LiveEdgeTagsTest {
         assertEquals(List.of(List.of("town_1")), pieces(tags.snapshot(WORLD), 7).get(1).lanes());
     }
 
+    @Test
+    void thePassWarmsAndAsksTheDomainCacheInItsOwnWorld() {
+        // KNG-112: the hub has its own district_9 that keeps players out; this world's district_9 is open
+        net.knightsandkings.knk.core.regions.RegionDomainResolver resolver =
+            new net.knightsandkings.knk.core.regions.RegionDomainResolver();
+        resolver.registerDomain(WORLD, domain(1, "town_1", true, true));
+        resolver.registerDomain(WORLD, domain(2, "district_9", true, true));
+        resolver.registerDomain("hub", domain(3, "district_9", false, false));
+        List<String> askedIn = new ArrayList<>();
+        List<String> warmedIn = new ArrayList<>();
+        districtRows.addAll(Set.of(0, 1));
+        LiveEdgeTags tags = new LiveEdgeTags(w -> stored.get(), wideProbe(), () -> 5, Runnable::run, Runnable::run,
+            changed::add, (world, regions) -> warmedIn.add(world + " " + regions), () -> 0L, regionId -> true,
+            LiveEdgeTags.restrictsByDomainInWorld((world, regionId) -> {
+                askedIn.add(world);
+                return resolver.getDomainByRegionIdNoRefresh(world, regionId);
+            }, new net.knightsandkings.knk.core.regions.DomainAccessEvaluator()));
+
+        run(tags);
+
+        assertEquals(21, regionLookups, "this world's district is open: nothing looked across");
+        assertEquals(Set.of(WORLD), Set.copyOf(askedIn));
+        assertEquals(List.of(WORLD + " [district_9]"), warmedIn);
+    }
+
+    private static net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot domain(int id, String region,
+                                                                                                 boolean entry, boolean exit) {
+        return new net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot(id, region, null, region,
+            entry, exit, "District", Set.of(), Set.of(), Set.of(), Set.of());
+    }
+
     private static net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot domain(String region,
                                                                                                  boolean entry, boolean exit) {
         return new net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot(1, region, null, region,

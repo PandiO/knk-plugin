@@ -458,7 +458,8 @@ public final class RoadBuildJob {
             OptionalInt town = OptionalInt.empty();
             if (world != null) {
                 for (String regionId : regionIds.at(world, (cx << 4) + 8, world.getMinHeight() + 64, (cz << 4) + 8)) {
-                    Optional<RegionDomainResolver.DomainSnapshot> domain = regionResolver.getDomainByRegionIdNoRefresh(regionId);
+                    Optional<RegionDomainResolver.DomainSnapshot> domain =
+                        regionResolver.getDomainByRegionIdNoRefresh(key.world(), regionId);
                     if (domain.isPresent() && "Town".equalsIgnoreCase(domain.get().domainType()) && domain.get().id() != null) {
                         town = OptionalInt.of(domain.get().id());
                         break;
@@ -538,14 +539,16 @@ public final class RoadBuildJob {
     private void resolveDomains(TileBuildResult result, Map<Integer, Set<String>> regionsByEdge) {
         Set<String> all = new HashSet<>();
         regionsByEdge.values().forEach(all::addAll);
-        CompletableFuture<Void> warm = regionResolver == null ? CompletableFuture.completedFuture(null) : regionResolver.warmCache(all);
+        CompletableFuture<Void> warm = regionResolver == null ? CompletableFuture.completedFuture(null)
+            : regionResolver.warmCache(key.world(), all);
         warm.whenComplete((v, ex) -> mainThread.execute(() -> {
             Map<Integer, List<Integer>> domainsByEdge = new HashMap<>();
             if (regionResolver != null) {
                 regionsByEdge.forEach((edge, regions) -> {
                     TreeSet<Integer> domains = new TreeSet<>();
                     for (String regionId : regions) {
-                        regionResolver.getDomainByRegionIdNoRefresh(regionId).map(RegionDomainResolver.DomainSnapshot::id)
+                        regionResolver.getDomainByRegionIdNoRefresh(key.world(), regionId)
+                            .map(RegionDomainResolver.DomainSnapshot::id)
                             .filter(Objects::nonNull).ifPresent(domains::add);
                     }
                     domainsByEdge.put(edge, new ArrayList<>(domains));

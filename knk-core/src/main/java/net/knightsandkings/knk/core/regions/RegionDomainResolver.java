@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -52,10 +53,12 @@ public class RegionDomainResolver {
     private final DistrictCache districtCache;
     private final StructureCache structureCache;
 
-    // Local domain snapshot cache (for domain decisions, not yet in shared caches)
-    private final Map<String, CachedValue<DomainSnapshot>> domainsByRegionId = new ConcurrentHashMap<>();
+    // Local domain snapshot cache (for domain decisions, not yet in shared caches), keyed by world and region (KNG-112:
+    // the same region id can exist in several worlds, each with its own domain). A null world is a domain whose world
+    // the caller didn't name and the API didn't give (registered through the world-blind methods).
+    private final Map<RegionKey, CachedValue<DomainSnapshot>> domainsByRegion = new ConcurrentHashMap<>();
     /** Regions {@link #refreshIfStale} is asking the API about right now (one request per region at a time). */
-    private final Set<String> refreshing = ConcurrentHashMap.newKeySet();
+    private final Set<RegionKey> refreshing = ConcurrentHashMap.newKeySet();
     private final DomainCache.CacheMetrics domainCacheMetrics = new DomainCache.CacheMetrics();
 
     /**
@@ -137,9 +140,16 @@ public class RegionDomainResolver {
      * region, forever, with no error and no retry.
      */
     public RegionSnapshot resolveRegions(Set<String> regionIds) {
+        return resolveRegions(null, regionIds);
+    }
+
+    /**
+     * KNG-112: {@link #resolveRegions(Set)} for the regions of one world. A null world is the world-blind lookup.
+     */
+    public RegionSnapshot resolveRegions(String world, Set<String> regionIds) {
         Set<DomainSnapshot> domains = new HashSet<>();
         for (String regionId : regionIds) {
-            getDomainByRegionIdNoRefresh(regionId).ifPresent(domains::add);
+            getDomainByRegionIdNoRefresh(world, regionId).ifPresent(domains::add);
         }
         return new RegionSnapshot(domains);
     }
@@ -149,6 +159,14 @@ public class RegionDomainResolver {
      * Safe to run off the Paper main thread only.
      */
     public CompletableFuture<RegionSnapshot> resolveRegionsFromApi(Set<String> regionIds) {
+        return resolveRegionsFromApi(null, regionIds);
+    }
+
+    /**
+     * KNG-112: {@link #resolveRegionsFromApi(Set)} for the regions of one world: the API is asked for that world's
+     * domains only. A null world is the world-blind lookup.
+     */
+    public CompletableFuture<RegionSnapshot> resolveRegionsFromApi(String world, Set<String> regionIds) {
         if (regionIds == null || regionIds.isEmpty()) {
             return CompletableFuture.completedFuture(new RegionSnapshot(Set.of()));
         }
@@ -156,22 +174,22 @@ public class RegionDomainResolver {
         LOGGER.info("[KnK Resolver] resolveRegionsFromApi called for: " + regionIds);
         if (domainsQueryApi == null) {
             LOGGER.fine("[KnK Resolver] domainsQueryApi not configured; returning cache snapshot only");
-            return CompletableFuture.completedFuture(resolveRegions(regionIds));
+            return CompletableFuture.completedFuture(resolveRegions(world, regionIds));
         }
 
         Set<String> missing = regionIds.stream()
-            .filter(id -> !isCached(id))
+            .filter(id -> !isCached(world, id))
             .collect(Collectors.toSet());
 
         if (missing.isEmpty()) {
             LOGGER.info("[KnK Resolver] resolveRegionsFromApi all regions cached, returning snapshot");
-            return CompletableFuture.completedFuture(resolveRegions(regionIds));
+            return CompletableFuture.completedFuture(resolveRegions(world, regionIds));
         }
 
         // KNG-122: one request per region - a several-region answer holds one Town, District and Structure only
-        return askEach(missing, Level.WARNING)
+        return askEach(world, missing, Level.WARNING)
             .thenApply(v -> {
-                RegionSnapshot snapshot = resolveRegions(regionIds);
+                RegionSnapshot snapshot = resolveRegions(world, regionIds);
                 LOGGER.info("[KnK Resolver] resolveRegionsFromApi completed: domains=" + snapshot.domains().size());
                 return snapshot;
             });
@@ -189,7 +207,7 @@ public class RegionDomainResolver {
      *
      * @return completes when every request has been answered or has failed; never exceptionally
      */
-    private CompletableFuture<Void> askEach(Collection<String> regionIds, Level failure) {
+    private CompletableFuture<Void> askEach(String world, Collection<String> regionIds, Level failure) {
         List<String> queue = regionIds.stream().filter(Objects::nonNull).distinct().sorted().toList();
         CompletableFuture<Void> done = new CompletableFuture<>();
         if (queue.isEmpty()) {
@@ -199,33 +217,36 @@ public class RegionDomainResolver {
         AtomicInteger next = new AtomicInteger();
         AtomicInteger open = new AtomicInteger(queue.size());
         for (int i = 0; i < Math.min(MAX_REQUESTS_IN_FLIGHT, queue.size()); i++) {
-            askNext(queue, next, open, done, failure);
+            askNext(world, queue, next, open, done, failure);
         }
         return done;
     }
 
-    private void askNext(List<String> queue, AtomicInteger next, AtomicInteger open, CompletableFuture<Void> done,
-                         Level failure) {
+    private void askNext(String world, List<String> queue, AtomicInteger next, AtomicInteger open,
+                         CompletableFuture<Void> done, Level failure) {
         int i = next.getAndIncrement();
         if (i >= queue.size()) {
             return;
         }
-        ask(queue.get(i), failure).whenComplete((v, ex) -> {
+        ask(world, queue.get(i), failure).whenComplete((v, ex) -> {
             if (open.decrementAndGet() == 0) {
                 done.complete(null);
             } else {
-                askNext(queue, next, open, done, failure);
+                askNext(world, queue, next, open, done, failure);
             }
         });
     }
 
-    /** One region's request: caches the answer; a failure is logged at {@code failure} and completes normally. */
-    private CompletableFuture<Void> ask(String regionId, Level failure) {
+    /**
+     * One region's request (KNG-112: about {@code world}'s domain; null asks world-blind): caches the answer; a failure
+     * is logged at {@code failure} and completes normally.
+     */
+    private CompletableFuture<Void> ask(String world, String regionId, Level failure) {
         Set<String> one = Set.of(regionId);
         CompletableFuture<Void> request;
         try {
-            request = domainsQueryApi.searchDomainRegionDecisions(new DomainRegionQuery(one, Boolean.TRUE))
-                .thenAccept(results -> applyApiAnswer(one, results == null ? null : results.values()));
+            request = domainsQueryApi.searchDomainRegionDecisions(new DomainRegionQuery(one, Boolean.TRUE, world))
+                .thenAccept(results -> applyApiAnswer(world, one, results == null ? null : results.values()));
         } catch (RuntimeException e) {
             request = CompletableFuture.failedFuture(e);
         }
@@ -235,8 +256,8 @@ public class RegionDomainResolver {
         });
     }
 
-    private boolean isCached(String wgRegionId) {
-        return getDomainByRegionId(wgRegionId).isPresent();
+    private boolean isCached(String world, String wgRegionId) {
+        return getDomainByRegionId(world, wgRegionId).isPresent();
     }
 
     /**
@@ -251,23 +272,31 @@ public class RegionDomainResolver {
      * @return completes when every request has been answered (or failed)
      */
     public CompletableFuture<Void> refreshIfStale(Collection<String> regionIds) {
+        return refreshIfStale(null, regionIds);
+    }
+
+    /** KNG-112: {@link #refreshIfStale(Collection)} for the regions of one world (null: world-blind). */
+    public CompletableFuture<Void> refreshIfStale(String world, Collection<String> regionIds) {
         if (domainsQueryApi == null || regionIds == null || regionIds.isEmpty()) {
             return CompletableFuture.completedFuture(null);
         }
         List<CompletableFuture<Void>> requests = new ArrayList<>();
         for (String regionId : regionIds) {
-            CachedValue<DomainSnapshot> cached = regionId == null ? null : domainsByRegionId.get(regionId);
-            if (cached == null || !cached.isExpired(cacheTtl) || !refreshing.add(regionId)) {
+            // The entry a lookup in this world returns (the world's own, a world-less one, or - world-blind - the only
+            // world's), so whatever navigation is served is what gets refreshed.
+            RegionKey key = regionId == null ? null : cachedKey(world, regionId);
+            CachedValue<DomainSnapshot> cached = key == null ? null : domainsByRegion.get(key);
+            if (cached == null || !cached.isExpired(cacheTtl) || !refreshing.add(key)) {
                 continue;
             }
-            requests.add(ask(regionId, Level.FINE).whenComplete((v, ex) -> refreshing.remove(regionId)));
+            requests.add(ask(key.world(), regionId, Level.FINE).whenComplete((v, ex) -> refreshing.remove(key)));
         }
         return CompletableFuture.allOf(requests.toArray(new CompletableFuture[0]));
     }
 
     /** KNG-104: forgets every locally cached region (with {@code /knk cache refresh}); the next lookup asks the API. */
     public void clearRegionCache() {
-        domainsByRegionId.clear();
+        domainsByRegion.clear();
     }
 
     /**
@@ -275,15 +304,16 @@ public class RegionDomainResolver {
      * whose answer is complete - forgets the region when the API returned no domain for it (KNG-104: an orphaned
      * region, or a domain that moved to another region, must not keep its last snapshot).
      */
-    private void applyApiAnswer(Set<String> requested, Collection<DomainRegionSummary> results) {
-        registerDomainRegionSummaries(results);
+    private void applyApiAnswer(String world, Set<String> requested, Collection<DomainRegionSummary> results) {
+        registerDomainRegionSummaries(world, results);
         if (requested.size() != 1) {
             return;
         }
         String regionId = requested.iterator().next();
         boolean answered = results != null && results.stream().anyMatch(s -> answers(s, regionId));
-        if (!answered && domainsByRegionId.remove(regionId) != null) {
-            LOGGER.info("[KnK Resolver] Region " + regionId + " has no domain any more; forgotten");
+        if (!answered && domainsByRegion.remove(RegionKey.of(world, regionId)) != null) {
+            LOGGER.info("[KnK Resolver] Region " + regionId + (world == null ? "" : " in " + world)
+                + " has no domain any more; forgotten");
         }
     }
 
@@ -307,12 +337,17 @@ public class RegionDomainResolver {
      * @return CompletableFuture that completes when every region has been asked about
      */
     public CompletableFuture<Void> warmCache(Collection<String> regionIds) {
+        return warmCache(null, regionIds);
+    }
+
+    /** KNG-112: {@link #warmCache(Collection)} for the regions of one world (null: world-blind). */
+    public CompletableFuture<Void> warmCache(String world, Collection<String> regionIds) {
         if (regionIds == null || regionIds.isEmpty()) {
             return CompletableFuture.completedFuture(null);
         }
         
         Set<String> missing = regionIds.stream()
-            .filter(id -> !isCached(id))
+            .filter(id -> !isCached(world, id))
             .collect(Collectors.toSet());
         
         if (missing.isEmpty()) {
@@ -327,42 +362,45 @@ public class RegionDomainResolver {
             return CompletableFuture.completedFuture(null);
         }
         
-        return askEach(missing, Level.WARNING)
+        return askEach(world, missing, Level.WARNING)
             .thenRun(() -> LOGGER.info("[KnK Resolver] warmCache: completed, cached "
-                + missing.stream().filter(id -> domainsByRegionId.containsKey(id)).count() + " of " + missing.size()
+                + missing.stream().filter(id -> isCached(world, id)).count() + " of " + missing.size()
                 + " regions"));
     }
 
-    private void registerDomainRegionSummaries(Collection<DomainRegionSummary> summaries) {
+    private void registerDomainRegionSummaries(String world, Collection<DomainRegionSummary> summaries) {
         if (summaries == null || summaries.isEmpty()) {
             return;
         }
-        Set<String> visited = new HashSet<>();
+        Set<RegionKey> visited = new HashSet<>();
         for (DomainRegionSummary summary : summaries) {
-            registerDomainHierarchy(summary, visited);
+            registerDomainHierarchy(world, summary, visited);
         }
     }
 
-    private void registerDomainHierarchy(DomainRegionSummary summary, Set<String> visited) {
+    private void registerDomainHierarchy(String requestedWorld, DomainRegionSummary summary, Set<RegionKey> visited) {
         if (summary == null) {
             return;
         }
+        // KNG-112: the domain's own world when the API knows it; otherwise (a domain from before worlds were stored,
+        // matched as a fallback) the world that was asked about.
+        String world = summary.worldName() != null && !summary.worldName().isBlank() ? summary.worldName() : requestedWorld;
         String regionId = summary.wgRegionId();
-        if (regionId != null && !visited.add(regionId)) {
+        if (regionId != null && !visited.add(RegionKey.of(world, regionId))) {
             return;
         }
 
-        registerDomainFromSummary(summary);
+        registerDomainFromSummary(world, summary);
 
         if (summary.parentDomainDecisions() != null) {
             for (DomainRegionSummary parent : summary.parentDomainDecisions()) {
-                registerDomainHierarchy(parent, visited);
+                registerDomainHierarchy(world, parent, visited);
             }
         }
     }
 
-    private void registerDomainFromSummary(DomainRegionSummary summary) {
-        registerDomain(new DomainSnapshot(
+    private void registerDomainFromSummary(String world, DomainRegionSummary summary) {
+        registerDomain(world, new DomainSnapshot(
             summary.id(),
             summary.name(),
             summary.description(),
@@ -401,7 +439,7 @@ public class RegionDomainResolver {
         }
         
         // Fall back to local domain snapshot cache
-        CachedValue<DomainSnapshot> cached = domainsByRegionId.get(wgRegionId);
+        CachedValue<DomainSnapshot> cached = cachedWorldBlind(wgRegionId);
         if (cached == null) {
             domainCacheMetrics.recordMiss();
             return Optional.empty();
@@ -409,6 +447,33 @@ public class RegionDomainResolver {
         
         domainCacheMetrics.recordHit();
         return Optional.of(cached.value());
+    }
+
+    /**
+     * KNG-112: {@link #getDomainByRegionIdNoRefresh(String)} for a region of one world: that world's domain, or one
+     * cached without a world (the world-blind methods) as a fallback, never another world's. The shared Town/
+     * District/Structure caches are keyed by region id alone, so they are not consulted. A null world is the
+     * world-blind lookup.
+     */
+    public Optional<DomainSnapshot> getDomainByRegionIdNoRefresh(String world, String wgRegionId) {
+        if (world == null) {
+            return getDomainByRegionIdNoRefresh(wgRegionId);
+        }
+        CachedValue<DomainSnapshot> cached = cachedInWorld(world, wgRegionId);
+        if (cached == null) {
+            domainCacheMetrics.recordMiss();
+            return Optional.empty();
+        }
+        domainCacheMetrics.recordHit();
+        return Optional.of(cached.value());
+    }
+
+    /** KNG-112: {@link #getDomainByRegionId(String)} for a region of one world (empty when expired). */
+    public Optional<DomainSnapshot> getDomainByRegionId(String world, String wgRegionId) {
+        if (world == null) {
+            return getDomainByRegionId(wgRegionId);
+        }
+        return fresh(wgRegionId, cachedInWorld(world, wgRegionId));
     }
 
     /**
@@ -427,7 +492,10 @@ public class RegionDomainResolver {
         }
         
         // Fall back to local domain snapshot cache
-        CachedValue<DomainSnapshot> cached = domainsByRegionId.get(wgRegionId);
+        return fresh(wgRegionId, cachedWorldBlind(wgRegionId));
+    }
+
+    private Optional<DomainSnapshot> fresh(String wgRegionId, CachedValue<DomainSnapshot> cached) {
         if (cached == null) {
             LOGGER.fine("[KnK Resolver] Domain cache MISS for: " + wgRegionId + " (not cached)");
             domainCacheMetrics.recordMiss();
@@ -446,10 +514,69 @@ public class RegionDomainResolver {
     }
 
     public void registerDomain(DomainSnapshot domain) {
+        registerDomain(null, domain);
+    }
+
+    /** KNG-112: caches {@code domain} as the domain of its region in {@code world} (null: world not known). */
+    public void registerDomain(String world, DomainSnapshot domain) {
         if (domain != null && domain.wgRegionId() != null) {
-            domainsByRegionId.put(domain.wgRegionId(), new CachedValue<>(domain, Instant.now()));
+            domainsByRegion.put(RegionKey.of(world, domain.wgRegionId()), new CachedValue<>(domain, Instant.now()));
             domainCacheMetrics.recordPut();
         }
+    }
+
+    /** The entry for a region in {@code world}, else one cached without a world; never another world's. */
+    private CachedValue<DomainSnapshot> cachedInWorld(String world, String wgRegionId) {
+        RegionKey key = keyInWorld(world, wgRegionId);
+        return key == null ? null : domainsByRegion.get(key);
+    }
+
+    private RegionKey keyInWorld(String world, String wgRegionId) {
+        if (wgRegionId == null) {
+            return null;
+        }
+        RegionKey exact = RegionKey.of(world, wgRegionId);
+        if (domainsByRegion.containsKey(exact)) {
+            return exact;
+        }
+        RegionKey noWorld = RegionKey.of(null, wgRegionId);
+        return domainsByRegion.containsKey(noWorld) ? noWorld : null;
+    }
+
+    /**
+     * The world-blind entry for a region: one cached without a world, else the only world's. When several worlds have
+     * a domain for this region id the answer is ambiguous and nothing is returned; callers that know the world use
+     * the world-qualified methods.
+     */
+    private CachedValue<DomainSnapshot> cachedWorldBlind(String wgRegionId) {
+        RegionKey key = worldBlindKey(wgRegionId);
+        return key == null ? null : domainsByRegion.get(key);
+    }
+
+    private RegionKey worldBlindKey(String wgRegionId) {
+        if (wgRegionId == null) {
+            return null;
+        }
+        RegionKey noWorld = RegionKey.of(null, wgRegionId);
+        if (domainsByRegion.containsKey(noWorld)) {
+            return noWorld;
+        }
+        RegionKey found = null;
+        for (RegionKey key : domainsByRegion.keySet()) {
+            if (wgRegionId.equals(key.regionId())) {
+                if (found != null) {
+                    LOGGER.fine("[KnK Resolver] Region " + wgRegionId + " has a domain in several worlds; a world-blind lookup can't choose");
+                    return null;
+                }
+                found = key;
+            }
+        }
+        return found;
+    }
+
+    /** The key of the entry a lookup of {@code wgRegionId} in {@code world} (null: world-blind) returns. */
+    private RegionKey cachedKey(String world, String wgRegionId) {
+        return world == null ? worldBlindKey(wgRegionId) : keyInWorld(world, wgRegionId);
     }
     
     /**
@@ -523,7 +650,7 @@ public class RegionDomainResolver {
      * Get the current size of the domain snapshot cache.
      */
     public int getDomainCacheSize() {
-        return domainsByRegionId.size();
+        return domainsByRegion.size();
     }
 
     /**
@@ -731,6 +858,14 @@ public class RegionDomainResolver {
         Boolean allowExit,
         Boolean isGate
     ) {}
+
+    /** A region id within a world; the world is lower-cased (Bukkit world lookups ignore case), null when unknown. */
+    private record RegionKey(String world, String regionId) {
+        static RegionKey of(String world, String regionId) {
+            String normalized = world == null || world.isBlank() ? null : world.trim().toLowerCase(Locale.ROOT);
+            return new RegionKey(normalized, regionId);
+        }
+    }
 
     private record CachedValue<T>(T value, Instant cachedAt) {
         boolean isExpired(Duration ttl) {

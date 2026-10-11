@@ -35,10 +35,11 @@ public final class ManagedRegionReconciler {
         Objects.requireNonNull(store, "store");
         RepairReport report = new RepairReport();
 
-        // 1. One spec per region. Two domains claiming one region with different ideas is ambiguous: touch neither.
+        // 1. One spec per region (KNG-112: per world and id). Two domains claiming one region with different ideas is
+        //    ambiguous: touch neither.
         Map<String, List<ManagedRegionSpec>> byKey = new LinkedHashMap<>();
         for (ManagedRegionSpec spec : specs) {
-            byKey.computeIfAbsent(spec.key(), key -> new ArrayList<>()).add(spec);
+            byKey.computeIfAbsent(spec.scopedKey(), key -> new ArrayList<>()).add(spec);
         }
         List<ManagedRegionSpec> candidates = new ArrayList<>();
         for (List<ManagedRegionSpec> group : byKey.values()) {
@@ -46,7 +47,7 @@ public final class ManagedRegionReconciler {
             boolean conflicting = group.stream().anyMatch(other -> other.kind() != first.kind()
                     || !Objects.equals(ManagedRegionSpec.key(other.parentRegionId()), ManagedRegionSpec.key(first.parentRegionId())));
             if (conflicting) {
-                report.add(first.regionId(), RepairReport.Outcome.SKIPPED,
+                report.add(first.label(), RepairReport.Outcome.SKIPPED,
                         "claimed by several domains with different kind/parent: " + sources(group));
             } else {
                 candidates.add(first);
@@ -58,23 +59,23 @@ public final class ManagedRegionReconciler {
         List<ManagedRegionSpec> present = new ArrayList<>();
         for (ManagedRegionSpec spec : candidates) {
             try {
-                Optional<ActualRegionState> state = store.read(spec.regionId());
+                Optional<ActualRegionState> state = store.read(spec.worldName(), spec.regionId());
                 if (state.isPresent()) {
-                    actual.put(spec.key(), state.get());
+                    actual.put(spec.scopedKey(), state.get());
                     present.add(spec);
                 } else {
-                    report.add(spec.regionId(), RepairReport.Outcome.SKIPPED,
+                    report.add(spec.label(), RepairReport.Outcome.SKIPPED,
                             "no such region in WorldGuard (stale " + spec.source() + ")");
                 }
             } catch (RegionStoreException | RuntimeException e) {
-                report.add(spec.regionId(), RepairReport.Outcome.FAILED, "could not read region: " + e.getMessage());
+                report.add(spec.label(), RepairReport.Outcome.FAILED, "could not read region: " + e.getMessage());
             }
         }
 
         // 3. Plan, then apply parents before children.
-        ManagedRegionPlanner.Plan plan = planner.plan(present, regionId -> {
+        ManagedRegionPlanner.Plan plan = planner.plan(present, (worldName, regionId) -> {
             try {
-                return store.read(regionId);
+                return store.read(worldName, regionId);
             } catch (RegionStoreException | RuntimeException e) {
                 return Optional.empty();
             }
@@ -84,19 +85,19 @@ public final class ManagedRegionReconciler {
         Set<String> unsupportedWarned = new HashSet<>();
         boolean anyChanged = false;
         for (ManagedRegionPlanner.PlannedRegion planned : plan.regions()) {
-            ActualRegionState state = actual.get(planned.spec().key());
+            ActualRegionState state = actual.get(planned.spec().scopedKey());
+            String label = planned.spec().label();
             RegionChange change = diff(planned, state, store, report, unsupportedWarned);
             if (change.isEmpty()) {
-                report.add(planned.regionId(), RepairReport.Outcome.UNCHANGED, planned.kind().name());
+                report.add(label, RepairReport.Outcome.UNCHANGED, planned.kind().name());
                 continue;
             }
             try {
-                store.apply(planned.regionId(), change);
+                store.apply(planned.worldName(), planned.regionId(), change);
                 anyChanged = true;
-                report.add(planned.regionId(), RepairReport.Outcome.CHANGED,
-                        planned.kind() + ": " + change.describe(state));
+                report.add(label, RepairReport.Outcome.CHANGED, planned.kind() + ": " + change.describe(state));
             } catch (RegionStoreException | RuntimeException e) {
-                report.add(planned.regionId(), RepairReport.Outcome.FAILED, "could not apply (nothing changed): " + e.getMessage());
+                report.add(label, RepairReport.Outcome.FAILED, "could not apply (nothing changed): " + e.getMessage());
             }
         }
 

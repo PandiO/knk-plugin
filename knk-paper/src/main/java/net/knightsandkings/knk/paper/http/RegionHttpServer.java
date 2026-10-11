@@ -20,7 +20,7 @@ import java.util.logging.Logger;
 /**
  * Minimal HTTP server to expose region management endpoints for the Web API.
  * Supports:
- * - POST /Regions/rename?oldRegionId=...&newRegionId=...[&domainType=...][&parentRegionId=...]
+ * - POST /Regions/rename?oldRegionId=...&newRegionId=...[&domainType=...][&parentRegionId=...][&world=...]
  *   (domainType/parentRegionId are optional: when given, the renamed region also gets its managed-region parent,
  *   priority and flags - see {@code regions.managed})
  * - GET /api/regions/{regionId}/contains-location?x=...&z=...&allowBoundary=false
@@ -73,6 +73,8 @@ public class RegionHttpServer {
             String newRegionId = query.get("newRegionId");
             String domainType = query.get("domainType");
             String parentRegionId = query.get("parentRegionId");
+            // KNG-112: the world the region is in (optional; without it the first loaded world that has it).
+            String world = query.get("world");
 
             if (oldRegionId == null || newRegionId == null || oldRegionId.isBlank() || newRegionId.isBlank()) {
                 send(exchange, 400, "oldRegionId and newRegionId are required");
@@ -81,7 +83,7 @@ public class RegionHttpServer {
 
             // Run rename on main thread to keep WorldGuard safe
             plugin.getServer().getScheduler().callSyncMethod(plugin, () -> {
-                boolean result = handler.renameRegion(oldRegionId, newRegionId, domainType, parentRegionId);
+                boolean result = handler.renameRegion(oldRegionId, newRegionId, domainType, parentRegionId, world);
                 try {
                     send(exchange, 200, Boolean.toString(result));
                 } catch (IOException e) {
@@ -158,6 +160,7 @@ public class RegionHttpServer {
                 String xStr = query.get("x");
                 String zStr = query.get("z");
                 String allowBoundaryStr = query.getOrDefault("allowBoundary", "false");
+                String world = query.get("world");
 
                 if (xStr == null || zStr == null) {
                     send(exchange, 400, "x and z are required");
@@ -178,7 +181,7 @@ public class RegionHttpServer {
                 }
 
                 plugin.getServer().getScheduler().callSyncMethod(plugin, () -> {
-                    boolean result = LocationTaskHandler.checkLocationInsideRegion(regionId, x, z, allowBoundary);
+                    boolean result = LocationTaskHandler.checkLocationInsideRegion(regionId, x, z, allowBoundary, world);
                     try {
                         send(exchange, 200, Boolean.toString(result));
                     } catch (IOException e) {
@@ -208,11 +211,12 @@ public class RegionHttpServer {
             // Parse query parameters
             Map<String, String> query = parseQuery(exchange.getRequestURI());
             String requireFullStr = query.getOrDefault("requireFullContainment", "true");
+            String world = query.get("world");
             boolean requireFullContainment = Boolean.parseBoolean(requireFullStr);
 
             // Run containment check on main thread to keep WorldGuard safe
             plugin.getServer().getScheduler().callSyncMethod(plugin, () -> {
-                boolean result = handler.checkRegionContainment(parentRegionId, childRegionId, requireFullContainment);
+                boolean result = handler.checkRegionContainment(parentRegionId, childRegionId, requireFullContainment, world);
                 try {
                     send(exchange, 200, Boolean.toString(result));
                 } catch (IOException e) {

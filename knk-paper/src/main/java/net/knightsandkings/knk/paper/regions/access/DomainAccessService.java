@@ -119,10 +119,13 @@ public class DomainAccessService {
         }
         Map<String, RegionView> before = byId(from != null && from.getWorld() != null ? regions.at(from, player) : List.of());
         Map<String, RegionView> after = byId(regions.at(to, player));
+        // KNG-112: regions of another world are other regions, even with the same id: a move between worlds leaves
+        // every region at `from` and enters every region at `to`.
+        boolean sameWorld = from != null && from.getWorld() != null && from.getWorld().equals(to.getWorld());
         List<RegionView> entered = after.entrySet().stream()
-            .filter(e -> !before.containsKey(e.getKey())).map(Map.Entry::getValue).toList();
+            .filter(e -> !sameWorld || !before.containsKey(e.getKey())).map(Map.Entry::getValue).toList();
         List<RegionView> exited = before.entrySet().stream()
-            .filter(e -> !after.containsKey(e.getKey())).map(Map.Entry::getValue).toList();
+            .filter(e -> !sameWorld || !after.containsKey(e.getKey())).map(Map.Entry::getValue).toList();
         if (entered.isEmpty() && exited.isEmpty()) {
             return Optional.empty();
         }
