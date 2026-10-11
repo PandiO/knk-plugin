@@ -513,6 +513,13 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         }
     }
 
+    /** {@code /gate tp}'s structure spawn point lookup (KNG-105); see {@link GateCommand#setStructureSpawnLookup}. */
+    public void setGateSpawnLookup(GateCommandSupport.StructureSpawnLookup lookup, java.util.concurrent.Executor mainThread) {
+        if (gateCommand != null) {
+            gateCommand.setStructureSpawnLookup(lookup, mainThread);
+        }
+    }
+
     /**
      * The permission check for every subcommand's metadata node, the help listing and tab completion
      * (KNG-24). Bukkit-only until set - KnKPlugin sets the KnkPermissible-backed one.
