@@ -40,7 +40,7 @@ public class TownsMapper {
      * Maps a single TownListDto to TownSummary.
      */
     public static TownSummary mapSummary(TownListDto dto) {
-        return new TownSummary(dto.id(), dto.name(), dto.description(), dto.wgRegionId());
+        return new TownSummary(dto.id(), dto.name(), dto.description(), dto.wgRegionId(), dto.worldName());
     }
     
     /**

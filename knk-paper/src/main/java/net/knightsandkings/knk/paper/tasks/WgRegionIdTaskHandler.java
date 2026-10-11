@@ -59,7 +59,8 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      */
     @FunctionalInterface
     public interface RegionFinalizer {
-        void finalized(String regionId, String domainType, String parentRegionId);
+        /** @param world the region's world (KNG-112; null when it could not be told) */
+        void finalized(String regionId, String domainType, String parentRegionId, String world);
     }
 
     private volatile RegionFinalizer regionFinalizer;
@@ -626,7 +627,12 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
         RegionFinalizer finalizer = regionFinalizer;
         if (renamed && finalizer != null && domainType != null && !domainType.isBlank()) {
             try {
-                finalizer.finalized(newRegionId, domainType, parentRegionId);
+                String finalWorld = world;
+                if (finalWorld == null) {
+                    World found = findWorldByRegion(newRegionId, null);
+                    finalWorld = found != null ? found.getName() : null;
+                }
+                finalizer.finalized(newRegionId, domainType, parentRegionId, finalWorld);
             } catch (Exception e) {
                 // The rename itself succeeded; the startup repair will still set the region up.
                 LOGGER.warning("Managed-region setup of " + newRegionId + " failed: " + e.getMessage());

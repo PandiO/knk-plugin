@@ -84,13 +84,18 @@ public class ManagedRegionsBootstrap {
      * correct from the start instead of waiting for the next startup. Main thread. An unknown type is left to the repair.
      */
     public void finalizeNewRegion(String regionId, String domainType, String parentRegionId) {
+        finalizeNewRegion(regionId, domainType, parentRegionId, null);
+    }
+
+    /** KNG-112: as above, for the region in {@code worldName} (null: whichever loaded world has it). */
+    public void finalizeNewRegion(String regionId, String domainType, String parentRegionId, String worldName) {
         ManagedRegionKind kind = ManagedRegionKind.fromDomainType(domainType).orElse(null);
         if (kind == null) {
             LOGGER.fine("[KnK Regions] " + regionId + " renamed without a domain type; the next repair will set it up");
             return;
         }
         RepairReport report = reconciler.reconcileOne(
-                new ManagedRegionSpec(regionId, kind, parentRegionId, domainType + " (new)"), store);
+                new ManagedRegionSpec(regionId, kind, parentRegionId, domainType + " (new)", worldName), store);
         LOGGER.info("[KnK Regions] New region " + regionId + " as " + kind + ": " + report.summary());
         report.entries().stream().filter(entry -> entry.outcome() == RepairReport.Outcome.FAILED)
                 .forEach(entry -> LOGGER.warning("[KnK Regions] " + entry.regionId() + ": " + entry.detail()));

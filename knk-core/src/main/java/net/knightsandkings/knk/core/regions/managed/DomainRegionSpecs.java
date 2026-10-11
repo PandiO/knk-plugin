@@ -33,6 +33,10 @@ public final class DomainRegionSpecs {
         List<String> warnings = new ArrayList<>();
         Map<Integer, String> townRegions = new HashMap<>();
         Map<Integer, String> districtRegions = new HashMap<>();
+        // KNG-112: each region in its domain's world; a domain without one yet takes its parent's (a parent never
+        // crosses worlds), else stays world-less and is looked up in the loaded worlds in turn
+        Map<Integer, String> townWorlds = new HashMap<>();
+        Map<Integer, String> districtWorlds = new HashMap<>();
 
         for (TownSummary town : nullSafe(towns)) {
             String label = "Town#" + town.id() + " '" + town.name() + "'";
@@ -41,7 +45,8 @@ public final class DomainRegionSpecs {
                 continue;
             }
             townRegions.put(town.id(), town.wgRegionId());
-            specs.add(new ManagedRegionSpec(town.wgRegionId(), ManagedRegionKind.TOWN, null, label));
+            townWorlds.put(town.id(), town.worldName());
+            specs.add(new ManagedRegionSpec(town.wgRegionId(), ManagedRegionKind.TOWN, null, label, town.worldName()));
         }
         for (DistrictSummary district : nullSafe(districts)) {
             String label = "District#" + district.id() + " '" + district.name() + "'";
@@ -50,11 +55,13 @@ public final class DomainRegionSpecs {
                 continue;
             }
             districtRegions.put(district.id(), district.wgRegionId());
+            String world = firstNonBlank(district.worldName(), district.townId() != null ? townWorlds.get(district.townId()) : null);
+            districtWorlds.put(district.id(), world);
             String parent = district.townId() != null ? townRegions.get(district.townId()) : null;
             if (parent == null) {
                 warnings.add(label + ": its Town (id " + district.townId() + ") is unknown or has no region; no parent set");
             }
-            specs.add(new ManagedRegionSpec(district.wgRegionId(), ManagedRegionKind.DISTRICT, parent, label));
+            specs.add(new ManagedRegionSpec(district.wgRegionId(), ManagedRegionKind.DISTRICT, parent, label, world));
         }
         for (StructureSummary structure : nullSafe(structures)) {
             String type = domainTypes != null ? domainTypes.get(structure.id()) : null;
@@ -69,13 +76,19 @@ public final class DomainRegionSpecs {
             }
             ManagedRegionKind kind = ManagedRegionKind.fromDomainType(type).filter(ManagedRegionKind::isStructureTier)
                     .orElse(ManagedRegionKind.STRUCTURE);
-            specs.add(new ManagedRegionSpec(structure.wgRegionId(), kind, parent, label));
+            String world = firstNonBlank(structure.worldName(),
+                    structure.districtId() != null ? districtWorlds.get(structure.districtId()) : null);
+            specs.add(new ManagedRegionSpec(structure.wgRegionId(), kind, parent, label, world));
         }
         return new Result(specs, skipped, warnings);
     }
 
     private static <T> List<T> nullSafe(List<T> list) {
         return list != null ? list : List.of();
+    }
+
+    private static String firstNonBlank(String first, String second) {
+        return !isBlank(first) ? first : !isBlank(second) ? second : null;
     }
 
     private static boolean isBlank(String value) {

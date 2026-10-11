@@ -111,6 +111,25 @@ class WalkAccessFactoryTest {
     }
 
     @Test
+    void aRegionsDomainIsLookedUpInTheWalksWorld() {
+        // KNG-112: the hub's "house" keeps players out; the gameplay world's "house" is a different, open domain
+        org.mockito.Mockito.when(world.getName()).thenReturn("gameplay");
+        regions = Map.of("house", RegionShape.cuboid(4, 0, 4, 8, 100, 8));
+        Map<String, DomainSnapshot> byWorld = Map.of(
+            "hub", domain(1, "Hub house", "house", false, false),
+            "gameplay", domain(2, "House", "house", true, true));
+        WalkAccessFactory perWorld = new WalkAccessFactory((p, ids) -> new GateAvailability(id -> Optional.empty(), id -> false),
+            p -> playerRegions, p -> bypass, (w, box) -> regions, (p, w, x, y, z) -> true,
+            (worldName, regionId) -> Optional.ofNullable(byWorld.get(worldName)), new DomainAccessEvaluator());
+
+        WalkSnapshotService.WalkCapture capture = capture();
+        WalkAccessFactory.WalkAccess access = perWorld.prepare(player, world, fake.gates(), capture, 2);
+
+        assertEquals("House", access.lookup().domainByRegionId("house").orElseThrow().name());
+        assertEquals(WalkResult.Status.FOUND, walkInto(access.resolve(), capture).status());
+    }
+
+    @Test
     void theRegionBypassOpensDoorsAndDomainsWithoutAskingWorldGuard() {
         doorsAllowed = false;
         bypass = true;
