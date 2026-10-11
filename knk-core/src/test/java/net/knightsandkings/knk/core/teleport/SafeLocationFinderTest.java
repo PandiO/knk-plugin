@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.core.teleport;
 
+
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
@@ -9,6 +10,8 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import net.knightsandkings.knk.core.util.BlockProbe;
 
 class SafeLocationFinderTest {
 

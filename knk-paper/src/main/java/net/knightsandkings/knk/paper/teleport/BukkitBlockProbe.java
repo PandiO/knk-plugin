@@ -5,7 +5,7 @@ import java.util.Objects;
 import org.bukkit.Material;
 import org.bukkit.World;
 
-import net.knightsandkings.knk.core.teleport.BlockProbe;
+import net.knightsandkings.knk.core.util.BlockProbe;
 import net.knightsandkings.knk.core.teleport.SafeLocationFinder;
 
 /**

@@ -145,7 +145,16 @@ public class SpawnPointResolver {
         });
     }
 
-    private CompletableFuture<SpawnPoint> resolveReference(KnkSpawnReference reference) {
+    /**
+     * Any Game Settings reference (join spawn, a world's spawn, a respawn spot -
+     * docs/specs/game-settings/DESIGN.md §3.2), looked up now and not cached: the Location or the
+     * domain's Location, else the coordinates saved with it, else the world spawn. Never completes
+     * exceptionally.
+     */
+    public CompletableFuture<SpawnPoint> resolveReference(KnkSpawnReference reference) {
+        if (reference == null) {
+            return CompletableFuture.completedFuture(SpawnPoint.worldSpawn());
+        }
         return lookUp(reference).handle((found, ex) -> {
             if (ex != null) {
                 LOGGER.log(Level.WARNING, "[KnK Teleport] Could not look up the spawn " + reference.label(), ex);

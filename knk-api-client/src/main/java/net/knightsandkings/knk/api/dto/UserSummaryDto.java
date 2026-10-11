@@ -27,5 +27,19 @@ public record UserSummaryDto (
     // with the Default group as fallback.
     @JsonProperty("chatPrimaryColor") String chatPrimaryColor,
     @JsonProperty("chatSecondaryColor") String chatSecondaryColor,
-    @JsonProperty("nameColor") String nameColor
-) {}
+    @JsonProperty("nameColor") String nameColor,
+    // KNG-52: effective groups in Game Settings precedence order.
+    @JsonProperty("permissionGroups") java.util.List<PermissionGroupRefDto> permissionGroups
+) {
+    /** Without the KNG-52 group list. */
+    public UserSummaryDto(Integer id, String username, java.util.UUID uuid, String email, int coins, int gems,
+                          int experiencePoints, boolean isFullAccount, String gatePassThroughMethodDefault,
+                          String activeMode, Integer titleBracketId, String titleName, int prestigeExperience,
+                          Integer premiumTierGroupId, String premiumTierName,
+                          java.time.OffsetDateTime premiumTierExpiresAt, boolean isFrozen, String frozenReason,
+                          String gender, String chatPrimaryColor, String chatSecondaryColor, String nameColor) {
+        this(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, gatePassThroughMethodDefault,
+            activeMode, titleBracketId, titleName, prestigeExperience, premiumTierGroupId, premiumTierName,
+            premiumTierExpiresAt, isFrozen, frozenReason, gender, chatPrimaryColor, chatSecondaryColor, nameColor, null);
+    }
+}

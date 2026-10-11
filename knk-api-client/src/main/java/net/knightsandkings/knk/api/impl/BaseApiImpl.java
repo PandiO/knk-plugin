@@ -12,6 +12,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import net.knightsandkings.knk.api.auth.AuthProvider;
 import net.knightsandkings.knk.core.exception.ApiException;
+import net.knightsandkings.knk.core.telemetry.ApiFailureObserver;
+import net.knightsandkings.knk.core.telemetry.ApiRouteTemplates;
+import net.knightsandkings.knk.core.telemetry.TelemetryCorrelation;
 import okhttp3.Headers;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -37,6 +40,34 @@ public class BaseApiImpl {
     protected final ExecutorService executor;
     protected final boolean debugLogging;
 
+    /**
+     * Told about every failed call (diagnostic {@code api.call_failed}, KNG-34 link 6); set once by the
+     * plugin at enable when telemetry is on. Calls to the telemetry endpoints themselves are never
+     * reported (they would loop while the API is down).
+     */
+    private static volatile ApiFailureObserver failureObserver = ApiFailureObserver.NONE;
+
+    public static void setFailureObserver(ApiFailureObserver observer) {
+        failureObserver = observer == null ? ApiFailureObserver.NONE : observer;
+    }
+
+    static boolean isTelemetryUrl(String url) {
+        return url != null && url.contains(TelemetryApiImpl.TELEMETRY_ENDPOINT + "/");
+    }
+
+    private static void reportFailure(Request request, String url, int status, String exceptionType) {
+        ApiFailureObserver observer = failureObserver;
+        if (observer == ApiFailureObserver.NONE || isTelemetryUrl(url)) {
+            return;
+        }
+        try {
+            observer.callFailed(request.method(), ApiRouteTemplates.template(url), status, exceptionType,
+                request.header(TelemetryCorrelation.HEADER));
+        } catch (RuntimeException e) {
+            LOGGER.fine("api.call_failed observer failed: " + e);
+        }
+    }
+
     protected BaseApiImpl(
         String baseUrl,
         OkHttpClient httpClient,
@@ -57,6 +88,11 @@ public class BaseApiImpl {
         Request.Builder builder = new Request.Builder().url(url);
         if (authProvider != null && authProvider.getAuthHeader() != null) {
             builder.addHeader(authProvider.getAuthHeaderName(), authProvider.getAuthHeader());
+        }
+        // KNG-34 link 6: joins the API's failure events and ledger postings to the in-game action.
+        String correlationId = TelemetryCorrelation.current();
+        if (correlationId != null) {
+            builder.addHeader(TelemetryCorrelation.HEADER, correlationId);
         }
         return builder;
     }
@@ -123,7 +159,14 @@ public class BaseApiImpl {
 
     protected String execute(Request request, String url) throws ApiException, IOException {
         long startTime = System.currentTimeMillis();
-        try (Response response = httpClient.newCall(request).execute()) {
+        Response call;
+        try {
+            call = httpClient.newCall(request).execute();
+        } catch (IOException e) {
+            reportFailure(request, url, 0, e.getClass().getSimpleName());
+            throw e;
+        }
+        try (Response response = call) {
             long latency = System.currentTimeMillis() - startTime;
             String responseBody = response.body() != null ? response.body().string() : "";
             String logUrl = loggableUrl(url);
@@ -144,6 +187,7 @@ public class BaseApiImpl {
             }
 
             if (!response.isSuccessful()) {
+                reportFailure(request, url, response.code(), null);
                 throw new ApiException(logUrl, response.code(), "Request failed", loggableBody(url, responseBody));
             }
             // 204 No Content is a success with no body - return empty string
@@ -161,6 +205,65 @@ public class BaseApiImpl {
         Request request = newRequest(url).get().build();
         if (debugLogging) LOGGER.info("API Request: GET " + loggableUrl(url));
         return execute(request, url);
+    }
+
+    /** Header a conditional GET sends the cached copy's ETag in (road navigation, plan R17). */
+    public static final String IF_NONE_MATCH_HEADER = "If-None-Match";
+
+    /**
+     * The outcome of {@link #getConditional}: either the server answered 304 Not Modified
+     * ({@code notModified}, no body) or it sent a fresh body. {@code etag} is the response's
+     * {@code ETag} header verbatim (quoted, e.g. {@code "3"}); on a 304 without one it is the
+     * tag the caller sent.
+     */
+    public record ConditionalResponse(boolean notModified, String body, String etag) {}
+
+    /**
+     * A GET with {@code If-None-Match: etag} (plan R17, road navigation tile downloads). Unlike
+     * {@link #execute}, a 304 is not an error here; every other non-2xx still throws
+     * {@link ApiException}. The etag goes back to the server verbatim (weak tags included).
+     *
+     * @param etag the ETag of the caller's cached copy, or {@code null} for an unconditional GET
+     */
+    protected ConditionalResponse getConditional(String url, String etag) throws ApiException, IOException {
+        Request.Builder builder = newRequest(url).get();
+        if (etag != null && !etag.isBlank()) {
+            builder.header(IF_NONE_MATCH_HEADER, etag);
+        }
+        Request request = builder.build();
+        if (debugLogging) {
+            LOGGER.info("API Request: GET " + url + (etag == null ? "" : " (" + IF_NONE_MATCH_HEADER + ": " + etag + ")"));
+        }
+        long startTime = System.currentTimeMillis();
+        try (Response response = httpClient.newCall(request).execute()) {
+            long latency = System.currentTimeMillis() - startTime;
+            String responseBody = response.body() != null ? response.body().string() : "";
+            String responseEtag = response.header("ETag");
+
+            if (response.code() == 304) {
+                if (debugLogging) {
+                    LOGGER.info(String.format("API Response: GET %s [304 Not Modified] in %dms", url, latency));
+                }
+                return new ConditionalResponse(true, null, responseEtag != null ? responseEtag : etag);
+            }
+            if (!response.isSuccessful()) {
+                LOGGER.warning(String.format("API Error: GET %s -> [%d] %s in %dms",
+                    url, response.code(), response.message(), latency));
+                LOGGER.warning("  Request headers:\n" + loggableHeaders(request.headers()));
+                LOGGER.warning("  Response headers:\n" + loggableHeaders(response.headers()));
+                LOGGER.warning("  Response body: " + snippet(responseBody));
+                throw new ApiException(url, response.code(), "Request failed", snippet(responseBody));
+            }
+            if (debugLogging) {
+                LOGGER.info(String.format("API Response: GET %s [%d] in %dms", url, response.code(), latency));
+                LOGGER.info("  Response headers:\n" + loggableHeaders(response.headers()));
+                LOGGER.info("  Response body: " + snippet(responseBody));
+            }
+            if (responseBody.isEmpty()) {
+                throw new ApiException(url, response.code(), "Empty response body", "");
+            }
+            return new ConditionalResponse(false, responseBody, responseEtag);
+        }
     }
 
     protected String postJson(String url, String json) throws ApiException, IOException {

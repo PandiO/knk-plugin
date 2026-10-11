@@ -36,7 +36,6 @@ import net.knightsandkings.knk.api.dto.LinkCodeResponseDto;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.ports.api.UserAccountApi;
 import net.knightsandkings.knk.core.teleport.TeleportSettings;
-import net.knightsandkings.knk.paper.KnKPlugin;
 import net.knightsandkings.knk.paper.chat.ChatCaptureManager;
 import net.knightsandkings.knk.paper.config.KnkConfig;
 import net.knightsandkings.knk.paper.user.PlayerUserData;
@@ -48,7 +47,8 @@ class AccountLinkCommandTest {
     private static final String CODE = "QX7-K2P";
 
     private final UUID uuid = UUID.randomUUID();
-    private final KnKPlugin plugin = mock(KnKPlugin.class);
+    // Bukkit's Plugin interface: Mockito's inline mock maker can't redefine the KnKPlugin class.
+    private final Plugin plugin = mock(Plugin.class);
     private final UserManager userManager = mock(UserManager.class);
     private final UserAccountApi api = mock(UserAccountApi.class);
     private final CommandCooldownManager cooldowns = mock(CommandCooldownManager.class);
@@ -115,7 +115,8 @@ class AccountLinkCommandTest {
             "&cThis code is invalid or has expired.", "duplicate", "merged");
         return new KnkConfig(api, KnkConfig.CacheConfig.defaultConfig(), account, messages,
             KnkConfig.PrivateMessagesConfig.defaults(), TeleportSettings.defaults(), KnkConfig.DiscoveryConfig.defaults(),
-            KnkConfig.RegionHttpConfig.defaults(), new KnkConfig.WebConfig(publicUrl));
+            net.knightsandkings.knk.paper.config.NavigationConfig.defaults(), KnkConfig.StatisticsConfig.defaults(), KnkConfig.TelemetryConfig.defaults(),
+            KnkConfig.WorldAnalyticsConfig.defaults(), KnkConfig.RegionHttpConfig.defaults(), new KnkConfig.WebConfig(publicUrl));
     }
 
     private void apiGenerates() {

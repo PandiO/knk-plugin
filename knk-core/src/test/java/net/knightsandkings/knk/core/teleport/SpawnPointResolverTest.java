@@ -113,6 +113,31 @@ class SpawnPointResolverTest {
         assertEquals(List.of(type + ":4"), lookedUp);
     }
 
+    // ===== other Game Settings references (KNG-52: world spawns, respawn spots) =====
+
+    @Test
+    void anyReferenceResolvesWithoutReadingOrCachingTheSettings() {
+        KnkLocation district = at("world", 7, 70, 7);
+        know(SourceType.DISTRICT, 3, district);
+
+        SpawnPoint point = resolver.resolveReference(new KnkSpawnReference(SourceType.DISTRICT, 3, "District: Docks", SNAPSHOT)).join();
+
+        assertSame(district, point.location());
+        assertEquals(SpawnPoint.Source.REFERENCE, point.source());
+        assertEquals(0, settingsReads.get());
+        assertEquals(List.of("DISTRICT:3"), lookedUp);
+        resolver.resolveReference(new KnkSpawnReference(SourceType.DISTRICT, 3, "District: Docks", SNAPSHOT)).join();
+        assertEquals(2, lookedUp.size());
+    }
+
+    @Test
+    void anyReferenceKeepsTheSnapshotAndWorldSpawnFallbacks() {
+        assertEquals(SpawnPoint.Source.SNAPSHOT,
+            resolver.resolveReference(new KnkSpawnReference(SourceType.TOWN, 99, "Town #99", SNAPSHOT)).join().source());
+        assertTrue(resolver.resolveReference(new KnkSpawnReference(SourceType.TOWN, 99, "Town #99", null)).join().isWorldSpawn());
+        assertTrue(resolver.resolveReference(null).join().isWorldSpawn());
+    }
+
     @Test
     void modeIsCaseInsensitive() {
         know(SourceType.TOWN, 4, at("world", 5, 64, 5));

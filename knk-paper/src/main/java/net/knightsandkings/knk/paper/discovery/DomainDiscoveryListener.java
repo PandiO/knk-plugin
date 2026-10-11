@@ -25,11 +25,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.plugin.Plugin;
 
-import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldguard.WorldGuard;
-import com.sk89q.worldguard.protection.ApplicableRegionSet;
-import com.sk89q.worldguard.protection.regions.ProtectedRegion;
-import com.sk89q.worldguard.protection.regions.RegionQuery;
 
 import net.knightsandkings.knk.core.discovery.DiscoveryRecorder;
 import net.knightsandkings.knk.core.discovery.DiscoveryTracker;
@@ -37,6 +33,7 @@ import net.knightsandkings.knk.core.discovery.PendingDiscovery;
 import net.knightsandkings.knk.core.domain.discovery.DiscoverySource;
 import net.knightsandkings.knk.core.ports.api.DiscoveriesApi;
 import net.knightsandkings.knk.paper.events.UserDataLoadedEvent;
+import net.knightsandkings.knk.paper.regions.RegionIds;
 
 /**
  * Detects the regions a player may be discovering (docs/specs/domain-discovery DESIGN.md §3.6),
@@ -63,7 +60,6 @@ import net.knightsandkings.knk.paper.events.UserDataLoadedEvent;
  */
 public final class DomainDiscoveryListener implements Listener {
     private static final Logger LOGGER = Logger.getLogger(DomainDiscoveryListener.class.getName());
-    private static final String GLOBAL_REGION = "__global__";
 
     private final Plugin plugin;
     private final DiscoveryTracker tracker;
@@ -72,7 +68,7 @@ public final class DomainDiscoveryListener implements Listener {
     private final DiscoveryEligibility eligibility;
     private final DiscoveryFlushTask flushTask;
     private final Clock clock;
-    private final RegionQuery regionQuery;
+    private final RegionIds regionIds;
 
     /** Candidates waiting for next tick's confirmation, per player. */
     private final Map<UUID, Map<String, DiscoverySource>> toConfirm = new HashMap<>();
@@ -87,7 +83,7 @@ public final class DomainDiscoveryListener implements Listener {
         this.eligibility = eligibility;
         this.flushTask = flushTask;
         this.clock = clock;
-        this.regionQuery = WorldGuard.getInstance().getPlatform().getRegionContainer().createQuery();
+        this.regionIds = new RegionIds();
         flushTask.setUserResolvedHandler(this::loadKnown);
     }
 
@@ -253,18 +249,12 @@ public final class DomainDiscoveryListener implements Listener {
         });
     }
 
+    /** The region ids at a location, never {@code __global__} (R8: delegates to {@link RegionIds#at}). */
     private Set<String> regionIdsAt(Location location) {
         if (location == null || location.getWorld() == null) {
             return Set.of();
         }
-        ApplicableRegionSet regions = regionQuery.getApplicableRegions(BukkitAdapter.adapt(location));
-        Set<String> ids = new HashSet<>();
-        for (ProtectedRegion region : regions) {
-            if (!GLOBAL_REGION.equalsIgnoreCase(region.getId())) {
-                ids.add(region.getId());
-            }
-        }
-        return ids;
+        return regionIds.at(location);
     }
 
     private static boolean sameBlock(Location a, Location b) {

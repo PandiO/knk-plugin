@@ -41,6 +41,22 @@ api:
     read: 10
     write: 10
 
+  # Service-wide API connectivity (KNG-115). The plugin probes knk-web-api's GET /health/ready
+  # (which also checks MySQL) on an async timer and keeps one UP/DOWN state with hysteresis.
+  # Each change fires ApiConnectivityChangedEvent on the main thread; /knk health shows it.
+  connectivity:
+    enabled: true
+    probe-interval-seconds: 10
+    # Whole-call timeout of one probe (the API's own database check gives up after 3 s)
+    probe-timeout-seconds: 5
+    # Consecutive failed probes (unreachable, timeout, HTTP 503 unhealthy) before UP -> DOWN
+    failures-to-down: 3
+    # Consecutive passing probes (healthy or degraded) before DOWN -> UP
+    successes-to-up: 2
+    # API root that serves /health/ready. Empty = base-url without its trailing /api
+    # (http://localhost:5294/api -> http://localhost:5294/health/ready).
+    health-root-url: ""
+
 # Region HTTP server: knk-web-api calls it back for region renames and containment checks.
 region-http:
   # Address to listen on. 127.0.0.1 (default) only accepts calls from this host. Use the Docker
@@ -132,6 +148,19 @@ private-messages:
 player-notifications:
   # How often the plugin polls the API for them (skipped while no players are online)
   poll-interval-seconds: 2
+
+# Global Game Settings from the web app's Game Settings page (docs/specs/game-settings/DESIGN.md §4, KNG-52):
+# announcements, join spawn and game mode, respawn policy, per-world time lock, weather and spawn point.
+# The settings themselves are edited on the web app; these keys only tune how the plugin follows them.
+game-settings:
+  # How often the settings are read from the API (seconds, min 5). /knk cache refresh reads them at once.
+  refresh-interval-seconds: 30
+  # How often the loaded worlds are checked; they are reported to the API only when they changed
+  # (or every 10 minutes). Seconds, min 5. The report needs the plugin API key (api.auth.type: apikey).
+  runtime-sync-interval-seconds: 30
+  # Earlier versions of the settings kept in plugins/KnightsAndKings/game-settings-backups/ (0 = none).
+  # The latest version is always cached in game-settings-cache.json and used when the API is down at startup.
+  backup-history-limit: 48
 
 # Teleport engine (docs/specs/teleport/DESIGN.md §3.11, knk-workspace). Staff teleports (/tp,
 # /tphere, /knk tp) are instant and skip warmup, cooldown, combat tag and the safe-spot check; the
@@ -227,6 +256,185 @@ discovery:
     # Shown instead when discoveries made while the API was down are granted later
     replay-summary: "&bWhile the server was busy you discovered &a{count}&b place(s):"
 
+# Player statistics (KNG-34, knk-workspace docs/specs/player-statistics/IMPLEMENTATION_PLAN.md §5.1):
+# sessions/logins, active and AFK playtime, distance per mode and the highest survived fall,
+# buffered in memory and sent to the API in batches off the main thread. While the API can't take
+# them (down, 503 statistics disabled, API key mismatch) batches are spooled to disk and replayed.
+# enabled: false registers no statistics listener, task or command (/afk) - today's behaviour.
+# The privacy menu (/stats settings, Profile → Statistics privacy) works either way.
+statistics:
+  enabled: true
+  flush-interval-seconds: 60
+  # Entries per batch (the API takes at most 2000)
+  max-batch-entries: 2000
+  # Under the plugin folder; one file per undelivered batch
+  spool-directory: statistics-spool
+  replay-interval-seconds: 60
+  # No combat, distance or fall statistics in these game modes (playtime still counts)
+  excluded-game-modes: [CREATIVE, SPECTATOR]
+  afk:
+    # false: every online second is active time; no /afk, no automatic AFK, no marker
+    enabled: true
+    # Automatic AFK after this long without looking around, walking (not in a vehicle or water),
+    # chatting, commands, building, interacting, inventory clicks, attacking or sneak/sprint toggles
+    idle-seconds: 300
+    command-enabled: true
+    tab-list-marker: true
+    marker-text: "&7[AFK]"
+  movement:
+    enabled: true
+    # A longer single move is a relocation, not travel
+    max-segment-blocks: 10.0
+  fall:
+    enabled: true
+  combat:
+    # false: no kills, deaths, damage, arrows, headshots or open-world killstreaks are recorded
+    enabled: true
+    # Plugin-dealt damage (e.g. Chaos enchant procs) would be counted twice; leave off
+    count-custom-damage: false
+    # Creatures spawned like this are farmed: killing them is no PvE kill
+    pve-excluded-spawn-reasons: [SPAWNER, SPAWNER_EGG, BREEDING, EGG, DISPENSE_EGG]
+  gates:
+    # false: gate-door damage is not credited to players (gate HP works exactly the same either way)
+    enabled: true
+    # Credit fire damage to whoever set each burning door block alight
+    fire-attribution: true
+  siege:
+    # Report members who left a match early (with their kills/deaths/streak/captures) when it ends;
+    # they still get no reward. false = the completion payload as before
+    report-departed-members: true
+
+# Diagnostic telemetry (KNG-34 link 6, docs/specs/player-statistics DESIGN.md §F.12): a timeline of
+# meaningful actions and outcomes (joins, menus, command labels, Siege lobby/match steps, failed API
+# calls) that only the owner can read in the web app. Never chat, command arguments, IPs or tokens.
+# Enhanced detail (position samples, menu clicks, hits) is only sent for players/test runs the owner
+# picks. Events are buffered and dropped when the API is down - never spooled; gameplay never waits.
+telemetry:
+  # false: no diagnostic events at all (today's behaviour)
+  enabled: true
+  # Events held between flushes; beyond this the oldest are dropped (and counted)
+  max-buffer-events: 5000
+  flush-interval-seconds: 10
+  # How often the owner's choices (enhanced players, test runs) are read from the API
+  config-poll-seconds: 60
+  # Position sample interval for enhanced players
+  enhanced-movement-sample-seconds: 5
+
+# World analytics (KNG-34 link 7, knk-workspace docs/specs/player-statistics): anonymous movement
+# heatmaps, menu funnels and domain interactions for the owner's /owner/analytics page. Aggregated in
+# memory (no user ids or names leave the plugin), posted every flush-interval-seconds, never across a
+# local midnight of the API's statistics time zone. Kept in memory while the API is unreachable (up
+# to max-pending-batches windows), never spooled to disk.
+world-analytics:
+  # false: no sampler, menu observer, region listener or task (today's behaviour)
+  enabled: true
+  # One position sample per online, non-AFK player this often (at least 10)
+  movement-sample-seconds: 10
+  # Heatmap cell edge in blocks
+  cell-size: 16
+  flush-interval-seconds: 300
+  # Part switches
+  movement: true
+  menu-funnels: true
+  domain-interactions: true
+  # Players in these game modes are not sampled (spectators never are)
+  excluded-game-modes: [CREATIVE, SPECTATOR]
+  max-pending-batches: 12
+
+# Road navigation (KNG-27, docs/specs/navigation/DESIGN.md §4). Road materials live in the API's road
+# profiles (learned by /knk road survey, edited in the web app), not here. Every key has a default.
+navigation:
+  enabled: true
+  # Routing cost per road class; lower is preferred
+  class-cost: { Main: 0.9, Road: 1.0, Path: 1.15 }
+  # Thin blocks that may lie ON a road (the road cell is the block beneath); *_SUFFIX patterns allowed
+  overlay-materials: [SNOW, "*_CARPET", "*_PRESSURE_PLATE", RAIL, POWERED_RAIL, LEAF_LITTER, PINK_PETALS]
+  # Every Domain Location within 8 blocks of a road cell seeds the build
+  seed-from-domains: true
+  # Hard limit: a destination (and, without walk paths, the player) must be this close to a road; a target
+  # this close to the player is walked to directly
+  max-snap-distance: 48
+  # 1 block of height counts as this many when snapping the player (a bridge vs the road below it)
+  snap-vertical-weight: 4
+  # The same for a destination: its last leg is a walk path, which climbs, so plain 3D (1) by default
+  destination-snap-vertical-weight: 1
+  # With walk paths: the player may be this far from a road (plain 3D); the first leg is a walk path to it
+  max-start-distance: 96
+  # With walk paths: a destination may be this far from a road (plain 3D). Within destination-walk-range of the road's
+  # end the last leg is a walk path; further, "No conventional path" and the HUD arrow alone. Beyond: refused
+  max-destination-distance: 256
+  destination-walk-range: 96
+  trail-length: 30
+  trail-period-ticks: 10
+  trail-particle: DUST
+  trail-color: "#E8C66A"
+  reroute-distance: 8
+  reroute-after-ticks: 40
+  arrive-distance: 4
+  max-session-minutes: 30
+  # Blocks per second for the ETA ("3 min = 1000 blocks")
+  sprint-speed: 5.6
+  survey:
+    sample-period-ticks: 4
+    cross-section-half-width: 7
+    breadcrumb-seed-spacing: 32
+  builder:
+    tile-size: 512
+    tile-margin: 32
+    max-cells-per-tile: 250000
+    # Chunks extracted per tick on the main thread while a tile is captured (fewer under lag)
+    snapshot-chunks-per-tick: 4
+    junction-cluster-radius: 3
+    min-spur-length: 4
+    # An ambiguous material (cobblestone, planks) only counts within this many cells of a sure road cell
+    ambiguous-reach: 3
+    # A plaza (wider than its profile's width-max) reaches this many cells beyond its wide core, so
+    # the corners and bumps of an irregular square join its one junction instead of forking into more
+    plaza-growth: 2
+    # A node an admin locked (edited, merged into, recorded through) absorbs rebuilt junctions and
+    # dead ends within this many blocks, so manual cleanup survives a rebuild
+    locked-node-reach: 8.0
+    # Wide road areas become one plaza junction on their own (true), or only where an admin designed a
+    # plaza with /knk road node plaza <radius> (false). Designed plazas always apply (DESIGN §5.6 step 4)
+    auto-plazas: true
+    # Curated tiles (rev. 6 Part B, plan §5.7): once a tile has been built, a rebuild only proposes changes
+    # (/knk road proposal) instead of replacing the stored graph. false = every build is uploaded directly,
+    # as before (the kill switch). /knk road tile uncurate lets one tile's next build write directly.
+    curated-tiles: true
+  # Walkable last-mile paths (KNG-51, docs/specs/navigation/LAST_MILE_PATHFINDING.md §9): direct mode
+  # (a target within max-snap-distance, and the last leg after a road's end) follows a path a player
+  # can walk instead of a straight line through terrain. No path found -> the straight line.
+  walk:
+    # false = straight lines exactly as before (the kill switch)
+    enabled: true
+    # Cells one search may expand, and the longest path it may return: factor x the straight distance or the
+    # straight distance + detour-allowance, whichever is longer, never above max-length; plus climb-allowance
+    # per block of height
+    max-expansions: 20000
+    max-length-factor: 1.75
+    max-length: 144
+    # Blocks a path may always add to the straight distance: a short leg behind a building needs a detour of
+    # several times its length (a 27 m leg went round in 68). 0 = the factor alone
+    detour-allowance: 48
+    # Blocks a path may add per block of height between start and target, also above max-length: a spiral
+    # stair takes 5-6 blocks of walking per block of height (a tower roof 29 high: 168), a ladder 1. 0 = none
+    climb-allowance: 5
+    # Deepest drop taken (3 = no fall damage) and the extra cost per block dropped (drops only when needed)
+    max-drop: 3
+    drop-penalty: 10
+    # Blocks captured around the player->target box (also up and down); loaded chunks only
+    capture-margin: 16
+    # A captured chunk is reused this long; a path is also recomputed after this age
+    chunk-ttl-seconds: 10
+    # The path is recomputed when the player strays this far from it
+    recompute-distance: 6
+    # Walk searches running at once, server-wide (their own threads)
+    max-concurrent-searches: 2
+    # Materials climbed like a ladder
+    climbables: [LADDER]
+    # Extra cost of a step beside a wall: paths keep a block from walls and round corners wider (0 = hug them)
+    wall-cost: 1.0
+
 # Player payments (currency ledger Phase 3, docs/specs/currency-payments/DESIGN.md §3.6). Every
 # limit that matters (min/max, daily caps, cooldown, confirmation threshold, who may send) lives in
 # the API's currency policy; these only shape the in-game experience.
@@ -240,6 +448,20 @@ currency:
 
 # Gate structure state synchronization
 gates:
+  # Gate command targets (KNG-78/KNG-79). A door's "region" is the box its door blocks span in the
+  # closed position plus its captured closed/opened regions - so an open gate counts too.
+  here:
+    # '/gate toggle here', '/gatedoor repair here': doors whose region is within this many blocks
+    # of you (measured to the region's closest point; standing inside it = 0).
+    radius: 15
+    # Several gates/doors in range: 'prompt' lists them as clickable chat lines (sorted by
+    # distance); 'nearest' just picks the closest.
+    ambiguity: prompt
+  lookat:
+    # Leave the target out of /gate|/gatedoor open, close, toggle, info or repair and the gate door
+    # you are looking at is used (then 'here', then the usage message). One ray trace per command.
+    enabled: true
+    max-distance: 12
   # How often (seconds) the plugin pushes the current open/closed/destroyed state of every
   # gate to the API, as a safety net for state changes that were never persisted (e.g. a crash
   # mid-animation). The state is also pushed once immediately after every open/close animation
@@ -250,6 +472,12 @@ gates:
   # Runs in addition to the one-shot cleanup at startup, so a duplicate that appears while the
   # server is running gets fixed without needing a restart.
   display-cleanup-interval-seconds: 60
+  # KNG-106: moving gate doors move players, mobs, items and vehicles out of their way (to a safe
+  # spot on their own side when there is room) before the blocks land, and anyone found inside door
+  # blocks (after a teleport, on join) is moved out. Decision for review: door blocks cause no
+  # suffocation damage (false); true keeps the vanilla damage on top of the move.
+  safety:
+    door-suffocation-damage: false
   # Continuous damage ("fire") system: a gate door block set alight by a flaming projectile or
   # fire charge burns for fire-duration-seconds, dealing fire-damage-per-tick HealthCurrent
   # damage to its owning gate every fire-tick-interval-seconds for each door block still burning
@@ -446,6 +674,44 @@ regions:
     extra-regions: []
     #  - { region: arena_2, kind: arena, parent: district_2 }
     #  - { region: arena_2-battleground, kind: battleground, parent: arena_2 }
+  # Domain AllowEntry/AllowExit (KNG-56). The rules are written onto each domain's WorldGuard region as the flags
+  # knk-allow-entry / knk-allow-exit / knk-domain-name, which WorldGuard saves - so they are enforced at startup, at
+  # join and while the API is down (the last synced values). WorldGuard enforces them for every way of moving;
+  # owners and members of a region, knk.region.bypass and WorldGuard's region bypass pass.
+  access:
+    sync:
+      enabled: true
+      delay-ticks: 100            # first sync after enable (WorldGuard must have loaded its regions)
+      attempts: 3                 # retries while the API is still starting
+      retry-delay-seconds: 30
+      interval-minutes: 5         # re-sync from the API this often (0 = only at startup / repair / new regions)
+    message-interval-ms: 2000     # a player is told "You are not allowed to ..." at most this often
+    # KNG-74: the message is shown in the action bar (shared with the /navigate arrow), and the first one of a refusal
+    # "episode" is also sent to chat so it cannot be missed. An episode starts with a refusal after chat-quiet-period-ms
+    # without any refusal (effectively at least message-interval-ms), or with a different message than the one last
+    # sent to chat (another domain, entry vs exit). 0 = every shown message also goes to chat.
+    chat-quiet-period-ms: 10000
+    # For this long after a refusal message is shown, the /navigate action-bar arrow is not drawn over it (vanilla
+    # shows an action-bar message for about 3 s).
+    action-bar-hold-ms: 3000
+    # Only a refusal RATE no honest player reaches (a client pushing a border makes a few per second) leads to an
+    # action: first a teleport to the world spawn, then - if it happens again within escalation-window-seconds - a kick.
+    load-guard:
+      enabled: true
+      max-refusals-per-second: 20
+      window-seconds: 3
+      escalation-window-seconds: 60
+# Offline security cache (KNG-58). The last account (UUID -> knk user id), freeze, owner/staff mode and permission
+# answers knk-web-api gave are kept in one file, so permissions, freezes and vanish still apply after a restart while
+# the API is down. Used ONLY when the API can't be asked; every API answer overwrites it. Holds no email or balances.
+# Erasure (KNG-34): an account the API no longer knows under that UUID is deleted from the file by the hourly check.
+offline-cache:
+  enabled: true
+  file: offline-security.json      # in the plugin folder
+  identity-max-age-days: 30        # an account unconfirmed for longer is forgotten (at most 30: the GDPR erasure deadline)
+  permission-max-age-hours: 72     # an older permission answer counts as "no"
+  verify-after-hours: 6            # hourly, accounts the API hasn't confirmed for this long are re-checked
+  flush-seconds: 10                # how often changes are written to the file
 cache:
   # Global time-to-live for cached API responses (in seconds)
   # After this duration, cached data is considered stale and will be refetched
@@ -580,7 +846,7 @@ cache:
     health:
       ttl-seconds: 30          # Health uses seconds (short TTL)
       max-ttl-seconds: 120
-      default-policy: CACHE_FIRST
+      default-policy: API_ONLY # KNG-115: a cached "healthy" must not stand in for "reachable now"
       allow-stale: false       # Don't serve stale health checks
       retry-attempts: 2        # Fewer retries for health checks
       retry-backoff-ms: 50

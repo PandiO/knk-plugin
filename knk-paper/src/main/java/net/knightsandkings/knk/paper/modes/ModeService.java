@@ -15,7 +15,9 @@ import org.bukkit.plugin.Plugin;
 
 import net.knightsandkings.knk.core.cache.UserCache;
 import net.knightsandkings.knk.core.domain.users.ActiveMode;
+import net.knightsandkings.knk.core.domain.permissions.PermissionDecision;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
+import net.knightsandkings.knk.core.offline.OfflineSecurityStore;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.paper.permissions.KnkPermissible;
 import net.knightsandkings.knk.paper.utils.ColorOptions;
@@ -54,6 +56,8 @@ public class ModeService {
     private final KnkPermissible knkPermissible;
     private final UserCache userCache;
     private final UsersCommandApi usersCommandApi;
+    // KNG-58: the persisted mode when the account wasn't loaded this session (API down at join).
+    private volatile OfflineSecurityStore offline;
 
     // In-session mode per online player. The persisted value (UserCache/API) can differ from
     // this while an "onquit" change is pending - see ModeCommand.
@@ -64,6 +68,10 @@ public class ModeService {
         this.knkPermissible = Objects.requireNonNull(knkPermissible, "knkPermissible must not be null");
         this.userCache = Objects.requireNonNull(userCache, "userCache must not be null");
         this.usersCommandApi = usersCommandApi; // null when the API client isn't wired - persistence then no-ops
+    }
+
+    public void setOfflineStore(OfflineSecurityStore offline) {
+        this.offline = offline;
     }
 
     public static String nodeFor(ActiveMode mode) {
@@ -97,7 +105,11 @@ public class ModeService {
      * this plugin is the only writer of the mode, so the cached value stays correct.
      */
     public ActiveMode getPersistedMode(Player player) {
-        return userCache.getStale(player.getUniqueId()).map(UserSummary::activeMode).orElse(ActiveMode.NONE);
+        UUID uuid = player.getUniqueId();
+        return userCache.getStale(uuid).map(UserSummary::activeMode)
+            .or(() -> offline == null ? java.util.Optional.empty()
+                : offline.identity(uuid).map(OfflineSecurityStore.Identity::activeMode))
+            .orElse(ActiveMode.NONE);
     }
 
     /**
@@ -140,17 +152,27 @@ public class ModeService {
     public CompletableFuture<Void> persist(Player player, ActiveMode mode, UsersCommandApi api) {
         UUID uuid = player.getUniqueId();
         UserSummary cached = userCache.getStale(uuid).orElse(null);
-        if (cached == null || cached.id() == null) {
+        Integer userId = cached != null ? cached.id() : null;
+        if (userId == null && offline != null) {
+            userId = offline.identity(uuid).map(OfflineSecurityStore.Identity::userId).orElse(null);
+        }
+        if (userId == null) {
             return CompletableFuture.failedFuture(new IllegalStateException("No cached knk user for " + uuid));
         }
-        userCache.put(cached.withActiveMode(mode));
+        if (cached != null) {
+            userCache.put(cached.withActiveMode(mode));
+        }
+        if (offline != null) {
+            offline.setActiveMode(uuid, mode);
+        }
 
         if (api == null) {
             return CompletableFuture.completedFuture(null);
         }
-        return api.setActiveModeById(cached.id(), mode).whenComplete((ignored, ex) -> {
+        int id = userId;
+        return api.setActiveModeById(id, mode).whenComplete((ignored, ex) -> {
             if (ex != null) {
-                LOGGER.log(Level.WARNING, "Failed to persist active mode " + mode + " for user " + cached.id(), ex);
+                LOGGER.log(Level.WARNING, "Failed to persist active mode " + mode + " for user " + id, ex);
             }
         });
     }
@@ -186,6 +208,17 @@ public class ModeService {
      */
     public void whenHasModePermission(Player player, ActiveMode mode, Consumer<Boolean> onMainThread) {
         onMain(knkPermissible.hasPermissionAsync(player, nodeFor(mode)), onMainThread);
+    }
+
+    /**
+     * Like {@link #whenHasModePermission}, but tells a real "no" ({@code DENIED}) apart from "couldn't
+     * be checked" ({@code UNAVAILABLE}: API down and no last-known answer, KNG-58) - restoring a
+     * vanished mode at join must not reveal a staff member just because the API is unreachable.
+     */
+    public void whenModePermissionKnown(Player player, ActiveMode mode, Consumer<PermissionDecision> onMainThread) {
+        CompletableFuture<PermissionDecision> decision = knkPermissible.checkAsync(player, nodeFor(mode))
+            .exceptionally(ex -> PermissionDecision.UNAVAILABLE);
+        decision.thenAccept(value -> Bukkit.getScheduler().runTask(plugin, () -> onMainThread.accept(value)));
     }
 
     public void forget(Player player) {

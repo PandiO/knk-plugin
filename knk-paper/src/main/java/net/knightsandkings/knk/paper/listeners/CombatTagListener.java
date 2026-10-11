@@ -9,6 +9,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.PlayerDeathEvent;
 
 import net.knightsandkings.knk.paper.teleport.TeleportService;
 
@@ -16,7 +17,8 @@ import net.knightsandkings.knk.paper.teleport.TeleportService;
  * Combat tag for teleports (docs/specs/teleport/DESIGN.md §3.4.3): a player hitting another player,
  * directly or with a projectile, tags both for {@code teleport.combat-tag-seconds} (v1's 10 s
  * {@code Main.combat}, set but never checked in v1). Player teleports refuse while tagged; staff
- * teleports ignore it. Hits that were cancelled (safezones, frozen players) don't tag.
+ * teleports ignore it. Hits that were cancelled (safezones, frozen players) don't tag. Dying clears
+ * the dead player's tag.
  */
 public class CombatTagListener implements Listener {
 
@@ -38,6 +40,12 @@ public class CombatTagListener implements Listener {
         long now = teleportService.now();
         teleportService.combatTags().tag(victim.getUniqueId(), now);
         teleportService.combatTags().tag(attacker.getUniqueId(), now);
+    }
+
+    /** Death ends the fight for the player who died: their tag is cleared (the killer's stays). */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onDeath(PlayerDeathEvent event) {
+        teleportService.combatTags().clear(event.getEntity().getUniqueId());
     }
 
     static Player attackerOf(Entity damager) {

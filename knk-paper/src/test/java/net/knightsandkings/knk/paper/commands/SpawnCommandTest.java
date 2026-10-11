@@ -170,6 +170,34 @@ class SpawnCommandTest {
     }
 
     @Test
+    void aGroupSpawnOverrideWinsOverTheServerSpawn() {
+        grant(TeleportNodes.SPAWN);
+        townSpawn(100.5, 70, -20.5, "world");
+        command.setPlayerSpawn(player -> player == alice
+            ? new net.knightsandkings.knk.core.teleport.SpawnPoint(new KnkLocation(1, "lounge", 5.5, 80.0, 5.5, 0f, 0f, "world"),
+                "Structure: Noble lounge", net.knightsandkings.knk.core.teleport.SpawnPoint.Source.REFERENCE)
+            : null);
+
+        run(alice);
+
+        Location destination = startedPlan().destination().get();
+        assertEquals(5.5, destination.getX());
+        assertEquals(80, destination.getY());
+        assertEquals("Structure: Noble lounge", startedPlan().destinationLabel());
+    }
+
+    @Test
+    void withoutAGroupSpawnTheServerSpawnIsUsed() {
+        grant(TeleportNodes.SPAWN);
+        townSpawn(100.5, 70, -20.5, "world");
+        command.setPlayerSpawn(player -> null);
+
+        run(alice);
+
+        assertEquals(100.5, startedPlan().destination().get().getX());
+    }
+
+    @Test
     void spawnInAWorldThatIsNotLoadedFallsBackToTheWorldSpawn() {
         grant(TeleportNodes.SPAWN);
         townSpawn(100, 70, -20, "old_world");

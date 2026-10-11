@@ -12,6 +12,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -81,5 +82,19 @@ class CommandRegistryPermissionsTest {
 
     private static List<String> names(List<CommandRegistry.RegisteredCommand> commands) {
         return commands.stream().map(c -> c.metadata().name()).toList();
+    }
+
+    // KNG-80: a subcommand without a top-level node (each action checks its own) is listed only to
+    // senders its visibility predicate accepts; running it is unaffected.
+    @Test
+    void aVisibilityPredicate_hidesANodelessSubcommandFromListing() {
+        registry.register(new CommandMetadata("location", "d", "/knk location", null), towns);
+        assertTrue(registry.listAvailable(staff).stream().anyMatch(c -> c.metadata().name().equals("location")));
+
+        registry.setVisibility("location", sender -> false);
+
+        assertTrue(registry.listAvailable(staff).stream().noneMatch(c -> c.metadata().name().equals("location")));
+        registry.execute(staff, registry.get("location").orElseThrow(), new String[0]);
+        verify(towns).execute(staff, new String[0]);
     }
 }

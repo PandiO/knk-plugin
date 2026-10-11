@@ -20,6 +20,10 @@ import net.knightsandkings.knk.api.impl.UsersQueryApiImpl;
 import net.knightsandkings.knk.api.impl.UsersCommandApiImpl;
 import net.knightsandkings.knk.api.impl.PlayerNotificationsApiImpl;
 import net.knightsandkings.knk.api.impl.DiscoveriesApiImpl;
+import net.knightsandkings.knk.api.impl.StatisticsApiImpl;
+import net.knightsandkings.knk.api.impl.LeaderboardsApiImpl;
+import net.knightsandkings.knk.api.impl.RoadNetworkCommandApiImpl;
+import net.knightsandkings.knk.api.impl.RoadNetworkQueryApiImpl;
 import net.knightsandkings.knk.api.impl.UserIgnoresApiImpl;
 import net.knightsandkings.knk.api.impl.PrivateMessageLogApiImpl;
 import net.knightsandkings.knk.api.impl.UserAccountApiImpl;
@@ -54,6 +58,8 @@ import net.knightsandkings.knk.core.ports.api.UsersQueryApi;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.core.ports.api.PlayerNotificationsApi;
 import net.knightsandkings.knk.core.ports.api.DiscoveriesApi;
+import net.knightsandkings.knk.core.ports.api.RoadNetworkCommandApi;
+import net.knightsandkings.knk.core.ports.api.RoadNetworkQueryApi;
 import net.knightsandkings.knk.core.ports.api.UserIgnoresApi;
 import net.knightsandkings.knk.core.ports.api.PrivateMessageLogApi;
 import net.knightsandkings.knk.core.ports.api.UserAccountApi;
@@ -111,6 +117,10 @@ public class KnkApiClient {
     private final UsersCommandApi usersCommandApi;
     private final PlayerNotificationsApi playerNotificationsApi;
     private final DiscoveriesApi discoveriesApi;
+    private final StatisticsApiImpl statisticsApi;
+    private final net.knightsandkings.knk.core.ports.api.TelemetryApi telemetryApi;
+    private final net.knightsandkings.knk.core.ports.api.WorldAnalyticsApi worldAnalyticsApi;
+    private final LeaderboardsApiImpl leaderboardsApi;
     private final UserIgnoresApi userIgnoresApi;
     private final PrivateMessageLogApi privateMessageLogApi;
     private final UserAccountApi userAccountApi;
@@ -133,10 +143,15 @@ public class KnkApiClient {
     private final net.knightsandkings.knk.core.ports.api.CategoriesQueryApi categoriesQueryApi;
     private final KitsCommandApi kitsCommandApi;
     private final net.knightsandkings.knk.core.ports.api.GameSettingsQueryApi gameSettingsQueryApi;
+    private final net.knightsandkings.knk.core.ports.api.GameSettingsCommandApi gameSettingsCommandApi;
+    private final net.knightsandkings.knk.core.ports.api.DomainAccessRulesApi domainAccessRulesApi;
     private final net.knightsandkings.knk.api.impl.TeleportDestinationsApiImpl teleportDestinationsApi;
     private final net.knightsandkings.knk.core.ports.api.LootboxesQueryApi lootboxesQueryApi;
     private final net.knightsandkings.knk.core.ports.api.LootboxesCommandApi lootboxesCommandApi;
     private final CurrencyApi currencyApi;
+    private final RoadNetworkQueryApi roadNetworkQueryApi;
+    private final RoadNetworkCommandApi roadNetworkCommandApi;
+    private final net.knightsandkings.knk.core.ports.api.LocationRetentionApi locationRetentionApi;
 
     private KnkApiClient(
         String baseUrl,
@@ -144,16 +159,25 @@ public class KnkApiClient {
         ObjectMapper objectMapper,
         AuthProvider authProvider,
         ExecutorService executor,
-        boolean debugLogging
+        boolean debugLogging,
+        String healthRootUrl,
+        Duration healthProbeTimeout
     ) {
+        // KNG-34 link 6: calls started inside a correlated action carry its X-Correlation-Id.
+        executor = CorrelationPropagatingExecutorService.wrap(executor);
         this.baseUrl = baseUrl;
         this.httpClient = httpClient;
         this.objectMapper = objectMapper;
         this.authProvider = authProvider;
         this.executor = executor;
+        this.telemetryApi = new net.knightsandkings.knk.api.impl.TelemetryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.worldAnalyticsApi = new net.knightsandkings.knk.api.impl.WorldAnalyticsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         
         // Initialize API implementations
-        this.healthApi = new HealthApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.healthApi = new HealthApiImpl(
+            healthRootUrl != null && !healthRootUrl.isBlank() ? healthRootUrl : HealthApiImpl.deriveHealthRootUrl(baseUrl),
+            healthProbeTimeout != null ? healthProbeTimeout : HealthApiImpl.DEFAULT_PROBE_TIMEOUT,
+            httpClient, objectMapper, authProvider, executor, debugLogging);
         this.townsQueryApi = new TownsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.locationsQueryApi = new LocationsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.enchantmentDefinitionsQueryApi = new EnchantmentDefinitionsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -167,6 +191,8 @@ public class KnkApiClient {
         this.usersCommandApi = new UsersCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.playerNotificationsApi = new PlayerNotificationsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.discoveriesApi = new DiscoveriesApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.statisticsApi = new StatisticsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.leaderboardsApi = new LeaderboardsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.userIgnoresApi = new UserIgnoresApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.privateMessageLogApi = new PrivateMessageLogApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.userAccountApi = new UserAccountApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -190,9 +216,14 @@ public class KnkApiClient {
         this.currencyApi = new net.knightsandkings.knk.api.impl.CurrencyApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.categoriesQueryApi = new net.knightsandkings.knk.api.impl.CategoriesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.gameSettingsQueryApi = new net.knightsandkings.knk.api.impl.GameSettingsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.gameSettingsCommandApi = new net.knightsandkings.knk.api.impl.GameSettingsCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.domainAccessRulesApi = new net.knightsandkings.knk.api.impl.DomainAccessRulesApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.teleportDestinationsApi = new net.knightsandkings.knk.api.impl.TeleportDestinationsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.lootboxesQueryApi = new net.knightsandkings.knk.api.impl.LootboxesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.lootboxesCommandApi = new net.knightsandkings.knk.api.impl.LootboxesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.roadNetworkQueryApi = new RoadNetworkQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.roadNetworkCommandApi = new RoadNetworkCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.locationRetentionApi = new net.knightsandkings.knk.api.impl.LocationRetentionApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
     }
     
     public HealthApi getHealthApi() {
@@ -243,9 +274,19 @@ public class KnkApiClient {
         return categoriesQueryApi;
     }
 
+    /** KNG-56: {@code GET /api/Domains/access-rules} - domain AllowEntry/AllowExit for the region flag sync. */
+    public net.knightsandkings.knk.core.ports.api.DomainAccessRulesApi getDomainAccessRulesApi() {
+        return domainAccessRulesApi;
+    }
+
     /** Teleport Phase 4 ({@code /spawn}): {@code GET /api/GameSettings}. */
     public net.knightsandkings.knk.core.ports.api.GameSettingsQueryApi getGameSettingsQueryApi() {
         return gameSettingsQueryApi;
+    }
+
+    /** Game settings (KNG-52): {@code PUT /api/GameSettings/runtime-worlds}. */
+    public net.knightsandkings.knk.core.ports.api.GameSettingsCommandApi getGameSettingsCommandApi() {
+        return gameSettingsCommandApi;
     }
 
     /** Teleport Phase 5 ({@code /warp}): {@code GET /api/teleport-destinations?userId=}. */
@@ -298,6 +339,46 @@ public class KnkApiClient {
     /** Domain discovery (KNG-20): {@code api/users/{userId}/discoveries}. */
     public DiscoveriesApi getDiscoveriesApi() {
         return discoveriesApi;
+    }
+
+    /** Player statistics (KNG-34): {@code api/statistics}. */
+    public net.knightsandkings.knk.core.ports.api.StatisticsApi getStatisticsApi() {
+        return statisticsApi;
+    }
+
+    /** Diagnostic telemetry (KNG-34 link 6): {@code api/telemetry}. */
+    public net.knightsandkings.knk.core.ports.api.TelemetryApi getTelemetryApi() {
+        return telemetryApi;
+    }
+
+    /** World analytics (KNG-34 link 7): {@code api/world-analytics}. */
+    public net.knightsandkings.knk.core.ports.api.WorldAnalyticsApi getWorldAnalyticsApi() {
+        return worldAnalyticsApi;
+    }
+
+    /** Leaderboards (KNG-34): {@code api/leaderboards}. */
+    public net.knightsandkings.knk.core.ports.api.LeaderboardsApi getLeaderboardsApi() {
+        return leaderboardsApi;
+    }
+
+    /** Server name and plugin version sent with every statistics batch. */
+    public void setStatisticsSource(String serverName, String pluginVersion) {
+        statisticsApi.setSource(serverName, pluginVersion);
+    }
+
+    /** Road navigation reads (KNG-27): tiles, conditional tile graphs, meta, profiles, surveys, seeds, edge search. */
+    public RoadNetworkQueryApi getRoadNetworkQueryApi() {
+        return roadNetworkQueryApi;
+    }
+
+    /** Road navigation writes (KNG-27): build upload, dirty marks, profiles, surveys, seeds, node/edge review. */
+    public RoadNetworkCommandApi getRoadNetworkCommandApi() {
+        return roadNetworkCommandApi;
+    }
+
+    /** Location retention (KNG-80): the orphan list and teleport targets. */
+    public net.knightsandkings.knk.core.ports.api.LocationRetentionApi getLocationRetentionApi() {
+        return locationRetentionApi;
     }
 
     /** KNG-18 Phase 2: players' ignore lists. */
@@ -394,6 +475,8 @@ public class KnkApiClient {
         private boolean shutdownExecutorOnClose = false;
         private boolean debugLogging = false;
         private boolean allowUntrustedSsl = false;
+        private String healthRootUrl;
+        private Duration healthProbeTimeout;
         
         public Builder baseUrl(String baseUrl) {
             this.baseUrl = baseUrl;
@@ -436,6 +519,21 @@ public class KnkApiClient {
             return this;
         }
         
+        /**
+         * API root for {@code /health/ready} (KNG-115); null or blank derives it from baseUrl by
+         * dropping a trailing {@code /api}.
+         */
+        public Builder healthRootUrl(String healthRootUrl) {
+            this.healthRootUrl = healthRootUrl;
+            return this;
+        }
+
+        /** Whole-call timeout of one readiness probe (default 5 s). */
+        public Builder healthProbeTimeout(Duration timeout) {
+            this.healthProbeTimeout = timeout;
+            return this;
+        }
+
         public KnkApiClient build() {
             if (baseUrl == null || baseUrl.isBlank()) {
                 throw new IllegalArgumentException("baseUrl is required");
@@ -479,7 +577,8 @@ public class KnkApiClient {
                 shutdownExecutorOnClose = true;
             }
             
-            return new KnkApiClient(baseUrl, httpClient, objectMapper, authProvider, finalExecutor, debugLogging);
+            return new KnkApiClient(baseUrl, httpClient, objectMapper, authProvider, finalExecutor, debugLogging,
+                healthRootUrl, healthProbeTimeout);
         }
     }
     

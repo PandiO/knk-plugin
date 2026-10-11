@@ -23,6 +23,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -41,7 +42,8 @@ import java.util.logging.Logger;
  *       {@link #SUMMARY_TTL_MILLIS} (the hub tile, which has no row fetch) a background read
  *       starts and the next render shows it.</li>
  * </ul>
- * The viewer's knk user id comes from the plugin's user cache; with none, the grid is empty.
+ * The viewer's knk user id comes from the plugin's user cache; with none, the grid is empty. Staff
+ * (the {@code staff} check) see disabled types tagged in the header instead of left out.
  * Remembers the last {@value #MAX_REMEMBERED} viewers' summaries.
  */
 public final class DiscoveriesMenuFeature implements MenuFeature {
@@ -63,6 +65,7 @@ public final class DiscoveriesMenuFeature implements MenuFeature {
     private final DiscoveriesApi discoveriesApi;
     private final UserCache userCache;
     private final Clock clock;
+    private final Predicate<Player> staff;
     private final Set<UUID> refreshing = ConcurrentHashMap.newKeySet();
     private final Map<UUID, CachedSummary> summaries = Collections.synchronizedMap(
             new LinkedHashMap<>(16, 0.75f, true) {
@@ -73,9 +76,15 @@ public final class DiscoveriesMenuFeature implements MenuFeature {
             });
 
     public DiscoveriesMenuFeature(DiscoveriesApi discoveriesApi, UserCache userCache, Clock clock) {
+        this(discoveriesApi, userCache, clock, player -> false);
+    }
+
+    /** @param staff whether a viewer sees disabled types tagged ({@code knk.admin.discovery}) */
+    public DiscoveriesMenuFeature(DiscoveriesApi discoveriesApi, UserCache userCache, Clock clock, Predicate<Player> staff) {
         this.discoveriesApi = discoveriesApi;
         this.userCache = userCache;
         this.clock = clock;
+        this.staff = staff;
     }
 
     @Override
@@ -97,7 +106,7 @@ public final class DiscoveriesMenuFeature implements MenuFeature {
         if (cached == null || clock.millis() - cached.fetchedAtMillis() >= SUMMARY_TTL_MILLIS) {
             refreshSummary(uuid);
         }
-        return cached != null ? new DiscoveriesView(cached.summary()) : DiscoveriesView.unavailable();
+        return cached != null ? new DiscoveriesView(cached.summary(), staff.test(player)) : DiscoveriesView.unavailable();
     }
 
     private void refreshSummary(UUID uuid) {

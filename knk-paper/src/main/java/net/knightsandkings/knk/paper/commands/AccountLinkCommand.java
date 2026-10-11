@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.paper.commands;
 
 import org.bukkit.Bukkit;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -13,7 +14,6 @@ import net.knightsandkings.knk.api.dto.MergeAccountsRequestDto;
 import net.knightsandkings.knk.api.dto.UserResponseDto;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.ports.api.UserAccountApi;
-import net.knightsandkings.knk.paper.KnKPlugin;
 import net.knightsandkings.knk.paper.chat.ChatCaptureManager;
 import net.knightsandkings.knk.paper.config.KnkConfig;
 import net.knightsandkings.knk.paper.user.PlayerUserData;
@@ -25,7 +25,7 @@ import net.knightsandkings.knk.paper.utils.CommandCooldownManager;
  * Generates a link code to enter on the website; a code typed in game only gets an explanation.
  */
 public class AccountLinkCommand implements CommandExecutor {
-    private final KnKPlugin plugin;
+    private final Plugin plugin;
     private final UserManager userManager;
     private final ChatCaptureManager chatCaptureManager;
     private final UserAccountApi userAccountApi;
@@ -33,7 +33,7 @@ public class AccountLinkCommand implements CommandExecutor {
     private final CommandCooldownManager cooldownManager;
 
     public AccountLinkCommand(
-        KnKPlugin plugin,
+        Plugin plugin,
         UserManager userManager,
         ChatCaptureManager chatCaptureManager,
         UserAccountApi userAccountApi,

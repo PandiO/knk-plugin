@@ -1,6 +1,6 @@
 package net.knightsandkings.knk.paper.siege;
 
-import net.knightsandkings.knk.core.teleport.BlockProbe;
+import net.knightsandkings.knk.core.util.BlockProbe;
 import net.knightsandkings.knk.core.teleport.TeleportDenial;
 import net.knightsandkings.knk.core.teleport.TeleportKind;
 import net.knightsandkings.knk.core.teleport.TeleportOutcome;

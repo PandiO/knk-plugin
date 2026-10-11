@@ -108,6 +108,26 @@ class DiscoveriesMenuFeatureTest {
     }
 
     @Test
+    void aDisabledTypeIsLeftOutForPlayersAndTaggedForStaff() {
+        loggedIn();
+        DiscoverySummary summary = new DiscoverySummary(
+                List.of(new DiscoveryTypeCount("Town", 1, 2), new DiscoveryTypeCount("GateStructure", 0, 0, false)),
+                null, 1, 0, 0, 0);
+        when(api.progress(anyInt(), any())).thenReturn(CompletableFuture.completedFuture(new Page<>(List.of(), 0, 1, 27)));
+        when(api.summary(9)).thenReturn(CompletableFuture.completedFuture(summary));
+
+        DiscoveriesMenuFeature forPlayers = new DiscoveriesMenuFeature(api, cache, Clock.systemUTC(), p -> false);
+        forPlayers.fetchRows(context(), engineQuery(Map.of())).join();
+        assertEquals(List.of("&7Towns: &f1&7/&f2"), forPlayers.viewFor(player).getSummaryLines());
+
+        DiscoveriesMenuFeature forStaff = new DiscoveriesMenuFeature(api, cache, Clock.systemUTC(), p -> true);
+        forStaff.fetchRows(context(), engineQuery(Map.of())).join();
+        DiscoveriesView staffView = forStaff.viewFor(player);
+        assertEquals(List.of("&7Towns: &f1&7/&f2", "&7Gates: &8Disabled"), staffView.getSummaryLines());
+        assertEquals("&7Discovered &f1 &7of &f2 &7places", staffView.getCountLine());
+    }
+
+    @Test
     void theRootNeverWaitsAndReadsAMissingOrStaleSummaryInTheBackground() {
         loggedIn();
         CompletableFuture<DiscoverySummary> pending = new CompletableFuture<>();

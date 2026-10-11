@@ -12,6 +12,7 @@ import net.knightsandkings.knk.core.siege.SiegeDisplayText;
 import net.knightsandkings.knk.core.siege.SiegeObjectiveLabels;
 import net.knightsandkings.knk.core.siege.SiegeObjectiveBoard.BoardStep;
 import net.knightsandkings.knk.paper.clan.BannerDesignBukkitMapper;
+import net.knightsandkings.knk.paper.utils.ParticleDraw;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
@@ -43,7 +44,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.logging.Level;
@@ -65,8 +65,6 @@ import java.util.logging.Logger;
  */
 public final class SiegeWorldPresenter implements SiegeMatchObserver, Listener {
 
-    /** Members further away than this don't get the rings. */
-    private static final double PARTICLE_RANGE = 64.0;
     private static final double DISPLAY_HEIGHT = 2.3;
 
     private final Plugin plugin;
@@ -330,19 +328,9 @@ public final class SiegeWorldPresenter implements SiegeMatchObserver, Listener {
         }
     }
 
+    /** Delegates to the shared per-viewer drawing helper (road navigation R9); behaviour unchanged. */
     private static void ring(List<Player> viewers, Location center, double radius, Particle particle) {
-        if (radius <= 0) return;
-        World world = center.getWorld();
-        int points = Math.max(12, (int) Math.ceil(radius * 8));
-        for (Player viewer : viewers) {
-            if (!Objects.equals(viewer.getWorld(), world)) continue;
-            if (viewer.getLocation().distanceSquared(center) > PARTICLE_RANGE * PARTICLE_RANGE) continue;
-            for (int i = 0; i < points; i++) {
-                double angle = 2 * Math.PI * i / points;
-                viewer.spawnParticle(particle, center.getX() + radius * Math.cos(angle), center.getY() + 0.15,
-                        center.getZ() + radius * Math.sin(angle), 1, 0, 0, 0, 0);
-            }
-        }
+        ParticleDraw.ring(viewers, center, radius, particle);
     }
 
     // ==================== Banner protection ====================

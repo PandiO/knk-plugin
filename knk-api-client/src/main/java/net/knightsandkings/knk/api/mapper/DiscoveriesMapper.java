@@ -82,6 +82,6 @@ public final class DiscoveriesMapper {
     }
 
     private static DiscoveryTypeCount mapTypeCount(DiscoveryTypeCountDto dto) {
-        return new DiscoveryTypeCount(dto.domainType(), dto.discovered(), dto.total());
+        return new DiscoveryTypeCount(dto.domainType(), dto.discovered(), dto.total(), !Boolean.FALSE.equals(dto.enabled()));
     }
 }

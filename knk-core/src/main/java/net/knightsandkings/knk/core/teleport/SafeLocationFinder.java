@@ -1,10 +1,13 @@
 package net.knightsandkings.knk.core.teleport;
 
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+
+import net.knightsandkings.knk.core.util.BlockProbe;
 
 /**
  * Finds a spot near a teleport destination where a player can stand without getting hurt

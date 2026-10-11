@@ -1,7 +1,7 @@
 package net.knightsandkings.knk.paper.teleport;
 
 import net.knightsandkings.knk.core.teleport.BackKind;
-import net.knightsandkings.knk.core.teleport.BlockProbe;
+import net.knightsandkings.knk.core.util.BlockProbe;
 import net.knightsandkings.knk.core.teleport.TeleportBackSettings;
 import net.knightsandkings.knk.core.teleport.TeleportDenial;
 import net.knightsandkings.knk.core.teleport.TeleportKind;

@@ -6,6 +6,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiConsumer;
+import java.util.function.Function;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.logging.Level;
@@ -53,6 +54,8 @@ public class SpawnCommand implements TabExecutor {
     private final TeleportService teleportService;
     private final SpawnDestinationResolver spawn;
     private final Predicate<Player> isVanished;
+    /** A player's own spawn (their group's Game Settings override, KNG-52), or null for the server spawn. */
+    private volatile Function<Player, SpawnPoint> playerSpawn = player -> null;
     private volatile TeleportCharges charges;
 
     public SpawnCommand(PlayerCommandSupport support, TargetRankCheck rankCheck, VisibleTargetResolver targets,
@@ -63,6 +66,15 @@ public class SpawnCommand implements TabExecutor {
         this.teleportService = Objects.requireNonNull(teleportService, "teleportService must not be null");
         this.spawn = Objects.requireNonNull(spawn, "spawn must not be null");
         this.isVanished = Objects.requireNonNull(isVanished, "isVanished must not be null");
+    }
+
+    /**
+     * Where {@code /spawn} takes a particular player when it isn't the server spawn: their group's
+     * spawn override from the Game Settings page (docs/specs/game-settings/DESIGN.md §3.8). Null
+     * answers mean the server spawn.
+     */
+    public void setPlayerSpawn(Function<Player, SpawnPoint> playerSpawn) {
+        this.playerSpawn = playerSpawn != null ? playerSpawn : player -> null;
     }
 
     @Override
@@ -92,7 +104,7 @@ public class SpawnCommand implements TabExecutor {
             sender.sendMessage(ChatColor.YELLOW + "Usage from the console: /spawn <player>");
             return;
         }
-        support.whenAllowed(sender, TeleportNodes.SPAWN, () -> withSpawn(sender, (destination, point) -> {
+        support.whenAllowed(sender, TeleportNodes.SPAWN, () -> withSpawn(sender, player, (destination, point) -> {
             TeleportCharges fees = charges;
             if (fees == null) {
                 teleportService.start(TeleportPlan.spawn(player, destination, point.label()))
@@ -130,7 +142,7 @@ public class SpawnCommand implements TabExecutor {
             return;
         }
         support.whenAllowed(sender, TeleportNodes.STAFF_OTHERS, () -> withSilent(sender, silentRequested, silent ->
-            rankCheck.whenOutranks(sender, target.getName(), summary -> withSpawn(sender, (destination, point) -> {
+            rankCheck.whenOutranks(sender, target.getName(), summary -> withSpawn(sender, target, (destination, point) -> {
                 TeleportPlan plan = TeleportPlan.staffToLocation(sender, target, destination, point.label(), silent);
                 teleportService.start(plan).thenAccept(outcome -> StaffTeleportCommand.report(sender, plan, outcome, () -> {
                     sender.sendMessage(ChatColor.GREEN + "Sent " + target.getName() + " to spawn.");
@@ -142,10 +154,25 @@ public class SpawnCommand implements TabExecutor {
     }
 
     /**
-     * Resolve the spawn (async - it may read the API) and hand its Location to {@code next} on the main
-     * thread; tells the sender when there is none.
+     * Resolve the spawn of {@code traveller} (async - it may read the API) and hand its Location to
+     * {@code next} on the main thread; tells the sender when there is none. A group spawn override
+     * is already resolved and used as is.
      */
-    private void withSpawn(CommandSender sender, BiConsumer<Location, SpawnPoint> next) {
+    private void withSpawn(CommandSender sender, Player traveller, BiConsumer<Location, SpawnPoint> next) {
+        SpawnPoint own;
+        try {
+            own = playerSpawn.apply(traveller);
+        } catch (RuntimeException ex) {
+            LOGGER.log(Level.WARNING, "[KnK Teleport] Could not look up the group spawn of " + traveller.getName(), ex);
+            own = null;
+        }
+        if (own != null) {
+            Location destination = spawn.toLocation(own);
+            if (destination != null && destination.getWorld() != null) {
+                next.accept(destination, own);
+                return;
+            }
+        }
         CompletableFuture<SpawnPoint> resolved;
         try {
             resolved = spawn.resolve();

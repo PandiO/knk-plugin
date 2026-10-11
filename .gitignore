@@ -1,6 +1,8 @@
 # Gradle
 .gradle/
 **/build/
+# The road builder lives in the Java package core/roads/build/ (plan Phase 2c); only Gradle output is meant above.
+!**/src/**/build/
 
 # IntelliJ/Eclipse/VSCode
 .idea/
