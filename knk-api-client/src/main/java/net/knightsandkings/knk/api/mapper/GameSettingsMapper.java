@@ -9,6 +9,8 @@ import net.knightsandkings.knk.api.dto.GameSettingsDto;
 import net.knightsandkings.knk.core.domain.location.KnkLocation;
 import net.knightsandkings.knk.core.domain.settings.KnkGameSettings;
 import net.knightsandkings.knk.core.domain.settings.KnkGroupOverride;
+import net.knightsandkings.knk.core.domain.settings.KnkHubRules;
+import net.knightsandkings.knk.core.domain.settings.KnkHubSettings;
 import net.knightsandkings.knk.core.domain.settings.KnkRespawnPolicy;
 import net.knightsandkings.knk.core.domain.settings.KnkSpawnReference;
 import net.knightsandkings.knk.core.domain.settings.KnkWeather;
@@ -41,12 +43,45 @@ public final class GameSettingsMapper {
                 }
                 groups.add(new KnkGroupOverride(o.permissionGroupId(), o.groupName(),
                     o.precedence() != null ? o.precedence() : position, o.joinAnnouncement(), o.leaveAnnouncement(),
-                    toCore(o.joinSpawnReference()), toCore(o.respawnPolicy()), Boolean.TRUE.equals(o.joinAtLastLocation())));
+                    toCore(o.joinSpawnReference()), toCore(o.respawnPolicy()), Boolean.TRUE.equals(o.joinAtLastLocation()),
+                    KnkHubSettings.OutageAction.parse(o.outageAction()), o.outageDelaySeconds(),
+                    Boolean.TRUE.equals(o.exemptInStaffMode()), Boolean.TRUE.equals(o.exemptInOwnerMode())));
             }
         }
         return new KnkGameSettings(dto.joinSpawnMode(), toCore(dto.joinSpawnReference()), dto.joinAnnouncement(),
             dto.leaveAnnouncement(), toCore(dto.defaultRespawnPolicy()), worlds, dto.updatedAt(),
-            dto.motd() == null || dto.motd().isBlank() ? null : dto.motd(), groups);
+            dto.motd() == null || dto.motd().isBlank() ? null : dto.motd(), groups, toCore(dto.hub()));
+    }
+
+    /** The hub block; {@link KnkHubSettings#none()} when the API sent none. */
+    static KnkHubSettings toCore(GameSettingsDto.Hub hub) {
+        if (hub == null) {
+            return KnkHubSettings.none();
+        }
+        return new KnkHubSettings(hub.domainId(), hub.domainName(), hub.domainType(), hub.worldName(), hub.wgRegionId(),
+            toCore(hub.spawnReference()), KnkHubSettings.OutageAction.parse(hub.outageAction()),
+            hub.outageDelaySeconds() != null ? hub.outageDelaySeconds() : 0, toCore(hub.rules()));
+    }
+
+    static KnkHubRules toCore(GameSettingsDto.HubRules rules) {
+        KnkHubRules d = KnkHubRules.defaults();
+        if (rules == null) {
+            return d;
+        }
+        return new KnkHubRules(or(rules.damagePlayers(), d.damagePlayers()), or(rules.damageEntities(), d.damageEntities()),
+            or(rules.takeDamage(), d.takeDamage()), or(rules.buildBreak(), d.buildBreak()), or(rules.dropPickup(), d.dropPickup()),
+            or(rules.useDoors(), d.useDoors()), or(rules.useNpcs(), d.useNpcs()), or(rules.useStorage(), d.useStorage()),
+            or(rules.useItemFramesPaintings(), d.useItemFramesPaintings()),
+            rules.healAmount() != null ? rules.healAmount() : d.healAmount(),
+            rules.healIntervalTicks() != null ? rules.healIntervalTicks() : d.healIntervalTicks(),
+            rules.feedAmount() != null ? rules.feedAmount() : d.feedAmount(),
+            rules.feedIntervalTicks() != null ? rules.feedIntervalTicks() : d.feedIntervalTicks(),
+            rules.saturationAmount() != null ? rules.saturationAmount() : d.saturationAmount(),
+            rules.saturationIntervalTicks() != null ? rules.saturationIntervalTicks() : d.saturationIntervalTicks());
+    }
+
+    private static boolean or(Boolean value, boolean fallback) {
+        return value != null ? value : fallback;
     }
 
     public static GameSettingsDto.RuntimeWorld toDto(KnkWorldRuntime world) {

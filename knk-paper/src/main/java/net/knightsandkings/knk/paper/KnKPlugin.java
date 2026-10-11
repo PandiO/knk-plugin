@@ -2248,7 +2248,9 @@ public class KnKPlugin extends JavaPlugin {
             () -> spawnDestinationResolver,
             townsQueryApi,
             settingsConfig,
-            new net.knightsandkings.knk.paper.settings.GameSettingsStore(getDataFolder().toPath(), settingsConfig.backupHistoryLimit()));
+            // Hub DESIGN §16.4 decision 7: the snapshot lives in the KNG-58 offline store (null when it is disabled)
+            new net.knightsandkings.knk.paper.settings.GameSettingsStore(getDataFolder().toPath(), settingsConfig.backupHistoryLimit(),
+                offlineSecurity));
         gameSettingsManager.start();
         if (cacheManager != null) {
             cacheManager.registerRefreshHook("game settings", gameSettingsManager::refreshNow);

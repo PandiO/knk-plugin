@@ -83,7 +83,9 @@ public final class OfflineSecurityStore {
     record PermissionFile(int userId, String node, boolean allowed, String verifiedAt) {
     }
 
-    record StoreFile(int version, List<IdentityFile> identities, List<PermissionFile> permissions) {
+    /** @param gameSettings the last Game Settings snapshot as its own JSON text (hub DESIGN §16.4 decision 7); may be null */
+    record StoreFile(int version, List<IdentityFile> identities, List<PermissionFile> permissions, String gameSettings,
+                     String gameSettingsSavedAt) {
     }
 
     private final Path file;
@@ -94,6 +96,8 @@ public final class OfflineSecurityStore {
     private final Map<UUID, Identity> identities = new ConcurrentHashMap<>();
     private final Map<PermissionKey, PermissionAnswer> permissions = new ConcurrentHashMap<>();
     private final AtomicBoolean dirty = new AtomicBoolean();
+    private volatile String gameSettingsJson;
+    private volatile Instant gameSettingsSavedAt;
 
     /** @param file where the store is kept; null keeps it in memory only (tests) */
     public OfflineSecurityStore(Path file, Settings settings, Clock clock) {
@@ -216,6 +220,32 @@ public final class OfflineSecurityStore {
         return permissions.size();
     }
 
+    // ---- Game Settings (hub DESIGN §16.4 decision 7) ----
+
+    /**
+     * The last Game Settings the API gave, as JSON text, so the settings and the hub survive a restart while the API is
+     * down. Unlike identities and permission answers it does not age out: the last valid snapshot is kept until the
+     * API sends another (hub DESIGN §3). Blank is ignored.
+     */
+    public void recordGameSettings(String json) {
+        if (json == null || json.isBlank() || json.equals(gameSettingsJson)) {
+            return;
+        }
+        gameSettingsJson = json;
+        gameSettingsSavedAt = clock.instant();
+        dirty.set(true);
+    }
+
+    /** The last recorded Game Settings JSON, if any. */
+    public Optional<String> gameSettingsJson() {
+        return Optional.ofNullable(gameSettingsJson);
+    }
+
+    /** When the Game Settings were last recorded, if ever. */
+    public Optional<Instant> gameSettingsSavedAt() {
+        return Optional.ofNullable(gameSettingsSavedAt);
+    }
+
     /** Read the file (if any); expired entries are dropped on the way in. A corrupt file is moved aside. */
     public synchronized void load() {
         if (file == null || !Files.exists(file)) {
@@ -235,6 +265,10 @@ public final class OfflineSecurityStore {
                     permissions.put(new PermissionKey(f.userId(), f.node()),
                         new PermissionAnswer(f.allowed(), Instant.parse(f.verifiedAt())));
                 }
+            }
+            if (stored.gameSettings() != null && !stored.gameSettings().isBlank()) {
+                gameSettingsJson = stored.gameSettings();
+                gameSettingsSavedAt = stored.gameSettingsSavedAt() != null ? Instant.parse(stored.gameSettingsSavedAt()) : null;
             }
             prune();
         } catch (IOException | RuntimeException e) {
@@ -263,7 +297,9 @@ public final class OfflineSecurityStore {
         try {
             Files.createDirectories(file.toAbsolutePath().getParent());
             Path temp = file.resolveSibling(file.getFileName() + ".tmp");
-            Files.write(temp, mapper.writeValueAsBytes(new StoreFile(FORMAT_VERSION, identityFiles, permissionFiles)));
+            Instant savedAt = gameSettingsSavedAt;
+            Files.write(temp, mapper.writeValueAsBytes(new StoreFile(FORMAT_VERSION, identityFiles, permissionFiles,
+                gameSettingsJson, savedAt != null ? savedAt.toString() : null)));
             try {
                 Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
             } catch (AtomicMoveNotSupportedException e) {
