@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.paper.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -26,6 +27,9 @@ import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
+import net.kyori.adventure.text.event.ClickEvent;
+import net.kyori.adventure.text.Component;
 import org.bukkit.scheduler.BukkitScheduler;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -54,6 +58,7 @@ class AccountLinkCommandTest {
     private final CommandCooldownManager cooldowns = mock(CommandCooldownManager.class);
     private final Player player = mock(Player.class);
     private final List<String> sent = new ArrayList<>();
+    private final List<Component> components = new ArrayList<>();
     private final List<String> logged = new ArrayList<>();
     private final Logger logger = Logger.getLogger("AccountLinkCommandTest-" + UUID.randomUUID());
     private MockedStatic<Bukkit> bukkit;
@@ -90,6 +95,11 @@ class AccountLinkCommandTest {
         when(player.getName()).thenReturn("Steve");
         org.mockito.Mockito.doAnswer(inv -> sent.add(ChatColor.stripColor(inv.getArgument(0, String.class))))
             .when(player).sendMessage(anyString());
+        org.mockito.Mockito.doAnswer(inv -> {
+            Component message = inv.getArgument(0, Component.class);
+            components.add(message);
+            return sent.add(PlainTextComponentSerializer.plainText().serialize(message));
+        }).when(player).sendMessage(any(Component.class));
         when(userManager.getCachedUser(uuid)).thenReturn(new PlayerUserData(
             7, "Steve", uuid, null, 0, 0, 0, false, false, null, GatePassThroughMethod.DEFAULT));
         when(cooldowns.canExecute(any(), anyString(), anyInt())).thenReturn(true);
@@ -105,13 +115,17 @@ class AccountLinkCommandTest {
     }
 
     static KnkConfig config(String publicUrl) {
+        return config(publicUrl, LinkCodeMessage.DEFAULT_TEMPLATE);
+    }
+
+    static KnkConfig config(String publicUrl, String linkCodeTemplate) {
         KnkConfig.AuthConfig auth = new KnkConfig.AuthConfig("none", "", "", "X-API-Key");
         KnkConfig.ApiConfig api = new KnkConfig.ApiConfig("http://localhost", false, false, auth,
             new KnkConfig.TimeoutsConfig(1, 1, 1));
         KnkConfig.AccountConfig account = new KnkConfig.AccountConfig(20, 120,
             new KnkConfig.AccountConfig.CooldownsConfig(300, 60, 10, 5));
         KnkConfig.MessagesConfig messages = new KnkConfig.MessagesConfig(
-            "[KnK] ", "created", "&aYour accounts have been linked!", LinkCodeMessage.DEFAULT_TEMPLATE,
+            "[KnK] ", "created", "&aYour accounts have been linked!", linkCodeTemplate,
             "&cThis code is invalid or has expired.", "duplicate", "merged");
         return new KnkConfig(api, KnkConfig.CacheConfig.defaultConfig(), account, messages,
             KnkConfig.PrivateMessagesConfig.defaults(), TeleportSettings.defaults(), KnkConfig.DiscoveryConfig.defaults(),
@@ -137,6 +151,31 @@ class AccountLinkCommandTest {
         ), sent);
         assertTrue(logged.stream().anyMatch(line -> line.contains("Link code generated for Steve")), logged.toString());
         logged.forEach(line -> assertFalse(line.contains(CODE) || line.contains("QX7K2P"), "logged the code: " + line));
+    }
+
+    @Test
+    void theCodeLineCopiesTheCodeAndTheRegisterLineOpensTheWebsite() {
+        apiGenerates();
+
+        command("https://app.knightsandkings.net").onCommand(player, null, "link", new String[0]);
+
+        assertEquals(ClickEvent.copyToClipboard(CODE), components.get(0).clickEvent());
+        assertEquals(ClickEvent.openUrl("https://app.knightsandkings.net/auth/register"), components.get(1).clickEvent());
+        assertNull(components.get(2).clickEvent());
+    }
+
+    @Test
+    void anOlderTemplateWithoutTheUrlStillGetsTheRegisterLine() {
+        apiGenerates();
+
+        new AccountLinkCommand(plugin, userManager, mock(ChatCaptureManager.class), api,
+            config("https://app.knightsandkings.net", "&aYour link code is: &6{code}&a. It expires in {minutes} minutes."),
+            cooldowns).onCommand(player, null, "link", new String[0]);
+
+        assertEquals(List.of(
+            "[KnK] Your link code is: " + CODE + ". It expires in 20 minutes.",
+            "[KnK] New to the website? Register at https://app.knightsandkings.net/auth/register"
+        ), sent);
     }
 
     @Test

@@ -102,9 +102,9 @@ public class AccountLinkCommand implements CommandExecutor {
                 LinkCodeResponseDto response = (LinkCodeResponseDto) responseObj;
                 runSync(() -> {
                     String formattedCode = response.formattedCode() != null ? response.formattedCode() : response.code();
-                    for (String line : LinkCodeMessage.format(config.messages().linkCodeGenerated(), formattedCode,
-                            config.account().linkCodeExpiryMinutes(), config.web().publicUrl())) {
-                        sendPrefixed(player, line);
+                    for (String line : LinkCodeMessage.formatGenerated(config.messages().linkCodeGenerated(),
+                            formattedCode, config.account().linkCodeExpiryMinutes(), config.web().publicUrl())) {
+                        player.sendMessage(LinkCodeMessage.toComponent(config.messages().prefix() + line, formattedCode));
                     }
                     // Never log the code itself: whoever holds it can register the player's web login.
                     plugin.getLogger().info("Link code generated for " + player.getName());
@@ -132,7 +132,7 @@ public class AccountLinkCommand implements CommandExecutor {
         plugin.getLogger().info(player.getName() + " tried to enter a link code in game");
         for (String line : LinkCodeMessage.format(config.messages().linkCodeEnteredInGame(), "",
                 config.account().linkCodeExpiryMinutes(), config.web().publicUrl())) {
-            sendPrefixed(player, line);
+            player.sendMessage(LinkCodeMessage.toComponent(config.messages().prefix() + line, ""));
         }
     }
 
