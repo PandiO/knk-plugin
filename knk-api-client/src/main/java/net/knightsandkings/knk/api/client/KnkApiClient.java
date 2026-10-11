@@ -20,6 +20,8 @@ import net.knightsandkings.knk.api.impl.UsersQueryApiImpl;
 import net.knightsandkings.knk.api.impl.UsersCommandApiImpl;
 import net.knightsandkings.knk.api.impl.PlayerNotificationsApiImpl;
 import net.knightsandkings.knk.api.impl.DiscoveriesApiImpl;
+import net.knightsandkings.knk.api.impl.StatisticsApiImpl;
+import net.knightsandkings.knk.api.impl.LeaderboardsApiImpl;
 import net.knightsandkings.knk.api.impl.RoadNetworkCommandApiImpl;
 import net.knightsandkings.knk.api.impl.RoadNetworkQueryApiImpl;
 import net.knightsandkings.knk.api.impl.UserIgnoresApiImpl;
@@ -115,6 +117,10 @@ public class KnkApiClient {
     private final UsersCommandApi usersCommandApi;
     private final PlayerNotificationsApi playerNotificationsApi;
     private final DiscoveriesApi discoveriesApi;
+    private final StatisticsApiImpl statisticsApi;
+    private final net.knightsandkings.knk.core.ports.api.TelemetryApi telemetryApi;
+    private final net.knightsandkings.knk.core.ports.api.WorldAnalyticsApi worldAnalyticsApi;
+    private final LeaderboardsApiImpl leaderboardsApi;
     private final UserIgnoresApi userIgnoresApi;
     private final PrivateMessageLogApi privateMessageLogApi;
     private final UserAccountApi userAccountApi;
@@ -155,11 +161,15 @@ public class KnkApiClient {
         ExecutorService executor,
         boolean debugLogging
     ) {
+        // KNG-34 link 6: calls started inside a correlated action carry its X-Correlation-Id.
+        executor = CorrelationPropagatingExecutorService.wrap(executor);
         this.baseUrl = baseUrl;
         this.httpClient = httpClient;
         this.objectMapper = objectMapper;
         this.authProvider = authProvider;
         this.executor = executor;
+        this.telemetryApi = new net.knightsandkings.knk.api.impl.TelemetryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.worldAnalyticsApi = new net.knightsandkings.knk.api.impl.WorldAnalyticsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         
         // Initialize API implementations
         this.healthApi = new HealthApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -176,6 +186,8 @@ public class KnkApiClient {
         this.usersCommandApi = new UsersCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.playerNotificationsApi = new PlayerNotificationsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.discoveriesApi = new DiscoveriesApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.statisticsApi = new StatisticsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.leaderboardsApi = new LeaderboardsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.userIgnoresApi = new UserIgnoresApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.privateMessageLogApi = new PrivateMessageLogApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.userAccountApi = new UserAccountApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -322,6 +334,31 @@ public class KnkApiClient {
     /** Domain discovery (KNG-20): {@code api/users/{userId}/discoveries}. */
     public DiscoveriesApi getDiscoveriesApi() {
         return discoveriesApi;
+    }
+
+    /** Player statistics (KNG-34): {@code api/statistics}. */
+    public net.knightsandkings.knk.core.ports.api.StatisticsApi getStatisticsApi() {
+        return statisticsApi;
+    }
+
+    /** Diagnostic telemetry (KNG-34 link 6): {@code api/telemetry}. */
+    public net.knightsandkings.knk.core.ports.api.TelemetryApi getTelemetryApi() {
+        return telemetryApi;
+    }
+
+    /** World analytics (KNG-34 link 7): {@code api/world-analytics}. */
+    public net.knightsandkings.knk.core.ports.api.WorldAnalyticsApi getWorldAnalyticsApi() {
+        return worldAnalyticsApi;
+    }
+
+    /** Leaderboards (KNG-34): {@code api/leaderboards}. */
+    public net.knightsandkings.knk.core.ports.api.LeaderboardsApi getLeaderboardsApi() {
+        return leaderboardsApi;
+    }
+
+    /** Server name and plugin version sent with every statistics batch. */
+    public void setStatisticsSource(String serverName, String pluginVersion) {
+        statisticsApi.setSource(serverName, pluginVersion);
     }
 
     /** Road navigation reads (KNG-27): tiles, conditional tile graphs, meta, profiles, surveys, seeds, edge search. */
