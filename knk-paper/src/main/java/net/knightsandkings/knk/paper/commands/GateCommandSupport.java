@@ -490,7 +490,13 @@ public class GateCommandSupport {
      */
     public boolean teleportTo(Player player, CachedGateDoor door) {
         World world = doorWorld(player, door);
-        Optional<Location> spot = world == null ? Optional.empty() : doorSpots.find(world, door, gateManager);
+        if (world == null) {
+            // KNG-113: never guess the player's world for a door elsewhere
+            player.sendMessage(ChatColor.RED + doorLabel(door) + " is in world '" + door.getWorldName()
+                + "', which is not loaded; not teleporting.");
+            return false;
+        }
+        Optional<Location> spot = doorSpots.find(world, door, gateManager);
         if (spot.isEmpty()) {
             player.sendMessage(ChatColor.RED + "No safe spot to stand within " + GateSafeSpots.TELEPORT_RADIUS
                 + " blocks of " + doorLabel(door) + "; not teleporting.");
@@ -500,16 +506,16 @@ public class GateCommandSupport {
         return true;
     }
 
-    /** The door's own world when it is loaded, else the player's. */
+    /**
+     * The door's own world, or null when it is not loaded (KNG-113: the player's world is never guessed - a door's
+     * coordinates mean nothing in another world). A door without a world is not loaded at all since KNG-113.
+     */
     static World doorWorld(Player player, CachedGateDoor door) {
         String worldName = door.getWorldName();
-        if (worldName != null && !worldName.isBlank() && player.getServer() != null) {
-            World world = player.getServer().getWorld(worldName);
-            if (world != null) {
-                return world;
-            }
+        if (worldName == null || worldName.isBlank() || player.getServer() == null) {
+            return null;
         }
-        return player.getWorld();
+        return player.getServer().getWorld(worldName);
     }
 
     static String capitalise(String text) {

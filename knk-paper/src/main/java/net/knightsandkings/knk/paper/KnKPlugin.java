@@ -418,7 +418,9 @@ public class KnKPlugin extends JavaPlugin {
             // Constructed after gateStateSyncTask: DistrictGateLoader hands it every district's
             // freshly-(re)loaded gates for a world/DB sync check-and-fix pass (Mechanism B) -
             // the primary correction path, bounded to whatever district a player just entered.
-            GateLoaderAdapter gateLoader = new GateLoaderAdapter(gateManager);
+            // KNG-113: a door without a world in its anchor point belongs to the main (level-name) world
+            GateLoaderAdapter gateLoader = new GateLoaderAdapter(gateManager,
+                () -> getServer().getWorlds().isEmpty() ? null : getServer().getWorlds().get(0).getName());
             gateManager.setReloadAction(() -> gateLoader.loadAll(gateStructuresApi));
             this.districtGateLoader = new DistrictGateLoader(gateLoader, gateStructuresApi, gateStateSyncTask);
 
@@ -954,11 +956,14 @@ public class KnKPlugin extends JavaPlugin {
             new GateFireDamageTask(gateFireSystem).runTaskTimer(this, fireTickIntervalTicks, fireTickIntervalTicks);
 
             WorldGuardIntegration worldGuardIntegration = new WorldGuardIntegration(this);
-            for (org.bukkit.World world : getServer().getWorlds()) {
+            // KNG-113: one animation task per world, also for a world loaded later; stopped when its world unloads
+            boolean rasterize = rotationGapFillRasterizationEnabled;
+            var gateWorldTasks = new net.knightsandkings.knk.paper.gates.GateWorldTasks(world ->
                 new GateAnimationTask(gateManager, world, org.bukkit.Material.STONE, worldGuardIntegration,
-                    gateDoorsApi, this, gateDisplayManager, rotationGapFillRasterizationEnabled)
-                    .runTaskTimer(this, 1L, 1L);
-            }
+                    gateDoorsApi, this, gateDisplayManager, rasterize)
+                    .runTaskTimer(this, 1L, 1L));
+            getServer().getWorlds().forEach(gateWorldTasks::start);
+            getServer().getPluginManager().registerEvents(gateWorldTasks, this);
             new GateDisplayUpdateTask(gateDisplayManager, gateManager).runTaskTimer(this, 20L, 20L);
             // KNG-106: anyone found inside gate door blocks is moved out instead of suffocating.
             getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.gates.GateSuffocationGuard(
