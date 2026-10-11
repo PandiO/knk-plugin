@@ -193,6 +193,18 @@ public class UsersDataAccessTest {
     }
 
     @Test
+    void testGetOrCreate_CreatedAccountWithoutCoins_IsStillCachedAsNewUser() throws Exception {
+        UUID newUuid = UUID.randomUUID();
+        UserDetail seed = new UserDetail(78, "NoCoins", newUuid, null, null, new Date());
+
+        FetchResult<UserSummary> result = gateway.getOrCreateAsync(newUuid, true, seed).get();
+
+        assertTrue(result.isSuccess());
+        assertTrue(cache.getByUuid(newUuid).orElseThrow().isNewUser());
+        assertEquals(0, cache.getByUuid(newUuid).orElseThrow().coins());
+    }
+
+    @Test
     void testGetOrCreate_ExistingAccount_IsNotNewUser() throws Exception {
         UserDetail seed = new UserDetail(0, "TestPlayer", testUuid, "test@example.com", 250, new Date());
 

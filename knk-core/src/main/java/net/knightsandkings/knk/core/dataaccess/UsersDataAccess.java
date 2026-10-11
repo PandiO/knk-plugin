@@ -200,7 +200,7 @@ public class UsersDataAccess {
                             created.username(),
                             created.uuid(),
                             null,
-                            created.coins(),
+                            created.coins() != null ? created.coins() : 0,
                             0,
                             0,
                             false,
