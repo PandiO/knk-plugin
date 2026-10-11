@@ -109,6 +109,8 @@ public final class DiscoveryFlushTask {
         for (UUID playerId : tracker.playersWithPending()) {
             tracker.nextBatch(playerId, now).ifPresent(this::send);
         }
+        // A new player's quiet minutes ended: their held announcements, as one summary (KNG-128).
+        effects.releaseSettled();
     }
 
     private void send(DiscoveryTracker.Batch batch) {

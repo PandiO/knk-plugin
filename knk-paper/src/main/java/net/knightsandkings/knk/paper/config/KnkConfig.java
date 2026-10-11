@@ -27,7 +27,8 @@ public record KnkConfig(
     TelemetryConfig telemetry,
     WorldAnalyticsConfig worldAnalytics,
     RegionHttpConfig regionHttp,
-    WebConfig web
+    WebConfig web,
+    OnboardingConfig onboarding
 ) {
     public KnkConfig {
         // No teleport: block (e.g. an older config.yml) means the DESIGN §3.11 defaults.
@@ -42,6 +43,17 @@ public record KnkConfig(
         // An older config.yml has no region-http bind address and no web: block.
         regionHttp = regionHttp != null ? regionHttp : RegionHttpConfig.defaults();
         web = web != null ? web : WebConfig.defaults();
+        // No onboarding: block (an older config.yml): the KNG-128/129 defaults.
+        onboarding = onboarding != null ? onboarding : OnboardingConfig.defaults();
+    }
+
+    /** Without an onboarding section: its defaults (new-player onboarding, KNG-128/129). */
+    public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
+                     PrivateMessagesConfig privateMessages, TeleportSettings teleport, DiscoveryConfig discovery,
+                     NavigationConfig navigation, StatisticsConfig statistics, TelemetryConfig telemetry,
+                     WorldAnalyticsConfig worldAnalytics, RegionHttpConfig regionHttp, WebConfig web) {
+        this(api, cache, account, messages, privateMessages, teleport, discovery, navigation, statistics,
+            telemetry, worldAnalytics, regionHttp, web, OnboardingConfig.defaults());
     }
 
     /** Without region-http and web sections: their defaults (closed-alpha hardening, KNG-70). */
@@ -130,6 +142,68 @@ public record KnkConfig(
         public void validate() {
             if (port < 1 || port > 65535) {
                 throw new IllegalArgumentException("region-http.port must be between 1 and 65535 (got: " + port + ")");
+            }
+        }
+    }
+
+    /**
+     * A new player's first minutes and the reminder to link a web account (KNG-128/129). Templates use
+     * {@code &} colour codes.
+     *
+     * @param firstJoinWelcome        lines sent instead of "Welcome back" when the account was created at
+     *                                this join; {player}
+     * @param linkPrompt              text before the link button in the first-join welcome
+     * @param linkButton              the button; clicking it runs {@code /account link}
+     * @param linkButtonHover         the button's tooltip
+     * @param discoveryQuietMinutes   discovery announcements are held this long after a first join and
+     *                                then shown as one summary; 0 = never held
+     * @param discoverySettledSummary that summary's first line; {count}
+     * @param unlinkedReminderEnabled remind players without a web account on every later join
+     * @param unlinkedReminder        text before the link button in that reminder
+     */
+    public record OnboardingConfig(
+        List<String> firstJoinWelcome,
+        String linkPrompt,
+        String linkButton,
+        String linkButtonHover,
+        int discoveryQuietMinutes,
+        String discoverySettledSummary,
+        boolean unlinkedReminderEnabled,
+        String unlinkedReminder
+    ) {
+        public static final int MAX_QUIET_MINUTES = 60;
+
+        public OnboardingConfig {
+            firstJoinWelcome = firstJoinWelcome == null ? List.of() : List.copyOf(firstJoinWelcome);
+            linkPrompt = linkPrompt == null ? "" : linkPrompt;
+            linkButton = linkButton == null || linkButton.isBlank() ? "&a&n[Link it now]" : linkButton;
+            linkButtonHover = linkButtonHover == null ? "" : linkButtonHover;
+            discoverySettledSummary = discoverySettledSummary == null ? "" : discoverySettledSummary;
+            unlinkedReminder = unlinkedReminder == null ? "" : unlinkedReminder;
+        }
+
+        public static OnboardingConfig defaults() {
+            return new OnboardingConfig(
+                List.of(
+                    "&6Welcome to Knights & Kings, &e{player}&6!",
+                    "&7Explore the kingdom: every town, district and structure you find for the first time earns you coins and XP."),
+                "&7Link your account to follow your progress on the website: ",
+                "&a&n[Link it now]",
+                "&7Get a code to create your web account",
+                10,
+                "&bWhile settling in you discovered &a{count}&b place(s). See them all with &a/discoveries&b.",
+                true,
+                "&7You haven't linked a web account yet. ");
+        }
+
+        public Duration discoveryQuiet() {
+            return Duration.ofMinutes(discoveryQuietMinutes);
+        }
+
+        public void validate() {
+            if (discoveryQuietMinutes < 0 || discoveryQuietMinutes > MAX_QUIET_MINUTES) {
+                throw new IllegalArgumentException("onboarding.discovery-quiet-minutes must be 0-" + MAX_QUIET_MINUTES
+                    + " (got: " + discoveryQuietMinutes + ")");
             }
         }
     }
@@ -252,6 +326,7 @@ public record KnkConfig(
         telemetry.validate();
         worldAnalytics.validate();
         regionHttp.validate();
+        onboarding.validate();
     }
     
     public record CacheConfig(

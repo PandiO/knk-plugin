@@ -45,6 +45,7 @@ import net.knightsandkings.knk.paper.cache.CacheManager;
 import net.knightsandkings.knk.paper.chat.ChatLineFormat;
 import net.knightsandkings.knk.paper.kit.KitGrantPlacer;
 import net.knightsandkings.knk.paper.modes.ModeService;
+import net.knightsandkings.knk.paper.onboarding.NewPlayerWindow;
 import net.knightsandkings.knk.paper.permissions.KnkPermissible;
 import net.knightsandkings.knk.paper.settings.GameSettingsManager;
 import net.knightsandkings.knk.paper.user.IgnoreService;
@@ -76,6 +77,8 @@ public class PlayerListener implements Listener {
 	private final MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
 	/** Null-safe: chat works unfiltered without it. */
 	private final IgnoreService ignoreService;
+	/** KNG-128: an account created at this join opens the new player's window (welcome, quiet discoveries). */
+	private final NewPlayerWindow newPlayers;
 
 	public PlayerListener(
 			UsersDataAccess usersDataAccess,
@@ -86,7 +89,8 @@ public class PlayerListener implements Listener {
 			KitsCommandApi kitsCommandApi,
 			ItemBlueprintsDataAccess itemBlueprintsDataAccess,
 			MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess,
-			IgnoreService ignoreService
+			IgnoreService ignoreService,
+			NewPlayerWindow newPlayers
 	) {
 		this.usersDataAccess = usersDataAccess;
 		this.gameSettings = gameSettings;
@@ -97,6 +101,7 @@ public class PlayerListener implements Listener {
 		this.itemBlueprintsDataAccess = itemBlueprintsDataAccess;
 		this.minecraftMaterialRefsDataAccess = minecraftMaterialRefsDataAccess;
 		this.ignoreService = ignoreService;
+		this.newPlayers = newPlayers;
 	}
 
 	@EventHandler
@@ -205,6 +210,9 @@ public class PlayerListener implements Listener {
 			// predates this (none existed here; UserAccountListener's welcome message doesn't
 			// distinguish new/returning either - verified by reading both listeners directly).
 			if (user.isNewUser()) {
+				if (newPlayers != null) {
+					newPlayers.markFirstJoin(player.getUniqueId());
+				}
 				LOGGER.info("First-join kits: " + player.getName() + " (user " + user.id() + ") is a new account, asking the API to grant them");
 				triggerBackgroundFirstJoinKits(player, user.id());
 			}

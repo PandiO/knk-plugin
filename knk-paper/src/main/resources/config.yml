@@ -71,6 +71,25 @@ web:
   # leave the link out.
   public-url: ""
 
+# A new player's first minutes and the web-account reminder (KNG-128/129). & colour codes.
+onboarding:
+  # Sent instead of "Welcome back" when the account was created at this join. {player}
+  first-join-welcome:
+    - "&6Welcome to Knights & Kings, &e{player}&6!"
+    - "&7Explore the kingdom: every town, district and structure you find for the first time earns you coins and XP."
+  # After the welcome: this text, then the button. Clicking it runs /account link (code + register URL).
+  link-prompt: "&7Link your account to follow your progress on the website: "
+  link-button: "&a&n[Link it now]"
+  link-button-hover: "&7Get a code to create your web account"
+  # Discovery announcements are held this long after a first join (0-60, 0 = off), then shown as one
+  # summary. The discoveries are recorded and rewarded straight away. {count}
+  discovery-quiet-minutes: 10
+  discovery-settled-summary: "&bWhile settling in you discovered &a{count}&b place(s). See them all with &a/discoveries&b."
+  # On every later join of a player without a web account: this text, then the same button.
+  unlinked-reminder:
+    enabled: true
+    message: "&7You haven't linked a web account yet. "
+
 # Account management configuration (Phase 1+)
 account:
   # Link code expiry time (in minutes)
