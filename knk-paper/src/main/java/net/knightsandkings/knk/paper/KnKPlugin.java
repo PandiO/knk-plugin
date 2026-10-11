@@ -261,6 +261,7 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.roads.RoadOverlayRenderer roadOverlayRenderer;
     private net.knightsandkings.knk.paper.roads.RoadProposals roadProposals;
     private GateStateSyncTask gateStateSyncTask;
+    private final net.knightsandkings.knk.paper.worlds.KnkWorlds knkWorlds = new net.knightsandkings.knk.paper.worlds.KnkWorlds();
     private GateDisplayManager gateDisplayManager;
     private DistrictGateLoader districtGateLoader;
     private WorldTaskHandlerRegistry worldTaskHandlerRegistry;
@@ -317,6 +318,9 @@ public class KnKPlugin extends JavaPlugin {
             saveDefaultConfig();
             config = ConfigLoader.load(getConfig());
             getLogger().info("Configuration loaded successfully");
+            // KNG-114: load the worlds in worlds.load first, so gates, region repair, Game Settings and admission all
+            // start with every world there (hub DESIGN §16 decision 1: a minimal KnK loader, no Multiverse).
+            knkWorlds.loadAndGuard(this);
             getLogger().info("API Base URL: " + config.api().baseUrl());
             
             // Create auth provider based on config
