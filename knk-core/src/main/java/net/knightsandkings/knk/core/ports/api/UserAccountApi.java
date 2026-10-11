@@ -42,18 +42,10 @@ public interface UserAccountApi {
      * Validate a link code before account linking.
      * 
      * @param code The link code to validate
-     * @return Future with validation response (isValid, userId, error message if invalid)
+     * @return Future with validation response (isValid, the code owner's username, error message if invalid).
+     *         It carries no user id or email, and validating does not consume the code.
      */
     CompletableFuture<Object> validateLinkCode(String code);
-    
-    /**
-     * Link an existing account using a link code.
-     * Merges plugin account with web account.
-     * 
-     * @param request The link request (code, email, password)
-     * @return Future with merged user response
-     */
-    CompletableFuture<Object> linkAccount(Object request);
     
     /**
      * Merge two accounts into one.
