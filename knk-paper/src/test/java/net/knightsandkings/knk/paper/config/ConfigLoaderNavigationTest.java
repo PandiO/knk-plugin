@@ -63,10 +63,10 @@ class ConfigLoaderNavigationTest {
         var walk = yaml.getConfigurationSection("navigation.walk");
 
         assertNotNull(walk, "config.yml has a navigation.walk block (KNG-51 §9)");
-        assertEquals(java.util.Set.of("enabled", "max-expansions", "max-length-factor", "max-length", "detour-allowance", "max-drop",
-            "drop-penalty", "capture-margin", "chunk-ttl-seconds", "recompute-distance", "max-concurrent-searches",
-            "climbables", "wall-cost"), walk.getKeys(false));
-        assertEquals(new NavigationConfig.WalkConfig(true, 20_000, 1.75, 144, 48, 3, 10, 16, 10, 6, 2, List.of("LADDER"), 1.0),
+        assertEquals(java.util.Set.of("enabled", "max-expansions", "max-length-factor", "max-length", "detour-allowance",
+            "climb-allowance", "max-drop", "drop-penalty", "capture-margin", "chunk-ttl-seconds", "recompute-distance",
+            "max-concurrent-searches", "climbables", "wall-cost"), walk.getKeys(false));
+        assertEquals(new NavigationConfig.WalkConfig(true, 20_000, 1.75, 144, 48, 5, 3, 10, 16, 10, 6, 2, List.of("LADDER"), 1.0),
             ConfigLoader.load(yaml).navigation().walk());
     }
 
@@ -167,7 +167,7 @@ class ConfigLoaderNavigationTest {
     @Test
     void walkKeysDefaultToTheDesignAndOverride() {
         NavigationConfig.WalkConfig defaults = ConfigLoader.loadNavigation(null).walk();
-        assertEquals(new NavigationConfig.WalkConfig(true, 20_000, 1.75, 144, 48, 3, 10, 16, 10, 6, 2, List.of("LADDER"), 1.0),
+        assertEquals(new NavigationConfig.WalkConfig(true, 20_000, 1.75, 144, 48, 5, 3, 10, 16, 10, 6, 2, List.of("LADDER"), 1.0),
             defaults, "KNG-51 §9 defaults");
         assertEquals(net.knightsandkings.knk.core.roads.walk.MovementProfile.PLAYER, defaults.profile());
         assertEquals(net.knightsandkings.knk.core.roads.walk.WalkBudget.DEFAULTS, defaults.budget());
@@ -178,6 +178,7 @@ class ConfigLoaderNavigationTest {
         yaml.set("navigation.walk.capture-margin", 8);
         yaml.set("navigation.walk.chunk-ttl-seconds", 30);
         yaml.set("navigation.walk.max-expansions", 5000);
+        yaml.set("navigation.walk.climb-allowance", 3.5);
         yaml.set("navigation.walk.climbables", List.of("ladder", "VINE"));
         NavigationConfig.WalkConfig walk = ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation")).walk();
         walk.validate();
@@ -187,6 +188,7 @@ class ConfigLoaderNavigationTest {
         assertEquals(java.util.Set.of("LADDER", "VINE"), walk.profile().climbables());
         assertEquals(5000, walk.budget().maxExpansions());
         assertEquals(144, walk.budget().maxLength(), 0.0001, "unset keys keep their defaults");
+        assertEquals(3.5, walk.budget().climbAllowance(), 0.0001);
         assertEquals(8, walk.captureMargin());
         assertEquals(30, walk.chunkTtlSeconds());
         assertEquals(2, walk.maxConcurrentSearches());
@@ -195,6 +197,10 @@ class ConfigLoaderNavigationTest {
         bad.set("navigation.walk.max-length-factor", 0.5);
         assertThrows(IllegalArgumentException.class,
             () -> ConfigLoader.loadNavigation(bad.getConfigurationSection("navigation")).validate());
+        YamlConfiguration negativeClimb = new YamlConfiguration();
+        negativeClimb.set("navigation.walk.climb-allowance", -1);
+        assertThrows(IllegalArgumentException.class,
+            () -> ConfigLoader.loadNavigation(negativeClimb.getConfigurationSection("navigation")).validate());
         YamlConfiguration blank = new YamlConfiguration();
         blank.set("navigation.walk.climbables", List.of(" "));
         assertThrows(IllegalArgumentException.class,

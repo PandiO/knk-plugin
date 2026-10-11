@@ -16,6 +16,7 @@ import net.knightsandkings.knk.core.dataaccess.PermissionsDataAccess;
 import net.knightsandkings.knk.core.domain.permissions.PermissionCheckResult;
 import net.knightsandkings.knk.core.domain.permissions.PermissionDecision;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
+import net.knightsandkings.knk.core.offline.OfflineSecurityStore;
 
 /**
  * Call sites migrating onto the new permission model (docs/specs/user-features/DESIGN.md §2.2)
@@ -45,6 +46,12 @@ import net.knightsandkings.knk.core.domain.users.UserSummary;
  * exists for that node, and authoring one is docs/specs/user-features/IMPLEMENTATION_PLAN.md
  * §6.2, a later phase not built yet. A real grant/deny from the new model still takes over
  * normally for a non-op.
+ * <p>
+ * KNG-58: when the API can't answer - the account isn't cached (restart during an outage) or a
+ * check can't be made - the last answers the API gave are taken from the
+ * {@link OfflineSecurityStore} (on disk, bounded by age; an unknown or too-old answer still means
+ * no). The same store fills the gap after the 30 s memory TTL, so the first check after it no
+ * longer fails closed while the refresh is under way.
  */
 public class KnkPermissible {
 
@@ -52,10 +59,17 @@ public class KnkPermissible {
 
     private final UserCache userCache;
     private final PermissionsDataAccess permissionsDataAccess;
+    private final OfflineSecurityStore offline;
 
     public KnkPermissible(UserCache userCache, PermissionsDataAccess permissionsDataAccess) {
+        this(userCache, permissionsDataAccess, null);
+    }
+
+    /** @param offline the last-known answers for when the API can't be asked (KNG-58); null = none */
+    public KnkPermissible(UserCache userCache, PermissionsDataAccess permissionsDataAccess, OfflineSecurityStore offline) {
         this.userCache = Objects.requireNonNull(userCache, "userCache must not be null");
         this.permissionsDataAccess = Objects.requireNonNull(permissionsDataAccess, "permissionsDataAccess must not be null");
+        this.offline = offline;
     }
 
     /**
@@ -115,12 +129,13 @@ public class KnkPermissible {
                 if (decision == PermissionDecision.UNAVAILABLE) {
                     LOGGER.log(Level.WARNING, "Permission check failed for user " + userId + ", node " + node,
                         result != null ? result.error().orElse(null) : null);
+                    return lastKnown(userId, node);
                 }
                 return decision;
             })
             .exceptionally(ex -> {
                 LOGGER.log(Level.WARNING, "Permission check failed for user " + userId + ", node " + node, ex);
-                return PermissionDecision.UNAVAILABLE;
+                return lastKnown(userId, node);
             });
     }
 
@@ -129,7 +144,20 @@ public class KnkPermissible {
         // nothing refreshes an online player's entry mid-session, so a fresh-only read stopped
         // resolving (and every check failed closed for non-ops) about a minute after join. A
         // UUID's knk user id never changes, so an expired entry is still a correct answer here.
-        return userCache.getStale(uuid).map(UserSummary::id).orElse(null);
+        Integer cached = userCache.getStale(uuid).map(UserSummary::id).orElse(null);
+        if (cached != null || offline == null) {
+            return cached;
+        }
+        // Not loaded this session (restart while the API is down): the account the API last named.
+        return offline.identity(uuid).map(OfflineSecurityStore.Identity::userId).orElse(null);
+    }
+
+    /** The API's last answer for this user and node (KNG-58), else UNAVAILABLE. */
+    private PermissionDecision lastKnown(int userId, String node) {
+        if (offline == null) {
+            return PermissionDecision.UNAVAILABLE;
+        }
+        return offline.permission(userId, node).map(PermissionDecision::of).orElse(PermissionDecision.UNAVAILABLE);
     }
 
     private boolean checkCacheOnly(int userId, String node) {
@@ -140,12 +168,12 @@ public class KnkPermissible {
             return cached.value().map(PermissionCheckResult::isAllowed).orElse(false);
         }
 
-        // Nothing cached yet - fail closed for this call, but warm the cache asynchronously so
-        // the next check for this user/node has a real answer instead of repeating this fallback.
+        // Nothing fresh in memory - refresh in the background so the next check has a real answer,
+        // and answer this one with the API's last answer if we have one (KNG-58), else fail closed.
         permissionsDataAccess.checkAsync(userId, node).exceptionally(ex -> {
             LOGGER.log(Level.WARNING, "Background permission refresh failed for user " + userId + ", node " + node, ex);
             return null;
         });
-        return false;
+        return offline != null && offline.permission(userId, node).orElse(false);
     }
 }

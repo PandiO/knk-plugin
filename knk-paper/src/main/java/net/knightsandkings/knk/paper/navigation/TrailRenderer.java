@@ -1,9 +1,14 @@
 package net.knightsandkings.knk.paper.navigation;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
+import java.util.function.LongSupplier;
 
 import org.bukkit.Color;
 import org.bukkit.Location;
@@ -28,7 +33,8 @@ import net.knightsandkings.knk.paper.utils.TickBudget;
  * their heights snapped to the floor ({@link KnkLocations#floorOf}, R28). Under lag
  * ({@link TickBudget}) the trail is drawn at half length. The point maths is pure for the tests.
  * With a road surface ({@link TrailCentring}, KNG-76) the route trail keeps to the middle of the road and, on a
- * slope, to its stairs and slabs.
+ * slope, to its stairs and slabs. Where a region the player may not enter covers part of the road (KNG-110), it keeps
+ * to the middle of the free part, so the region's border does not push the player back.
  */
 public final class TrailRenderer {
 
@@ -46,6 +52,24 @@ public final class TrailRenderer {
     private final Object routeData;
     private final Object legData;
     private final java.util.function.Function<World, TrailCentring.Ground> ground;
+    private final CellRegions cellRegions;
+    private final java.util.function.Function<Player, java.util.function.Predicate<String>> rules;
+    private final LongSupplier clock;
+    private final Map<Cell, Set<String>> regionCache = new HashMap<>();
+    private long regionCacheSince;
+
+    /** KNG-110: the WorldGuard regions at a block, feet level (main thread). */
+    @FunctionalInterface
+    public interface CellRegions {
+        Set<String> at(World world, int x, int feetY, int z);
+    }
+
+    private record Cell(UUID world, int x, int y, int z) {
+    }
+
+    /** Regions per cell are remembered this long (millis): the window is centred again every redraw. */
+    static final long REGION_CACHE_MILLIS = 5_000;
+    static final int REGION_CACHE_MAX = 8_192;
 
     public TrailRenderer(NavigationConfig.TrailConfig config, TickBudget budget) {
         this(config, budget, null);
@@ -57,7 +81,22 @@ public final class TrailRenderer {
      */
     public TrailRenderer(NavigationConfig.TrailConfig config, TickBudget budget,
                          java.util.function.Function<World, TrailCentring.Ground> ground) {
+        this(config, budget, ground, null, null, System::currentTimeMillis);
+    }
+
+    /**
+     * @param cellRegions the regions at a road cell (KNG-110); null: the trail does not look at regions
+     * @param rules       the regions a player may stand in on a road ({@code NavigationService.trailRule}); the trail
+     *                    keeps to the road cells outside the others, through the free part of the road
+     * @param clock       millis, for the region cache
+     */
+    public TrailRenderer(NavigationConfig.TrailConfig config, TickBudget budget,
+                         java.util.function.Function<World, TrailCentring.Ground> ground, CellRegions cellRegions,
+                         java.util.function.Function<Player, java.util.function.Predicate<String>> rules, LongSupplier clock) {
         this.ground = ground;
+        this.cellRegions = cellRegions;
+        this.rules = rules;
+        this.clock = Objects.requireNonNull(clock, "clock");
         this.config = Objects.requireNonNull(config, "config");
         this.budget = Objects.requireNonNull(budget, "budget");
         this.particle = particleOf(config.particle());
@@ -91,7 +130,7 @@ public final class TrailRenderer {
     public void drawRoute(Player viewer, Route route, double along, double[] target, boolean fromPlayer) {
         double length = budget.isLagging() ? Math.max(4, config.length() / 2.0) : config.length();
         List<double[]> trail = ground != null && viewer.getWorld() != null
-            ? centredWindow(route, along, length, SPACING, ground.apply(viewer.getWorld()))
+            ? centredWindow(route, along, length, SPACING, surfaceFor(viewer))
             : trailPoints(route, along, length, SPACING);
         if (trail.isEmpty()) {
             return;
@@ -132,6 +171,51 @@ public final class TrailRenderer {
             return;
         }
         ParticleDraw.polyline(viewer, lifted(window), LEG_SPACING, particle, legData);
+    }
+
+    /**
+     * The viewer's road surface: the world's, with the road cells in a region the viewer may not enter blocked
+     * (KNG-110), so the centred trail keeps to the free part of a road a region covers in part.
+     */
+    TrailCentring.Ground surfaceFor(Player viewer) {
+        World world = viewer.getWorld();
+        TrailCentring.Ground surface = ground.apply(world);
+        java.util.function.Predicate<String> mayEnter = rules == null ? null : rules.apply(viewer);
+        if (cellRegions == null || mayEnter == null) {
+            return surface;
+        }
+        return new TrailCentring.Ground() {
+            @Override
+            public java.util.OptionalInt roadFloor(int x, int z, int nearY) {
+                return surface.roadFloor(x, z, nearY);
+            }
+
+            @Override
+            public boolean stairOrSlab(int x, int y, int z) {
+                return surface.stairOrSlab(x, y, z);
+            }
+
+            @Override
+            public boolean blocked(int x, int y, int z) {
+                for (String regionId : regionsAt(world, x, y + 1, z)) {
+                    if (!mayEnter.test(regionId)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        };
+    }
+
+    /** The regions at a cell, remembered a few seconds (the window is centred again on every redraw). */
+    private Set<String> regionsAt(World world, int x, int feetY, int z) {
+        long now = clock.getAsLong();
+        if (now - regionCacheSince > REGION_CACHE_MILLIS || regionCache.size() > REGION_CACHE_MAX) {
+            regionCache.clear();
+            regionCacheSince = now;
+        }
+        return regionCache.computeIfAbsent(new Cell(world.getUID(), x, feetY, z),
+            c -> Set.copyOf(cellRegions.at(world, x, feetY, z)));
     }
 
     private void drawLeg(Player viewer, double[] from, double[] to) {

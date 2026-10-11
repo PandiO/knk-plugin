@@ -10,6 +10,7 @@ import net.knightsandkings.knk.core.gates.GateSpatialIndex;
 import net.knightsandkings.knk.paper.gates.GateRestingFramePlacer.RestingCell;
 import net.knightsandkings.knk.paper.integration.WorldGuardIntegration;
 import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.Sound;
@@ -17,8 +18,11 @@ import org.bukkit.SoundCategory;
 import org.bukkit.World;
 import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.Hanging;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.util.BoundingBox;
 import org.bukkit.util.Vector;
 
 import java.util.ArrayList;
@@ -42,9 +46,6 @@ public class GateAnimationTask extends BukkitRunnable {
     
     // Minimum time between lag checks (milliseconds)
     private static final long LAG_CHECK_INTERVAL = 1000;
-
-    private static final double ENTITY_PUSH_RADIUS = 5.0;
-    private static final int ENTITY_COLLISION_FRAMES_THRESHOLD = 2;
 
     // Consecutive ticks a door block must be blocked by a non-replaceable obstruction before
     // the gate is marked jammed - filters out a single transient block (e.g. a player mid-swing).
@@ -579,37 +580,46 @@ public class GateAnimationTask extends BukkitRunnable {
         spatialIndex.putAll(gate.getWorldName(), positions, gate.getId());
     }
 
+    /**
+     * KNG-106: moves every entity that is in the way of the blocks this update and the next ones
+     * place (both sides of the door, its whole depth, a drawbridge's arc - see
+     * {@link CollisionPredictor#upcomingCells}) to a safe spot outside the rest of the door's sweep,
+     * before the blocks are placed. Players, mobs, dropped items and vehicles (with their
+     * passengers) alike; spectators, displays and hanging entities are left alone. Without a safe
+     * spot nearby the entity gets the old push away from the door instead.
+     */
     private void handleEntityPush(CachedGateDoor gate, int currentFrame) {
-        Vector anchor = gate.getAnchorPoint();
-        if (anchor == null) {
+        Set<Long> upcoming = CollisionPredictor.upcomingCells(gate, currentFrame, rasterizationEnabled);
+        BoundingBox area = CollisionPredictor.boundsOf(upcoming);
+        if (area == null) {
             return;
         }
 
-        Location origin = new Location(world, anchor.getX(), anchor.getY(), anchor.getZ());
-        double radius = entitySearchRadius(gate);
-
-        for (Entity entity : world.getNearbyEntities(origin, radius, radius, radius)) {
-            if (entity.isDead() || entity instanceof Display) {
+        Set<Long> remaining = null;
+        Set<java.util.UUID> moved = new HashSet<>();
+        for (Entity entity : world.getNearbyEntities(area.expand(1.0))) {
+            if (!isMovable(entity) || !CollisionPredictor.overlaps(entity, upcoming)) {
                 continue;
             }
-
-            int framesToCollision = CollisionPredictor.predictCollision(gate, entity, currentFrame);
-            if (framesToCollision == 0) {
-                // Already inside the blocks being rendered this frame; a push cannot save it.
-                if (!EntityEvacuator.evacuate(entity, gate)) {
-                    EntityPusher.pushEntity(entity, gate);
-                }
-            } else if (framesToCollision <= ENTITY_COLLISION_FRAMES_THRESHOLD) {
-                EntityPusher.pushEntity(entity, gate);
+            Entity root = EntityEvacuator.rootVehicle(entity);
+            if (!moved.add(root.getUniqueId())) {
+                continue;
+            }
+            if (remaining == null) {
+                remaining = CollisionPredictor.remainingCells(gate, currentFrame, rasterizationEnabled);
+                remaining.addAll(upcoming);
+            }
+            if (!EntityEvacuator.evacuate(root, gate, gateManager, CollisionPredictor.asFilter(remaining))) {
+                EntityPusher.pushEntity(root, gate);
             }
         }
     }
 
-    private double entitySearchRadius(CachedGateDoor gate) {
-        int span = Math.max(gate.getGeometryWidth(), Math.max(gate.getGeometryHeight(), gate.getGeometryDepth()));
-        Vector motion = gate.getMotionVector();
-        double travel = motion != null ? motion.length() : 0.0;
-        return Math.max(ENTITY_PUSH_RADIUS, span + travel);
+    static boolean isMovable(Entity entity) {
+        if (entity == null || entity.isDead() || entity instanceof Display || entity instanceof Hanging) {
+            return false;
+        }
+        return !(entity instanceof Player player) || player.getGameMode() != GameMode.SPECTATOR;
     }
 
     /**

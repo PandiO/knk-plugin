@@ -101,6 +101,20 @@ class WalkTypesTest {
     }
 
     @Test
+    void theClimbAllowanceAddsPerBlockOfHeightAboveTheMaximum() {
+        assertEquals(5.0, WalkBudget.DEFAULTS.climbAllowance(), 1e-9);
+        assertEquals(WalkBudget.DEFAULTS.lengthCap(29.6), WalkBudget.DEFAULTS.lengthCap(29.6, 0), 1e-9, "level: as before");
+        assertEquals(77.6 + 5 * 28, WalkBudget.DEFAULTS.lengthCap(29.6, 28), 1e-9,
+            "the Keep Tower Roof leg (KNG-108): the 168-block spiral stair fits");
+        assertEquals(77.6 + 5 * 28, WalkBudget.DEFAULTS.lengthCap(29.6, -28), 1e-9, "up or down");
+        assertEquals(144.0 + 5 * 40, WalkBudget.DEFAULTS.lengthCap(96, 40), 1e-9, "on top of max-length");
+        assertEquals(58.0, new WalkBudget(20_000, 1.75, 144, 48, 2, 3).lengthCap(10, 30), 1e-9,
+            "callers from before KNG-108: no allowance");
+        assertThrows(IllegalArgumentException.class, () -> new WalkBudget(10, 1.75, 96, 48, -1, 2, 3));
+        assertThrows(IllegalArgumentException.class, () -> new WalkBudget(10, 1.75, 96, 48, Double.POSITIVE_INFINITY, 2, 3));
+    }
+
+    @Test
     void aPointGoalIsReachedWithinItsDistance() {
         WalkGoal goal = WalkGoal.within(10.5, 64, 10.5, 2.0);
 

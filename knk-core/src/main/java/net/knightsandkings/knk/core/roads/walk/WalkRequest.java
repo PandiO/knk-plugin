@@ -88,4 +88,9 @@ public record WalkRequest(
         double dz = targetZ - startZ;
         return Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
+
+    /** Height between the start (as a floor point) and the target, up or down: the length cap's climb (KNG-108). */
+    public double heightDifference() {
+        return Math.abs(targetFloorY - (startY - 1));
+    }
 }

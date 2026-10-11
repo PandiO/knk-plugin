@@ -30,6 +30,42 @@ public class UsersDataAccess {
     private final UsersCommandApi usersCommandApi;
     private final DataAccessSettings settings;
     private final DataAccessExecutor<UUID, UserSummary> executor;
+    private volatile UserAnswerListener answerListener = UserAnswerListener.NONE;
+
+    /**
+     * Told about every user the API returns, or that it knows no user for a UUID (KNG-58: the
+     * offline security cache records the first and forgets the second). Local cache edits
+     * (balances, mode) are not API answers and are not reported.
+     */
+    public interface UserAnswerListener {
+        UserAnswerListener NONE = new UserAnswerListener() {
+            @Override
+            public void found(UserSummary user) {
+            }
+
+            @Override
+            public void notFound(UUID uuid) {
+            }
+        };
+
+        void found(UserSummary user);
+
+        void notFound(UUID uuid);
+    }
+
+    public void setAnswerListener(UserAnswerListener listener) {
+        this.answerListener = listener != null ? listener : UserAnswerListener.NONE;
+    }
+
+    private UserSummary reportByUuid(UUID uuid, UserSummary userSummary) {
+        if (userSummary != null) {
+            userCache.put(userSummary);
+            answerListener.found(userSummary);
+        } else {
+            answerListener.notFound(uuid);
+        }
+        return userSummary;
+    }
     
     /**
      * Create a new UsersDataAccess gateway.
@@ -79,12 +115,7 @@ public class UsersDataAccess {
         return executor.fetchAsync(
             uuid,
             policy,
-            () -> usersQueryApi.getByUuid(uuid).thenApply(userSummary -> {
-                if (userSummary != null) {
-                    userCache.put(userSummary);
-                }
-                return userSummary;
-            })
+            () -> usersQueryApi.getByUuid(uuid).thenApply(userSummary -> reportByUuid(uuid, userSummary))
         );
     }
     
@@ -120,6 +151,7 @@ public class UsersDataAccess {
         return usersQueryApi.getByUsername(username).thenApply(userSummary -> {
             if (userSummary != null) {
                 userCache.put(userSummary); // Cache by UUID for future UUID lookups
+                answerListener.found(userSummary);
                 return FetchResult.<UserSummary>missFetched(userSummary);
             }
             return FetchResult.<UserSummary>notFound();
@@ -165,6 +197,7 @@ public class UsersDataAccess {
                             created.coins()
                         );
                         userCache.put(summary);
+                        answerListener.found(summary);
                         return FetchResult.<UserSummary>missFetched(summary);
                     }
                     return FetchResult.<UserSummary>notFound();
@@ -193,12 +226,7 @@ public class UsersDataAccess {
         return executor.fetchAsync(
             uuid,
             settings.resolvePolicy(FetchPolicy.API_ONLY),
-            () -> usersQueryApi.getByUuid(uuid).thenApply(userSummary -> {
-                if (userSummary != null) {
-                    userCache.put(userSummary);
-                }
-                return userSummary;
-            })
+            () -> usersQueryApi.getByUuid(uuid).thenApply(userSummary -> reportByUuid(uuid, userSummary))
         );
     }
     

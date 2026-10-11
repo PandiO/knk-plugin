@@ -34,7 +34,7 @@ public final class SiegeMatchMapper {
                 completion.winningAllianceGroup(),
                 completion.participants().stream()
                         .map(p -> new SiegeMatchDtos.ParticipantResult(p.userId(), p.siegeTeamId(), p.kills(), p.deaths(),
-                                p.highestKillStreak(), p.captures()))
+                                p.highestKillStreak(), p.captures(), iso(p.leftAt())))
                         .toList(),
                 completion.objectives().stream()
                         .map(o -> new SiegeMatchDtos.ObjectiveResult(o.objectiveId(), o.finalHolderTeamId(),

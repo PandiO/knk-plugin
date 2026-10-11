@@ -1,6 +1,8 @@
 package net.knightsandkings.knk.core.roads.route;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -30,6 +32,10 @@ import net.knightsandkings.knk.core.domain.roads.RoadNodeKind;
  * region's piece starts just outside its border and a door's piece just before the door (D5: regions are
  * sampled every 2 blocks, doors every half block). A stored tag the samples never find (a region deleted
  * since the build) stays on the whole edge, as before the view. Pure and Bukkit-free.
+ *
+ * <p>KNG-110 (P4): where a region covers only part of the road's width, a sample also carries the road's
+ * {@linkplain RoadEdge#lanes lanes} - the region sets of the road cells across it, so the entry rule can look for a
+ * free gap. Lanes cut the road like tags: a piece has one set of lanes, or none (one lane, the centre line's regions).
  */
 public final class RoutingView {
 
@@ -45,15 +51,49 @@ public final class RoutingView {
         }
     }
 
-    /** A stretch of a stored edge with one set of access tags, {@code from < to} in polyline blocks. */
-    public record Span(double from, double to, List<String> regionIds, List<Integer> gateDoorIds) {
+    /**
+     * A stretch of a stored edge with one set of access tags, {@code from < to} in polyline blocks.
+     *
+     * @param lanes the region sets across the road where a region covers part of its width (KNG-110), else empty
+     */
+    public record Span(double from, double to, List<String> regionIds, List<Integer> gateDoorIds,
+                       List<List<String>> lanes) {
         public Span {
             regionIds = List.copyOf(regionIds);
             gateDoorIds = List.copyOf(gateDoorIds);
+            lanes = lanes.stream().<List<String>>map(List::copyOf).toList();
+        }
+
+        /** A span with one lane, the centre line's. */
+        public Span(double from, double to, List<String> regionIds, List<Integer> gateDoorIds) {
+            this(from, to, regionIds, gateDoorIds, List.of());
         }
     }
 
     private RoutingView() {
+    }
+
+    /**
+     * The lanes of a road's cross-section: the region set of each road cell, without the sets that hold another one
+     * (a cell in more regions is never the easier way through), each sorted, smallest first.
+     */
+    public static List<List<String>> minimalLanes(Collection<? extends Collection<String>> cells) {
+        List<Set<String>> sets = new ArrayList<>();
+        for (Collection<String> cell : cells) {
+            Set<String> set = Set.copyOf(cell);
+            if (!sets.contains(set)) {
+                sets.add(set);
+            }
+        }
+        List<List<String>> out = new ArrayList<>();
+        for (Set<String> set : sets) {
+            boolean holdsAnother = sets.stream().anyMatch(other -> other.size() < set.size() && set.containsAll(other));
+            if (!holdsAnother) {
+                out.add(set.stream().sorted().toList());
+            }
+        }
+        out.sort(Comparator.<List<String>>comparingInt(List::size).thenComparing(Object::toString));
+        return out;
     }
 
     /**
@@ -67,12 +107,26 @@ public final class RoutingView {
      * @param doors   gate door hits, in polyline order
      */
     public static List<Span> spans(RoadEdge edge, double length, List<Hit<String>> regions, List<Hit<Integer>> doors) {
+        return spans(edge, length, regions, List.of(), doors);
+    }
+
+    /**
+     * As {@link #spans(RoadEdge, double, List, List)}, with the lanes found across the road (KNG-110): a hit's tags
+     * are the sample's {@link #minimalLanes}, or none where the centre line decides. A stored region found nowhere
+     * joins every lane of a span, as it stays on the span.
+     *
+     * @param lanes lane hits, in polyline order (may be empty: no lanes anywhere)
+     */
+    public static List<Span> spans(RoadEdge edge, double length, List<Hit<String>> regions,
+                                   List<Hit<List<String>>> lanes, List<Hit<Integer>> doors) {
         Objects.requireNonNull(edge, "edge");
         Map<String, List<double[]>> regionRuns = runs(regions, length);
+        Map<List<String>, List<double[]>> laneRuns = runs(lanes, length);
         Map<Integer, List<double[]>> doorRuns = runs(doors, length);
 
         List<Double> cuts = new ArrayList<>();
         regionRuns.values().forEach(list -> list.forEach(r -> addCut(cuts, r, length)));
+        laneRuns.values().forEach(list -> list.forEach(r -> addCut(cuts, r, length)));
         doorRuns.values().forEach(list -> list.forEach(r -> addCut(cuts, r, length)));
         cuts.sort(Double::compare);
         List<Double> bounds = new ArrayList<>();
@@ -91,15 +145,30 @@ public final class RoutingView {
             double mid = (from + to) / 2;
             List<String> r = tagsAt(edge.regionIds(), regionRuns, mid);
             List<Integer> d = tagsAt(edge.gateDoorIds(), doorRuns, mid);
+            List<List<String>> l = lanesAt(edge.regionIds(), regionRuns, laneRuns, mid);
             Span last = out.isEmpty() ? null : out.get(out.size() - 1);
             if (last != null && Set.copyOf(last.regionIds()).equals(Set.copyOf(r))
-                && Set.copyOf(last.gateDoorIds()).equals(Set.copyOf(d))) {
-                out.set(out.size() - 1, new Span(last.from(), to, last.regionIds(), last.gateDoorIds()));
+                && Set.copyOf(last.gateDoorIds()).equals(Set.copyOf(d)) && last.lanes().equals(l)) {
+                out.set(out.size() - 1, new Span(last.from(), to, last.regionIds(), last.gateDoorIds(), last.lanes()));
             } else {
-                out.add(new Span(from, to, r, d));
+                out.add(new Span(from, to, r, d, l));
             }
         }
         return out;
+    }
+
+    /** The lanes found here, each with the stored regions the samples never find; empty when none are found. */
+    private static List<List<String>> lanesAt(List<String> stored, Map<String, List<double[]>> regionRuns,
+                                              Map<List<String>, List<double[]>> laneRuns, double at) {
+        List<Set<String>> here = new ArrayList<>();
+        for (Map.Entry<List<String>, List<double[]>> e : laneRuns.entrySet()) {
+            if (covers(e.getValue(), at)) {
+                Set<String> lane = new LinkedHashSet<>(e.getKey());
+                stored.stream().filter(tag -> !regionRuns.containsKey(tag)).forEach(lane::add);
+                here.add(lane);
+            }
+        }
+        return here.isEmpty() ? List.of() : minimalLanes(here);
     }
 
     /** Per tag, the stretches it covers: each run of samples with it, widened to the samples either side. */
@@ -258,6 +327,6 @@ public final class RoutingView {
     private static RoadEdge copy(RoadEdge edge, int id, int from, int to, List<int[]> geometry, double length, Span span) {
         return new RoadEdge(id, from, to, geometry, length, edge.avgWidth(), edge.profileId(), edge.streetId(),
             edge.costMultiplier(), edge.flags(), span.gateDoorIds(), edge.domainIds(), span.regionIds(), edge.source(),
-            edge.stale(), edge.confirmed());
+            edge.stale(), edge.confirmed(), span.lanes());
     }
 }

@@ -234,6 +234,8 @@ public record NavigationConfig(
      * @param maxLengthFactor       a path may be at most this many times the straight distance
      * @param maxLength             and never longer than this many blocks
      * @param detourAllowance       but always at least this many blocks longer than the straight distance
+     * @param climbAllowance        and this many blocks more per block of height between start and target, also
+     *                              above {@code maxLength} (KNG-108: stairs in tall buildings)
      * @param maxDrop               deepest drop taken (3 = no fall damage)
      * @param dropPenalty           extra cost per block dropped
      * @param captureMargin         blocks captured around the start→target box (also up and down)
@@ -244,9 +246,9 @@ public record NavigationConfig(
      * @param wallCost              extra cost of a cell beside a wall: paths keep a block from walls (0 = hug them)
      */
     public record WalkConfig(boolean enabled, int maxExpansions, double maxLengthFactor, double maxLength,
-                             double detourAllowance, int maxDrop, double dropPenalty, int captureMargin, int chunkTtlSeconds,
-                             double recomputeDistance, int maxConcurrentSearches, List<String> climbables,
-                             double wallCost) {
+                             double detourAllowance, double climbAllowance, int maxDrop, double dropPenalty,
+                             int captureMargin, int chunkTtlSeconds, double recomputeDistance, int maxConcurrentSearches,
+                             List<String> climbables, double wallCost) {
         public WalkConfig {
             climbables = climbables == null ? List.of("LADDER") : climbables.stream()
                 .map(name -> name == null ? "" : name.trim().toUpperCase(Locale.ROOT))
@@ -255,7 +257,8 @@ public record NavigationConfig(
 
         public static WalkConfig defaults() {
             return new WalkConfig(true, WalkBudget.DEFAULTS.maxExpansions(), WalkBudget.DEFAULTS.maxLengthFactor(),
-                WalkBudget.DEFAULTS.maxLength(), WalkBudget.DEFAULTS.detourAllowance(), MovementProfile.PLAYER.maxDrop(), MovementProfile.PLAYER.dropPenalty(),
+                WalkBudget.DEFAULTS.maxLength(), WalkBudget.DEFAULTS.detourAllowance(), WalkBudget.DEFAULTS.climbAllowance(),
+                MovementProfile.PLAYER.maxDrop(), MovementProfile.PLAYER.dropPenalty(),
                 16, 10, 6, 2, List.of("LADDER"), MovementProfile.PLAYER.wallCost());
         }
 
@@ -271,6 +274,9 @@ public record NavigationConfig(
             }
             if (!(detourAllowance >= 0) || Double.isInfinite(detourAllowance)) {
                 throw new IllegalArgumentException("navigation.walk.detour-allowance must be a number >= 0 (got: " + detourAllowance + ")");
+            }
+            if (!(climbAllowance >= 0) || Double.isInfinite(climbAllowance)) {
+                throw new IllegalArgumentException("navigation.walk.climb-allowance must be a number >= 0 (got: " + climbAllowance + ")");
             }
             if (!(wallCost >= 0) || Double.isInfinite(wallCost)) {
                 throw new IllegalArgumentException("navigation.walk.wall-cost must be a number >= 0 (got: " + wallCost + ")");
@@ -308,8 +314,8 @@ public record NavigationConfig(
 
         /** The search budget (snap radii keep the core defaults: start 2, goal 3). */
         public WalkBudget budget() {
-            return new WalkBudget(maxExpansions, maxLengthFactor, maxLength, detourAllowance, WalkBudget.DEFAULTS.startSnap(),
-                WalkBudget.DEFAULTS.goalSnap());
+            return new WalkBudget(maxExpansions, maxLengthFactor, maxLength, detourAllowance, climbAllowance,
+                WalkBudget.DEFAULTS.startSnap(), WalkBudget.DEFAULTS.goalSnap());
         }
     }
 

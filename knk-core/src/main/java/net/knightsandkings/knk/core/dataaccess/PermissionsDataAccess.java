@@ -34,6 +34,16 @@ public class PermissionsDataAccess {
     private final DataAccessSettings settings;
     private final DataAccessExecutor<PermissionCheckKey, PermissionCheckResult> checkExecutor;
     private final DataAccessExecutor<Integer, EffectivePermissionSet> effectiveExecutor;
+    private volatile AnswerListener answerListener = (userId, node, result) -> { };
+
+    /**
+     * Told about every answer the API gives a check (KNG-58: the offline security cache keeps the
+     * last one). {@code result} is null when the API knows no such user.
+     */
+    @FunctionalInterface
+    public interface AnswerListener {
+        void answered(int userId, String node, PermissionCheckResult result);
+    }
 
     private record PermissionCheckKey(int userId, String node) {
     }
@@ -81,8 +91,15 @@ public class PermissionsDataAccess {
         return checkExecutor.fetchAsync(
             key,
             effective,
-            () -> api.check(userId, node)
+            () -> api.check(userId, node).thenApply(result -> {
+                answerListener.answered(userId, node, result);
+                return result;
+            })
         );
+    }
+
+    public void setAnswerListener(AnswerListener listener) {
+        this.answerListener = listener != null ? listener : (userId, node, result) -> { };
     }
 
     /**
