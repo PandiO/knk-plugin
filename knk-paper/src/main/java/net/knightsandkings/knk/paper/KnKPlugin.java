@@ -1988,6 +1988,8 @@ public class KnKPlugin extends JavaPlugin {
                     player -> modeService != null && modeService.isVanished(player),
                     MenuService.mainThreadExecutor(this),
                     player -> new net.knightsandkings.knk.paper.commands.LocationDebugCommand(this).onCommand(player, null, "knk", new String[0]));
+                // KNG-118 (L3): a Location stored without a world is in the main (level-name) world
+                locationAdmin.setMainWorld(() -> org.bukkit.Bukkit.getWorlds().isEmpty() ? null : org.bukkit.Bukkit.getWorlds().get(0));
                 knkAdminCommand.registerSubcommand(
                     net.knightsandkings.knk.paper.locations.LocationAdminCommand.metadata(), locationAdmin, locationAdmin::complete);
                 // No top-level node (each action checks its own), so only list it to holders of one of them.
