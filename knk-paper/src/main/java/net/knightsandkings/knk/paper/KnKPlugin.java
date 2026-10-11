@@ -147,6 +147,7 @@ public class KnKPlugin extends JavaPlugin {
     private CacheManager cacheManager;
     /** KNG-58: last-known account, freeze, mode and permission answers on disk, for when the API is down. */
     private net.knightsandkings.knk.core.offline.OfflineSecurityStore offlineSecurity;
+    private net.knightsandkings.knk.paper.hub.HubService hubService;
     private DataAccessFactory dataAccessFactory;
     private TownsQueryApi townsQueryApi;
     private LocationsQueryApi locationsQueryApi;
@@ -926,6 +927,7 @@ public class KnKPlugin extends JavaPlugin {
             );
             registerEvents(regionTracker);
             wireDomainAccess();
+            initializeHub();
 
             HealthSystem healthSystem = new HealthSystem(gateDoorsApi, this, gateDisplayManager, gateManager);
             this.gateHealthSystem = healthSystem;
@@ -2464,6 +2466,36 @@ public class KnKPlugin extends JavaPlugin {
      * who ignores domain AllowEntry/AllowExit - at the border (KNG-56) and in navigation's routes and
      * walk paths alike.
      */
+    /**
+     * The hub (hub DESIGN §16 Phase 5): with a hub selected on the Game Settings page, joining players are placed at its
+     * spawn before they appear, joins are refused while it is unusable, and its rules and Peaceful healing apply inside
+     * its region. Without a hub selected nothing changes.
+     */
+    private void initializeHub() {
+        var regionIds = regionTracker.regionIds();
+        this.hubService = new net.knightsandkings.knk.paper.hub.HubService(
+            () -> gameSettingsManager != null ? gameSettingsManager.current() : null,
+            org.bukkit.Bukkit::getWorld,
+            (world, regionId) -> {
+                var manager = com.sk89q.worldguard.WorldGuard.getInstance().getPlatform().getRegionContainer()
+                    .get(com.sk89q.worldedit.bukkit.BukkitAdapter.adapt(world));
+                return manager != null && manager.hasRegion(regionId);
+            },
+            regionIds::at);
+        getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.hub.HubAdmissionListener(hubService,
+            uuid -> org.bukkit.Bukkit.getOfflinePlayer(uuid).isOp()), this);
+        getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.hub.HubRulesListener(hubService,
+            player -> knkPermissible != null && knkPermissible.hasPermission(player, "knk.hub.bypass")), this);
+        new net.knightsandkings.knk.paper.hub.HubRegenerationTask(hubService).runTaskTimer(this, 1L, 1L);
+        hubService.unusable().ifPresent(reason -> getLogger().severe("[KnK Hub] The selected hub cannot take players: "
+            + reason + ". Only operators may join until it is fixed on the Game Settings page."));
+    }
+
+    /** The hub, for the join path (null before the plugin enabled). */
+    public net.knightsandkings.knk.paper.hub.HubService getHubService() {
+        return hubService;
+    }
+
     private boolean hasRegionBypass(org.bukkit.entity.Player player) {
         String bypassNode = net.knightsandkings.knk.paper.teleport.TeleportNodes.REGION_BYPASS;
         return player != null
