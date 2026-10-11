@@ -3,23 +3,27 @@ package net.knightsandkings.knk.paper.navigation;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
 import org.bukkit.plugin.Plugin;
@@ -102,6 +106,32 @@ public final class NavigationService implements SiegeMatchObserver {
     @FunctionalInterface
     public interface PolicyFactory {
         AccessPolicy policyFor(Player player, RoadNetworkSnapshot snapshot);
+
+        /**
+         * KNG-110: the policy for a route whose destination lies in {@code destinationRegions}: a region the player
+         * may enter but not leave blocks the way unless the destination is in it.
+         */
+        default AccessPolicy policyFor(Player player, RoadNetworkSnapshot snapshot, Set<String> destinationRegions) {
+            return policyFor(player, snapshot);
+        }
+
+        /**
+         * KNG-110: the regions the player may stand in on a road, by the router's entry rule - the trail keeps off the
+         * road cells of the others. Main thread, without blocking lookups. Every region by default.
+         */
+        default Predicate<String> mayEnter(Player player) {
+            return regionId -> true;
+        }
+
+        /** KNG-110: {@link #mayEnter(Player)} on the way to a destination in {@code destinationRegions}. */
+        default Predicate<String> mayEnter(Player player, Set<String> destinationRegions) {
+            return mayEnter(player);
+        }
+
+        /** KNG-110: the WorldGuard regions at a floor point (feet level above it); none by default. Main thread. */
+        default Set<String> regionsAt(World world, double[] floorPoint) {
+            return Set.of();
+        }
     }
 
     /**
@@ -367,6 +397,42 @@ public final class NavigationService implements SiegeMatchObserver {
 
     public int activeCount() {
         return active.size();
+    }
+
+    /**
+     * KNG-110: the regions a navigating player may stand in on a road, for the trail ({@link TrailRenderer} keeps off
+     * the road cells of the others); every region for a player who is not navigating. Main thread.
+     */
+    public Predicate<String> trailRule(Player player) {
+        Active a = active.get(player.getUniqueId());
+        if (a == null) {
+            return regionId -> true;
+        }
+        return deps.policies().mayEnter(player, destinationRegions(player, a.destination, a.goals, a.target));
+    }
+
+    /** Goals whose regions count as the destination's when there is no target point (a street). */
+    static final int DESTINATION_REGION_GOALS = 16;
+
+    /**
+     * KNG-110: the regions the destination lies in - a region destination's own, and the regions at the target
+     * point, or at the goals when there is none (a street) - so a region the player may enter but not leave blocks the
+     * way only when the destination is outside it. Main thread.
+     */
+    Set<String> destinationRegions(Player player, Destination destination, List<SnapPoint> goals, double[] target) {
+        Set<String> out = new HashSet<>();
+        if (destination.regionId() != null) {
+            out.add(destination.regionId());
+        }
+        World world = player.getWorld();
+        if (target != null) {
+            out.addAll(deps.policies().regionsAt(world, target));
+        } else {
+            for (SnapPoint goal : goals.subList(0, Math.min(goals.size(), DESTINATION_REGION_GOALS))) {
+                out.addAll(deps.policies().regionsAt(world, goal.point()));
+            }
+        }
+        return out;
     }
 
     public EtaEstimator eta() {
@@ -1001,7 +1067,8 @@ public final class NavigationService implements SiegeMatchObserver {
         if (to.stream().allMatch(g -> distance(f[0], f[1], f[2], g.point()) <= sessionParameters.arriveDistance())) {
             return false; // the player and the target are nearest the same bit of road: the roads would not move them (KNG-75)
         }
-        AccessPolicy policy = deps.policies().policyFor(a.player, snapshot);
+        AccessPolicy policy = deps.policies().policyFor(a.player, snapshot,
+            destinationRegions(a.player, a.destination, List.of(goal.get()), leg.target));
         RouteRequest request = RouteRequest.of(from, to, policy, routerParameters);
         deps.routing().execute(() -> {
             RouteResult result;
@@ -1240,7 +1307,8 @@ public final class NavigationService implements SiegeMatchObserver {
             deliver(a, a.generation, RouteResult.noRoute());
             return;
         }
-        AccessPolicy policy = deps.policies().policyFor(player, snapshot);
+        AccessPolicy policy = deps.policies().policyFor(player, snapshot,
+            destinationRegions(player, a.destination, a.goals, a.target));
         SnapPoint from = connectedStart(snapshot, feet, start.get(), a.goals);
         List<SnapPoint> to = connectedGoals(snapshot, from, a.goals, a.target, a.destination);
         RouteRequest request = RouteRequest.of(from, to, policy, routerParameters);
@@ -1523,7 +1591,8 @@ public final class NavigationService implements SiegeMatchObserver {
         if (route == null || a.session == null || a.session.state() != NavigationSession.State.GUIDING) {
             return;
         }
-        AccessPolicy policy = deps.policies().policyFor(a.player, a.snapshot);
+        AccessPolicy policy = deps.policies().policyFor(a.player, a.snapshot,
+            destinationRegions(a.player, a.destination, a.goals, a.target));
         double travelled = a.session.along();
         double stepStart = 0;
         for (int i = 0; i < route.steps().size(); i++) {
@@ -1727,7 +1796,8 @@ public final class NavigationService implements SiegeMatchObserver {
             out.accept(NavigationMessages.playerTooFar(startLimit()));
             return;
         }
-        AccessPolicy policy = deps.policies().policyFor(as, snapshot);
+        AccessPolicy policy = deps.policies().policyFor(as, snapshot,
+            destinationRegions(as, destination, goals.goals(), goals.target()));
         SnapPoint from = connectedStart(snapshot, feet, start.get(), goals.goals());
         List<SnapPoint> to = connectedGoals(snapshot, from, goals.goals(), goals.target(), destination);
         RouteRequest request = RouteRequest.of(from, to, policy, routerParameters);

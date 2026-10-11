@@ -4,6 +4,7 @@ import net.knightsandkings.knk.paper.enchantment.FrozenPlayerTracker;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
+import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.plugin.Plugin;
 import org.junit.jupiter.api.Test;
@@ -47,6 +48,41 @@ class FreezeMovementListenerTest {
         listener.onPlayerMove(event);
 
         assertEquals(to, event.getTo());
+    }
+
+    @Test
+    void deathEndsTheFreeze() {
+        UUID playerId = UUID.randomUUID();
+        TestFrozenPlayerTracker tracker = new TestFrozenPlayerTracker(playerId, true);
+        FreezeMovementListener listener = new FreezeMovementListener(tracker);
+        EntityDeathEvent death = org.mockito.Mockito.mock(EntityDeathEvent.class);
+        Player player = testPlayer(playerId);
+        org.mockito.Mockito.when(death.getEntity()).thenReturn(player);
+
+        listener.onDeath(death);
+
+        assertEquals(playerId, tracker.unfrozen);
+    }
+
+    @Test
+    void anUnfrozenTrackerReallyForgetsTheFreeze() {
+        UUID playerId = UUID.randomUUID();
+        FrozenPlayerTracker tracker = new FrozenPlayerTracker((Plugin) Proxy.newProxyInstance(
+                Plugin.class.getClassLoader(), new Class[]{Plugin.class}, (proxy, method, args) -> null));
+        try (var bukkit = org.mockito.Mockito.mockStatic(org.bukkit.Bukkit.class)) {
+            var scheduler = org.mockito.Mockito.mock(org.bukkit.scheduler.BukkitScheduler.class);
+            bukkit.when(org.bukkit.Bukkit::getScheduler).thenReturn(scheduler);
+            org.mockito.Mockito.when(scheduler.scheduleSyncDelayedTask(org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.any(Runnable.class), org.mockito.ArgumentMatchers.anyLong())).thenReturn(42);
+
+            tracker.freeze(testPlayer(playerId), 200);
+            assertEquals(true, tracker.isFrozen(playerId));
+
+            tracker.unfreeze(playerId);
+
+            assertEquals(false, tracker.isFrozen(playerId));
+            org.mockito.Mockito.verify(scheduler).cancelTask(42);
+        }
     }
 
     private static Player testPlayer(UUID playerId) {
@@ -104,6 +140,7 @@ class FreezeMovementListenerTest {
     private static final class TestFrozenPlayerTracker extends FrozenPlayerTracker {
         private final UUID expectedPlayerId;
         private final boolean frozen;
+        private UUID unfrozen;
 
         private TestFrozenPlayerTracker(UUID expectedPlayerId, boolean frozen) {
             super((Plugin) Proxy.newProxyInstance(
@@ -118,6 +155,11 @@ class FreezeMovementListenerTest {
         @Override
         public boolean isFrozen(UUID playerId) {
             return frozen && expectedPlayerId.equals(playerId);
+        }
+
+        @Override
+        public void unfreeze(UUID playerId) {
+            unfrozen = playerId;
         }
     }
 }

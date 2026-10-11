@@ -20,7 +20,8 @@ public class HealthBoostEffect extends SupportEnchantmentEffect {
 
             @Override
             public void run() {
-                if (!player.isOnline()) {
+                // Dying ends the heal: never set the health of a dead or just respawned player.
+                if (!player.isOnline() || player.isDead()) {
                     cancel();
                     return;
                 }

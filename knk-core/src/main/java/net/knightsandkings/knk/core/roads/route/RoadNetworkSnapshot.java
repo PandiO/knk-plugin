@@ -98,6 +98,7 @@ public final class RoadNetworkSnapshot {
                 incidentLists.computeIfAbsent(edge.toNodeId(), k -> new ArrayList<>()).add(i);
             }
             regions.addAll(edge.regionIds());
+            edge.lanes().forEach(regions::addAll);
         }
         this.edgeIndexById = Collections.unmodifiableMap(index);
         this.polylines = Collections.unmodifiableList(decoded);

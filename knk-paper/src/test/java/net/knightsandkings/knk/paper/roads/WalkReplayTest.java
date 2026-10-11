@@ -38,7 +38,8 @@ import net.knightsandkings.knk.paper.navigation.walk.WalkChunkExtractor;
  *
  * <p>{@code walk.txt} keys: {@code start=x,feetY,z} (the player's location), {@code target=x,y,z} (the leg's
  * target as navigation passes it), optional {@code margin=16}, {@code max-expansions=20000},
- * {@code max-length-factor=1.75}, {@code max-length=96}, {@code detour-allowance=48}, {@code wall-cost=1.0}, {@code max-drop=3}, {@code drop-penalty=10},
+ * {@code max-length-factor=1.75}, {@code max-length=96}, {@code detour-allowance=48}, {@code climb-allowance=5},
+ * {@code wall-cost=1.0}, {@code max-drop=3}, {@code drop-penalty=10},
  * {@code arrive-distance=4} and {@code map=y0,y1} (a top view of the box, highest cell per column in that range).
  * Gate doors and WorldGuard access are not replayed (open access); passability uses the curated collidable list.
  */
@@ -57,7 +58,8 @@ class WalkReplayTest {
             .withWallCost(Double.parseDouble(c.getOrDefault("wall-cost", String.valueOf(MovementProfile.PLAYER.wallCost()))));
         WalkBudget live = new WalkBudget(Integer.parseInt(c.getOrDefault("max-expansions", "20000")),
             Double.parseDouble(c.getOrDefault("max-length-factor", "1.75")), Double.parseDouble(c.getOrDefault("max-length", "96")),
-            Double.parseDouble(c.getOrDefault("detour-allowance", "48")), WalkBudget.DEFAULTS.startSnap(), WalkBudget.DEFAULTS.goalSnap());
+            Double.parseDouble(c.getOrDefault("detour-allowance", "48")), Double.parseDouble(c.getOrDefault("climb-allowance", "5")),
+            WalkBudget.DEFAULTS.startSnap(), WalkBudget.DEFAULTS.goalSnap());
         double arrive = Double.parseDouble(c.getOrDefault("arrive-distance", "4"));
 
         RoadReplayTest anvil = new RoadReplayTest();
@@ -80,7 +82,9 @@ class WalkReplayTest {
         out.append("box ").append(box).append(", ").append(chunks.size()).append(" chunks, sections ")
             .append(box.minSection()).append("..").append(box.maxSection()).append('\n');
         out.append("straight distance ").append(String.format("%.1f", request.straightDistance()))
-            .append(", length cap ").append(String.format("%.1f", live.lengthCap(request.straightDistance()))).append('\n');
+            .append(", height ").append(String.format("%.1f", request.heightDifference()))
+            .append(", length cap ").append(String.format("%.1f", live.lengthCap(request.straightDistance(), request.heightDifference())))
+            .append('\n');
         out.append(describe("live budget", new WalkSearch().find(request)));
         WalkBudget unlimited = new WalkBudget(2_000_000, 100.0, 10_000.0, 0.0, live.startSnap(), live.goalSnap());
         out.append(describe("no length cap, 2M expansions", new WalkSearch().find(request.withBudget(unlimited))));
@@ -99,7 +103,8 @@ class WalkReplayTest {
     /**
      * KNG-75 step 2a: many legs at once with their cost - {@code replay/legs.txt}, one leg per line
      * {@code name;startX,feetY,startZ;targetX,floorY,targetZ}, plus {@code budgets=factor/detour/max-length/expansions,…}
-     * (one column per budget; default the shipped 1.75/48/96/20000) and {@code margin}, {@code arrive-distance}. Per
+     * or {@code …/expansions/climb} (KNG-108; without it no climb allowance) (one column per budget; default
+     * 1.75/48/96/20000) and {@code margin}, {@code arrive-distance}. Per
      * leg: the capture box's chunk count, the offline extraction time (Anvil reader, not the live {@code ChunkSnapshot}),
      * and per budget the result (with the path length), expansions and search time (median of 5). Writes {@code replay/out_legs.txt}. Skipped without {@code legs.txt}.
      */
@@ -147,8 +152,8 @@ class WalkReplayTest {
                 .append(chunks.size()).append(" | ").append(String.format("%.0f", extractMs)).append(" |");
             for (String b : budgets) {
                 double[] v = java.util.Arrays.stream(b.trim().split("/")).mapToDouble(Double::parseDouble).toArray();
-                WalkBudget budget = new WalkBudget((int) v[3], v[0], v[2], v[1], WalkBudget.DEFAULTS.startSnap(),
-                    WalkBudget.DEFAULTS.goalSnap());
+                WalkBudget budget = new WalkBudget((int) v[3], v[0], v[2], v[1], v.length > 4 ? v[4] : 0.0,
+                    WalkBudget.DEFAULTS.startSnap(), WalkBudget.DEFAULTS.goalSnap());
                 WalkRequest r = request.withBudget(budget);
                 WalkResult result = null;
                 double[] times = new double[5];

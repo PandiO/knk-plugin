@@ -13,6 +13,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -185,19 +186,74 @@ public class RegionDomainResolver {
             return CompletableFuture.completedFuture(resolveRegions(world, regionIds));
         }
 
-        DomainRegionQuery query = new DomainRegionQuery(missing, Boolean.TRUE, world);
-
-        return domainsQueryApi.searchDomainRegionDecisions(query)
-            .thenApply(results -> {
-                applyApiAnswer(world, missing, results.values());
+        // KNG-122: one request per region - a several-region answer holds one Town, District and Structure only
+        return askEach(world, missing, Level.WARNING)
+            .thenApply(v -> {
                 RegionSnapshot snapshot = resolveRegions(world, regionIds);
                 LOGGER.info("[KnK Resolver] resolveRegionsFromApi completed: domains=" + snapshot.domains().size());
                 return snapshot;
-            })
-            .exceptionally(ex -> {
-                LOGGER.log(Level.WARNING, "Failed domain search for WG regions {0}: {1}", new Object[]{missing, ex.getMessage()});
-                return resolveRegions(world, regionIds);
             });
+    }
+
+    /** Requests {@link #askEach} keeps in flight at once (a network load warms dozens of regions). */
+    static final int MAX_REQUESTS_IN_FLIGHT = 4;
+
+    /**
+     * KNG-122: asks the API about each region on its own, at most {@link #MAX_REQUESTS_IN_FLIGHT} at a time, and
+     * caches the answers ({@link #applyApiAnswer}). {@code POST api/Domains/search-region-decisions} answers a query
+     * with at most one Town, one District and one Structure, so a several-region query lost the other districts (live
+     * test 2026-10-10: "preloading 4 regions … cached 1 domains"). A failed request is logged at {@code failure} and
+     * does not stop the others.
+     *
+     * @return completes when every request has been answered or has failed; never exceptionally
+     */
+    private CompletableFuture<Void> askEach(String world, Collection<String> regionIds, Level failure) {
+        List<String> queue = regionIds.stream().filter(Objects::nonNull).distinct().sorted().toList();
+        CompletableFuture<Void> done = new CompletableFuture<>();
+        if (queue.isEmpty()) {
+            done.complete(null);
+            return done;
+        }
+        AtomicInteger next = new AtomicInteger();
+        AtomicInteger open = new AtomicInteger(queue.size());
+        for (int i = 0; i < Math.min(MAX_REQUESTS_IN_FLIGHT, queue.size()); i++) {
+            askNext(world, queue, next, open, done, failure);
+        }
+        return done;
+    }
+
+    private void askNext(String world, List<String> queue, AtomicInteger next, AtomicInteger open,
+                         CompletableFuture<Void> done, Level failure) {
+        int i = next.getAndIncrement();
+        if (i >= queue.size()) {
+            return;
+        }
+        ask(world, queue.get(i), failure).whenComplete((v, ex) -> {
+            if (open.decrementAndGet() == 0) {
+                done.complete(null);
+            } else {
+                askNext(world, queue, next, open, done, failure);
+            }
+        });
+    }
+
+    /**
+     * One region's request (KNG-112: about {@code world}'s domain; null asks world-blind): caches the answer; a failure
+     * is logged at {@code failure} and completes normally.
+     */
+    private CompletableFuture<Void> ask(String world, String regionId, Level failure) {
+        Set<String> one = Set.of(regionId);
+        CompletableFuture<Void> request;
+        try {
+            request = domainsQueryApi.searchDomainRegionDecisions(new DomainRegionQuery(one, Boolean.TRUE, world))
+                .thenAccept(results -> applyApiAnswer(world, one, results == null ? null : results.values()));
+        } catch (RuntimeException e) {
+            request = CompletableFuture.failedFuture(e);
+        }
+        return request.exceptionally(ex -> {
+            LOGGER.log(failure, "[KnK Resolver] Domain lookup for region " + regionId + " failed: " + ex.getMessage());
+            return null;
+        });
     }
 
     private boolean isCached(String world, String wgRegionId) {
@@ -233,21 +289,7 @@ public class RegionDomainResolver {
             if (cached == null || !cached.isExpired(cacheTtl) || !refreshing.add(key)) {
                 continue;
             }
-            Set<String> one = Set.of(regionId);
-            String entryWorld = key.world();
-            CompletableFuture<Void> request;
-            try {
-                request = domainsQueryApi.searchDomainRegionDecisions(new DomainRegionQuery(one, Boolean.TRUE, entryWorld))
-                    .thenAccept(results -> applyApiAnswer(entryWorld, one, results.values()));
-            } catch (RuntimeException e) {
-                request = CompletableFuture.failedFuture(e);
-            }
-            requests.add(request
-                .exceptionally(ex -> {
-                    LOGGER.log(Level.FINE, "[KnK Resolver] Refresh of region " + regionId + " failed: " + ex.getMessage());
-                    return null;
-                })
-                .whenComplete((v, ex) -> refreshing.remove(key)));
+            requests.add(ask(key.world(), regionId, Level.FINE).whenComplete((v, ex) -> refreshing.remove(key)));
         }
         return CompletableFuture.allOf(requests.toArray(new CompletableFuture[0]));
     }
@@ -287,12 +329,12 @@ public class RegionDomainResolver {
     }
 
     /**
-     * Batch cache warming for multiple region IDs.
-     * Efficiently preloads missing regions in a single API call.
+     * Batch cache warming for multiple region IDs: preloads the regions not cached yet, one request per region
+     * ({@link #askEach}, KNG-122), at most {@link #MAX_REQUESTS_IN_FLIGHT} at a time.
      * Useful for server startup or when preloading common regions.
-     * 
+     *
      * @param regionIds Collection of WorldGuard region IDs to warm the cache with
-     * @return CompletableFuture that completes when all regions are cached
+     * @return CompletableFuture that completes when every region has been asked about
      */
     public CompletableFuture<Void> warmCache(Collection<String> regionIds) {
         return warmCache(null, regionIds);
@@ -320,16 +362,10 @@ public class RegionDomainResolver {
             return CompletableFuture.completedFuture(null);
         }
         
-        DomainRegionQuery query = new DomainRegionQuery(missing, Boolean.TRUE, world);
-        return domainsQueryApi.searchDomainRegionDecisions(query)
-            .thenAccept(results -> {
-                registerDomainRegionSummaries(world, results.values());
-                LOGGER.info("[KnK Resolver] warmCache: completed, cached " + results.size() + " domains");
-            })
-            .exceptionally(ex -> {
-                LOGGER.log(Level.WARNING, "warmCache failed for regions: " + missing, ex);
-                return null;
-            });
+        return askEach(world, missing, Level.WARNING)
+            .thenRun(() -> LOGGER.info("[KnK Resolver] warmCache: completed, cached "
+                + missing.stream().filter(id -> isCached(world, id)).count() + " of " + missing.size()
+                + " regions"));
     }
 
     private void registerDomainRegionSummaries(String world, Collection<DomainRegionSummary> summaries) {
@@ -414,26 +450,6 @@ public class RegionDomainResolver {
     }
 
     /**
-     * Get domain from cache. Returns empty if not cached or expired.
-     * Does NOT trigger automatic background refresh to prevent API storms.
-     * 
-     * Checks shared caches first for potentially fresher data.
-     */
-    public Optional<DomainSnapshot> getDomainByRegionId(String wgRegionId) {
-        // Check shared caches first - they may have fresher data
-        Optional<DomainSnapshot> fromSharedCache = checkSharedCaches(wgRegionId);
-        if (fromSharedCache.isPresent()) {
-            LOGGER.fine("[KnK Resolver] Domain cache HIT (shared) for: " + wgRegionId);
-            domainCacheMetrics.recordHit();
-            return fromSharedCache;
-        }
-        
-        // Fall back to local domain snapshot cache
-        CachedValue<DomainSnapshot> cached = cachedWorldBlind(wgRegionId);
-        return fresh(wgRegionId, cached);
-    }
-
-    /**
      * KNG-112: {@link #getDomainByRegionIdNoRefresh(String)} for a region of one world: that world's domain, or one
      * cached without a world (the world-blind methods) as a fallback, never another world's. The shared Town/
      * District/Structure caches are keyed by region id alone, so they are not consulted. A null world is the
@@ -458,6 +474,25 @@ public class RegionDomainResolver {
             return getDomainByRegionId(wgRegionId);
         }
         return fresh(wgRegionId, cachedInWorld(world, wgRegionId));
+    }
+
+    /**
+     * Get domain from cache. Returns empty if not cached or expired.
+     * Does NOT trigger automatic background refresh to prevent API storms.
+     * 
+     * Checks shared caches first for potentially fresher data.
+     */
+    public Optional<DomainSnapshot> getDomainByRegionId(String wgRegionId) {
+        // Check shared caches first - they may have fresher data
+        Optional<DomainSnapshot> fromSharedCache = checkSharedCaches(wgRegionId);
+        if (fromSharedCache.isPresent()) {
+            LOGGER.fine("[KnK Resolver] Domain cache HIT (shared) for: " + wgRegionId);
+            domainCacheMetrics.recordHit();
+            return fromSharedCache;
+        }
+        
+        // Fall back to local domain snapshot cache
+        return fresh(wgRegionId, cachedWorldBlind(wgRegionId));
     }
 
     private Optional<DomainSnapshot> fresh(String wgRegionId, CachedValue<DomainSnapshot> cached) {
