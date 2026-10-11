@@ -1998,6 +1998,7 @@ public class KnKPlugin extends JavaPlugin {
                 getServer().getPluginManager().registerEvents(orphanNotifier, this);
             }
             knkAdminCommand.setCommandPermissions(commandPermissions());
+            knkAdminCommand.setOtherCommands(this::otherCommandsForHelp); // KNG-107
             knkCommand.setExecutor(knkAdminCommand);
             knkCommand.setTabCompleter(knkAdminCommand);
             getLogger().info("Registered /knk admin command");
@@ -2038,6 +2039,13 @@ public class KnKPlugin extends JavaPlugin {
             new net.knightsandkings.knk.paper.commands.StaffChatCommand(commandPermissions::hasAsync,
                 MenuService.mainThreadExecutor(this), org.bukkit.Bukkit::getOnlinePlayers),
             commandPermissions, gatedCommandVisibility);
+        // KNG-107: every command whose forms all need a node is left out of "/" for players holding none.
+        for (String gatedName : net.knightsandkings.knk.paper.commands.support.CommandNodes.commands()) {
+            PluginCommand gatedCommand = getCommand(gatedName);
+            if (gatedCommand != null) {
+                gatedCommandVisibility.gate(gatedCommand, net.knightsandkings.knk.paper.commands.support.CommandNodes.anyOf(gatedName));
+            }
+        }
         getServer().getPluginManager().registerEvents(gatedCommandVisibility, this);
         registerTabCommand("msg", new net.knightsandkings.knk.paper.commands.MessageCommand(messagingService, visiblePlayers));
         registerTabCommand("reply", new net.knightsandkings.knk.paper.commands.ReplyCommand(messagingService));
@@ -2882,12 +2890,46 @@ public class KnKPlugin extends JavaPlugin {
     private void registerTabCommand(String name, org.bukkit.command.TabExecutor executor) {
         PluginCommand pluginCommand = getCommand(name);
         if (pluginCommand != null) {
+            executor = gatedOnCommandNodes(name, executor);
             pluginCommand.setExecutor(executor);
             pluginCommand.setTabCompleter(executor);
             getLogger().info("Registered /" + name + " command");
         } else {
             getLogger().warning("Failed to register /" + name + " command - not defined in plugin.yml?");
         }
+    }
+
+    /**
+     * KNG-107: the plugin's commands besides /knk for {@code /knk help}, from plugin.yml - only those
+     * registered (a disabled feature leaves its command unset) - with the nodes from
+     * {@code CommandNodes}, or the plugin.yml {@code permission:} (checked by Bukkit).
+     */
+    private java.util.List<net.knightsandkings.knk.paper.commands.HelpSubcommand.OtherCommand> otherCommandsForHelp() {
+        java.util.List<net.knightsandkings.knk.paper.commands.HelpSubcommand.OtherCommand> commands = new java.util.ArrayList<>();
+        for (String name : getDescription().getCommands().keySet()) {
+            PluginCommand pluginCommand = getCommand(name);
+            if ("knk".equalsIgnoreCase(name) || pluginCommand == null || pluginCommand.getExecutor() == this) {
+                continue;
+            }
+            java.util.List<String> nodes = net.knightsandkings.knk.paper.commands.support.CommandNodes.anyOf(name);
+            if (nodes.isEmpty() && pluginCommand.getPermission() != null) {
+                nodes = java.util.List.of(pluginCommand.getPermission());
+            }
+            commands.add(new net.knightsandkings.knk.paper.commands.HelpSubcommand.OtherCommand(
+                name, pluginCommand.getDescription(), pluginCommand.getUsage(), pluginCommand.getAliases(), nodes));
+        }
+        commands.sort(java.util.Comparator.comparing(net.knightsandkings.knk.paper.commands.HelpSubcommand.OtherCommand::name));
+        return commands;
+    }
+
+    /**
+     * KNG-107: a command listed in {@code CommandNodes} answers "no permission" (not its usage) and
+     * completes nothing for a sender holding none of its nodes; the executor's own checks still apply.
+     */
+    private org.bukkit.command.TabExecutor gatedOnCommandNodes(String name, org.bukkit.command.TabExecutor executor) {
+        java.util.List<String> nodes = net.knightsandkings.knk.paper.commands.support.CommandNodes.anyOf(name);
+        return nodes.isEmpty() ? executor
+            : new net.knightsandkings.knk.paper.commands.support.PermissionGatedCommand(nodes, executor, commandPermissions());
     }
 
     /** Bukkit-or-in-house permission checks for commands (KNG-24); Bukkit-only when the API isn't configured. */
@@ -2931,7 +2973,8 @@ public class KnKPlugin extends JavaPlugin {
     private void registerModeCommand(String name, ActiveMode mode) {
         PluginCommand modeCommand = getCommand(name);
         if (modeCommand != null) {
-            ModeCommand executor = new ModeCommand(modeService, mode, commandPermissions()::hasForCompletion);
+            org.bukkit.command.TabExecutor executor = gatedOnCommandNodes(name,
+                new ModeCommand(modeService, mode, commandPermissions()::hasForCompletion));
             modeCommand.setExecutor(executor);
             modeCommand.setTabCompleter(executor);
             getLogger().info("Registered /" + name + " command");

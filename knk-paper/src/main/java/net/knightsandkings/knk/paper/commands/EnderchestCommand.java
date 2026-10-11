@@ -58,7 +58,9 @@ public class EnderchestCommand implements TabExecutor {
         } else if (args.length == 2 && SUBCOMMANDS.contains(args[0].toLowerCase(Locale.ROOT))) {
             targetName = args[1];
         } else {
-            sender.sendMessage(ChatColor.YELLOW + "Usage: /enderchest [player] | /enderchest open <player>");
+            // KNG-107: the other-player forms only for holders of their node.
+            sender.sendMessage(ChatColor.YELLOW + (support.holds(sender, NODE_OPEN)
+                ? "Usage: /enderchest [player] | /enderchest open <player>" : "Usage: /enderchest"));
             return true;
         }
 

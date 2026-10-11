@@ -103,7 +103,8 @@ public class FlyCommand implements TabExecutor {
     }
 
     private void sendUsage(CommandSender sender) {
-        sender.sendMessage(ChatColor.YELLOW + "Usage: /fly [on|off] [player]");
+        // KNG-107: the [player] form only for holders of its node.
+        sender.sendMessage(ChatColor.YELLOW + (support.holds(sender, NODE_OTHERS) ? "Usage: /fly [on|off] [player]" : "Usage: /fly [on|off]"));
     }
 
     @Override

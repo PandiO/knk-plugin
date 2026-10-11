@@ -120,12 +120,47 @@ class CommandRegistryPermissionsTest {
     }
 
     @Test
-    void help_isListedOnlyWhenSomethingElseIs() {
-        registry.setVisibility("help", sender -> registry.anyListedExcept(sender, "help"));
-        assertEquals(List.of(), names(registry.listAvailable(staff)));
+    void aNodelessSubcommand_refusesASenderHoldingNoneOfItsNodes_insteadOfShowingItsUsage() {
+        SubcommandExecutor currency = mock(SubcommandExecutor.class);
+        registry.register(new CommandMetadata("currency", "d", "/knk currency", null), currency);
+        registry.setVisibleToAny("currency", List.of("knk.admin.currency.history", "knk.admin.currency.lock"));
+        live("knk.admin.currency.history", PermissionDecision.DENIED);
+        live("knk.admin.currency.lock", PermissionDecision.DENIED);
 
-        when(permissible.hasPermission(staff, "knk.admin.towns")).thenReturn(true);
-        assertEquals(List.of("towns", "help"), names(registry.listAvailable(staff)));
+        registry.execute(staff, registry.get("currency").orElseThrow(), new String[0]);
+        verify(currency, never()).execute(any(), any());
+        verify(staff).sendMessage(CommandPermissions.NO_PERMISSION_MESSAGE);
+
+        live("knk.admin.currency.lock", PermissionDecision.ALLOWED);
+        registry.execute(staff, registry.get("currency").orElseThrow(), new String[0]);
+        verify(currency).execute(eq(staff), any());
+    }
+
+    @Test
+    void help_listsTheOtherCommandsTheSenderMayUse() {
+        List<String> sent = new java.util.ArrayList<>();
+        org.mockito.Mockito.doAnswer(inv -> sent.add(inv.getArgument(0))).when(staff).sendMessage(anyString());
+        HelpSubcommand help = new HelpSubcommand(registry);
+        help.setOtherCommands(() -> List.of(
+                new HelpSubcommand.OtherCommand("msg", "Message a player", "/msg <player> <message>", List.of("m"), List.of()),
+                new HelpSubcommand.OtherCommand("inventory", "Open a player's inventory", "/inventory open <player>", List.of(),
+                        List.of("knk.inventory.open"))),
+                (sender, nodes) -> nodes.stream().anyMatch(node -> registry.isListed(sender,
+                        new CommandRegistry.RegisteredCommand(new CommandMetadata("x", "", "", node), towns))));
+
+        help.execute(staff, new String[0]);
+        assertTrue(sent.stream().anyMatch(m -> m.contains("/msg") && m.contains("Message a player")), sent::toString);
+        assertTrue(sent.stream().noneMatch(m -> m.contains("/inventory") || m.contains("No commands available")), sent::toString);
+
+        sent.clear();
+        help.execute(staff, new String[] {"m"});
+        assertTrue(sent.stream().anyMatch(m -> m.contains("/msg <player> <message>")), sent::toString);
+        sent.clear();
+        help.execute(staff, new String[] {"inventory"});
+        assertTrue(sent.stream().anyMatch(m -> m.contains("Unknown command: inventory")), sent::toString);
+
+        when(permissible.hasPermission(staff, "knk.inventory.open")).thenReturn(true);
+        assertEquals(List.of("help", "msg", "inventory"), help.completionNames(staff));
     }
 
     @Test

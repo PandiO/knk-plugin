@@ -445,8 +445,6 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                         List.of("/knk help", "/knk help towns")),
                 (sender, args) -> helpSubcommand.execute(sender, args)
         );
-        // KNG-107: offered only to senders who are offered something else; running it is unchanged.
-        registry.setVisibility("help", sender -> registry.anyListedExcept(sender, "help"));
         // Each action checks its own node (the metadata carries none): listed only to holders of one.
         registry.setVisibleToAny("user", UserManagementCommand.CHECKED_NODES);
         if (currencyAdminCommand != null) {
@@ -489,6 +487,22 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         registry.setVisibility(name, visibleTo, nodes);
     }
 
+    /**
+     * KNG-107: the plugin's other commands for {@code /knk help} (listed when the sender holds one
+     * of their nodes or they need none; cached check).
+     */
+    public void setOtherCommands(java.util.function.Supplier<List<HelpSubcommand.OtherCommand>> otherCommands) {
+        helpSubcommand.setOtherCommands(otherCommands,
+                (sender, nodes) -> nodes.stream().anyMatch(node -> commandPermissions.has(sender, node)));
+    }
+
+    /** Nodes /knk help reads from the cache: the subcommands' and the other commands'. */
+    private Set<String> helpNodes() {
+        Set<String> nodes = new LinkedHashSet<>(registry.permissionNodes());
+        nodes.addAll(helpSubcommand.otherCommandNodes());
+        return nodes;
+    }
+
     /** See {@link CommandRegistry#setVisibleToAny}. */
     public void setSubcommandVisibleToAny(String name, java.util.Collection<String> nodes) {
         registry.setVisibleToAny(name, nodes);
@@ -498,7 +512,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length == 0) {
             // Show help when no args
-            commandPermissions.warm(sender, registry.permissionNodes(), () -> helpSubcommand.execute(sender, new String[0]));
+            commandPermissions.warm(sender, helpNodes(), () -> helpSubcommand.execute(sender, new String[0]));
             return true;
         }
 
@@ -516,7 +530,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         CommandRegistry.RegisteredCommand cmd = registered.get();
         if ("help".equals(cmd.metadata().name())) {
             // The listing reads cached answers; ask for every node first so in-house grants show.
-            commandPermissions.warm(sender, registry.permissionNodes(), () -> registry.execute(sender, cmd, subArgs));
+            commandPermissions.warm(sender, helpNodes(), () -> registry.execute(sender, cmd, subArgs));
             return true;
         }
 
@@ -612,7 +626,12 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                         return;
                 }
                 lastCompletionWarm.put(player.getUniqueId(), now);
-                commandPermissions.warm(sender, registry.permissionNodes(), () -> { });
+                Set<String> nodes = helpNodes();
+                nodesCheckedInside.values().forEach(nodes::addAll);
+                if (gateCommand != null) {
+                        nodes.addAll(gateCommand.completionNodes());
+                }
+                commandPermissions.warm(sender, nodes, () -> { });
         }
 
         private List<String> completeBuiltIn(CommandSender sender, String root, String[] args) {
@@ -620,8 +639,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                 String current = args[args.length - 1];
                 if (args.length == 1) {
                         return switch (root) {
-                                case "help" -> filterByPrefix(registry.listAvailable(sender).stream()
-                                                .map(command -> command.metadata().name()).toList(), current);
+                                case "help" -> filterByPrefix(helpSubcommand.completionNames(sender), current);
                                 case "cache" -> filterByPrefix(List.of("refresh", "reload"), current);
                                 case "clans" -> filterByPrefix(List.of("list", "info", "banner", "design"), current);
                                 case "towns", "districts", "streets" -> filterByPrefix(List.of("list"), current);

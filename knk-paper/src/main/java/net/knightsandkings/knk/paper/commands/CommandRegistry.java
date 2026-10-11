@@ -27,11 +27,20 @@ public class CommandRegistry {
     }
 
     /**
-     * Runs the subcommand if the sender holds its metadata permission (none = open); otherwise
+     * Runs the subcommand if the sender holds its metadata permission (none = open; for a nodeless one
+     * with visibility nodes, any of those - KNG-107); otherwise
      * tells them they lack it, or that it couldn't be checked. May run after this returns, on the
      * main thread, when the in-house check has to ask knk-web-api.
      */
     public void execute(CommandSender sender, RegisteredCommand cmd, String[] args) {
+        Collection<String> anyOf = cmd.metadata().permission() == null
+                ? visibilityNodes.get(cmd.metadata().name().toLowerCase()) : null;
+        if (anyOf != null && !anyOf.isEmpty()) {
+            // KNG-107: a nodeless subcommand whose actions each check a node - a sender holding none of
+            // them is told they lack permission, not shown its usage. The actions still check their own.
+            permissions.whenAnyAllowed(sender, anyOf, () -> cmd.executor().execute(sender, args));
+            return;
+        }
         permissions.whenAllowed(sender, cmd.metadata().permission(), () -> cmd.executor().execute(sender, args));
     }
 
@@ -114,13 +123,6 @@ public class CommandRegistry {
     public boolean isListed(CommandSender sender, RegisteredCommand cmd) {
         return permissions.has(sender, cmd.metadata().permission())
                 && visibility.getOrDefault(cmd.metadata().name().toLowerCase(), s -> true).test(sender);
-    }
-
-    /** Whether any subcommand but {@code except} is listed to the sender (e.g. whether /knk help has anything to show). */
-    public boolean anyListedExcept(CommandSender sender, String except) {
-        return commands.values().stream()
-                .filter(cmd -> !cmd.metadata().name().equalsIgnoreCase(except))
-                .anyMatch(cmd -> isListed(sender, cmd));
     }
 
     /** Every subcommand listed to the sender ({@link #isListed}). */

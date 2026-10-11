@@ -5,9 +5,7 @@ import java.util.Locale;
 import java.util.Objects;
 
 import org.bukkit.command.Command;
-import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
-import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 
 import net.knightsandkings.knk.core.domain.users.ActiveMode;
@@ -33,7 +31,7 @@ import net.kyori.adventure.text.Component;
  * /knk's per-subcommand nodes. Unlike v1, /staffmode is not refused for owners/co-owners: anyone
  * holding the staff node may use it.
  */
-public class ModeCommand implements CommandExecutor, TabCompleter {
+public class ModeCommand implements org.bukkit.command.TabExecutor {
 
     private enum Action { TOGGLE, ENABLE, DISABLE }
 

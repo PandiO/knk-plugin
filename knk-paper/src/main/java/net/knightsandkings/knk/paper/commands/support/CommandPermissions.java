@@ -116,6 +116,52 @@ public final class CommandPermissions {
     }
 
     /**
+     * KNG-107: like {@link #whenAllowed}, but holding any one of {@code nodes} is enough (a command
+     * whose forms need different nodes). Refused as "can't be checked" only when no node was allowed
+     * and at least one check couldn't be made.
+     */
+    public void whenAnyAllowed(CommandSender sender, Collection<String> nodes, Runnable onAllowed) {
+        if (nodes.isEmpty() || !(sender instanceof Player player) || nodes.stream().anyMatch(sender::hasPermission)) {
+            onAllowed.run();
+            return;
+        }
+        if (asyncCheck == null) {
+            sender.sendMessage(NO_PERMISSION_MESSAGE);
+            return;
+        }
+        CompletableFuture<PermissionDecision> any = CompletableFuture.completedFuture(PermissionDecision.DENIED);
+        for (String node : nodes) {
+            any = any.thenCombine(decide(player, node), CommandPermissions::either);
+        }
+        any.thenAccept(decision -> mainThread.execute(() -> {
+            if (decision == PermissionDecision.ALLOWED) {
+                onAllowed.run();
+            } else if (decision == PermissionDecision.DENIED) {
+                sender.sendMessage(NO_PERMISSION_MESSAGE);
+            } else {
+                sender.sendMessage(PlayerCommandSupport.UNAVAILABLE_MESSAGE);
+            }
+        }));
+    }
+
+    /** {@link #hasForCompletion} for any one of {@code nodes} (each "no" is asked in the background). */
+    public boolean hasAnyForCompletion(CommandSender sender, Collection<String> nodes) {
+        boolean any = nodes.isEmpty();
+        for (String node : nodes) {
+            any |= hasForCompletion(sender, node);
+        }
+        return any;
+    }
+
+    private static PermissionDecision either(PermissionDecision a, PermissionDecision b) {
+        if (a == PermissionDecision.ALLOWED || b == PermissionDecision.ALLOWED) {
+            return PermissionDecision.ALLOWED;
+        }
+        return a == PermissionDecision.UNAVAILABLE || b == PermissionDecision.UNAVAILABLE
+                ? PermissionDecision.UNAVAILABLE : PermissionDecision.DENIED;
+    }
+
+    /**
      * Asks the in-house model about every node (filling the cache {@link #has} reads), then runs
      * {@code then} on the main thread whatever the answers. For executors that check several nodes
      * synchronously (e.g. {@code /knk user}'s per-property nodes), so a granted player isn't refused
@@ -151,6 +197,9 @@ public final class CommandPermissions {
             check = asyncCheck.apply(player, node);
         } catch (RuntimeException ex) {
             check = CompletableFuture.failedFuture(ex);
+        }
+        if (check == null) {
+            check = CompletableFuture.failedFuture(new IllegalStateException("no permission answer"));
         }
         return check.exceptionally(ex -> {
             LOGGER.log(Level.WARNING, "Permission check failed for " + player.getName() + ", node " + node, ex);

@@ -90,7 +90,15 @@ public class RestoreCommand implements TabExecutor {
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length > 1) {
-            sender.sendMessage(ChatColor.YELLOW + "Usage: /" + kind.label + " [player|all]");
+            // KNG-107: only the forms the sender holds the node for.
+            List<String> forms = new java.util.ArrayList<>();
+            if (support.holds(sender, kind.othersNode())) {
+                forms.add("player");
+            }
+            if (support.holds(sender, kind.allNode())) {
+                forms.add("all");
+            }
+            sender.sendMessage(ChatColor.YELLOW + "Usage: /" + kind.label + (forms.isEmpty() ? "" : " [" + String.join("|", forms) + "]"));
             return true;
         }
 

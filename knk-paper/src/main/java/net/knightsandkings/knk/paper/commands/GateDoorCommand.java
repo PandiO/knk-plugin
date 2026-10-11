@@ -89,18 +89,49 @@ public class GateDoorCommand implements CommandExecutor {
     }
 
     void sendHelp(CommandSender sender) {
+        // KNG-107: only the forms the sender can use (cached check).
+        boolean control = controlsAny(sender);
+        boolean admin = support.isDoorAdmin(sender);
         sender.sendMessage(ChatColor.GOLD + "━━━ Gate Door Commands (one door) ━━━");
         sender.sendMessage(ChatColor.GRAY + "<door> = door id or name, <structure> <door>, or 'here'. "
-            + "Left out on open/close/toggle/info/repair: the door you look at.");
-        sender.sendMessage(ChatColor.GRAY + "/gatedoor open|close|toggle [door]");
+            + "Left out on " + (control ? "open/close/toggle/" : "") + "info" + (admin ? "/repair" : "") + ": the door you look at.");
+        if (control) {
+            sender.sendMessage(ChatColor.GRAY + "/gatedoor open|close|toggle [door]");
+        }
         sender.sendMessage(ChatColor.GRAY + "/gatedoor info [door]");
         sender.sendMessage(ChatColor.GRAY + "/gatedoor list [structure]");
-        sender.sendMessage(ChatColor.GRAY + "/gatedoor repair [door]");
-        sender.sendMessage(ChatColor.GRAY + "/gatedoor tp <door>");
-        sender.sendMessage(ChatColor.GRAY + "/gatedoor health <door> <amount>");
-        sender.sendMessage(ChatColor.GRAY + "/gatedoor active|invincible <door>");
-        sender.sendMessage(ChatColor.GRAY + "/gatedoor capture|redefine <door> [closed|opened]");
+        if (admin) {
+            sender.sendMessage(ChatColor.GRAY + "/gatedoor repair [door]");
+            sender.sendMessage(ChatColor.GRAY + "/gatedoor tp <door>");
+            sender.sendMessage(ChatColor.GRAY + "/gatedoor health <door> <amount>");
+            sender.sendMessage(ChatColor.GRAY + "/gatedoor active|invincible <door>");
+            sender.sendMessage(ChatColor.GRAY + "/gatedoor capture|redefine <door> [closed|opened]");
+        }
         sender.sendMessage(ChatColor.GRAY + "Whole gate (all its doors): /gate help. Long form: /knk gatedoor ...");
+    }
+
+    /** Whether the sender may open or close at least one loaded door (or every door). Cached check. */
+    private boolean controlsAny(CommandSender sender) {
+        return support.isDoorAdmin(sender)
+            || gateManager.getAllGates().values().stream().anyMatch(door -> controls(sender, door));
+    }
+
+    private boolean controls(CommandSender sender, CachedGateDoor door) {
+        return support.mayControlDoor(sender, "open", door) || support.mayControlDoor(sender, "close", door);
+    }
+
+    /** KNG-107: the subcommands the sender can use - info and list are open to everyone. */
+    private List<String> subcommandsFor(CommandSender sender) {
+        List<String> actions = new ArrayList<>();
+        if (controlsAny(sender)) {
+            actions.addAll(List.of("open", "close", "toggle"));
+        }
+        actions.addAll(List.of("info", "list"));
+        if (support.isDoorAdmin(sender)) {
+            actions.addAll(List.of("repair", "tp", "health", "active", "invincible", "capture", "redefine"));
+        }
+        actions.add("help");
+        return actions;
     }
 
     // === open / close / toggle ===
@@ -426,18 +457,21 @@ public class GateDoorCommand implements CommandExecutor {
             return List.of();
         }
         String current = args[args.length - 1];
+        // KNG-107: only what the sender can run, and for open/close/toggle only the doors they control.
+        List<String> allowed = subcommandsFor(sender);
         if (args.length == 1) {
-            return filterByPrefix(SUBCOMMANDS, current);
+            return filterByPrefix(allowed, current);
         }
         String sub = args[0].toLowerCase(Locale.ROOT);
-        if (!SUBCOMMANDS.contains(sub) || "help".equals(sub)) {
+        if (!allowed.contains(sub) || "help".equals(sub)) {
             return List.of();
         }
         if ("list".equals(sub)) {
             return args.length == 2 ? filterByPrefix(structureSelectors(), current) : List.of();
         }
         if (args.length == 2) {
-            return filterByPrefix(doorSelectors(), current);
+            boolean control = List.of("open", "close", "toggle").contains(sub);
+            return filterByPrefix(doorSelectors(door -> !control || controls(sender, door)), current);
         }
         if (("capture".equals(sub) || "redefine".equals(sub))) {
             return filterByPrefix(List.of("closed", "opened"), current);
@@ -448,10 +482,11 @@ public class GateDoorCommand implements CommandExecutor {
         return List.of();
     }
 
-    private List<String> doorSelectors() {
+    private List<String> doorSelectors(java.util.function.Predicate<CachedGateDoor> include) {
         List<String> selectors = new ArrayList<>();
         selectors.add(GateCommandKeywords.HERE);
         gateManager.getAllGates().values().stream()
+            .filter(include)
             .sorted(Comparator.comparingInt(CachedGateDoor::getId))
             .forEach(door -> {
                 selectors.add(String.valueOf(door.getId()));
@@ -463,8 +498,13 @@ public class GateDoorCommand implements CommandExecutor {
     }
 
     List<String> structureSelectors() {
+        return structureSelectors(structure -> true);
+    }
+
+    List<String> structureSelectors(java.util.function.Predicate<CachedGateStructure> include) {
         List<String> selectors = new ArrayList<>();
         gateManager.getAllStructures().values().stream()
+            .filter(include)
             .sorted(Comparator.comparingInt(CachedGateStructure::getId))
             .forEach(structure -> {
                 selectors.add(String.valueOf(structure.getId()));

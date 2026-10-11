@@ -176,4 +176,32 @@ class CommandPermissionsTest {
         assertTrue(permissions.hasForCompletion(staff, NODE));
         assertTrue(permissions.hasForCompletion(mock(ConsoleCommandSender.class), NODE));
     }
+
+    // KNG-107: a command whose forms need different nodes - any one of them lets the sender in.
+    @Test
+    void anyOfGate_runsForAHolderOfOneNode_refusesWithNoPermissionOtherwise() {
+        CommandExecutor delegate = mock(CommandExecutor.class);
+        var gated = new PermissionGatedCommand(List.of("knk.inventory.open", "knk.inventory.clear"), delegate, permissions);
+        when(permissible.checkAsync(any(), eq("knk.inventory.open"))).thenReturn(CompletableFuture.completedFuture(PermissionDecision.DENIED));
+        when(permissible.checkAsync(any(), eq("knk.inventory.clear"))).thenReturn(CompletableFuture.completedFuture(PermissionDecision.DENIED));
+
+        gated.onCommand(staff, mock(Command.class), "inventory", new String[0]);
+        verify(delegate, never()).onCommand(any(), any(), anyString(), any());
+        verify(staff).sendMessage(CommandPermissions.NO_PERMISSION_MESSAGE);
+
+        when(permissible.checkAsync(any(), eq("knk.inventory.clear"))).thenReturn(CompletableFuture.completedFuture(PermissionDecision.ALLOWED));
+        gated.onCommand(staff, mock(Command.class), "inventory", new String[0]);
+        verify(delegate).onCommand(eq(staff), any(), eq("inventory"), any());
+    }
+
+    @Test
+    void anyOfGate_unreachableServiceIsNotReportedAsNoPermission() {
+        CommandExecutor delegate = mock(CommandExecutor.class);
+        var gated = new PermissionGatedCommand(List.of("knk.a", "knk.b"), delegate, permissions);
+        when(permissible.checkAsync(any(), eq("knk.a"))).thenReturn(CompletableFuture.completedFuture(PermissionDecision.DENIED));
+        when(permissible.checkAsync(any(), eq("knk.b"))).thenReturn(CompletableFuture.completedFuture(PermissionDecision.UNAVAILABLE));
+
+        gated.onCommand(staff, mock(Command.class), "x", new String[0]);
+        verify(staff).sendMessage(PlayerCommandSupport.UNAVAILABLE_MESSAGE);
+    }
 }

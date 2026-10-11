@@ -118,7 +118,19 @@ public class InventoryCommand implements TabExecutor {
     }
 
     private void sendUsage(CommandSender sender) {
-        sender.sendMessage(ChatColor.YELLOW + "Usage: /inventory open <player> | /inventory clear <player> confirm");
+        // KNG-107: only the forms the sender holds the node for.
+        List<String> forms = new java.util.ArrayList<>();
+        if (support.holds(sender, NODE_OPEN)) {
+            forms.add("/inventory open <player>");
+        }
+        if (support.holds(sender, NODE_CLEAR)) {
+            forms.add("/inventory clear <player> confirm");
+        }
+        if (forms.isEmpty()) {
+            sender.sendMessage(ChatColor.RED + "You don't have permission to do that.");
+            return;
+        }
+        sender.sendMessage(ChatColor.YELLOW + "Usage: " + String.join(" | ", forms));
     }
 
     @Override
