@@ -102,6 +102,9 @@ public class HubService {
         if (hub.wgRegionId() == null || hub.wgRegionId().isBlank() || !regionExists.test(world, hub.wgRegionId())) {
             return Optional.of("the hub region '" + hub.wgRegionId() + "' does not exist in world '" + worldName + "'");
         }
+        if (!inHub(new Location(world, spot.x(), spot.y(), spot.z()))) {
+            return Optional.of("the hub spawn is outside the hub region '" + hub.wgRegionId() + "'");
+        }
         return Optional.empty();
     }
 

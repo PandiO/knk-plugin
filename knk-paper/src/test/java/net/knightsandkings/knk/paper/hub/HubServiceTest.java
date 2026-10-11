@@ -100,6 +100,33 @@ class HubServiceTest {
     }
 
     @Test
+    void aSpawnOutsideTheHubRegionRefusesJoins() {
+        // In the hub's world, but past the region's edge (x >= 100): a join there would be unprotected.
+        settings = withHub(new KnkHubSettings(4, "Hubtown", "Town", "hub", "town_4",
+            new KnkSpawnReference(KnkSpawnReference.SourceType.LOCATION, 9, "Far field",
+                new KnkLocation(9, "Far field", 150.0, 65.0, 2.5, 0f, 0f, "hub")),
+            KnkHubSettings.OutageAction.SEND_TO_HUB, 0, KnkHubRules.defaults()));
+
+        assertEquals("the hub spawn is outside the hub region 'town_4'", hub.unusable().orElseThrow());
+        assertTrue(hub.admissionSpawn().isEmpty());
+    }
+
+    @Test
+    void theEntityDamageRuleHoldsForBuildersToo() {
+        Player builder = player(new Location(hubWorld, 5, 65, 5));
+        org.bukkit.entity.Villager npc = mock(org.bukkit.entity.Villager.class);
+        when(npc.getLocation()).thenReturn(new Location(hubWorld, 6, 65, 5));
+        org.bukkit.event.entity.EntityDamageByEntityEvent hit = mock(org.bukkit.event.entity.EntityDamageByEntityEvent.class);
+        when(hit.getEntity()).thenReturn(npc);
+        when(hit.getDamager()).thenReturn(builder);
+        when(hit.getCause()).thenReturn(EntityDamageEvent.DamageCause.ENTITY_ATTACK);
+
+        new HubRulesListener(hub, p -> p == builder).onDamage(hit);
+
+        verify(hit).setCancelled(true);
+    }
+
+    @Test
     void onlyTheHubsRegionInTheHubsWorldIsTheHub() {
         assertTrue(hub.inHub(new Location(hubWorld, 5, 65, 5)), "region ids are case-insensitive");
         assertFalse(hub.inHub(new Location(hubWorld, 500, 65, 5)), "outside the region");

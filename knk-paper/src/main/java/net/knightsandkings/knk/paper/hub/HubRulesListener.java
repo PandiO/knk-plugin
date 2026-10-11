@@ -95,7 +95,7 @@ public final class HubRulesListener implements Listener {
             }
             return;
         }
-        if (!rules.damageEntities() && hub.inHub(victim.getLocation()) && !bypass.test(attacker)) {
+        if (!rules.damageEntities() && hub.inHub(victim.getLocation())) {
             event.setCancelled(true);
         }
     }

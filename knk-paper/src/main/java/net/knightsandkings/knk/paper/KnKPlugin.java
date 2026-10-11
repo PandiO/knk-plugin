@@ -2552,7 +2552,8 @@ public class KnKPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(
             new net.knightsandkings.knk.paper.regions.access.DomainAccessListener(domainAccess,
                 this::resyncWorldGuardSession,
-                player -> siegeService != null && siegeService.isParticipant(player.getUniqueId())),
+                player -> siegeService != null && siegeService.isParticipant(player.getUniqueId()),
+                location -> hubService != null && hubService.inHub(location)),
             this);
         if (teleportService != null) {
             teleportService.registerRestriction(new net.knightsandkings.knk.paper.teleport.RegionTeleportRestriction(

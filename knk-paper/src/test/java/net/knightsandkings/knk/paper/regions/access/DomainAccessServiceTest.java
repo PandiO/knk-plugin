@@ -381,6 +381,18 @@ class DomainAccessServiceTest {
     }
 
     @Test
+    void aJoinInsideTheSelectedHubIsLeftToHubAdmission() {
+        // Hub DESIGN §1: admission placed them at the hub spawn; the hub's own AllowEntry must not undo that.
+        DomainAccessListener listener = new DomainAccessListener(access, resync, p -> false, location -> location.getX() == 5);
+        when(world.getSpawnLocation()).thenReturn(at(-50));
+        Player noble = player(5);
+
+        listener.onUserDataLoaded(new UserDataLoadedEvent(noble, null));
+
+        assertEquals(5, noble.getLocation().getX());
+    }
+
+    @Test
     void aResidentJoiningInsideStaysPut() {
         DomainAccessListener listener = new DomainAccessListener(access, resync, p -> false);
         Player resident = player(5);
