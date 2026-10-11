@@ -174,15 +174,15 @@ public final class HubRulesListener implements Listener {
     @EventHandler(priority = EventPriority.HIGH)
     public void onInteract(PlayerInteractEvent event) {
         Block block = event.getClickedBlock();
-        if (block == null || !hub.configured()) {
+        // In the hub first: classifying reads the block's state, which is not free on every click on the server.
+        if (block == null || !hub.configured() || !hub.inHub(block.getLocation()) || bypass.test(event.getPlayer())) {
             return;
         }
-        Player player = event.getPlayer();
         KnkHubRules rules = rules();
         boolean refused = switch (classify(event.getAction(), block)) {
-            case DOOR -> restricted(player, block.getLocation(), rules.useDoors());
-            case STORAGE -> restricted(player, block.getLocation(), rules.useStorage());
-            case TRAMPLE -> restricted(player, block.getLocation(), rules.buildBreak());
+            case DOOR -> !rules.useDoors();
+            case STORAGE -> !rules.useStorage();
+            case TRAMPLE -> !rules.buildBreak();
             case OTHER -> false;
         };
         if (refused) {
