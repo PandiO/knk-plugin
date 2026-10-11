@@ -10,6 +10,8 @@ import java.util.logging.Logger;
 import net.knightsandkings.knk.core.cache.UserCache;
 import net.knightsandkings.knk.core.domain.users.UserDetail;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
+import net.knightsandkings.knk.core.domain.users.ActiveMode;
+import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.core.ports.api.UsersQueryApi;
 
@@ -30,6 +32,42 @@ public class UsersDataAccess {
     private final UsersCommandApi usersCommandApi;
     private final DataAccessSettings settings;
     private final DataAccessExecutor<UUID, UserSummary> executor;
+    private volatile UserAnswerListener answerListener = UserAnswerListener.NONE;
+
+    /**
+     * Told about every user the API returns, or that it knows no user for a UUID (KNG-58: the
+     * offline security cache records the first and forgets the second). Local cache edits
+     * (balances, mode) are not API answers and are not reported.
+     */
+    public interface UserAnswerListener {
+        UserAnswerListener NONE = new UserAnswerListener() {
+            @Override
+            public void found(UserSummary user) {
+            }
+
+            @Override
+            public void notFound(UUID uuid) {
+            }
+        };
+
+        void found(UserSummary user);
+
+        void notFound(UUID uuid);
+    }
+
+    public void setAnswerListener(UserAnswerListener listener) {
+        this.answerListener = listener != null ? listener : UserAnswerListener.NONE;
+    }
+
+    private UserSummary reportByUuid(UUID uuid, UserSummary userSummary) {
+        if (userSummary != null) {
+            userCache.put(userSummary);
+            answerListener.found(userSummary);
+        } else {
+            answerListener.notFound(uuid);
+        }
+        return userSummary;
+    }
     
     /**
      * Create a new UsersDataAccess gateway.
@@ -79,12 +117,7 @@ public class UsersDataAccess {
         return executor.fetchAsync(
             uuid,
             policy,
-            () -> usersQueryApi.getByUuid(uuid).thenApply(userSummary -> {
-                if (userSummary != null) {
-                    userCache.put(userSummary);
-                }
-                return userSummary;
-            })
+            () -> usersQueryApi.getByUuid(uuid).thenApply(userSummary -> reportByUuid(uuid, userSummary))
         );
     }
     
@@ -120,6 +153,7 @@ public class UsersDataAccess {
         return usersQueryApi.getByUsername(username).thenApply(userSummary -> {
             if (userSummary != null) {
                 userCache.put(userSummary); // Cache by UUID for future UUID lookups
+                answerListener.found(userSummary);
                 return FetchResult.<UserSummary>missFetched(userSummary);
             }
             return FetchResult.<UserSummary>notFound();
@@ -157,14 +191,28 @@ public class UsersDataAccess {
                 LOGGER.log(Level.INFO, "Creating new user for uuid={0}", uuid);
                 return usersCommandApi.create(seed).thenApply(created -> {
                     if (created != null) {
-                        // Convert to summary and cache
+                        // Convert to summary and cache. isNewUser = true: this call just created the
+                        // account (AsyncPlayerPreLoginEvent for a brand-new player), and PlayerListener.onJoin
+                        // reads this cached summary to run the first-join kit grant (kits DESIGN §4.4, KNG-81).
+                        // The grant is idempotent in the API, so a relog that reads it again grants nothing.
                         UserSummary summary = new UserSummary(
                             created.id(),
                             created.username(),
                             created.uuid(),
-                            created.coins()
+                            null,
+                            created.coins() != null ? created.coins() : 0,
+                            0,
+                            0,
+                            false,
+                            true,
+                            GatePassThroughMethod.DEFAULT,
+                            ActiveMode.NONE,
+                            null,
+                            null,
+                            0
                         );
                         userCache.put(summary);
+                        answerListener.found(summary);
                         return FetchResult.<UserSummary>missFetched(summary);
                     }
                     return FetchResult.<UserSummary>notFound();
@@ -193,12 +241,7 @@ public class UsersDataAccess {
         return executor.fetchAsync(
             uuid,
             settings.resolvePolicy(FetchPolicy.API_ONLY),
-            () -> usersQueryApi.getByUuid(uuid).thenApply(userSummary -> {
-                if (userSummary != null) {
-                    userCache.put(userSummary);
-                }
-                return userSummary;
-            })
+            () -> usersQueryApi.getByUuid(uuid).thenApply(userSummary -> reportByUuid(uuid, userSummary))
         );
     }
     

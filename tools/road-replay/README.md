@@ -71,14 +71,15 @@ on the same copied region files. Use it when `/knk road status` counts a request
    detour-allowance=48
    map=27,65
    ```
-   Other keys: `margin`, `max-expansions`, `max-length-factor`, `max-length`, `wall-cost`, `max-drop`, `drop-penalty`,
-   `arrive-distance`.
+   Other keys: `margin`, `max-expansions`, `max-length-factor`, `max-length`, `climb-allowance` (default 5, KNG-108),
+   `wall-cost`, `max-drop`, `drop-penalty`, `arrive-distance`.
 3. Run as above with `--tests "*WalkReplayTest*"` and read `replay/out_walk.txt`: the result with the configured budget,
    the same search without length cap (the real path, if any), and the map with the path drawn.
 
 **Many legs at once (KNG-75 step 2a):** write `replay/legs.txt` - one leg per line
 `name;startX,feetY,startZ;targetX,floorY,targetZ`, plus `budgets=factor/detour/max-length/expansions,…` (one column per
-budget; default the shipped `1.75/48/96/20000`) and optionally `margin`, `arrive-distance` - and run with
+budget; default `1.75/48/96/20000`; a fifth value is the climb allowance, e.g. `1.75/48/144/20000/5`, KNG-108) and
+optionally `margin`, `arrive-distance` - and run with
 `--tests "*WalkReplayTest.legs"`. `replay/out_legs.txt` has per leg the capture box's chunk count, the offline extraction
 time (the Anvil reader, not the live `ChunkSnapshot`), and per budget the result with the path length, the expansions
 and the search time (median of 5). A budget like `100/0/10000/400000` is "no length cap": it tells a leg the cap cuts

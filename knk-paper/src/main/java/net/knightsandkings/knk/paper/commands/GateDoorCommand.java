@@ -299,7 +299,7 @@ public class GateDoorCommand implements CommandExecutor {
             return true;
         }
         if (support.teleportTo(player, gate)) {
-            sender.sendMessage(ChatColor.GREEN + "Teleported to " + doorLabel(gate) + ".");
+            sender.sendMessage(ChatColor.GREEN + "Teleported next to " + doorLabel(gate) + ".");
         }
         return true;
     }

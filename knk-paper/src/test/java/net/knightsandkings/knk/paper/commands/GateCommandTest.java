@@ -5,6 +5,7 @@ import net.knightsandkings.knk.api.GateStructuresApi;
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.domain.gates.CachedGateStructure;
+import net.knightsandkings.knk.core.domain.location.KnkLocation;
 import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.paper.gates.DistrictGateLoader;
@@ -17,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
@@ -349,6 +351,104 @@ class GateCommandTest {
         assertEquals("here", targets.get(0));
         assertTrue(targets.containsAll(List.of("16", "Left", "17", "Right")));
         assertEquals(List.of("opened"), gateCommand.doorCommand().complete(sender, new String[]{"capture", "16", "op"}));
+    }
+
+    // ===== /gate tp (KNG-105) =====
+
+    /** Kept in a field: Location holds its world only weakly (see knk-plugin CLAUDE.md). */
+    private final org.bukkit.World world = mock(org.bukkit.World.class);
+    private final org.bukkit.Location doorSpot = new org.bukkit.Location(world, 99.5, 64, 98.5);
+
+    private void tpReady() {
+        org.bukkit.Server server = mock(org.bukkit.Server.class);
+        when(server.getWorld("world")).thenReturn(world);
+        when(player.getServer()).thenReturn(server);
+        when(player.getWorld()).thenReturn(world);
+        when(player.isOnline()).thenReturn(true);
+        gateCommand.support().doorSpots = (w, door, manager) -> door.getId() == 16 ? Optional.of(doorSpot) : Optional.empty();
+    }
+
+    private static KnkLocation spawn(String worldName) {
+        return new KnkLocation(5, "North Gate spawn", 120.5, 65.0, 80.5, 90f, 10f, worldName);
+    }
+
+    @Test
+    void tpUsesTheStructuresSpawnPointWhenSet() {
+        tpReady();
+        gateCommand.setStructureSpawnLookup(id -> CompletableFuture.completedFuture(
+            id == 3 ? Optional.of(spawn("world")) : Optional.empty()), Runnable::run);
+
+        gateCommand.onCommand(player, null, "gate", new String[]{"tp", "North", "Gate"});
+
+        verify(player).teleport(new org.bukkit.Location(world, 120.5, 65.0, 80.5, 90f, 10f));
+        assertTrue(messages.stream().anyMatch(m -> m.contains("Teleported to the spawn point of gate 'North Gate' (#3)")), messages::toString);
+    }
+
+    @Test
+    void tpWithoutASpawnPointUsesASafeSpotByTheFirstDoorAndSaysWhy() {
+        tpReady();
+        gateCommand.setStructureSpawnLookup(id -> CompletableFuture.completedFuture(Optional.empty()), Runnable::run);
+
+        gateCommand.onCommand(player, null, "gate", new String[]{"tp", "3"});
+
+        verify(player).teleport(doorSpot);
+        assertTrue(messages.stream().anyMatch(m -> m.contains("Teleported next to door 'Left' (#16)")
+            && m.contains("it has no spawn point set")), messages::toString);
+    }
+
+    @Test
+    void tpFallsBackToTheDoorWhenTheLookupFails() {
+        tpReady();
+        gateCommand.setStructureSpawnLookup(id -> CompletableFuture.failedFuture(new RuntimeException("API down")), Runnable::run);
+
+        gateCommand.onCommand(player, null, "gate", new String[]{"tp", "3"});
+
+        verify(player).teleport(doorSpot);
+        assertTrue(messages.stream().anyMatch(m -> m.contains("couldn't be looked up")), messages::toString);
+    }
+
+    @Test
+    void tpFallsBackToTheDoorWhenTheSpawnWorldIsNotLoaded() {
+        tpReady();
+        gateCommand.setStructureSpawnLookup(id -> CompletableFuture.completedFuture(Optional.of(spawn("nether"))), Runnable::run);
+
+        gateCommand.onCommand(player, null, "gate", new String[]{"tp", "3"});
+
+        verify(player).teleport(doorSpot);
+        assertTrue(messages.stream().anyMatch(m -> m.contains("world 'nether', which isn't loaded")), messages::toString);
+    }
+
+    @Test
+    void tpWithoutLookupGoesToTheDoor() {
+        tpReady();
+
+        gateCommand.onCommand(player, null, "gate", new String[]{"tp", "3"});
+
+        verify(player).teleport(doorSpot);
+    }
+
+    @Test
+    void tpRefusesWhenNoSpawnPointAndNoSafeSpotByTheDoor() {
+        tpReady();
+        gateCommand.support().doorSpots = (w, door, manager) -> Optional.empty();
+        gateCommand.setStructureSpawnLookup(id -> CompletableFuture.completedFuture(Optional.empty()), Runnable::run);
+
+        gateCommand.onCommand(player, null, "gate", new String[]{"tp", "3"});
+
+        verify(player, never()).teleport(any(org.bukkit.Location.class));
+        assertTrue(messages.stream().anyMatch(m -> m.contains("No safe spot to stand within 4 blocks of door 'Left'")), messages::toString);
+    }
+
+    @Test
+    void tpSpawnPointWorksForAGateWithoutLoadedDoors() {
+        tpReady();
+        when(gateManager.getDoorsForStructure(3)).thenReturn(List.of());
+        gateCommand.setStructureSpawnLookup(id -> CompletableFuture.completedFuture(Optional.of(spawn("world"))), Runnable::run);
+
+        gateCommand.onCommand(player, null, "gate", new String[]{"tp", "3"});
+
+        verify(player).teleport(any(org.bukkit.Location.class));
+        assertTrue(messages.stream().anyMatch(m -> m.contains("Teleported to the spawn point")), messages::toString);
     }
 
     private static CachedGateDoor door(int id, CachedGateStructure structure, String name, AnimationState state) {

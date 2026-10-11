@@ -11,6 +11,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import net.knightsandkings.knk.api.auth.AuthProvider;
 import net.knightsandkings.knk.core.exception.ApiException;
+import net.knightsandkings.knk.core.telemetry.ApiFailureObserver;
+import net.knightsandkings.knk.core.telemetry.ApiRouteTemplates;
+import net.knightsandkings.knk.core.telemetry.TelemetryCorrelation;
 import okhttp3.Headers;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -36,6 +39,34 @@ public class BaseApiImpl {
     protected final ExecutorService executor;
     protected final boolean debugLogging;
 
+    /**
+     * Told about every failed call (diagnostic {@code api.call_failed}, KNG-34 link 6); set once by the
+     * plugin at enable when telemetry is on. Calls to the telemetry endpoints themselves are never
+     * reported (they would loop while the API is down).
+     */
+    private static volatile ApiFailureObserver failureObserver = ApiFailureObserver.NONE;
+
+    public static void setFailureObserver(ApiFailureObserver observer) {
+        failureObserver = observer == null ? ApiFailureObserver.NONE : observer;
+    }
+
+    static boolean isTelemetryUrl(String url) {
+        return url != null && url.contains(TelemetryApiImpl.TELEMETRY_ENDPOINT + "/");
+    }
+
+    private static void reportFailure(Request request, String url, int status, String exceptionType) {
+        ApiFailureObserver observer = failureObserver;
+        if (observer == ApiFailureObserver.NONE || isTelemetryUrl(url)) {
+            return;
+        }
+        try {
+            observer.callFailed(request.method(), ApiRouteTemplates.template(url), status, exceptionType,
+                request.header(TelemetryCorrelation.HEADER));
+        } catch (RuntimeException e) {
+            LOGGER.fine("api.call_failed observer failed: " + e);
+        }
+    }
+
     protected BaseApiImpl(
         String baseUrl,
         OkHttpClient httpClient,
@@ -56,6 +87,11 @@ public class BaseApiImpl {
         Request.Builder builder = new Request.Builder().url(url);
         if (authProvider != null && authProvider.getAuthHeader() != null) {
             builder.addHeader(authProvider.getAuthHeaderName(), authProvider.getAuthHeader());
+        }
+        // KNG-34 link 6: joins the API's failure events and ledger postings to the in-game action.
+        String correlationId = TelemetryCorrelation.current();
+        if (correlationId != null) {
+            builder.addHeader(TelemetryCorrelation.HEADER, correlationId);
         }
         return builder;
     }
@@ -98,7 +134,14 @@ public class BaseApiImpl {
 
     protected String execute(Request request, String url) throws ApiException, IOException {
         long startTime = System.currentTimeMillis();
-        try (Response response = httpClient.newCall(request).execute()) {
+        Response call;
+        try {
+            call = httpClient.newCall(request).execute();
+        } catch (IOException e) {
+            reportFailure(request, url, 0, e.getClass().getSimpleName());
+            throw e;
+        }
+        try (Response response = call) {
             long latency = System.currentTimeMillis() - startTime;
             String responseBody = response.body() != null ? response.body().string() : "";
 
@@ -118,6 +161,7 @@ public class BaseApiImpl {
             }
 
             if (!response.isSuccessful()) {
+                reportFailure(request, url, response.code(), null);
                 throw new ApiException(url, response.code(), "Request failed", snippet(responseBody));
             }
             // 204 No Content is a success with no body - return empty string

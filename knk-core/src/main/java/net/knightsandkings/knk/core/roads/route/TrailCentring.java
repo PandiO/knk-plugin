@@ -34,6 +34,14 @@ public final class TrailCentring {
 
         /** Whether the floor block at {@code (x, y, z)} is a stair or a slab. */
         boolean stairOrSlab(int x, int y, int z);
+
+        /**
+         * KNG-110: whether the player may not stand on the road cell with floor {@code (x, y, z)} (a region they may
+         * not enter covers it). The trail keeps to the free part of the road. None by default.
+         */
+        default boolean blocked(int x, int y, int z) {
+            return false;
+        }
     }
 
     private TrailCentring() {
@@ -55,6 +63,25 @@ public final class TrailCentring {
         }
         double[] shift = new double[n];
         double[][] normal = new double[n][];
+        boolean[] anyBlocked = {false};
+        Ground seen = new Ground() {
+            @Override
+            public OptionalInt roadFloor(int x, int z, int nearY) {
+                return ground.roadFloor(x, z, nearY);
+            }
+
+            @Override
+            public boolean stairOrSlab(int x, int y, int z) {
+                return ground.stairOrSlab(x, y, z);
+            }
+
+            @Override
+            public boolean blocked(int x, int y, int z) {
+                boolean blocked = ground.blocked(x, y, z);
+                anyBlocked[0] |= blocked;
+                return blocked;
+            }
+        };
         for (int i = 0; i < n; i++) {
             double[] before = points.get(Math.max(0, i - 1));
             double[] after = points.get(Math.min(n - 1, i + 1));
@@ -66,7 +93,7 @@ public final class TrailCentring {
             }
             normal[i] = new double[] {-dz / len, dx / len};
             boolean sloped = Math.abs(after[1] - before[1]) >= SLOPE;
-            shift[i] = offset(points.get(i), normal[i], sloped, ground);
+            shift[i] = offset(points.get(i), normal[i], sloped, seen);
         }
         for (int i = 0; i < n; i++) {
             double[] p = points.get(i).clone();
@@ -80,6 +107,10 @@ public final class TrailCentring {
                     }
                 }
                 double s = sum / count;
+                if (anyBlocked[0] && s != shift[i] && blockedAt(p, normal[i], s, ground)
+                    && !blockedAt(p, normal[i], shift[i], ground)) {
+                    s = shift[i]; // KNG-110: smoothing must not pull the trail back onto a cell the player may not enter
+                }
                 p[0] += normal[i][0] * s;
                 p[2] += normal[i][1] * s;
             }
@@ -88,23 +119,101 @@ public final class TrailCentring {
         return out;
     }
 
+    private static boolean blockedAt(double[] p, double[] normal, double shift, Ground ground) {
+        return ground.blocked((int) Math.floor(p[0] + normal[0] * shift), (int) Math.round(p[1]),
+            (int) Math.floor(p[2] + normal[1] * shift));
+    }
+
     /**
      * How far along {@code normal} the middle of the road lies from {@code p} (blocks): the road cells reachable from
      * the point's own cell across the road, each side until a non-road cell; on a slope the middle of the stair and
      * slab cells among them, if any. 0 when the point is not on a road cell.
      */
     static double offset(double[] p, double[] normal, boolean sloped, Ground ground) {
+        List<Cell> cells = freeRun(across(p, normal, ground), ground);
+        if (cells.isEmpty()) {
+            return 0;
+        }
+        double stairSum = 0; // the own cell sits at 0
+        int stairs = 0;
+        for (Cell cell : cells) {
+            if (ground.stairOrSlab(cell.x(), cell.y(), cell.z())) {
+                stairSum += cell.k();
+                stairs++;
+            }
+        }
+        if (sloped && stairs > 0) {
+            return stairSum / stairs;
+        }
+        return (cells.get(0).k() + cells.get(cells.size() - 1).k()) / 2.0;
+    }
+
+    /**
+     * KNG-110: the part of the road across a point that the trail keeps to - the run of cells that are not
+     * {@linkplain Ground#blocked blocked} around the point's own cell; when that one is blocked, the nearest free run
+     * (the wider one on a tie, then the one the normal points to). Empty when no cell is free.
+     */
+    static List<Cell> freeRun(List<Cell> cells, Ground ground) {
+        int own = -1;
+        boolean[] free = new boolean[cells.size()];
+        for (int i = 0; i < cells.size(); i++) {
+            Cell c = cells.get(i);
+            free[i] = !ground.blocked(c.x(), c.y(), c.z());
+            if (c.k() == 0) {
+                own = i;
+            }
+        }
+        int bestFrom = -1;
+        int bestTo = -1;
+        int bestDistance = Integer.MAX_VALUE;
+        for (int i = 0; i < cells.size(); i++) {
+            if (!free[i] || (i > 0 && free[i - 1])) {
+                continue; // not the start of a free run
+            }
+            int j = i;
+            while (j + 1 < cells.size() && free[j + 1]) {
+                j++;
+            }
+            if (i <= own && own <= j) {
+                return cells.subList(i, j + 1); // the point's own cell is free: its run
+            }
+            int distance = j < own ? -cells.get(j).k() : cells.get(i).k();
+            boolean better = distance < bestDistance
+                || distance == bestDistance && (j - i > bestTo - bestFrom || j - i == bestTo - bestFrom && i > own);
+            if (better) {
+                bestFrom = i;
+                bestTo = j;
+                bestDistance = distance;
+            }
+        }
+        return bestFrom < 0 ? List.of() : cells.subList(bestFrom, bestTo + 1);
+    }
+
+    /**
+     * A road cell across the road from a point.
+     *
+     * @param k how many steps along the normal from the point (negative: the other side; 0: the point's own cell)
+     * @param y the cell's floor y
+     */
+    public record Cell(int k, int x, int y, int z) {
+    }
+
+    /**
+     * The road cells across the road at {@code p} (block-centred x/z, floor y), from the point's own cell each side
+     * along {@code normal} (a unit vector in x/z) until a non-road cell, up to {@link #MAX_HALF_WIDTH} steps; ordered
+     * by {@link Cell#k}. A diagonal normal can meet a cell twice: it counts once. Empty when the point's own cell is no
+     * road. Also the road's width for the live region tags (KNG-110).
+     */
+    public static List<Cell> across(double[] p, double[] normal, Ground ground) {
         int y = (int) Math.round(p[1]);
         int ownX = (int) Math.floor(p[0]);
         int ownZ = (int) Math.floor(p[2]);
         OptionalInt own = ground.roadFloor(ownX, ownZ, y);
         if (own.isEmpty()) {
-            return 0;
+            return List.of();
         }
-        double low = 0;
-        double high = 0;
-        double stairSum = 0; // the own cell sits at 0
-        int stairs = ground.stairOrSlab(ownX, own.getAsInt(), ownZ) ? 1 : 0;
+        List<Cell> low = new ArrayList<>();
+        List<Cell> high = new ArrayList<>();
         for (int side = -1; side <= 1; side += 2) {
             int floor = own.getAsInt();
             int lastX = ownX;
@@ -122,20 +231,15 @@ public final class TrailCentring {
                 floor = cell.getAsInt();
                 lastX = x;
                 lastZ = z;
-                if (side < 0) {
-                    low = -k;
-                } else {
-                    high = k;
-                }
-                if (ground.stairOrSlab(x, floor, z)) {
-                    stairSum += side * k;
-                    stairs++;
-                }
+                (side < 0 ? low : high).add(new Cell(side * k, x, floor, z));
             }
         }
-        if (sloped && stairs > 0) {
-            return stairSum / stairs;
+        List<Cell> out = new ArrayList<>(low.size() + 1 + high.size());
+        for (int i = low.size() - 1; i >= 0; i--) {
+            out.add(low.get(i));
         }
-        return (low + high) / 2;
+        out.add(new Cell(0, ownX, own.getAsInt(), ownZ));
+        out.addAll(high);
+        return out;
     }
 }

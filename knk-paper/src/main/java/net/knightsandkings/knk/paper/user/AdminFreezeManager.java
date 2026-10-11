@@ -27,6 +27,12 @@ public class AdminFreezeManager {
     private static final Logger LOGGER = Logger.getLogger(AdminFreezeManager.class.getName());
 
     private final Map<UUID, String> frozen = new ConcurrentHashMap<>();
+    // KNG-58: the last freeze the API (or this server) set, for a join while the API is down.
+    private volatile net.knightsandkings.knk.core.offline.OfflineSecurityStore offline;
+
+    public void setOfflineStore(net.knightsandkings.knk.core.offline.OfflineSecurityStore offline) {
+        this.offline = offline;
+    }
 
     public boolean isFrozen(UUID uuid) {
         return frozen.containsKey(uuid);
@@ -38,26 +44,60 @@ public class AdminFreezeManager {
 
     public void freeze(UUID uuid, String reason) {
         frozen.put(uuid, reason);
+        if (offline != null) {
+            offline.setFrozen(uuid, true, reason);
+        }
     }
 
     public void unfreeze(UUID uuid) {
         frozen.remove(uuid);
+        if (offline != null) {
+            offline.setFrozen(uuid, false, null);
+        }
     }
 
-    /** Called on join to make a persisted freeze (possibly applied while offline) take effect. */
+    /**
+     * Called on join to make a persisted freeze (possibly applied while offline) take effect. When
+     * the API can't be asked, the last known freeze is applied (KNG-58) - it used to fail open, so a
+     * frozen player who relogged during an outage was free.
+     */
     public void restoreOnJoin(Plugin plugin, Player player, UsersDataAccess usersDataAccess) {
+        UUID uuid = player.getUniqueId();
         usersDataAccess.getByUsernameAsync(player.getName()).thenAccept(result -> {
-            if (result.isSuccess() && result.value().isPresent() && result.value().get().isFrozen()) {
-                frozen.put(player.getUniqueId(), result.value().get().frozenReason());
-                Bukkit.getScheduler().runTask(plugin, () -> {
-                    if (player.isOnline()) {
-                        player.sendMessage(org.bukkit.ChatColor.RED + "You are frozen: " + frozen.get(player.getUniqueId()));
-                    }
-                });
+            if (result.isSuccess() && result.value().isPresent()) {
+                if (result.value().get().isFrozen()) {
+                    applyOnJoin(plugin, player, result.value().get().frozenReason());
+                }
+                return;
             }
+            if (result.status() == net.knightsandkings.knk.core.dataaccess.FetchStatus.NOT_FOUND) {
+                return;
+            }
+            LOGGER.warning("Failed to check frozen state for " + player.getName() + " on join; using the last known state");
+            applyLastKnown(plugin, player, uuid);
         }).exceptionally(ex -> {
-            LOGGER.warning("Failed to check frozen state for " + player.getName() + " on join: " + ex.getMessage());
+            LOGGER.warning("Failed to check frozen state for " + player.getName() + " on join: " + ex.getMessage()
+                + "; using the last known state");
+            applyLastKnown(plugin, player, uuid);
             return null;
+        });
+    }
+
+    private void applyLastKnown(Plugin plugin, Player player, UUID uuid) {
+        if (offline == null) {
+            return;
+        }
+        offline.identity(uuid)
+            .filter(net.knightsandkings.knk.core.offline.OfflineSecurityStore.Identity::frozen)
+            .ifPresent(identity -> applyOnJoin(plugin, player, identity.frozenReason()));
+    }
+
+    private void applyOnJoin(Plugin plugin, Player player, String reason) {
+        frozen.put(player.getUniqueId(), reason != null ? reason : "");
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (player.isOnline()) {
+                player.sendMessage(org.bukkit.ChatColor.RED + "You are frozen: " + frozen.get(player.getUniqueId()));
+            }
         });
     }
 

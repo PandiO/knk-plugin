@@ -21,35 +21,75 @@ public record KnkConfig(
     PrivateMessagesConfig privateMessages,
     TeleportSettings teleport,
     DiscoveryConfig discovery,
-    NavigationConfig navigation
+    NavigationConfig navigation,
+    StatisticsConfig statistics,
+    TelemetryConfig telemetry,
+    WorldAnalyticsConfig worldAnalytics
 ) {
     public KnkConfig {
         // No teleport: block (e.g. an older config.yml) means the DESIGN §3.11 defaults.
         teleport = teleport != null ? teleport : TeleportSettings.defaults();
         navigation = navigation != null ? navigation : NavigationConfig.defaults();
+        // No statistics: block means "on, with defaults" (player statistics, KNG-34).
+        statistics = statistics != null ? statistics : StatisticsConfig.defaults();
+        // No telemetry: block means "on, with defaults" (diagnostic telemetry, KNG-34 link 6).
+        telemetry = telemetry != null ? telemetry : TelemetryConfig.defaults();
+        // No world-analytics: block means "on, with defaults" (KNG-34 link 7).
+        worldAnalytics = worldAnalytics != null ? worldAnalytics : WorldAnalyticsConfig.defaults();
     }
 
-    /** Without private-messages, teleport, discovery and navigation sections: their defaults. */
+    /** Without a navigation section: its defaults (the KNG-34 statistics/telemetry/analytics form). */
+    public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
+                     PrivateMessagesConfig privateMessages, TeleportSettings teleport, DiscoveryConfig discovery,
+                     StatisticsConfig statistics, TelemetryConfig telemetry, WorldAnalyticsConfig worldAnalytics) {
+        this(api, cache, account, messages, privateMessages, teleport, discovery, NavigationConfig.defaults(),
+            statistics, telemetry, worldAnalytics);
+    }
+
+    /** Without navigation and world-analytics sections: their defaults. */
+    public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
+                     PrivateMessagesConfig privateMessages, TeleportSettings teleport, DiscoveryConfig discovery,
+                     StatisticsConfig statistics, TelemetryConfig telemetry) {
+        this(api, cache, account, messages, privateMessages, teleport, discovery, statistics, telemetry,
+            WorldAnalyticsConfig.defaults());
+    }
+
+    /** Without navigation, telemetry and world-analytics sections: their defaults. */
+    public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
+                     PrivateMessagesConfig privateMessages, TeleportSettings teleport, DiscoveryConfig discovery,
+                     StatisticsConfig statistics) {
+        this(api, cache, account, messages, privateMessages, teleport, discovery, statistics, TelemetryConfig.defaults());
+    }
+
+    /** Without the KNG-34 sections: their defaults (road navigation, KNG-27). */
+    public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
+                     PrivateMessagesConfig privateMessages, TeleportSettings teleport, DiscoveryConfig discovery,
+                     NavigationConfig navigation) {
+        this(api, cache, account, messages, privateMessages, teleport, discovery, navigation,
+            StatisticsConfig.defaults(), TelemetryConfig.defaults(), WorldAnalyticsConfig.defaults());
+    }
+
+    /** Without private-messages, teleport, discovery, navigation and KNG-34 sections: their defaults. */
     public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages) {
         this(api, cache, account, messages, PrivateMessagesConfig.defaults(), TeleportSettings.defaults(),
             DiscoveryConfig.defaults(), NavigationConfig.defaults());
     }
 
-    /** Without teleport, discovery and navigation sections: their defaults. */
+    /** Without teleport, discovery, navigation and KNG-34 sections: their defaults. */
     public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
                      PrivateMessagesConfig privateMessages) {
         this(api, cache, account, messages, privateMessages, TeleportSettings.defaults(), DiscoveryConfig.defaults(),
             NavigationConfig.defaults());
     }
 
-    /** Without teleport and navigation sections: their defaults (road navigation Phase 3's older form). */
+    /** Without teleport, navigation and KNG-34 sections: their defaults (road navigation Phase 3's older form). */
     public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
                      PrivateMessagesConfig privateMessages, DiscoveryConfig discovery) {
         this(api, cache, account, messages, privateMessages, TeleportSettings.defaults(), discovery,
             NavigationConfig.defaults());
     }
 
-    /** Without a navigation section: its defaults (road navigation, KNG-27). */
+    /** Without navigation and KNG-34 sections: their defaults. */
     public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
                      PrivateMessagesConfig privateMessages, TeleportSettings teleport, DiscoveryConfig discovery) {
         this(api, cache, account, messages, privateMessages, teleport, discovery, NavigationConfig.defaults());
@@ -147,6 +187,9 @@ public record KnkConfig(
             throw new IllegalArgumentException("navigation configuration is required");
         }
         navigation.validate();
+        statistics.validate();
+        telemetry.validate();
+        worldAnalytics.validate();
     }
     
     public record CacheConfig(
@@ -511,6 +554,177 @@ public record KnkConfig(
     }
 
     /**
+     * Player statistics (KNG-34, knk-workspace docs/specs/player-statistics IMPLEMENTATION_PLAN.md
+     * §5.1): sessions, active/AFK playtime, distance and falls, buffered and flushed to knk-web-api
+     * in batches off the main thread, spooled while the API can't take them. {@code enabled: false}
+     * registers no statistics listener, task or command ({@code /afk}) - today's behaviour.
+     *
+     * @param flushIntervalSeconds  how often accrued statistics are sent (one batch per interval)
+     * @param maxBatchEntries       entries per batch (the API takes at most 2,000)
+     * @param spoolDirectory        under the plugin folder; one file per undelivered batch
+     * @param replayIntervalSeconds how often the spool is replayed (at most one batch per second on average)
+     * @param excludedGameModes     no distance or fall statistics in these game modes (playtime still counts)
+     */
+    public record StatisticsConfig(
+        boolean enabled,
+        int flushIntervalSeconds,
+        int maxBatchEntries,
+        String spoolDirectory,
+        int replayIntervalSeconds,
+        Set<GameMode> excludedGameModes,
+        AfkConfig afk,
+        MovementConfig movement,
+        FallConfig fall,
+        CombatConfig combat,
+        GatesConfig gates,
+        SiegeConfig siege
+    ) {
+        public static final List<String> DEFAULT_EXCLUDED_GAME_MODES = List.of("CREATIVE", "SPECTATOR");
+
+        /**
+         * AFK detection (DESIGN.md §F.2). {@code enabled: false}: every online second is active time,
+         * no {@code /afk}, no marker.
+         *
+         * @param idleSeconds   automatic AFK after this long without an activity signal
+         * @param markerText    appended to the tab-list name while AFK ({@code &} colour codes)
+         */
+        public record AfkConfig(boolean enabled, int idleSeconds, boolean commandEnabled, boolean tabListMarker,
+                                String markerText) {
+            public static AfkConfig defaults() {
+                return new AfkConfig(true, 300, true, true, "&7[AFK]");
+            }
+        }
+
+        /** Distance per mode (DESIGN.md §F.9); a segment longer than {@code maxSegmentBlocks} is not travel. */
+        public record MovementConfig(boolean enabled, double maxSegmentBlocks) {
+            public static MovementConfig defaults() {
+                return new MovementConfig(true, 10.0);
+            }
+        }
+
+        /** Highest survived fall (DESIGN.md §F.9). */
+        public record FallConfig(boolean enabled) {
+            public static FallConfig defaults() {
+                return new FallConfig(true);
+            }
+        }
+
+        /**
+         * Kills, deaths, damage, arrows, headshots and the open-world killstreak (DESIGN.md §F.7, link 4).
+         *
+         * @param countCustomDamage        count synthetic {@code CUSTOM} damage (Chaos enchant procs, L1-9)
+         * @param pveExcludedSpawnReasons  {@code CreatureSpawnEvent.SpawnReason} names whose creatures are no PvE kill (L1-10)
+         */
+        public record CombatConfig(boolean enabled, boolean countCustomDamage, Set<String> pveExcludedSpawnReasons) {
+            public CombatConfig {
+                pveExcludedSpawnReasons = pveExcludedSpawnReasons == null ? Set.of() : Set.copyOf(pveExcludedSpawnReasons);
+            }
+
+            public static CombatConfig defaults() {
+                return new CombatConfig(true, false, parseSpawnReasons(
+                    net.knightsandkings.knk.core.statistics.CombatStatisticsRules.DEFAULT_PVE_EXCLUDED_SPAWN_REASONS));
+            }
+        }
+
+        /**
+         * Gate-door damage credited to players (DESIGN.md §F.8, link 4).
+         *
+         * @param fireAttribution remember each burning block's igniter and credit fire ticks to them
+         */
+        public record GatesConfig(boolean enabled, boolean fireAttribution) {
+            public static GatesConfig defaults() {
+                return new GatesConfig(true, true);
+            }
+        }
+
+        /**
+         * Siege reconciliation (DESIGN.md §F.6, link 4).
+         *
+         * @param reportDepartedMembers include members who left early (with their stats and leave time) in
+         *                              the match completion; false = today's payload
+         */
+        public record SiegeConfig(boolean reportDepartedMembers) {
+            public static SiegeConfig defaults() {
+                return new SiegeConfig(true);
+            }
+        }
+
+        public StatisticsConfig {
+            excludedGameModes = excludedGameModes == null ? Set.of() : Set.copyOf(excludedGameModes);
+            afk = afk == null ? AfkConfig.defaults() : afk;
+            movement = movement == null ? MovementConfig.defaults() : movement;
+            fall = fall == null ? FallConfig.defaults() : fall;
+            combat = combat == null ? CombatConfig.defaults() : combat;
+            gates = gates == null ? GatesConfig.defaults() : gates;
+            siege = siege == null ? SiegeConfig.defaults() : siege;
+        }
+
+        /** The link-3 shape (combat, gates and siege at their defaults). */
+        public StatisticsConfig(boolean enabled, int flushIntervalSeconds, int maxBatchEntries, String spoolDirectory,
+                                int replayIntervalSeconds, Set<GameMode> excludedGameModes, AfkConfig afk,
+                                MovementConfig movement, FallConfig fall) {
+            this(enabled, flushIntervalSeconds, maxBatchEntries, spoolDirectory, replayIntervalSeconds, excludedGameModes,
+                afk, movement, fall, null, null, null);
+        }
+
+        public static StatisticsConfig defaults() {
+            return new StatisticsConfig(true, 60, 2000, "statistics-spool", 60,
+                parseGameModes(DEFAULT_EXCLUDED_GAME_MODES), AfkConfig.defaults(), MovementConfig.defaults(), FallConfig.defaults(),
+                CombatConfig.defaults(), GatesConfig.defaults(), SiegeConfig.defaults());
+        }
+
+        /** Spawn reason names, any case; an unknown name is a config error. */
+        public static Set<String> parseSpawnReasons(List<String> names) {
+            if (names == null) {
+                return Set.of();
+            }
+            return names.stream().map(name -> {
+                String normalized = name == null ? "" : name.trim().toUpperCase(Locale.ROOT);
+                try {
+                    return org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.valueOf(normalized).name();
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException("statistics.combat.pve-excluded-spawn-reasons: unknown spawn reason '" + name + "'");
+                }
+            }).collect(Collectors.toUnmodifiableSet());
+        }
+
+        /** Game mode names, any case; an unknown name is a config error. */
+        public static Set<GameMode> parseGameModes(List<String> names) {
+            if (names == null) {
+                return Set.of();
+            }
+            return names.stream().map(name -> {
+                try {
+                    return GameMode.valueOf(name.trim().toUpperCase(Locale.ROOT));
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException("statistics.excluded-game-modes: unknown game mode '" + name + "'");
+                }
+            }).collect(Collectors.toUnmodifiableSet());
+        }
+
+        public void validate() {
+            if (flushIntervalSeconds < 10) {
+                throw new IllegalArgumentException("statistics.flush-interval-seconds must be at least 10 (got: " + flushIntervalSeconds + ")");
+            }
+            if (maxBatchEntries < 10 || maxBatchEntries > 2000) {
+                throw new IllegalArgumentException("statistics.max-batch-entries must be between 10 and 2000 (got: " + maxBatchEntries + ")");
+            }
+            if (replayIntervalSeconds < 10) {
+                throw new IllegalArgumentException("statistics.replay-interval-seconds must be at least 10 (got: " + replayIntervalSeconds + ")");
+            }
+            if (spoolDirectory == null || spoolDirectory.isBlank()) {
+                throw new IllegalArgumentException("statistics.spool-directory is required");
+            }
+            if (afk.idleSeconds() < 30) {
+                throw new IllegalArgumentException("statistics.afk.idle-seconds must be at least 30 (got: " + afk.idleSeconds() + ")");
+            }
+            if (!(movement.maxSegmentBlocks() > 0)) {
+                throw new IllegalArgumentException("statistics.movement.max-segment-blocks must be positive (got: " + movement.maxSegmentBlocks() + ")");
+            }
+        }
+    }
+
+    /**
      * /msg, /reply and social spy (docs/specs/private-messages/DESIGN.md §3.3.10). Every key has a
      * default, so an existing config.yml without the section keeps working.
      */
@@ -580,6 +794,101 @@ public record KnkConfig(
             if (log.flushSeconds() < 1) {
                 throw new IllegalArgumentException(
                     "private-messages.log.flush-seconds must be at least 1 (got: " + log.flushSeconds() + ")");
+            }
+        }
+    }
+
+    /**
+     * Diagnostic telemetry (KNG-34 link 6, knk-workspace docs/specs/player-statistics IMPLEMENTATION_PLAN.md
+     * §5.1, DESIGN.md §F.12): low-frequency baseline events for every player, enhanced events only for
+     * players/test runs the owner picked in the API. Buffered in memory (bounded, oldest dropped and
+     * counted), flushed off the main thread, never spooled. {@code enabled: false} registers no emitter,
+     * listener or task - today's behaviour.
+     *
+     * @param maxBufferEvents                events held between flushes; beyond it the oldest are dropped
+     * @param flushIntervalSeconds           how often buffered events are sent
+     * @param configPollSeconds              how often the API's emitter config (enhanced targets, test runs) is read
+     * @param enhancedMovementSampleSeconds  position sample interval for enhanced players
+     */
+    public record TelemetryConfig(
+        boolean enabled,
+        int maxBufferEvents,
+        int flushIntervalSeconds,
+        int configPollSeconds,
+        int enhancedMovementSampleSeconds
+    ) {
+        public static TelemetryConfig defaults() {
+            return new TelemetryConfig(true, 5000, 10, 60, 5);
+        }
+
+        public void validate() {
+            if (maxBufferEvents < 10) {
+                throw new IllegalArgumentException("telemetry.max-buffer-events must be at least 10 (got: " + maxBufferEvents + ")");
+            }
+            if (flushIntervalSeconds < 1) {
+                throw new IllegalArgumentException("telemetry.flush-interval-seconds must be at least 1 (got: " + flushIntervalSeconds + ")");
+            }
+            if (configPollSeconds < 10) {
+                throw new IllegalArgumentException("telemetry.config-poll-seconds must be at least 10 (got: " + configPollSeconds + ")");
+            }
+            if (enhancedMovementSampleSeconds < 1) {
+                throw new IllegalArgumentException(
+                    "telemetry.enhanced-movement-sample-seconds must be at least 1 (got: " + enhancedMovementSampleSeconds + ")");
+            }
+        }
+    }
+
+    /**
+     * World analytics (KNG-34 link 7, knk-workspace docs/specs/player-statistics IMPLEMENTATION_PLAN.md
+     * §5.1, DESIGN.md D10/D11): anonymous movement heatmap cells, menu funnels and domain interactions,
+     * aggregated in memory and posted every {@code flush-interval-seconds} (never across a local midnight).
+     * No user id or name leaves the plugin. {@code enabled: false} creates no sampler, observer, listener
+     * or task - today's behaviour; the three part switches turn single parts off.
+     *
+     * @param movementSampleSeconds  one position sample per online, non-AFK player this often (at least 10 s)
+     * @param cellSize               heatmap cell edge in blocks
+     * @param flushIntervalSeconds   how often the aggregates are posted
+     * @param movement               sample positions for the heatmap
+     * @param menuFunnels            count menu opens, actions, back and close
+     * @param domainInteractions     count region entries/exits and discoveries per domain
+     * @param excludedGameModes      players in these game modes are not sampled (spectators never are)
+     * @param maxPendingBatches      closed windows kept in memory while the API is unreachable (oldest dropped)
+     */
+    public record WorldAnalyticsConfig(
+        boolean enabled,
+        int movementSampleSeconds,
+        int cellSize,
+        int flushIntervalSeconds,
+        boolean movement,
+        boolean menuFunnels,
+        boolean domainInteractions,
+        Set<GameMode> excludedGameModes,
+        int maxPendingBatches
+    ) {
+        public WorldAnalyticsConfig {
+            excludedGameModes = excludedGameModes == null ? Set.of() : Set.copyOf(excludedGameModes);
+        }
+
+        public static WorldAnalyticsConfig defaults() {
+            return new WorldAnalyticsConfig(true, 10, 16, 300, true, true, true,
+                Set.of(GameMode.CREATIVE, GameMode.SPECTATOR), 12);
+        }
+
+        public void validate() {
+            if (movementSampleSeconds < 10) {
+                throw new IllegalArgumentException(
+                    "world-analytics.movement-sample-seconds must be at least 10 (got: " + movementSampleSeconds + ")");
+            }
+            if (cellSize < 1 || cellSize > 1024) {
+                throw new IllegalArgumentException("world-analytics.cell-size must be between 1 and 1024 (got: " + cellSize + ")");
+            }
+            if (flushIntervalSeconds < 30) {
+                throw new IllegalArgumentException(
+                    "world-analytics.flush-interval-seconds must be at least 30 (got: " + flushIntervalSeconds + ")");
+            }
+            if (maxPendingBatches < 1) {
+                throw new IllegalArgumentException(
+                    "world-analytics.max-pending-batches must be at least 1 (got: " + maxPendingBatches + ")");
             }
         }
     }

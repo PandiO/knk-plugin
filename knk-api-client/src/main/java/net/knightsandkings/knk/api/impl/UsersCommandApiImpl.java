@@ -8,6 +8,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.logging.Logger;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import net.knightsandkings.knk.api.auth.AuthProvider;
@@ -308,7 +309,11 @@ public class UsersCommandApiImpl extends BaseApiImpl implements UsersCommandApi 
                 String bodyJson = objectMapper.writeValueAsString(createDto);
                 LOGGER.fine("Creating user with payload: " + snippet(bodyJson));
                 String responseJson = postJson(url, bodyJson);
-                UserDto dto = objectMapper.readValue(responseJson, UserDto.class);
+                // POST /api/Users answers {"user": {...}, "linkCode": ...}. Reading that straight into
+                // UserDto left every field null (unknown properties are ignored), so read the user inside it.
+                JsonNode root = objectMapper.readTree(responseJson);
+                JsonNode userNode = root != null && root.hasNonNull("user") ? root.get("user") : root;
+                UserDto dto = objectMapper.treeToValue(userNode, UserDto.class);
                 return UsersMapper.mapUserDetail(dto);
             } catch (ApiException | IOException e) {
                 throw new RuntimeException("Failed to create user", e);
