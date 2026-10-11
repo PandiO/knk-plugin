@@ -205,8 +205,12 @@ public class PlayerListener implements Listener {
 			// predates this (none existed here; UserAccountListener's welcome message doesn't
 			// distinguish new/returning either - verified by reading both listeners directly).
 			if (user.isNewUser()) {
+				LOGGER.info("First-join kits: " + player.getName() + " (user " + user.id() + ") is a new account, asking the API to grant them");
 				triggerBackgroundFirstJoinKits(player, user.id());
 			}
+		} else {
+			// KNG-81: without a cached summary nothing here can tell a new account, so no first-join kits.
+			LOGGER.info("First-join kits: no cached user for " + player.getName() + " at join, skipped");
 		}
 	}
 
@@ -217,11 +221,16 @@ public class PlayerListener implements Listener {
 	 */
 	private void triggerBackgroundFirstJoinKits(Player player, int userId) {
 		if (kitsCommandApi == null) {
+			LOGGER.warning("First-join kits: the kits API is not available, nothing granted to user " + userId);
 			return;
 		}
 		UUID uuid = player.getUniqueId();
 		kitsCommandApi.grantFirstJoinKitsAsync(userId)
 			.thenCompose(claimResults -> {
+				// The API grants once per player (KNG-81): an empty answer means already granted, or no kit
+				// flagged "grant on first join" passes this player's gating.
+				LOGGER.info("First-join kits for user " + userId + ": " + (claimResults == null ? 0 : claimResults.size())
+					+ " kit(s) granted" + (claimResults == null || claimResults.isEmpty() ? " (already granted, or none applies)" : ""));
 				if (claimResults == null || claimResults.isEmpty()) {
 					return CompletableFuture.completedFuture(List.<KitGrantPlacer.ResolvedItem>of());
 				}
