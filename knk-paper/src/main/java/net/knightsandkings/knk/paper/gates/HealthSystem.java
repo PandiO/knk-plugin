@@ -57,26 +57,30 @@ public class HealthSystem {
      * 
      * @param gate The gate to damage
      * @param damageAmount The amount of damage to apply
+     * @return the effective HP lost ({@code before - newHealth}; 0 when nothing was applied) - read by
+     *         the KNG-34 gate-damage statistics, never used to change the outcome
      */
-    public void applyDamage(CachedGateDoor gate, double damageAmount) {
+    public double applyDamage(CachedGateDoor gate, double damageAmount) {
         if (gate == null || damageAmount <= 0) {
-            return;
+            return 0;
         }
 
         if (gate.isEffectivelyDestroyed()) {
             LOGGER.fine("Gate '" + gate.getName() + "' is already destroyed, ignoring damage.");
-            return;
+            return 0;
         }
 
         // Skip if invincible (decision 5.0-B: a structure-level override applies immediately)
         if (gate.isEffectivelyInvincible()) {
             LOGGER.info("Gate '" + gate.getName() + "' is invincible, ignoring damage");
-            return;
+            return 0;
         }
 
         // Apply damage
-        double newHealth = Math.max(0, gate.getHealthCurrent() - damageAmount);
+        double before = gate.getHealthCurrent();
+        double newHealth = Math.max(0, before - damageAmount);
         gate.setHealthCurrent(newHealth);
+        double loss = before - newHealth;
 
         LOGGER.info("Gate '" + gate.getName() + "' took " + damageAmount + " damage. Health: " +
                    String.format("%.1f", newHealth) + "/" + gate.getHealthMax());
@@ -91,6 +95,7 @@ public class HealthSystem {
             // Persist health change to API asynchronously
             persistHealthChange(gate);
         }
+        return loss;
     }
 
     /**
@@ -105,22 +110,26 @@ public class HealthSystem {
      *
      * @param gate The gate to damage
      * @param damageAmount The amount of damage to apply
+     * @return the effective HP lost (0 when nothing was applied), for the KNG-34 fire attribution
      */
-    public void applyContinuousDamage(CachedGateDoor gate, double damageAmount) {
+    public double applyContinuousDamage(CachedGateDoor gate, double damageAmount) {
         if (gate == null || damageAmount <= 0) {
-            return;
+            return 0;
         }
 
         if (gate.isEffectivelyDestroyed() || gate.isEffectivelyInvincible()) {
-            return;
+            return 0;
         }
 
-        double newHealth = Math.max(0, gate.getHealthCurrent() - damageAmount);
+        double before = gate.getHealthCurrent();
+        double newHealth = Math.max(0, before - damageAmount);
         gate.setHealthCurrent(newHealth);
+        double loss = before - newHealth;
 
         if (newHealth <= 0) {
             destroyGate(gate);
         }
+        return loss;
     }
 
     /**

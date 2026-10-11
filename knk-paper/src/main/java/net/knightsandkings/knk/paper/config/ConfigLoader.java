@@ -115,7 +115,10 @@ public class ConfigLoader {
             loadPrivateMessages(config.getConfigurationSection("private-messages")),
             loadTeleportSettings(config.getConfigurationSection("teleport")),
             loadDiscovery(config.getConfigurationSection("discovery")),
-            loadNavigation(config.getConfigurationSection("navigation")));
+            loadNavigation(config.getConfigurationSection("navigation")),
+            loadStatistics(config.getConfigurationSection("statistics")),
+            loadTelemetry(config.getConfigurationSection("telemetry")),
+            loadWorldAnalytics(config.getConfigurationSection("world-analytics")));
         knkConfig.validate();
         
         return knkConfig;
@@ -180,6 +183,106 @@ public class ConfigLoader {
             section.getInt("cooldown-seconds", defaults.cooldownSeconds()),
             section.getInt("max-incoming", defaults.maxIncoming()),
             section.getInt("price-coins", defaults.priceCoins())
+        );
+    }
+
+    /** Player statistics (KNG-34); every key has a default, so a missing section means "on, with defaults". */
+    static KnkConfig.StatisticsConfig loadStatistics(ConfigurationSection section) {
+        KnkConfig.StatisticsConfig defaults = KnkConfig.StatisticsConfig.defaults();
+        if (section == null) {
+            return defaults;
+        }
+        KnkConfig.StatisticsConfig.AfkConfig afkDefaults = defaults.afk();
+        ConfigurationSection afk = section.getConfigurationSection("afk");
+        KnkConfig.StatisticsConfig.AfkConfig afkConfig = afk == null ? afkDefaults
+            : new KnkConfig.StatisticsConfig.AfkConfig(
+                afk.getBoolean("enabled", afkDefaults.enabled()),
+                afk.getInt("idle-seconds", afkDefaults.idleSeconds()),
+                afk.getBoolean("command-enabled", afkDefaults.commandEnabled()),
+                afk.getBoolean("tab-list-marker", afkDefaults.tabListMarker()),
+                afk.getString("marker-text", afkDefaults.markerText())
+            );
+        ConfigurationSection movement = section.getConfigurationSection("movement");
+        KnkConfig.StatisticsConfig.MovementConfig movementConfig = movement == null ? defaults.movement()
+            : new KnkConfig.StatisticsConfig.MovementConfig(
+                movement.getBoolean("enabled", defaults.movement().enabled()),
+                movement.getDouble("max-segment-blocks", defaults.movement().maxSegmentBlocks())
+            );
+        ConfigurationSection fall = section.getConfigurationSection("fall");
+        KnkConfig.StatisticsConfig.FallConfig fallConfig = fall == null ? defaults.fall()
+            : new KnkConfig.StatisticsConfig.FallConfig(fall.getBoolean("enabled", defaults.fall().enabled()));
+        ConfigurationSection combat = section.getConfigurationSection("combat");
+        KnkConfig.StatisticsConfig.CombatConfig combatConfig = combat == null ? defaults.combat()
+            : new KnkConfig.StatisticsConfig.CombatConfig(
+                combat.getBoolean("enabled", defaults.combat().enabled()),
+                combat.getBoolean("count-custom-damage", defaults.combat().countCustomDamage()),
+                combat.contains("pve-excluded-spawn-reasons")
+                    ? KnkConfig.StatisticsConfig.parseSpawnReasons(combat.getStringList("pve-excluded-spawn-reasons"))
+                    : defaults.combat().pveExcludedSpawnReasons()
+            );
+        ConfigurationSection gates = section.getConfigurationSection("gates");
+        KnkConfig.StatisticsConfig.GatesConfig gatesConfig = gates == null ? defaults.gates()
+            : new KnkConfig.StatisticsConfig.GatesConfig(
+                gates.getBoolean("enabled", defaults.gates().enabled()),
+                gates.getBoolean("fire-attribution", defaults.gates().fireAttribution())
+            );
+        ConfigurationSection siege = section.getConfigurationSection("siege");
+        KnkConfig.StatisticsConfig.SiegeConfig siegeConfig = siege == null ? defaults.siege()
+            : new KnkConfig.StatisticsConfig.SiegeConfig(
+                siege.getBoolean("report-departed-members", defaults.siege().reportDepartedMembers()));
+        java.util.List<String> gameModes = section.contains("excluded-game-modes")
+            ? section.getStringList("excluded-game-modes")
+            : KnkConfig.StatisticsConfig.DEFAULT_EXCLUDED_GAME_MODES;
+        return new KnkConfig.StatisticsConfig(
+            section.getBoolean("enabled", defaults.enabled()),
+            section.getInt("flush-interval-seconds", defaults.flushIntervalSeconds()),
+            section.getInt("max-batch-entries", defaults.maxBatchEntries()),
+            section.getString("spool-directory", defaults.spoolDirectory()),
+            section.getInt("replay-interval-seconds", defaults.replayIntervalSeconds()),
+            KnkConfig.StatisticsConfig.parseGameModes(gameModes),
+            afkConfig,
+            movementConfig,
+            fallConfig,
+            combatConfig,
+            gatesConfig,
+            siegeConfig
+        );
+    }
+
+    /** Diagnostic telemetry (KNG-34 link 6); every key has a default, so a missing section means "on, with defaults". */
+    static KnkConfig.TelemetryConfig loadTelemetry(ConfigurationSection section) {
+        KnkConfig.TelemetryConfig defaults = KnkConfig.TelemetryConfig.defaults();
+        if (section == null) {
+            return defaults;
+        }
+        return new KnkConfig.TelemetryConfig(
+            section.getBoolean("enabled", defaults.enabled()),
+            section.getInt("max-buffer-events", defaults.maxBufferEvents()),
+            section.getInt("flush-interval-seconds", defaults.flushIntervalSeconds()),
+            section.getInt("config-poll-seconds", defaults.configPollSeconds()),
+            section.getInt("enhanced-movement-sample-seconds", defaults.enhancedMovementSampleSeconds())
+        );
+    }
+
+    /** World analytics (KNG-34 link 7); every key has a default, so a missing section means "on, with defaults". */
+    static KnkConfig.WorldAnalyticsConfig loadWorldAnalytics(ConfigurationSection section) {
+        KnkConfig.WorldAnalyticsConfig defaults = KnkConfig.WorldAnalyticsConfig.defaults();
+        if (section == null) {
+            return defaults;
+        }
+        java.util.Set<org.bukkit.GameMode> gameModes = section.contains("excluded-game-modes")
+            ? KnkConfig.StatisticsConfig.parseGameModes(section.getStringList("excluded-game-modes"))
+            : defaults.excludedGameModes();
+        return new KnkConfig.WorldAnalyticsConfig(
+            section.getBoolean("enabled", defaults.enabled()),
+            section.getInt("movement-sample-seconds", defaults.movementSampleSeconds()),
+            section.getInt("cell-size", defaults.cellSize()),
+            section.getInt("flush-interval-seconds", defaults.flushIntervalSeconds()),
+            section.getBoolean("movement", defaults.movement()),
+            section.getBoolean("menu-funnels", defaults.menuFunnels()),
+            section.getBoolean("domain-interactions", defaults.domainInteractions()),
+            gameModes,
+            section.getInt("max-pending-batches", defaults.maxPendingBatches())
         );
     }
 

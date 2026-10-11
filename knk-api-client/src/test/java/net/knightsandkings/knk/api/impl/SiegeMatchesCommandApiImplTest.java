@@ -34,6 +34,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -154,6 +155,23 @@ class SiegeMatchesCommandApiImplTest {
         assertEquals(501, body.get("objectives").get(0).get("siegeObjectiveId").asInt());
         assertEquals("2026-09-26T21:05:00Z", body.get("objectives").get(0).get("capturedAt").asText());
         assertTrue(body.get("objectives").get(1).get("capturedByUserId").isNull());
+    }
+
+    @Test
+    void complete_sendsLeftAtOnlyForDepartedMembers() throws Exception {
+        responseByPath.put("/api/siege-matches/43/complete", """
+                {"matchId":43,"status":"Completed","alreadyCompleted":false,"rewards":[]}""");
+        Completion completion = new Completion(SiegeEndReason.TIME_EXPIRED, null,
+                List.of(new ParticipantResult(7, 202, 3, 1, 2, 1),
+                        new ParticipantResult(8, 201, 2, 4, 1, 0, Instant.parse("2026-10-03T12:00:00Z"))),
+                List.of());
+
+        await(api.completeMatch(43, completion));
+
+        JsonNode participants = json.readTree(bodies.get("/api/siege-matches/43/complete")).get("participants");
+        assertFalse(participants.get(0).has("leftAt"), "a member present at the end is sent exactly as before");
+        assertEquals("2026-10-03T12:00:00Z", participants.get(1).get("leftAt").asText());
+        assertEquals(2, participants.get(1).get("kills").asInt());
     }
 
     @Test
