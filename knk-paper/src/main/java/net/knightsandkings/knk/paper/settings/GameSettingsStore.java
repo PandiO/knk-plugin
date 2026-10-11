@@ -122,7 +122,9 @@ public class GameSettingsStore {
             LOGGER.log(Level.WARNING, "[KnK GameSettings] Could not keep the previous game settings in " + historyDir, ex);
         }
         offline.recordGameSettings(json);
-        offline.flushIfDirty();
+        if (!offline.flushIfDirty()) {
+            return; // keep the old file until the store holds the snapshot on disk
+        }
         try {
             // The snapshot now lives in the offline store (it was copied to the history above).
             Files.deleteIfExists(cacheFile);

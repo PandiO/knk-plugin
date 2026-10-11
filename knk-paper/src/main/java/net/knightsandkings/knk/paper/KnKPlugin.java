@@ -2464,11 +2464,6 @@ public class KnKPlugin extends JavaPlugin {
      * WorldGuard's own region bypass. Owners and members of a region pass it.
      */
     /**
-     * {@code knk.region.bypass}, also carried by a staff teleport (docs/specs/teleport/DESIGN.md §4 D11):
-     * who ignores domain AllowEntry/AllowExit - at the border (KNG-56) and in navigation's routes and
-     * walk paths alike.
-     */
-    /**
      * The hub (hub DESIGN §16 Phase 5): with a hub selected on the Game Settings page, joining players are placed at its
      * spawn before they appear, joins are refused while it is unusable, and its rules and Peaceful healing apply inside
      * its region. Without a hub selected nothing changes.
@@ -2484,6 +2479,9 @@ public class KnKPlugin extends JavaPlugin {
                 return manager != null && manager.hasRegion(regionId);
             },
             regionIds::at);
+        if (gameSettingsManager != null) {
+            hubService.setResolvedSpawn(gameSettingsManager::resolvedReference);
+        }
         getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.hub.HubAdmissionListener(hubService,
             uuid -> org.bukkit.Bukkit.getOfflinePlayer(uuid).isOp()), this);
         getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.hub.HubRulesListener(hubService,
@@ -2498,6 +2496,11 @@ public class KnKPlugin extends JavaPlugin {
         return hubService;
     }
 
+    /**
+     * {@code knk.region.bypass}, also carried by a staff teleport (docs/specs/teleport/DESIGN.md §4 D11):
+     * who ignores domain AllowEntry/AllowExit - at the border (KNG-56) and in navigation's routes and
+     * walk paths alike.
+     */
     private boolean hasRegionBypass(org.bukkit.entity.Player player) {
         String bypassNode = net.knightsandkings.knk.paper.teleport.TeleportNodes.REGION_BYPASS;
         return player != null

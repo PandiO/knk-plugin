@@ -15,6 +15,7 @@ import net.knightsandkings.knk.core.domain.location.KnkLocation;
 import net.knightsandkings.knk.core.domain.settings.KnkGameSettings;
 import net.knightsandkings.knk.core.domain.settings.KnkHubRules;
 import net.knightsandkings.knk.core.domain.settings.KnkHubSettings;
+import net.knightsandkings.knk.core.domain.settings.KnkSpawnReference;
 
 /**
  * The selected hub as the server sees it (hub DESIGN §16 Phase 5): where joining players are placed, whether that is
@@ -28,6 +29,7 @@ public class HubService {
     private final Function<String, World> worlds;
     private final BiPredicate<World, String> regionExists;
     private final Function<Location, Set<String>> regionsAt;
+    private Function<KnkSpawnReference, Optional<KnkLocation>> resolvedSpawn = reference -> Optional.empty();
 
     /**
      * @param settings     the Game Settings in force; null until the API or the offline store gave them
@@ -41,6 +43,24 @@ public class HubService {
         this.worlds = Objects.requireNonNull(worlds, "worlds");
         this.regionExists = Objects.requireNonNull(regionExists, "regionExists");
         this.regionsAt = Objects.requireNonNull(regionsAt, "regionsAt");
+    }
+
+    /** Where the hub spawn reference points now (the referenced Location or domain), else its saved snapshot is used. */
+    public void setResolvedSpawn(Function<KnkSpawnReference, Optional<KnkLocation>> resolvedSpawn) {
+        this.resolvedSpawn = resolvedSpawn != null ? resolvedSpawn : reference -> Optional.empty();
+    }
+
+    /** The hub spawn's coordinates: as resolved now when that is in the hub's world, else the saved snapshot. */
+    private KnkLocation spawnSpot(KnkHubSettings hub) {
+        KnkLocation snapshot = hub.spawn().snapshot();
+        KnkLocation current = resolvedSpawn.apply(hub.spawn()).orElse(null);
+        String hubWorld = hub.worldName() != null && !hub.worldName().isBlank() ? hub.worldName()
+            : snapshot != null ? snapshot.world() : null;
+        if (current != null && current.world() != null && current.x() != null && current.y() != null && current.z() != null
+            && (hubWorld == null || hubWorld.equalsIgnoreCase(current.world()))) {
+            return current;
+        }
+        return snapshot;
     }
 
     /** The hub settings in force; {@link KnkHubSettings#none()} without Game Settings or without a hub. */
@@ -67,7 +87,7 @@ public class HubService {
         if (!hub.configured()) {
             return Optional.empty();
         }
-        KnkLocation spot = hub.spawn().snapshot();
+        KnkLocation spot = spawnSpot(hub);
         if (spot == null || spot.world() == null || spot.x() == null || spot.y() == null || spot.z() == null) {
             return Optional.of("the hub spawn has no coordinates");
         }
@@ -90,7 +110,7 @@ public class HubService {
         if (!configured() || unusable().isPresent()) {
             return Optional.empty();
         }
-        KnkLocation spot = hub().spawn().snapshot();
+        KnkLocation spot = spawnSpot(hub());
         World world = worlds.apply(spot.world());
         if (world == null) {
             return Optional.empty();
@@ -111,6 +131,23 @@ public class HubService {
         }
         String region = hub.wgRegionId().toLowerCase(Locale.ROOT);
         return regionsAt.apply(location).stream().anyMatch(id -> id.toLowerCase(Locale.ROOT).equals(region));
+    }
+
+    /**
+     * Whether {@code location}'s column is in the hub: the spot at the hub spawn's height. For a player falling out of
+     * the bottom of a void hub, where no region reaches.
+     */
+    public boolean inHubColumn(Location location) {
+        if (!configured() || location == null) {
+            return false;
+        }
+        KnkLocation spot = spawnSpot(hub());
+        if (spot == null || spot.y() == null) {
+            return false;
+        }
+        Location probe = location.clone();
+        probe.setY(spot.y());
+        return inHub(probe);
     }
 
     /** The hub's world, if a hub is selected and its world is loaded. */

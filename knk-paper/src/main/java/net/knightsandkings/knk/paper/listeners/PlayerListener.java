@@ -183,8 +183,11 @@ public class PlayerListener implements Listener {
 		if (gameSettings != null && gameSettings.current() != null && gameSettings.current().hub().configured()) {
 			// Hub DESIGN §16 Phase 5: the hub admission already placed the player at the hub spawn while they were
 			// connecting; no join teleport. The game mode is that of the world they arrived in.
-			player.setGameMode(gameSettings.gameModeFor(player.getWorld()));
-			player.setFlying(false);
+			if (!knkPermissible.hasPermission(player, "knk.mode.owner")) {
+				// Owners keep their game mode and flight, as without a hub.
+				player.setGameMode(gameSettings.gameModeFor(player.getWorld()));
+				player.setFlying(false);
+			}
 		} else if (!knkPermissible.hasPermission(player, "knk.mode.owner")) {
 			// The server spawn /spawn uses, in its world's default game mode (DESIGN §3.2/§3.4). Never
 			// waits on the API: the spot was resolved in the background. JoinLoadingGuard.hold (later

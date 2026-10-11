@@ -281,10 +281,18 @@ public final class OfflineSecurityStore {
         }
     }
 
-    /** Write the file if anything changed since the last write (temp file + atomic move). */
-    public synchronized void flushIfDirty() {
-        if (file == null || !dirty.getAndSet(false)) {
-            return;
+    /**
+     * Write the file if anything changed since the last write (temp file + atomic move).
+     *
+     * @return whether the file now holds everything in memory (written now, or nothing to write); false when there is
+     *         no file or the write failed (it is retried on the next flush)
+     */
+    public synchronized boolean flushIfDirty() {
+        if (file == null) {
+            return false;
+        }
+        if (!dirty.getAndSet(false)) {
+            return true;
         }
         List<IdentityFile> identityFiles = identities.values().stream()
             .map(i -> new IdentityFile(i.uuid().toString(), i.userId(), i.username(), i.activeMode().name(),
@@ -308,7 +316,9 @@ public final class OfflineSecurityStore {
         } catch (IOException e) {
             dirty.set(true);
             LOGGER.log(Level.WARNING, "[KnK Offline] Could not write " + file, e);
+            return false;
         }
+        return true;
     }
 
     private void forgetPermissions(int userId) {

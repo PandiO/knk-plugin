@@ -70,14 +70,16 @@ public final class HubRulesListener implements Listener {
         KnkHubRules rules = rules();
 
         if (victim instanceof Player player) {
-            boolean inHub = hub.inHub(player.getLocation());
+            boolean falling = event.getCause() == EntityDamageEvent.DamageCause.VOID;
+            // Below a void hub no region reaches: judge the column instead.
+            boolean inHub = falling ? hub.inHubColumn(player.getLocation()) : hub.inHub(player.getLocation());
             if (attacker != null && !rules.damagePlayers() && (inHub || hub.inHub(attacker.getLocation()))) {
                 event.setCancelled(true);
                 return;
             }
             if (inHub && !rules.takeDamage()) {
                 event.setCancelled(true);
-                if (event.getCause() == EntityDamageEvent.DamageCause.VOID) {
+                if (falling) {
                     // Falling out of a void hub: back to its spawn instead of falling forever.
                     hub.admissionSpawn().ifPresent(player::teleport);
                 }
@@ -202,11 +204,12 @@ public final class HubRulesListener implements Listener {
         if (action != Action.RIGHT_CLICK_BLOCK) {
             return BlockUse.OTHER;
         }
-        if (block.getBlockData() instanceof Openable) {
-            return BlockUse.DOOR;
+        // Storage first: a barrel's block data is Openable too. Chests, barrels, shulker boxes, hoppers, furnaces, ...
+        // - not the ender chest: that is the player's own.
+        if (block.getState() instanceof Container) {
+            return BlockUse.STORAGE;
         }
-        // Chests, barrels, shulker boxes, hoppers, furnaces, ... - not the ender chest: that is the player's own.
-        return block.getState() instanceof Container ? BlockUse.STORAGE : BlockUse.OTHER;
+        return block.getBlockData() instanceof Openable ? BlockUse.DOOR : BlockUse.OTHER;
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)

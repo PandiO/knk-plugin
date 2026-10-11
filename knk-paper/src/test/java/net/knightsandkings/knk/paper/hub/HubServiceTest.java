@@ -53,7 +53,8 @@ class HubServiceTest {
         Map<String, World> worlds = Map.of("hub", hubWorld, "world", gameplay);
         hub = new HubService(() -> settings, name -> worlds.get(name.toLowerCase()),
             (world, region) -> world == hubWorld && hubRegions.contains(region),
-            location -> location.getX() < 100 ? Set.of("TOWN_4", "inn_1") : Set.of());
+            // The region: x < 100, from y 0 up (a void hub's floor)
+            location -> location.getX() < 100 && location.getY() >= 0 ? Set.of("TOWN_4", "inn_1") : Set.of());
     }
 
     private static KnkSpawnReference spawn(String world) {
@@ -143,6 +144,22 @@ class HubServiceTest {
 
         verify(voidDamage).setCancelled(true);
         verify(visitor).teleport(hub.admissionSpawn().orElseThrow());
+    }
+
+    @Test
+    void aBarrelIsStorageNotADoor() {
+        // A barrel's block data is Openable (Paper 1.21.10), like a door's.
+        Block barrel = mock(Block.class);
+        when(barrel.getState()).thenReturn(mock(org.bukkit.block.Barrel.class));
+        when(barrel.getBlockData()).thenReturn(mock(org.bukkit.block.data.type.Barrel.class));
+        Block door = mock(Block.class);
+        when(door.getState()).thenReturn(mock(org.bukkit.block.BlockState.class));
+        when(door.getBlockData()).thenReturn(mock(org.bukkit.block.data.type.Door.class));
+
+        assertEquals(HubRulesListener.BlockUse.STORAGE,
+            HubRulesListener.classify(org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK, barrel));
+        assertEquals(HubRulesListener.BlockUse.DOOR,
+            HubRulesListener.classify(org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK, door));
     }
 
     private static Player player(Location at) {
