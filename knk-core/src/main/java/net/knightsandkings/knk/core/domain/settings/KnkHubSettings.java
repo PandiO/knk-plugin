@@ -1,6 +1,8 @@
 package net.knightsandkings.knk.core.domain.settings;
 
+import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 
 /**
  * The hub (knk-web-api {@code HubSettingsDto}, hub DESIGN §16 Phase 4): the selected hub domain, where joining players
@@ -15,9 +17,11 @@ import java.util.Locale;
  * @param outageAction       what happens to online players when the API is lost
  * @param outageDelaySeconds seconds before that; 0 = immediately
  * @param rules              the rules inside the hub; never null
+ * @param portalRegionIds    the hub's portals: WorldGuard region ids in its world, lower case (decision 2026-10-12)
  */
 public record KnkHubSettings(Integer domainId, String domainName, String domainType, String worldName, String wgRegionId,
-                             KnkSpawnReference spawn, OutageAction outageAction, int outageDelaySeconds, KnkHubRules rules) {
+                             KnkSpawnReference spawn, OutageAction outageAction, int outageDelaySeconds, KnkHubRules rules,
+                             List<String> portalRegionIds) {
 
     /** hub DESIGN §1, §2. */
     public enum OutageAction {
@@ -41,6 +45,15 @@ public record KnkHubSettings(Integer domainId, String domainName, String domainT
         outageAction = outageAction != null ? outageAction : OutageAction.SEND_TO_HUB;
         outageDelaySeconds = Math.max(0, outageDelaySeconds);
         rules = rules != null ? rules : KnkHubRules.defaults();
+        portalRegionIds = portalRegionIds == null ? List.of() : portalRegionIds.stream()
+            .filter(Objects::nonNull).map(id -> id.trim().toLowerCase(Locale.ROOT)).filter(id -> !id.isEmpty())
+            .distinct().toList();
+    }
+
+    /** Without portals (the overnight 2026-10-12 shape). */
+    public KnkHubSettings(Integer domainId, String domainName, String domainType, String worldName, String wgRegionId,
+                          KnkSpawnReference spawn, OutageAction outageAction, int outageDelaySeconds, KnkHubRules rules) {
+        this(domainId, domainName, domainType, worldName, wgRegionId, spawn, outageAction, outageDelaySeconds, rules, List.of());
     }
 
     /** No hub configured. */

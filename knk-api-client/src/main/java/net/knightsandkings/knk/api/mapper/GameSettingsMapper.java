@@ -60,7 +60,7 @@ public final class GameSettingsMapper {
         }
         return new KnkHubSettings(hub.domainId(), hub.domainName(), hub.domainType(), hub.worldName(), hub.wgRegionId(),
             toCore(hub.spawnReference()), KnkHubSettings.OutageAction.parse(hub.outageAction()),
-            hub.outageDelaySeconds() != null ? hub.outageDelaySeconds() : 0, toCore(hub.rules()));
+            hub.outageDelaySeconds() != null ? hub.outageDelaySeconds() : 0, toCore(hub.rules()), hub.portalRegionIds());
     }
 
     static KnkHubRules toCore(GameSettingsDto.HubRules rules) {

@@ -167,6 +167,22 @@ public class HubService {
         return name == null ? Optional.empty() : Optional.ofNullable(worlds.apply(name));
     }
 
+    /** The hub portal at this spot (one of the hub's portal regions, in the hub's world), if any. */
+    public Optional<String> portalAt(Location location) {
+        KnkHubSettings hub = hub();
+        if (!hub.configured() || hub.portalRegionIds().isEmpty() || location == null || location.getWorld() == null) {
+            return Optional.empty();
+        }
+        String hubWorld = hub.worldName() != null ? hub.worldName() : hub.spawn().snapshot() != null ? hub.spawn().snapshot().world() : null;
+        if (hubWorld == null || !hubWorld.equalsIgnoreCase(location.getWorld().getName())) {
+            return Optional.empty();
+        }
+        Set<String> here = regionsAt.apply(location);
+        return hub.portalRegionIds().stream()
+            .filter(portal -> here.stream().anyMatch(id -> id.equalsIgnoreCase(portal)))
+            .findFirst();
+    }
+
     /** Hub admission placed this player at the hub spawn; their join then needs no teleport. */
     public void markAdmitted(UUID player) {
         if (player != null) {

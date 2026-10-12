@@ -43,7 +43,8 @@ public record GameSettingsDto(
             @JsonProperty("spawnReference") LocationReference spawnReference,
             @JsonProperty("outageAction") String outageAction,
             @JsonProperty("outageDelaySeconds") Integer outageDelaySeconds,
-            @JsonProperty("rules") HubRules rules
+            @JsonProperty("rules") HubRules rules,
+            @JsonProperty("portalRegionIds") List<String> portalRegionIds
     ) {}
 
     /** knk-web-api {@code HubRulesDto}; a missing field keeps the hub default. */

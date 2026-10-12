@@ -2553,14 +2553,7 @@ public class KnKPlugin extends JavaPlugin {
             store,
             () -> outageBacklogChecks.stream().allMatch(java.util.function.BooleanSupplier::getAsBoolean),
             uuid -> siegeService == null || siegeService.releaseForOutage(uuid),
-            player -> {
-                // As a hub join: the hub world's game mode, except for owners.
-                if (gameSettingsManager != null && (knkPermissible == null
-                        || !knkPermissible.hasPermission(player, net.knightsandkings.knk.paper.modes.ModeService.OWNER_NODE))) {
-                    player.setGameMode(gameSettingsManager.gameModeFor(player.getWorld()));
-                    player.setFlying(false);
-                }
-            },
+            this::settleInWorld,
             java.time.Clock.systemUTC());
         hubAdmission.setOutageAdmission(hubOutageService::savedOnJoin);
         getServer().getPluginManager().registerEvents(hubOutageService, this);
@@ -2570,12 +2563,19 @@ public class KnKPlugin extends JavaPlugin {
             hubOutageService.connectivityChanged(connectivity.state());
         }
 
+        net.knightsandkings.knk.paper.hub.HubOutageService.Access access = (player, at) -> domainAccess == null
+            ? java.util.Optional.empty()
+            : domainAccess.refusedToBeAt(player, at).map(net.knightsandkings.knk.core.regions.access.RegionAccessRules.Refusal::message);
+        // §11: the portals take a player into the game through the join chain without the hub.
+        getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.hub.HubPortalListener(hubService,
+            hubOutageService,
+            player -> getCacheManager().getUserCache().getStale(player.getUniqueId()).isPresent(),
+            player -> gameSettingsManager != null ? gameSettingsManager.joinSpawn(hubGroupsOf(player.getUniqueId())) : null,
+            access, this::hubTransfer, this::settleInWorld, System::currentTimeMillis), this);
+
         var hubCommand = getCommand("hub");
         if (hubCommand != null) {
-            var executor = new net.knightsandkings.knk.paper.hub.HubCommand(hubOutageService,
-                (player, at) -> domainAccess == null ? java.util.Optional.empty()
-                    : domainAccess.refusedToBeAt(player, at).map(net.knightsandkings.knk.core.regions.access.RegionAccessRules.Refusal::message),
-                this::hubTransfer);
+            var executor = new net.knightsandkings.knk.paper.hub.HubCommand(hubOutageService, access, this::hubTransfer);
             hubCommand.setExecutor(executor);
             hubCommand.setTabCompleter(executor);
         }
@@ -2588,6 +2588,15 @@ public class KnKPlugin extends JavaPlugin {
                 ? java.util.Optional.of(new net.knightsandkings.knk.core.teleport.TeleportDenial("HUB_OUTAGE",
                     "The game world can't be entered while the server's services are down."))
                 : java.util.Optional.empty());
+        }
+    }
+
+    /** After the plugin moved a player into another world: that world's game mode, as on a join, except for owners. */
+    private void settleInWorld(org.bukkit.entity.Player player) {
+        if (gameSettingsManager != null && (knkPermissible == null
+                || !knkPermissible.hasPermission(player, net.knightsandkings.knk.paper.modes.ModeService.OWNER_NODE))) {
+            player.setGameMode(gameSettingsManager.gameModeFor(player.getWorld()));
+            player.setFlying(false);
         }
     }
 

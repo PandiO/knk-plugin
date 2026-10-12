@@ -28,7 +28,7 @@ class GameSettingsHubMapperTest {
              "hub":{"domainId":4,"domainName":"Hubtown","worldName":"hub","wgRegionId":"town_4",
                     "spawnReference":{"sourceType":"Location","sourceId":9,
                                       "location":{"x":2.5,"y":65,"z":2.5,"world":"hub"}},
-                    "outageAction":"SendToWorldSpawn","outageDelaySeconds":0,
+                    "outageAction":"SendToWorldSpawn","outageDelaySeconds":0,"portalRegionIds":["Portal_North"],
                     "rules":{"dropPickup":false,"healIntervalTicks":40}}}
             """, GameSettingsDto.class);
 
@@ -39,6 +39,7 @@ class GameSettingsHubMapperTest {
         assertEquals("town_4", hub.wgRegionId());
         assertEquals("hub", hub.spawn().snapshot().world());
         assertEquals(KnkHubSettings.OutageAction.SEND_TO_WORLD_SPAWN, hub.outageAction());
+        assertEquals(java.util.List.of("portal_north"), hub.portalRegionIds());
         assertFalse(hub.rules().dropPickup());
         assertEquals(40, hub.rules().healIntervalTicks());
         assertEquals(10, hub.rules().feedIntervalTicks(), "a field the API did not send keeps the Peaceful default");
@@ -56,5 +57,6 @@ class GameSettingsHubMapperTest {
 
         assertFalse(settings.hub().configured());
         assertEquals(KnkHubSettings.OutageAction.SEND_TO_HUB, settings.hub().outageAction());
+        assertTrue(settings.hub().portalRegionIds().isEmpty());
     }
 }
