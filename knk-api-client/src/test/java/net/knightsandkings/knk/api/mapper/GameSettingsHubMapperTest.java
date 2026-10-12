@@ -47,8 +47,6 @@ class GameSettingsHubMapperTest {
         KnkGroupOverride staff = settings.groupOverrides().get(0);
         assertEquals(KnkHubSettings.OutageAction.KICK, staff.outageAction());
         assertEquals(30, staff.outageDelaySeconds());
-        assertTrue(staff.exemptInStaffMode());
-        assertFalse(staff.exemptInOwnerMode());
     }
 
     @Test

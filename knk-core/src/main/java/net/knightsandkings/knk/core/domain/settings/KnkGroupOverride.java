@@ -17,21 +17,18 @@ package net.knightsandkings.knk.core.domain.settings;
  *                           still uses the server spawn
  * @param outageAction       the hub's outage action for the group's members; null = not set (hub DESIGN §13)
  * @param outageDelaySeconds the outage delay for the group's members; null = not set
- * @param exemptInStaffMode  members whose active mode is staff are exempt from the outage action (only true counts)
- * @param exemptInOwnerMode  members whose active mode is owner are exempt
  */
 public record KnkGroupOverride(int permissionGroupId, String groupName, int precedence, String joinAnnouncement,
                                String leaveAnnouncement, KnkSpawnReference joinSpawnReference,
                                KnkRespawnPolicy respawnPolicy, boolean joinAtLastLocation,
-                               KnkHubSettings.OutageAction outageAction, Integer outageDelaySeconds,
-                               boolean exemptInStaffMode, boolean exemptInOwnerMode) {
+                               KnkHubSettings.OutageAction outageAction, Integer outageDelaySeconds) {
 
     /** Without the hub's outage fields (KNG-52 round 4 shape). */
     public KnkGroupOverride(int permissionGroupId, String groupName, int precedence, String joinAnnouncement,
                             String leaveAnnouncement, KnkSpawnReference joinSpawnReference,
                             KnkRespawnPolicy respawnPolicy, boolean joinAtLastLocation) {
         this(permissionGroupId, groupName, precedence, joinAnnouncement, leaveAnnouncement, joinSpawnReference,
-            respawnPolicy, joinAtLastLocation, null, null, false, false);
+            respawnPolicy, joinAtLastLocation, null, null);
     }
 
     /** Without "join where they logged out" (round 3 shape). */

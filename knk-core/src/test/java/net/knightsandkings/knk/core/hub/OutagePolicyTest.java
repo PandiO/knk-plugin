@@ -25,9 +25,9 @@ class OutagePolicyTest {
 
     private static final KnkGameSettings SETTINGS = new KnkGameSettings("WorldSpawn", null, null, null, null, List.of(), null, null,
         List.of(
-            new KnkGroupOverride(3, "Staff", 1, null, null, null, null, false, null, null, true, false),
-            new KnkGroupOverride(2, "Noble", 2, null, null, null, null, false, OutageAction.KICK, null, false, false),
-            new KnkGroupOverride(1, "Default", 3, null, null, null, null, false, null, 120, false, false)),
+            new KnkGroupOverride(3, "Staff", 1, null, null, null, null, false, null, null),
+            new KnkGroupOverride(2, "Noble", 2, null, null, null, null, false, OutageAction.KICK, null),
+            new KnkGroupOverride(1, "Default", 3, null, null, null, null, false, null, 120)),
         new KnkHubSettings(4, "Hubtown", "Town", "hub", "town_4", null, OutageAction.SEND_TO_HUB, 30, KnkHubRules.defaults()));
 
     @Test

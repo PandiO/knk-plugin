@@ -79,16 +79,14 @@ public record GameSettingsDto(
             @JsonProperty("respawnPolicy") RespawnPolicy respawnPolicy,
             @JsonProperty("joinAtLastLocation") Boolean joinAtLastLocation,
             @JsonProperty("outageAction") String outageAction,
-            @JsonProperty("outageDelaySeconds") Integer outageDelaySeconds,
-            @JsonProperty("exemptInStaffMode") Boolean exemptInStaffMode,
-            @JsonProperty("exemptInOwnerMode") Boolean exemptInOwnerMode
+            @JsonProperty("outageDelaySeconds") Integer outageDelaySeconds
     ) {
         /** Without the hub's outage fields (KNG-52 shape). */
         public GroupOverride(int permissionGroupId, String groupName, Integer precedence, String joinAnnouncement,
                              String leaveAnnouncement, LocationReference joinSpawnReference, RespawnPolicy respawnPolicy,
                              Boolean joinAtLastLocation) {
             this(permissionGroupId, groupName, precedence, joinAnnouncement, leaveAnnouncement, joinSpawnReference,
-                respawnPolicy, joinAtLastLocation, null, null, null, null);
+                respawnPolicy, joinAtLastLocation, null, null);
         }
     }
 

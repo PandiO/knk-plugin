@@ -44,8 +44,7 @@ public final class GameSettingsMapper {
                 groups.add(new KnkGroupOverride(o.permissionGroupId(), o.groupName(),
                     o.precedence() != null ? o.precedence() : position, o.joinAnnouncement(), o.leaveAnnouncement(),
                     toCore(o.joinSpawnReference()), toCore(o.respawnPolicy()), Boolean.TRUE.equals(o.joinAtLastLocation()),
-                    KnkHubSettings.OutageAction.parse(o.outageAction()), o.outageDelaySeconds(),
-                    Boolean.TRUE.equals(o.exemptInStaffMode()), Boolean.TRUE.equals(o.exemptInOwnerMode())));
+                    KnkHubSettings.OutageAction.parse(o.outageAction()), o.outageDelaySeconds()));
             }
         }
         return new KnkGameSettings(dto.joinSpawnMode(), toCore(dto.joinSpawnReference()), dto.joinAnnouncement(),

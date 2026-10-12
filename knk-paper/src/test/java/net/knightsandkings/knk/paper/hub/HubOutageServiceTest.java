@@ -67,8 +67,8 @@ class HubOutageServiceTest {
             new KnkLocation(9, "Hub square", 2.5, 65.0, 2.5, 0f, 0f, "hub"));
         KnkGameSettings settings = new KnkGameSettings("WorldSpawn", null, null, null, null, List.of(), null, null,
             List.of(
-                new KnkGroupOverride(3, "Staff", 1, null, null, null, null, false, null, null, true, false),
-                new KnkGroupOverride(2, "Noble", 2, null, null, null, null, false, OutageAction.KICK, 0, false, false)),
+                new KnkGroupOverride(3, "Staff", 1, null, null, null, null, false, null, null),
+                new KnkGroupOverride(2, "Noble", 2, null, null, null, null, false, OutageAction.KICK, 0)),
             new KnkHubSettings(4, "Hubtown", "Town", "hub", "town_4", spawn, OutageAction.SEND_TO_HUB, 60, KnkHubRules.defaults()));
         Map<String, World> worlds = Map.of("hub", hubWorld, "world", gameplay);
         hub = new HubService(() -> settings, name -> worlds.get(name.toLowerCase()), (world, region) -> world == hubWorld,
