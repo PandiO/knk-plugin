@@ -11,7 +11,7 @@ import com.sk89q.worldguard.protection.managers.RegionManager;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import net.knightsandkings.knk.core.domain.validation.ValidationResult;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
-import net.knightsandkings.knk.paper.utils.PlaceholderInterpolationUtil;
+import net.knightsandkings.knk.paper.tasks.validation.ParentRegionFeedback;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -19,6 +19,7 @@ import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -39,6 +40,11 @@ public class LocationTaskHandler implements IWorldTaskHandler {
     
     // Track active tasks: player -> TaskContext
     private final Map<Player, TaskContext> activeTasksByPlayer = new HashMap<>();
+
+    private static final List<String> BLOCKED_ADVICE = List.of(
+        "Task not completed. Please move to a valid location and type 'save' again.",
+        "Or type 'cancel' to abort the task.",
+        "If you believe this is an error, contact a developer.");
 
     /**
      * Internal context for tracking task state
@@ -196,21 +202,16 @@ public class LocationTaskHandler implements IWorldTaskHandler {
             player.sendMessage("§7World: " + worldName);
             player.sendMessage("§7Name: " + locationName);
             
-            // NEW: Validate against rules from InputJson
+            // Validate against rules from InputJson (KNG-173: a warning saves, a block refuses). This is the only
+            // validation of the location: completing the task doesn't validate it again.
             player.sendMessage("§7Validating location...");
             ValidationResult validation = validateLocation(player, location, context);
-            if (!validation.isValid()) {
-                player.sendMessage("§c✗ Validation Failed:");
-                player.sendMessage("§c" + validation.getMessage());
-                player.sendMessage("§e");
-                if (validation.isBlocking()) {
-                    player.sendMessage("§eTask not completed. Please move to a valid location and type 'save' again.");
-                    player.sendMessage("§eOr type 'cancel' to abort the task.");
-                    player.sendMessage("§eIf you believe this is an error, contact a developer.");
-                    return; // Block completion
-                } else {
-                    player.sendMessage("§eWarning only - proceeding with save.");
-                }
+            for (String line : ParentRegionFeedback.chatLines(validation, BLOCKED_ADVICE,
+                    "Warning only - saving the location anyway.")) {
+                player.sendMessage(line);
+            }
+            if (!validation.isValid() && validation.isBlocking()) {
+                return; // Block completion
             }
             
             player.sendMessage("§7Completing task...");
@@ -304,20 +305,8 @@ public class LocationTaskHandler implements IWorldTaskHandler {
         
         String outputJson = output.toString();
 
-        // Validate again before completing (safety net)
-        Location validationLocation = context.capturedLocation;
-        if (validationLocation == null) {
-            validationLocation = new Location(player.getWorld(), x, y, z, yaw, pitch);
-        }
-
-        ValidationResult validation = validateLocation(player, validationLocation, context);
-        if (!validation.isValid() && validation.isBlocking()) {
-            player.sendMessage("§c✗ Validation Failed:");
-            player.sendMessage("§c" + validation.getMessage());
-            player.sendMessage("§eTask not completed. Please move to a valid location and type 'save' again.");
-            player.sendMessage("§eOr type 'cancel' to abort the task.");
-            return;
-        }
+        // KNG-173: no second validation here. captureLocation validated this same location just before and stopped
+        // on a block; validating again only repeated its messages (and a warning would have been shown twice).
 
         // Complete the task via API
         // Backend will extract this data and create Location entity during finalization
@@ -373,13 +362,13 @@ public class LocationTaskHandler implements IWorldTaskHandler {
             }
             
             JsonObject input = JsonParser.parseString(context.inputJson).getAsJsonObject();
-            if (!input.has("validationContext")) {
+            if (!input.has("validationContext") || !input.get("validationContext").isJsonObject()) {
                 LOGGER.info("No validationContext in InputJson - skipping validation");
                 return ValidationResult.success("No validation configured");
             }
             
             JsonObject validationContext = input.getAsJsonObject("validationContext");
-            if (!validationContext.has("validationRules")) {
+            if (!validationContext.has("validationRules") || !validationContext.get("validationRules").isJsonArray()) {
                 LOGGER.info("No validationRules in context - skipping validation");
                 return ValidationResult.success("No validation rules");
             }
@@ -387,22 +376,20 @@ public class LocationTaskHandler implements IWorldTaskHandler {
             JsonArray rules = validationContext.getAsJsonArray("validationRules");
             LOGGER.info("Found " + rules.size() + " validation rule(s)");
             
-            // Execute each validation rule
+            // Execute every validation rule; a block from any rule wins over warnings (KNG-173)
+            List<ValidationResult> results = new ArrayList<>();
             for (JsonElement ruleElement : rules) {
                 JsonObject rule = ruleElement.getAsJsonObject();
                 String validationType = rule.get("validationType").getAsString();
                 LOGGER.info("Processing validation rule: " + validationType);
                 
                 if ("LocationInsideRegion".equals(validationType)) {
-                    ValidationResult result = validateLocationInsideRegion(player, location, rule);
-                    if (!result.isValid()) {
-                        return result; // Return first failure
-                    }
+                    results.add(validateLocationInsideRegion(player, location, rule));
                 }
                 // Add more validation types here as needed
             }
             
-            return ValidationResult.success("All validations passed");
+            return ParentRegionFeedback.combine(results);
             
         } catch (Exception e) {
             LOGGER.warning("Validation error for task " + context.taskId + ": " + e.getMessage());
@@ -428,14 +415,16 @@ public class LocationTaskHandler implements IWorldTaskHandler {
     private ValidationResult validateLocationInsideRegion(Player player, Location location, JsonObject rule) {
         try {
             // Parse config
-            JsonObject config = JsonParser.parseString(rule.get("configJson").getAsString()).getAsJsonObject();
+            JsonObject config = rule.has("configJson") && !rule.get("configJson").isJsonNull()
+                ? JsonParser.parseString(rule.get("configJson").getAsString()).getAsJsonObject()
+                : new JsonObject();
 
             //Log config for debugging
             LOGGER.info("Validating LocationInsideRegion with config: " + config.toString());
             
             // Get pre-resolved placeholders from InputJson (if provided by frontend)
             JsonObject preResolvedPlaceholders = new JsonObject();
-            if (rule.has("preResolvedPlaceholders") && !rule.get("preResolvedPlaceholders").isJsonNull()) {
+            if (rule.has("preResolvedPlaceholders") && rule.get("preResolvedPlaceholders").isJsonObject()) {
                 preResolvedPlaceholders = rule.getAsJsonObject("preResolvedPlaceholders");
                 LOGGER.info("Pre-resolved placeholders from frontend: " + preResolvedPlaceholders.toString());
             }
@@ -464,26 +453,31 @@ public class LocationTaskHandler implements IWorldTaskHandler {
             }
             
             LOGGER.info("Resolved parent region ID: " + parentRegionId + " from dependency path: " + dependencyPath);
-            
-            // Get WorldGuard region manager
+            ParentRegionFeedback parent = ParentRegionFeedback.of(rule, depValue, parentRegionId);
+
+            // KNG-173: the parent region lives in the dependency's world when it names a loaded one, else the
+            // location's. Every failure below follows the rule's isBlocking and names the parent.
+            World locationWorld = location.getWorld();
+            World parentWorld = resolveParentWorld(parent.worldName(), locationWorld);
             RegionManager regionManager = WorldGuard.getInstance()
                 .getPlatform()
                 .getRegionContainer()
-                .get(BukkitAdapter.adapt(location.getWorld()));
+                .get(BukkitAdapter.adapt(parentWorld));
             
             if (regionManager == null) {
-                return ValidationResult.blockingFailure("WorldGuard region manager not available for this world");
+                return parent.noRegionData(parentWorld.getName());
             }
-            
-            boolean isBlocking = rule.has("isBlocking") && rule.get("isBlocking").getAsBoolean();
 
-            // Get parent region
             ProtectedRegion parentRegion = regionManager.getRegion(parentRegionId);
             if (parentRegion == null) {
                 // KNG-131: the check could not run, so the rule's "outside" message would be wrong.
-                String errorMsg = regionNotFoundMessage(parentRegionId, location.getWorld().getName());
-                LOGGER.info("LocationInsideRegion validation failed: " + errorMsg);
-                return new ValidationResult(false, errorMsg, isBlocking);
+                ValidationResult missing = parent.parentRegionMissing(parentWorld.getName());
+                LOGGER.info("LocationInsideRegion validation failed: " + missing.getMessage());
+                return missing;
+            }
+
+            if (!parentWorld.getName().equals(locationWorld.getName())) {
+                return parent.wrongWorld("This location", locationWorld.getName(), parentWorld.getName());
             }
             
             // Check if location is inside parent region
@@ -491,21 +485,20 @@ public class LocationTaskHandler implements IWorldTaskHandler {
             boolean isInside = parentRegion.contains(blockLoc);
             
             // Plugin-computed placeholders override the pre-resolved ones from the frontend
-            JsonObject allPlaceholders = PlaceholderInterpolationUtil.mergePlaceholders(
-                preResolvedPlaceholders,
-                computedPlaceholders(depValue, parentRegion.getId(), location.getX(), location.getY(), location.getZ()));
+            JsonObject coordinates = coordinatePlaceholders(location.getX(), location.getY(), location.getZ());
 
             if (!isInside) {
-                String errorMsg = rule.get("errorMessage").getAsString();
-                errorMsg = PlaceholderInterpolationUtil.interpolate(errorMsg, allPlaceholders);
-                return new ValidationResult(false, errorMsg, isBlocking);
+                String errorMsg = rule.has("errorMessage") && !rule.get("errorMessage").isJsonNull()
+                    ? parent.interpolate(rule.get("errorMessage").getAsString(), preResolvedPlaceholders, coordinates)
+                    : null;
+                return parent.notInside(errorMsg, null);
             }
             
             // Success - interpolate success message if present
             String successMsg = "Location is inside region";
             if (rule.has("successMessage") && !rule.get("successMessage").isJsonNull()) {
-                successMsg = rule.get("successMessage").getAsString();
-                successMsg = PlaceholderInterpolationUtil.interpolate(successMsg, allPlaceholders);
+                successMsg = parent.interpolate(rule.get("successMessage").getAsString(), preResolvedPlaceholders,
+                    coordinates);
             }
             
             player.sendMessage("§a✓ " + successMsg);
@@ -519,36 +512,27 @@ public class LocationTaskHandler implements IWorldTaskHandler {
         }
     }
 
-    /** KNG-131: the message when the dependency names a region this world does not have. */
-    static String regionNotFoundMessage(String regionId, String worldName) {
-        return "Cannot check the location: region '" + regionId + "' does not exist in world '" + worldName
-            + "'. Check the form's region before saving.";
+    /** The dependency's world when it names one that is loaded, else {@code fallback} (KNG-173). */
+    private static World resolveParentWorld(String dependencyWorld, World fallback) {
+        if (dependencyWorld != null) {
+            World named = Bukkit.getWorld(dependencyWorld);
+            if (named != null) {
+                return named;
+            }
+            LOGGER.warning("World " + dependencyWorld + " named by the validation dependency is not loaded; "
+                + "looking for the parent region in " + fallback.getName());
+        }
+        return fallback;
     }
 
     /**
-     * The placeholders the plugin fills in a LocationInsideRegion message, matching the API's
-     * validator: {coordinates}, {regionName} and {parentEntityName} (the dependency's name, else
-     * the region id).
+     * The {coordinates} placeholder of a LocationInsideRegion message, matching the API's validator. The parent's
+     * placeholders ({regionName}, {parentEntityName}, ...) come from {@link ParentRegionFeedback#placeholders()}.
      */
-    static JsonObject computedPlaceholders(JsonElement depValue, String regionId, double x, double y, double z) {
+    static JsonObject coordinatePlaceholders(double x, double y, double z) {
         JsonObject placeholders = new JsonObject();
-        placeholders.addProperty("regionName", regionId);
         placeholders.addProperty("coordinates", String.format(Locale.ROOT, "(%.2f, %.2f, %.2f)", x, y, z));
-        placeholders.addProperty("parentEntityName", entityName(depValue, regionId));
         return placeholders;
-    }
-
-    private static String entityName(JsonElement depValue, String fallback) {
-        if (depValue != null && depValue.isJsonObject()) {
-            JsonObject entity = depValue.getAsJsonObject();
-            for (String key : entity.keySet()) {
-                JsonElement value = entity.get(key);
-                if (key.equalsIgnoreCase("name") && value.isJsonPrimitive() && !value.getAsString().isBlank()) {
-                    return value.getAsString();
-                }
-            }
-        }
-        return fallback;
     }
 
     /**
