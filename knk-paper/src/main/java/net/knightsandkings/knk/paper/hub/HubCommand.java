@@ -19,12 +19,12 @@ public final class HubCommand implements TabExecutor {
 
     private final HubOutageService outage;
     private final HubOutageService.Access access;
-    private final HubOutageService.Transfer transfer;
+    private final HubOutageService.Blocker blocker;
 
-    public HubCommand(HubOutageService outage, HubOutageService.Access access, HubOutageService.Transfer transfer) {
+    public HubCommand(HubOutageService outage, HubOutageService.Access access, HubOutageService.Blocker blocker) {
         this.outage = Objects.requireNonNull(outage, "outage");
         this.access = Objects.requireNonNull(access, "access");
-        this.transfer = Objects.requireNonNull(transfer, "transfer");
+        this.blocker = Objects.requireNonNull(blocker, "blocker");
     }
 
     @Override
@@ -47,7 +47,7 @@ public final class HubCommand implements TabExecutor {
             outage.offerReturn(player);
             return true;
         }
-        outage.returnTo(player, token, access, transfer);
+        outage.returnTo(player, token, access, blocker);
         return true;
     }
 

@@ -9,7 +9,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.function.BiPredicate;
+import java.util.function.BiFunction;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -24,6 +24,8 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerMoveEvent;
+import org.bukkit.event.player.PlayerTeleportEvent;
 
 import net.knightsandkings.knk.core.connectivity.ApiConnectivityState;
 import net.knightsandkings.knk.core.domain.settings.KnkGameSettings;
@@ -68,25 +70,31 @@ public final class HubOutageService implements Listener {
     private final HubOutageStore store;
     private final BooleanSupplier synced;
     private final Predicate<UUID> releaseFromMinigame;
-    private final Consumer<Player> arrivedInHub;
+    private final Consumer<Player> settle;
+    private final Transfer transfer;
     private final Clock clock;
     private final OutageClock outage;
     /** Players sent to their world's spawn in this outage: that action runs once per outage. */
     private final Set<UUID> sentToWorldSpawn = new HashSet<>();
     private Supplier<Collection<? extends Player>> online = Bukkit::getOnlinePlayers;
     private Function<String, World> worlds = Bukkit::getWorld;
-    private BiPredicate<World, Location> safe = (world, at) -> net.knightsandkings.knk.core.teleport.SafeLocationFinder.isSafe(
-        new net.knightsandkings.knk.paper.teleport.BukkitBlockProbe(world), at.getBlockX(), at.getBlockY(), at.getBlockZ());
+    private BiFunction<World, Location, Optional<Location>> safeSpot = HubOutageService::safeSpotNear;
+    private Runnable onRecovery = () -> { };
+    /** Players being returned to their spot now: that teleport out of the hub is not "leaving" the offer. */
+    private final Set<UUID> returning = new HashSet<>();
+    /** The spools are read at most every few seconds while recovering (it parses their files). */
+    private int ticksUntilSyncCheck;
 
     /**
      * @param groups              a player's groups in precedence order (empty when unknown)
      * @param synced              every durable spool is empty (the backlog is synced)
      * @param releaseFromMinigame frees the player from a Siege round (aborting it); false = not now, try later
-     * @param arrivedInHub        after an evacuation into the hub: the hub world's game mode, as on a join
+     * @param settle              after the plugin moved a player into another world: that world's game mode, as on a join
+     * @param transfer            moves a player on the plugin's behalf (exit pass, WorldGuard resync)
      */
     public HubOutageService(HubService hub, Supplier<KnkGameSettings> settings, Function<UUID, List<PermissionGroupRef>> groups,
                             Function<Player, ActiveMode> activeMode, HubOutageStore store, BooleanSupplier synced,
-                            Predicate<UUID> releaseFromMinigame, Consumer<Player> arrivedInHub, Clock clock) {
+                            Predicate<UUID> releaseFromMinigame, Consumer<Player> settle, Transfer transfer, Clock clock) {
         this.hub = Objects.requireNonNull(hub, "hub");
         this.settings = Objects.requireNonNull(settings, "settings");
         this.groups = Objects.requireNonNull(groups, "groups");
@@ -94,17 +102,35 @@ public final class HubOutageService implements Listener {
         this.store = Objects.requireNonNull(store, "store");
         this.synced = Objects.requireNonNull(synced, "synced");
         this.releaseFromMinigame = Objects.requireNonNull(releaseFromMinigame, "releaseFromMinigame");
-        this.arrivedInHub = Objects.requireNonNull(arrivedInHub, "arrivedInHub");
+        this.settle = Objects.requireNonNull(settle, "settle");
+        this.transfer = Objects.requireNonNull(transfer, "transfer");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.outage = new OutageClock(store.outageStartedAt().orElse(null));
     }
 
-    /** Tests: the online players, loaded worlds and the safe-spot check without a server. */
+    /** Tests: the online players, loaded worlds and the safe-spot search without a server. */
     void useForTests(Supplier<Collection<? extends Player>> online, Function<String, World> worlds,
-                     BiPredicate<World, Location> safe) {
+                     BiFunction<World, Location, Optional<Location>> safeSpot) {
         this.online = online;
         this.worlds = worlds;
-        this.safe = safe;
+        this.safeSpot = safeSpot;
+    }
+
+    /** Runs when the API comes back after an outage (main thread), e.g. restarting the Siege lobbies it stopped. */
+    public void setOnRecovery(Runnable onRecovery) {
+        this.onRecovery = onRecovery != null ? onRecovery : () -> { };
+    }
+
+    /**
+     * The saved spot, or a safe one within a block of it (standing on a slab, a path or farmland puts the feet inside
+     * that block; a jump or a fall saves a spot just above the ground). Empty when there is none.
+     */
+    static Optional<Location> safeSpotNear(World world, Location at) {
+        var probe = new net.knightsandkings.knk.paper.teleport.BukkitBlockProbe(world);
+        return net.knightsandkings.knk.core.teleport.SafeLocationFinder.find(probe, at.getBlockX(), at.getBlockY(), at.getBlockZ(), 1)
+            .map(spot -> spot.x() == at.getBlockX() && spot.y() == at.getBlockY() && spot.z() == at.getBlockZ()
+                ? at
+                : new Location(world, spot.x() + 0.5, spot.y(), spot.z() + 0.5, at.getYaw(), at.getPitch()));
     }
 
     /** Whether the API is down now (outage rules apply). */
@@ -155,6 +181,7 @@ public final class HubOutageService implements Listener {
             outage.up(now);
             if (wasOutage) {
                 LOGGER.info("[KnK Hub] API back; the outage timer resets once the backlog is synced");
+                onRecovery.run();
                 for (Player player : List.copyOf(online.get())) {
                     offerReturn(player);
                 }
@@ -165,7 +192,7 @@ public final class HubOutageService implements Listener {
     /** Every second: a full recovery resets the timer; during an outage, the due actions run. */
     public void tick() {
         Instant now = clock.instant();
-        if (outage.tick(now, synced.getAsBoolean())) {
+        if (outage.tick(now, this::syncedNow)) {
             store.setOutageStartedAt(null);
             sentToWorldSpawn.clear();
             LOGGER.info("[KnK Hub] Backlog synced after the outage; the outage timer is reset");
@@ -176,6 +203,15 @@ public final class HubOutageService implements Listener {
         for (Player player : List.copyOf(online.get())) {
             applyIfDue(player, now);
         }
+    }
+
+    /** Whether the backlog is synced, asked at most every 5 seconds (the spools are parsed from disk). */
+    private boolean syncedNow() {
+        if (ticksUntilSyncCheck-- > 0) {
+            return false;
+        }
+        ticksUntilSyncCheck = 4;
+        return synced.getAsBoolean();
     }
 
     void applyIfDue(Player player, Instant now) {
@@ -198,6 +234,9 @@ public final class HubOutageService implements Listener {
     private void sendToHub(Player player, Instant now) {
         Optional<Location> spawn = hub.admissionSpawn();
         if (spawn.isEmpty()) {
+            if (player.isOp()) {
+                return; // operators may join while the hub is unusable, to fix it; don't kick them out again
+            }
             // §13: no usable hub - kick with a clear message rather than leave them in unprotected gameplay.
             kick(player, now, "The server lost its connection to its services and its hub is not available. "
                 + "Please come back later.");
@@ -206,8 +245,8 @@ public final class HubOutageService implements Listener {
         if (!prepare(player, now)) {
             return;
         }
-        if (player.teleport(spawn.get())) {
-            arrivedInHub.accept(player);
+        if (transfer.move(player, spawn.get())) {
+            settle.accept(player);
             player.sendMessage(Component.text("The server lost its connection to its services, so you were moved to the "
                 + "hub. Your spot is saved: you can return to it once the services are back.").color(ColorOptions.error));
             LOGGER.info("[KnK Hub] Outage: moved " + player.getName() + " to the hub");
@@ -230,8 +269,8 @@ public final class HubOutageService implements Listener {
         if (!prepare(player, now)) {
             return;
         }
-        sentToWorldSpawn.add(player.getUniqueId());
-        if (player.teleport(world.getSpawnLocation())) {
+        if (transfer.move(player, world.getSpawnLocation())) {
+            sentToWorldSpawn.add(player.getUniqueId());
             player.sendMessage(Component.text("The server lost its connection to its services, so you were moved to this "
                 + "world's spawn. Your spot is saved: you can return to it once the services are back.").color(ColorOptions.error));
             LOGGER.info("[KnK Hub] Outage: moved " + player.getName() + " to the spawn of " + world.getName());
@@ -247,14 +286,17 @@ public final class HubOutageService implements Listener {
         return true;
     }
 
-    /** Saves where the player is now as their return spot, unless they already have one (the original wins). */
+    /**
+     * Saves where the player is now as their return spot. A spot saved earlier in this outage wins; one from an earlier
+     * outage is replaced. Never a spot in the hub (a Siege member restored to where they queued, for example).
+     */
     void saveReturn(Player player, Instant now) {
         Location at = player.getLocation();
-        if (at.getWorld() == null) {
+        if (at.getWorld() == null || hub.inHub(at)) {
             return;
         }
-        store.saveIfAbsent(new ReturnRecord(player.getUniqueId(), at.getWorld().getName(), at.getX(), at.getY(), at.getZ(),
-            at.getYaw(), at.getPitch(), now));
+        store.save(new ReturnRecord(player.getUniqueId(), at.getWorld().getName(), at.getX(), at.getY(), at.getZ(),
+            at.getYaw(), at.getPitch(), now), store.outageStartedAt().orElse(null));
     }
 
     /**
@@ -265,8 +307,9 @@ public final class HubOutageService implements Listener {
         if (loggedOutAt == null || loggedOutAt.getWorld() == null || hub.inHub(loggedOutAt)) {
             return;
         }
-        store.saveIfAbsent(new ReturnRecord(player, loggedOutAt.getWorld().getName(), loggedOutAt.getX(), loggedOutAt.getY(),
-            loggedOutAt.getZ(), loggedOutAt.getYaw(), loggedOutAt.getPitch(), clock.instant()));
+        store.save(new ReturnRecord(player, loggedOutAt.getWorld().getName(), loggedOutAt.getX(), loggedOutAt.getY(),
+            loggedOutAt.getZ(), loggedOutAt.getYaw(), loggedOutAt.getPitch(), clock.instant()),
+            store.outageStartedAt().orElse(null));
     }
 
     /** Once the account is loaded: the return offer, or while the API is still down, that the spot is kept. */
@@ -290,16 +333,23 @@ public final class HubOutageService implements Listener {
         Optional<String> refusal(Player player, Location at);
     }
 
+    /** Why a player may not leave for their saved spot now (frozen, in a match), or empty. */
+    @FunctionalInterface
+    public interface Blocker {
+        Optional<String> reason(Player player);
+    }
+
     /** What {@code /hub return} did. */
-    public enum ReturnOutcome { RETURNED, NO_RECORD, STALE, SERVICES_DOWN, INVALIDATED, FAILED }
+    public enum ReturnOutcome { RETURNED, NO_RECORD, STALE, SERVICES_DOWN, BLOCKED, UNSAFE, INVALIDATED, FAILED }
 
     /**
      * {@code /hub return <token>} (§12): back to the saved spot, only after the player chose it, with the API up, and
      * only for the current record ({@code token} is its save time, so an old or repeated click does nothing). A spot in a
-     * missing world, an unsafe spot or one the player may no longer enter removes the record with a message; it never
-     * sends them somewhere else. The record is consumed only after a successful teleport.
+     * missing world or one the player may no longer enter removes the record with a message; a spot with no safe place
+     * within a block keeps it for later. It never sends them somewhere else. The record is consumed only after a
+     * successful teleport; a frozen player or a match member can't use it.
      */
-    public ReturnOutcome returnTo(Player player, long token, Access access, Transfer transfer) {
+    public ReturnOutcome returnTo(Player player, long token, Access access, Blocker blocker) {
         Optional<ReturnRecord> found = store.returnRecord(player.getUniqueId());
         if (found.isEmpty()) {
             player.sendMessage(Component.text("You have no saved spot to return to.").color(ColorOptions.error));
@@ -315,23 +365,40 @@ public final class HubOutageService implements Listener {
                 .color(ColorOptions.error));
             return ReturnOutcome.SERVICES_DOWN;
         }
+        Optional<String> blocked = blocker.reason(player);
+        if (blocked.isPresent()) {
+            player.sendMessage(Component.text(blocked.get() + " Your spot stays saved.").color(ColorOptions.error));
+            return ReturnOutcome.BLOCKED;
+        }
         World world = worlds.apply(record.world());
         if (world == null) {
             return invalidate(player, "Your saved spot is in world '" + record.world() + "', which is not available.");
         }
-        Location target = new Location(world, record.x(), record.y(), record.z(), record.yaw(), record.pitch());
-        if (!safe.test(world, target)) {
-            return invalidate(player, "Your saved spot is no longer safe to stand on.");
+        Location saved = new Location(world, record.x(), record.y(), record.z(), record.yaw(), record.pitch());
+        Optional<Location> safe = safeSpot.apply(world, saved);
+        if (safe.isEmpty()) {
+            player.sendMessage(Component.text("Your saved spot is not safe to stand on right now. It stays saved; try "
+                + "again later.").color(ColorOptions.error));
+            return ReturnOutcome.UNSAFE;
         }
+        Location target = safe.get();
         Optional<String> refused = access.refusal(player, target);
         if (refused.isPresent()) {
             return invalidate(player, "You may no longer go to your saved spot: " + refused.get());
         }
-        if (!transfer.move(player, target)) {
+        boolean moved;
+        returning.add(player.getUniqueId());
+        try {
+            moved = transfer.move(player, target);
+        } finally {
+            returning.remove(player.getUniqueId());
+        }
+        if (!moved) {
             player.sendMessage(Component.text("The return failed. Your spot stays saved; try again.").color(ColorOptions.error));
             return ReturnOutcome.FAILED;
         }
         store.remove(player.getUniqueId());
+        settle.accept(player);
         player.sendMessage(Component.text("Welcome back.").color(ColorOptions.message));
         LOGGER.info("[KnK Hub] " + player.getName() + " returned to their spot from before the outage");
         return ReturnOutcome.RETURNED;
@@ -346,6 +413,34 @@ public final class HubOutageService implements Listener {
     /** A voluntary gameplay entry (the hub portal) ends the return offer (§12, §13). */
     public void enteredGameplay(Player player) {
         store.remove(player.getUniqueId());
+    }
+
+    /** Leaving the hub any other way once the API is up (walking out, /spawn, /warp) also ends the return offer. */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onMove(PlayerMoveEvent event) {
+        Location from = event.getFrom();
+        Location to = event.getTo();
+        if (from.getBlockX() == to.getBlockX() && from.getBlockY() == to.getBlockY() && from.getBlockZ() == to.getBlockZ()
+                && from.getWorld() == to.getWorld()) {
+            return;
+        }
+        leftHub(event.getPlayer(), from, to);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onTeleport(PlayerTeleportEvent event) {
+        leftHub(event.getPlayer(), event.getFrom(), event.getTo());
+    }
+
+    void leftHub(Player player, Location from, Location to) {
+        if (outage.inOutage() || returning.contains(player.getUniqueId()) || store.returnRecord(player.getUniqueId()).isEmpty()) {
+            return;
+        }
+        if (hub.inHub(from) && !hub.inHub(to)) {
+            store.remove(player.getUniqueId());
+            player.sendMessage(Component.text("You left the hub, so the offer to return to your spot from before the "
+                + "outage has ended.").color(ColorOptions.message));
+        }
     }
 
     /** Sends the return offer (API up) or the "your spot is saved" notice (API down), when the player has a record. */

@@ -196,7 +196,8 @@ public class PlayerListener implements Listener {
 				player.setGameMode(gameSettings.gameModeFor(player.getWorld()));
 				player.setFlying(false);
 			}
-		} else if (!knkPermissible.hasPermission(player, "knk.mode.owner")) {
+		} else if (!knkPermissible.hasPermission(player, "knk.mode.owner") && !inStaffOrOwnerMode(user)) {
+			// Players in staff or owner mode join where they logged out, like owners (decision 2026-10-12).
 			// The server spawn /spawn uses, in its world's default game mode (DESIGN §3.2/§3.4). Never
 			// waits on the API: the spot was resolved in the background. JoinLoadingGuard.hold (later
 			// in this join) switches to ADVENTURE and hands this mode back when the account is loaded.
@@ -414,6 +415,11 @@ public class PlayerListener implements Listener {
 	/** The player's title name for {title} in join/leave messages (KNG-52 round 3); null when none or not cached yet. */
 	private static String titleOf(UserSummary user) {
 		return user != null ? user.titleName() : null;
+	}
+
+	private static boolean inStaffOrOwnerMode(UserSummary user) {
+		return user != null && user.activeMode() != null
+			&& user.activeMode() != net.knightsandkings.knk.core.domain.users.ActiveMode.NONE;
 	}
 
 	private static List<PermissionGroupRef> groupsOf(UserSummary user) {

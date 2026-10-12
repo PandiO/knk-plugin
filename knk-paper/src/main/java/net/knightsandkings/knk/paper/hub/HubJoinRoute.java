@@ -9,8 +9,9 @@ import net.knightsandkings.knk.core.settings.GroupOverrides;
 /**
  * Where a joining player goes when a hub is selected (developer decision 2026-10-12, hub DESIGN §16.4 decision 8): the
  * hub replaces only the server's default join spawn. Owners and a group's "join where they logged out" keep the last
- * location, and a group's own join spawn wins, as without a hub. While the API is down every join goes to the hub
- * (§13: gameplay entry needs the API), unless the player is exempt by an active-mode exemption.
+ * location, and a group's own join spawn wins, as without a hub. A player in staff or owner mode always joins where they
+ * logged out. While the API is down every other join goes to the hub (§13: gameplay entry needs the API), unless the
+ * player is exempt by an active-mode exemption.
  */
 public enum HubJoinRoute {
     /** No hub is selected: the join works as before. */
@@ -22,7 +23,7 @@ public enum HubJoinRoute {
      * becomes their return spot (§12).
      */
     OUTAGE_HUB,
-    /** An owner, or a group that joins where they logged out: no teleport. */
+    /** A player in staff or owner mode, an owner, or a group that joins where they logged out: no teleport. */
     LAST_LOCATION,
     /** The player's group join spawn. */
     GROUP_SPAWN;
@@ -31,13 +32,19 @@ public enum HubJoinRoute {
      * @param hubConfigured      a hub is selected
      * @param apiDown            the API is down (KNG-115 DOWN)
      * @param exemptDuringOutage the player is exempt from the outage rules (active staff/owner mode, ticked box)
+     * @param inMode             the player's persisted active mode is staff or owner (decision 2026-10-12: they join
+     *                           where they logged out, also during an outage)
      * @param owner              the player holds {@code knk.mode.owner} (ops included)
      * @param groupSpawnUsable   the player's group join spawn resolves to a spot in a loaded world
      */
-    public static HubJoinRoute decide(boolean hubConfigured, boolean apiDown, boolean exemptDuringOutage, boolean owner,
-                                      KnkGameSettings settings, List<PermissionGroupRef> groups, boolean groupSpawnUsable) {
+    public static HubJoinRoute decide(boolean hubConfigured, boolean apiDown, boolean exemptDuringOutage, boolean inMode,
+                                      boolean owner, KnkGameSettings settings, List<PermissionGroupRef> groups,
+                                      boolean groupSpawnUsable) {
         if (!hubConfigured) {
             return NO_HUB;
+        }
+        if (inMode) {
+            return LAST_LOCATION;
         }
         HubJoinRoute normal;
         if (owner || GroupOverrides.joinsAtLastLocation(settings, groups)) {

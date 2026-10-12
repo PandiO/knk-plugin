@@ -2507,8 +2507,7 @@ public class KnKPlugin extends JavaPlugin {
      */
     private net.knightsandkings.knk.paper.hub.HubJoinRoute hubJoinRoute(java.util.UUID uuid) {
         var settings = gameSettingsManager != null ? gameSettingsManager.current() : null;
-        java.util.List<net.knightsandkings.knk.core.domain.users.PermissionGroupRef> groups = getCacheManager().getUserCache()
-            .getByUuid(uuid).map(net.knightsandkings.knk.core.domain.users.UserSummary::permissionGroups).orElse(java.util.List.of());
+        java.util.List<net.knightsandkings.knk.core.domain.users.PermissionGroupRef> groups = hubGroupsOf(uuid);
         var connectivity = getApiConnectivity();
         boolean apiDown = connectivity != null
             && connectivity.state() == net.knightsandkings.knk.core.connectivity.ApiConnectivityState.DOWN;
@@ -2517,21 +2516,23 @@ public class KnKPlugin extends JavaPlugin {
             .completeOnTimeout(net.knightsandkings.knk.core.domain.permissions.PermissionDecision.UNAVAILABLE, 3, java.util.concurrent.TimeUnit.SECONDS)
             .join() == net.knightsandkings.knk.core.domain.permissions.PermissionDecision.ALLOWED;
         boolean groupSpawn = gameSettingsManager != null && gameSettingsManager.groupSpawnPoint(groups) != null;
+        boolean inMode = persistedMode(uuid) != net.knightsandkings.knk.core.domain.users.ActiveMode.NONE;
         return net.knightsandkings.knk.paper.hub.HubJoinRoute.decide(hubService != null && hubService.configured(), apiDown,
-            hubOutageExempt(uuid), owner, settings, groups, groupSpawn);
+            hubOutageExempt(uuid), inMode, owner, settings, groups, groupSpawn);
     }
 
     /** Whether a joining player is exempt from the outage rules (persisted staff/owner mode with a ticked group box). */
     private boolean hubOutageExempt(java.util.UUID uuid) {
-        if (hubOutageService == null) {
-            return false;
-        }
-        net.knightsandkings.knk.core.domain.users.ActiveMode mode = getCacheManager().getUserCache().getStale(uuid)
+        return hubOutageService != null && hubOutageService.exemptOnJoin(uuid, persistedMode(uuid));
+    }
+
+    /** A joining player's persisted active mode (user cache, else the KNG-58 offline store); NONE when unknown. */
+    private net.knightsandkings.knk.core.domain.users.ActiveMode persistedMode(java.util.UUID uuid) {
+        return getCacheManager().getUserCache().getStale(uuid)
             .map(net.knightsandkings.knk.core.domain.users.UserSummary::activeMode)
             .or(() -> offlineSecurity == null ? java.util.Optional.empty()
                 : offlineSecurity.identity(uuid).map(net.knightsandkings.knk.core.offline.OfflineSecurityStore.Identity::activeMode))
             .orElse(net.knightsandkings.knk.core.domain.users.ActiveMode.NONE);
-        return hubOutageService.exemptOnJoin(uuid, mode);
     }
 
     /** A player's groups in precedence order, also from a stale cache entry (during an outage); empty when unknown. */
@@ -2554,7 +2555,13 @@ public class KnKPlugin extends JavaPlugin {
             () -> outageBacklogChecks.stream().allMatch(java.util.function.BooleanSupplier::getAsBoolean),
             uuid -> siegeService == null || siegeService.releaseForOutage(uuid),
             this::settleInWorld,
+            this::hubTransfer,
             java.time.Clock.systemUTC());
+        hubOutageService.setOnRecovery(() -> {
+            if (siegeService != null) {
+                siegeService.resumeAfterOutage();
+            }
+        });
         hubAdmission.setOutageAdmission(hubOutageService::savedOnJoin);
         getServer().getPluginManager().registerEvents(hubOutageService, this);
         getServer().getScheduler().runTaskTimer(this, hubOutageService::tick, 20L, 20L);
@@ -2575,7 +2582,15 @@ public class KnKPlugin extends JavaPlugin {
 
         var hubCommand = getCommand("hub");
         if (hubCommand != null) {
-            var executor = new net.knightsandkings.knk.paper.hub.HubCommand(hubOutageService, access, this::hubTransfer);
+            var executor = new net.knightsandkings.knk.paper.hub.HubCommand(hubOutageService, access, player -> {
+                if (adminFreezeManager != null && adminFreezeManager.isFrozen(player.getUniqueId())) {
+                    return java.util.Optional.of("You are frozen.");
+                }
+                if (siegeService != null && siegeService.isParticipant(player.getUniqueId())) {
+                    return java.util.Optional.of("You are in a siege.");
+                }
+                return java.util.Optional.empty();
+            });
             hubCommand.setExecutor(executor);
             hubCommand.setTabCompleter(executor);
         }

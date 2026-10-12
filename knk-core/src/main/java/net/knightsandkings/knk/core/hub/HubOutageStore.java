@@ -71,7 +71,20 @@ public final class HubOutageStore {
 
     /** Saves a return record unless the player already has one (the original spot wins). Returns whether it was saved. */
     public synchronized boolean saveIfAbsent(ReturnRecord record) {
-        if (record == null || returns.containsKey(record.player())) {
+        return save(record, null);
+    }
+
+    /**
+     * Saves a return record for the current outage: a record the player already has from this outage keeps the
+     * original spot, but one saved before {@code currentOutageStart} (an offer they never used) is replaced, so a new
+     * outage never sends them back to an old spot. Returns whether it was saved.
+     */
+    public synchronized boolean save(ReturnRecord record, Instant currentOutageStart) {
+        if (record == null) {
+            return false;
+        }
+        ReturnRecord existing = returns.get(record.player());
+        if (existing != null && (currentOutageStart == null || !existing.savedAt().isBefore(currentOutageStart))) {
             return false;
         }
         returns.put(record.player(), record);

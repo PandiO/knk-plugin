@@ -29,12 +29,12 @@ class HubJoinRouteTest {
         KnkHubSettings.none());
 
     private static HubJoinRoute route(boolean apiDown, boolean exempt, boolean owner, List<PermissionGroupRef> groups) {
-        return HubJoinRoute.decide(true, apiDown, exempt, owner, SETTINGS, groups, true);
+        return HubJoinRoute.decide(true, apiDown, exempt, false, owner, SETTINGS, groups, true);
     }
 
     @Test
     void withoutAHubNothingChanges() {
-        assertEquals(HubJoinRoute.NO_HUB, HubJoinRoute.decide(false, true, false, false, SETTINGS, List.of(DEFAULT), true));
+        assertEquals(HubJoinRoute.NO_HUB, HubJoinRoute.decide(false, true, false, false, false, SETTINGS, List.of(DEFAULT), true));
     }
 
     @Test
@@ -48,7 +48,7 @@ class HubJoinRouteTest {
 
     @Test
     void aGroupSpawnThatCannotBeReachedFallsBackToTheHub() {
-        assertEquals(HubJoinRoute.HUB, HubJoinRoute.decide(true, false, false, false, SETTINGS, List.of(NOBLE), false));
+        assertEquals(HubJoinRoute.HUB, HubJoinRoute.decide(true, false, false, false, false, SETTINGS, List.of(NOBLE), false));
     }
 
     @Test
@@ -58,5 +58,12 @@ class HubJoinRouteTest {
         assertEquals(HubJoinRoute.OUTAGE_HUB, route(true, false, false, List.of(BUILDER)));
         assertEquals(HubJoinRoute.HUB, route(true, false, false, List.of(DEFAULT)), "would have gone to the hub anyway");
         assertEquals(HubJoinRoute.LAST_LOCATION, route(true, true, true, List.of(DEFAULT)));
+    }
+
+    @Test
+    void staffAndOwnerModeJoinWhereTheyLoggedOutAlsoDuringAnOutage() {
+        // Decision 2026-10-12.
+        assertEquals(HubJoinRoute.LAST_LOCATION, HubJoinRoute.decide(true, false, false, true, false, SETTINGS, List.of(DEFAULT), true));
+        assertEquals(HubJoinRoute.LAST_LOCATION, HubJoinRoute.decide(true, true, false, true, false, SETTINGS, List.of(NOBLE), true));
     }
 }

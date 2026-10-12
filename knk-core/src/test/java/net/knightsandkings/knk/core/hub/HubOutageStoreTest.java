@@ -57,4 +57,14 @@ class HubOutageStoreTest {
         assertTrue(store.outageStartedAt().isEmpty());
         assertTrue(Files.exists(dir.resolve("hub-outage.json.corrupt")));
     }
+
+    @Test
+    void aNewOutageReplacesAnOfferThatWasNeverUsed() {
+        HubOutageStore store = new HubOutageStore(null);
+        store.save(new ReturnRecord(ALICE, "world", 1, 64, 1, 0f, 0f, T0), T0);
+        Instant secondOutage = T0.plusSeconds(3600);
+        assertFalse(store.save(new ReturnRecord(ALICE, "world", 2, 64, 2, 0f, 0f, T0.plusSeconds(60)), T0), "same outage");
+        assertTrue(store.save(new ReturnRecord(ALICE, "world", 3, 64, 3, 0f, 0f, secondOutage.plusSeconds(5)), secondOutage));
+        assertEquals(3, store.returnRecord(ALICE).orElseThrow().x());
+    }
 }

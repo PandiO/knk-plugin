@@ -52,6 +52,7 @@ class HubOutageServiceTest {
     private final Set<UUID> inMatchEnding = new HashSet<>();
     private final List<Player> online = new ArrayList<>();
     private final List<Player> settled = new ArrayList<>();
+    private final List<Location> transfers = new ArrayList<>();
     private final HubOutageStore store = new HubOutageStore(null);
     private Instant now = T0;
     private HubService hub;
@@ -74,8 +75,9 @@ class HubOutageServiceTest {
             location -> location.getWorld() == hubWorld && location.getX() < 100 ? Set.of("town_4") : Set.of());
         outage = new HubOutageService(hub, () -> settings, uuid -> groups.getOrDefault(uuid, List.of()),
             player -> modes.getOrDefault(player.getUniqueId(), ActiveMode.NONE), store, () -> true,
-            uuid -> !inMatchEnding.contains(uuid), settled::add, Clock.fixed(T0, ZoneOffset.UTC));
-        outage.useForTests(() -> online, name -> worlds.get(name), (world, at) -> at.getY() > 0);
+            uuid -> !inMatchEnding.contains(uuid), settled::add, (player, to) -> transfers.add(to) && player.teleport(to),
+            Clock.fixed(T0, ZoneOffset.UTC));
+        outage.useForTests(() -> online, name -> worlds.get(name), (world, at) -> at.getY() > 0 ? Optional.of(at) : Optional.empty());
     }
 
     private Player player(Location at, PermissionGroupRef... groupRefs) {
@@ -101,6 +103,7 @@ class HubOutageServiceTest {
 
         outage.applyIfDue(alice, T0.plusSeconds(60));
         verify(alice).teleport(hub.admissionSpawn().orElseThrow());
+        assertEquals(List.of(hub.admissionSpawn().orElseThrow()), transfers, "through the plugin's transfer");
         assertEquals(List.of(alice), settled);
         assertEquals(500, store.returnRecord(alice.getUniqueId()).orElseThrow().x());
     }
@@ -151,15 +154,18 @@ class HubOutageServiceTest {
         outage.applyIfDue(alice, T0.plusSeconds(60));
         long token = store.returnRecord(alice.getUniqueId()).orElseThrow().savedAt().toEpochMilli();
         HubOutageService.Access open = (player, at) -> Optional.empty();
-        List<Location> moved = new ArrayList<>();
-        HubOutageService.Transfer transfer = (player, to) -> moved.add(to);
+        HubOutageService.Blocker free = player -> Optional.empty();
+        transfers.clear();
+        settled.clear();
 
-        assertEquals(HubOutageService.ReturnOutcome.SERVICES_DOWN, outage.returnTo(alice, token, open, transfer));
+        assertEquals(HubOutageService.ReturnOutcome.SERVICES_DOWN, outage.returnTo(alice, token, open, free));
         outage.connectivityChanged(ApiConnectivityState.UP);
-        assertEquals(HubOutageService.ReturnOutcome.STALE, outage.returnTo(alice, token - 1, open, transfer));
-        assertEquals(HubOutageService.ReturnOutcome.RETURNED, outage.returnTo(alice, token, open, transfer));
-        assertEquals(500, moved.get(0).getX());
-        assertEquals(HubOutageService.ReturnOutcome.NO_RECORD, outage.returnTo(alice, token, open, transfer), "no second return");
+        assertEquals(HubOutageService.ReturnOutcome.STALE, outage.returnTo(alice, token - 1, open, free));
+        assertEquals(HubOutageService.ReturnOutcome.BLOCKED, outage.returnTo(alice, token, open, player -> Optional.of("You are frozen.")));
+        assertEquals(HubOutageService.ReturnOutcome.RETURNED, outage.returnTo(alice, token, open, free));
+        assertEquals(500, transfers.get(0).getX());
+        assertEquals(List.of(alice), settled, "the destination world's game mode");
+        assertEquals(HubOutageService.ReturnOutcome.NO_RECORD, outage.returnTo(alice, token, open, free), "no second return");
     }
 
     @Test
@@ -171,7 +177,43 @@ class HubOutageServiceTest {
         outage.connectivityChanged(ApiConnectivityState.UP);
 
         assertEquals(HubOutageService.ReturnOutcome.INVALIDATED,
-            outage.returnTo(alice, token, (player, at) -> Optional.of("Oakhaven is closed"), (player, to) -> true));
+            outage.returnTo(alice, token, (player, at) -> Optional.of("Oakhaven is closed"), player -> Optional.empty()));
         assertTrue(store.returnRecord(alice.getUniqueId()).isEmpty());
+    }
+
+    @Test
+    void anUnsafeSpotStaysSavedForLater() {
+        Player alice = player(new Location(gameplay, 500, -10, 500));
+        outage.connectivityChanged(ApiConnectivityState.DOWN);
+        outage.applyIfDue(alice, T0.plusSeconds(60));
+        long token = store.returnRecord(alice.getUniqueId()).orElseThrow().savedAt().toEpochMilli();
+        outage.connectivityChanged(ApiConnectivityState.UP);
+
+        assertEquals(HubOutageService.ReturnOutcome.UNSAFE,
+            outage.returnTo(alice, token, (player, at) -> Optional.empty(), player -> Optional.empty()));
+        assertTrue(store.returnRecord(alice.getUniqueId()).isPresent());
+    }
+
+    @Test
+    void leavingTheHubAfterTheOutageEndsTheOfferButNotDuringIt() {
+        Player alice = player(new Location(gameplay, 500, 64, 500));
+        outage.connectivityChanged(ApiConnectivityState.DOWN);
+        outage.applyIfDue(alice, T0.plusSeconds(60));
+        Location inHub = new Location(hubWorld, 5, 65, 5);
+        Location outside = new Location(hubWorld, 150, 65, 5);
+
+        outage.leftHub(alice, inHub, outside);
+        assertTrue(store.returnRecord(alice.getUniqueId()).isPresent(), "during the outage the action brings them back");
+
+        outage.connectivityChanged(ApiConnectivityState.UP);
+        outage.leftHub(alice, inHub, outside);
+        assertTrue(store.returnRecord(alice.getUniqueId()).isEmpty());
+    }
+
+    @Test
+    void aSpotInsideTheHubIsNeverSaved() {
+        Player queued = player(new Location(hubWorld, 5, 65, 5));
+        outage.saveReturn(queued, T0);
+        assertTrue(store.returnRecord(queued.getUniqueId()).isEmpty(), "never a spot in the hub");
     }
 }

@@ -3,6 +3,7 @@ package net.knightsandkings.knk.core.hub;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.function.BooleanSupplier;
 
 /**
  * The outage delay timer (hub DESIGN §10, §13; developer decision 2026-10-12). The timer starts at the first drop of an
@@ -74,10 +75,15 @@ public final class OutageClock {
      * @param synced every durable spool is empty
      */
     public boolean tick(Instant now, boolean synced) {
+        return tick(now, () -> synced);
+    }
+
+    /** {@link #tick(Instant, boolean)}, asking {@code synced} only while recovering (it may read the spools). */
+    public boolean tick(Instant now, BooleanSupplier synced) {
         if (phase != Phase.RECOVERING || upSince == null) {
             return false;
         }
-        if (synced || !now.isBefore(upSince.plus(RECOVERY_CAP))) {
+        if (!now.isBefore(upSince.plus(RECOVERY_CAP)) || synced.getAsBoolean()) {
             phase = Phase.HEALTHY;
             startedAt = null;
             upSince = null;

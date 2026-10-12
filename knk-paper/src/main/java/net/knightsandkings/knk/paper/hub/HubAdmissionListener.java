@@ -69,7 +69,11 @@ public final class HubAdmissionListener implements Listener {
     @EventHandler(priority = EventPriority.HIGH)
     public void onSpawnLocation(AsyncPlayerSpawnLocationEvent event) {
         UUID uuid = event.getConnection().getProfile().getId();
-        if (uuid == null || !hub.configured()) {
+        if (uuid == null) {
+            return;
+        }
+        hub.consumeAdmitted(uuid); // a flag left by a connection that dropped before joining must not skip this join's teleport
+        if (!hub.configured()) {
             return;
         }
         HubJoinRoute joinRoute = route.apply(uuid);
