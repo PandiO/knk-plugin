@@ -14,7 +14,7 @@ import net.knightsandkings.knk.core.domain.users.PermissionGroupRef;
  * Which outage action applies to a player, after which delay, and whether they are exempt (hub DESIGN §13, §16.4
  * decision 5). Action and delay are separate fields: each comes from the first of the player's groups (in precedence
  * order) that sets it, else from the hub settings. A player is exempt while their <em>active</em> mode is staff or
- * owner and any of their groups ticks that mode's box; holding the node alone exempts nobody.
+ * owner (decision 2026-10-12); holding the node alone exempts nobody.
  */
 public final class OutagePolicy {
 
@@ -41,17 +41,12 @@ public final class OutagePolicy {
             Math.max(0, delay != null ? delay : hub.outageDelaySeconds()));
     }
 
+    /**
+     * Whether the player is exempt from the outage rules: their active mode is staff or owner (developer decision
+     * 2026-10-12, replacing the per-group boxes of decision 5). The settings and groups are not consulted.
+     */
     public static boolean exempt(KnkGameSettings settings, List<PermissionGroupRef> groups, ActiveMode activeMode) {
-        if (activeMode == null || activeMode == ActiveMode.NONE) {
-            return false;
-        }
-        for (KnkGroupOverride group : groupOverrides(settings, groups)) {
-            if ((activeMode == ActiveMode.STAFF && group.exemptInStaffMode())
-                || (activeMode == ActiveMode.OWNER && group.exemptInOwnerMode())) {
-                return true;
-            }
-        }
-        return false;
+        return activeMode == ActiveMode.STAFF || activeMode == ActiveMode.OWNER;
     }
 
     private static List<KnkGroupOverride> groupOverrides(KnkGameSettings settings, List<PermissionGroupRef> groups) {

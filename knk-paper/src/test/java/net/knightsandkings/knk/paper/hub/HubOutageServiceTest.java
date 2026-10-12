@@ -119,8 +119,9 @@ class HubOutageServiceTest {
     }
 
     @Test
-    void anActiveModeWithATickedBoxIsExemptUntilTheyLeaveIt() {
-        Player staff = player(new Location(gameplay, 10, 64, 10), STAFF);
+    void anActiveModeIsExemptUntilTheyLeaveIt() {
+        // Decision 2026-10-12: the mode alone exempts; Default has no ticked box. (Its delay is the hub's 60 s.)
+        Player staff = player(new Location(gameplay, 10, 64, 10));
         modes.put(staff.getUniqueId(), ActiveMode.STAFF);
         outage.connectivityChanged(ApiConnectivityState.DOWN);
 

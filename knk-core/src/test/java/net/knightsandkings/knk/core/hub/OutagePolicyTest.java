@@ -40,10 +40,11 @@ class OutagePolicyTest {
     }
 
     @Test
-    void onlyAnActiveModeWithATickedBoxExempts() {
-        assertTrue(OutagePolicy.exempt(SETTINGS, List.of(NOBLE, STAFF), ActiveMode.STAFF), "any of the player's groups");
+    void anActiveStaffOrOwnerModeExemptsWhateverTheBoxes() {
+        // Decision 2026-10-12: being in the mode is enough.
+        assertTrue(OutagePolicy.exempt(SETTINGS, List.of(STAFF), ActiveMode.STAFF));
+        assertTrue(OutagePolicy.exempt(SETTINGS, List.of(NOBLE), ActiveMode.STAFF), "no ticked box needed");
+        assertTrue(OutagePolicy.exempt(SETTINGS, List.of(), ActiveMode.OWNER));
         assertFalse(OutagePolicy.exempt(SETTINGS, List.of(STAFF), ActiveMode.NONE), "the rank alone exempts nobody");
-        assertFalse(OutagePolicy.exempt(SETTINGS, List.of(STAFF), ActiveMode.OWNER), "the owner box is not ticked");
-        assertFalse(OutagePolicy.exempt(SETTINGS, List.of(NOBLE), ActiveMode.STAFF));
     }
 }
