@@ -7,12 +7,15 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 
@@ -65,6 +68,9 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
     private final Predicate<Player> bypass;
     private final DomainAccessEvaluator evaluator;
     private final RoadRule roadRule;
+    private final BooleanSupplier onMainThread;
+    /** Regions whose domain is being asked for in the background on behalf of a main-thread lookup (KNG-123). */
+    private final Set<String> backgroundLookups = ConcurrentHashMap.newKeySet();
 
     /**
      * @param gateManager the gate cache (R5)
@@ -85,6 +91,16 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
     public NavigationAccess(GateManager gateManager, Supplier<SiegeGateController> siegeGates, RegionIds regionIds,
                             RegionDomainResolver resolver, Predicate<Player> bypass, DomainAccessEvaluator evaluator,
                             RoadRule roadRule) {
+        this(gateManager, siegeGates, regionIds, resolver, bypass, evaluator, roadRule, Bukkit::isPrimaryThread);
+    }
+
+    /**
+     * @param onMainThread whether the caller is on the server main thread, where a domain lookup never waits for the
+     *                     API (KNG-123); tests pass their own
+     */
+    public NavigationAccess(GateManager gateManager, Supplier<SiegeGateController> siegeGates, RegionIds regionIds,
+                            RegionDomainResolver resolver, Predicate<Player> bypass, DomainAccessEvaluator evaluator,
+                            RoadRule roadRule, BooleanSupplier onMainThread) {
         this.gateManager = Objects.requireNonNull(gateManager, "gateManager");
         this.siegeGates = Objects.requireNonNull(siegeGates, "siegeGates");
         this.regionIds = Objects.requireNonNull(regionIds, "regionIds");
@@ -92,6 +108,7 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
         this.bypass = Objects.requireNonNull(bypass, "bypass");
         this.evaluator = Objects.requireNonNull(evaluator, "evaluator");
         this.roadRule = Objects.requireNonNull(roadRule, "roadRule");
+        this.onMainThread = Objects.requireNonNull(onMainThread, "onMainThread");
     }
 
     /** Main thread: reads the player's regions, nodes and every gate of the network once. */
@@ -190,6 +207,11 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
     /**
      * The domain of a region of a world: the cache, else the API (any thread; blocks briefly off the main thread).
      * KNG-112: a region id names one region per world, so the hub's {@code town_1} is never the gameplay town.
+     * <p>
+     * KNG-123: on the main thread (a policy built for {@code /navigate}, the route re-check) a region missing from the
+     * cache is answered as unknown - open, as for the trail ({@link #mayEnter}) - and asked for in the background, so
+     * the next build or re-check has it. Before, the main thread waited up to {@value #API_FALLBACK_SECONDS} s per
+     * such region, which froze the server while the API was unreachable.
      *
      * @param world the region's world (null: world-blind - answered only when the id is in one world)
      */
@@ -201,6 +223,10 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
             resolver.refreshIfStale(world, Set.of(regionId));
             return cached;
         }
+        if (onMainThread.getAsBoolean()) {
+            lookUpInBackground(world, regionId);
+            return Optional.empty();
+        }
         try {
             resolver.resolveRegionsFromApi(world, Set.of(regionId)).get(API_FALLBACK_SECONDS, TimeUnit.SECONDS);
         } catch (Exception e) {
@@ -208,6 +234,24 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
             return Optional.empty();
         }
         return resolver.getDomainByRegionIdNoRefresh(world, regionId);
+    }
+
+    private void lookUpInBackground(String world, String regionId) {
+        String key = world + "\u0000" + regionId;
+        if (!backgroundLookups.add(key)) {
+            return;
+        }
+        try {
+            resolver.resolveRegionsFromApi(world, Set.of(regionId)).whenComplete((snapshot, ex) -> {
+                backgroundLookups.remove(key);
+                if (ex != null) {
+                    LOGGER.log(Level.FINE, "[Navigation] Domain of region " + regionId + " not resolvable now: " + ex.getMessage());
+                }
+            });
+        } catch (RuntimeException e) {
+            backgroundLookups.remove(key);
+            LOGGER.log(Level.FINE, "[Navigation] Domain of region " + regionId + " not resolvable now: " + e.getMessage());
+        }
     }
 
     private static String worldOf(Player player) {
