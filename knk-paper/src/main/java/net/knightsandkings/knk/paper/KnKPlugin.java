@@ -1730,7 +1730,7 @@ public class KnKPlugin extends JavaPlugin {
                 org.bukkit.entity.Player online = org.bukkit.Bukkit.getPlayer(uuid);
                 return online != null && online.isOnline();
             },
-            clock);
+            clock, offlineSecurity);
         // Players already online after a reload: load their lists (joins load their own).
         getServer().getScheduler().runTaskLater(this, () -> org.bukkit.Bukkit.getOnlinePlayers()
             .forEach(online -> ignoreService.load(online.getUniqueId())), 20L);
