@@ -3,6 +3,7 @@ package net.knightsandkings.knk.paper.hub;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.logging.Logger;
@@ -31,6 +32,7 @@ public final class HubAdmissionListener implements Listener {
     private final HubService hub;
     private final Predicate<UUID> operator;
     private final Function<UUID, HubJoinRoute> route;
+    private BiConsumer<UUID, Location> outageAdmission = (uuid, loggedOutAt) -> { };
 
     /**
      * @param route where a joining player goes; called after their account was loaded (it may wait on a permission
@@ -42,13 +44,18 @@ public final class HubAdmissionListener implements Listener {
         this.route = Objects.requireNonNull(route, "route");
     }
 
+    /** Told where a player logged out when the outage, not their settings, sends them to the hub (§12 return spot). */
+    public void setOutageAdmission(BiConsumer<UUID, Location> outageAdmission) {
+        this.outageAdmission = outageAdmission != null ? outageAdmission : (uuid, loggedOutAt) -> { };
+    }
+
     /** HIGH: after the account is loaded (PlayerListener, NORMAL), so the player's groups are known. */
     @EventHandler(priority = EventPriority.HIGH)
     public void onPreLogin(AsyncPlayerPreLoginEvent event) {
         if (event.getLoginResult() != AsyncPlayerPreLoginEvent.Result.ALLOWED || !hub.configured()) {
             return;
         }
-        if (route.apply(event.getUniqueId()) != HubJoinRoute.HUB) {
+        if (!route.apply(event.getUniqueId()).toHub()) {
             return;
         }
         String refusal = refusal(hub.unusable(), operator.test(event.getUniqueId()));
@@ -62,10 +69,17 @@ public final class HubAdmissionListener implements Listener {
     @EventHandler(priority = EventPriority.HIGH)
     public void onSpawnLocation(AsyncPlayerSpawnLocationEvent event) {
         UUID uuid = event.getConnection().getProfile().getId();
-        if (uuid == null || !hub.configured() || route.apply(uuid) != HubJoinRoute.HUB) {
+        if (uuid == null || !hub.configured()) {
+            return;
+        }
+        HubJoinRoute joinRoute = route.apply(uuid);
+        if (!joinRoute.toHub()) {
             return;
         }
         Optional<Location> spawn = hub.admissionSpawn();
+        if (spawn.isPresent() && joinRoute == HubJoinRoute.OUTAGE_HUB && !event.isNewPlayer()) {
+            outageAdmission.accept(uuid, event.getSpawnLocation());
+        }
         spawn.ifPresent(location -> {
             event.setSpawnLocation(location);
             hub.markAdmitted(uuid);

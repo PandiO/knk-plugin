@@ -192,7 +192,8 @@ public final class SiegeLobbyStateMachine {
      * Admin stop or server shutdown: aborts whatever is running and disables the lobby until
      * {@link #start()}. A running match ends with this reason (no winner, no rewards).
      *
-     * @param reason {@link SiegeEndReason#ADMIN_STOPPED} or {@link SiegeEndReason#SERVER_RESTART}
+     * @param reason {@link SiegeEndReason#ADMIN_STOPPED}, {@link SiegeEndReason#SERVER_RESTART} or
+     *               {@link SiegeEndReason#API_OUTAGE}
      */
     public List<SiegeEffect> stop(SiegeEndReason reason) {
         if (!reason.isAbort()) throw new IllegalArgumentException("stop() takes an abort reason, got " + reason);
@@ -201,7 +202,8 @@ public final class SiegeLobbyStateMachine {
         List<SiegeEffect> effects = new ArrayList<>();
         switch (phase) {
             case MATCHMAKING, HUB -> effects.add(new CancelMatchmakingEffect(
-                    reason == SiegeEndReason.SERVER_RESTART ? CancelReason.SERVER_RESTART : CancelReason.ADMIN_STOPPED,
+                    reason == SiegeEndReason.SERVER_RESTART ? CancelReason.SERVER_RESTART
+                        : reason == SiegeEndReason.API_OUTAGE ? CancelReason.API_OUTAGE : CancelReason.ADMIN_STOPPED,
                     phase == SiegePhase.HUB));
             case IN_PROGRESS -> effects.add(new EndMatchEffect(drawnScenario, reason));
             default -> { }

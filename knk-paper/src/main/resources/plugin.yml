@@ -264,6 +264,9 @@ commands:
     description: "Guide yourself along the roads to a place, town, district, structure, street or road node"
     usage: "/navigate <destination> [spawn|region] | /navigate stop | /navigate"
     aliases: [nav]
+  hub:
+    description: Return to where you were before an API outage (the button in the chat)
+    usage: /hub return
   lootbox:
     description: "Lootboxes: help, and what a box can give (docs/specs/lootboxes/DESIGN.md §3.4)"
     usage: "/lootbox | /lootbox odds <category> [stars]"

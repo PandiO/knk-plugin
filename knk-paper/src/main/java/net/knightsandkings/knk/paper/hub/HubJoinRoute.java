@@ -15,8 +15,13 @@ import net.knightsandkings.knk.core.settings.GroupOverrides;
 public enum HubJoinRoute {
     /** No hub is selected: the join works as before. */
     NO_HUB,
-    /** Placed at the hub spawn. */
+    /** Placed at the hub spawn: their join would use the server's default spawn. */
     HUB,
+    /**
+     * Placed at the hub spawn because the API is down, though they would have joined elsewhere: where they logged out
+     * becomes their return spot (§12).
+     */
+    OUTAGE_HUB,
     /** An owner, or a group that joins where they logged out: no teleport. */
     LAST_LOCATION,
     /** The player's group join spawn. */
@@ -34,15 +39,19 @@ public enum HubJoinRoute {
         if (!hubConfigured) {
             return NO_HUB;
         }
-        if (apiDown && !exemptDuringOutage) {
-            return HUB;
-        }
+        HubJoinRoute normal;
         if (owner || GroupOverrides.joinsAtLastLocation(settings, groups)) {
-            return LAST_LOCATION;
+            normal = LAST_LOCATION;
+        } else if (GroupOverrides.joinSpawn(settings, groups).isPresent() && groupSpawnUsable) {
+            normal = GROUP_SPAWN;
+        } else {
+            normal = HUB;
         }
-        if (GroupOverrides.joinSpawn(settings, groups).isPresent() && groupSpawnUsable) {
-            return GROUP_SPAWN;
-        }
-        return HUB;
+        return apiDown && !exemptDuringOutage && normal != HUB ? OUTAGE_HUB : normal;
+    }
+
+    /** Whether the player is placed at the hub spawn. */
+    public boolean toHub() {
+        return this == HUB || this == OUTAGE_HUB;
     }
 }

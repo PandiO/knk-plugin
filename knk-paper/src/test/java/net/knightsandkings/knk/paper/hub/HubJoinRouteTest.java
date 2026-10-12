@@ -53,8 +53,10 @@ class HubJoinRouteTest {
 
     @Test
     void duringAnOutageEveryJoinGoesToTheHubUnlessExempt() {
-        assertEquals(HubJoinRoute.HUB, route(true, false, true, List.of(NOBLE)));
-        assertEquals(HubJoinRoute.HUB, route(true, false, false, List.of(BUILDER)));
+        assertEquals(HubJoinRoute.OUTAGE_HUB, route(true, false, true, List.of(NOBLE)), "an owner, not exempt");
+        assertEquals(HubJoinRoute.OUTAGE_HUB, route(true, false, false, List.of(NOBLE)));
+        assertEquals(HubJoinRoute.OUTAGE_HUB, route(true, false, false, List.of(BUILDER)));
+        assertEquals(HubJoinRoute.HUB, route(true, false, false, List.of(DEFAULT)), "would have gone to the hub anyway");
         assertEquals(HubJoinRoute.LAST_LOCATION, route(true, true, true, List.of(DEFAULT)));
     }
 }
