@@ -4,6 +4,8 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -30,6 +32,8 @@ public class HubService {
     private final BiPredicate<World, String> regionExists;
     private final Function<Location, Set<String>> regionsAt;
     private Function<KnkSpawnReference, Optional<KnkLocation>> resolvedSpawn = reference -> Optional.empty();
+    /** Players placed at the hub spawn while connecting, until their join handler has seen it. */
+    private final Set<UUID> admitted = ConcurrentHashMap.newKeySet();
 
     /**
      * @param settings     the Game Settings in force; null until the API or the offline store gave them
@@ -161,5 +165,17 @@ public class HubService {
         }
         String name = hub.worldName() != null ? hub.worldName() : hub.spawn().snapshot() != null ? hub.spawn().snapshot().world() : null;
         return name == null ? Optional.empty() : Optional.ofNullable(worlds.apply(name));
+    }
+
+    /** Hub admission placed this player at the hub spawn; their join then needs no teleport. */
+    public void markAdmitted(UUID player) {
+        if (player != null) {
+            admitted.add(player);
+        }
+    }
+
+    /** Whether hub admission placed this joining player at the hub spawn; answers once per join. */
+    public boolean consumeAdmitted(UUID player) {
+        return player != null && admitted.remove(player);
     }
 }

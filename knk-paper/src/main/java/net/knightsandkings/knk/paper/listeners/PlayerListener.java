@@ -77,6 +77,13 @@ public class PlayerListener implements Listener {
 	/** Null-safe: chat works unfiltered without it. */
 	private final IgnoreService ignoreService;
 
+	/** Whether hub admission placed a joining player at the hub spawn (answers once per join); none without a hub. */
+	private java.util.function.Predicate<UUID> hubAdmitted = uuid -> false;
+
+	public void setHubAdmitted(java.util.function.Predicate<UUID> hubAdmitted) {
+		this.hubAdmitted = hubAdmitted != null ? hubAdmitted : uuid -> false;
+	}
+
 	public PlayerListener(
 			UsersDataAccess usersDataAccess,
 			GameSettingsManager gameSettings,
@@ -180,9 +187,10 @@ public class PlayerListener implements Listener {
 			e.joinMessage(Component.text("► " + "Player " + player.getName() + " joined").color(ColorOptions.message));
 		}
 
-		if (gameSettings != null && gameSettings.current() != null && gameSettings.current().hub().configured()) {
+		if (hubAdmitted.test(player.getUniqueId())) {
 			// Hub DESIGN §16 Phase 5: the hub admission already placed the player at the hub spawn while they were
-			// connecting; no join teleport. The game mode is that of the world they arrived in.
+			// connecting, in place of the server spawn; no join teleport. The game mode is that of the world they arrived
+			// in. Owners and the groups' own join settings never get here (HubJoinRoute).
 			if (!knkPermissible.hasPermission(player, "knk.mode.owner")) {
 				// Owners keep their game mode and flight, as without a hub.
 				player.setGameMode(gameSettings.gameModeFor(player.getWorld()));

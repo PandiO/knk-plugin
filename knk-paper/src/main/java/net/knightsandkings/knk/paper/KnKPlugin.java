@@ -1795,7 +1795,9 @@ public class KnKPlugin extends JavaPlugin {
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.GameSettingsMotdListener(gameSettingsManager), this);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.GameSettingsWeatherCommandListener(gameSettingsManager), this);
         }
-        pluginManager.registerEvents(new PlayerListener(usersDataAccess, gameSettingsManager, this.getCacheManager(), knkPermissible, usersCommandApi, kitsCommandApi, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, ignoreService), this);
+        PlayerListener playerListener = new PlayerListener(usersDataAccess, gameSettingsManager, this.getCacheManager(), knkPermissible, usersCommandApi, kitsCommandApi, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, ignoreService);
+        playerListener.setHubAdmitted(uuid -> hubService != null && hubService.consumeAdmitted(uuid));
+        pluginManager.registerEvents(playerListener, this);
         if (playerCurrencyService != null) {
             // Drops a leaving player's open /pay confirmation and its expiry notice.
             pluginManager.registerEvents(playerCurrencyService, this);
@@ -2483,12 +2485,38 @@ public class KnKPlugin extends JavaPlugin {
             hubService.setResolvedSpawn(gameSettingsManager::resolvedReference);
         }
         getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.hub.HubAdmissionListener(hubService,
-            uuid -> org.bukkit.Bukkit.getOfflinePlayer(uuid).isOp()), this);
+            uuid -> org.bukkit.Bukkit.getOfflinePlayer(uuid).isOp(), this::hubJoinRoute), this);
         getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.hub.HubRulesListener(hubService,
             player -> knkPermissible != null && knkPermissible.hasPermission(player, "knk.hub.bypass")), this);
         new net.knightsandkings.knk.paper.hub.HubRegenerationTask(hubService).runTaskTimer(this, 1L, 1L);
         hubService.unusable().ifPresent(reason -> getLogger().severe("[KnK Hub] The selected hub cannot take players: "
             + reason + ". Only operators may join until it is fixed on the Game Settings page."));
+    }
+
+    /**
+     * Where a joining player goes with a hub selected (decision 2026-10-12): the hub replaces only the server's default
+     * join spawn. Runs in the asynchronous login events, after the account was loaded; the owner check may wait up to
+     * 3 s for the API and counts as "not an owner" when it can't be made, which sends the player to the hub.
+     */
+    private net.knightsandkings.knk.paper.hub.HubJoinRoute hubJoinRoute(java.util.UUID uuid) {
+        var settings = gameSettingsManager != null ? gameSettingsManager.current() : null;
+        java.util.List<net.knightsandkings.knk.core.domain.users.PermissionGroupRef> groups = getCacheManager().getUserCache()
+            .getByUuid(uuid).map(net.knightsandkings.knk.core.domain.users.UserSummary::permissionGroups).orElse(java.util.List.of());
+        var connectivity = getApiConnectivity();
+        boolean apiDown = connectivity != null
+            && connectivity.state() == net.knightsandkings.knk.core.connectivity.ApiConnectivityState.DOWN;
+        boolean owner = knkPermissible != null && knkPermissible
+            .checkAsync(org.bukkit.Bukkit.getOfflinePlayer(uuid), net.knightsandkings.knk.paper.modes.ModeService.OWNER_NODE)
+            .completeOnTimeout(net.knightsandkings.knk.core.domain.permissions.PermissionDecision.UNAVAILABLE, 3, java.util.concurrent.TimeUnit.SECONDS)
+            .join() == net.knightsandkings.knk.core.domain.permissions.PermissionDecision.ALLOWED;
+        boolean groupSpawn = gameSettingsManager != null && gameSettingsManager.groupSpawnPoint(groups) != null;
+        return net.knightsandkings.knk.paper.hub.HubJoinRoute.decide(hubService != null && hubService.configured(), apiDown,
+            hubOutageExempt(uuid), owner, settings, groups, groupSpawn);
+    }
+
+    /** Whether a player is exempt from the outage rules (active staff/owner mode with a ticked group box). */
+    private boolean hubOutageExempt(java.util.UUID uuid) {
+        return false;
     }
 
     /** The hub, for the join path (null before the plugin enabled). */

@@ -3,6 +3,7 @@ package net.knightsandkings.knk.paper.hub;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.logging.Logger;
 
@@ -16,10 +17,11 @@ import io.papermc.paper.event.player.AsyncPlayerSpawnLocationEvent;
 import net.kyori.adventure.text.Component;
 
 /**
- * Hub admission (hub DESIGN §1, §3, §16.2 H1): with a hub selected, every joining player is placed at the hub spawn
- * while they are still connecting, so they never appear in the gameplay world first - also while the API is down, from
- * the Game Settings in the offline store. When the hub cannot take players (its world, region or spawn is missing), the
- * join is refused with the reason, except for operators, who can fix it.
+ * Hub admission (hub DESIGN §1, §3, §16.2 H1): with a hub selected, a player whose join would use the server's default
+ * spawn is placed at the hub spawn while they are still connecting, so they never appear in the gameplay world first -
+ * also while the API is down, from the Game Settings in the offline store. Owners and the groups' own join settings
+ * keep working ({@link HubJoinRoute}). When the hub cannot take players (its world, region or spawn is missing), a join
+ * bound for it is refused with the reason, except for operators, who can fix it.
  */
 @SuppressWarnings("UnstableApiUsage")
 public final class HubAdmissionListener implements Listener {
@@ -28,15 +30,25 @@ public final class HubAdmissionListener implements Listener {
 
     private final HubService hub;
     private final Predicate<UUID> operator;
+    private final Function<UUID, HubJoinRoute> route;
 
-    public HubAdmissionListener(HubService hub, Predicate<UUID> operator) {
+    /**
+     * @param route where a joining player goes; called after their account was loaded (it may wait on a permission
+     *              check, both events are asynchronous)
+     */
+    public HubAdmissionListener(HubService hub, Predicate<UUID> operator, Function<UUID, HubJoinRoute> route) {
         this.hub = Objects.requireNonNull(hub, "hub");
         this.operator = Objects.requireNonNull(operator, "operator");
+        this.route = Objects.requireNonNull(route, "route");
     }
 
-    @EventHandler(priority = EventPriority.LOW)
+    /** HIGH: after the account is loaded (PlayerListener, NORMAL), so the player's groups are known. */
+    @EventHandler(priority = EventPriority.HIGH)
     public void onPreLogin(AsyncPlayerPreLoginEvent event) {
-        if (event.getLoginResult() != AsyncPlayerPreLoginEvent.Result.ALLOWED) {
+        if (event.getLoginResult() != AsyncPlayerPreLoginEvent.Result.ALLOWED || !hub.configured()) {
+            return;
+        }
+        if (route.apply(event.getUniqueId()) != HubJoinRoute.HUB) {
             return;
         }
         String refusal = refusal(hub.unusable(), operator.test(event.getUniqueId()));
@@ -46,11 +58,18 @@ public final class HubAdmissionListener implements Listener {
         }
     }
 
-    /** Every join, new or returning, starts at the hub spawn. */
+    /** A join bound for the hub starts at the hub spawn; the join teleport then leaves the player there. */
     @EventHandler(priority = EventPriority.HIGH)
     public void onSpawnLocation(AsyncPlayerSpawnLocationEvent event) {
+        UUID uuid = event.getConnection().getProfile().getId();
+        if (uuid == null || !hub.configured() || route.apply(uuid) != HubJoinRoute.HUB) {
+            return;
+        }
         Optional<Location> spawn = hub.admissionSpawn();
-        spawn.ifPresent(event::setSpawnLocation);
+        spawn.ifPresent(location -> {
+            event.setSpawnLocation(location);
+            hub.markAdmitted(uuid);
+        });
     }
 
     /** The kick message while the selected hub is unusable, or null when the player may join. */
