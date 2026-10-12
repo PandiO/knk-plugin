@@ -18,31 +18,26 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import net.knightsandkings.knk.core.gates.GateManager;
-import net.knightsandkings.knk.core.regions.DomainAccessEvaluator;
 import net.knightsandkings.knk.core.regions.RegionDomainResolver;
 import net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot;
 import net.knightsandkings.knk.core.regions.RegionDomainResolver.RegionSnapshot;
-import net.knightsandkings.knk.core.roads.route.DomainAvailability.RoadRule;
-import net.knightsandkings.knk.paper.regions.RegionIds;
 
 /**
  * KNG-123: a domain lookup on the main thread (a {@code /navigate} policy, the route re-check) never waits for the
  * API - with the API unreachable it froze the server for up to 3 s per region missing from the cache.
  */
-class NavigationAccessMainThreadTest {
+class NavigationDomainLookupTest {
 
     private static final DomainSnapshot TOWN = new DomainSnapshot(4, "Town", null, "town_4", false, true, "Town",
         Set.of(), Set.of(), Set.of(), Set.of());
 
     private final RegionDomainResolver resolver = mock(RegionDomainResolver.class);
     private final AtomicBoolean mainThread = new AtomicBoolean(true);
-    private NavigationAccess access;
+    private NavigationDomainLookup access;
 
     @BeforeEach
     void setUp() {
-        access = new NavigationAccess(new GateManager(), () -> null, new RegionIds(() -> null), resolver,
-            player -> false, new DomainAccessEvaluator(), RoadRule.ALWAYS, mainThread::get);
+        access = new NavigationDomainLookup(resolver, mainThread::get);
     }
 
     @Test
