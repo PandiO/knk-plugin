@@ -215,15 +215,30 @@ public final class OfflineSecurityStore {
     }
 
     /**
-     * The API accepted a change to {@code owner}'s list made on this server: keep it for the next outage. It
-     * doesn't count as the API returning the list, so the max age isn't extended. No list known: nothing to change.
+     * The API accepted an /ignore of {@code entry} made on this server: add it to the stored list (replacing an entry
+     * for the same user). It doesn't count as the API returning the list, so the max age isn't extended. No list
+     * known: nothing to change.
      */
-    public void updateIgnores(UUID owner, List<UserIgnore> entries) {
+    public void addIgnore(UUID owner, UserIgnore entry) {
+        if (owner == null || entry == null) {
+            return;
+        }
+        ignores.computeIfPresent(owner, (key, current) -> {
+            List<UserIgnore> entries = new ArrayList<>(current.entries());
+            entries.removeIf(e -> e.ignoredUserId() == entry.ignoredUserId());
+            entries.add(entry);
+            return new IgnoreList(current.userId(), List.copyOf(entries), current.verifiedAt());
+        });
+        dirty.set(true);
+    }
+
+    /** The API accepted an /unignore of user {@code ignoredUserId} made on this server; as {@link #addIgnore}. */
+    public void removeIgnore(UUID owner, int ignoredUserId) {
         if (owner == null) {
             return;
         }
         ignores.computeIfPresent(owner, (key, current) -> new IgnoreList(current.userId(),
-            entries == null ? List.of() : List.copyOf(entries), current.verifiedAt()));
+            current.entries().stream().filter(e -> e.ignoredUserId() != ignoredUserId).toList(), current.verifiedAt()));
         dirty.set(true);
     }
 

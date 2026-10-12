@@ -88,6 +88,10 @@ public class IgnoreService implements IgnoreGate.Lookup {
                 LOGGER.log(Level.WARNING, "Failed to load the ignore list of user " + userId, ex);
                 return useLastKnown(player);
             }
+            if (!userId.equals(userIdOf.apply(player))) {
+                // The UUID now belongs to another account (erased, relinked): this list is not theirs.
+                return false;
+            }
             if (offline != null) {
                 offline.recordIgnores(player, userId, entries);
             }
@@ -210,8 +214,8 @@ public class IgnoreService implements IgnoreGate.Lookup {
         return api.add(userId, targetUserId).whenComplete((result, ex) -> {
             if (ex != null || result != UserIgnoresApi.AddResult.IGNORED) {
                 lists.computeIfPresent(player, (key, list) -> list.get(targetUserId) == entry ? without(list, targetUserId) : list);
-            } else {
-                remember(player);
+            } else if (offline != null) {
+                offline.addIgnore(player, entry);
             }
         });
     }
@@ -231,18 +235,10 @@ public class IgnoreService implements IgnoreGate.Lookup {
         return api.remove(userId, targetUserId).whenComplete((ignored, ex) -> {
             if (ex != null) {
                 lists.computeIfPresent(player, (key, current) -> current.containsKey(targetUserId) ? current : with(current, removed));
-            } else {
-                remember(player);
+            } else if (offline != null) {
+                offline.removeIgnore(player, targetUserId);
             }
         });
-    }
-
-    /** The API accepted a change: the offline store keeps the list as it now is (KNG-123). */
-    private void remember(UUID player) {
-        Map<Integer, UserIgnore> list = lists.get(player);
-        if (offline != null && list != null) {
-            offline.updateIgnores(player, List.copyOf(list.values()));
-        }
     }
 
     private static Map<Integer, UserIgnore> with(Map<Integer, UserIgnore> list, UserIgnore entry) {

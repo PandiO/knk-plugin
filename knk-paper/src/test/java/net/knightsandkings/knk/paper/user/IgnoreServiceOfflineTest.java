@@ -240,4 +240,39 @@ class IgnoreServiceOfflineTest {
 
         assertFalse(service(store).load(ALICE).join());
     }
+
+    @Test
+    void anOverlappingChangeTheApiRefusesIsNotKept() {
+        OfflineSecurityStore store = store();
+        api.listAnswer = CompletableFuture.completedFuture(List.of());
+        IgnoreService service = service(store);
+        service.load(ALICE).join();
+        CompletableFuture<UserIgnoresApi.AddResult> carolAnswer = new CompletableFuture<>();
+
+        api.addAnswer = carolAnswer;
+        CompletableFuture<UserIgnoresApi.AddResult> carol = service.ignore(ALICE, 3, "Carol", CAROL);
+        api.addAnswer = CompletableFuture.completedFuture(UserIgnoresApi.AddResult.IGNORED);
+        service.ignore(ALICE, 2, "Bob", BOB).join();
+        carolAnswer.complete(UserIgnoresApi.AddResult.CANNOT_IGNORE_STAFF);
+        carol.join();
+
+        assertEquals(List.of(2), store.ignores(ALICE).orElseThrow().stream().map(UserIgnore::ignoredUserId).toList(),
+            "only the change the API accepted");
+    }
+
+    @Test
+    void aLoadForAReplacedAccountIsDiscarded() {
+        OfflineSecurityStore store = store();
+        CompletableFuture<List<UserIgnore>> inFlight = new CompletableFuture<>();
+        api.listAnswer = inFlight;
+        IgnoreService service = service(store);
+        CompletableFuture<Boolean> load = service.load(ALICE);
+
+        userIds.put(ALICE, 99);
+        inFlight.complete(List.of(new UserIgnore(2, "Bob", BOB, DAY1)));
+
+        assertFalse(load.join());
+        assertFalse(service.ignores(ALICE, BOB));
+        assertTrue(store.ignores(ALICE).isEmpty());
+    }
 }

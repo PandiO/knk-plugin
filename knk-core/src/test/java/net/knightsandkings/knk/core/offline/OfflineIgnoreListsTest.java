@@ -129,8 +129,10 @@ class OfflineIgnoreListsTest {
         store.recordIgnores(alice, 1, List.of(ignoresBob));
 
         now = now.plus(Duration.ofDays(20));
-        store.updateIgnores(alice, List.of(ignoresBob, ignoresCarol));
+        store.addIgnore(alice, ignoresCarol);
         assertEquals(List.of(ignoresBob, ignoresCarol), store.ignores(alice).orElseThrow());
+        store.removeIgnore(alice, 2);
+        assertEquals(List.of(ignoresCarol), store.ignores(alice).orElseThrow());
 
         now = now.plus(Duration.ofDays(11));
         assertTrue(store.ignores(alice).isEmpty(), "still 30 days from the API's list");
@@ -139,7 +141,7 @@ class OfflineIgnoreListsTest {
     @Test
     void aChangeWithoutAKnownListIsDropped() {
         OfflineSecurityStore store = store();
-        store.updateIgnores(alice, List.of(ignoresBob));
+        store.addIgnore(alice, ignoresBob);
 
         assertTrue(store.ignores(alice).isEmpty());
     }
