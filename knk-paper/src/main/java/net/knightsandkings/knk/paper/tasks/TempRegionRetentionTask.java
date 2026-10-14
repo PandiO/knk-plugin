@@ -7,6 +7,7 @@ import com.sk89q.worldguard.protection.managers.RegionManager;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.DomainsQueryApi;
+import net.knightsandkings.knk.core.regions.RegionRenamePlan;
 import net.knightsandkings.knk.core.regions.TempRegionCleanupPolicy;
 import net.knightsandkings.knk.core.regions.TempRegionCleanupPolicy.Decision;
 import net.knightsandkings.knk.core.regions.TempRegionCleanupPolicy.Usage;
@@ -114,56 +115,30 @@ public class TempRegionRetentionTask {
     }
 
     /**
+     * What one pass over the temp-named regions found (and, when deleting, removed). Names are {@code world/region}.
+     *
+     * @param orphanedFinalNames {@code domain_<id>} regions no domain uses according to a fresh API lookup: reported
+     *                           only, never deleted (a v2 region can carry the same name, managed-worldguard-regions.md
+     *                           §8 item 9; check {@code /rg info} first). Only filled when asked for.
+     */
+    public record Sweep(List<String> deleted, List<String> deletable, List<String> inUse, List<String> tooRecent,
+                        List<String> noTimestamp, List<String> usageUnknown, List<String> orphanedFinalNames,
+                        List<String> deleteFailed) {
+        public int temporaryTotal() {
+            return deleted.size() + deletable.size() + inUse.size() + tooRecent.size() + noTimestamp.size()
+                    + usageUnknown.size() + deleteFailed.size();
+        }
+    }
+
+    /**
      * Run the cleanup operation: scan all worlds for old, unused temp regions and delete them.
      */
     private void runCleanup() {
         try {
-            long cutoffTime = System.currentTimeMillis() - retentionMillis;
-            int deletedCount = 0;
-            int keptInUse = 0;
-            int keptUnknown = 0;
-
-            for (World world : plugin.getServer().getWorlds()) {
-                RegionManager regionManager = WorldGuard.getInstance().getPlatform()
-                    .getRegionContainer().get(BukkitAdapter.adapt(world));
-
-                if (regionManager == null) {
-                    continue;
-                }
-
-                List<String> regionsToDelete = new ArrayList<>();
-
-                for (ProtectedRegion region : new ArrayList<>(regionManager.getRegions().values())) {
-                    if (!TempRegionCleanupPolicy.isTemporary(region.getId())) {
-                        continue;
-                    }
-                    Decision decision = TempRegionCleanupPolicy.decide(region.getId(), region.getFlag(CREATION_TIMESTAMP),
-                            cutoffTime, knownDomainRegion, domainUsage);
-                    switch (decision) {
-                        case DELETE -> regionsToDelete.add(region.getId());
-                        case KEEP_KNOWN_DOMAIN_REGION, KEEP_IN_USE -> {
-                            keptInUse++;
-                            LOGGER.fine("Keeping temp-named region backing a domain: " + region.getId());
-                        }
-                        case KEEP_USAGE_UNKNOWN -> keptUnknown++;
-                        case KEEP_INVALID_TIMESTAMP -> LOGGER.warning("Invalid creation timestamp for region " + region.getId()
-                                + ": " + region.getFlag(CREATION_TIMESTAMP));
-                        default -> LOGGER.fine("Keeping temp region " + region.getId() + ": " + decision);
-                    }
-                }
-
-                // Delete old, unused temp regions
-                for (String regionId : regionsToDelete) {
-                    try {
-                        regionManager.removeRegion(regionId);
-                        deletedCount++;
-                        LOGGER.info("Deleted temp region (retention policy, no domain uses it): " + regionId + " from world " + world.getName());
-                    } catch (Exception e) {
-                        LOGGER.warning("Failed to delete temp region " + regionId + ": " + e.getMessage());
-                    }
-                }
-            }
-
+            Sweep sweep = sweep(System.currentTimeMillis() - retentionMillis, true, false);
+            int deletedCount = sweep.deleted().size();
+            int keptInUse = sweep.inUse().size();
+            int keptUnknown = sweep.usageUnknown().size();
             if (deletedCount > 0 || keptInUse > 0 || keptUnknown > 0) {
                 LOGGER.info("Temp region retention cleanup completed. Deleted " + deletedCount + ", kept " + keptInUse
                         + " used by a domain" + (keptUnknown > 0 ? ", kept " + keptUnknown + " because the API could not be asked" : ""));
@@ -174,5 +149,75 @@ public class TempRegionRetentionTask {
         } catch (Exception e) {
             LOGGER.warning("Error running temp region retention cleanup: " + e.getMessage());
         }
+    }
+
+    /**
+     * One pass over every loaded world's temp-named regions with the cleanup policy, for regions created before
+     * {@code cutoffMillis}. Used by the daily cleanup and by {@code /knk regions temp} (KNG-103), which reports first and
+     * purges with a shorter age on request. Asks the API per region; call off the main thread.
+     *
+     * @param delete             remove the regions the policy allows; false only reports them as deletable
+     * @param findOrphanedFinals also look up every {@code domain_<id>} region and report the ones no domain uses
+     */
+    public Sweep sweep(long cutoffMillis, boolean delete, boolean findOrphanedFinals) {
+        Sweep sweep = new Sweep(new ArrayList<>(), new ArrayList<>(), new ArrayList<>(), new ArrayList<>(),
+                new ArrayList<>(), new ArrayList<>(), new ArrayList<>(), new ArrayList<>());
+        for (World world : plugin.getServer().getWorlds()) {
+            RegionManager regionManager = WorldGuard.getInstance().getPlatform()
+                .getRegionContainer().get(BukkitAdapter.adapt(world));
+
+            if (regionManager == null) {
+                continue;
+            }
+
+            List<String> regionsToDelete = new ArrayList<>();
+
+            for (ProtectedRegion region : new ArrayList<>(regionManager.getRegions().values())) {
+                String name = world.getName() + "/" + region.getId();
+                if (!TempRegionCleanupPolicy.isTemporary(region.getId())) {
+                    if (findOrphanedFinals && RegionRenamePlan.isFinalName(region.getId())
+                            && !knownDomainRegion.test(region.getId())
+                            && domainUsage.apply(region.getId()) == Usage.UNUSED) {
+                        sweep.orphanedFinalNames().add(name);
+                    }
+                    continue;
+                }
+                Decision decision = TempRegionCleanupPolicy.decide(region.getId(), region.getFlag(CREATION_TIMESTAMP),
+                        cutoffMillis, knownDomainRegion, domainUsage);
+                switch (decision) {
+                    case DELETE -> regionsToDelete.add(region.getId());
+                    case KEEP_KNOWN_DOMAIN_REGION, KEEP_IN_USE -> {
+                        sweep.inUse().add(name);
+                        LOGGER.fine("Keeping temp-named region backing a domain: " + region.getId());
+                    }
+                    case KEEP_USAGE_UNKNOWN -> sweep.usageUnknown().add(name);
+                    case KEEP_TOO_RECENT -> sweep.tooRecent().add(name);
+                    case KEEP_INVALID_TIMESTAMP -> {
+                        sweep.noTimestamp().add(name);
+                        LOGGER.warning("Invalid creation timestamp for region " + region.getId()
+                                + ": " + region.getFlag(CREATION_TIMESTAMP));
+                    }
+                    default -> sweep.noTimestamp().add(name);
+                }
+            }
+
+            // Delete old, unused temp regions
+            for (String regionId : regionsToDelete) {
+                String name = world.getName() + "/" + regionId;
+                if (!delete) {
+                    sweep.deletable().add(name);
+                    continue;
+                }
+                try {
+                    regionManager.removeRegion(regionId);
+                    sweep.deleted().add(name);
+                    LOGGER.info("Deleted temp region (retention policy, no domain uses it): " + regionId + " from world " + world.getName());
+                } catch (Exception e) {
+                    sweep.deleteFailed().add(name);
+                    LOGGER.warning("Failed to delete temp region " + regionId + ": " + e.getMessage());
+                }
+            }
+        }
+        return sweep;
     }
 }
