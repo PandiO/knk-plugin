@@ -95,7 +95,10 @@ import net.kyori.adventure.text.Component;
  * <p><b>Start leg</b> (KNG-75 step 1): with walk paths, a player off the road (up to {@code max-start-distance},
  * plain 3D) walks to the route's start along a walk path - the same {@link DirectLeg} machinery, held in
  * {@link Active#startLeg} - while the route is drawn from the road on; the core session takes over once the
- * player is within {@code reroute-distance} of the route.
+ * player is within {@code reroute-distance} of the route. KNG-124: a player within {@code reroute-distance} of the route
+ * but not on it ({@link #ON_ROUTE_HORIZONTAL}, {@link #ON_ROUTE_VERTICAL}) gets a short walk search to its nearest
+ * point - a check only ({@link DirectLeg#nearRoute}): shut in, "No conventional path to the road found." once and no
+ * straight line; otherwise nothing changes.
  *
  * <p>All state lives on the main thread; the routing thread only ever sees an immutable snapshot,
  * a policy built on the main thread and the request, and posts its result back.
@@ -229,6 +232,14 @@ public final class NavigationService implements SiegeMatchObserver {
     private final EtaEstimator eta;
     /** The HUD arrow of a walking leg points this far ahead along the path. */
     static final double WALK_ARROW_AHEAD = 4;
+    /**
+     * KNG-124: within {@code reroute-distance} of the route a player counts as on it within this many blocks
+     * horizontally of its nearest point (and {@link #ON_ROUTE_VERTICAL}); further off, a short walk search to that
+     * point checks that they are not shut in. Also the radius around that point that the search must reach.
+     */
+    static final double ON_ROUTE_HORIZONTAL = 1.5;
+    /** KNG-124: ... and within this many blocks of its height (feet on the road's floor level, give or take a step). */
+    static final double ON_ROUTE_VERTICAL = 1.5;
 
     private final Map<UUID, Active> active = new HashMap<>();
     private final long[] walkCounts = new long[WalkCount.values().length];
@@ -322,6 +333,12 @@ public final class NavigationService implements SiegeMatchObserver {
         boolean stale;
         /** KNG-75 step 2: the target is beyond the walk range - no search, the HUD arrow alone ({@link #startFarLeg}). */
         boolean beyondWalkRange;
+        /**
+         * KNG-124: a start leg for a player within {@code reroute-distance} of the route but not on it - a check only:
+         * the walk search tells whether they are shut in (NO_PATH: "No conventional path to the road found." once,
+         * no straight line to the road); the session guides meanwhile, a found path is not drawn and ends the check.
+         */
+        boolean nearRoute;
         CompletableFuture<?> capture;
 
         DirectLeg(double[] target) {
@@ -960,7 +977,8 @@ public final class NavigationService implements SiegeMatchObserver {
         try {
             // KNG-121: the navigation's destination, also for the walk to the road (not the road's start)
             capture = walk.preparer().prepare(a.player, new double[] {feet.getX(), feet.getY(), feet.getZ()}, target,
-                leg == a.startLeg ? WalkGoal.within(target[0], target[1], target[2], sessionParameters.arriveDistance())
+                leg == a.startLeg ? WalkGoal.within(target[0], target[1], target[2],
+                    leg.nearRoute ? ON_ROUTE_HORIZONTAL : sessionParameters.arriveDistance())
                     : walkGoal(a, target),
                 destinationRegions(a.player, a.destination, a.goals, a.target));
         } catch (RuntimeException e) {
@@ -1114,6 +1132,10 @@ public final class NavigationService implements SiegeMatchObserver {
      * (KNG-75) says "to the road" - or, out of budget, that it has trouble (live test S3) - and redraws with the route.
      */
     private void adoptWalkResult(Active a, DirectLeg leg, WalkResult result, Optional<WalkPath> partial) {
+        if (leg.nearRoute) {
+            adoptNearRouteResult(a, leg, result);
+            return;
+        }
         boolean wasWalking = leg.walking();
         boolean startLeg = leg == a.startLeg;
         if (result != null && !result.isFound() && !leg.noPathAnnounced) {
@@ -1160,6 +1182,40 @@ public final class NavigationService implements SiegeMatchObserver {
             } else {
                 deps.trail().drawDirect(a.player, leg.target);
             }
+        }
+    }
+
+    /**
+     * KNG-124: the check near the road ({@link DirectLeg#nearRoute}). NO_PATH: shut in - "No conventional path to the
+     * road found." once (again only after a path was found meanwhile), and the trail drops its straight line to the
+     * road ({@link #shutInNearRoute}); the re-check searches again. A found path, a search out of budget or none at
+     * all: nothing to say, the check ends and the trail is today's.
+     */
+    private void adoptNearRouteResult(Active a, DirectLeg leg, WalkResult result) {
+        if (result == null || result.status() != WalkResult.Status.NO_PATH) {
+            dropStartLeg(a);
+            return;
+        }
+        if (!leg.noPathAnnounced) {
+            leg.noPathAnnounced = true;
+            a.player.sendMessage(NavigationMessages.noConventionalPathToRoad());
+        }
+        leg.path = null;
+        leg.partial = false;
+        leg.status = DirectLeg.Status.NO_PATH;
+    }
+
+    /** KNG-124: the check near the road found the player shut in. */
+    private static boolean shutInNearRoute(Active a) {
+        return a.startLeg != null && a.startLeg.nearRoute && a.startLeg.status == DirectLeg.Status.NO_PATH;
+    }
+
+    /** The route's trail from {@code along} with today's straight line from the player - none when shut in (KNG-124). */
+    private void drawRouteFromPlayer(Active a, Route route, double along) {
+        if (shutInNearRoute(a)) {
+            deps.trail().drawRoute(a.player, route, along, trailTarget(a), false);
+        } else {
+            deps.trail().drawRoute(a.player, route, along, trailTarget(a));
         }
     }
 
@@ -1373,10 +1429,10 @@ public final class NavigationService implements SiegeMatchObserver {
             deps.events().accept(new NavigationRerouteEvent(player, a.destination.name(), effect.reason(), detail));
         }
         aimStartLeg(a, route);
-        if (a.startLeg != null) {
+        if (a.startLeg != null && !a.startLeg.nearRoute) {
             drawStartLeg(a, a.startLeg, route);
         } else {
-            deps.trail().drawRoute(player, route, 0, trailTarget(a));
+            drawRouteFromPlayer(a, route, 0);
         }
         deps.hud().update(player, a.destination.name(), route.length(), 0);
     }
@@ -1386,24 +1442,29 @@ public final class NavigationService implements SiegeMatchObserver {
     /**
      * After a route is adopted: a player more than {@code reroute-distance} from it walks to its start along a
      * walk path (a new leg, or the current one when the start stayed put); on the route, or without walk paths,
-     * no leg - the trail's straight line to the road, as before.
+     * no leg - the trail's straight line to the road, as before. KNG-124: closer than {@code reroute-distance} but
+     * not on the route, a check-only leg to its nearest point ({@link DirectLeg#nearRoute}).
      */
     private void aimStartLeg(Active a, Route route) {
         Location feet = a.player.getLocation();
         double x = feet.getX(), floorY = feet.getY() - 1, z = feet.getZ();
-        double toRoute = route.project(x, floorY, z, 0).distance();
-        if (!walkEnabled() || toRoute <= sessionParameters.rerouteDistance()) {
+        Route.Projection nearest = route.project(x, floorY, z, 0);
+        double toRoute = nearest.distance();
+        boolean near = toRoute <= sessionParameters.rerouteDistance();
+        if (!walkEnabled() || near && onRoute(nearest.point(), x, floorY, z)) {
             dropStartLeg(a);
             return;
         }
-        double[] start = route.start().point();
-        if (a.startLeg != null && distance(start[0], start[1], start[2], a.startLeg.target) <= 1) {
+        double[] start = near ? nearest.point() : route.start().point();
+        if (a.startLeg != null && a.startLeg.nearRoute == near
+            && distance(start[0], start[1], start[2], a.startLeg.target) <= 1) {
             a.startLegClosestToRoute = Math.min(a.startLegClosestToRoute, toRoute);
             return; // the same road start: keep the leg and its path
         }
         dropStartLeg(a);
         a.startLegClosestToRoute = toRoute;
         DirectLeg leg = new DirectLeg(start);
+        leg.nearRoute = near;
         double d = distance(x, floorY, z, start);
         leg.total = Math.max(1, d);
         leg.best = d;
@@ -1427,7 +1488,15 @@ public final class NavigationService implements SiegeMatchObserver {
         }
         Location feet = a.player.getLocation();
         double x = feet.getX(), floorY = feet.getY() - 1, z = feet.getZ();
-        double toRoute = route.project(x, floorY, z, 0).distance();
+        Route.Projection nearest = route.project(x, floorY, z, 0);
+        if (leg.nearRoute) {
+            // KNG-124: a check only - the session guides; on the route the check ends
+            if (onRoute(nearest.point(), x, floorY, z)) {
+                dropStartLeg(a);
+            }
+            return false;
+        }
+        double toRoute = nearest.distance();
         if (toRoute <= sessionParameters.rerouteDistance()
             || distance(x, floorY, z, leg.target) <= sessionParameters.arriveDistance()) {
             dropStartLeg(a);
@@ -1470,6 +1539,13 @@ public final class NavigationService implements SiegeMatchObserver {
         deps.trail().drawRoute(a.player, route, 0, trailTarget(a), straight);
     }
 
+    /** KNG-124: a floor position within {@link #ON_ROUTE_HORIZONTAL} and {@link #ON_ROUTE_VERTICAL} of a route point. */
+    static boolean onRoute(double[] routePoint, double x, double floorY, double z) {
+        double dx = routePoint[0] - x, dz = routePoint[2] - z;
+        return dx * dx + dz * dz <= ON_ROUTE_HORIZONTAL * ON_ROUTE_HORIZONTAL
+            && Math.abs(routePoint[1] - floorY) <= ON_ROUTE_VERTICAL;
+    }
+
     private static void dropStartLeg(Active a) {
         if (a.startLeg != null) {
             a.startLeg.cancelWalk();
@@ -1502,7 +1578,7 @@ public final class NavigationService implements SiegeMatchObserver {
             }
         }
         if (since % deps.trail().periodTicks() == 0) {
-            deps.trail().drawRoute(a.player, route, effect.along(), trailTarget(a));
+            drawRouteFromPlayer(a, route, effect.along());
         }
         if (since % HUD_TICKS == 0) {
             deps.hud().update(a.player, label, effect.remainingBlocks(), effect.progress());
@@ -1854,7 +1930,7 @@ public final class NavigationService implements SiegeMatchObserver {
             return a.leg.remainingOf(feet.getX(), feet.getY() - 1, feet.getZ());
         }
         double road = a.session == null ? 0 : a.session.remainingBlocks();
-        if (a.startLeg != null) {
+        if (a.startLeg != null && !a.startLeg.nearRoute) {
             Location feet = a.player.getLocation();
             return road + a.startLeg.remainingOf(feet.getX(), feet.getY() - 1, feet.getZ());
         }

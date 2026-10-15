@@ -1325,6 +1325,93 @@ class NavigationServiceTest {
     }
 
     @Test
+    void aPlayerShutInCloseToTheRoadIsToldSoOnce() {
+        // KNG-124 (finding N18): within reroute-distance of the route, but shut in - before, no search ran at all
+        walkFinder = r -> WalkResult.noPath("unreachable", 9);
+        NavigationService walking = walkService(NavigationConfig.defaults());
+        moveTo(50.5, 65, 4.5); // 4.5 blocks off Main Street
+
+        walking.navigate(player, cinixKeep());
+
+        NavigationService.DirectLeg check = walking.startLegOf(playerId).orElseThrow();
+        assertTrue(check.nearRoute);
+        assertArrayEquals(new double[] {50.5, 64, 0}, walkTargets.get(0), 1e-6, "to the route's nearest point");
+        assertTrue(walkGoals.get(0).reached(50.5, 64, 1.5), "the road itself");
+        assertFalse(walkGoals.get(0).reached(50.5, 64, 3.5), "not arrive-distance 4: the box could be inside that");
+        verify(trail).drawRoute(any(), any(), anyDouble(), any()); // today's trail while the check runs
+        runSearches();
+
+        assertEquals(NavigationService.DirectLeg.Status.NO_PATH, check.status);
+        assertEquals(1, messages().stream().filter(m -> m.contains("No conventional path to the road found.")).count());
+        assertEquals(NavigationSession.State.GUIDING, walking.sessionOf(playerId).orElseThrow().state(), "the session guides");
+        clearInvocations(trail);
+        ticks(20);
+        verify(trail, never()).drawRoute(any(), any(), anyDouble(), any()); // no straight line through the box
+        verify(trail, atLeastOnce()).drawRoute(any(), any(), anyDouble(), any(), org.mockito.ArgumentMatchers.eq(false));
+        verify(trail, never()).drawPath(any(), any());
+
+        ticks(NavigationService.RECHECK_TICKS * 6); // the path's age: searched again, said once
+        assertEquals(2, walkTargets.size());
+        runSearches();
+        assertEquals(1, messages().stream().filter(m -> m.contains("No conventional path to the road found.")).count());
+
+        walkFinder = r -> found(List.of(new double[] {50.5, 64, 4.5}, new double[] {50.5, 64, 0.5})); // a door opened
+        ticks(NavigationService.RECHECK_TICKS * 6);
+        runSearches();
+        assertTrue(walking.startLegOf(playerId).isEmpty(), "out: the check ends");
+        clearInvocations(trail);
+        ticks(20);
+        verify(trail, atLeastOnce()).drawRoute(any(), any(), anyDouble(), any());
+        verify(trail, never()).drawPath(any(), any());
+    }
+
+    @Test
+    void closeToTheRoadAFoundPathOrRunningOutOfBudgetChangesNothing() {
+        // KNG-124: the check is a check only - a found path is not drawn, out of budget says nothing
+        walkFinder = r -> found(List.of(new double[] {50.5, 64, 4.5}, new double[] {50.5, 64, 0.5}));
+        NavigationService walking = walkService(NavigationConfig.defaults());
+        moveTo(50.5, 65, 4.5);
+        walking.navigate(player, cinixKeep());
+        assertTrue(walking.startLegOf(playerId).isPresent());
+        runSearches();
+        assertTrue(walking.startLegOf(playerId).isEmpty());
+        ticks(20);
+        verify(trail, never()).drawPath(any(), any());
+        verify(trail, never()).drawRoute(any(), any(), anyDouble(), any(), org.mockito.ArgumentMatchers.eq(false));
+        walking.stop(player);
+
+        walkFinder = r -> WalkResult.fallback("length cap", 900);
+        walking.navigate(player, cinixKeep());
+        runSearches();
+        assertTrue(walking.startLegOf(playerId).isEmpty());
+        assertTrue(messages().stream().noneMatch(m -> m.contains("No conventional path") || m.contains("Having trouble")),
+            messages().toString());
+    }
+
+    @Test
+    void onTheRoadNoCheckRunsButAboveItOneDoes() {
+        // KNG-124: within 1.5 blocks of the route horizontally and in height - on it, as before (S8)
+        NavigationService walking = walkService(NavigationConfig.defaults());
+        moveTo(50.5, 65, 1.5);
+        walking.navigate(player, cinixKeep());
+        assertTrue(walking.startLegOf(playerId).isEmpty());
+        assertTrue(walkTargets.isEmpty());
+        walking.stop(player);
+
+        moveTo(50.5, 70, 0.5); // a balcony 5 above the road
+        walking.navigate(player, cinixKeep());
+        assertTrue(walking.startLegOf(playerId).orElseThrow().nearRoute);
+        assertEquals(1, walkTargets.size());
+        walking.stop(player);
+
+        NavigationService straight = new NavigationService(new NavigationService.Deps(null, NavigationConfig.defaults(),
+            w -> network.snapshot, policies, shapes, eligibility, hud, trail, Runnable::run, Runnable::run, tick::get,
+            events::add, Logger.getLogger("test")));
+        straight.navigate(player, cinixKeep());
+        assertTrue(straight.startLegOf(playerId).isEmpty(), "without walk paths nothing changes");
+    }
+
+    @Test
     void withWalkPathsAPlayerMayStartUpTo96BlocksFromARoadInPlain3d() {
         // KNG-75: without walk paths the weighted 48 applies, as before
         moveTo(30.5, 65, 75.5); // 69.5 blocks from the nearest road (D's side road)
