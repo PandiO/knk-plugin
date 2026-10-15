@@ -303,4 +303,47 @@ class DiscoveryTrackerTest {
         tracker.startUnresolvedSession(joiner); // keeps the existing session
         assertFalse(tracker.isCandidate(joiner, "town_rivia", T0), "still suppressed");
     }
+
+    // ---- KNG-118 R14: (world, region id) keys ----
+
+    @Test
+    void aKnownRegionIsKnownOnlyInItsOwnWorld() {
+        tracker.knownLoaded(PLAYER, List.of(new KnownDiscovery(1, "town_rivia", "world")));
+
+        assertFalse(tracker.isCandidate(PLAYER, "World", "TOWN_RIVIA", T0));
+        assertTrue(tracker.isCandidate(PLAYER, "hub", "town_rivia", T0), "the same id in the hub is another place");
+        assertTrue(tracker.offer(PLAYER, "hub", "town_rivia", DiscoverySource.REGION_ENTER, T0));
+        assertFalse(tracker.isCandidate(PLAYER, "hub", "town_rivia", T0), "already pending");
+    }
+
+    @Test
+    void aKnownDomainWithoutAWorldDoesNotHideAWorldRegion() {
+        tracker.knownLoaded(PLAYER, List.of(new KnownDiscovery(1, "town_rivia", null)));
+
+        assertTrue(tracker.isCandidate(PLAYER, "world", "town_rivia", T0));
+        assertFalse(tracker.isCandidate(PLAYER, "town_rivia", T0), "a world-less candidate still matches it");
+    }
+
+    @Test
+    void aBatchHoldsOneWorld_AndAnswersAreKeyedInIt() {
+        tracker.knownLoaded(PLAYER, List.of());
+        tracker.offer(PLAYER, "world", "town_rivia", DiscoverySource.REGION_ENTER, T0);
+        tracker.offer(PLAYER, "hub", "town_rivia", DiscoverySource.REGION_ENTER, T0);
+        tracker.offer(PLAYER, "world", "spawn", DiscoverySource.REGION_ENTER, T0);
+
+        Batch first = tracker.nextBatch(PLAYER, T0).orElseThrow();
+        assertEquals("world", first.world());
+        assertEquals(List.of("town_rivia", "spawn"), first.regionIds());
+        assertTrue(tracker.nextBatch(PLAYER, T0).isEmpty(), "one request in flight");
+
+        tracker.completed(first, result(List.of(grant(1, "town_rivia", "Town")), List.of(),
+                List.of(new DiscoverySkip("spawn", DiscoverySkip.NOT_A_DOMAIN))), T0);
+        assertFalse(tracker.isCandidate(PLAYER, "world", "town_rivia", T0));
+        assertFalse(tracker.isCandidate(PLAYER, "world", "spawn", T0));
+        assertTrue(tracker.isCandidate(PLAYER, "hub", "spawn", T0), "not-a-domain in one world says nothing of another");
+
+        Batch second = tracker.nextBatch(PLAYER, T0.plusSeconds(1)).orElseThrow();
+        assertEquals("hub", second.world());
+        assertEquals(List.of("town_rivia"), second.regionIds());
+    }
 }

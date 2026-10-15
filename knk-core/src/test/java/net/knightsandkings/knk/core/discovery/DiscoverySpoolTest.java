@@ -62,10 +62,10 @@ class DiscoverySpoolTest {
                 new PendingDiscovery("town_rivia", DiscoverySource.REGION_ENTER, T0),
                 new PendingDiscovery("district_market", DiscoverySource.REGION_ENTER, T0)));
 
-        spool.remove(PLAYER, List.of("Town_Rivia"));
+        spool.remove(PLAYER, List.of(new PendingDiscovery("Town_Rivia", DiscoverySource.REGION_ENTER, T0)));
         assertEquals(1, spool.get(PLAYER).orElseThrow().entries().size());
 
-        spool.remove(PLAYER, List.of("district_market"));
+        spool.remove(PLAYER, List.of(new PendingDiscovery("district_market", DiscoverySource.REGION_ENTER, T0)));
         assertTrue(spool.get(PLAYER).isEmpty());
         assertTrue(spool.isEmpty());
         assertFalse(Files.exists(dir.resolve("discovery-spool").resolve(PLAYER + ".json")));
@@ -124,5 +124,54 @@ class DiscoverySpoolTest {
         assertTrue(pending.userResolved());
         assertEquals(List.of(new PendingDiscovery("town_rivia", DiscoverySource.JOIN_INSIDE, T0)), pending.entries());
         assertEquals(1, spool().list().size());
+    }
+
+    // ---- KNG-118 R14: entries carry their world ----
+
+    @Test
+    void entriesKeepTheirWorld_AndTheSameRegionInTwoWorldsIsTwoEntries() throws Exception {
+        DiscoverySpool spool = spool();
+        spool.add(PLAYER, 7, List.of(
+                new PendingDiscovery("world", "town_rivia", DiscoverySource.REGION_ENTER, T0),
+                new PendingDiscovery("hub", "town_rivia", DiscoverySource.REGION_ENTER, T0),
+                new PendingDiscovery("HUB", "TOWN_RIVIA", DiscoverySource.REGION_ENTER, T0.plusSeconds(5))));
+
+        String json = Files.readString(dir.resolve("discovery-spool").resolve(PLAYER + ".json"));
+        assertTrue(json.contains("\"version\" : 3"), json);
+        assertTrue(json.contains("\"world\" : \"hub\""), json);
+        assertEquals(List.of(
+                new PendingDiscovery("world", "town_rivia", DiscoverySource.REGION_ENTER, T0),
+                new PendingDiscovery("hub", "town_rivia", DiscoverySource.REGION_ENTER, T0)),
+                spool().get(PLAYER).orElseThrow().entries());
+
+        spool.remove(PLAYER, List.of(new PendingDiscovery("Hub", "town_rivia", DiscoverySource.REPLAY, T0)));
+        assertEquals(List.of(new PendingDiscovery("world", "town_rivia", DiscoverySource.REGION_ENTER, T0)),
+                spool.get(PLAYER).orElseThrow().entries());
+    }
+
+    @Test
+    void versionTwoEntriesWithoutAWorldReadAsWorldUnknown_AndStaySeparateFromWorldEntries() throws Exception {
+        Path folder = Files.createDirectories(dir.resolve("discovery-spool"));
+        Files.writeString(folder.resolve(PLAYER + ".json"), """
+                {
+                  "version" : 2,
+                  "playerId" : "%s",
+                  "userId" : null,
+                  "entries" : [ {
+                    "regionId" : "town_rivia",
+                    "source" : "RegionEnter",
+                    "discoveredAt" : "2026-09-26T12:00:00Z"
+                  } ]
+                }
+                """.formatted(PLAYER));
+
+        DiscoverySpool spool = spool();
+        assertEquals(List.of(new PendingDiscovery(null, "town_rivia", DiscoverySource.REGION_ENTER, T0)),
+                spool.get(PLAYER).orElseThrow().entries());
+
+        spool.add(PLAYER, 7, List.of(new PendingDiscovery("world", "town_rivia", DiscoverySource.REGION_ENTER, T0)));
+        DiscoverySpool.Pending pending = spool.get(PLAYER).orElseThrow();
+        assertEquals(7, pending.userId());
+        assertEquals(2, pending.entries().size(), "the old world-less entry is kept next to the world one");
     }
 }
