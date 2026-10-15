@@ -56,7 +56,7 @@ public class SiegeDataAccess {
         this.lobbiesApi = Objects.requireNonNull(lobbiesApi, "lobbiesApi must not be null");
         this.scenariosApi = Objects.requireNonNull(scenariosApi, "scenariosApi must not be null");
         this.settings = Objects.requireNonNullElse(settings, DataAccessSettings.defaults());
-        this.executor = new DataAccessExecutor<>(cache, this.settings.retryPolicy(), "SiegeRuntimeConfig");
+        this.executor = new DataAccessExecutor<>(cache, this.settings, "SiegeRuntimeConfig");
     }
 
     /** The runtime config with the configured default policy (CACHE_FIRST unless config.yml says otherwise). */

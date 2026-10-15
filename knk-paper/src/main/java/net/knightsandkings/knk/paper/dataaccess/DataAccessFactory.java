@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.util.logging.Logger;
 
 import net.knightsandkings.knk.core.cache.*;
+import net.knightsandkings.knk.core.connectivity.ApiOutageSignal;
 import net.knightsandkings.knk.core.dataaccess.*;
 import net.knightsandkings.knk.core.ports.api.*;
 import net.knightsandkings.knk.paper.config.KnkConfig;
@@ -12,13 +13,16 @@ import net.knightsandkings.knk.paper.config.KnkConfig;
  * Factory for creating data access gateways with configured settings.
  * <p>
  * Bridges the gap between Paper configuration (KnkConfig) and core data access components.
- * Constructs gateways with entity-specific TTL, policy, and retry settings from config.yml.
+ * Constructs gateways with entity-specific TTL, policy, and retry settings from config.yml, and
+ * hands every gateway except Health the API outage signal (KNG-171: reads skip the API while it is
+ * DOWN).
  */
 public class DataAccessFactory {
     
     private static final Logger LOGGER = Logger.getLogger(DataAccessFactory.class.getName());
     
     private final KnkConfig.EntityCacheSettings entitySettings;
+    private final ApiOutageSignal apiOutage;
     
     /**
      * Create a factory with entity-specific cache settings from configuration.
@@ -26,7 +30,16 @@ public class DataAccessFactory {
      * @param entitySettings Entity cache configuration
      */
     public DataAccessFactory(KnkConfig.EntityCacheSettings entitySettings) {
+        this(entitySettings, ApiOutageSignal.NEVER);
+    }
+
+    /**
+     * @param entitySettings Entity cache configuration
+     * @param apiOutage      while it reports DOWN, gateway reads make no API call (KNG-171)
+     */
+    public DataAccessFactory(KnkConfig.EntityCacheSettings entitySettings, ApiOutageSignal apiOutage) {
         this.entitySettings = entitySettings;
+        this.apiOutage = apiOutage != null ? apiOutage : ApiOutageSignal.NEVER;
     }
     
     /**
@@ -287,7 +300,8 @@ public class DataAccessFactory {
         Duration ttl,
         HealthApi healthApi
     ) {
-        DataAccessSettings settings = buildSettings(entitySettings.health(), "Health");
+        // Never gated: a health read is how an operator checks whether the API is back.
+        DataAccessSettings settings = buildSettings(entitySettings.health(), "Health", ApiOutageSignal.NEVER);
         return new HealthDataAccess(ttl, healthApi, settings);
     }
     
@@ -321,13 +335,19 @@ public class DataAccessFactory {
      * @return Configured DataAccessSettings
      */
     private DataAccessSettings buildSettings(KnkConfig.EntitySettings entityConfig, String entityName) {
+        return buildSettings(entityConfig, entityName, apiOutage);
+    }
+
+    private DataAccessSettings buildSettings(KnkConfig.EntitySettings entityConfig, String entityName,
+                                             ApiOutageSignal outage) {
         FetchPolicy policy = parseFetchPolicy(entityConfig.policyName(), entityName);
         RetryPolicy retryPolicy = buildRetryPolicy(entityConfig);
         
         DataAccessSettings settings = new DataAccessSettings(
             policy,
             entityConfig.isStaleAllowed(),
-            retryPolicy
+            retryPolicy,
+            outage
         );
         
         LOGGER.fine(String.format(

@@ -56,6 +56,10 @@ api:
     # API root that serves /health/ready. Empty = base-url without its trailing /api
     # (http://localhost:5294/api -> http://localhost:5294/health/ready).
     health-root-url: ""
+    # KNG-171: while the state is DOWN, reads (permission checks, users, catalogs...) make no API
+    # call: answered at once from the in-memory caches, else the offline store (KNG-58). Writes still
+    # go to the API. false = keep calling (and retrying) the API during an outage.
+    skip-api-while-down: true
 
 # Region HTTP server: knk-web-api calls it back for region renames and containment checks.
 region-http:

@@ -46,7 +46,7 @@ public class DistrictsDataAccess {
         this.districtCache = Objects.requireNonNull(districtCache, "districtCache must not be null");
         this.districtsQueryApi = Objects.requireNonNull(districtsQueryApi, "districtsQueryApi must not be null");
         this.settings = Objects.requireNonNullElse(settings, DataAccessSettings.defaults());
-        this.executor = new DataAccessExecutor<>(districtCache, this.settings.retryPolicy(), "District");
+        this.executor = new DataAccessExecutor<>(districtCache, this.settings, "District");
     }
     
     /**
