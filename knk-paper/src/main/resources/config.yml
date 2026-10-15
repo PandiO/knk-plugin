@@ -158,6 +158,9 @@ game-settings:
   # How often the loaded worlds are checked; they are reported to the API only when they changed
   # (or every 10 minutes). Seconds, min 5. The report needs the plugin API key (api.auth.type: apikey).
   runtime-sync-interval-seconds: 30
+  # This game server's id in that report (KNG-118). Each server's report replaces only its own worlds, so give
+  # every game server that shares one API its own id. Blank = "default" (the id of reports from older plugins).
+  server-id: "default"
   # Earlier versions of the settings kept in plugins/KnightsAndKings/game-settings-backups/ (0 = none).
   # The latest version is always cached in game-settings-cache.json and used when the API is down at startup.
   backup-history-limit: 48
