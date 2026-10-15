@@ -145,8 +145,14 @@ public final class NavigationService implements SiegeMatchObserver {
          * main thread - with null when no walk search is possible (an unloaded chunk, a box too large),
          * which keeps the straight line. The supplier runs on the walk executor (domain lookups may
          * block there) and builds the request. The caller may cancel the future.
+         *
+         * @param destinationRegions KNG-121: the regions the navigation's destination lies in
+         *                           ({@link NavigationService#destinationRegions}, the router's set) - a region the
+         *                           player may enter but not leave is kept out of unless it is one of them; null when
+         *                           not known (no such rule)
          */
-        CompletableFuture<Supplier<WalkRequest>> prepare(Player player, double[] feet, double[] target, WalkGoal goal);
+        CompletableFuture<Supplier<WalkRequest>> prepare(Player player, double[] feet, double[] target, WalkGoal goal,
+                                                         Set<String> destinationRegions);
 
         /** Capture counters for {@code /knk road status}; empty when there is nothing to say. */
         default String describe() {
@@ -952,9 +958,11 @@ public final class NavigationService implements SiegeMatchObserver {
         double[] target = leg.target;
         CompletableFuture<Supplier<WalkRequest>> capture;
         try {
+            // KNG-121: the navigation's destination, also for the walk to the road (not the road's start)
             capture = walk.preparer().prepare(a.player, new double[] {feet.getX(), feet.getY(), feet.getZ()}, target,
                 leg == a.startLeg ? WalkGoal.within(target[0], target[1], target[2], sessionParameters.arriveDistance())
-                    : walkGoal(a, target));
+                    : walkGoal(a, target),
+                destinationRegions(a.player, a.destination, a.goals, a.target));
         } catch (RuntimeException e) {
             deps.logger().log(Level.WARNING, "[Navigation] Walk capture failed for " + a.player.getName(), e);
             walkDelivered(a, leg, generation, null, WalkCount.FAILED);

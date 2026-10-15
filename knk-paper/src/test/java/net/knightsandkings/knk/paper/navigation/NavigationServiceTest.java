@@ -111,6 +111,7 @@ class NavigationServiceTest {
     // KNG-51 walk paths: the fake capture and search
     private final List<double[]> walkTargets = new ArrayList<>();
     private final List<WalkGoal> walkGoals = new ArrayList<>();
+    private final List<Set<String>> walkDestinationRegions = new ArrayList<>();
     private final List<CompletableFuture<Supplier<WalkRequest>>> walkCaptures = new ArrayList<>();
     private final List<Runnable> walkSearches = new ArrayList<>();
     private boolean walkCaptureReady = true;
@@ -155,9 +156,10 @@ class NavigationServiceTest {
      * capture and the search are this test's fakes; searches wait for {@link #runSearches}.
      */
     private NavigationService walkService(NavigationConfig config) {
-        NavigationService.WalkPreparer preparer = (p, from, target, goal) -> {
+        NavigationService.WalkPreparer preparer = (p, from, target, goal, destinationRegions) -> {
             walkTargets.add(target.clone());
             walkGoals.add(goal);
+            walkDestinationRegions.add(destinationRegions);
             CompletableFuture<Supplier<WalkRequest>> capture = new CompletableFuture<>();
             walkCaptures.add(capture);
             if (!walkCaptureHeld) {
@@ -1208,6 +1210,37 @@ class NavigationServiceTest {
         ticks(1);
         assertTrue(walking.startLegOf(playerId).isEmpty(), "on the road: the session guides");
         assertEquals(NavigationSession.State.GUIDING, walking.sessionOf(playerId).orElseThrow().state());
+    }
+
+    @Test
+    void walkLegsKnowTheRegionsOfTheNavigationsDestination() {
+        // KNG-121: the walk preparer gets the router's destination regions - for the walk to the road the final
+        // destination's, not the road start's
+        NavigationService.PolicyFactory base = policies;
+        policies = new NavigationService.PolicyFactory() {
+            @Override
+            public AccessPolicy policyFor(Player p, RoadNetworkSnapshot snapshot) {
+                return base.policyFor(p, snapshot);
+            }
+
+            @Override
+            public Set<String> regionsAt(World w, double[] floorPoint) {
+                return floorPoint[0] >= 150 ? Set.of("town_1", "keep_court") : Set.of("town_1", "market");
+            }
+        };
+        walkFinder = r -> found(List.of(new double[] {50.5, 64, 30.5}, new double[] {50.5, 64, 0.5}));
+        NavigationService walking = walkService(NavigationConfig.defaults());
+
+        moveTo(50.5, 65, 30.5);
+        walking.navigate(player, cinixKeep()); // the start leg to (50.5, 64, 0); the keep at x 200
+        assertTrue(walking.startLegOf(playerId).isPresent());
+        assertEquals(Set.of("town_1", "keep_court"), walkDestinationRegions.get(0));
+        walking.stop(player);
+
+        moveTo(0.5, 65, 0.5);
+        walking.navigate(player, well()); // direct mode
+        assertTrue(walking.isDirect(playerId));
+        assertEquals(Set.of("town_1", "market"), walkDestinationRegions.get(walkDestinationRegions.size() - 1));
     }
 
     @Test
