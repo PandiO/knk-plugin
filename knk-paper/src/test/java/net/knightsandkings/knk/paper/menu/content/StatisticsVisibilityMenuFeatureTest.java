@@ -119,14 +119,14 @@ class StatisticsVisibilityMenuFeatureTest {
     }
 
     @Test
-    void theRootHighlightsTheSelectedGroupAndCountsItsValues() {
+    void theRootBlinksTheSelectedGroupAndCountsItsValues() {
         when(api.getVisibility(9, 9)).thenReturn(CompletableFuture.completedFuture(settings(StatisticVisibility.EVERYONE, StatisticVisibility.NOBODY)));
         loadRows();
         registries.actions().execute(StatisticsVisibilityMenuFeature.SELECT_GROUP_ACTION, action(null, null), Map.of("group", "Combat"));
 
         StatisticsVisibilityView view = feature.viewFor(player);
 
-        assertEquals("HIGHLIGHT", view.getCombatMode());
+        assertEquals("BLINK", view.getCombatMode(), "KNG-125: the open group's selector blinks");
         assertEquals("NORMAL", view.getActivityMode());
         // Finding 9: the open group is named, not only highlighted.
         assertEquals("&e&l▶ Combat ◀", view.getCombatName());
