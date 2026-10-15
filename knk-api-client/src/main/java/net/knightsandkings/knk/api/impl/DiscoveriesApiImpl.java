@@ -56,12 +56,14 @@ public class DiscoveriesApiImpl extends BaseApiImpl implements DiscoveriesApi {
     }
 
     @Override
-    public CompletableFuture<DiscoveryGrantResult> grant(int userId, Collection<String> wgRegionIds, DiscoverySource source) {
+    public CompletableFuture<DiscoveryGrantResult> grant(int userId, String worldName, Collection<String> wgRegionIds,
+                                                         DiscoverySource source) {
         return CompletableFuture.supplyAsync(() -> {
             String url = discoveriesUrl(userId);
             try {
                 DiscoveryGrantRequestDto body = new DiscoveryGrantRequestDto(
-                    new ArrayList<>(wgRegionIds), null, (source == null ? DiscoverySource.REGION_ENTER : source).apiName());
+                    new ArrayList<>(wgRegionIds), null, worldName == null || worldName.isBlank() ? null : worldName,
+                    (source == null ? DiscoverySource.REGION_ENTER : source).apiName());
                 String json = postJson(url, objectMapper.writeValueAsString(body));
                 return DiscoveriesMapper.mapGrantResult(parse(json, DiscoveryGrantResultDto.class, url));
             } catch (ApiException | IOException e) {

@@ -33,11 +33,14 @@ import net.knightsandkings.knk.core.domain.discovery.DiscoverySource;
  * {@code plugins/KnightsAndKings/discovery-spool/}), written atomically (temp file + move, like the
  * siege result spool). Rewards are permanent one-offs, so a discovery made while the API is down is
  * kept and replayed rather than dropped; the server's idempotency makes a replay safe. Adding to a
- * player's file merges with what is already there (one entry per region id, the earliest sighting
- * kept). A player who joined while the API was down is spooled under their UUID with the user id
- * unknown ({@link DiscoveryTracker#UNRESOLVED_USER}, {@code "userId": null} in the file); the
- * replay resolves it by UUID. Files written before that (version 1, always with a user id) still
- * read. Thread-safe (every method is synchronized); no Bukkit types.
+ * player's file merges with what is already there (one entry per (world, region id), the earliest
+ * sighting kept). A player who joined while the API was down is spooled under their UUID with the
+ * user id unknown ({@link DiscoveryTracker#UNRESOLVED_USER}, {@code "userId": null} in the file); the
+ * replay resolves it by UUID.
+ *
+ * <p>File versions: 1 always had a user id; 2 allows a null one; 3 (KNG-118) adds each entry's
+ * {@code "world"}. Older files still read: their entries have no world and are replayed world-blind,
+ * as they were sent before. Thread-safe (every method is synchronized); no Bukkit types.
  */
 public final class DiscoverySpool {
 
@@ -55,12 +58,13 @@ public final class DiscoverySpool {
 
     // ---- file format (strings for enums and instants so it doesn't depend on Jackson modules) ----
 
-    record EntryFile(String regionId, String source, String discoveredAt) {}
+    /** {@code world} is absent in files before version 3 (read as null: world unknown). */
+    record EntryFile(String world, String regionId, String source, String discoveredAt) {}
 
-    /** Version 1 always had a user id; version 2 writes null while it is unknown. */
+    /** Version 1 always had a user id; version 2 writes null while it is unknown; version 3 adds the entries' world. */
     record PendingFile(int version, String playerId, Integer userId, List<EntryFile> entries) {}
 
-    static final int FILE_VERSION = 2;
+    static final int FILE_VERSION = 3;
 
     private final Path directory;
     private final Logger logger;
@@ -130,14 +134,17 @@ public final class DiscoverySpool {
         return result;
     }
 
-    /** Removes these region ids from the player's file; deletes the file when nothing is left. */
-    public synchronized void remove(UUID playerId, Collection<String> regionIds) {
+    /**
+     * Removes these entries (by world and region id) from the player's file; deletes the file when
+     * nothing is left.
+     */
+    public synchronized void remove(UUID playerId, Collection<PendingDiscovery> entries) {
         Optional<Pending> existing = read(playerId);
         if (existing.isEmpty()) {
             return;
         }
         Set<String> keys = new HashSet<>();
-        regionIds.forEach(id -> keys.add(PendingDiscovery.key(id)));
+        entries.forEach(e -> keys.add(e.key()));
         List<PendingDiscovery> left = existing.get().entries().stream().filter(e -> !keys.contains(e.key())).toList();
         if (left.isEmpty()) {
             delete(playerId);
@@ -204,7 +211,7 @@ public final class DiscoverySpool {
     static PendingFile toFile(Pending pending) {
         return new PendingFile(FILE_VERSION, pending.playerId().toString(), pending.userResolved() ? pending.userId() : null,
                 pending.entries().stream()
-                        .map(e -> new EntryFile(e.regionId(), e.source().apiName(), e.discoveredAt().toString()))
+                        .map(e -> new EntryFile(e.world(), e.regionId(), e.source().apiName(), e.discoveredAt().toString()))
                         .toList());
     }
 
@@ -215,7 +222,7 @@ public final class DiscoverySpool {
         int userId = file.userId() == null || file.userId() <= 0 ? DiscoveryTracker.UNRESOLVED_USER : file.userId();
         List<PendingDiscovery> entries = file.entries() == null ? List.of() : file.entries().stream()
                 .filter(e -> e.regionId() != null && !e.regionId().isBlank())
-                .map(e -> new PendingDiscovery(e.regionId(), DiscoverySource.fromApiName(e.source()),
+                .map(e -> new PendingDiscovery(e.world(), e.regionId(), DiscoverySource.fromApiName(e.source()),
                         e.discoveredAt() == null ? null : Instant.parse(e.discoveredAt())))
                 .toList();
         return new Pending(UUID.fromString(file.playerId()), userId, entries);
