@@ -2656,11 +2656,12 @@ public class KnKPlugin extends JavaPlugin {
         net.knightsandkings.knk.paper.commands.support.TargetRankCheck rankCheck = (sender, targetName, onAllowed) ->
             userAdminService.resolveTarget(sender, targetName, summary ->
                 userAdminService.withRankCheck(sender, summary, api -> onAllowed.accept(summary), () -> { }));
-        // KNG-13: offline players' saved inventory/ender chest, read from and written to <main world>/playerdata.
+        // KNG-13: offline players' saved inventory/ender chest, read from and written to the level directory's
+        // players/data (26.1 moved it there from <main world>/playerdata; all dimensions share one level directory).
         @SuppressWarnings("deprecation") // Bukkit.getUnsafe().getDataVersion() has no replacement
         var offlineStorage = new net.knightsandkings.knk.paper.inventory.OfflineStorageViews(
             new net.knightsandkings.knk.paper.inventory.OfflinePlayerStorage(
-                () -> org.bukkit.Bukkit.getWorlds().get(0).getWorldFolder().toPath().resolve("playerdata"),
+                () -> org.bukkit.Bukkit.getServer().getLevelDirectory().resolve("players").resolve("data"),
                 () -> org.bukkit.Bukkit.getUnsafe().getDataVersion()
             )
         );
