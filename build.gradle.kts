@@ -12,10 +12,10 @@ subprojects {
     // Zorgt dat elk subproject de Java plugin heeft
     plugins.apply("java")
 
-    // Zet JDK 21 toolchain voor alle subprojects
+    // Zet JDK 25 toolchain (Minecraft 26.x vereist Java 25) voor alle subprojects
     extensions.configure<org.gradle.api.plugins.JavaPluginExtension> {
         toolchain {
-            languageVersion.set(org.gradle.jvm.toolchain.JavaLanguageVersion.of(21))
+            languageVersion.set(org.gradle.jvm.toolchain.JavaLanguageVersion.of(25))
         }
     }
 

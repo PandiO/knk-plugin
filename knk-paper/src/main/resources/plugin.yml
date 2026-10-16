@@ -2,7 +2,7 @@ name: KnightsAndKings
 api: "1.21"
 version: 0.1.0
 main: net.knightsandkings.knk.paper.KnKPlugin
-api-version: "1.21"
+api-version: "26.2"
 depend:
   - WorldGuard
 softdepend:
