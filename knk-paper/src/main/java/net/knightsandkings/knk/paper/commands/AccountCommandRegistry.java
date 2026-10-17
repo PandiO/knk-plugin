@@ -53,7 +53,7 @@ public class AccountCommandRegistry implements TabExecutor {
         );
 
         registry.register(
-            new CommandMetadata("link", "Use a link code to link account", "/account link [code]", "knk.account.use"),
+            new CommandMetadata("link", "Get a code to register or link your web login", "/account link", "knk.account.use"),
             (sender, args) -> accountLinkCommand.onCommand(sender, null, "account", args)
         );
     }

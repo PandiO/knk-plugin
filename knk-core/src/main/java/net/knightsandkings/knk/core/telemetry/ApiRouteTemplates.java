@@ -14,7 +14,7 @@ public final class ApiRouteTemplates {
 
     /** Segments after which the next one is a player name or UUID even if it looks like a word. */
     private static final Set<String> VALUE_MARKERS = Set.of("username", "by-name", "by-username", "uuid", "by-uuid", "name",
-        "by-link-code", "by-key", "link-code", "code", "token");
+        "by-link-code", "by-key", "link-code", "validate-link-code", "code", "token");
 
     private ApiRouteTemplates() {
     }

@@ -109,6 +109,7 @@ class TelemetryCoreRulesTest {
         "http://api.test/api/players/by-name/Bob   | /api/players/by-name/{id}",
         "http://api.test/api/siege-matches/12/participants/7/left | /api/siege-matches/{id}/participants/{id}/left",
         "http://api.test/api/Users/by-link-code/ABCDEF | /api/Users/by-link-code/{id}",
+        "http://api.test/api/Users/validate-link-code/ABCDEF | /api/Users/validate-link-code/{id}",
         "/api/statistics/batches#frag              | /api/statistics/batches",
         "http://api.test                           | /"
     })
