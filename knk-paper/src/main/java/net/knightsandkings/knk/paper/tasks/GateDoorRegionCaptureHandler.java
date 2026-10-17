@@ -46,8 +46,10 @@ public class GateDoorRegionCaptureHandler {
 
     private final Map<Player, CaptureContext> activeCaptures = new HashMap<>();
 
-    private record CaptureContext(int gateDoorId, String gateDoorName, boolean isOpenedRegion) {
+    /** @param worldName the door's world (KNG-113): the region is drawn and saved there only */
+    private record CaptureContext(int gateDoorId, String gateDoorName, boolean isOpenedRegion, String worldName) {
     }
+
 
     public GateDoorRegionCaptureHandler(Plugin plugin, GateDoorsApi gateDoorsApi) {
         this.plugin = plugin;
@@ -63,7 +65,12 @@ public class GateDoorRegionCaptureHandler {
      * can't precisely represent those orientations.
      */
     public void startCapture(Player player, CachedGateDoor door, boolean isOpenedRegion) {
-        activeCaptures.put(player, new CaptureContext(door.getId(), door.getName(), isOpenedRegion));
+        String refusal = GateRegionWorld.wrongWorld(door.getWorldName(), player.getWorld().getName(), door.getName());
+        if (refusal != null) {
+            player.sendMessage(ChatColor.RED + refusal);
+            return;
+        }
+        activeCaptures.put(player, new CaptureContext(door.getId(), door.getName(), isOpenedRegion, door.getWorldName()));
 
         LocalSession session = WorldEdit.getInstance().getSessionManager().get(BukkitAdapter.adapt(player));
         session.dispatchCUISelection(BukkitAdapter.adapt(player));
@@ -88,6 +95,11 @@ public class GateDoorRegionCaptureHandler {
         }
 
         World world = player.getWorld();
+        String refusal = GateRegionWorld.wrongWorld(door.getWorldName(), world.getName(), door.getName());
+        if (refusal != null) {
+            player.sendMessage(ChatColor.RED + refusal);
+            return;
+        }
         RegionSelector selector;
         try {
             selector = GateRegionDataFormat.parseAsRegionSelector(BukkitAdapter.adapt(world), existingRegionData);
@@ -101,7 +113,7 @@ public class GateDoorRegionCaptureHandler {
         session.setRegionSelector(BukkitAdapter.adapt(world), selector);
         session.dispatchCUISelection(BukkitAdapter.adapt(player));
 
-        activeCaptures.put(player, new CaptureContext(door.getId(), door.getName(), isOpenedRegion));
+        activeCaptures.put(player, new CaptureContext(door.getId(), door.getName(), isOpenedRegion, door.getWorldName()));
 
         String slot = isOpenedRegion ? "opened" : "closed";
         player.sendMessage(ChatColor.GOLD + "[Gate Region] Redefining the " + slot + " region for door '" + door.getName() + "'.");
@@ -146,6 +158,11 @@ public class GateDoorRegionCaptureHandler {
     private void handleSave(Player player, CaptureContext context) {
         plugin.getServer().getScheduler().runTask(plugin, () -> {
             World world = player.getWorld();
+            String refusal = GateRegionWorld.wrongWorld(context.worldName(), world.getName(), context.gateDoorName());
+            if (refusal != null) {
+                player.sendMessage(ChatColor.RED + refusal + " Then type 'save' again, or 'cancel'.");
+                return;
+            }
             LocalSession session = WorldEdit.getInstance().getSessionManager().get(BukkitAdapter.adapt(player));
 
             Region selection;

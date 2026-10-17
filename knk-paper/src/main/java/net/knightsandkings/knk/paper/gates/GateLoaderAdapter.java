@@ -44,7 +44,18 @@ public class GateLoaderAdapter {
 
     private final GateManager gateManager;
 
+    /**
+     * KNG-113: the world a door without one in its anchor point is placed in - the main ({@code level-name}) world,
+     * where every gate from before worlds were stored is (hub DESIGN §16 decision 3). Null leaves such a door out.
+     */
+    private final java.util.function.Supplier<String> defaultWorld;
+
     public GateLoaderAdapter(GateManager gateManager) {
+        this(gateManager, () -> null);
+    }
+
+    public GateLoaderAdapter(GateManager gateManager, java.util.function.Supplier<String> defaultWorld) {
+        this.defaultWorld = defaultWorld != null ? defaultWorld : () -> null;
         this.gateManager = gateManager;
     }
 
@@ -164,6 +175,19 @@ public class GateLoaderAdapter {
                 continue;
             }
             CachedGateDoor door = buildCachedGateDoor(doorDto, structure);
+            if (door.getWorldName() == null || door.getWorldName().isBlank()) {
+                // KNG-113: a door without a world was animated in every world. It is placed in the main world (where
+                // every gate from before worlds were stored is), or left out when that is not known.
+                String fallback = defaultWorld.get();
+                if (fallback == null || fallback.isBlank()) {
+                    LOGGER.warning("Gate door " + door.getName() + " (ID: " + door.getId() + ", structure: "
+                        + structure.getName() + ") has no world in its anchor point; not loaded");
+                    continue;
+                }
+                LOGGER.warning("Gate door " + door.getName() + " (ID: " + door.getId() + ", structure: " + structure.getName()
+                    + ") has no world in its anchor point; using the main world '" + fallback + "'");
+                door.setWorldName(fallback);
+            }
             gateManager.cacheGate(door);
             doorIds.add(door.getId());
 

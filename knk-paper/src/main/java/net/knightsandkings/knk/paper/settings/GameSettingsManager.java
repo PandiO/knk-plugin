@@ -220,6 +220,11 @@ public class GameSettingsManager {
     }
 
     /** Every reference besides the join spawn: world spawns and configured respawn spots. */
+    /** A spawn reference's current spot as last resolved (the referenced Location or domain), if any. */
+    public java.util.Optional<KnkLocation> resolvedReference(KnkSpawnReference reference) {
+        return reference == null ? java.util.Optional.empty() : java.util.Optional.ofNullable(resolved.get(reference));
+    }
+
     private void resolveReferences(KnkGameSettings settings, SpawnDestinationResolver resolver) {
         Set<KnkSpawnReference> references = new HashSet<>();
         for (KnkWorldSettings world : settings.worldSettings()) {
@@ -234,6 +239,9 @@ public class GameSettingsManager {
                 references.add(group.joinSpawnReference());
             }
             addRespawnReference(references, group.respawnPolicy());
+        }
+        if (settings.hub().spawn() != null) {
+            references.add(settings.hub().spawn()); // the hub spawn follows a moved Location like the others
         }
 
         List<CompletableFuture<Void>> lookups = new ArrayList<>();

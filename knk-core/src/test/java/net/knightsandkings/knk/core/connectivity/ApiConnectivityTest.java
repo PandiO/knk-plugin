@@ -151,6 +151,22 @@ class ApiConnectivityTest {
     }
 
     @Test
+    void anOutageCarriesItsFirstFailedProbeAndAPassingProbeStartsTheRunOver() {
+        ApiConnectivity c = upMachine();
+        c.recordFailure(t(10), "x");
+        c.recordSuccess(t(20), "healthy"); // a blip: the next run starts over
+        c.recordFailure(t(30), "x");
+        c.recordFailure(t(40), "x");
+        ApiConnectivityTransition down = c.recordFailure(t(50), "x").orElseThrow();
+
+        assertEquals(t(50), down.at());
+        assertEquals(t(30), down.firstFailureAt());
+        c.recordSuccess(t(60), "healthy");
+        ApiConnectivityTransition up = c.recordSuccess(t(70), "healthy").orElseThrow();
+        assertEquals(t(70), up.firstFailureAt(), "a recovery has no earlier start");
+    }
+
+    @Test
     void rejectsThresholdsBelowOne() {
         assertThrows(IllegalArgumentException.class, () -> new ApiConnectivity(0, 1, T0));
         assertThrows(IllegalArgumentException.class, () -> new ApiConnectivity(1, 0, T0));

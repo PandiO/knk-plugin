@@ -651,10 +651,24 @@ lootboxes:
     slowest-step-ticks: 8          # the last step's delay; the reel starts at 1 tick per step and eases out
     show-result-ticks: 50          # how long the menu stays open on the result
     public-effects: true           # particles and sounds at the player that others nearby see and hear
+# Extra worlds KnK loads at startup (KNG-114), next to the level-name world (the gameplay world) and its nether/end,
+# which the server loads itself. Loaded before gates, region repair and Game Settings start. A world added here comes up
+# at the next restart; a listed world is never unloaded while the server runs. KnK never deletes or regenerates a world.
+#   name:        the world folder (and world name), letters, digits, _ and - only
+#   environment: normal | nether | the_end
+#   generator:   default | flat | void - how new chunks are generated; void is empty with a small stone platform at
+#                0,64,0 (for a hub that is built, not generated). Applied at every load, so keep it the same.
+#   create:      create the world when its folder does not exist yet (default false)
+#   required:    while it is missing, only operators may join (default true)
+# Go to a loaded world with KnK's staff teleport: /tp 2 65 2 <name> (a void world's platform is at 0..4, 64, 0..4).
+worlds:
+  load: []
+  #  - { name: hub, environment: normal, generator: void, create: true, required: true }
 # Managed WorldGuard regions (docs/architecture/managed-worldguard-regions.md in knk-workspace).
 # Knights and Kings gives every Town/District/Structure/Gate region its parent, priority and category flags when the region
 # is created, and re-checks all of them at each startup. It only ever touches those three things; owners, members and
 # every other flag (greetings, custom ones) stay as they are, and no region is created or deleted.
+
 regions:
   managed:
     startup-repair:

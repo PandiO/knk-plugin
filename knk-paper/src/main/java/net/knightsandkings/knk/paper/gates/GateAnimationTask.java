@@ -138,7 +138,8 @@ public class GateAnimationTask extends BukkitRunnable {
         Map<Integer, CachedGateDoor> gates = gateManager.getAllGates();
 
         for (CachedGateDoor gate : gates.values()) {
-            if (!gate.getWorldName().isBlank() && !gate.getWorldName().equals(world.getName())) {
+            // KNG-113: each world's task animates only its own doors (a door without a world is not loaded at all)
+            if (!world.getName().equalsIgnoreCase(gate.getWorldName())) {
                 continue;
             }
 
