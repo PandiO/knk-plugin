@@ -2,6 +2,7 @@ package net.knightsandkings.knk.core.roads.walk;
 
 import net.knightsandkings.knk.core.regions.DomainAccessEvaluator;
 import net.knightsandkings.knk.core.regions.DomainAccessEvaluator.Denial;
+import net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot;
 import net.knightsandkings.knk.core.roads.route.DomainAvailability;
 import net.knightsandkings.knk.core.roads.route.RegionShape;
 
@@ -10,6 +11,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Domain entry and exit rules at cell level (KNG-51 {@code LAST_MILE_PATHFINDING.md} §6 "Domains"):
@@ -20,6 +22,9 @@ import java.util.Optional;
  *       entry ({@link DomainAccessEvaluator#entry}), is blocked;</li>
  *   <li><b>exit:</b> for a region the mover <em>is</em> in now whose domain denies leaving
  *       ({@link DomainAccessEvaluator#exit}), every cell outside it is blocked;</li>
+ *   <li><b>no way out</b> (KNG-121, the walk-path half of KNG-110's rule): a region the mover is <em>not</em> in,
+ *       whose domain allows entry but denies leaving, is blocked like an entry when the destination is known to lie
+ *       outside it - the mover could not leave it again. A destination inside it is still reached;</li>
  *   <li><b>bypass</b> ({@code knk.region.bypass}): everything open.</li>
  * </ul>
  * Containment is pure geometry on the cell's <b>feet block</b> against a Bukkit-free
@@ -71,10 +76,25 @@ public final class DeniedRegionAccess implements CellAccess {
     /**
      * Keeps the candidates whose domain denies the mover: entry for regions the mover is not in, exit
      * for regions they are in ({@link DomainAvailability}'s split). With {@code bypass}, none. Domain
-     * lookups may block (paper: the resolver's API fallback) — call off the main thread.
+     * lookups may block (paper: the resolver's API fallback) - call off the main thread. Without the
+     * destination's regions: no "no way out" rule.
      */
     public static DeniedRegionAccess resolve(List<Candidate> candidates, DomainAvailability.DomainLookup lookup,
                                              DomainAccessEvaluator evaluator, boolean bypass) {
+        return resolve(candidates, null, lookup, evaluator, bypass);
+    }
+
+    /**
+     * As above, with the "no way out" rule (KNG-121): a region the mover is not in whose domain allows entry but
+     * denies leaving becomes an entry rule ({@link DomainAvailability#TRAP_MESSAGE}) unless it is one of
+     * {@code destinationRegionIds}.
+     *
+     * @param destinationRegionIds the regions the navigation's destination lies in - the same set the road router
+     *                             gets; null when the destination is not known: no such rule
+     */
+    public static DeniedRegionAccess resolve(List<Candidate> candidates, Set<String> destinationRegionIds,
+                                             DomainAvailability.DomainLookup lookup, DomainAccessEvaluator evaluator,
+                                             boolean bypass) {
         Objects.requireNonNull(candidates, "candidates");
         Objects.requireNonNull(lookup, "lookup");
         Objects.requireNonNull(evaluator, "evaluator");
@@ -83,12 +103,26 @@ public final class DeniedRegionAccess implements CellAccess {
         }
         List<Rule> rules = new ArrayList<>();
         for (Candidate candidate : candidates) {
-            Optional<Denial> denial = lookup.domainByRegionId(candidate.regionId())
-                .flatMap(candidate.moverInside() ? evaluator::exit : evaluator::entry);
+            Optional<DomainSnapshot> domain = lookup.domainByRegionId(candidate.regionId());
+            if (domain.isEmpty()) {
+                continue;
+            }
+            String message;
+            Optional<Denial> denial;
+            if (candidate.moverInside()) {
+                denial = evaluator.exit(domain.get());
+                message = DomainAvailability.EXIT_MESSAGE;
+            } else {
+                denial = evaluator.entry(domain.get());
+                message = DomainAvailability.ENTRY_MESSAGE;
+                if (denial.isEmpty() && destinationRegionIds != null
+                    && !destinationRegionIds.contains(candidate.regionId())) {
+                    denial = evaluator.exit(domain.get());
+                    message = DomainAvailability.TRAP_MESSAGE;
+                }
+            }
             if (denial.isPresent()) {
-                String name = denial.get().domain().name();
-                String reason = String.format(candidate.moverInside()
-                    ? DomainAvailability.EXIT_MESSAGE : DomainAvailability.ENTRY_MESSAGE, name);
+                String reason = String.format(message, denial.get().domain().name());
                 rules.add(new Rule(candidate.regionId(), candidate.shape(), candidate.moverInside(), reason));
             }
         }

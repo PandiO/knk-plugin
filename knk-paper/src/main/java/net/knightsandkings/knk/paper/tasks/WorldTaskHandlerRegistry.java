@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.logging.Logger;
+import java.util.stream.Stream;
 
 /**
  * Registry for world task handlers.
@@ -123,9 +124,26 @@ public class WorldTaskHandlerRegistry {
      * @return The active handler, if any
      */
     public Optional<IWorldTaskHandler> getActiveHandler(Player player) {
-        return handlers.values().stream()
+        // A handler registered only by task type can hold a task too (KNG-174)
+        return Stream.concat(handlers.values().stream(), handlersByTaskType.values().stream())
+                .distinct()
                 .filter(h -> h.isHandling(player))
                 .findFirst();
+    }
+
+    /**
+     * KNG-174: why the player can't claim another task yet, or empty when they can. A player with a task still open
+     * (any handler is handling them) finishes or cancels it first; a second claim would start a second task that
+     * shares the chat commands with the first.
+     */
+    public Optional<String> openTaskRefusal(Player player) {
+        return getActiveHandler(player).map(handler -> {
+            Integer taskId = handler.getTaskId(player);
+            String task = taskId != null
+                    ? "task #" + taskId + " (" + handler.getFieldName() + ")"
+                    : "a " + handler.getFieldName() + " task";
+            return "You still have " + task + " open. Finish it, or type 'cancel' to stop it, then claim again.";
+        });
     }
 
     /**

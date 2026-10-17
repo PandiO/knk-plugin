@@ -46,7 +46,7 @@ public class TownsDataAccess {
         this.townCache = Objects.requireNonNull(townCache, "townCache must not be null");
         this.townsQueryApi = Objects.requireNonNull(townsQueryApi, "townsQueryApi must not be null");
         this.settings = Objects.requireNonNullElse(settings, DataAccessSettings.defaults());
-        this.executor = new DataAccessExecutor<>(townCache, this.settings.retryPolicy(), "Town");
+        this.executor = new DataAccessExecutor<>(townCache, this.settings, "Town");
     }
     
     /**

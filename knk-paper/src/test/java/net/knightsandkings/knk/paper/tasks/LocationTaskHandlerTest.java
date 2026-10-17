@@ -4,7 +4,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
-import net.knightsandkings.knk.paper.utils.PlaceholderInterpolationUtil;
+import net.knightsandkings.knk.paper.tasks.validation.ParentRegionFeedback;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
@@ -39,26 +39,21 @@ class LocationTaskHandlerTest {
     void failureMessageFillsCoordinatesAndTheParentsName() {
         JsonObject gate = JsonParser.parseString("{\"id\":21,\"name\":\"Main Gate\",\"wgRegionId\":\"domain_21\"}")
                 .getAsJsonObject();
+        ParentRegionFeedback parent = ParentRegionFeedback.of(new JsonObject(), gate, "domain_21");
 
-        String message = PlaceholderInterpolationUtil.interpolate(
+        String message = parent.interpolate(
                 "Location {coordinates} is outside {parentEntityName}'s boundaries.",
-                LocationTaskHandler.computedPlaceholders(gate, "domain_21", -967.0, 113.0, 1653.5));
+                null,
+                LocationTaskHandler.coordinatePlaceholders(-967.0, 113.0, 1653.5));
 
         assertEquals("Location (-967.00, 113.00, 1653.50) is outside Main Gate's boundaries.", message);
     }
 
     @Test
     void parentNameFallsBackToTheRegionWhenTheDependencyIsJustTheRegionId() {
-        JsonObject placeholders = LocationTaskHandler.computedPlaceholders(
-                new JsonPrimitive("town_kardenna"), "town_kardenna", 1, 2, 3);
+        JsonObject placeholders = ParentRegionFeedback.of(new JsonObject(), new JsonPrimitive("town_kardenna"),
+                "town_kardenna").placeholders();
 
         assertEquals("town_kardenna", placeholders.get("parentEntityName").getAsString());
-    }
-
-    @Test
-    void aMissingRegionIsNamedInsteadOfCallingTheLocationOutside() {
-        assertEquals("Cannot check the location: region '21' does not exist in world 'knk_hub'. "
-                        + "Check the form's region before saving.",
-                LocationTaskHandler.regionNotFoundMessage("21", "knk_hub"));
     }
 }

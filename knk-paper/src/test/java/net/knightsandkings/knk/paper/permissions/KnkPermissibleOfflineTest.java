@@ -13,6 +13,8 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.bukkit.OfflinePlayer;
@@ -59,12 +61,16 @@ class KnkPermissibleOfflineTest {
     };
     private final OfflineSecurityStore store = new OfflineSecurityStore(null, OfflineSecurityStore.Settings.defaults(), clock);
     private final AtomicReference<CompletableFuture<PermissionCheckResult>> answer = new AtomicReference<>();
+    /** KNG-171: the service-wide connectivity state is DOWN. */
+    private final AtomicBoolean apiDown = new AtomicBoolean(false);
+    private final AtomicInteger apiCalls = new AtomicInteger();
 
     /** A fresh server: empty memory caches, the same offline store (as loaded from disk). */
     private KnkPermissible server(Duration permissionTtl) {
         PermissionsDataAccess permissions = new PermissionsDataAccess(permissionTtl, new PermissionsApi() {
             @Override
             public CompletableFuture<PermissionCheckResult> check(int userId, String node) {
+                apiCalls.incrementAndGet();
                 return answer.get();
             }
 
@@ -72,7 +78,7 @@ class KnkPermissibleOfflineTest {
             public CompletableFuture<EffectivePermissionSet> getEffective(int userId) {
                 return CompletableFuture.completedFuture(null);
             }
-        }, new DataAccessSettings(FetchPolicy.CACHE_FIRST, true, RetryPolicy.noRetry()));
+        }, new DataAccessSettings(FetchPolicy.CACHE_FIRST, true, RetryPolicy.noRetry(), apiDown::get));
         // As KnKPlugin wires it.
         permissions.setAnswerListener((userId, node, result) -> {
             if (result == null) {
@@ -92,6 +98,10 @@ class KnkPermissibleOfflineTest {
 
     private static CompletableFuture<PermissionCheckResult> granted() {
         return CompletableFuture.completedFuture(new PermissionCheckResult(NODE, PermissionResolution.GRANTED, null, null));
+    }
+
+    private static CompletableFuture<PermissionCheckResult> denied() {
+        return CompletableFuture.completedFuture(new PermissionCheckResult(NODE, PermissionResolution.DENIED, null, null));
     }
 
     private static CompletableFuture<PermissionCheckResult> down() {
@@ -174,5 +184,80 @@ class KnkPermissibleOfflineTest {
         answer.set(down());
 
         assertEquals(PermissionDecision.UNAVAILABLE, server(Duration.ofSeconds(30)).checkAsync(staff(), NODE).join());
+    }
+
+    // ==================== KNG-171: connectivity DOWN skips the API ====================
+
+    @Test
+    void whileDown_checksAreAnsweredFromTheOfflineStoreWithoutCallingTheApi() {
+        apiAnsweredBefore();
+        apiCalls.set(0);
+        answer.set(down());
+        apiDown.set(true);
+
+        KnkPermissible restarted = server(Duration.ofSeconds(30));
+        CompletableFuture<PermissionDecision> decision = restarted.checkAsync(staff(), NODE);
+
+        assertTrue(decision.isDone(), "no wait for the API");
+        assertEquals(PermissionDecision.ALLOWED, decision.join());
+        assertTrue(restarted.hasPermission(staff(), NODE), "the synchronous check too");
+        assertEquals(PermissionDecision.UNAVAILABLE, restarted.checkAsync(staff(), "knk.freeze").join(),
+            "a node the API never answered is still no");
+        assertEquals(0, apiCalls.get(), "not even the background refresh calls the API");
+    }
+
+    @Test
+    void whileDown_aFreshInMemoryAnswerIsUsed() {
+        store.recordUser(new UserSummary(7, "Staffer", STAFF, 0));
+        answer.set(granted());
+        KnkPermissible server = server(Duration.ofSeconds(30));
+        server.checkAsync(staff(), NODE).join();
+        apiCalls.set(0);
+        apiDown.set(true);
+
+        assertEquals(PermissionDecision.ALLOWED, server.checkAsync(staff(), NODE).join());
+        assertEquals(0, apiCalls.get());
+    }
+
+    @Test
+    void whileDown_aLastKnownDenialStaysADenial() {
+        store.recordUser(new UserSummary(7, "Staffer", STAFF, 0));
+        answer.set(denied());
+        server(Duration.ofSeconds(30)).checkAsync(staff(), NODE).join();
+        apiDown.set(true);
+
+        KnkPermissible restarted = server(Duration.ofSeconds(30));
+
+        assertEquals(PermissionDecision.DENIED, restarted.checkAsync(staff(), NODE).join());
+        assertFalse(restarted.hasPermission(staff(), NODE));
+    }
+
+    @Test
+    void whileDown_anAnswerOlderThanTheMaxAgeIsNotTrusted() {
+        apiAnsweredBefore();
+        apiCalls.set(0);
+        apiDown.set(true);
+        now = now.plus(Duration.ofHours(73));
+
+        KnkPermissible restarted = server(Duration.ofSeconds(30));
+
+        assertEquals(PermissionDecision.UNAVAILABLE, restarted.checkAsync(staff(), NODE).join());
+        assertFalse(restarted.hasPermission(staff(), NODE));
+        assertEquals(0, apiCalls.get());
+    }
+
+    @Test
+    void backUp_aChangeMadeInTheWebAppAppliesAgain() {
+        apiAnsweredBefore();
+        apiDown.set(true);
+        KnkPermissible server = server(Duration.ZERO);
+        assertEquals(PermissionDecision.ALLOWED, server.checkAsync(staff(), NODE).join());
+
+        // The node was revoked in the web app; the API answers again.
+        answer.set(denied());
+        apiDown.set(false);
+
+        assertEquals(PermissionDecision.DENIED, server.checkAsync(staff(), NODE).join());
+        assertEquals(java.util.Optional.of(false), store.permission(7, NODE), "the offline store learns it too");
     }
 }

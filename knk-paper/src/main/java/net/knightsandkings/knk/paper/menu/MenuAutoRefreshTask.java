@@ -10,6 +10,10 @@ import org.bukkit.scheduler.BukkitRunnable;
  * (batched), on the main thread. With no open auto-refreshing menus a tick
  * costs one pass over an empty/small map.
  * <p>
+ * KNG-125: after the refreshes, {@link MenuService#processBlinks} toggles the
+ * {@code BLINK} items of every open menu (the item blinker), on the same
+ * main-thread tick - v1/v2 ran it on an async timer.
+ * <p>
  * Scheduled by {@code KnKPlugin} with {@code runTaskTimer(plugin, 1L, 1L)}.
  */
 public final class MenuAutoRefreshTask extends BukkitRunnable {
@@ -23,5 +27,6 @@ public final class MenuAutoRefreshTask extends BukkitRunnable {
     @Override
     public void run() {
         menuService.processDueRefreshes();
+        menuService.processBlinks();
     }
 }

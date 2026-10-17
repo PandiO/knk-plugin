@@ -27,6 +27,9 @@ import java.util.Map;
  * @param skullOwner  {@code SkullOwner} binding (UUID or name), or null
  * @param displayMode effective display mode: a {@code DisplayMode} binding
  *                    overrides the column when it parses
+ * @param blinkTicks  KNG-125: {@code BlinkTicks} binding (the blink interval of a
+ *                    {@link MenuDisplayMode#BLINK} item, see {@link MenuBlink}), or
+ *                    null when not bound/invalid (the default interval is used then)
  * @param warnings    data problems found while resolving (an unparsable amount,
  *                    an unknown display mode, banner errors) - knk-paper logs
  *                    each once
@@ -39,6 +42,7 @@ public record MenuItemPresentation(
         BannerPatternSpec banner,
         String skullOwner,
         MenuDisplayMode displayMode,
+        Integer blinkTicks,
         List<String> warnings
 ) {
 
@@ -47,6 +51,7 @@ public record MenuItemPresentation(
     public static final String BANNER_PATTERNS = "BannerPatterns";
     public static final String SKULL_OWNER = "SkullOwner";
     public static final String DISPLAY_MODE = "DisplayMode";
+    public static final String BLINK_TICKS = "BlinkTicks";
     public static final int MIN_AMOUNT = 1;
     public static final int MAX_AMOUNT = 64;
 
@@ -97,12 +102,24 @@ public record MenuItemPresentation(
             try {
                 displayMode = MenuDisplayMode.valueOf(rawDisplayMode.trim().toUpperCase(Locale.ROOT));
             } catch (IllegalArgumentException e) {
-                warnings.add("DisplayMode binding value '" + rawDisplayMode + "' is not NORMAL/DISABLED/HIGHLIGHT/HIDDEN"
+                warnings.add("DisplayMode binding value '" + rawDisplayMode + "' is not NORMAL/DISABLED/HIGHLIGHT/HIDDEN/BLINK"
                         + " - using the DisplayMode column");
             }
         }
 
-        return new MenuItemPresentation(name, lore, materialKey, amount, banner, skullOwner, displayMode, warnings);
+        Integer blinkTicks = null;
+        String rawBlinkTicks = blankToNull(property(bindings, BLINK_TICKS, session, scope, currentTick, rowScope));
+        if (rawBlinkTicks != null) {
+            try {
+                blinkTicks = MenuBlink.intervalTicks(Integer.parseInt(rawBlinkTicks));
+            } catch (NumberFormatException e) {
+                warnings.add("BlinkTicks binding value '" + rawBlinkTicks + "' is not an integer - blinking every "
+                        + MenuBlink.DEFAULT_INTERVAL_TICKS + " ticks");
+            }
+        }
+
+        return new MenuItemPresentation(name, lore, materialKey, amount, banner, skullOwner, displayMode, blinkTicks,
+                warnings);
     }
 
     private static String property(List<KnkVariableBinding> bindings, String targetProperty, MenuSession session,
