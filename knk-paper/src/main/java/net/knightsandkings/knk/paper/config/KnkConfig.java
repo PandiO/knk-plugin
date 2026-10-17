@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 import org.bukkit.GameMode;
 
 import net.knightsandkings.knk.core.teleport.TeleportSettings;
+import net.knightsandkings.knk.paper.commands.LinkCodeMessage;
 
 /**
  * Plugin configuration loaded from config.yml.
@@ -24,7 +25,9 @@ public record KnkConfig(
     NavigationConfig navigation,
     StatisticsConfig statistics,
     TelemetryConfig telemetry,
-    WorldAnalyticsConfig worldAnalytics
+    WorldAnalyticsConfig worldAnalytics,
+    RegionHttpConfig regionHttp,
+    WebConfig web
 ) {
     public KnkConfig {
         // No teleport: block (e.g. an older config.yml) means the DESIGN §3.11 defaults.
@@ -36,6 +39,18 @@ public record KnkConfig(
         telemetry = telemetry != null ? telemetry : TelemetryConfig.defaults();
         // No world-analytics: block means "on, with defaults" (KNG-34 link 7).
         worldAnalytics = worldAnalytics != null ? worldAnalytics : WorldAnalyticsConfig.defaults();
+        // An older config.yml has no region-http bind address and no web: block.
+        regionHttp = regionHttp != null ? regionHttp : RegionHttpConfig.defaults();
+        web = web != null ? web : WebConfig.defaults();
+    }
+
+    /** Without region-http and web sections: their defaults (closed-alpha hardening, KNG-70). */
+    public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
+                     PrivateMessagesConfig privateMessages, TeleportSettings teleport, DiscoveryConfig discovery,
+                     NavigationConfig navigation, StatisticsConfig statistics, TelemetryConfig telemetry,
+                     WorldAnalyticsConfig worldAnalytics) {
+        this(api, cache, account, messages, privateMessages, teleport, discovery, navigation, statistics,
+            telemetry, worldAnalytics, RegionHttpConfig.defaults(), WebConfig.defaults());
     }
 
     /** Without a navigation section: its defaults (the KNG-34 statistics/telemetry/analytics form). */
@@ -93,6 +108,52 @@ public record KnkConfig(
     public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
                      PrivateMessagesConfig privateMessages, TeleportSettings teleport, DiscoveryConfig discovery) {
         this(api, cache, account, messages, privateMessages, teleport, discovery, NavigationConfig.defaults());
+    }
+
+    /**
+     * The small HTTP server knk-web-api calls back for region renames and containment checks
+     * ({@code paper/http/RegionHttpServer}). It binds to {@code bindAddress} only: the loopback
+     * address by default, so nothing outside the host can reach it.
+     */
+    public record RegionHttpConfig(String bindAddress, int port) {
+        public static final String DEFAULT_BIND_ADDRESS = "127.0.0.1";
+        public static final int DEFAULT_PORT = 8081;
+
+        public RegionHttpConfig {
+            bindAddress = bindAddress == null || bindAddress.isBlank() ? DEFAULT_BIND_ADDRESS : bindAddress.trim();
+        }
+
+        public static RegionHttpConfig defaults() {
+            return new RegionHttpConfig(DEFAULT_BIND_ADDRESS, DEFAULT_PORT);
+        }
+
+        public void validate() {
+            if (port < 1 || port > 65535) {
+                throw new IllegalArgumentException("region-http.port must be between 1 and 65535 (got: " + port + ")");
+            }
+        }
+    }
+
+    /**
+     * The public web app, for player-facing messages. {@code publicUrl} is empty when unknown; it
+     * never ends with a slash, so {@code publicUrl + "/auth/register"} is always well formed.
+     */
+    public record WebConfig(String publicUrl) {
+        public WebConfig {
+            String url = publicUrl == null ? "" : publicUrl.trim();
+            while (url.endsWith("/")) {
+                url = url.substring(0, url.length() - 1);
+            }
+            publicUrl = url;
+        }
+
+        public static WebConfig defaults() {
+            return new WebConfig("");
+        }
+
+        public boolean hasPublicUrl() {
+            return !publicUrl.isEmpty();
+        }
     }
 
     public record ApiConfig(
@@ -190,6 +251,7 @@ public record KnkConfig(
         statistics.validate();
         telemetry.validate();
         worldAnalytics.validate();
+        regionHttp.validate();
     }
     
     public record CacheConfig(
@@ -419,7 +481,9 @@ public record KnkConfig(
     /**
      * Messages configuration for player-facing text.
      * All messages support Minecraft color codes (&a, &6, etc.).
-     * Placeholders: {code}, {minutes}, {coins}, {gems}, {exp}
+     * Placeholders: {code}, {minutes}, {url}, {coins}, {gems}, {exp}
+     * ({url} is web.public-url; see {@code commands/LinkCodeMessage} for how a message that
+     * uses it reads when no URL is configured.)
      */
     public record MessagesConfig(
         String prefix,
@@ -428,8 +492,22 @@ public record KnkConfig(
         String linkCodeGenerated,
         String invalidLinkCode,
         String duplicateAccount,
-        String mergeComplete
+        String mergeComplete,
+        String linkCodeEnteredInGame
     ) {
+        public MessagesConfig {
+            if (linkCodeEnteredInGame == null || linkCodeEnteredInGame.isBlank()) {
+                linkCodeEnteredInGame = LinkCodeMessage.DEFAULT_ENTERED_IN_GAME_TEMPLATE;
+            }
+        }
+
+        /** Without link-code-entered-in-game: its default. */
+        public MessagesConfig(String prefix, String accountCreated, String accountLinked, String linkCodeGenerated,
+                              String invalidLinkCode, String duplicateAccount, String mergeComplete) {
+            this(prefix, accountCreated, accountLinked, linkCodeGenerated, invalidLinkCode, duplicateAccount,
+                mergeComplete, null);
+        }
+
         /**
          * Validate messages configuration.
          * Ensures all required messages are present.

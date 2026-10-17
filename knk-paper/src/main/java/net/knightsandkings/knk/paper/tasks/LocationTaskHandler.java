@@ -21,6 +21,7 @@ import org.bukkit.plugin.Plugin;
 
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.logging.Logger;
 
@@ -474,61 +475,35 @@ public class LocationTaskHandler implements IWorldTaskHandler {
                 return ValidationResult.blockingFailure("WorldGuard region manager not available for this world");
             }
             
+            boolean isBlocking = rule.has("isBlocking") && rule.get("isBlocking").getAsBoolean();
+
             // Get parent region
             ProtectedRegion parentRegion = regionManager.getRegion(parentRegionId);
             if (parentRegion == null) {
-                // Create computed placeholders
-                JsonObject computedPlaceholders = new JsonObject();
-                computedPlaceholders.addProperty("regionName", parentRegionId);
-                
-                // Merge with pre-resolved placeholders
-                JsonObject allPlaceholders = PlaceholderInterpolationUtil.mergePlaceholders(
-                    preResolvedPlaceholders, computedPlaceholders);
-                
-                // Interpolate error message
-                String errorMsg = rule.get("errorMessage").getAsString();
-                errorMsg = PlaceholderInterpolationUtil.interpolate(errorMsg, allPlaceholders);
+                // KNG-131: the check could not run, so the rule's "outside" message would be wrong.
+                String errorMsg = regionNotFoundMessage(parentRegionId, location.getWorld().getName());
                 LOGGER.info("LocationInsideRegion validation failed: " + errorMsg);
-                
-                return ValidationResult.blockingFailure(errorMsg);
+                return new ValidationResult(false, errorMsg, isBlocking);
             }
             
             // Check if location is inside parent region
             BlockVector3 blockLoc = BlockVector3.at(location.getX(), location.getY(), location.getZ());
             boolean isInside = parentRegion.contains(blockLoc);
             
+            // Plugin-computed placeholders override the pre-resolved ones from the frontend
+            JsonObject allPlaceholders = PlaceholderInterpolationUtil.mergePlaceholders(
+                preResolvedPlaceholders,
+                computedPlaceholders(depValue, parentRegion.getId(), location.getX(), location.getY(), location.getZ()));
+
             if (!isInside) {
-                // Create computed placeholders (plugin-only values)
-                JsonObject computedPlaceholders = new JsonObject();
-                computedPlaceholders.addProperty("regionName", parentRegion.getId());
-                computedPlaceholders.addProperty("coordinates", 
-                    String.format("(%.2f, %.2f, %.2f)", location.getX(), location.getY(), location.getZ()));
-                
-                // Merge pre-resolved placeholders from frontend with computed placeholders
-                // Computed placeholders take precedence (override)
-                JsonObject allPlaceholders = PlaceholderInterpolationUtil.mergePlaceholders(
-                    preResolvedPlaceholders, computedPlaceholders);
-                
-                // Interpolate error message with all placeholders
                 String errorMsg = rule.get("errorMessage").getAsString();
                 errorMsg = PlaceholderInterpolationUtil.interpolate(errorMsg, allPlaceholders);
-                
-                boolean isBlocking = rule.has("isBlocking") && rule.get("isBlocking").getAsBoolean();
                 return new ValidationResult(false, errorMsg, isBlocking);
             }
             
             // Success - interpolate success message if present
             String successMsg = "Location is inside region";
             if (rule.has("successMessage") && !rule.get("successMessage").isJsonNull()) {
-                // Create computed placeholders for success message
-                JsonObject computedPlaceholders = new JsonObject();
-                computedPlaceholders.addProperty("regionName", parentRegion.getId());
-                computedPlaceholders.addProperty("coordinates", 
-                    String.format("(%.2f, %.2f, %.2f)", location.getX(), location.getY(), location.getZ()));
-                
-                JsonObject allPlaceholders = PlaceholderInterpolationUtil.mergePlaceholders(
-                    preResolvedPlaceholders, computedPlaceholders);
-                
                 successMsg = rule.get("successMessage").getAsString();
                 successMsg = PlaceholderInterpolationUtil.interpolate(successMsg, allPlaceholders);
             }
@@ -542,6 +517,38 @@ public class LocationTaskHandler implements IWorldTaskHandler {
             // Fail-open
             return ValidationResult.success("Validation skipped due to error");
         }
+    }
+
+    /** KNG-131: the message when the dependency names a region this world does not have. */
+    static String regionNotFoundMessage(String regionId, String worldName) {
+        return "Cannot check the location: region '" + regionId + "' does not exist in world '" + worldName
+            + "'. Check the form's region before saving.";
+    }
+
+    /**
+     * The placeholders the plugin fills in a LocationInsideRegion message, matching the API's
+     * validator: {coordinates}, {regionName} and {parentEntityName} (the dependency's name, else
+     * the region id).
+     */
+    static JsonObject computedPlaceholders(JsonElement depValue, String regionId, double x, double y, double z) {
+        JsonObject placeholders = new JsonObject();
+        placeholders.addProperty("regionName", regionId);
+        placeholders.addProperty("coordinates", String.format(Locale.ROOT, "(%.2f, %.2f, %.2f)", x, y, z));
+        placeholders.addProperty("parentEntityName", entityName(depValue, regionId));
+        return placeholders;
+    }
+
+    private static String entityName(JsonElement depValue, String fallback) {
+        if (depValue != null && depValue.isJsonObject()) {
+            JsonObject entity = depValue.getAsJsonObject();
+            for (String key : entity.keySet()) {
+                JsonElement value = entity.get(key);
+                if (key.equalsIgnoreCase("name") && value.isJsonPrimitive() && !value.getAsString().isBlank()) {
+                    return value.getAsString();
+                }
+            }
+        }
+        return fallback;
     }
 
     /**
