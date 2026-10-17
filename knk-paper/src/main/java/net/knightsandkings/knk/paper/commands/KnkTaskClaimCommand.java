@@ -46,6 +46,13 @@ public class KnkTaskClaimCommand implements CommandExecutor {
             return true;
         }
 
+        // KNG-174: one open task at a time; refuse before fetching or claiming anything
+        var refusal = handlerRegistry.openTaskRefusal(player);
+        if (refusal.isPresent()) {
+            sender.sendMessage(ChatColor.RED + refusal.get());
+            return true;
+        }
+
         String idOrLinkCode = args[0];
         
         // Determine if it's an ID or link code
@@ -87,7 +94,8 @@ public class KnkTaskClaimCommand implements CommandExecutor {
             worldTasksApi.claim(task.id(), task.linkCode(), serverId, player.getName()).thenAccept(claimedTask -> {
                 Bukkit.getScheduler().runTask(plugin, () -> {
                     sender.sendMessage(ChatColor.GREEN + "✓ Successfully claimed task!");
-                    sender.sendMessage(ChatColor.GRAY + "Task: " + ChatColor.WHITE + claimedTask.entityType() + "." + claimedTask.fieldName());
+                    sender.sendMessage(ChatColor.GRAY + "Task: " + ChatColor.WHITE
+                        + taskLabel(claimedTask.entityType(), claimedTask.fieldName()));
 
                     // Start the handler if available
                     boolean started = handlerRegistry.startTask(
@@ -121,5 +129,21 @@ public class KnkTaskClaimCommand implements CommandExecutor {
         });
 
         return true;
+    }
+
+    /**
+     * KNG-174: the claimed task as shown to the player: {@code GateStructure › LocationId}, or just the field when
+     * the task has no entity type (the API can send none, which used to print {@code null.LocationId}).
+     */
+    static String taskLabel(String entityType, String fieldName) {
+        boolean hasType = entityType != null && !entityType.isBlank();
+        boolean hasField = fieldName != null && !fieldName.isBlank();
+        if (hasType && hasField) {
+            return entityType.trim() + " › " + fieldName.trim();
+        }
+        if (hasField) {
+            return fieldName.trim();
+        }
+        return hasType ? entityType.trim() : "(unknown field)";
     }
 }
