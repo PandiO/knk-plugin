@@ -3,6 +3,7 @@ package net.knightsandkings.knk.api.dto;
 import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
@@ -156,6 +157,11 @@ public record GameSettingsDto(
             @JsonProperty("isPrimary") boolean isPrimary
     ) {}
 
-    /** {@code PUT /api/GameSettings/runtime-worlds} body (knk-web-api {@code GameSettingsRuntimeWorldsUpdateDto}). */
-    public record RuntimeWorldsUpdate(@JsonProperty("runtimeWorlds") List<RuntimeWorld> runtimeWorlds) {}
+    /**
+     * {@code PUT /api/GameSettings/runtime-worlds} body (knk-web-api {@code GameSettingsRuntimeWorldsUpdateDto}).
+     * {@code serverId} (KNG-118) is left out when null, so the API files the report under "default".
+     */
+    public record RuntimeWorldsUpdate(
+            @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("serverId") String serverId,
+            @JsonProperty("runtimeWorlds") List<RuntimeWorld> runtimeWorlds) {}
 }

@@ -8,8 +8,10 @@ import net.knightsandkings.knk.core.menu.SectionView;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * The Bukkit-facing half of one player's currently-open menu: the live
@@ -33,12 +35,21 @@ public final class OpenMenuContext {
     private final Inventory inventory;
     private volatile RuntimeMenu menu;
     private volatile MenuRenderResult lastRender;
+    /** KNG-125: the tick this Inventory was opened - the blinker's phase is counted from it. */
+    private final long blinkStartTick;
+    /** KNG-125: blinking slots currently showing the yellow pane. Main thread only. */
+    private final Set<Integer> flashedSlots = new HashSet<>();
 
     public OpenMenuContext(Player player, Inventory inventory, RuntimeMenu menu, MenuRenderResult result) {
+        this(player, inventory, menu, result, MenuRenderer.currentTick());
+    }
+
+    OpenMenuContext(Player player, Inventory inventory, RuntimeMenu menu, MenuRenderResult result, long blinkStartTick) {
         this.player = player;
         this.inventory = inventory;
         this.menu = menu;
         this.lastRender = result;
+        this.blinkStartTick = blinkStartTick;
     }
 
     public Player player() {
@@ -102,9 +113,32 @@ public final class OpenMenuContext {
         return lastRender.materialNamespaceKeys();
     }
 
-    /** Called after re-rendering into the same, already-open Inventory (a page turn, a refresh). */
+    /** KNG-125: the last render, for {@link MenuItemBlinker} (the original stacks it puts back). */
+    MenuRenderResult lastRender() {
+        return lastRender;
+    }
+
+    /** KNG-125: the blinking slots of the last render and their interval in ticks. */
+    public Map<Integer, Integer> blinkTicksBySlot() {
+        return lastRender.blinkTicksBySlot();
+    }
+
+    long blinkStartTick() {
+        return blinkStartTick;
+    }
+
+    /** KNG-125: blinking slots now showing the yellow pane (mutable; main thread only). */
+    Set<Integer> flashedSlots() {
+        return flashedSlots;
+    }
+
+    /**
+     * Called after re-rendering into the same, already-open Inventory (a page turn, a refresh).
+     * The render wrote every slot's own item back, so no slot shows the blinker's pane any more.
+     */
     public void update(RuntimeMenu menu, MenuRenderResult result) {
         this.menu = menu;
         this.lastRender = result;
+        flashedSlots.clear();
     }
 }

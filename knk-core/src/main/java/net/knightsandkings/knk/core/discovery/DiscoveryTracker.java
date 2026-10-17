@@ -11,7 +11,9 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
@@ -27,8 +29,10 @@ import net.knightsandkings.knk.core.ports.api.DiscoveriesApi;
 /**
  * Per-player discovery state (docs/specs/domain-discovery DESIGN.md §3.6), so a player walking
  * around costs an API call only for regions that may still be undiscovered domains:
+ * Regions are keyed by {@code (world, region id)} ({@link PendingDiscovery#key(String, String)}),
+ * since region ids are unique per world only (KNG-118 R14):
  * <ul>
- *   <li><b>known</b> - region ids (and domain ids) the player has discovered, loaded once per
+ *   <li><b>known</b> - regions (and domain ids) the player has discovered, loaded once per
  *   session from {@code GET …/discoveries/known} and extended from every grant response;</li>
  *   <li><b>notDomain</b> - region ids the server said aren't domains, remembered for a while;</li>
  *   <li><b>pending</b> - candidates waiting for the next flush, in the order they were seen;</li>
@@ -46,6 +50,10 @@ import net.knightsandkings.knk.core.ports.api.DiscoveriesApi;
  * by UUID first (or spools under the UUID alone). Once the id is known, {@link #resolveUser} upgrades
  * the session in place - same session id, so answers to batches sent before still apply.
  *
+ * <p>A known domain without a world (not backfilled after KNG-111, or an API before KNG-118) is
+ * remembered under the world-less key only, so it doesn't hide a same-named region of a world: the
+ * player's first visit per session is sent and the server answers it as already discovered.
+ *
  * <p>No Bukkit types; thread-safe (every method is synchronized). The caller passes the time.
  */
 public final class DiscoveryTracker {
@@ -54,7 +62,7 @@ public final class DiscoveryTracker {
     public static final int UNRESOLVED_USER = 0;
 
     /**
-     * One grant request's worth of a player's pending candidates, all with the same source.
+     * One grant request's worth of a player's pending candidates, all with the same source and world.
      * {@code session} tells an answer for an earlier session (the player rejoined meanwhile) apart.
      * {@code userId} is {@link #UNRESOLVED_USER} for a player whose user id wasn't known yet.
      */
@@ -65,6 +73,11 @@ public final class DiscoveryTracker {
 
         public List<String> regionIds() {
             return entries.stream().map(PendingDiscovery::regionId).toList();
+        }
+
+        /** The world every entry is in; null for entries without one (old spool entries). */
+        public String world() {
+            return entries.isEmpty() ? null : entries.get(0).world();
         }
 
         public boolean userResolved() {
@@ -190,7 +203,7 @@ public final class DiscoveryTracker {
             for (KnownDiscovery discovery : known) {
                 session.knownDomains.add(discovery.domainId());
                 if (discovery.wgRegionId() != null && !discovery.wgRegionId().isBlank()) {
-                    session.knownRegions.add(PendingDiscovery.key(discovery.wgRegionId()));
+                    session.knownRegions.add(PendingDiscovery.key(discovery.worldName(), discovery.wgRegionId()));
                 }
             }
         }
@@ -249,11 +262,17 @@ public final class DiscoveryTracker {
 
     /**
      * Whether a region the player is in may be an undiscovered domain worth confirming: they have a
-     * session and the id isn't known, a recent non-domain, already pending, in flight, or suppressed.
+     * session and the (world, region) isn't known, a recent non-domain, already pending, in flight, or
+     * suppressed.
      */
-    public synchronized boolean isCandidate(UUID playerId, String regionId, Instant now) {
+    public synchronized boolean isCandidate(UUID playerId, String world, String regionId, Instant now) {
         Session session = sessions.get(playerId);
-        return session != null && isCandidate(session, PendingDiscovery.key(regionId), now);
+        return session != null && isCandidate(session, PendingDiscovery.key(world, regionId), now);
+    }
+
+    /** {@link #isCandidate(UUID, String, String, Instant)} for a region whose world isn't known. */
+    public synchronized boolean isCandidate(UUID playerId, String regionId, Instant now) {
+        return isCandidate(playerId, null, regionId, now);
     }
 
     private static boolean isCandidate(Session session, String key, Instant now) {
@@ -271,18 +290,24 @@ public final class DiscoveryTracker {
         return true;
     }
 
-    /** Queues a confirmed candidate. Returns false when it isn't one (see {@link #isCandidate}). */
-    public synchronized boolean offer(UUID playerId, String regionId, DiscoverySource source, Instant now) {
+    /** Queues a confirmed candidate in a world. Returns false when it isn't one (see {@link #isCandidate}). */
+    public synchronized boolean offer(UUID playerId, String world, String regionId, DiscoverySource source, Instant now) {
         Session session = sessions.get(playerId);
         if (session == null || regionId == null) {
             return false;
         }
-        String key = PendingDiscovery.key(regionId);
+        PendingDiscovery candidate = new PendingDiscovery(world, regionId.trim(), source, now);
+        String key = candidate.key();
         if (!isCandidate(session, key, now)) {
             return false;
         }
-        session.pending.put(key, new PendingDiscovery(regionId.trim(), source, now));
+        session.pending.put(key, candidate);
         return true;
+    }
+
+    /** {@link #offer(UUID, String, String, DiscoverySource, Instant)} for a region whose world isn't known. */
+    public synchronized boolean offer(UUID playerId, String regionId, DiscoverySource source, Instant now) {
+        return offer(playerId, null, regionId, source, now);
     }
 
     // ==================== Flushing ====================
@@ -299,7 +324,8 @@ public final class DiscoveryTracker {
 
     /**
      * Takes the player's next request: nothing while the known set is loading, a request is in flight,
-     * or the per-minute limit is used up; otherwise up to 50 due candidates of the oldest one's source.
+     * or the per-minute limit is used up; otherwise up to 50 due candidates of the oldest one's source
+     * and world (a grant request names one world).
      */
     public synchronized Optional<Batch> nextBatch(UUID playerId, Instant now) {
         Session session = sessions.get(playerId);
@@ -314,6 +340,7 @@ public final class DiscoveryTracker {
         }
 
         DiscoverySource source = null;
+        String world = null;
         List<PendingDiscovery> entries = new ArrayList<>();
         Iterator<Map.Entry<String, PendingDiscovery>> it = session.pending.entrySet().iterator();
         while (it.hasNext() && entries.size() < maxIdsPerRequest) {
@@ -324,7 +351,8 @@ public final class DiscoveryTracker {
             }
             if (source == null) {
                 source = entry.getValue().source();
-            } else if (entry.getValue().source() != source) {
+                world = worldKey(entry.getValue().world());
+            } else if (entry.getValue().source() != source || !Objects.equals(worldKey(entry.getValue().world()), world)) {
                 continue;
             }
             entries.add(entry.getValue());
@@ -381,14 +409,19 @@ public final class DiscoveryTracker {
         apply(session, entries, result, now);
     }
 
+    /**
+     * Applies an answer to one request's entries. A request names one world, so the server's skip keys
+     * (region ids as sent) and granted region ids are keyed in that world.
+     */
     private void apply(Session session, List<PendingDiscovery> sent, DiscoveryGrantResult result, Instant now) {
+        String world = sent.isEmpty() ? null : sent.get(0).world();
         Set<String> rateLimited = new HashSet<>();
         Set<String> notDomain = new HashSet<>();
         for (DiscoverySkip skip : result.skipped()) {
             if (DiscoverySkip.RATE_LIMITED.equals(skip.reason())) {
-                rateLimited.add(PendingDiscovery.key(skip.key()));
+                rateLimited.add(PendingDiscovery.key(world, skip.key()));
             } else if (DiscoverySkip.NOT_A_DOMAIN.equals(skip.reason())) {
-                notDomain.add(PendingDiscovery.key(skip.key()));
+                notDomain.add(PendingDiscovery.key(world, skip.key()));
             }
         }
         for (PendingDiscovery entry : sent) {
@@ -406,13 +439,17 @@ public final class DiscoveryTracker {
         for (DiscoveryGrant grant : result.granted()) {
             session.knownDomains.add(grant.domainId());
             if (grant.wgRegionId() != null && !grant.wgRegionId().isBlank()) {
-                String key = PendingDiscovery.key(grant.wgRegionId());
+                String key = PendingDiscovery.key(world, grant.wgRegionId());
                 session.knownRegions.add(key);
                 session.pending.remove(key);
                 session.notBefore.remove(key);
             }
         }
         session.knownDomains.addAll(result.alreadyDiscovered());
+    }
+
+    private static String worldKey(String world) {
+        return world == null ? null : world.toLowerCase(Locale.ROOT);
     }
 
     // ==================== Status ====================

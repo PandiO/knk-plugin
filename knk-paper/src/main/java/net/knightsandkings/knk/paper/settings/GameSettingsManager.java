@@ -674,7 +674,7 @@ public class GameSettingsManager {
         reporting.set(true);
         CompletableFuture<KnkGameSettings> report;
         try {
-            report = command.reportRuntimeWorlds(worlds);
+            report = command.reportRuntimeWorlds(config.serverId(), worlds);
         } catch (RuntimeException ex) {
             report = CompletableFuture.failedFuture(ex);
         }

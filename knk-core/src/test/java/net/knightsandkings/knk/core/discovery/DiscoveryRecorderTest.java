@@ -45,10 +45,13 @@ class DiscoveryRecorderTest {
         final List<List<String>> sent = new ArrayList<>();
         final List<DiscoverySource> sources = new ArrayList<>();
         final List<Integer> userIds = new ArrayList<>();
+        final List<String> worlds = new ArrayList<>();
 
         @Override
-        public CompletableFuture<DiscoveryGrantResult> grant(int userId, Collection<String> wgRegionIds, DiscoverySource source) {
+        public CompletableFuture<DiscoveryGrantResult> grant(int userId, String worldName, Collection<String> wgRegionIds,
+                                                             DiscoverySource source) {
             userIds.add(userId);
+            worlds.add(worldName);
             sent.add(List.copyOf(wgRegionIds));
             sources.add(source);
             return answer.apply(wgRegionIds);
@@ -318,5 +321,49 @@ class DiscoveryRecorderTest {
         assertEquals(List.of(other), replayed.stream().map(DiscoveryRecorder.Replayed::playerId).toList(),
                 "other players' files still replay");
         assertEquals(List.of(8), api.userIds);
+    }
+
+    // ---- KNG-118 R14: one world per request ----
+
+    private static PendingDiscovery in(String world, String region) {
+        return new PendingDiscovery(world, region, DiscoverySource.REGION_ENTER, T0);
+    }
+
+    @Test
+    void aGrantNamesTheWorldOfItsEntries() {
+        create();
+        api.answer = regions -> CompletableFuture.completedFuture(granted(regions));
+
+        recorder.grant(PLAYER, 7, List.of(in("hub", "town_rivia"), in("hub", "district_market")), DiscoverySource.REGION_ENTER).join();
+        recorder.grant(PLAYER, 7, entries("town_old"), DiscoverySource.REGION_ENTER).join();
+
+        assertEquals(java.util.Arrays.asList("hub", null), api.worlds);
+    }
+
+    @Test
+    void aSpooledGrantKeepsItsWorld_AndTheReplaySendsOneRequestPerWorld() {
+        create();
+        api.answer = regions -> failing(new ConnectException("refused"));
+        recorder.grant(PLAYER, 7, List.of(in("hub", "town_rivia")), DiscoverySource.REGION_ENTER).join();
+        recorder.grant(PLAYER, 7, List.of(in("world", "town_rivia")), DiscoverySource.REGION_ENTER).join();
+        spool.add(PLAYER, 7, entries("legacy_region")); // a version 2 entry: no world
+        assertEquals(3, spool.entryCount());
+
+        api.sent.clear();
+        api.worlds.clear();
+        api.answer = regions -> CompletableFuture.completedFuture(granted(regions));
+        List<DiscoveryRecorder.Replayed> replayed = recorder.replay().join();
+
+        assertEquals(java.util.Arrays.asList("hub", "world", null), api.worlds);
+        assertEquals(List.of(List.of("town_rivia"), List.of("town_rivia"), List.of("legacy_region")), api.sent);
+        assertEquals(3, replayed.size());
+        assertTrue(spool.isEmpty());
+    }
+
+    @Test
+    void commonWorldIsNullForMixedOrUnknownWorlds() {
+        assertEquals("hub", DiscoveryRecorder.commonWorld(List.of(in("hub", "a"), in("HUB", "b"))));
+        assertNull(DiscoveryRecorder.commonWorld(List.of(in("hub", "a"), in("world", "b"))));
+        assertNull(DiscoveryRecorder.commonWorld(List.of(in("hub", "a"), in(null, "b"))));
     }
 }

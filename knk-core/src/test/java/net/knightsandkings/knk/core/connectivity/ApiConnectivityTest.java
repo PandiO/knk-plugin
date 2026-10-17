@@ -30,6 +30,23 @@ class ApiConnectivityTest {
     }
 
     @Test
+    void onlyAConfirmedDownSkipsTheApi_kng171() {
+        ApiConnectivity c = new ApiConnectivity(3, 2, T0);
+        assertFalse(c.isApiDown(), "UNKNOWN calls the API as before");
+        c.recordSuccess(t(0), "healthy");
+        assertFalse(c.isApiDown());
+        c.recordFailure(t(10), "ConnectException");
+        c.recordFailure(t(20), "ConnectException");
+        assertFalse(c.isApiDown(), "two failures are not yet DOWN");
+        c.recordFailure(t(30), "ConnectException");
+        assertTrue(c.isApiDown());
+        c.recordSuccess(t(40), "healthy");
+        assertTrue(c.isApiDown(), "one success is not yet UP");
+        c.recordSuccess(t(50), "healthy");
+        assertFalse(c.isApiDown());
+    }
+
+    @Test
     void startsUnknownAndNotUp() {
         ApiConnectivity c = new ApiConnectivity(3, 2, T0);
         assertEquals(ApiConnectivityState.UNKNOWN, c.state());

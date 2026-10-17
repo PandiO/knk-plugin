@@ -15,7 +15,7 @@ import java.util.Optional;
  * A result that doesn't change the state returns no transition, so callers fire an event only on
  * a real change. Thread-safe; it does no I/O and knows nothing about Bukkit.
  */
-public final class ApiConnectivity {
+public final class ApiConnectivity implements ApiOutageSignal {
 
     /** Read-only view for status output such as {@code /knk health}. */
     public record Snapshot(
@@ -92,6 +92,12 @@ public final class ApiConnectivity {
     /** True only while the state is UP; UNKNOWN and DOWN both read as "not reachable". */
     public synchronized boolean isUp() {
         return state == ApiConnectivityState.UP;
+    }
+
+    /** True only while the state is DOWN (KNG-171: reads skip the API); UNKNOWN is not down. */
+    @Override
+    public synchronized boolean isApiDown() {
+        return state == ApiConnectivityState.DOWN;
     }
 
     public synchronized Snapshot snapshot() {

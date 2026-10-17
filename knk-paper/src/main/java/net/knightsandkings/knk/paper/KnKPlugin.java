@@ -303,6 +303,7 @@ public class KnKPlugin extends JavaPlugin {
     /** Kept for the siege gate controller (Phase 7a), which respawns doors a match destroyed. */
     private HealthSystem gateHealthSystem;
     private net.knightsandkings.knk.paper.connectivity.ApiConnectivityMonitor apiConnectivityMonitor;
+    private volatile boolean skipApiWhileDown = true;
     /** Kept for the siege non-member pass-through (Phase 7b, TELEPORT mode only). */
     private net.knightsandkings.knk.paper.gates.GatePassThroughService gatePassThroughService;
     
@@ -354,6 +355,7 @@ public class KnKPlugin extends JavaPlugin {
             // KNG-115: one service-wide UP/DOWN view of the API (ApiConnectivityChangedEvent on change)
             apiConnectivityMonitor = net.knightsandkings.knk.paper.connectivity.ApiConnectivityMonitor.start(
                 this, apiClient.getHealthApi(), apiConnectivitySettings);
+            skipApiWhileDown = apiConnectivitySettings.skipApiWhileDown();
             if (config.api().allowUntrustedSsl()) {
                 getLogger().warning("WARNING: SSL certificate validation is DISABLED. Only use in development!");
             }
@@ -584,7 +586,8 @@ public class KnKPlugin extends JavaPlugin {
             // Data access factory over the one CacheManager built above. A second CacheManager used to be
             // created here: UserManager kept the first one's user cache while everything else (usersDataAccess,
             // PlayerListener, KnkPermissible, ModeService, metrics, clearAll) used this one (KNG-81).
-            this.dataAccessFactory = new DataAccessFactory(config.cache().entities());
+            // KNG-171: while connectivity is DOWN, gateway reads answer from the caches without calling the API.
+            this.dataAccessFactory = new DataAccessFactory(config.cache().entities(), this::isApiSkippedWhileDown);
             this.usersDataAccess = dataAccessFactory.createUsersDataAccess(
                 cacheManager.getUserCache(),
                 usersQueryApi,
@@ -1834,6 +1837,20 @@ public class KnKPlugin extends JavaPlugin {
     public net.knightsandkings.knk.core.connectivity.ApiConnectivity getApiConnectivity() {
         var monitor = apiConnectivityMonitor;
         return monitor == null ? null : monitor.connectivity();
+    }
+
+    /**
+     * KNG-171: true while gateway reads skip knk-web-api - the connectivity state is DOWN and
+     * {@code api.connectivity.skip-api-while-down} is on. Reads the current monitor on every call.
+     */
+    public boolean isApiSkippedWhileDown() {
+        var connectivity = getApiConnectivity();
+        return skipApiWhileDown && connectivity != null && connectivity.isApiDown();
+    }
+
+    /** {@code api.connectivity.skip-api-while-down} (KNG-171). */
+    public boolean isSkipApiWhileDownEnabled() {
+        return skipApiWhileDown;
     }
 
     /** Private messages waiting for knk-web-api's PM log (/knk health); -1 when that sink is off. */

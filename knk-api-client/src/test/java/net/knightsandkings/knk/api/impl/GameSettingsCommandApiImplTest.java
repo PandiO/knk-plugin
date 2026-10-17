@@ -117,6 +117,13 @@ class GameSettingsCommandApiImplTest {
     }
 
     @Test
+    void theReportNamesThisServer() throws Exception {
+        command.reportRuntimeWorlds("hub-server", List.of()).join();
+
+        assertEquals("hub-server", mapper.readTree(bodies.get(0)).get("serverId").asText());
+    }
+
+    @Test
     void aRejectedReportFails() {
         status = 401;
         response = "{\"message\":\"no key\"}";

@@ -122,6 +122,7 @@ class ApiConnectivityMonitorTest {
     void settingsDefaultWhenTheSectionIsMissing() {
         assertEquals(ApiConnectivitySettings.defaults(), ApiConnectivitySettings.fromConfig(new YamlConfiguration()));
         assertEquals(ApiConnectivitySettings.defaults(), ApiConnectivitySettings.fromConfig(null));
+        assertTrue(ApiConnectivitySettings.defaults().skipApiWhileDown(), "KNG-171 on by default");
     }
 
     @Test
@@ -133,6 +134,7 @@ class ApiConnectivityMonitorTest {
         yaml.set("api.connectivity.failures-to-down", 0);
         yaml.set("api.connectivity.successes-to-up", 4);
         yaml.set("api.connectivity.health-root-url", "http://api.lan:5294");
+        yaml.set("api.connectivity.skip-api-while-down", false);
         ApiConnectivitySettings s = ApiConnectivitySettings.fromConfig(yaml);
         assertFalse(s.enabled());
         assertEquals(Duration.ofSeconds(30), s.probeInterval());
@@ -140,5 +142,6 @@ class ApiConnectivityMonitorTest {
         assertEquals(1, s.failuresToDown());
         assertEquals(4, s.successesToUp());
         assertEquals("http://api.lan:5294", s.healthRootUrl());
+        assertFalse(s.skipApiWhileDown());
     }
 }

@@ -56,6 +56,9 @@ import net.knightsandkings.knk.paper.regions.RegionIds;
  *   through a small structure still is.</li>
  *   <li><b>Quit</b>: candidates not yet sent are spooled and replayed later; the session is dropped.</li>
  * </ul>
+ * Candidates are {@code (world, region id)} pairs (KNG-118 R14): region ids are unique per world
+ * only, so the same id in another world is another candidate, and a confirmation needs the player
+ * still in that region of that world.
  * Only eligible players ({@link DiscoveryEligibility}) are looked at. Main thread.
  */
 public final class DomainDiscoveryListener implements Listener {
@@ -70,8 +73,11 @@ public final class DomainDiscoveryListener implements Listener {
     private final Clock clock;
     private final RegionIds regionIds;
 
-    /** Candidates waiting for next tick's confirmation, per player. */
-    private final Map<UUID, Map<String, DiscoverySource>> toConfirm = new HashMap<>();
+    /** A region seen at a move, teleport or join, waiting for next tick's confirmation. */
+    private record Seen(String world, String regionId, DiscoverySource source) {}
+
+    /** Candidates waiting for next tick's confirmation, per player, by (world, region) key. */
+    private final Map<UUID, Map<String, Seen>> toConfirm = new HashMap<>();
 
     public DomainDiscoveryListener(Plugin plugin, DiscoveryTracker tracker, DiscoveryRecorder recorder,
                                    DiscoveriesApi discoveriesApi, DiscoveryEligibility eligibility,
@@ -215,9 +221,10 @@ public final class DomainDiscoveryListener implements Listener {
             return;
         }
         Instant now = clock.instant();
-        Map<String, DiscoverySource> waiting = null;
+        String world = worldOf(location);
+        Map<String, Seen> waiting = null;
         for (String regionId : regionIdsAt(location)) {
-            if (!tracker.isCandidate(uuid, regionId, now)) {
+            if (!tracker.isCandidate(uuid, world, regionId, now)) {
                 continue;
             }
             if (waiting == null) {
@@ -228,25 +235,32 @@ public final class DomainDiscoveryListener implements Listener {
                     Bukkit.getScheduler().runTaskLater(plugin, () -> confirm(uuid), 1L);
                 }
             }
-            waiting.putIfAbsent(regionId, source);
+            waiting.putIfAbsent(PendingDiscovery.key(world, regionId), new Seen(world, regionId, source));
         }
     }
 
-    /** Next tick: queue the candidates the player is still inside of. */
+    /** Next tick: queue the candidates the player is still inside of, in the same world. */
     private void confirm(UUID uuid) {
-        Map<String, DiscoverySource> waiting = toConfirm.remove(uuid);
+        Map<String, Seen> waiting = toConfirm.remove(uuid);
         Player player = Bukkit.getPlayer(uuid);
         if (waiting == null || player == null || !eligibility.isEligible(player)) {
             return;
         }
+        Location location = player.getLocation();
+        String world = worldOf(location);
         Set<String> current = new HashSet<>();
-        regionIdsAt(player.getLocation()).forEach(id -> current.add(PendingDiscovery.key(id)));
+        regionIdsAt(location).forEach(id -> current.add(PendingDiscovery.key(world, id)));
         Instant now = clock.instant();
-        waiting.forEach((regionId, source) -> {
-            if (current.contains(PendingDiscovery.key(regionId)) && tracker.offer(uuid, regionId, source, now)) {
-                LOGGER.fine("[Discovery] " + player.getName() + " candidate " + regionId + " (" + source.apiName() + ")");
+        waiting.forEach((key, seen) -> {
+            if (current.contains(key) && tracker.offer(uuid, seen.world(), seen.regionId(), seen.source(), now)) {
+                LOGGER.fine("[Discovery] " + player.getName() + " candidate " + seen.world() + ":" + seen.regionId()
+                        + " (" + seen.source().apiName() + ")");
             }
         });
+    }
+
+    private static String worldOf(Location location) {
+        return location == null || location.getWorld() == null ? null : location.getWorld().getName();
     }
 
     /** The region ids at a location, never {@code __global__} (R8: delegates to {@link RegionIds#at}). */

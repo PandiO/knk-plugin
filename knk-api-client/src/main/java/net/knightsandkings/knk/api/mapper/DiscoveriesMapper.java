@@ -56,7 +56,7 @@ public final class DiscoveriesMapper {
     }
 
     public static KnownDiscovery mapKnown(KnownDiscoveryDto dto) {
-        return new KnownDiscovery(dto.domainId(), dto.wgRegionId());
+        return new KnownDiscovery(dto.domainId(), dto.wgRegionId(), dto.worldName());
     }
 
     public static DiscoveryProgressRow mapProgressRow(DiscoveryProgressRowDto dto) {
