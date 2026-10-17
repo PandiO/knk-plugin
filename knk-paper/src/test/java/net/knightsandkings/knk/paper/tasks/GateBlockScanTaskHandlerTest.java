@@ -223,6 +223,23 @@ class GateBlockScanTaskHandlerTest {
     }
 
     @Test
+    void testStartScan_PlaneGridWithRef2AboveRef1_FailsBeforeScanning() {
+        // KNG-132: the developer's door - ReferencePoint2 above ReferencePoint1, not the anchor.
+        net.knightsandkings.knk.api.dto.GateDoorDto gate = new net.knightsandkings.knk.api.dto.GateDoorDto();
+        gate.setName("Main Gate");
+        gate.setGeometryDefinitionMode("PLANE_GRID");
+        gate.setAnchorPoint("{\"x\":-972,\"y\":114,\"z\":1653,\"world\":\"knk_hub\"}");
+        gate.setReferencePoint1("{\"x\":-972,\"y\":114,\"z\":1651,\"world\":\"knk_hub\"}");
+        gate.setReferencePoint2("{\"x\":-972,\"y\":121,\"z\":1651,\"world\":\"knk_hub\"}");
+        AtomicBoolean finished = new AtomicBoolean(false);
+
+        handler.startScan(8, gate, false, () -> finished.set(true));
+
+        verify(mockWorldTasksApi).fail(eq(8), contains("set it to (-972, 121, 1653)"));
+        assertTrue(finished.get());
+    }
+
+    @Test
     void testStartScan_UnknownGeometryDefinitionMode_FailsTask() {
         net.knightsandkings.knk.api.dto.GateDoorDto gate = new net.knightsandkings.knk.api.dto.GateDoorDto();
         gate.setName("Mystery Door");

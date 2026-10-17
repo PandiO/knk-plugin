@@ -361,6 +361,13 @@ public class GateLoaderAdapter {
 
             LOGGER.fine("Gate " + gate.getName() + " basis vectors: u=" + u + ", v=" + v + ", n=" + n
                 + "; steps: uStep=" + uStep + ", vStep=" + vStep + ", nStep=" + nStep);
+
+            // KNG-132: loaded as before, but it will have been scanned wrong and is likely to jam.
+            String pointsProblem = GateReferencePoints.referencePoint2Problem(anchor, ref1, ref2);
+            if (pointsProblem != null) {
+                LOGGER.warning("Gate door " + gate.getName() + " (ID: " + gate.getId() + ") has sheared reference points: "
+                    + pointsProblem);
+            }
         } else {
             // Fallback to standard axes
             gate.setUAxis(new Vector(1, 0, 0));
