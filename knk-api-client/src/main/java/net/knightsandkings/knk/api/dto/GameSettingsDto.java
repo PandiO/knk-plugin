@@ -21,8 +21,52 @@ public record GameSettingsDto(
         @JsonProperty("runtimeWorlds") List<RuntimeWorld> runtimeWorlds,
         @JsonProperty("updatedAt") String updatedAt,
         @JsonProperty("motd") String motd,
-        @JsonProperty("groupOverrides") List<GroupOverride> groupOverrides
+        @JsonProperty("groupOverrides") List<GroupOverride> groupOverrides,
+        @JsonProperty("hub") Hub hub
 ) {
+    /** Without the hub block (KNG-52 shape). */
+    public GameSettingsDto(String joinSpawnMode, LocationReference joinSpawnReference, String joinAnnouncement,
+                           String leaveAnnouncement, RespawnPolicy defaultRespawnPolicy, List<WorldSettings> worldSettings,
+                           List<RuntimeWorld> runtimeWorlds, String updatedAt, String motd, List<GroupOverride> groupOverrides) {
+        this(joinSpawnMode, joinSpawnReference, joinAnnouncement, leaveAnnouncement, defaultRespawnPolicy, worldSettings,
+            runtimeWorlds, updatedAt, motd, groupOverrides, null);
+    }
+
+    /** knk-web-api {@code HubSettingsDto} (hub DESIGN §16 Phase 4). */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Hub(
+            @JsonProperty("domainId") Integer domainId,
+            @JsonProperty("domainName") String domainName,
+            @JsonProperty("domainType") String domainType,
+            @JsonProperty("worldName") String worldName,
+            @JsonProperty("wgRegionId") String wgRegionId,
+            @JsonProperty("spawnReference") LocationReference spawnReference,
+            @JsonProperty("outageAction") String outageAction,
+            @JsonProperty("outageDelaySeconds") Integer outageDelaySeconds,
+            @JsonProperty("rules") HubRules rules,
+            @JsonProperty("portalRegionIds") List<String> portalRegionIds
+    ) {}
+
+    /** knk-web-api {@code HubRulesDto}; a missing field keeps the hub default. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record HubRules(
+            @JsonProperty("damagePlayers") Boolean damagePlayers,
+            @JsonProperty("damageEntities") Boolean damageEntities,
+            @JsonProperty("takeDamage") Boolean takeDamage,
+            @JsonProperty("buildBreak") Boolean buildBreak,
+            @JsonProperty("dropPickup") Boolean dropPickup,
+            @JsonProperty("useDoors") Boolean useDoors,
+            @JsonProperty("useNpcs") Boolean useNpcs,
+            @JsonProperty("useStorage") Boolean useStorage,
+            @JsonProperty("useItemFramesPaintings") Boolean useItemFramesPaintings,
+            @JsonProperty("healAmount") Double healAmount,
+            @JsonProperty("healIntervalTicks") Integer healIntervalTicks,
+            @JsonProperty("feedAmount") Integer feedAmount,
+            @JsonProperty("feedIntervalTicks") Integer feedIntervalTicks,
+            @JsonProperty("saturationAmount") Double saturationAmount,
+            @JsonProperty("saturationIntervalTicks") Integer saturationIntervalTicks
+    ) {}
+
     /** knk-web-api {@code PermissionGroupGameSettingsDto} (KNG-52). */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record GroupOverride(
@@ -33,8 +77,18 @@ public record GameSettingsDto(
             @JsonProperty("leaveAnnouncement") String leaveAnnouncement,
             @JsonProperty("joinSpawnReference") LocationReference joinSpawnReference,
             @JsonProperty("respawnPolicy") RespawnPolicy respawnPolicy,
-            @JsonProperty("joinAtLastLocation") Boolean joinAtLastLocation
-    ) {}
+            @JsonProperty("joinAtLastLocation") Boolean joinAtLastLocation,
+            @JsonProperty("outageAction") String outageAction,
+            @JsonProperty("outageDelaySeconds") Integer outageDelaySeconds
+    ) {
+        /** Without the hub's outage fields (KNG-52 shape). */
+        public GroupOverride(int permissionGroupId, String groupName, Integer precedence, String joinAnnouncement,
+                             String leaveAnnouncement, LocationReference joinSpawnReference, RespawnPolicy respawnPolicy,
+                             Boolean joinAtLastLocation) {
+            this(permissionGroupId, groupName, precedence, joinAnnouncement, leaveAnnouncement, joinSpawnReference,
+                respawnPolicy, joinAtLastLocation, null, null);
+        }
+    }
 
     /** knk-web-api {@code LocationReferenceDto}. */
     @JsonIgnoreProperties(ignoreUnknown = true)

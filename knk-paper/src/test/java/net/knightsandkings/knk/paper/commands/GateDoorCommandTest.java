@@ -293,6 +293,9 @@ class GateDoorCommandTest {
         CachedGateDoor gate = createTestGate(1, "TestGate", true, false);
         when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
         when(mockPlayer.getWorld()).thenReturn(world);
+        org.bukkit.Server server = mock(org.bukkit.Server.class);
+        when(server.getWorld("world")).thenReturn(world);
+        when(mockPlayer.getServer()).thenReturn(server);
         org.bukkit.Location spot = new org.bukkit.Location(world, 3.5, 64, 7.5);
         structureCommand.support().doorSpots = (w, door, manager) -> java.util.Optional.of(spot);
 
@@ -305,10 +308,30 @@ class GateDoorCommandTest {
     }
 
     @Test
+    void testExecuteTeleport_DoorInAnUnloadedWorldRefuses() {
+        // KNG-113: the door's coordinates mean nothing in the player's world
+        CachedGateDoor gate = createTestGate(1, "TestGate", true, false);
+        gate.setWorldName("hub");
+        when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
+        org.bukkit.Server server = mock(org.bukkit.Server.class);
+        when(mockPlayer.getServer()).thenReturn(server);
+        when(mockPlayer.getWorld()).thenReturn(world);
+        structureCommand.support().doorSpots = (w, door, manager) -> java.util.Optional.of(new org.bukkit.Location(w, 1, 2, 3));
+
+        assertTrue(gateCommand.executeTeleport(mockPlayer, new String[]{"TestGate"}));
+
+        verify(mockPlayer, never()).teleport(any(org.bukkit.Location.class));
+        assertTrue(sentMessages.stream().anyMatch(m -> m.contains("is in world 'hub', which is not loaded")), sentMessages::toString);
+    }
+
+    @Test
     void testExecuteTeleport_NoSafeSpotRefuses() {
         CachedGateDoor gate = createTestGate(1, "TestGate", true, false);
         when(mockGateManager.getGateByName("TestGate")).thenReturn(gate);
         when(mockPlayer.getWorld()).thenReturn(world);
+        org.bukkit.Server server = mock(org.bukkit.Server.class);
+        when(server.getWorld("world")).thenReturn(world);
+        when(mockPlayer.getServer()).thenReturn(server);
         structureCommand.support().doorSpots = (w, door, manager) -> java.util.Optional.empty();
 
         boolean result = gateCommand.executeTeleport(mockPlayer, new String[]{"TestGate"});
@@ -359,6 +382,7 @@ class GateDoorCommandTest {
             "north"
         );
         gate.setCurrentState(AnimationState.CLOSED);
+        gate.setWorldName("world");
         // Commands look the door up again by id once the permission check answers.
         when(mockGateManager.getGate(id)).thenReturn(gate);
         return gate;

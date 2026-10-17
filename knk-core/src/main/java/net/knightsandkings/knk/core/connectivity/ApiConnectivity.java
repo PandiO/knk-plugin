@@ -36,6 +36,8 @@ public final class ApiConnectivity {
     private int consecutiveFailures;
     private int consecutiveSuccesses;
     private Instant lastProbeAt;
+    /** The first failed probe of the current run of failures; null while the last probe passed. */
+    private Instant failingSince;
     private boolean lastProbeSucceeded;
     private String lastProbeDetail;
 
@@ -55,6 +57,7 @@ public final class ApiConnectivity {
     public synchronized Optional<ApiConnectivityTransition> recordSuccess(Instant at, String detail) {
         consecutiveSuccesses++;
         consecutiveFailures = 0;
+        failingSince = null;
         noteProbe(at, true, detail);
         if (state == ApiConnectivityState.UP) {
             return Optional.empty();
@@ -69,6 +72,9 @@ public final class ApiConnectivity {
     public synchronized Optional<ApiConnectivityTransition> recordFailure(Instant at, String detail) {
         consecutiveFailures++;
         consecutiveSuccesses = 0;
+        if (failingSince == null) {
+            failingSince = at;
+        }
         noteProbe(at, false, detail);
         if (state == ApiConnectivityState.DOWN) {
             return Optional.empty();
@@ -108,7 +114,8 @@ public final class ApiConnectivity {
     }
 
     private ApiConnectivityTransition moveTo(ApiConnectivityState next, Instant at, String reason) {
-        ApiConnectivityTransition transition = new ApiConnectivityTransition(state, next, at, reason);
+        ApiConnectivityTransition transition = new ApiConnectivityTransition(state, next, at, reason,
+            next == ApiConnectivityState.DOWN ? failingSince : at);
         state = next;
         since = at;
         return transition;
