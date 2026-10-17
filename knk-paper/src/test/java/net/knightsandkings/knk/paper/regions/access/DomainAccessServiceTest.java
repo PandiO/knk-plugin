@@ -244,6 +244,21 @@ class DomainAccessServiceTest {
     }
 
     @Test
+    void aRefusalCanBeRewordedForWhereThePlayerIsLeavingFrom() {
+        // Smoke test 2026-10-17: in the hub, "use the portal" instead of "You are not allowed to leave Kardenna."
+        access.setRefusalWording((from, refusal) -> from.getX() <= -100
+            ? new Refusal(refusal.type(), refusal.regionId(), "You can only leave the hub through its portal.")
+            : refusal);
+
+        assertEquals("You can only leave the hub through its portal.",
+            access.preview(player(-150), at(-150), at(-250)).orElseThrow().message(), "a teleport out (/spawn, /warp)");
+        assertEquals("You can only leave the hub through its portal.", cross(player(-150), -150, -250).orElseThrow().message(),
+            "walking out");
+        assertEquals("You are not allowed to enter Old Quarter.", access.preview(player(-50), at(-50), at(5)).orElseThrow().message(),
+            "elsewhere the message is unchanged");
+    }
+
+    @Test
     void theTeleportPreviewUsesTheSameRules() {
         Player noble = player(-50);
 

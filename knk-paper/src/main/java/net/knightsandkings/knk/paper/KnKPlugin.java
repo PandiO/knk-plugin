@@ -2498,6 +2498,16 @@ public class KnKPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(hubRules, this);
         getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.hub.HubWorldGuardListener(hubRules), this);
         new net.knightsandkings.knk.paper.hub.HubRegenerationTask(hubService).runTaskTimer(this, 1L, 1L);
+        if (domainAccess != null) {
+            // Leaving the hub any way but its portal: say so instead of "You are not allowed to leave <town>."
+            domainAccess.setRefusalWording((from, refusal) -> refusal.type() != net.knightsandkings.knk.core.regions.RegionTransitionType.EXIT
+                    || !hubService.inHub(from)
+                ? refusal
+                : new net.knightsandkings.knk.core.regions.access.RegionAccessRules.Refusal(refusal.type(), refusal.regionId(),
+                    hubService.hub().portalRegionIds().isEmpty()
+                        ? "You can't leave the hub this way."
+                        : "You can only leave the hub through its portal."));
+        }
         hubService.unusable().ifPresent(reason -> getLogger().severe("[KnK Hub] The selected hub cannot take players: "
             + reason + ". Only operators may join until it is fixed on the Game Settings page."));
     }
@@ -2565,6 +2575,10 @@ public class KnKPlugin extends JavaPlugin {
             }
         });
         hubAdmission.setOutageAdmission(hubOutageService::savedOnJoin);
+        var domainSpawns = hubDomainSpawns();
+        if (domainSpawns != null) {
+            hubOutageService.setDomainSpawn(domainSpawns, MenuService.mainThreadExecutor(this));
+        }
         getServer().getPluginManager().registerEvents(hubOutageService, this);
         getServer().getScheduler().runTaskTimer(this, hubOutageService::tick, 20L, 20L);
         var connectivity = getApiConnectivity();
@@ -3029,6 +3043,48 @@ public class KnKPlugin extends JavaPlugin {
                 return all;
             }
         });
+    }
+
+    /**
+     * For an outage return whose saved spot has nothing safe nearby (smoke test 2026-10-17): the spawn Location of the
+     * structure, district or town the spot is in, innermost first, from the cached region-to-domain map. Null without the
+     * data accesses. Called on the main thread; the lookups run off it.
+     */
+    private java.util.function.Function<org.bukkit.Location, java.util.concurrent.CompletableFuture<java.util.Optional<net.knightsandkings.knk.core.domain.location.KnkLocation>>> hubDomainSpawns() {
+        if (dataAccessFactory == null || cacheManager == null || locationsQueryApi == null || structuresQueryApi == null
+                || townsDataAccess == null || districtsQueryApi == null || regionTracker == null || regionDomainResolver == null) {
+            return null;
+        }
+        ensureDomainDataAccesses();
+        net.knightsandkings.knk.core.dataaccess.FetchPolicy lookup = net.knightsandkings.knk.core.dataaccess.FetchPolicy.API_THEN_CACHE_REFRESH;
+        var domains = new net.knightsandkings.knk.core.navigation.DomainLocationResolver(
+            id -> locationsDataAccess.getByIdAsync(id, lookup).thenApply(r -> r != null ? r.value() : java.util.Optional.empty()),
+            id -> townsDataAccess.getByIdAsync(id, lookup).thenApply(r -> r != null ? r.value() : java.util.Optional.empty()),
+            id -> districtsDataAccess.getByIdAsync(id, lookup).thenApply(r -> r != null ? r.value() : java.util.Optional.empty()),
+            id -> structuresDataAccess.getByIdAsync(id, lookup).thenApply(r -> r != null ? r.value() : java.util.Optional.empty()));
+        var regionIds = regionTracker.regionIds();
+        java.util.List<String> innermostFirst = java.util.List.of(net.knightsandkings.knk.core.navigation.DomainLocationResolver.STRUCTURE,
+            net.knightsandkings.knk.core.navigation.DomainLocationResolver.DISTRICT, net.knightsandkings.knk.core.navigation.DomainLocationResolver.TOWN);
+        return at -> {
+            String world = at.getWorld() != null ? at.getWorld().getName() : null;
+            java.util.List<RegionDomainResolver.DomainSnapshot> found = regionIds.at(at).stream()
+                .map(id -> regionDomainResolver.getDomainByRegionIdNoRefresh(world, id).orElse(null))
+                .filter(d -> d != null && d.id() != null && innermostFirst.contains(d.domainType()))
+                .sorted(java.util.Comparator.comparingInt(d -> innermostFirst.indexOf(d.domainType())))
+                .toList();
+            java.util.concurrent.CompletableFuture<java.util.Optional<net.knightsandkings.knk.core.domain.location.KnkLocation>> chain =
+                java.util.concurrent.CompletableFuture.completedFuture(java.util.Optional.empty());
+            for (RegionDomainResolver.DomainSnapshot domain : found) {
+                chain = chain.thenCompose(previous -> previous.isPresent()
+                    ? java.util.concurrent.CompletableFuture.completedFuture(previous)
+                    : switch (domain.domainType()) {
+                        case net.knightsandkings.knk.core.navigation.DomainLocationResolver.STRUCTURE -> domains.structureLocation(domain.id());
+                        case net.knightsandkings.knk.core.navigation.DomainLocationResolver.DISTRICT -> domains.districtLocation(domain.id());
+                        default -> domains.townLocation(domain.id());
+                    });
+            }
+            return chain;
+        };
     }
 
     /**

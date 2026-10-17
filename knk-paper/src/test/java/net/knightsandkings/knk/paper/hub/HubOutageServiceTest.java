@@ -88,6 +88,7 @@ class HubOutageServiceTest {
         when(player.getLocation()).thenReturn(at);
         when(player.getWorld()).thenReturn(at.getWorld());
         when(player.teleport(any(Location.class))).thenReturn(true);
+        when(player.isOnline()).thenReturn(true);
         groups.put(id, List.of(groupRefs));
         online.add(player);
         return player;
@@ -196,16 +197,51 @@ class HubOutageServiceTest {
     }
 
     @Test
-    void anUnsafeSpotStaysSavedForLater() {
+    void anUnsafeSpotOutsideAnyDomainStaysSavedForLater() {
         Player alice = player(new Location(gameplay, 500, -10, 500));
         outage.connectivityChanged(ApiConnectivityState.DOWN);
         outage.applyIfDue(alice, T0.plusSeconds(60));
         long token = store.returnRecord(alice.getUniqueId()).orElseThrow().savedAt().toEpochMilli();
         outage.connectivityChanged(ApiConnectivityState.UP);
+        transfers.clear();
 
-        assertEquals(HubOutageService.ReturnOutcome.UNSAFE,
+        assertEquals(HubOutageService.ReturnOutcome.LOOKING_UP,
             outage.returnTo(alice, token, (player, at) -> Optional.empty(), player -> Optional.empty()));
         assertTrue(store.returnRecord(alice.getUniqueId()).isPresent());
+        assertTrue(transfers.isEmpty());
+    }
+
+    @Test
+    void anUnsafeSpotInADomainReturnsToTheDomainsSpawn() {
+        // Smoke test 2026-10-17: an unsafe spot blocked the return; the spawn of the town or district it is in is used.
+        Player alice = player(new Location(gameplay, 500, -10, 500));
+        outage.connectivityChanged(ApiConnectivityState.DOWN);
+        outage.applyIfDue(alice, T0.plusSeconds(60));
+        long token = store.returnRecord(alice.getUniqueId()).orElseThrow().savedAt().toEpochMilli();
+        outage.connectivityChanged(ApiConnectivityState.UP);
+        transfers.clear();
+        outage.setDomainSpawn(at -> java.util.concurrent.CompletableFuture.completedFuture(
+            Optional.of(new KnkLocation(12, "Oakhaven square", 480.5, 64.0, 490.5, 0f, 0f, "world"))), Runnable::run);
+
+        outage.returnTo(alice, token, (player, at) -> Optional.empty(), player -> Optional.empty());
+
+        assertEquals(480.5, transfers.get(0).getX());
+        assertTrue(store.returnRecord(alice.getUniqueId()).isEmpty(), "the offer is used");
+    }
+
+    @Test
+    void aNewOutageEndsTheEarlierOfferOfAPlayerWhoStayedInTheHub() {
+        // Smoke test 2026-10-17: players in the hub when the API went out got an old outage's offer again.
+        Player stayed = player(new Location(hubWorld, 5, 65, 5));
+        Player away = player(new Location(hubWorld, 5, 65, 5));
+        online.remove(away); // offline: they may not have seen their offer yet
+        store.save(new HubOutageStore.ReturnRecord(stayed.getUniqueId(), "world", 1, 64, 1, 0f, 0f, T0.minusSeconds(3600)), null);
+        store.save(new HubOutageStore.ReturnRecord(away.getUniqueId(), "world", 2, 64, 2, 0f, 0f, T0.minusSeconds(3600)), null);
+
+        outage.connectivityChanged(ApiConnectivityState.DOWN);
+
+        assertTrue(store.returnRecord(stayed.getUniqueId()).isEmpty());
+        assertTrue(store.returnRecord(away.getUniqueId()).isPresent());
     }
 
     @Test
