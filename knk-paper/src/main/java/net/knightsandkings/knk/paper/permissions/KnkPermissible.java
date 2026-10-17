@@ -16,6 +16,7 @@ import net.knightsandkings.knk.core.dataaccess.PermissionsDataAccess;
 import net.knightsandkings.knk.core.domain.permissions.PermissionCheckResult;
 import net.knightsandkings.knk.core.domain.permissions.PermissionDecision;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
+import net.knightsandkings.knk.core.exception.ApiDownException;
 import net.knightsandkings.knk.core.offline.OfflineSecurityStore;
 
 /**
@@ -52,6 +53,11 @@ import net.knightsandkings.knk.core.offline.OfflineSecurityStore;
  * {@link OfflineSecurityStore} (on disk, bounded by age; an unknown or too-old answer still means
  * no). The same store fills the gap after the 30 s memory TTL, so the first check after it no
  * longer fails closed while the refresh is under way.
+ * <p>
+ * KNG-171: while the service-wide connectivity state is DOWN, {@link PermissionsDataAccess} makes
+ * no API call (no retries, no connection wait): a fresh in-memory answer is used as always, else
+ * the check reads as UNAVAILABLE at once and is answered from the offline store as above. A
+ * last-known deny stays a deny and an answer past its max age is unknown (no).
  */
 public class KnkPermissible {
 
@@ -127,8 +133,14 @@ public class KnkPermissible {
             .thenApply(result -> {
                 PermissionDecision decision = PermissionsDataAccess.decide(result);
                 if (decision == PermissionDecision.UNAVAILABLE) {
-                    LOGGER.log(Level.WARNING, "Permission check failed for user " + userId + ", node " + node,
-                        result != null ? result.error().orElse(null) : null);
+                    Throwable error = result != null ? result.error().orElse(null) : null;
+                    if (ApiDownException.isApiDown(error)) {
+                        // KNG-171: not asked because the API is DOWN; expected, so no warning per check.
+                        LOGGER.fine(() -> "API DOWN: permission for user " + userId + ", node " + node
+                            + " answered from the offline store");
+                    } else {
+                        LOGGER.log(Level.WARNING, "Permission check failed for user " + userId + ", node " + node, error);
+                    }
                     return lastKnown(userId, node);
                 }
                 return decision;

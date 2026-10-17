@@ -1,9 +1,12 @@
 package net.knightsandkings.knk.core.dataaccess;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
@@ -72,5 +75,42 @@ class PermissionsDataAccessDecisionTest {
 
         answer.set(CompletableFuture.failedFuture(new RuntimeException("Connection refused")));
         assertEquals(PermissionDecision.ALLOWED, access.decideAsync(6, "knk.pay").join());
+    }
+
+    @Test
+    void whileTheApiIsDown_aCheckIsNotSent_kng171() {
+        AtomicBoolean down = new AtomicBoolean(false);
+        AtomicInteger calls = new AtomicInteger();
+        AtomicInteger answers = new AtomicInteger();
+        PermissionsApi counting = new PermissionsApi() {
+            @Override
+            public CompletableFuture<PermissionCheckResult> check(int userId, String node) {
+                calls.incrementAndGet();
+                return CompletableFuture.completedFuture(result(PermissionResolution.DENIED));
+            }
+
+            @Override
+            public CompletableFuture<EffectivePermissionSet> getEffective(int userId) {
+                calls.incrementAndGet();
+                return CompletableFuture.completedFuture(null);
+            }
+        };
+        PermissionsDataAccess gated = new PermissionsDataAccess(Duration.ofSeconds(30), counting,
+            DataAccessSettings.builder().retryPolicy(RetryPolicy.defaultPolicy()).apiOutage(down::get).build());
+        gated.setAnswerListener((userId, node, r) -> answers.incrementAndGet());
+        down.set(true);
+
+        CompletableFuture<PermissionDecision> decision = gated.decideAsync(8, "knk.pay");
+
+        assertTrue(decision.isDone(), "no wait for retries");
+        assertEquals(PermissionDecision.UNAVAILABLE, decision.join());
+        assertEquals(PermissionDecision.UNAVAILABLE, gated.decideAsync(8, "knk.pay").join());
+        assertEquals(0, calls.get());
+        assertEquals(0, answers.get(), "nothing reaches the offline store");
+
+        down.set(false);
+        assertEquals(PermissionDecision.DENIED, gated.decideAsync(8, "knk.pay").join());
+        assertEquals(1, calls.get());
+        assertEquals(1, answers.get());
     }
 }

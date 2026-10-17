@@ -10,8 +10,21 @@ import org.bukkit.configuration.file.FileConfiguration;
  * @param refreshIntervalSeconds      how often the settings are read from the API (min 5)
  * @param runtimeSyncIntervalSeconds  how often the loaded worlds are checked and, when they changed, reported (min 5)
  * @param backupHistoryLimit          how many earlier versions of the settings to keep on disk; 0 keeps none
+ * @param serverId                    this game server's id in the runtime-worlds report (KNG-118): each
+ *                                    server's report replaces only its own worlds; never blank
  */
-public record GameSettingsConfig(int refreshIntervalSeconds, int runtimeSyncIntervalSeconds, int backupHistoryLimit) {
+public record GameSettingsConfig(int refreshIntervalSeconds, int runtimeSyncIntervalSeconds, int backupHistoryLimit,
+                                 String serverId) {
+
+    public static final String DEFAULT_SERVER_ID = "default";
+
+    public GameSettingsConfig {
+        serverId = serverId == null || serverId.isBlank() ? DEFAULT_SERVER_ID : serverId.trim();
+    }
+
+    public GameSettingsConfig(int refreshIntervalSeconds, int runtimeSyncIntervalSeconds, int backupHistoryLimit) {
+        this(refreshIntervalSeconds, runtimeSyncIntervalSeconds, backupHistoryLimit, DEFAULT_SERVER_ID);
+    }
 
     public static GameSettingsConfig defaults() {
         return new GameSettingsConfig(30, 30, 48);
@@ -26,6 +39,7 @@ public record GameSettingsConfig(int refreshIntervalSeconds, int runtimeSyncInte
         return new GameSettingsConfig(
             Math.max(5, section.getInt("refresh-interval-seconds", defaults.refreshIntervalSeconds())),
             Math.max(5, section.getInt("runtime-sync-interval-seconds", defaults.runtimeSyncIntervalSeconds())),
-            Math.max(0, section.getInt("backup-history-limit", defaults.backupHistoryLimit())));
+            Math.max(0, section.getInt("backup-history-limit", defaults.backupHistoryLimit())),
+            section.getString("server-id", defaults.serverId()));
     }
 }

@@ -77,6 +77,13 @@ public class PlayerListener implements Listener {
 	/** Null-safe: chat works unfiltered without it. */
 	private final IgnoreService ignoreService;
 
+	/** Whether hub admission placed a joining player at the hub spawn (answers once per join); none without a hub. */
+	private java.util.function.Predicate<UUID> hubAdmitted = uuid -> false;
+
+	public void setHubAdmitted(java.util.function.Predicate<UUID> hubAdmitted) {
+		this.hubAdmitted = hubAdmitted != null ? hubAdmitted : uuid -> false;
+	}
+
 	public PlayerListener(
 			UsersDataAccess usersDataAccess,
 			GameSettingsManager gameSettings,
@@ -180,7 +187,17 @@ public class PlayerListener implements Listener {
 			e.joinMessage(Component.text("► " + "Player " + player.getName() + " joined").color(ColorOptions.message));
 		}
 
-		if (!knkPermissible.hasPermission(player, "knk.mode.owner")) {
+		if (hubAdmitted.test(player.getUniqueId())) {
+			// Hub DESIGN §16 Phase 5: the hub admission already placed the player at the hub spawn while they were
+			// connecting, in place of the server spawn; no join teleport. The game mode is that of the world they arrived
+			// in. Owners and the groups' own join settings never get here (HubJoinRoute).
+			if (!knkPermissible.hasPermission(player, "knk.mode.owner")) {
+				// Owners keep their game mode and flight, as without a hub.
+				player.setGameMode(gameSettings.gameModeFor(player.getWorld()));
+				player.setFlying(false);
+			}
+		} else if (!knkPermissible.hasPermission(player, "knk.mode.owner") && !inStaffOrOwnerMode(user)) {
+			// Players in staff or owner mode join where they logged out, like owners (decision 2026-10-12).
 			// The server spawn /spawn uses, in its world's default game mode (DESIGN §3.2/§3.4). Never
 			// waits on the API: the spot was resolved in the background. JoinLoadingGuard.hold (later
 			// in this join) switches to ADVENTURE and hands this mode back when the account is loaded.
@@ -398,6 +415,11 @@ public class PlayerListener implements Listener {
 	/** The player's title name for {title} in join/leave messages (KNG-52 round 3); null when none or not cached yet. */
 	private static String titleOf(UserSummary user) {
 		return user != null ? user.titleName() : null;
+	}
+
+	private static boolean inStaffOrOwnerMode(UserSummary user) {
+		return user != null && user.activeMode() != null
+			&& user.activeMode() != net.knightsandkings.knk.core.domain.users.ActiveMode.NONE;
 	}
 
 	private static List<PermissionGroupRef> groupsOf(UserSummary user) {

@@ -9,6 +9,8 @@ import java.time.Duration;
  * below so an existing server config without the section keeps working.
  *
  * @param healthRootUrl API root for {@code /health/ready}; blank derives it from {@code api.base-url}
+ * @param skipApiWhileDown KNG-171: while the state is DOWN, reads skip the API and answer from the
+ *                         caches and the offline store at once
  */
 public record ApiConnectivitySettings(
     boolean enabled,
@@ -16,12 +18,13 @@ public record ApiConnectivitySettings(
     Duration probeTimeout,
     int failuresToDown,
     int successesToUp,
-    String healthRootUrl
+    String healthRootUrl,
+    boolean skipApiWhileDown
 ) {
     public static final String SECTION = "api.connectivity";
 
     public static ApiConnectivitySettings defaults() {
-        return new ApiConnectivitySettings(true, Duration.ofSeconds(10), Duration.ofSeconds(5), 3, 2, "");
+        return new ApiConnectivitySettings(true, Duration.ofSeconds(10), Duration.ofSeconds(5), 3, 2, "", true);
     }
 
     /** Reads {@code api.connectivity} from the plugin's root config; null or missing gives the defaults. */
@@ -37,7 +40,8 @@ public record ApiConnectivitySettings(
             Duration.ofSeconds(Math.max(1L, s.getLong("probe-timeout-seconds", d.probeTimeout().toSeconds()))),
             Math.max(1, s.getInt("failures-to-down", d.failuresToDown())),
             Math.max(1, s.getInt("successes-to-up", d.successesToUp())),
-            s.getString("health-root-url", d.healthRootUrl())
+            s.getString("health-root-url", d.healthRootUrl()),
+            s.getBoolean("skip-api-while-down", d.skipApiWhileDown())
         );
     }
 }

@@ -91,6 +91,7 @@ class DiscoveriesApiImplTest {
         assertEquals("district_market", body.get("wgRegionIds").get(0).asText());
         assertEquals("JoinInside", body.get("source").asText());
         assertTrue(!body.has("domainIds"), "no domainIds field when none are sent");
+        assertTrue(!body.has("worldName"), "a world-blind grant sends no worldName");
 
         assertEquals(2, result.granted().size());
         assertEquals("Rivia", result.granted().get(0).name());
@@ -126,6 +127,17 @@ class DiscoveriesApiImplTest {
     }
 
     @Test
+    void grantInAWorldSendsTheWorldName() throws Exception {
+        responseJson = "{\"granted\":[],\"alreadyDiscovered\":[],\"skipped\":[]}";
+
+        api.grant(12, "hub", List.of("town_rivia"), DiscoverySource.REGION_ENTER).join();
+
+        JsonNode body = mapper.readTree(bodies.get(0));
+        assertEquals("hub", body.get("worldName").asText());
+        assertEquals("town_rivia", body.get("wgRegionIds").get(0).asText());
+    }
+
+    @Test
     void aRefusalKeepsTheStatusCodeInTheCauseChain() {
         status = 400;
         responseJson = "{\"error\":\"ValidationFailed\"}";
@@ -150,6 +162,15 @@ class DiscoveriesApiImplTest {
         assertEquals("GET", seen.get(0).method());
         assertEquals("http://api.test/api/users/12/discoveries/known", seen.get(0).url().toString());
         assertEquals(List.of(new KnownDiscovery(1, "town_rivia"), new KnownDiscovery(2, null)), known);
+    }
+
+    @Test
+    void knownReadsEachDomainsWorld() {
+        responseJson = "[{\"domainId\":1,\"wgRegionId\":\"town_rivia\",\"worldName\":\"hub\"},"
+                + "{\"domainId\":2,\"wgRegionId\":\"town_x\",\"worldName\":null}]";
+
+        assertEquals(List.of(new KnownDiscovery(1, "town_rivia", "hub"), new KnownDiscovery(2, "town_x", null)),
+                api.known(12).join());
     }
 
     @Test

@@ -30,13 +30,14 @@ public class GameSettingsCommandApiImpl extends BaseApiImpl implements GameSetti
     }
 
     @Override
-    public CompletableFuture<KnkGameSettings> reportRuntimeWorlds(List<KnkWorldRuntime> worlds) {
+    public CompletableFuture<KnkGameSettings> reportRuntimeWorlds(String serverId, List<KnkWorldRuntime> worlds) {
         List<GameSettingsDto.RuntimeWorld> body = (worlds == null ? List.<KnkWorldRuntime>of() : worlds).stream()
             .map(GameSettingsMapper::toDto).toList();
         return CompletableFuture.supplyAsync(() -> {
             String url = baseUrl + ENDPOINT;
             try {
-                String json = objectMapper.writeValueAsString(new GameSettingsDto.RuntimeWorldsUpdate(body));
+                String json = objectMapper.writeValueAsString(new GameSettingsDto.RuntimeWorldsUpdate(
+                    serverId == null || serverId.isBlank() ? null : serverId.trim(), body));
                 return GameSettingsMapper.toCore(parse(putJson(url, json), GameSettingsDto.class, url));
             } catch (ApiException | IOException e) {
                 throw new RuntimeException("Failed to report the loaded worlds", e);

@@ -36,7 +36,9 @@ public sealed interface SiegeEffect {
         /** No rotation scenario was available (all locked by other lobbies). */
         NO_SCENARIO_AVAILABLE,
         ADMIN_STOPPED,
-        SERVER_RESTART
+        SERVER_RESTART,
+        /** An API-outage action evacuated a member. */
+        API_OUTAGE
     }
 
     enum DisableReason {

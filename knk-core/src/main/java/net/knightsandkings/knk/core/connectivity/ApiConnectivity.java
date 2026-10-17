@@ -15,7 +15,7 @@ import java.util.Optional;
  * A result that doesn't change the state returns no transition, so callers fire an event only on
  * a real change. Thread-safe; it does no I/O and knows nothing about Bukkit.
  */
-public final class ApiConnectivity {
+public final class ApiConnectivity implements ApiOutageSignal {
 
     /** Read-only view for status output such as {@code /knk health}. */
     public record Snapshot(
@@ -36,6 +36,8 @@ public final class ApiConnectivity {
     private int consecutiveFailures;
     private int consecutiveSuccesses;
     private Instant lastProbeAt;
+    /** The first failed probe of the current run of failures; null while the last probe passed. */
+    private Instant failingSince;
     private boolean lastProbeSucceeded;
     private String lastProbeDetail;
 
@@ -55,6 +57,7 @@ public final class ApiConnectivity {
     public synchronized Optional<ApiConnectivityTransition> recordSuccess(Instant at, String detail) {
         consecutiveSuccesses++;
         consecutiveFailures = 0;
+        failingSince = null;
         noteProbe(at, true, detail);
         if (state == ApiConnectivityState.UP) {
             return Optional.empty();
@@ -69,6 +72,9 @@ public final class ApiConnectivity {
     public synchronized Optional<ApiConnectivityTransition> recordFailure(Instant at, String detail) {
         consecutiveFailures++;
         consecutiveSuccesses = 0;
+        if (failingSince == null) {
+            failingSince = at;
+        }
         noteProbe(at, false, detail);
         if (state == ApiConnectivityState.DOWN) {
             return Optional.empty();
@@ -86,6 +92,12 @@ public final class ApiConnectivity {
     /** True only while the state is UP; UNKNOWN and DOWN both read as "not reachable". */
     public synchronized boolean isUp() {
         return state == ApiConnectivityState.UP;
+    }
+
+    /** True only while the state is DOWN (KNG-171: reads skip the API); UNKNOWN is not down. */
+    @Override
+    public synchronized boolean isApiDown() {
+        return state == ApiConnectivityState.DOWN;
     }
 
     public synchronized Snapshot snapshot() {
@@ -108,7 +120,8 @@ public final class ApiConnectivity {
     }
 
     private ApiConnectivityTransition moveTo(ApiConnectivityState next, Instant at, String reason) {
-        ApiConnectivityTransition transition = new ApiConnectivityTransition(state, next, at, reason);
+        ApiConnectivityTransition transition = new ApiConnectivityTransition(state, next, at, reason,
+            next == ApiConnectivityState.DOWN ? failingSince : at);
         state = next;
         since = at;
         return transition;

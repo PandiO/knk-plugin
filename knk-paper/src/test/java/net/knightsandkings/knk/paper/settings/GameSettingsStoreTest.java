@@ -101,4 +101,44 @@ class GameSettingsStoreTest {
         yaml.set("game-settings.backup-history-limit", -3);
         assertEquals(new GameSettingsConfig(5, 120, 0), GameSettingsConfig.from(yaml));
     }
+
+    // ===== hub DESIGN §16.4 decision 7: the snapshot lives in the KNG-58 offline store =====
+
+    private net.knightsandkings.knk.core.offline.OfflineSecurityStore offlineStore() {
+        var store = new net.knightsandkings.knk.core.offline.OfflineSecurityStore(folder.resolve("offline-security.json"),
+            net.knightsandkings.knk.core.offline.OfflineSecurityStore.Settings.defaults(), java.time.Clock.systemUTC());
+        store.load();
+        return store;
+    }
+
+    @Test
+    void theSnapshotWithTheHubLivesInTheOfflineStoreAndSurvivesARestart() {
+        KnkGameSettings base = settings("&a{player} joined");
+        var hub = new net.knightsandkings.knk.core.domain.settings.KnkHubSettings(4, "Hubtown", "Town", "hub", "town_4",
+            base.joinSpawnReference(), net.knightsandkings.knk.core.domain.settings.KnkHubSettings.OutageAction.KICK, 30,
+            net.knightsandkings.knk.core.domain.settings.KnkHubRules.defaults());
+        KnkGameSettings saved = new KnkGameSettings(base.joinSpawnMode(), base.joinSpawnReference(), base.joinAnnouncement(),
+            base.leaveAnnouncement(), base.defaultRespawnPolicy(), base.worldSettings(), base.updatedAt(), base.motd(),
+            base.groupOverrides(), hub);
+
+        new GameSettingsStore(folder, 5, offlineStore()).save(saved);
+
+        assertFalse(Files.exists(folder.resolve(GameSettingsStore.CACHE_FILE)), "no second copy");
+        assertEquals(saved, new GameSettingsStore(folder, 5, offlineStore()).load().orElseThrow(), "after a restart");
+    }
+
+    @Test
+    void anOldCacheFileIsReadOnceThenMovedToTheHistory() throws IOException {
+        new GameSettingsStore(folder, 5).save(settings("old"));
+        GameSettingsStore store = new GameSettingsStore(folder, 5, offlineStore());
+
+        assertEquals("old", store.load().orElseThrow().joinAnnouncement(), "migrated from game-settings-cache.json");
+        store.save(settings("new"));
+
+        assertFalse(Files.exists(folder.resolve(GameSettingsStore.CACHE_FILE)));
+        try (Stream<Path> history = Files.list(folder.resolve(GameSettingsStore.HISTORY_DIR))) {
+            assertEquals(1, history.count(), "the old snapshot is kept in the history");
+        }
+        assertEquals("new", new GameSettingsStore(folder, 5, offlineStore()).load().orElseThrow().joinAnnouncement());
+    }
 }

@@ -44,9 +44,35 @@ class GateLoaderAdapterTest {
     }
 
     @Test
+    void aDoorKeepsItsAnchorsWorldAndOneWithoutAWorldGoesToTheMainWorld() {
+        // KNG-113: a door without a world used to be animated in every world
+        GateManager gateManager = new GateManager();
+        GateDoorDto inHub = doorOf(1, 1, "Hub Door");
+        inHub.setAnchorPoint("{\"x\":0,\"y\":64,\"z\":0,\"world\":\"hub\"}");
+        GateDoorDto legacy = doorOf(2, 1, "Old Door");
+        legacy.setAnchorPoint("{\"x\":0,\"y\":64,\"z\":0}");
+
+        new GateLoaderAdapter(gateManager, () -> "world").loadAndCacheStructure(structureOf(1, "Gate", inHub, legacy));
+
+        assertEquals("hub", gateManager.getGate(1).getWorldName());
+        assertEquals("world", gateManager.getGate(2).getWorldName());
+    }
+
+    @Test
+    void aDoorWithoutAWorldIsLeftOutWhenTheMainWorldIsNotKnown() {
+        GateManager gateManager = new GateManager();
+        GateDoorDto legacy = doorOf(2, 1, "Old Door");
+        legacy.setAnchorPoint("{\"x\":0,\"y\":64,\"z\":0}");
+
+        new GateLoaderAdapter(gateManager).loadAndCacheStructure(structureOf(1, "Gate", legacy));
+
+        assertNull(gateManager.getGate(2));
+    }
+
+    @Test
     void loadAndCacheStructure_ComputesBasisVectorsAndMotion() {
         GateManager gateManager = new GateManager();
-        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
 
         GateDoorDto door = doorOf(1, 1, "Basis Door");
         door.setGateType("SLIDING");
@@ -90,7 +116,7 @@ class GateLoaderAdapterTest {
     @Test
     void loadAndCacheStructure_MapsPassThroughFields() {
         GateManager gateManager = new GateManager();
-        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
 
         GateDoorDto door = doorOf(2, 2, "PassThrough Door");
         door.setGateType("SLIDING");
@@ -114,7 +140,7 @@ class GateLoaderAdapterTest {
     @Test
     void loadAndCacheStructure_DefaultsPassThroughFieldsWhenAbsentFromDto() {
         GateManager gateManager = new GateManager();
-        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
 
         GateDoorDto door = doorOf(3, 3, "Legacy Door");
         door.setGateType("SLIDING");
@@ -137,7 +163,7 @@ class GateLoaderAdapterTest {
     @Test
     void loadForDistrict_FetchesOnlyThatDistrictsGatesAndCachesThem() {
         GateManager gateManager = new GateManager();
-        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
         GateStructuresApi api = mock(GateStructuresApi.class);
 
         // getByDistrict (a query-filtered search) returns the backend's lightweight list DTO -
@@ -175,7 +201,7 @@ class GateLoaderAdapterTest {
     @Test
     void loadForDistrict_SkipsGatesMissingAnId() {
         GateManager gateManager = new GateManager();
-        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
         GateStructuresApi api = mock(GateStructuresApi.class);
 
         GateStructureDto dtoWithoutId = new GateStructureDto();
@@ -190,7 +216,7 @@ class GateLoaderAdapterTest {
     @Test
     void loadForDistrict_SkipsGateWhenFullLookupReturnsNothing() {
         GateManager gateManager = new GateManager();
-        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
         GateStructuresApi api = mock(GateStructuresApi.class);
 
         GateStructureDto summary = new GateStructureDto();
@@ -211,7 +237,7 @@ class GateLoaderAdapterTest {
         // a diagonal reference point must produce a correctly signed, correctly ordered
         // cross product, not just the trivial axis-aligned case.
         GateManager gateManager = new GateManager();
-        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
 
         GateDoorDto door = doorOf(2, 2, "Diagonal Door");
         door.setGateType("SLIDING");
@@ -275,7 +301,7 @@ class GateLoaderAdapterTest {
         // integer blocks (distance * (1,0,1)) rather than by the unit axis (distance * (0.7071,0,0.7071)),
         // which would only travel distance/sqrt(2) blocks along each world axis.
         GateManager gateManager = new GateManager();
-        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
 
         GateDoorDto door = doorOf(20, 20, "Diagonal Lateral Door");
         door.setGateType("SLIDING");
@@ -302,7 +328,7 @@ class GateLoaderAdapterTest {
     @Test
     void loadAndCacheStructure_KeepsVerticalMotionOnWorldYWhenReferencePointIsOffset() {
         GateManager gateManager = new GateManager();
-        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
 
         GateDoorDto door = doorOf(12, 12, "Offset Vertical Door");
         door.setGateType("SLIDING");
@@ -332,7 +358,7 @@ class GateLoaderAdapterTest {
     @Test
     void loadAndCacheStructure_FallsBackToDefaultAxesWhenReferencePointsMissing() {
         GateManager gateManager = new GateManager();
-        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
 
         GateDoorDto door = doorOf(3, 3, "No Reference Points Door");
         door.setGateType("SLIDING");
@@ -368,7 +394,7 @@ class GateLoaderAdapterTest {
     @Test
     void loadAndCacheStructure_UsesBlockDataJsonFromRealApiContract() {
         GateManager gateManager = new GateManager();
-        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
 
         GateDoorDto door = doorOf(11, 11, "Keep Door test");
         door.setGateType("SLIDING");
@@ -403,7 +429,7 @@ class GateLoaderAdapterTest {
         // out into depth to lie flat as a bridge - rotating around nAxis (the old, wrong
         // default) would instead spin blocks within their own plane and never form a bridge.
         GateManager gateManager = new GateManager();
-        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
 
         GateDoorDto door = doorOf(30, 30, "Drawbridge Door");
         door.setGateType("DRAWBRIDGE");
@@ -428,7 +454,7 @@ class GateLoaderAdapterTest {
         // Double doors hinge along a vertical edge (vAxis) and swing width-offset blocks out
         // into depth as they open.
         GateManager gateManager = new GateManager();
-        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
 
         GateDoorDto door = doorOf(31, 31, "Double Doors Door");
         door.setGateType("DOUBLE_DOORS");
@@ -451,7 +477,7 @@ class GateLoaderAdapterTest {
     @Test
     void loadAll_CachesEveryDoorOfEveryStructureReturnedByTheApi() {
         GateManager gateManager = new GateManager();
-        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
         GateStructuresApi api = mock(GateStructuresApi.class);
 
         GateStructureDto summaryTen = new GateStructureDto();
@@ -488,7 +514,7 @@ class GateLoaderAdapterTest {
     @Test
     void loadAndCacheStructure_NoOpenedSnapshots_LeavesOpenBlocksEmptyAndNothingPaired() {
         GateManager gateManager = new GateManager();
-        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
 
         GateDoorDto door = doorOf(50, 50, "No Open Scan Door");
         door.setGateType("SLIDING");
@@ -514,7 +540,7 @@ class GateLoaderAdapterTest {
     @Test
     void loadAndCacheStructure_VerticalGateWithOpenedSnapshots_PairsByIndexPosition() {
         GateManager gateManager = new GateManager();
-        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
 
         GateDoorDto door = doorOf(51, 51, "Vertical Dual-Scan Door");
         door.setGateType("SLIDING");
@@ -558,7 +584,7 @@ class GateLoaderAdapterTest {
     @Test
     void loadAndCacheStructure_RotationGateWithOpenedSnapshots_PairsByNearestWorldDistance() {
         GateManager gateManager = new GateManager();
-        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
 
         GateDoorDto door = doorOf(52, 52, "Drawbridge Dual-Scan Door");
         door.setGateType("DRAWBRIDGE");
@@ -617,7 +643,7 @@ class GateLoaderAdapterTest {
     @Test
     void loadAndCacheStructure_RotationGateWithThreeOrMorePairings_FitsARigidTransform() {
         GateManager gateManager = new GateManager();
-        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
 
         GateDoorDto door = doorOf(53, 53, "Drawbridge Dense Dual-Scan Door");
         door.setGateType("DRAWBRIDGE");
@@ -704,7 +730,7 @@ class GateLoaderAdapterTest {
         // the reported non-rigid motion, so no fit should ever be computed for them, regardless of
         // how many pairings exist.
         GateManager gateManager = new GateManager();
-        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
 
         GateDoorDto door = doorOf(54, 54, "Vertical Dense Dual-Scan Door");
         door.setGateType("SLIDING");
@@ -753,7 +779,7 @@ class GateLoaderAdapterTest {
         // POLYGON2D capture is fundamentally an X/Z outline - see the design note on
         // GateLoaderAdapter.precomputeFootprintPolygons for why a vertical vAxis degenerates.
         GateManager gateManager = new GateManager();
-        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
 
         GateDoorDto door = doorOf(60, 60, "Region Door");
         door.setGateType("SLIDING");
@@ -801,7 +827,7 @@ class GateLoaderAdapterTest {
         // re-ordering step (GateFrameCalculator.convexHull2D) runs and produces a correct result,
         // not just that projection alone would (which the shuffled order would fail without it).
         GateManager gateManager = new GateManager();
-        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
 
         GateDoorDto door = doorOf(62, 62, "Vertical Convex Door");
         door.setGateType("SLIDING");
@@ -841,7 +867,7 @@ class GateLoaderAdapterTest {
         // Non-REGION gates must not run the footprint precompute at all - confirms it's correctly
         // gated on GeometryDefinitionMode, not run unconditionally for every door.
         GateManager gateManager = new GateManager();
-        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager);
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
 
         GateDoorDto door = doorOf(61, 61, "Plane Grid Door");
         door.setGateType("SLIDING");
