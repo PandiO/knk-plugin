@@ -212,18 +212,52 @@ public final class HubRulesListener implements Listener {
         return block.getBlockData() instanceof Openable ? BlockUse.DOOR : BlockUse.OTHER;
     }
 
+    /**
+     * Whether the hub's rules allow using this block outright: a door, trapdoor or gate with doors allowed, storage with
+     * storage allowed. WorldGuard is then told not to refuse it ({@link HubWorldGuardListener}): a Town region refuses
+     * these to non-members unless its {@code use}/{@code chest-access} flag allows them, which left the hub's door rule
+     * without effect (smoke test 2026-10-17).
+     */
+    boolean allowsUse(Block block) {
+        if (block == null || !hub.configured() || !hub.inHub(block.getLocation())) {
+            return false;
+        }
+        KnkHubRules rules = rules();
+        return switch (classify(Action.RIGHT_CLICK_BLOCK, block)) {
+            case DOOR -> rules.useDoors();
+            case STORAGE -> rules.useStorage();
+            default -> false;
+        };
+    }
+
+    /** {@link #allowsUse(Block)} for entities: NPCs and villagers, item frames and paintings, storage on entities. */
+    boolean allowsUse(Entity target) {
+        if (target == null || target instanceof Player || !hub.configured() || !hub.inHub(target.getLocation())) {
+            return false;
+        }
+        Boolean allowed = entityRule(target, rules());
+        return allowed != null && allowed;
+    }
+
+    /** The hub rule for right-clicking this entity, or null when no hub rule covers it. */
+    private static Boolean entityRule(Entity target, KnkHubRules rules) {
+        if (target instanceof Hanging) {
+            return rules.useItemFramesPaintings();
+        }
+        if (target instanceof AbstractVillager || target.hasMetadata("NPC")) {
+            return rules.useNpcs();
+        }
+        if (target instanceof InventoryHolder && !(target instanceof Player)) {
+            return rules.useStorage(); // chest minecarts and boats, donkeys' packs
+        }
+        return null;
+    }
+
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onInteractEntity(PlayerInteractEntityEvent event) {
         Entity target = event.getRightClicked();
-        KnkHubRules rules = rules();
-        boolean allowed;
-        if (target instanceof Hanging) {
-            allowed = rules.useItemFramesPaintings();
-        } else if (target instanceof AbstractVillager || target.hasMetadata("NPC")) {
-            allowed = rules.useNpcs();
-        } else if (target instanceof InventoryHolder && !(target instanceof Player)) {
-            allowed = rules.useStorage(); // chest minecarts and boats, donkeys' packs
-        } else {
+        Boolean allowed = entityRule(target, rules());
+        if (allowed == null) {
             return;
         }
         if (restricted(event.getPlayer(), target.getLocation(), allowed)) {

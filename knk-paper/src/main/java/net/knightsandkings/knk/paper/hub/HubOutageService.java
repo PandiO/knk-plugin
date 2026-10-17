@@ -158,17 +158,26 @@ public final class HubOutageService implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onConnectivity(ApiConnectivityChangedEvent event) {
-        connectivityChanged(event.getNewState());
+        connectivityChanged(event.getNewState(), event.getTransition().firstFailureAt());
     }
 
     /** A KNG-115 state, from the change event or the state already known at enable; repeats are ignored. */
     public void connectivityChanged(ApiConnectivityState state) {
+        connectivityChanged(state, null);
+    }
+
+    /**
+     * {@link #connectivityChanged(ApiConnectivityState)}, with when the API was lost: the first failed probe. A new
+     * outage's timer starts there, not when the probes confirmed it some 20-30 s later (smoke test 2026-10-17), so
+     * the delays count from the loss of the API.
+     */
+    public void connectivityChanged(ApiConnectivityState state, Instant lostAt) {
         Instant now = clock.instant();
         if (state == ApiConnectivityState.DOWN) {
             if (outage.inOutage()) {
                 return;
             }
-            if (outage.down(now)) {
+            if (outage.down(lostAt != null && lostAt.isBefore(now) ? lostAt : now)) {
                 store.setOutageStartedAt(outage.startedAt().orElse(now));
                 LOGGER.warning("[KnK Hub] API outage started; outage actions apply after each player's delay");
             } else {
@@ -372,7 +381,7 @@ public final class HubOutageService implements Listener {
         }
         World world = worlds.apply(record.world());
         if (world == null) {
-            return invalidate(player, "Your saved spot is in world '" + record.world() + "', which is not available.");
+            return invalidate(player, "Your saved spot is in a world that is not available.");
         }
         Location saved = new Location(world, record.x(), record.y(), record.z(), record.yaw(), record.pitch());
         Optional<Location> safe = safeSpot.apply(world, saved);
@@ -460,8 +469,7 @@ public final class HubOutageService implements Listener {
             .append(Component.text("[Return to where you were]")
                 .color(NamedTextColor.GREEN).decorate(TextDecoration.BOLD)
                 .clickEvent(ClickEvent.runCommand(command))
-                .hoverEvent(HoverEvent.showText(Component.text(r.world() + " " + Math.round(r.x()) + ", "
-                    + Math.round(r.y()) + ", " + Math.round(r.z())))))
+                .hoverEvent(HoverEvent.showText(Component.text("Back to your spot from before the outage"))))
             .append(Component.text(" Or stay; the offer stays until you use it or enter the game another way.")
                 .color(ColorOptions.message)));
     }

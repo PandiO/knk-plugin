@@ -109,6 +109,19 @@ class HubOutageServiceTest {
     }
 
     @Test
+    void theDelayCountsFromTheFirstFailedProbeNotFromTheConfirmedOutage() {
+        // Smoke test 2026-10-17: three failed probes 10 s apart confirm an outage 20-30 s after the API stopped.
+        Player alice = player(new Location(gameplay, 500, 64, 500));
+        outage.connectivityChanged(ApiConnectivityState.DOWN, T0.minusSeconds(25));
+
+        assertEquals(Optional.of(T0.minusSeconds(25)), outage.outageStartedAt());
+        outage.applyIfDue(alice, T0.plusSeconds(34));
+        verify(alice, never()).teleport(any(Location.class));
+        outage.applyIfDue(alice, T0.plusSeconds(35));
+        verify(alice).teleport(hub.admissionSpawn().orElseThrow());
+    }
+
+    @Test
     void aGroupsActionAndDelayWinAndKickAlsoSavesTheSpot() {
         Player noble = player(new Location(gameplay, 10, 64, 10), NOBLE);
 

@@ -2493,8 +2493,10 @@ public class KnKPlugin extends JavaPlugin {
             uuid -> org.bukkit.Bukkit.getOfflinePlayer(uuid).isOp(), this::hubJoinRoute);
         getServer().getPluginManager().registerEvents(hubAdmission, this);
         initializeHubOutage(hubAdmission);
-        getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.hub.HubRulesListener(hubService,
-            player -> knkPermissible != null && knkPermissible.hasPermission(player, "knk.hub.bypass")), this);
+        var hubRules = new net.knightsandkings.knk.paper.hub.HubRulesListener(hubService,
+            player -> knkPermissible != null && knkPermissible.hasPermission(player, "knk.hub.bypass"));
+        getServer().getPluginManager().registerEvents(hubRules, this);
+        getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.hub.HubWorldGuardListener(hubRules), this);
         new net.knightsandkings.knk.paper.hub.HubRegenerationTask(hubService).runTaskTimer(this, 1L, 1L);
         hubService.unusable().ifPresent(reason -> getLogger().severe("[KnK Hub] The selected hub cannot take players: "
             + reason + ". Only operators may join until it is fixed on the Game Settings page."));

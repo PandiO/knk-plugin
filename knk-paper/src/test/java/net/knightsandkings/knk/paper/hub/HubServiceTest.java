@@ -189,6 +189,44 @@ class HubServiceTest {
             HubRulesListener.classify(org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK, door));
     }
 
+    @Test
+    void theUsesTheHubAllowsAreAllowedPastWorldGuardAndNoOthers() {
+        // Smoke test 2026-10-17: a Town region refused doors to non-members although the hub allowed them.
+        HubRulesListener rules = new HubRulesListener(hub, p -> false);
+        Block door = openable(new Location(hubWorld, 5, 65, 5), mock(org.bukkit.block.data.type.Door.class),
+            mock(org.bukkit.block.BlockState.class));
+        Block chest = openable(new Location(hubWorld, 6, 65, 5), mock(org.bukkit.block.data.type.Chest.class),
+            mock(org.bukkit.block.Chest.class));
+        Block doorOutside = openable(new Location(hubWorld, 600, 65, 5), mock(org.bukkit.block.data.type.Door.class),
+            mock(org.bukkit.block.BlockState.class));
+
+        assertTrue(rules.allowsUse(door), "doors are allowed by default");
+        assertFalse(rules.allowsUse(chest), "storage is refused by default: WorldGuard keeps refusing it too");
+        assertFalse(rules.allowsUse(doorOutside), "outside the hub WorldGuard decides alone");
+
+        KnkHubRules closed = new KnkHubRules(false, false, false, false, true, false, true, true, false,
+            1.0, 20, 1, 10, 1.0, 20);
+        settings = withHub(new KnkHubSettings(4, "Hubtown", "Town", "hub", "town_4", spawn("hub"),
+            KnkHubSettings.OutageAction.SEND_TO_HUB, 0, closed));
+        assertFalse(rules.allowsUse(door), "doors off: WorldGuard is not overruled");
+        assertTrue(rules.allowsUse(chest), "storage on: allowed past WorldGuard");
+
+        org.bukkit.entity.Villager villager = mock(org.bukkit.entity.Villager.class);
+        when(villager.getLocation()).thenReturn(new Location(hubWorld, 5, 65, 6));
+        org.bukkit.entity.ItemFrame frame = mock(org.bukkit.entity.ItemFrame.class);
+        when(frame.getLocation()).thenReturn(new Location(hubWorld, 5, 66, 6));
+        assertTrue(rules.allowsUse(villager), "NPCs are allowed by default");
+        assertFalse(rules.allowsUse(frame), "item frames are refused by default");
+        assertFalse(rules.allowsUse(player(new Location(hubWorld, 5, 65, 5))), "players are not the hub's to allow");
+    }
+
+    private static Block openable(Location at, org.bukkit.block.data.BlockData data, org.bukkit.block.BlockState state) {
+        Block block = block(at);
+        when(block.getBlockData()).thenReturn(data);
+        when(block.getState()).thenReturn(state);
+        return block;
+    }
+
     private static Player player(Location at) {
         Player player = mock(Player.class);
         when(player.getUniqueId()).thenReturn(UUID.randomUUID());
