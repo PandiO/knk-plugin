@@ -54,7 +54,22 @@ class CurrencyAdminCommandTest {
         command.execute(sender, new String[] {"reverse", "01M3ABC"});
         command.execute(sender, new String[] {"frobnicate"});
         verify(service, never()).staffReverse(any(), anyString(), anyString(), anyBoolean());
-        verify(sender, org.mockito.Mockito.times(2)).sendMessage(CurrencySettings.defaults().message("currency-admin-usage"));
+        // KNG-107: a known action shows its own usage; no action, the full message (or the held forms).
+        verify(sender).sendMessage(org.bukkit.ChatColor.YELLOW + "Usage: /knk currency reverse <txId> [--partial] <reason...>");
+        verify(sender).sendMessage(CurrencySettings.defaults().message("currency-admin-usage"));
+    }
+
+    @Test
+    void withoutAnAction_theUsageNamesOnlyTheHeldActions() {
+        CurrencyAdminCommand partial = new CurrencyAdminCommand(service,
+            (who, node) -> node.equals(PlayerCurrencyService.CURRENCY_HISTORY_NODE) || node.equals(PlayerCurrencyService.CURRENCY_LOCK_NODE));
+
+        partial.execute(sender, new String[0]);
+
+        org.bukkit.ChatColor y = org.bukkit.ChatColor.YELLOW;
+        org.bukkit.ChatColor g = org.bukkit.ChatColor.GRAY;
+        verify(sender).sendMessage(y + "Usage: /knk currency history <player> [coins|gems|xp] [page]" + g + " | " + y
+            + "lock <player> <reason...>" + g + " | " + y + "unlock <player>");
     }
 
     @Test
@@ -83,7 +98,8 @@ class CurrencyAdminCommandTest {
 
         verify(service, never()).staffAcknowledgeAlert(any(), anyString());
         verify(service, never()).staffAlerts(any(), anyBoolean(), org.mockito.ArgumentMatchers.anyInt());
-        verify(sender, org.mockito.Mockito.times(2)).sendMessage(CurrencySettings.defaults().message("currency-admin-usage"));
+        verify(sender, org.mockito.Mockito.times(2)).sendMessage(org.bukkit.ChatColor.YELLOW
+            + "Usage: /knk currency alerts [all] [page] | alerts ack <id>");
     }
 
     @Test

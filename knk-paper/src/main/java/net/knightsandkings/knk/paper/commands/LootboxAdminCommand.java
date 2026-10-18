@@ -24,6 +24,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Executor;
@@ -131,11 +132,23 @@ public final class LootboxAdminCommand {
                 + "area create|list|info|delete";
     }
 
+    private static final Map<String, String> FORM_BY_SUBCOMMAND = Map.of(
+            "spawn", "spawn <category> [stars]", "despawn", "despawn [id|nearest]", "list", "list [area]",
+            "tp", "tp <id>", "give", "give <player> <category> [stars]",
+            "token", "token <player> <category> [stars|any] [amount]", "reload", "reload",
+            "area", "area create|list|info|delete");
+
+    /** {@link #usage()} with only the subcommands the sender may use (KNG-107); all of them when none. */
+    String usageFor(CommandSender sender) {
+        List<String> held = SUBCOMMANDS.stream().filter(sub -> allowed(sender, sub)).map(FORM_BY_SUBCOMMAND::get).toList();
+        return held.isEmpty() ? usage() : "/knk lootbox " + String.join(" | ", held);
+    }
+
     public boolean execute(CommandSender sender, String[] args) {
         String sub = args.length == 0 ? "" : args[0].toLowerCase(Locale.ROOT);
         String[] rest = args.length == 0 ? args : Arrays.copyOfRange(args, 1, args.length);
         if (!SUBCOMMANDS.contains(sub)) {
-            sender.sendMessage(ChatColor.YELLOW + "Usage: " + usage());
+            sender.sendMessage(ChatColor.YELLOW + "Usage: " + usageFor(sender));
             return true;
         }
         if (!allowed(sender, sub)) {

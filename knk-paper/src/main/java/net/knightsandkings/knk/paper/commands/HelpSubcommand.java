@@ -59,34 +59,63 @@ public class HelpSubcommand {
 
     public boolean execute(CommandSender sender, String[] args) {
         if (args.length == 0) {
-            showCommandList(sender);
+            showCommandList(sender, 1);
+        } else if (args[0].matches("\\d{1,4}")) {
+            showCommandList(sender, Integer.parseInt(args[0]));
         } else {
             showCommandDetail(sender, args[0]);
         }
         return true;
     }
 
-    private void showCommandList(CommandSender sender) {
-        List<CommandRegistry.RegisteredCommand> available = registry.listAvailable(sender).stream()
-                .filter(cmd -> !"help".equalsIgnoreCase(cmd.metadata().name()))
-                .toList();
-        List<OtherCommand> others = otherCommandsFor(sender);
+    /** Lines per page of {@code /knk help}, like the vanilla /help (KNG-107 live test: the list ran off the chat). */
+    static final int PAGE_SIZE = 8;
 
-        if (available.isEmpty() && others.isEmpty()) {
+    private void showCommandList(CommandSender sender, int requestedPage) {
+        List<String> lines = new java.util.ArrayList<>();
+        for (OtherCommand other : otherCommandsFor(sender)) {
+            lines.add(ChatColor.AQUA + "/" + other.name() + ChatColor.GRAY + " - " + other.description());
+        }
+        for (CommandRegistry.RegisteredCommand cmd : registry.listAvailable(sender)) {
+            if (!"help".equalsIgnoreCase(cmd.metadata().name())) {
+                lines.add(ChatColor.AQUA + "/knk " + cmd.metadata().name() + ChatColor.GRAY + " - " + cmd.metadata().description());
+            }
+        }
+
+        if (lines.isEmpty()) {
             sender.sendMessage(ChatColor.YELLOW + "No commands available.");
             return;
         }
 
-        sender.sendMessage(ChatColor.GOLD + "━━━ KnK Commands ━━━");
-        for (OtherCommand other : others) {
-            sender.sendMessage(ChatColor.AQUA + "/" + other.name() + ChatColor.GRAY + " - " + other.description());
-        }
-        for (CommandRegistry.RegisteredCommand cmd : available) {
-            sender.sendMessage(ChatColor.AQUA + "/knk " + cmd.metadata().name() + 
-                    ChatColor.GRAY + " - " + cmd.metadata().description());
+        int pages = (lines.size() + PAGE_SIZE - 1) / PAGE_SIZE;
+        int page = Math.max(1, Math.min(requestedPage, pages));
+        sender.sendMessage(ChatColor.GOLD + "━━━ KnK Commands " + ChatColor.GRAY + "(page " + page + "/" + pages + ")"
+                + ChatColor.GOLD + " ━━━");
+        lines.subList((page - 1) * PAGE_SIZE, Math.min(lines.size(), page * PAGE_SIZE)).forEach(sender::sendMessage);
+        if (pages > 1) {
+            sender.sendMessage(pageFooter(page, pages));
         }
         sender.sendMessage(ChatColor.GRAY + "Use " + ChatColor.WHITE + "/knk help <command>" + 
                 ChatColor.GRAY + " for details");
+    }
+
+    /** "« Previous | Page 2/4 | Next »", the arrows clickable. */
+    private static net.kyori.adventure.text.Component pageFooter(int page, int pages) {
+        var gray = net.kyori.adventure.text.format.NamedTextColor.GRAY;
+        var link = net.kyori.adventure.text.format.NamedTextColor.AQUA;
+        var footer = net.kyori.adventure.text.Component.text();
+        if (page > 1) {
+            footer.append(net.kyori.adventure.text.Component.text("« Previous", link)
+                    .clickEvent(net.kyori.adventure.text.event.ClickEvent.runCommand("/knk help " + (page - 1))))
+                    .append(net.kyori.adventure.text.Component.text(" | ", gray));
+        }
+        footer.append(net.kyori.adventure.text.Component.text("Page " + page + "/" + pages, gray));
+        if (page < pages) {
+            footer.append(net.kyori.adventure.text.Component.text(" | ", gray))
+                    .append(net.kyori.adventure.text.Component.text("Next »", link)
+                            .clickEvent(net.kyori.adventure.text.event.ClickEvent.runCommand("/knk help " + (page + 1))));
+        }
+        return footer.build();
     }
 
     private void showCommandDetail(CommandSender sender, String commandName) {

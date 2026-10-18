@@ -123,13 +123,13 @@ public class UserManagementCommand implements CommandExecutor {
 
     private void handleBalance(CommandSender sender, String targetName, String property, String[] args) {
         if (args.length < 4) {
-            sendUsage(sender);
+            sendUsage(sender, property);
             return;
         }
 
         String action = args[2].toLowerCase(Locale.ROOT);
         if (!BALANCE_ACTIONS.contains(action)) {
-            sendUsage(sender);
+            sendUsage(sender, property);
             return;
         }
 
@@ -258,14 +258,34 @@ public class UserManagementCommand implements CommandExecutor {
         return PROPERTIES.stream().anyMatch(property -> userAdminService.hasPermission(sender, UserAdminService.NODE_PREFIX + property));
     }
 
+    /** Each property's usage line (KNG-107: only the typed one, or the ones the sender holds). */
+    private static final java.util.Map<String, String> USAGE_BY_PROPERTY = java.util.Map.of(
+            "info", "/knk user <player> info",
+            "coins", "/knk user <player> coins set|add|remove <amount> <reason...>",
+            "gems", "/knk user <player> gems set|add|remove <amount> <reason...>",
+            "xp", "/knk user <player> xp set|add|remove <amount> [reason...]",
+            "group", "/knk user <player> group add|remove <groupName> [duration]",
+            "perm", "/knk user <player> perm grant|revoke <node> [duration]",
+            "history", "/knk user <player> history [coins|gems|xp] [page]");
+
     private void sendUsage(CommandSender sender) {
+        sendUsage(sender, null);
+    }
+
+    /**
+     * The usage of {@code property} alone, else the lines for the properties the sender holds (all of them
+     * when they hold none, e.g. a test sender). KNG-107 live test: the whole tree for one mistyped action.
+     */
+    private void sendUsage(CommandSender sender, String property) {
+        List<String> properties = property != null && USAGE_BY_PROPERTY.containsKey(property) ? List.of(property)
+                : propertiesHeld(sender, userAdminService::hasPermission);
+        if (properties.isEmpty()) {
+            properties = PROPERTIES;
+        }
         sender.sendMessage(ChatColor.YELLOW + "Usage:");
-        sender.sendMessage(ChatColor.YELLOW + "  /knk user <player> info");
-        sender.sendMessage(ChatColor.YELLOW + "  /knk user <player> coins|gems set|add|remove <amount> <reason...>");
-        sender.sendMessage(ChatColor.YELLOW + "  /knk user <player> xp set|add|remove <amount> [reason...]");
-        sender.sendMessage(ChatColor.YELLOW + "  /knk user <player> group add|remove <groupName> [duration]");
-        sender.sendMessage(ChatColor.YELLOW + "  /knk user <player> perm grant|revoke <node> [duration]");
-        sender.sendMessage(ChatColor.YELLOW + "  /knk user <player> history [coins|gems|xp] [page]");
-        sender.sendMessage(ChatColor.GRAY + "  duration examples: 2h, 90m, 3d (omit for permanent)");
+        properties.forEach(p -> sender.sendMessage(ChatColor.YELLOW + "  " + USAGE_BY_PROPERTY.get(p)));
+        if (properties.contains("group") || properties.contains("perm")) {
+            sender.sendMessage(ChatColor.GRAY + "  duration examples: 2h, 90m, 3d (omit for permanent)");
+        }
     }
 }

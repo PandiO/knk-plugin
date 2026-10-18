@@ -108,4 +108,20 @@ class GatedCommandVisibilityListenerTest {
         fresh.onCommandSend(new PlayerCommandSendEvent(player, hidden));
         assertEquals(List.of("msg"), List.copyOf(hidden));
     }
+
+    // KNG-107 live test: no namespaced forms, and other plugins' commands only when the filter allows them.
+    @Test
+    void namespacedLabelsAndHiddenOtherCommandsAreLeftOut_withoutAnyPermissionCheckForThem() {
+        GatedCommandVisibilityListener plain = new GatedCommandVisibilityListener(CommandPermissions.of(permissible, Runnable::run), Runnable::run);
+        plain.setHideNamespaced(true);
+        plain.setOtherCommandsHidden((p, label) -> label.equals("autopluginloader") || label.equals("/pos1"));
+
+        Collection<String> commands = new ArrayList<>(List.of("msg", "knightsandkings:msg", "worldedit:/pos1", "/pos1",
+            "autopluginloader", "autopluginloader:apl", "spawn"));
+        plain.onCommandSend(new PlayerCommandSendEvent(player, commands));
+
+        assertEquals(List.of("msg", "spawn"), List.copyOf(commands));
+        verify(permissible, never()).checkAsync(any(), anyString());
+        verify(player, never()).updateCommands();
+    }
 }

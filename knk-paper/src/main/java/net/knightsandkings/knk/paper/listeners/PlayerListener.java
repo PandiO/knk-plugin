@@ -63,6 +63,7 @@ import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 public class PlayerListener implements Listener {
 	private static final Logger LOGGER = Logger.getLogger(PlayerListener.class.getName());
 	private static final long MENTION_SOUND_COOLDOWN_MILLIS = 5_000L;
+	private static final long PERMISSION_PRELOAD_WAIT_MS = 2_000L;
 	private static final Map<UUID, Long> mentionSoundCooldowns = new ConcurrentHashMap<>();
 
 	private final UsersDataAccess usersDataAccess;
@@ -123,6 +124,7 @@ public class PlayerListener implements Listener {
 
 			if (result.isSuccess()) {
 				LOGGER.fine("User " + uuid + " loaded via " + result.source() + " (" + result.status() + ")");
+				preloadPermissions(uuid);
 				return;
 			}
 
@@ -130,6 +132,7 @@ public class PlayerListener implements Listener {
 				FetchResult<UserSummary> usernameLookup = usersDataAccess.getByUsernameAsync(username).join();
 				if (usernameLookup.isSuccess()) {
 					LOGGER.info("Loaded user " + username + " via username lookup (UUID: " + uuid + ")");
+					preloadPermissions(uuid);
 					return;
 				}
 
@@ -137,6 +140,7 @@ public class PlayerListener implements Listener {
 				FetchResult<UserSummary> created = usersDataAccess.getOrCreateAsync(uuid, true, newUser).join();
 				if (created.isSuccess()) {
 					LOGGER.info("Created and cached new user " + username + " (UUID: " + uuid + ")");
+					preloadPermissions(uuid);
 				} else if (created.status() == FetchStatus.ERROR) {
 					LOGGER.warning("Failed to create user " + uuid + ": " + created.error().map(Throwable::getMessage).orElse("unknown error"));
 				}
@@ -149,6 +153,26 @@ public class PlayerListener implements Listener {
 		} catch (Exception ex) {
 			LOGGER.log(Level.WARNING, "Unexpected error loading user " + uuid + " from data access", ex);
 			// Allow login to proceed even if data fetch fails
+		}
+	}
+
+	/**
+	 * KNG-107: the player's permission set, loaded while they connect (this is the async pre-login thread),
+	 * so the join and their first command, help listing or "/" list need no API call. Waits at most
+	 * {@link #PERMISSION_PRELOAD_WAIT_MS}; a slower load finishes in the background.
+	 */
+	private void preloadPermissions(UUID uuid) {
+		if (knkPermissible == null) {
+			return;
+		}
+		try {
+			knkPermissible.preload(uuid).get(PERMISSION_PRELOAD_WAIT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+		} catch (java.util.concurrent.TimeoutException ex) {
+			LOGGER.fine("Permission preload for " + uuid + " still running after " + PERMISSION_PRELOAD_WAIT_MS + " ms");
+		} catch (InterruptedException ex) {
+			Thread.currentThread().interrupt();
+		} catch (java.util.concurrent.ExecutionException ex) {
+			LOGGER.log(Level.FINE, "Permission preload for " + uuid + " failed", ex);
 		}
 	}
 

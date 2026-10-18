@@ -175,6 +175,32 @@ class CommandRegistryPermissionsTest {
     }
 
     @Test
+    void help_isPaged_eightLinesAPage() {
+        List<String> sent = new java.util.ArrayList<>();
+        org.mockito.Mockito.doAnswer(inv -> sent.add(inv.getArgument(0))).when(staff).sendMessage(anyString());
+        List<HelpSubcommand.OtherCommand> others = new java.util.ArrayList<>();
+        for (int i = 1; i <= 19; i++) {
+            others.add(new HelpSubcommand.OtherCommand(String.format("cmd%02d", i), "Command " + i, "/cmd" + i, List.of(), List.of()));
+        }
+        HelpSubcommand help = new HelpSubcommand(registry);
+        help.setOtherCommands(() -> others, (sender, nodes) -> true);
+
+        help.execute(staff, new String[0]);
+        assertTrue(sent.get(0).contains("page 1/3"), sent::toString);
+        assertTrue(sent.stream().anyMatch(m -> m.contains("/cmd08")) && sent.stream().noneMatch(m -> m.contains("/cmd09")), sent::toString);
+        verify(staff).sendMessage(any(net.kyori.adventure.text.Component.class)); // the clickable page footer
+
+        sent.clear();
+        help.execute(staff, new String[] {"3"});
+        assertTrue(sent.get(0).contains("page 3/3"), sent::toString);
+        assertEquals(3, sent.stream().filter(m -> m.contains("/cmd")).count(), sent::toString);
+
+        sent.clear();
+        help.execute(staff, new String[] {"99"});
+        assertTrue(sent.get(0).contains("page 3/3"), sent::toString);
+    }
+
+    @Test
     void theConsoleIsOfferedEverything() {
         org.bukkit.command.CommandSender console = mock(org.bukkit.command.ConsoleCommandSender.class);
         registry.setVisibleToAny("towns", List.of("knk.admin.whatever"));

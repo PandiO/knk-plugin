@@ -142,6 +142,14 @@ class LootboxAdminCommandTest {
     }
 
     @Test
+    void unknownAction_usageNamesOnlyTheHeldSubcommands() {
+        granted.add("knk.lootbox.admin.list");
+        granted.add("knk.lootbox.admin.tp");
+        command.execute(admin, new String[0]);
+        verify(admin).sendMessage(org.bukkit.ChatColor.YELLOW + "Usage: /knk lootbox list [area] | tp <id>");
+    }
+
+    @Test
     void tabComplete_offersOnlyAllowedActions() {
         granted.add("knk.lootbox.admin.list");
         assertEquals(List.of("list"), command.tabComplete(admin, new String[]{""}));

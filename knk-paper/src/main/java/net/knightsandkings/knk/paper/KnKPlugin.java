@@ -614,6 +614,11 @@ public class KnKPlugin extends JavaPlugin {
                 menuTemplatesQueryApi
             );
             this.permissionsDataAccess = dataAccessFactory.createPermissionsDataAccess(permissionsApi);
+            if (getConfig().getBoolean("cache.entities.permissions.resolve-from-effective-set", true)) {
+                // KNG-107: one API call per player per TTL instead of one per node checked.
+                permissionsDataAccess.resolveFromEffectiveSets(java.time.Duration.ofSeconds(
+                    Math.max(0, getConfig().getInt("cache.entities.permissions.effective-set-stale-seconds", 90))));
+            }
             this.offlineSecurity = createOfflineSecurity();
             this.knkPermissible = new KnkPermissible(cacheManager.getUserCache(), permissionsDataAccess, offlineSecurity);
             // Gate pass-through (and navigation's gate verdicts) honour KnK's permission model as well as Bukkit's.
@@ -713,6 +718,13 @@ public class KnKPlugin extends JavaPlugin {
             );
             // KNG-24: knk.admin.user.* checked through KnkPermissible as well as Bukkit.
             this.userAdminService.setPermissions(commandPermissions());
+            if (permissionsDataAccess != null) {
+                // KNG-107: a change made in game applies at once instead of after the set's TTL.
+                this.userAdminService.setPermissionsChanged(userId -> {
+                    permissionsDataAccess.invalidateEffective(userId);
+                    return permissionsDataAccess.preload(userId);
+                });
+            }
             // Salary on join (offline gap) and every hour online; the scoreboard is redrawn after a payout.
             this.salaryPayoutScheduler = new net.knightsandkings.knk.paper.user.SalaryPayoutScheduler(
                 this, usersCommandApi, cacheManager.getUserCache(), usersDataAccess,
@@ -2089,6 +2101,13 @@ public class KnKPlugin extends JavaPlugin {
             if (gatedCommand != null) {
                 gatedCommandVisibility.gate(gatedCommand, net.knightsandkings.knk.paper.commands.support.CommandNodes.anyOf(gatedName));
             }
+        }
+        // KNG-107: "/" shows only what the player can run - no namespaced forms, no other plugins' commands they can't use.
+        gatedCommandVisibility.setHideNamespaced(getConfig().getBoolean("command-visibility.hide-namespaced", true));
+        if (getConfig().getBoolean("command-visibility.hide-other-plugins-without-permission", true)) {
+            gatedCommandVisibility.setOtherCommandsHidden(new net.knightsandkings.knk.paper.commands.support.OtherPluginCommandVisibility(
+                label -> org.bukkit.Bukkit.getCommandMap().getCommand(label), this,
+                java.util.Set.copyOf(getConfig().getStringList("command-visibility.always-show"))));
         }
         getServer().getPluginManager().registerEvents(gatedCommandVisibility, this);
         registerTabCommand("msg", new net.knightsandkings.knk.paper.commands.MessageCommand(messagingService, visiblePlayers));

@@ -151,6 +151,21 @@ public class KnkPermissible {
             });
     }
 
+    /**
+     * KNG-107: loads the player's permission set ahead of their first check (at login), so the join
+     * itself and their first command or listing answer from memory. Completes normally either way.
+     */
+    public CompletableFuture<Void> preload(UUID uuid) {
+        Integer userId = resolveUserId(uuid);
+        if (userId == null) {
+            return CompletableFuture.completedFuture(null);
+        }
+        return permissionsDataAccess.preload(userId).exceptionally(ex -> {
+            LOGGER.log(Level.FINE, "Permission preload failed for user " + userId, ex);
+            return null;
+        });
+    }
+
     private Integer resolveUserId(UUID uuid) {
         // getStale, not getByUuid: the user cache's TTL is the short global cache TTL and
         // nothing refreshes an online player's entry mid-session, so a fresh-only read stopped
