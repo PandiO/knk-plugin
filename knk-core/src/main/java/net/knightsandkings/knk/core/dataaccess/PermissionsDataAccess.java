@@ -43,7 +43,8 @@ import net.knightsandkings.knk.core.ports.api.PermissionsApi;
  * check answers from the user's last set after its TTL while it is reloaded in the background, so
  * listings neither wait nor flicker to "no" at every TTL; while the API is DOWN only up to
  * {@code staleFor} past the TTL (then the offline store answers). {@link #forget} drops a user's set
- * (at quit). An API whose sets carry no ranks switches this back to single-node checks.
+ * (at quit). From an API whose sets carry no ranks the set still answers every node it can decide
+ * without the chain order; only a node two groups disagree about is asked with a single-node check.
  */
 public class PermissionsDataAccess {
 
@@ -60,8 +61,8 @@ public class PermissionsDataAccess {
     private volatile boolean resolveFromEffectiveSets;
     private volatile Duration staleFor = Duration.ZERO;
     private volatile LongSupplier clockMillis = System::currentTimeMillis;
-    /** Set when the API sent a set without ranks: back to single-node checks for good. */
-    private volatile boolean effectiveSetsUnranked;
+    /** Logged once: the API's sets carry no ranks, so group conflicts are asked node by node. */
+    private volatile boolean unrankedLogged;
     private final Map<Integer, CompletableFuture<FetchResult<EffectivePermissionSet>>> effectiveLoads = new ConcurrentHashMap<>();
     private final Map<Integer, LoadedSet> loadedSets = new ConcurrentHashMap<>();
 
@@ -125,7 +126,7 @@ public class PermissionsDataAccess {
     public CompletableFuture<FetchResult<PermissionCheckResult>> checkAsync(int userId, String node, FetchPolicy policy) {
         Objects.requireNonNull(node, "node must not be null");
         FetchPolicy effective = settings.resolvePolicy(policy);
-        if (resolveFromEffectiveSets && !effectiveSetsUnranked) {
+        if (resolveFromEffectiveSets) {
             return checkFromEffectiveSet(userId, node, effective);
         }
         return checkSingleNode(userId, node, effective);
@@ -168,7 +169,7 @@ public class PermissionsDataAccess {
      * command or listing needs no API call). Does nothing unless checks resolve from effective sets.
      */
     public CompletableFuture<Void> preload(int userId) {
-        if (!resolveFromEffectiveSets || effectiveSetsUnranked) {
+        if (!resolveFromEffectiveSets) {
             return CompletableFuture.completedFuture(null);
         }
         return loadEffective(userId).thenAccept(result -> { });
@@ -180,7 +181,7 @@ public class PermissionsDataAccess {
      * for a reload after the TTL).
      */
     public boolean hasLoadedSet(int userId) {
-        if (!resolveFromEffectiveSets || effectiveSetsUnranked) {
+        if (!resolveFromEffectiveSets) {
             return false;
         }
         LoadedSet last = loadedSets.get(userId);
@@ -203,11 +204,11 @@ public class PermissionsDataAccess {
             if (!result.isSuccess()) {
                 return CompletableFuture.completedFuture(result.map(set -> (PermissionCheckResult) null));
             }
-            LoadedSet loaded = loaded(userId, result.value().orElseThrow());
-            if (loaded == null) {
-                return checkSingleNode(userId, node, policy);
-            }
-            return CompletableFuture.completedFuture(result.map(set -> answer(userId, node, loaded)));
+            Optional<PermissionCheckResult> answer = answer(userId, node, loaded(userId, result.value().orElseThrow()));
+            return answer.isPresent()
+                ? CompletableFuture.completedFuture(result.map(set -> answer.get()))
+                : checkSingleNode(userId, node, policy); // two groups disagree and the set has no ranks
+
         });
     }
 
@@ -218,14 +219,17 @@ public class PermissionsDataAccess {
     private FetchResult<PermissionCheckResult> checkCachedSet(int userId, String node) {
         Optional<EffectivePermissionSet> fresh = effectiveCache.get(userId);
         if (fresh.isPresent()) {
-            LoadedSet loaded = loaded(userId, fresh.get());
-            return loaded != null ? FetchResult.hit(answer(userId, node, loaded)) : checkSingleNodeCacheOnly(userId, node);
+            return answer(userId, node, loaded(userId, fresh.get()))
+                .map(FetchResult::hit)
+                .orElseGet(() -> checkSingleNodeCacheOnly(userId, node));
         }
         LoadedSet last = loadedSets.get(userId);
         if (last != null && mayServeExpired(last)) {
             loadEffective(userId);
             // Not passed to the answer listener: the offline store keeps API answers, not expired ones.
-            return FetchResult.staleServed(last.resolver().resolve(node));
+            return last.resolver().resolve(node)
+                .map(FetchResult::staleServed)
+                .orElseGet(() -> checkSingleNodeCacheOnly(userId, node));
         }
         return FetchResult.notFound();
     }
@@ -271,30 +275,28 @@ public class PermissionsDataAccess {
         return load;
     }
 
-    /** The loaded state for {@code set} (kept per user, replaced by a newer set), or null when it carries no ranks. */
+    /** The loaded state for {@code set}, kept per user and replaced by a newer set. */
     private LoadedSet loaded(int userId, EffectivePermissionSet set) {
         LoadedSet current = loadedSets.get(userId);
         if (current != null && current.set() == set) {
             return current;
         }
-        Optional<EffectivePermissionResolver> resolver = EffectivePermissionResolver.of(set);
-        if (resolver.isEmpty()) {
-            if (!effectiveSetsUnranked) {
-                effectiveSetsUnranked = true;
-                LOGGER.warning("knk-web-api sends effective permission sets without ranks (an older API): "
-                    + "permission checks go to the API one node at a time again");
-            }
-            return null;
+        EffectivePermissionResolver resolver = EffectivePermissionResolver.of(set);
+        if (!resolver.ranked() && !unrankedLogged) {
+            unrankedLogged = true;
+            LOGGER.info("knk-web-api sends effective permission sets without sourceRank (an API older than KNG-107): "
+                + "nodes are still resolved from the set; only a node two groups disagree about is checked with the API");
         }
-        LoadedSet loaded = new LoadedSet(set, resolver.get(), clockMillis.getAsLong(), ConcurrentHashMap.newKeySet());
+        LoadedSet loaded = new LoadedSet(set, resolver, clockMillis.getAsLong(), ConcurrentHashMap.newKeySet());
         loadedSets.put(userId, loaded);
         return loaded;
     }
 
-    private PermissionCheckResult answer(int userId, String node, LoadedSet loaded) {
-        PermissionCheckResult result = loaded.resolver().resolve(node);
-        if (loaded.reported().add(node)) {
-            answerListener.answered(userId, node, result);
+    /** The set's answer for {@code node} (told to the listener once per set); empty when the API must be asked. */
+    private Optional<PermissionCheckResult> answer(int userId, String node, LoadedSet loaded) {
+        Optional<PermissionCheckResult> result = loaded.resolver().resolve(node);
+        if (result.isPresent() && loaded.reported().add(node)) {
+            answerListener.answered(userId, node, result.get());
         }
         return result;
     }

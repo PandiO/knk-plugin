@@ -194,15 +194,23 @@ class PermissionsDataAccessEffectiveSetTest {
         assertEquals(PermissionDecision.UNAVAILABLE, access.decideAsync(7, "knk.fly").join());
     }
 
+    // KNG-107 retest: the dev API had no sourceRank yet and /knk help sent 244 single-node checks.
     @Test
-    void anOlderApiWithoutRanks_fallsBackToSingleNodeChecks_forGood() {
-        effective.set(CompletableFuture.completedFuture(set(new EffectivePermission("knk.fly", false, USER))));
+    void anOlderApiWithoutRanks_stillResolvesFromTheSet_andAsksOnlyAboutConflicts() {
+        PermissionHolder vip = new PermissionHolder(2, "PermissionGroup", "vip");
+        PermissionHolder base = new PermissionHolder(3, "PermissionGroup", "default");
+        effective.set(CompletableFuture.completedFuture(set(
+            new EffectivePermission("knk.*", true, vip),
+            new EffectivePermission("knk.fly", false, base))));
 
-        assertEquals(PermissionDecision.ALLOWED, access.decideAsync(7, "knk.fly").join());
         assertEquals(PermissionDecision.ALLOWED, access.decideAsync(7, "knk.heal").join());
+        assertEquals(PermissionDecision.DENIED, access.decideAsync(7, "other.node").join());
+        assertEquals(0, checkCalls.get());
+        assertTrue(access.hasLoadedSet(7));
 
+        assertEquals(PermissionDecision.ALLOWED, access.decideAsync(7, "knk.fly").join()); // the API's answer
+        assertEquals(1, checkCalls.get());
         assertEquals(1, effectiveCalls.get());
-        assertEquals(2, checkCalls.get());
     }
 
     @Test
