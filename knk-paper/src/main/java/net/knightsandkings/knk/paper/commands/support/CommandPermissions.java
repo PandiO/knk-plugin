@@ -44,13 +44,25 @@ public final class CommandPermissions {
     private final BiPredicate<Player, String> cachedCheck;
     private final BiFunction<Player, String, CompletableFuture<PermissionDecision>> asyncCheck;
     private final Executor mainThread;
+    /** Whether a player's cache-only answers are ready for a listing; and a background refresh of them. */
+    private final java.util.function.Predicate<Player> listingReady;
+    private final java.util.function.Consumer<Player> refresh;
 
     CommandPermissions(BiPredicate<Player, String> cachedCheck,
                        BiFunction<Player, String, CompletableFuture<PermissionDecision>> asyncCheck,
                        Executor mainThread) {
+        this(cachedCheck, asyncCheck, mainThread, player -> false, player -> { });
+    }
+
+    CommandPermissions(BiPredicate<Player, String> cachedCheck,
+                       BiFunction<Player, String, CompletableFuture<PermissionDecision>> asyncCheck,
+                       Executor mainThread, java.util.function.Predicate<Player> listingReady,
+                       java.util.function.Consumer<Player> refresh) {
         this.cachedCheck = cachedCheck;
         this.asyncCheck = asyncCheck;
         this.mainThread = mainThread;
+        this.listingReady = listingReady;
+        this.refresh = refresh;
     }
 
     /** In-house checks through {@code knkPermissible}; Bukkit-only when it is null (no API configured). */
@@ -58,7 +70,8 @@ public final class CommandPermissions {
         if (knkPermissible == null) {
             return bukkitOnly();
         }
-        return new CommandPermissions(knkPermissible::hasPermission, knkPermissible::checkAsync, mainThread);
+        return new CommandPermissions(knkPermissible::hasPermission, knkPermissible::checkAsync, mainThread,
+                knkPermissible::listingReady, player -> knkPermissible.preload(player.getUniqueId()));
     }
 
     /** Plain Bukkit checks - the behaviour before KNG-24; for tests and when the API isn't configured. */
@@ -178,6 +191,22 @@ public final class CommandPermissions {
                 .toList();
         CompletableFuture.allOf(checks.toArray(CompletableFuture[]::new))
                 .thenRun(() -> mainThread.execute(then));
+    }
+
+    /**
+     * {@link #warm} for a listing (help, a "/" list): when the player's cache-only answers are already
+     * served from their loaded permission set, runs {@code then} at once and refreshes the set in the
+     * background - a listing never waits for the API then (KNG-107: {@code /knk help towns} waited
+     * ~10 s after the set's TTL). Otherwise as {@link #warm}. Not for executors deciding what to allow:
+     * they keep {@link #warm}, which waits for current answers.
+     */
+    public void warmForListing(CommandSender sender, Collection<String> nodes, Runnable then) {
+        if (sender instanceof Player player && asyncCheck != null && listingReady.test(player)) {
+            refresh.accept(player);
+            then.run();
+            return;
+        }
+        warm(sender, nodes, then);
     }
 
     /** Bukkit grant, or the live in-house answer (false without an in-house model). Never fails. */

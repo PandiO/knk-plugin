@@ -119,15 +119,45 @@ class PermissionsDataAccessEffectiveSetTest {
     }
 
     @Test
-    void cacheOnly_pastTheStaleWindow_isAMiss() throws Exception {
+    void cacheOnly_longAfterTheTtl_stillAnswersFromTheLastSet_whileTheApiIsUp() throws Exception {
         PermissionsDataAccess shortTtl = new PermissionsDataAccess(Duration.ofMillis(1), api,
             new DataAccessSettings(FetchPolicy.CACHE_FIRST, true, RetryPolicy.noRetry()));
         shortTtl.resolveFromEffectiveSets(Duration.ofSeconds(90), now::get);
+        effective.set(CompletableFuture.completedFuture(set(new EffectivePermission("knk.fly", true, USER, 0))));
+        shortTtl.preload(7).join();
+        effective.set(new CompletableFuture<>()); // reloads now hang, like a slow API
+        Thread.sleep(5);
+        now.addAndGet(Duration.ofMinutes(10).toMillis());
+
+        assertTrue(shortTtl.hasLoadedSet(7));
+        assertTrue(shortTtl.checkAsync(7, "knk.fly", FetchPolicy.CACHE_ONLY).join().value().orElseThrow().isAllowed());
+    }
+
+    @Test
+    void cacheOnly_pastTheStaleWindow_whileTheApiIsDown_isAMiss() throws Exception {
+        java.util.concurrent.atomic.AtomicBoolean down = new java.util.concurrent.atomic.AtomicBoolean(false);
+        PermissionsDataAccess shortTtl = new PermissionsDataAccess(Duration.ofMillis(1), api,
+            DataAccessSettings.builder().retryPolicy(RetryPolicy.noRetry()).apiOutage(down::get).build());
+        shortTtl.resolveFromEffectiveSets(Duration.ofSeconds(90), now::get);
         shortTtl.preload(7).join();
         Thread.sleep(5);
-        now.addAndGet(Duration.ofSeconds(91).toMillis());
+        down.set(true);
 
+        assertTrue(shortTtl.checkAsync(7, "knk.fly", FetchPolicy.CACHE_ONLY).join().isSuccess(), "within the window");
+        now.addAndGet(Duration.ofSeconds(91).toMillis());
         assertFalse(shortTtl.checkAsync(7, "knk.fly", FetchPolicy.CACHE_ONLY).join().isSuccess());
+        assertFalse(shortTtl.hasLoadedSet(7));
+    }
+
+    @Test
+    void forget_dropsTheSet() {
+        access.preload(7).join();
+        assertTrue(access.hasLoadedSet(7));
+
+        access.forget(7);
+
+        assertFalse(access.hasLoadedSet(7));
+        assertFalse(access.checkAsync(7, "knk.fly", FetchPolicy.CACHE_ONLY).join().isSuccess());
     }
 
     @Test

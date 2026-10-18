@@ -52,6 +52,32 @@ class CommandPermissionsTest {
         return ran.get();
     }
 
+    // KNG-107 retest: /knk help towns waited ~10 s for the set to reload after its TTL.
+    @Test
+    void warmForListing_withALoadedSet_runsAtOnce_andRefreshesInTheBackground() {
+        when(permissible.listingReady(staff)).thenReturn(true);
+        when(permissible.checkAsync(any(), anyString())).thenReturn(new CompletableFuture<>()); // a slow API
+        AtomicBoolean ran = new AtomicBoolean();
+
+        permissions.warmForListing(staff, java.util.List.of(NODE), () -> ran.set(true));
+
+        assertTrue(ran.get());
+        verify(permissible).preload(any());
+    }
+
+    @Test
+    void warmForListing_withoutALoadedSet_waitsLikeWarm() {
+        CompletableFuture<PermissionDecision> answer = new CompletableFuture<>();
+        when(permissible.checkAsync(any(), anyString())).thenReturn(answer);
+        AtomicBoolean ran = new AtomicBoolean();
+
+        permissions.warmForListing(staff, java.util.List.of(NODE), () -> ran.set(true));
+        assertFalse(ran.get());
+
+        answer.complete(PermissionDecision.ALLOWED);
+        assertTrue(ran.get());
+    }
+
     @Test
     void nonOpStaffWithAnInHouseGrantPasses() {
         inHouse(PermissionDecision.ALLOWED);

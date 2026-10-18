@@ -40,9 +40,10 @@ import net.knightsandkings.knk.core.ports.api.PermissionsApi;
  * KNG-107: with {@link #resolveFromEffectiveSets} on, a check is answered from the user's effective
  * set - one API call per user per TTL, however many nodes are asked, with concurrent loads of the
  * same user's set shared - resolved locally by {@link EffectivePermissionResolver}. A cache-only
- * check may answer from a set that expired up to {@code staleFor} ago while it is reloaded in the
- * background, so listings don't flicker to "no" at every TTL. An API whose sets carry no ranks
- * switches this back to single-node checks.
+ * check answers from the user's last set after its TTL while it is reloaded in the background, so
+ * listings neither wait nor flicker to "no" at every TTL; while the API is DOWN only up to
+ * {@code staleFor} past the TTL (then the offline store answers). {@link #forget} drops a user's set
+ * (at quit). An API whose sets carry no ranks switches this back to single-node checks.
  */
 public class PermissionsDataAccess {
 
@@ -173,6 +174,24 @@ public class PermissionsDataAccess {
         return loadEffective(userId).thenAccept(result -> { });
     }
 
+    /**
+     * Whether cache-only checks for the user answer from a loaded set (fresh or being reloaded), so a
+     * listing can be shown without waiting for the API (KNG-107: {@code /knk help towns} waited ~10 s
+     * for a reload after the TTL).
+     */
+    public boolean hasLoadedSet(int userId) {
+        if (!resolveFromEffectiveSets || effectiveSetsUnranked) {
+            return false;
+        }
+        LoadedSet last = loadedSets.get(userId);
+        return last != null && (effectiveCache.get(userId).isPresent() || mayServeExpired(last));
+    }
+
+    /** Drops the user's set (they left); their next check loads it again. */
+    public void forget(int userId) {
+        invalidateEffective(userId);
+    }
+
     private CompletableFuture<FetchResult<PermissionCheckResult>> checkFromEffectiveSet(int userId, String node, FetchPolicy policy) {
         if (policy == FetchPolicy.CACHE_ONLY) {
             return CompletableFuture.completedFuture(checkCachedSet(userId, node));
@@ -192,7 +211,10 @@ public class PermissionsDataAccess {
         });
     }
 
-    /** Cache-only: the fresh set, else one expired less than {@code staleFor} ago (and reload it), else a miss. */
+    /**
+     * Cache-only: the fresh set, else the last one (and reload it) - while the API is DOWN only if it
+     * expired less than {@code staleFor} ago - else a miss.
+     */
     private FetchResult<PermissionCheckResult> checkCachedSet(int userId, String node) {
         Optional<EffectivePermissionSet> fresh = effectiveCache.get(userId);
         if (fresh.isPresent()) {
@@ -200,12 +222,18 @@ public class PermissionsDataAccess {
             return loaded != null ? FetchResult.hit(answer(userId, node, loaded)) : checkSingleNodeCacheOnly(userId, node);
         }
         LoadedSet last = loadedSets.get(userId);
-        if (last != null && clockMillis.getAsLong() - last.loadedAtMillis() <= settingsTtlMillis() + staleFor.toMillis()) {
+        if (last != null && mayServeExpired(last)) {
             loadEffective(userId);
             // Not passed to the answer listener: the offline store keeps API answers, not expired ones.
             return FetchResult.staleServed(last.resolver().resolve(node));
         }
         return FetchResult.notFound();
+    }
+
+    /** An expired set still answers cache-only checks: always while the API is up, else for {@code staleFor}. */
+    private boolean mayServeExpired(LoadedSet last) {
+        return !settings.apiOutage().isApiDown()
+            || clockMillis.getAsLong() - last.loadedAtMillis() <= settingsTtlMillis() + staleFor.toMillis();
     }
 
     private FetchResult<PermissionCheckResult> checkSingleNodeCacheOnly(int userId, String node) {

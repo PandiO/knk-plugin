@@ -512,7 +512,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length == 0) {
             // Show help when no args
-            commandPermissions.warm(sender, helpNodes(), () -> helpSubcommand.execute(sender, new String[0]));
+            commandPermissions.warmForListing(sender, helpNodes(), () -> helpSubcommand.execute(sender, new String[0]));
             return true;
         }
 
@@ -530,7 +530,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         CommandRegistry.RegisteredCommand cmd = registered.get();
         if ("help".equals(cmd.metadata().name())) {
             // The listing reads cached answers; ask for every node first so in-house grants show.
-            commandPermissions.warm(sender, helpNodes(), () -> registry.execute(sender, cmd, subArgs));
+            commandPermissions.warmForListing(sender, helpNodes(), () -> registry.execute(sender, cmd, subArgs));
             return true;
         }
 

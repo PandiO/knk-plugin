@@ -302,6 +302,14 @@ public class PlayerListener implements Listener {
 			});
 	}
 
+	/** KNG-107: drop the player's permission set after every other quit handler had it; the next join loads it again. */
+	@EventHandler(priority = org.bukkit.event.EventPriority.MONITOR)
+	public void forgetPermissions(PlayerQuitEvent e) {
+		if (knkPermissible != null) {
+			knkPermissible.forget(e.getPlayer().getUniqueId());
+		}
+	}
+
 	@EventHandler
 	public void onLeave(PlayerQuitEvent e) {
 		Player player = e.getPlayer();

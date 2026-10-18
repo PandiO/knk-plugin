@@ -901,6 +901,7 @@ cache:
       # player per ttl-seconds, loaded at join) instead of one API call per node. false = one call
       # per node, the old way. Needs a knk-web-api that sends sourceRank; an older one falls back.
       resolve-from-effective-set: true
-      # How long past ttl-seconds a player's set may still answer help, tab completion and the "/"
-      # list while it is reloaded in the background. Running a command always waits for a fresh set.
+      # Help, tab completion and the "/" list answer from a player's last set past ttl-seconds while it
+      # is reloaded in the background (never waiting for the API); while the API is DOWN only for this
+      # many seconds more, then the offline cache answers. Running a command always waits for a fresh set.
       effective-set-stale-seconds: 90
