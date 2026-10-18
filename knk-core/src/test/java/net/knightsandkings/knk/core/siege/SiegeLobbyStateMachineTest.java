@@ -430,6 +430,24 @@ class SiegeLobbyStateMachineTest {
     }
 
     @Test
+    void anApiOutageAbortsLikeAnAdminStop() {
+        // Hub DESIGN §16.4 decision 6: no winner, no rewards, members restored.
+        SiegeLobbyStateMachine m = defaultMachine();
+        m.start();
+        runMatchmaking(m, 4);
+        KnkSiegeScenario scenario = m.drawnScenario().orElseThrow();
+
+        assertEquals(new EndMatchEffect(scenario, SiegeEndReason.API_OUTAGE), m.stop(SiegeEndReason.API_OUTAGE).get(0));
+        assertTrue(SiegeEndReason.API_OUTAGE.isAbort());
+        assertEquals("ApiOutage", SiegeEndReason.API_OUTAGE.apiName());
+
+        SiegeLobbyStateMachine hub = defaultMachine();
+        hub.start();
+        ticks(hub, 290, 4);
+        assertEquals(new CancelMatchmakingEffect(CancelReason.API_OUTAGE, true), hub.stop(SiegeEndReason.API_OUTAGE).get(0));
+    }
+
+    @Test
     void joinRequirementsFollowTheCandidatesThenTheDrawnScenario() {
         KnkSiegeScenario veteran = new KnkSiegeScenario(7, "Veteran", null, 8, "Town 8", null, null, null,
                 2, 40, 3, 1000, null, null, true, false, true, cinix.teams(), cinix.objectives(), null, null);

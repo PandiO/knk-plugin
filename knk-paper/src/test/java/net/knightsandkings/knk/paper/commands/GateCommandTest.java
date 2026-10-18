@@ -456,6 +456,7 @@ class GateCommandTest {
             60, 1, new Vector(100, 64, 100), 5, 3, 1, 500.0, 500.0, true, false, true, 90, "north");
         door.setStructure(structure);
         door.setCurrentState(state);
+        door.setWorldName("world");
         return door;
     }
 

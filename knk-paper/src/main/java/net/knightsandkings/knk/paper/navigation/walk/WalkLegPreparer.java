@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.paper.navigation.walk;
 
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -23,7 +24,8 @@ import net.knightsandkings.knk.paper.roads.GateCellsIndex;
  * The server side of {@link NavigationService.WalkPreparer} (KNG-51 {@code LAST_MILE_PATHFINDING.md}
  * §3, §6, §8): per walk leg, on the main thread, the world's gate cells now, the {@link WalkBox}
  * around the leg, the capture ({@link WalkSnapshotService}, loaded chunks only) and the player's
- * gate/door/region access ({@link WalkAccessFactory#prepare}). The supplier it completes with runs on
+ * gate/door/region access ({@link WalkAccessFactory#prepare}, with the destination's regions for the "no way out"
+ * rule, KNG-121). The supplier it completes with runs on
  * the walk executor: it resolves the domain part of the access (decision L3-5) and builds the
  * {@link WalkRequest} with {@code navigation.walk}'s profile and budget. A capture that is not READY
  * (an unloaded chunk, a box too large) completes with null: the leg keeps its straight line.
@@ -63,7 +65,8 @@ public final class WalkLegPreparer implements NavigationService.WalkPreparer {
     }
 
     @Override
-    public CompletableFuture<Supplier<WalkRequest>> prepare(Player player, double[] feet, double[] target, WalkGoal goal) {
+    public CompletableFuture<Supplier<WalkRequest>> prepare(Player player, double[] feet, double[] target, WalkGoal goal,
+                                                            Set<String> destinationRegions) {
         Objects.requireNonNull(player, "player");
         Objects.requireNonNull(goal, "goal");
         double[] from = feet.clone();
@@ -77,7 +80,8 @@ public final class WalkLegPreparer implements NavigationService.WalkPreparer {
             if (!captured.ready()) {
                 return null;
             }
-            WalkAccessFactory.WalkAccess walkAccess = access.prepare(player, world, gates, captured, profile.headroom());
+            WalkAccessFactory.WalkAccess walkAccess = access.prepare(player, world, gates, captured, profile.headroom(),
+                destinationRegions);
             WalkTerrain terrain = captured.terrain().terrain();
             return () -> new WalkRequest(terrain, walkAccess.resolve(), profile, from[0], from[1], from[2],
                 to[0], to[1], to[2], goal, budget);

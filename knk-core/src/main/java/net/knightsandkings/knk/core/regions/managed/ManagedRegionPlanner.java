@@ -16,10 +16,13 @@ import java.util.Set;
  */
 public final class ManagedRegionPlanner {
 
-    /** Existing regions that are not part of the batch being planned (a new region's already-existing parent). */
+    /**
+     * Existing regions that are not part of the batch being planned (a new region's already-existing parent), by world
+     * (KNG-112; null: any world) and region id.
+     */
     @FunctionalInterface
     public interface ExternalRegions {
-        Optional<ActualRegionState> find(String regionId);
+        Optional<ActualRegionState> find(String worldName, String regionId);
     }
 
     /**
@@ -31,6 +34,11 @@ public final class ManagedRegionPlanner {
                                 String requestedParentId, int priority, List<FlagRule> flagRules) {
         public String regionId() {
             return spec.regionId();
+        }
+
+        /** KNG-112: the region's world (null: whichever world has it). */
+        public String worldName() {
+            return spec.worldName();
         }
     }
 
@@ -53,8 +61,9 @@ public final class ManagedRegionPlanner {
     public Plan plan(Collection<ManagedRegionSpec> specs, ExternalRegions external) {
         List<String> warnings = new ArrayList<>();
         Map<String, ManagedRegionSpec> byKey = new LinkedHashMap<>();
+        // KNG-112: keyed by world and id - a region id names one region per world, and a parent is in its child's world
         for (ManagedRegionSpec spec : specs) {
-            byKey.putIfAbsent(spec.key(), spec);
+            byKey.putIfAbsent(spec.scopedKey(), spec);
         }
 
         // 1. Resolve every region's parent link: a planned region, an existing external one, or none.
@@ -63,26 +72,28 @@ public final class ManagedRegionPlanner {
         Map<String, String> requestedParent = new HashMap<>();
         Map<String, ManagedRegionKind> kinds = new HashMap<>();
         for (ManagedRegionSpec spec : byKey.values()) {
+            String self = spec.scopedKey();
             RegionOverride override = overrides.get(spec.key());
             ManagedRegionKind kind = override != null && override.kind() != null ? override.kind() : spec.kind();
             String requested = override != null && override.parentRegionId() != null ? override.parentRegionId() : spec.parentRegionId();
-            kinds.put(spec.key(), kind);
-            String parentKey = ManagedRegionSpec.key(requested);
-            requestedParent.put(spec.key(), requested);
-            if (parentKey == null || parentKey.isEmpty()) {
+            kinds.put(self, kind);
+            requestedParent.put(self, requested);
+            String requestedKey = ManagedRegionSpec.key(requested);
+            if (requestedKey == null || requestedKey.isEmpty()) {
                 continue;
             }
-            if (parentKey.equals(spec.key())) {
-                warnings.add(spec.regionId() + ": lists itself as its parent; ignored");
+            String parentKey = ManagedRegionSpec.scopedKey(spec.worldName(), requested);
+            if (parentKey.equals(self)) {
+                warnings.add(spec.label() + ": lists itself as its parent; ignored");
             } else if (byKey.containsKey(parentKey)) {
-                plannedParent.put(spec.key(), parentKey);
+                plannedParent.put(self, parentKey);
             } else {
-                Optional<ActualRegionState> found = external != null ? external.find(requested) : Optional.empty();
+                Optional<ActualRegionState> found = external != null ? external.find(spec.worldName(), requested) : Optional.empty();
                 if (found.isPresent()) {
-                    plannedParent.put(spec.key(), parentKey);
+                    plannedParent.put(self, parentKey);
                     externalParentPriority.put(parentKey, found.get().priority());
                 } else {
-                    warnings.add(spec.regionId() + ": parent region '" + requested + "' does not exist; parent left as it is");
+                    warnings.add(spec.label() + ": parent region '" + requested + "' does not exist; parent left as it is");
                 }
             }
         }
@@ -94,7 +105,7 @@ public final class ManagedRegionPlanner {
             String current = start;
             while (current != null && byKey.containsKey(current)) {
                 if (!path.add(current)) {
-                    warnings.add(byKey.get(previous).regionId() + ": parent chain loops back on itself; parent link dropped");
+                    warnings.add(byKey.get(previous).label() + ": parent chain loops back on itself; parent link dropped");
                     plannedParent.remove(previous);
                     break;
                 }
@@ -114,7 +125,7 @@ public final class ManagedRegionPlanner {
         order.sort((a, b) -> Integer.compare(depth.get(a), depth.get(b)));
         for (String key : order) {
             ManagedRegionSpec spec = byKey.get(key);
-            RegionOverride override = overrides.get(key);
+            RegionOverride override = overrides.get(spec.key());
             String parentKey = plannedParent.get(key);
             String parentId = parentKey == null ? null
                     : byKey.containsKey(parentKey) ? byKey.get(parentKey).regionId() : requestedParent.get(key);
@@ -143,7 +154,7 @@ public final class ManagedRegionPlanner {
                 level = 1;
             }
         }
-        RegionOverride override = overrides.get(key);
+        RegionOverride override = overrides.get(byKey.get(key).key());
         int priority = override != null && override.priority() != null
                 ? override.priority()
                 : policy.priorityFor(kinds.get(key), parentPriority);

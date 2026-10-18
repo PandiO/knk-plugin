@@ -27,4 +27,25 @@ public interface RegionTransitionService {
     default RegionTransitionDecision previewAccess(Set<String> oldRegionIds, Set<String> newRegionIds) {
         return null;
     }
+
+    /**
+     * KNG-112: {@link #handleRegionTransition(UUID, Set, Set)} with the world of each side. The same region id in two
+     * worlds belongs to two domains, so a move between worlds leaves every old region and enters every new one. A
+     * null world is world-blind. Implementations that don't know worlds fall back to the world-blind transition.
+     */
+    default RegionTransitionDecision handleRegionTransition(
+            UUID playerId,
+            String oldWorld,
+            Set<String> oldRegionIds,
+            String newWorld,
+            Set<String> newRegionIds
+    ) {
+        return handleRegionTransition(playerId, oldRegionIds, newRegionIds);
+    }
+
+    /** KNG-112: {@link #previewAccess(Set, Set)} with the world of each side (null: world-blind). */
+    default RegionTransitionDecision previewAccess(String oldWorld, Set<String> oldRegionIds,
+                                                   String newWorld, Set<String> newRegionIds) {
+        return previewAccess(oldRegionIds, newRegionIds);
+    }
 }

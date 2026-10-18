@@ -25,6 +25,10 @@ import net.knightsandkings.knk.core.ports.api.PermissionsApi;
  * phase), so {@link #invalidateAll()} is the only invalidation available for now; a future phase
  * wiring up in-game grant/revoke commands should call it after a mutation rather than waiting out
  * the TTL.
+ * <p>
+ * KNG-171: built with {@link DataAccessSettings#apiOutage()}, so while knk-web-api is DOWN a check
+ * that isn't in the fresh cache makes no API call and ends at once as an ERROR result
+ * ({@link PermissionDecision#UNAVAILABLE}); the caller answers it from the offline store.
  */
 public class PermissionsDataAccess {
 
@@ -69,8 +73,8 @@ public class PermissionsDataAccess {
         this.effectiveCache = new EffectiveCache(ttl);
         this.api = Objects.requireNonNull(api, "api must not be null");
         this.settings = Objects.requireNonNullElse(settings, DataAccessSettings.defaults());
-        this.checkExecutor = new DataAccessExecutor<>(checkCache, this.settings.retryPolicy(), "PermissionCheck");
-        this.effectiveExecutor = new DataAccessExecutor<>(effectiveCache, this.settings.retryPolicy(), "EffectivePermissions");
+        this.checkExecutor = new DataAccessExecutor<>(checkCache, this.settings, "PermissionCheck");
+        this.effectiveExecutor = new DataAccessExecutor<>(effectiveCache, this.settings, "EffectivePermissions");
     }
 
     /**
@@ -112,7 +116,8 @@ public class PermissionsDataAccess {
     /**
      * {@link #checkAsync(int, String)} as a {@link PermissionDecision}: {@code ALLOWED} for a
      * grant, {@code DENIED} for a real "no" (deny, undeclared, or a user the API doesn't know),
-     * {@code UNAVAILABLE} when the API couldn't be asked (error after retries, no cached answer).
+     * {@code UNAVAILABLE} when the API couldn't be asked (error after retries, or the API is DOWN,
+     * with no cached answer).
      * Never completes exceptionally.
      */
     public CompletableFuture<PermissionDecision> decideAsync(int userId, String node) {

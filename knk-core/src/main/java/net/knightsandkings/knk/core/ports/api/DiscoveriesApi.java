@@ -24,8 +24,17 @@ public interface DiscoveriesApi {
     /**
      * Discovers and rewards the domains behind these WorldGuard region ids (plus their ancestors).
      * Idempotent: a repeat grants nothing and lists the domains under alreadyDiscovered.
+     *
+     * @param worldName the world the regions are in (KNG-118): the server then matches only that
+     *                  world's domains (or ones without a world yet). Null sends a world-blind request.
      */
-    CompletableFuture<DiscoveryGrantResult> grant(int userId, Collection<String> wgRegionIds, DiscoverySource source);
+    CompletableFuture<DiscoveryGrantResult> grant(int userId, String worldName, Collection<String> wgRegionIds,
+                                                  DiscoverySource source);
+
+    /** A world-blind grant ({@link #grant(int, String, Collection, DiscoverySource)} without a world). */
+    default CompletableFuture<DiscoveryGrantResult> grant(int userId, Collection<String> wgRegionIds, DiscoverySource source) {
+        return grant(userId, null, wgRegionIds, source);
+    }
 
     /** Every domain the user has discovered, for the plugin's known-set cache. */
     CompletableFuture<List<KnownDiscovery>> known(int userId);

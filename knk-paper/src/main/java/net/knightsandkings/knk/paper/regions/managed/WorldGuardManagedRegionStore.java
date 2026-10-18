@@ -23,8 +23,9 @@ import net.knightsandkings.knk.core.regions.managed.RegionChange;
 import net.knightsandkings.knk.core.regions.managed.RegionStoreException;
 
 /**
- * {@link ManagedRegionStore} over WorldGuard's region managers (one per world; a region id is looked up in each world in
- * turn). Main thread only.
+ * {@link ManagedRegionStore} over WorldGuard's region managers (one per world). A region of a known world is looked up in
+ * that world's manager only (KNG-112: a region id is unique per world); without a world, in each world in turn. Main
+ * thread only.
  * <ul>
  *   <li>{@link #apply} touches priority, parent and the named flags and nothing else, so owners, members and every
  *       other flag stay as they are; if any step fails it puts back what it had changed.</li>
@@ -43,7 +44,12 @@ public class WorldGuardManagedRegionStore implements ManagedRegionStore {
 
     @Override
     public Optional<ActualRegionState> read(String regionId) {
-        Located located = locate(regionId);
+        return read(null, regionId);
+    }
+
+    @Override
+    public Optional<ActualRegionState> read(String worldName, String regionId) {
+        Located located = locate(worldName, regionId);
         if (located == null) {
             return Optional.empty();
         }
@@ -63,9 +69,15 @@ public class WorldGuardManagedRegionStore implements ManagedRegionStore {
 
     @Override
     public void apply(String regionId, RegionChange change) throws RegionStoreException {
-        Located located = locate(regionId);
+        apply(null, regionId, change);
+    }
+
+    @Override
+    public void apply(String worldName, String regionId, RegionChange change) throws RegionStoreException {
+        Located located = locate(worldName, regionId);
         if (located == null) {
-            throw new RegionStoreException("region '" + regionId + "' does not exist");
+            throw new RegionStoreException("region '" + regionId + "' does not exist"
+                + (worldName != null ? " in world '" + worldName + "'" : ""));
         }
         ProtectedRegion region = located.region();
         ProtectedRegion newParent = null;
@@ -127,11 +139,14 @@ public class WorldGuardManagedRegionStore implements ManagedRegionStore {
     private record Located(RegionManager manager, ProtectedRegion region) {
     }
 
-    private Located locate(String regionId) {
+    private Located locate(String worldName, String regionId) {
         if (regionId == null || regionId.isBlank()) {
             return null;
         }
         for (RegionManager manager : managers.get()) {
+            if (worldName != null && !worldName.equalsIgnoreCase(manager.getName())) {
+                continue;
+            }
             ProtectedRegion region = manager.getRegion(regionId);
             if (region != null) {
                 return new Located(manager, region);

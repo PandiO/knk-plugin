@@ -11,5 +11,6 @@ public record StructureListDto(
         @JsonProperty("streetId") Integer streetId,
         @JsonProperty("streetName") String streetName,
         @JsonProperty("districtId") Integer districtId,
-        @JsonProperty("districtName") String districtName
+        @JsonProperty("districtName") String districtName,
+        @JsonProperty("worldName") String worldName
 ) {}

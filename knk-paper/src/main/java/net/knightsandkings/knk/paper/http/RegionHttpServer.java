@@ -20,34 +20,60 @@ import java.util.logging.Logger;
 /**
  * Minimal HTTP server to expose region management endpoints for the Web API.
  * Supports:
- * - POST /Regions/rename?oldRegionId=...&newRegionId=...[&domainType=...][&parentRegionId=...]
+ * - POST /Regions/rename?oldRegionId=...&newRegionId=...[&domainType=...][&parentRegionId=...][&world=...]
  *   (domainType/parentRegionId are optional: when given, the renamed region also gets its managed-region parent,
  *   priority and flags - see {@code regions.managed})
  * - GET /api/regions/{regionId}/contains-location?x=...&z=...&allowBoundary=false
  * - GET /api/regions/{parentRegionId}/contains-region/{childRegionId}?requireFullContainment=true
+ *
+ * It listens on {@code region-http.bind-address} only (loopback by default), and when the plugin has an API
+ * key every request must carry it in {@code X-API-Key} ({@link RegionHttpAuthFilter}).
  */
 public class RegionHttpServer {
     private static final Logger LOGGER = Logger.getLogger(RegionHttpServer.class.getName());
 
     private final Plugin plugin;
     private final WgRegionIdTaskHandler handler;
+    private final String bindAddress;
     private final int port;
+    private final RegionHttpAuthFilter authFilter;
     private HttpServer server;
     private ExecutorService executor = Executors.newCachedThreadPool();
 
-    public RegionHttpServer(Plugin plugin, WgRegionIdTaskHandler handler, int port) {
+    /**
+     * @param bindAddress the address to listen on (e.g. {@code 127.0.0.1})
+     * @param apiKey      the plugin's API key; when non-blank every request must send it as {@code X-API-Key}
+     */
+    public RegionHttpServer(Plugin plugin, WgRegionIdTaskHandler handler, String bindAddress, int port, String apiKey) {
         this.plugin = plugin;
         this.handler = handler;
+        this.bindAddress = bindAddress;
         this.port = port;
+        this.authFilter = new RegionHttpAuthFilter(apiKey);
     }
 
     public void start() throws IOException {
-        server = HttpServer.create(new InetSocketAddress(port), 0);
-        server.createContext("/Regions/rename", new RenameHandler());
-        server.createContext("/api/regions/", new RegionContainmentHandler());
+        server = HttpServer.create(new InetSocketAddress(bindAddress, port), 0);
+        server.createContext("/Regions/rename", new RenameHandler()).getFilters().add(authFilter);
+        server.createContext("/api/regions/", new RegionContainmentHandler()).getFilters().add(authFilter);
+        // Anything else would get the JDK's default 404 without the key check; keep the answer uniform.
+        server.createContext("/", exchange -> send(exchange, 404, "Not Found")).getFilters().add(authFilter);
         server.setExecutor(executor);
         server.start();
-        LOGGER.info("RegionHttpServer started on port " + port);
+        InetSocketAddress bound = server.getAddress();
+        LOGGER.info("RegionHttpServer listening on " + bound.getAddress().getHostAddress() + ":" + bound.getPort()
+            + (authFilter.isKeyRequired()
+                ? " (X-API-Key required)"
+                : " (no api.auth.api-key set: requests are NOT authenticated)"));
+        if (!authFilter.isKeyRequired() && !bound.getAddress().isLoopbackAddress()) {
+            LOGGER.warning("RegionHttpServer is reachable beyond this host without a key - set api.auth.api-key"
+                + " or bind region-http.bind-address to 127.0.0.1");
+        }
+    }
+
+    /** The address the server listens on, or null before {@link #start()}. */
+    public InetSocketAddress getAddress() {
+        return server != null ? server.getAddress() : null;
     }
 
     public void stop() {
@@ -73,6 +99,8 @@ public class RegionHttpServer {
             String newRegionId = query.get("newRegionId");
             String domainType = query.get("domainType");
             String parentRegionId = query.get("parentRegionId");
+            // KNG-112: the world the region is in (optional; without it the first loaded world that has it).
+            String world = query.get("world");
 
             if (oldRegionId == null || newRegionId == null || oldRegionId.isBlank() || newRegionId.isBlank()) {
                 send(exchange, 400, "oldRegionId and newRegionId are required");
@@ -81,7 +109,7 @@ public class RegionHttpServer {
 
             // Run rename on main thread to keep WorldGuard safe
             plugin.getServer().getScheduler().callSyncMethod(plugin, () -> {
-                boolean result = handler.renameRegion(oldRegionId, newRegionId, domainType, parentRegionId);
+                boolean result = handler.renameRegion(oldRegionId, newRegionId, domainType, parentRegionId, world);
                 try {
                     send(exchange, 200, Boolean.toString(result));
                 } catch (IOException e) {
@@ -158,6 +186,7 @@ public class RegionHttpServer {
                 String xStr = query.get("x");
                 String zStr = query.get("z");
                 String allowBoundaryStr = query.getOrDefault("allowBoundary", "false");
+                String world = query.get("world");
 
                 if (xStr == null || zStr == null) {
                     send(exchange, 400, "x and z are required");
@@ -178,7 +207,7 @@ public class RegionHttpServer {
                 }
 
                 plugin.getServer().getScheduler().callSyncMethod(plugin, () -> {
-                    boolean result = LocationTaskHandler.checkLocationInsideRegion(regionId, x, z, allowBoundary);
+                    boolean result = LocationTaskHandler.checkLocationInsideRegion(regionId, x, z, allowBoundary, world);
                     try {
                         send(exchange, 200, Boolean.toString(result));
                     } catch (IOException e) {
@@ -208,11 +237,12 @@ public class RegionHttpServer {
             // Parse query parameters
             Map<String, String> query = parseQuery(exchange.getRequestURI());
             String requireFullStr = query.getOrDefault("requireFullContainment", "true");
+            String world = query.get("world");
             boolean requireFullContainment = Boolean.parseBoolean(requireFullStr);
 
             // Run containment check on main thread to keep WorldGuard safe
             plugin.getServer().getScheduler().callSyncMethod(plugin, () -> {
-                boolean result = handler.checkRegionContainment(parentRegionId, childRegionId, requireFullContainment);
+                boolean result = handler.checkRegionContainment(parentRegionId, childRegionId, requireFullContainment, world);
                 try {
                     send(exchange, 200, Boolean.toString(result));
                 } catch (IOException e) {

@@ -111,6 +111,25 @@ class WalkAccessFactoryTest {
     }
 
     @Test
+    void aRegionsDomainIsLookedUpInTheWalksWorld() {
+        // KNG-112: the hub's "house" keeps players out; the gameplay world's "house" is a different, open domain
+        org.mockito.Mockito.when(world.getName()).thenReturn("gameplay");
+        regions = Map.of("house", RegionShape.cuboid(4, 0, 4, 8, 100, 8));
+        Map<String, DomainSnapshot> byWorld = Map.of(
+            "hub", domain(1, "Hub house", "house", false, false),
+            "gameplay", domain(2, "House", "house", true, true));
+        WalkAccessFactory perWorld = new WalkAccessFactory((p, ids) -> new GateAvailability(id -> Optional.empty(), id -> false),
+            p -> playerRegions, p -> bypass, (w, box) -> regions, (p, w, x, y, z) -> true,
+            (worldName, regionId) -> Optional.ofNullable(byWorld.get(worldName)), new DomainAccessEvaluator());
+
+        WalkSnapshotService.WalkCapture capture = capture();
+        WalkAccessFactory.WalkAccess access = perWorld.prepare(player, world, fake.gates(), capture, 2);
+
+        assertEquals("House", access.lookup().domainByRegionId("house").orElseThrow().name());
+        assertEquals(WalkResult.Status.FOUND, walkInto(access.resolve(), capture).status());
+    }
+
+    @Test
     void theRegionBypassOpensDoorsAndDomainsWithoutAskingWorldGuard() {
         doorsAllowed = false;
         bypass = true;
@@ -150,6 +169,25 @@ class WalkAccessFactoryTest {
 
         assertEquals(0.0, resolved.extraCost(2, 65, 2), "inside; entry is not asked of a region one is in");
         assertEquals(Optional.of("you may not leave Yard"), resolved.denyReason(5, 65, 2));
+    }
+
+    @Test
+    void aRegionThePlayerCouldNotLeaveAgainKeepsThePathOutUnlessTheDestinationIsInIt() {
+        // KNG-121: the house allows entry but not leaving; the walk target (6, 64, 6) lies in it
+        regions = Map.of("house", RegionShape.cuboid(4, 0, 4, 8, 100, 8));
+        domains.put("house", domain(1, "House", "house", true, false));
+
+        CellAccess elsewhere = factory().prepare(player, world, fake.gates(), capture(), 2, Set.of("town")).resolve();
+        assertEquals(Optional.of("you could not leave House again"), elsewhere.denyReason(6, 65, 6));
+        assertNoWalkPath(walkInto(elsewhere, capture()), "the navigation's destination is outside the house");
+
+        CellAccess destinationInside = factory().prepare(player, world, fake.gates(), capture(), 2, Set.of("house"))
+            .resolve();
+        assertEquals(0.0, destinationInside.extraCost(6, 65, 6));
+        assertEquals(WalkResult.Status.FOUND, walkInto(destinationInside, capture()).status());
+
+        assertEquals(0.0, factory().prepare(player, world, fake.gates(), capture(), 2).resolve().extraCost(6, 65, 6),
+            "destination unknown: as before");
     }
 
     @Test

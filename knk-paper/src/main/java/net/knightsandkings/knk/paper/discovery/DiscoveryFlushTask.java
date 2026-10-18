@@ -113,7 +113,7 @@ public final class DiscoveryFlushTask {
 
     private void send(DiscoveryTracker.Batch batch) {
         LOGGER.fine("[Discovery] Sending " + batch.entries().size() + " candidate(s) of user " + batch.userId()
-                + " (" + batch.source().apiName() + "): " + batch.regionIds());
+                + " (" + batch.source().apiName() + ") in " + batch.world() + ": " + batch.regionIds());
         recorder.grant(batch.playerId(), batch.userId(), batch.entries(), batch.source())
                 .thenAccept(outcome -> runOnMainThread(() -> handle(batch, outcome)));
     }

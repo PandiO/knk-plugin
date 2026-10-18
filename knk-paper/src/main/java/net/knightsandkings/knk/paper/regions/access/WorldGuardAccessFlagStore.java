@@ -54,6 +54,57 @@ public final class WorldGuardAccessFlagStore implements AccessFlagSync.Store {
         }
     }
 
+    /** KNG-112: the region in {@code world} only; null reads the first loaded world that has it. */
+    @Override
+    public Optional<AccessFlags> read(String world, String regionId) {
+        if (world == null) {
+            return read(regionId);
+        }
+        RegionManager manager = managerOf(world);
+        ProtectedRegion region = manager == null ? null : manager.getRegion(regionId);
+        return region == null ? Optional.empty() : Optional.of(flagsOf(region));
+    }
+
+    /** KNG-112: writes the region in {@code world} only; null writes every loaded world's region with that id. */
+    @Override
+    public void write(String world, String regionId, AccessFlags flags) {
+        if (world == null) {
+            write(regionId, flags);
+            return;
+        }
+        RegionManager manager = managerOf(world);
+        ProtectedRegion region = manager == null ? null : manager.getRegion(regionId);
+        if (region == null) {
+            return;
+        }
+        region.setFlag(DomainAccessFlags.entry(), toState(flags.entry()));
+        region.setFlag(DomainAccessFlags.exit(), toState(flags.exit()));
+        region.setFlag(DomainAccessFlags.name(), flags.name());
+        dirty.add(manager);
+    }
+
+    @Override
+    public Collection<AccessFlagSync.RegionRef> regionsWithAccessFlagsByWorld() {
+        List<AccessFlagSync.RegionRef> refs = new ArrayList<>();
+        for (RegionManager manager : managers.get()) {
+            for (ProtectedRegion region : manager.getRegions().values()) {
+                if (!flagsOf(region).equals(AccessFlags.NONE)) {
+                    refs.add(new AccessFlagSync.RegionRef(manager.getName(), region.getId()));
+                }
+            }
+        }
+        return refs;
+    }
+
+    private RegionManager managerOf(String world) {
+        for (RegionManager manager : managers.get()) {
+            if (world.equalsIgnoreCase(manager.getName())) {
+                return manager;
+            }
+        }
+        return null;
+    }
+
     @Override
     public Collection<String> regionsWithAccessFlags() {
         List<String> ids = new ArrayList<>();

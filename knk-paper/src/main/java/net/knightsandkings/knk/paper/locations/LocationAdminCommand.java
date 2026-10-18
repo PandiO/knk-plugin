@@ -64,6 +64,8 @@ public final class LocationAdminCommand implements SubcommandExecutor {
     private final Predicate<Player> isVanished;
     private final Executor mainThread;
     private final Consumer<Player> showHere;
+    /** KNG-118 (L3): the world of a Location stored without one - the main (level-name) world, never a guessed name. */
+    private Supplier<World> mainWorld = () -> null;
 
     public LocationAdminCommand(LocationRetentionApi api, PermissionGate permissions, java.util.function.BiPredicate<CommandSender, String> holdsCached,
                                 Supplier<TeleportService> teleports, Function<String, World> worlds, Predicate<Player> isVanished,
@@ -152,14 +154,22 @@ public final class LocationAdminCommand implements SubcommandExecutor {
         });
     }
 
+    /** Where a Location stored without a world is (the main world); null leaves such a Location unreachable. */
+    public void setMainWorld(Supplier<World> mainWorld) {
+        this.mainWorld = mainWorld != null ? mainWorld : () -> null;
+    }
+
     /** Main thread. */
     private void teleportTo(Player player, LocationTeleportTarget target) {
-        String worldName = target.world() == null || target.world().isBlank() ? "world" : target.world();
-        World world = worlds.apply(worldName);
+        boolean noWorld = target.world() == null || target.world().isBlank();
+        World world = noWorld ? mainWorld.get() : worlds.apply(target.world());
         if (world == null) {
-            player.sendMessage(ChatColor.RED + "Location #" + target.id() + " is in world '" + worldName + "', which isn't loaded on this server.");
+            player.sendMessage(ChatColor.RED + (noWorld
+                ? "Location #" + target.id() + " has no world, and the main world isn't known."
+                : "Location #" + target.id() + " is in world '" + target.world() + "', which isn't loaded on this server."));
             return;
         }
+        String worldName = world.getName();
         TeleportService service = teleports.get();
         if (service == null) {
             player.sendMessage(ChatColor.RED + "Teleports aren't available - the teleport engine didn't start.");
@@ -209,7 +219,7 @@ public final class LocationAdminCommand implements SubcommandExecutor {
         boolean teleportLinks = holdsCached.test(sender, TELEPORT_NODE);
         for (LocationOrphanEntry entry : result.items()) {
             Component line = Component.text(String.format(Locale.ROOT, "#%d ", entry.locationId()), NamedTextColor.YELLOW)
-                .append(Component.text(String.format(Locale.ROOT, "%s %.1f %.1f %.1f", entry.world() == null ? "world" : entry.world(),
+                .append(Component.text(String.format(Locale.ROOT, "%s %.1f %.1f %.1f", entry.world() == null || entry.world().isBlank() ? "(no world)" : entry.world(),
                     entry.x(), entry.y(), entry.z()), NamedTextColor.WHITE))
                 .append(Component.text(" flagged " + shortDate(entry.flaggedAt()), NamedTextColor.GRAY));
             if (entry.previouslyKeptBy() != null) {

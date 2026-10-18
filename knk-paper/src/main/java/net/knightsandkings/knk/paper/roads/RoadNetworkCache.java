@@ -341,7 +341,7 @@ public final class RoadNetworkCache {
         }
         state.snapshot = snapshot;
         if (regionResolver != null) {
-            regionResolver.warmCache(snapshot.regionIds());
+            regionResolver.warmCache(world, snapshot.regionIds());
         }
         LOGGER.info("[Roads] " + world + ": network snapshot " + snapshot.nodeCount() + " nodes, " + snapshot.edgeCount()
             + " edges from " + state.graphs.size() + " tile(s)");

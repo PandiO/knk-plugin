@@ -14,6 +14,9 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
+import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
+import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.IntSupplier;
@@ -109,10 +112,10 @@ public final class LiveEdgeTags {
     private final Executor builder;
     private final Executor mainThread;
     private final Consumer<String> onChanged;
-    private final Consumer<Set<String>> onRegions;
+    private final BiConsumer<String, Set<String>> onRegions;
     private final LongSupplier clock;
     private final Predicate<String> cutsRoads;
-    private final Predicate<String> restricts;
+    private final BiPredicate<String, String> restricts;
     private final CrossSections crossSections;
 
     private final Map<String, State> states = new ConcurrentHashMap<>();
@@ -151,6 +154,20 @@ public final class LiveEdgeTags {
     public LiveEdgeTags(Function<String, RoadNetworkSnapshot> stored, Probe probe, IntSupplier budget, Executor builder,
                         Executor mainThread, Consumer<String> onChanged, Consumer<Set<String>> onRegions, LongSupplier clock,
                         Predicate<String> cutsRoads, Predicate<String> restricts) {
+        this(stored, probe, budget, builder, mainThread, onChanged, (world, regions) -> onRegions.accept(regions), clock,
+            cutsRoads, (world, regionId) -> restricts.test(regionId));
+    }
+
+    /**
+     * KNG-112: as above, with the world of the pass - a region id names one region per world, so the domain cache is
+     * warmed and asked in that world.
+     *
+     * @param onRegions regions the live tags added, with their world: warm the domain cache for them
+     * @param restricts whether a region of a world keeps anyone off the road
+     */
+    public LiveEdgeTags(Function<String, RoadNetworkSnapshot> stored, Probe probe, IntSupplier budget, Executor builder,
+                        Executor mainThread, Consumer<String> onChanged, BiConsumer<String, Set<String>> onRegions,
+                        LongSupplier clock, Predicate<String> cutsRoads, BiPredicate<String, String> restricts) {
         this.cutsRoads = Objects.requireNonNull(cutsRoads, "cutsRoads");
         this.restricts = Objects.requireNonNull(restricts, "restricts");
         this.crossSections = new CrossSections(Objects.requireNonNull(probe, "probe"));
@@ -176,6 +193,14 @@ public final class LiveEdgeTags {
     public static Predicate<String> restrictsByDomain(Function<String, Optional<DomainSnapshot>> domains,
                                                      DomainAccessEvaluator evaluator) {
         return regionId -> domains.apply(regionId)
+            .map(domain -> evaluator.entry(domain).isPresent() || evaluator.exit(domain).isPresent())
+            .orElse(true);
+    }
+
+    /** KNG-112: {@link #restrictsByDomain} with the region's world ({@code (world, regionId) -> cached domain}). */
+    public static BiPredicate<String, String> restrictsByDomainInWorld(
+            BiFunction<String, String, Optional<DomainSnapshot>> domains, DomainAccessEvaluator evaluator) {
+        return (world, regionId) -> domains.apply(world, regionId)
             .map(domain -> evaluator.entry(domain).isPresent() || evaluator.exit(domain).isPresent())
             .orElse(true);
     }
@@ -237,7 +262,7 @@ public final class LiveEdgeTags {
             return; // nothing changed since the last pass: no rebuild, no re-route
         }
         if (!pass.newRegions.isEmpty()) {
-            onRegions.accept(Set.copyOf(pass.newRegions));
+            onRegions.accept(pass.world, Set.copyOf(pass.newRegions));
         }
         Map<Integer, List<Span>> changed = pass.changed;
         builder.execute(() -> {
@@ -330,7 +355,7 @@ public final class LiveEdgeTags {
                     regions.add(new Hit<>(s.along(), at));
                     left--;
                     Set<List<String>> across = Set.of();
-                    if (ground != null && at.stream().anyMatch(restricts)) {
+                    if (ground != null && at.stream().anyMatch(regionId -> restricts.test(world, regionId))) {
                         List<TrailCentring.Cell> cells = crossSections.at(world, ground, samples, sampleIndex);
                         left -= cells.size();
                         across = lanesAcross(at, cells);
