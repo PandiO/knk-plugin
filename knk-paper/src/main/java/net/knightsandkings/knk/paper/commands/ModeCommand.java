@@ -5,9 +5,7 @@ import java.util.Locale;
 import java.util.Objects;
 
 import org.bukkit.command.Command;
-import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
-import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 
 import net.knightsandkings.knk.core.domain.users.ActiveMode;
@@ -33,14 +31,22 @@ import net.kyori.adventure.text.Component;
  * /knk's per-subcommand nodes. Unlike v1, /staffmode is not refused for owners/co-owners: anyone
  * holding the staff node may use it.
  */
-public class ModeCommand implements CommandExecutor, TabCompleter {
+public class ModeCommand implements org.bukkit.command.TabExecutor {
 
     private enum Action { TOGGLE, ENABLE, DISABLE }
 
     private final ModeService modeService;
     private final ActiveMode mode;
 
+    /** The immediate (cache-only) node check for tab completion (KNG-107). */
+    private final java.util.function.BiPredicate<CommandSender, String> holdsCached;
+
     public ModeCommand(ModeService modeService, ActiveMode mode) {
+        this(modeService, mode, net.knightsandkings.knk.paper.commands.support.CommandPermissions.bukkitOnly()::has);
+    }
+
+    public ModeCommand(ModeService modeService, ActiveMode mode, java.util.function.BiPredicate<CommandSender, String> holdsCached) {
+        this.holdsCached = holdsCached;
         this.modeService = Objects.requireNonNull(modeService, "modeService must not be null");
         if (mode == null || mode == ActiveMode.NONE) {
             throw new IllegalArgumentException("ModeCommand needs a concrete mode, got " + mode);
@@ -182,6 +188,10 @@ public class ModeCommand implements CommandExecutor, TabCompleter {
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        // KNG-107: only for holders of the mode's node (knk.mode.owner / knk.mode.staff).
+        if (!holdsCached.test(sender, ModeService.nodeFor(mode))) {
+            return List.of();
+        }
         if (args.length == 1) {
             return filter(List.of("on", "off", "enable", "disable", "help"), args[0]);
         }

@@ -44,13 +44,25 @@ public final class CommandPermissions {
     private final BiPredicate<Player, String> cachedCheck;
     private final BiFunction<Player, String, CompletableFuture<PermissionDecision>> asyncCheck;
     private final Executor mainThread;
+    /** Whether a player's cache-only answers are ready for a listing; and a background refresh of them. */
+    private final java.util.function.Predicate<Player> listingReady;
+    private final java.util.function.Consumer<Player> refresh;
 
     CommandPermissions(BiPredicate<Player, String> cachedCheck,
                        BiFunction<Player, String, CompletableFuture<PermissionDecision>> asyncCheck,
                        Executor mainThread) {
+        this(cachedCheck, asyncCheck, mainThread, player -> false, player -> { });
+    }
+
+    CommandPermissions(BiPredicate<Player, String> cachedCheck,
+                       BiFunction<Player, String, CompletableFuture<PermissionDecision>> asyncCheck,
+                       Executor mainThread, java.util.function.Predicate<Player> listingReady,
+                       java.util.function.Consumer<Player> refresh) {
         this.cachedCheck = cachedCheck;
         this.asyncCheck = asyncCheck;
         this.mainThread = mainThread;
+        this.listingReady = listingReady;
+        this.refresh = refresh;
     }
 
     /** In-house checks through {@code knkPermissible}; Bukkit-only when it is null (no API configured). */
@@ -58,7 +70,8 @@ public final class CommandPermissions {
         if (knkPermissible == null) {
             return bukkitOnly();
         }
-        return new CommandPermissions(knkPermissible::hasPermission, knkPermissible::checkAsync, mainThread);
+        return new CommandPermissions(knkPermissible::hasPermission, knkPermissible::checkAsync, mainThread,
+                knkPermissible::listingReady, player -> knkPermissible.preload(player.getUniqueId()));
     }
 
     /** Plain Bukkit checks - the behaviour before KNG-24; for tests and when the API isn't configured. */
@@ -72,6 +85,21 @@ public final class CommandPermissions {
             return true;
         }
         return cachedCheck != null && cachedCheck.test(player, node);
+    }
+
+    /**
+     * {@link #has} for tab completion (KNG-107): on a "no" for a player it also asks the in-house
+     * model in the background (never waited on), so a cold or expired cache shows the real answer
+     * from the next keystroke on. A cached "no" is answered from the cache without an API call.
+     */
+    public boolean hasForCompletion(CommandSender sender, String node) {
+        if (has(sender, node)) {
+            return true;
+        }
+        if (asyncCheck != null && sender instanceof Player player) {
+            decide(player, node);
+        }
+        return false;
     }
 
     /**
@@ -101,6 +129,52 @@ public final class CommandPermissions {
     }
 
     /**
+     * KNG-107: like {@link #whenAllowed}, but holding any one of {@code nodes} is enough (a command
+     * whose forms need different nodes). Refused as "can't be checked" only when no node was allowed
+     * and at least one check couldn't be made.
+     */
+    public void whenAnyAllowed(CommandSender sender, Collection<String> nodes, Runnable onAllowed) {
+        if (nodes.isEmpty() || !(sender instanceof Player player) || nodes.stream().anyMatch(sender::hasPermission)) {
+            onAllowed.run();
+            return;
+        }
+        if (asyncCheck == null) {
+            sender.sendMessage(NO_PERMISSION_MESSAGE);
+            return;
+        }
+        CompletableFuture<PermissionDecision> any = CompletableFuture.completedFuture(PermissionDecision.DENIED);
+        for (String node : nodes) {
+            any = any.thenCombine(decide(player, node), CommandPermissions::either);
+        }
+        any.thenAccept(decision -> mainThread.execute(() -> {
+            if (decision == PermissionDecision.ALLOWED) {
+                onAllowed.run();
+            } else if (decision == PermissionDecision.DENIED) {
+                sender.sendMessage(NO_PERMISSION_MESSAGE);
+            } else {
+                sender.sendMessage(PlayerCommandSupport.UNAVAILABLE_MESSAGE);
+            }
+        }));
+    }
+
+    /** {@link #hasForCompletion} for any one of {@code nodes} (each "no" is asked in the background). */
+    public boolean hasAnyForCompletion(CommandSender sender, Collection<String> nodes) {
+        boolean any = nodes.isEmpty();
+        for (String node : nodes) {
+            any |= hasForCompletion(sender, node);
+        }
+        return any;
+    }
+
+    private static PermissionDecision either(PermissionDecision a, PermissionDecision b) {
+        if (a == PermissionDecision.ALLOWED || b == PermissionDecision.ALLOWED) {
+            return PermissionDecision.ALLOWED;
+        }
+        return a == PermissionDecision.UNAVAILABLE || b == PermissionDecision.UNAVAILABLE
+                ? PermissionDecision.UNAVAILABLE : PermissionDecision.DENIED;
+    }
+
+    /**
      * Asks the in-house model about every node (filling the cache {@link #has} reads), then runs
      * {@code then} on the main thread whatever the answers. For executors that check several nodes
      * synchronously (e.g. {@code /knk user}'s per-property nodes), so a granted player isn't refused
@@ -117,6 +191,22 @@ public final class CommandPermissions {
                 .toList();
         CompletableFuture.allOf(checks.toArray(CompletableFuture[]::new))
                 .thenRun(() -> mainThread.execute(then));
+    }
+
+    /**
+     * {@link #warm} for a listing (help, a "/" list): when the player's cache-only answers are already
+     * served from their loaded permission set, runs {@code then} at once and refreshes the set in the
+     * background - a listing never waits for the API then (KNG-107: {@code /knk help towns} waited
+     * ~10 s after the set's TTL). Otherwise as {@link #warm}. Not for executors deciding what to allow:
+     * they keep {@link #warm}, which waits for current answers.
+     */
+    public void warmForListing(CommandSender sender, Collection<String> nodes, Runnable then) {
+        if (sender instanceof Player player && asyncCheck != null && listingReady.test(player)) {
+            refresh.accept(player);
+            then.run();
+            return;
+        }
+        warm(sender, nodes, then);
     }
 
     /** Bukkit grant, or the live in-house answer (false without an in-house model). Never fails. */
@@ -136,6 +226,9 @@ public final class CommandPermissions {
             check = asyncCheck.apply(player, node);
         } catch (RuntimeException ex) {
             check = CompletableFuture.failedFuture(ex);
+        }
+        if (check == null) {
+            check = CompletableFuture.failedFuture(new IllegalStateException("no permission answer"));
         }
         return check.exceptionally(ex -> {
             LOGGER.log(Level.WARNING, "Permission check failed for " + player.getName() + ", node " + node, ex);

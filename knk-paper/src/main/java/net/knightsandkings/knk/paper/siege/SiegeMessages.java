@@ -112,6 +112,7 @@ public final class SiegeMessages {
             case NO_SCENARIO_AVAILABLE -> "no scenario is available right now";
             case ADMIN_STOPPED -> "an admin stopped the lobby";
             case SERVER_RESTART -> "the server is restarting";
+            case API_OUTAGE -> "the server lost its connection to its services";
         };
     }
 
@@ -133,6 +134,7 @@ public final class SiegeMessages {
             case NOT_ENOUGH_PLAYERS -> "too few players left";
             case ADMIN_STOPPED -> "stopped by an admin";
             case SERVER_RESTART -> "server restart";
+            case API_OUTAGE -> "the server's services are down";
         };
     }
 

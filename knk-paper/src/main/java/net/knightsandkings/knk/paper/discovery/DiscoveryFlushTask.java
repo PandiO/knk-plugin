@@ -109,11 +109,13 @@ public final class DiscoveryFlushTask {
         for (UUID playerId : tracker.playersWithPending()) {
             tracker.nextBatch(playerId, now).ifPresent(this::send);
         }
+        // A new player's quiet minutes ended: their held announcements, as one summary (KNG-128).
+        effects.releaseSettled();
     }
 
     private void send(DiscoveryTracker.Batch batch) {
         LOGGER.fine("[Discovery] Sending " + batch.entries().size() + " candidate(s) of user " + batch.userId()
-                + " (" + batch.source().apiName() + "): " + batch.regionIds());
+                + " (" + batch.source().apiName() + ") in " + batch.world() + ": " + batch.regionIds());
         recorder.grant(batch.playerId(), batch.userId(), batch.entries(), batch.source())
                 .thenAccept(outcome -> runOnMainThread(() -> handle(batch, outcome)));
     }

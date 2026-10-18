@@ -46,7 +46,7 @@ public class StructuresDataAccess {
         this.structureCache = Objects.requireNonNull(structureCache, "structureCache must not be null");
         this.structuresQueryApi = Objects.requireNonNull(structuresQueryApi, "structuresQueryApi must not be null");
         this.settings = Objects.requireNonNullElse(settings, DataAccessSettings.defaults());
-        this.executor = new DataAccessExecutor<>(structureCache, this.settings.retryPolicy(), "Structure");
+        this.executor = new DataAccessExecutor<>(structureCache, this.settings, "Structure");
     }
     
     /**

@@ -45,7 +45,7 @@ public class TagsDataAccess {
         this.cache = new TagCache(ttl);
         this.queryApi = Objects.requireNonNull(queryApi, "queryApi must not be null");
         this.settings = Objects.requireNonNullElse(settings, DataAccessSettings.defaults());
-        this.executor = new DataAccessExecutor<>(cache, this.settings.retryPolicy(), "Tag");
+        this.executor = new DataAccessExecutor<>(cache, this.settings, "Tag");
     }
 
     public CompletableFuture<FetchResult<KnkTag>> getByIdAsync(int id, FetchPolicy policy) {

@@ -44,7 +44,18 @@ public class GateLoaderAdapter {
 
     private final GateManager gateManager;
 
+    /**
+     * KNG-113: the world a door without one in its anchor point is placed in - the main ({@code level-name}) world,
+     * where every gate from before worlds were stored is (hub DESIGN §16 decision 3). Null leaves such a door out.
+     */
+    private final java.util.function.Supplier<String> defaultWorld;
+
     public GateLoaderAdapter(GateManager gateManager) {
+        this(gateManager, () -> null);
+    }
+
+    public GateLoaderAdapter(GateManager gateManager, java.util.function.Supplier<String> defaultWorld) {
+        this.defaultWorld = defaultWorld != null ? defaultWorld : () -> null;
         this.gateManager = gateManager;
     }
 
@@ -164,6 +175,19 @@ public class GateLoaderAdapter {
                 continue;
             }
             CachedGateDoor door = buildCachedGateDoor(doorDto, structure);
+            if (door.getWorldName() == null || door.getWorldName().isBlank()) {
+                // KNG-113: a door without a world was animated in every world. It is placed in the main world (where
+                // every gate from before worlds were stored is), or left out when that is not known.
+                String fallback = defaultWorld.get();
+                if (fallback == null || fallback.isBlank()) {
+                    LOGGER.warning("Gate door " + door.getName() + " (ID: " + door.getId() + ", structure: "
+                        + structure.getName() + ") has no world in its anchor point; not loaded");
+                    continue;
+                }
+                LOGGER.warning("Gate door " + door.getName() + " (ID: " + door.getId() + ", structure: " + structure.getName()
+                    + ") has no world in its anchor point; using the main world '" + fallback + "'");
+                door.setWorldName(fallback);
+            }
             gateManager.cacheGate(door);
             doorIds.add(door.getId());
 
@@ -337,6 +361,13 @@ public class GateLoaderAdapter {
 
             LOGGER.fine("Gate " + gate.getName() + " basis vectors: u=" + u + ", v=" + v + ", n=" + n
                 + "; steps: uStep=" + uStep + ", vStep=" + vStep + ", nStep=" + nStep);
+
+            // KNG-132: loaded as before, but it will have been scanned wrong and is likely to jam.
+            String pointsProblem = GateReferencePoints.referencePoint2Problem(anchor, ref1, ref2);
+            if (pointsProblem != null) {
+                LOGGER.warning("Gate door " + gate.getName() + " (ID: " + gate.getId() + ") has sheared reference points: "
+                    + pointsProblem);
+            }
         } else {
             // Fallback to standard axes
             gate.setUAxis(new Vector(1, 0, 0));

@@ -51,7 +51,7 @@ public class StreetsDataAccess {
         this.streetCache = Objects.requireNonNull(streetCache, "streetCache must not be null");
         this.streetsQueryApi = Objects.requireNonNull(streetsQueryApi, "streetsQueryApi must not be null");
         this.settings = Objects.requireNonNullElse(settings, DataAccessSettings.defaults());
-        this.executor = new DataAccessExecutor<>(streetCache, this.settings.retryPolicy(), "Street");
+        this.executor = new DataAccessExecutor<>(streetCache, this.settings, "Street");
     }
     
     /**

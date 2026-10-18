@@ -172,6 +172,25 @@ class WalkAccessFactoryTest {
     }
 
     @Test
+    void aRegionThePlayerCouldNotLeaveAgainKeepsThePathOutUnlessTheDestinationIsInIt() {
+        // KNG-121: the house allows entry but not leaving; the walk target (6, 64, 6) lies in it
+        regions = Map.of("house", RegionShape.cuboid(4, 0, 4, 8, 100, 8));
+        domains.put("house", domain(1, "House", "house", true, false));
+
+        CellAccess elsewhere = factory().prepare(player, world, fake.gates(), capture(), 2, Set.of("town")).resolve();
+        assertEquals(Optional.of("you could not leave House again"), elsewhere.denyReason(6, 65, 6));
+        assertNoWalkPath(walkInto(elsewhere, capture()), "the navigation's destination is outside the house");
+
+        CellAccess destinationInside = factory().prepare(player, world, fake.gates(), capture(), 2, Set.of("house"))
+            .resolve();
+        assertEquals(0.0, destinationInside.extraCost(6, 65, 6));
+        assertEquals(WalkResult.Status.FOUND, walkInto(destinationInside, capture()).status());
+
+        assertEquals(0.0, factory().prepare(player, world, fake.gates(), capture(), 2).resolve().extraCost(6, 65, 6),
+            "destination unknown: as before");
+    }
+
+    @Test
     void gateVerdictsComeFromTheRoutersRuleForTheDoorsInTheBox() {
         // the village's open gate 7 at (5, 65..66, 24) and closed gate 8 at (6, 65..66, 24)
         gateViews.put(7, new GateAvailability.GateView(7, "North Gate", AnimationState.OPEN, false, false, false, false, false));

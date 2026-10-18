@@ -69,7 +69,7 @@ public class HealthDataAccess {
         this.healthCache = new HealthCache(ttl);
         this.healthApi = Objects.requireNonNull(healthApi, "healthApi must not be null");
         this.settings = Objects.requireNonNullElse(settings, DataAccessSettings.defaults());
-        this.executor = new DataAccessExecutor<>(healthCache, this.settings.retryPolicy(), "Health");
+        this.executor = new DataAccessExecutor<>(healthCache, this.settings, "Health");
     }
     
     /**

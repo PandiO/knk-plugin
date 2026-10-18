@@ -65,7 +65,7 @@ public class DomainsDataAccess {
         this.domainCache = new DomainCache(ttl);
         this.domainsQueryApi = Objects.requireNonNull(domainsQueryApi, "domainsQueryApi must not be null");
         this.settings = Objects.requireNonNullElse(settings, DataAccessSettings.defaults());
-        this.executor = new DataAccessExecutor<>(domainCache, this.settings.retryPolicy(), "Domain");
+        this.executor = new DataAccessExecutor<>(domainCache, this.settings, "Domain");
     }
     
     /**

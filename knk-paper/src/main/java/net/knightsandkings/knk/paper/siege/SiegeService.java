@@ -161,6 +161,8 @@ public final class SiegeService {
     private final Map<Integer, SiegeLobbyRuntime> lobbies = new LinkedHashMap<>();
     /** Lobbies an admin stopped: a config refresh must not restart them. */
     private final Set<Integer> adminStopped = new HashSet<>();
+    /** Lobbies stopped because an outage action evacuated a member: started again when the API is back. */
+    private final Set<Integer> outageStopped = new HashSet<>();
     private final Set<Integer> skippedModeLogged = new HashSet<>();
     private final List<SiegeMatchObserver> observers = new ArrayList<>();
 
@@ -763,12 +765,14 @@ public final class SiegeService {
                 .orElseGet(() -> rt.lobby().rotation().stream().mapToInt(r -> r.scenario().playersMin()).min().orElse(0));
         Component message = SiegeMessages.bad("The siege " + rt.displayName() + " was called off: "
                 + SiegeMessages.cancelReason(e.reason(), min) + "."
-                + (e.reason() == CancelReason.ADMIN_STOPPED || e.reason() == CancelReason.SERVER_RESTART ? ""
+                + (e.reason() == CancelReason.ADMIN_STOPPED || e.reason() == CancelReason.SERVER_RESTART
+                    || e.reason() == CancelReason.API_OUTAGE ? ""
                 : " Next matchmaking in " + SiegeMessages.duration(rt.lobby().cooldownSeconds()) + "."));
         sendToMembers(rt, message);
         SiegeEndReason abortReason = switch (e.reason()) {
             case ADMIN_STOPPED -> SiegeEndReason.ADMIN_STOPPED;
             case SERVER_RESTART -> SiegeEndReason.SERVER_RESTART;
+            case API_OUTAGE -> SiegeEndReason.API_OUTAGE;
             case NOT_ENOUGH_PLAYERS, NO_SCENARIO_AVAILABLE -> SiegeEndReason.NOT_ENOUGH_PLAYERS;
         };
         // A match row exists only after the draw (DESIGN §6.3: a cancel at the draw records nothing).
@@ -1411,6 +1415,42 @@ public final class SiegeService {
         logger.info("[Siege] " + sender.getName() + " stopped lobby " + rt.key() + (reason == null ? "" : ": " + reason));
         return Reply.ok(SiegeMessages.good("Stopped " + rt.displayName() + ". It stays stopped until /siege admin start "
                 + rt.key() + "."));
+    }
+
+    /**
+     * Hub DESIGN §16.4 decision 6: an outage action is about to move or kick this player. A member of a lobby in
+     * matchmaking, at the siege hub or in a match has the whole round aborted ({@link SiegeEndReason#API_OUTAGE}: no
+     * winner, no rewards, recorded through the result spool): every member is restored once, to their pre-match spot.
+     *
+     * @return true when the player is free to be moved now (not a member, or their round was just aborted); false while
+     *         their match is ending, so the caller tries again later
+     */
+    public boolean releaseForOutage(UUID playerId) {
+        Optional<SiegeLobbyRuntime> found = lobbyOf(playerId);
+        if (found.isEmpty()) return true;
+        SiegeLobbyRuntime rt = found.get();
+        SiegePhase phase = rt.phase();
+        if (phase != SiegePhase.MATCHMAKING && phase != SiegePhase.HUB && phase != SiegePhase.IN_PROGRESS) {
+            return false;
+        }
+        sendToMembers(rt, SiegeMessages.bad("The siege " + rt.displayName()
+                + " was aborted: the server lost its connection to its services. Nobody wins; you get your things back."));
+        outageStopped.add(rt.id());
+        apply(rt, rt.machine().stop(SiegeEndReason.API_OUTAGE));
+        logger.warning("[Siege] Aborted lobby " + rt.key() + ": an API-outage action evacuates a member");
+        return lobbyOf(playerId).isEmpty();
+    }
+
+    /** The API is back: lobbies stopped by an outage start matchmaking again (not those an admin stopped since). */
+    public void resumeAfterOutage() {
+        for (Integer id : List.copyOf(outageStopped)) {
+            SiegeLobbyRuntime rt = lobbies.get(id);
+            if (rt != null && rt.phase() == SiegePhase.DISABLED && !adminStopped.contains(id) && rt.lobby().hasReadyScenario()) {
+                apply(rt, rt.machine().start());
+                logger.info("[Siege] Lobby " + rt.key() + " restarted after the API outage");
+            }
+        }
+        outageStopped.clear();
     }
 
     /** {@code /siege admin kick <player>}: remove a member (restore applies). */

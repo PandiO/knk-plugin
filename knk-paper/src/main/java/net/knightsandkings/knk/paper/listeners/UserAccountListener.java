@@ -18,6 +18,8 @@ import net.knightsandkings.knk.paper.config.KnkConfig;
 import net.knightsandkings.knk.paper.currency.CurrencySettings;
 import net.knightsandkings.knk.paper.currency.PlayerCurrencyService;
 import net.knightsandkings.knk.paper.events.UserDataLoadedEvent;
+import net.knightsandkings.knk.paper.onboarding.NewPlayerWindow;
+import net.knightsandkings.knk.paper.onboarding.OnboardingMessages;
 import net.knightsandkings.knk.paper.user.JoinLoadingGuard;
 import net.knightsandkings.knk.paper.user.PlayerUserData;
 import net.knightsandkings.knk.paper.user.UserManager;
@@ -31,8 +33,10 @@ import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
  *
  * Responsibilities:
  * - Sync user data on join via UserManager
- * - Display welcome messages with account status
- * - Prompt for account linking if needed
+ * - Display welcome messages with account status: the first-join welcome for an account created at
+ *   this join, "Welcome back" otherwise (KNG-128)
+ * - Prompt for account linking if needed: in the first-join welcome, then on every later join until
+ *   the player has a web account (KNG-129)
  * - Clear cache on player quit
  *
  * Priority: HIGH
@@ -57,6 +61,9 @@ public class UserAccountListener implements Listener {
     private final Logger logger;
     /** The balance line in /balance's format (currency ledger); null if the currency service failed to start. */
     private final PlayerCurrencyService currencyService;
+    /** Marked by PlayerListener when the API created the account at this join (KNG-128). */
+    private final NewPlayerWindow newPlayers;
+    private final KnkConfig.OnboardingConfig onboarding;
 
     public UserAccountListener(
         Plugin plugin,
@@ -64,7 +71,9 @@ public class UserAccountListener implements Listener {
         JoinLoadingGuard joinLoadingGuard,
         KnkConfig.MessagesConfig messagesConfig,
         Logger logger,
-        PlayerCurrencyService currencyService
+        PlayerCurrencyService currencyService,
+        NewPlayerWindow newPlayers,
+        KnkConfig.OnboardingConfig onboarding
     ) {
         this.plugin = plugin;
         this.userManager = userManager;
@@ -72,6 +81,8 @@ public class UserAccountListener implements Listener {
         this.messagesConfig = messagesConfig;
         this.logger = logger;
         this.currencyService = currencyService;
+        this.newPlayers = newPlayers;
+        this.onboarding = onboarding != null ? onboarding : KnkConfig.OnboardingConfig.defaults();
     }
     
     /**
@@ -122,17 +133,22 @@ public class UserAccountListener implements Listener {
             return;
         }
         try {
-            sendWelcomeMessage(online, balanceLine);
+            // hasEmailLinked reflects the API's account: true once the player registered on the website.
+            boolean unlinked = !userData.hasEmailLinked() && userData.userId() != null;
+            boolean firstJoin = newPlayers != null && newPlayers.takeFirstJoinWelcome(uuid);
+            if (firstJoin) {
+                sendFirstJoinWelcome(online, balanceLine, unlinked && !userData.hasDuplicateAccount());
+            } else {
+                sendWelcomeMessage(online, balanceLine);
+            }
 
             // Check for duplicate account and prompt if needed
             if (userData.hasDuplicateAccount()) {
                 sendDuplicateAccountPrompt(online, userData);
-            }
-
-            // Check for minecraft-only account and suggest linking
-            // hasEmailLinked now reflects isFullAccount from API (true = has email + password)
-            if (!userData.hasEmailLinked() && userData.userId() != null) {
-                sendAccountLinkSuggestion(online);
+            } else if (unlinked && !firstJoin && onboarding.unlinkedReminderEnabled()) {
+                // KNG-129: every later join until the player has a web account. The first join's welcome
+                // already asks, and the duplicate prompt points to /account link itself.
+                online.sendMessage(getPrefixComponent().append(linkPrompt(onboarding.unlinkedReminder())));
             }
         } catch (Exception ex) {
             logger.severe("Failed to display join messages for " + online.getName() + ": " + ex.getMessage());
@@ -201,6 +217,26 @@ public class UserAccountListener implements Listener {
     }
     
     /**
+     * The first-join welcome (KNG-128): the configured lines instead of "Welcome back", the balance, and
+     * the link button when the account has no web login yet.
+     */
+    private void sendFirstJoinWelcome(Player player, String balanceLine, boolean promptLink) {
+        OnboardingMessages.firstJoinWelcome(onboarding.firstJoinWelcome(), player.getName())
+            .forEach(line -> player.sendMessage(getPrefixComponent().append(line)));
+        if (balanceLine != null) {
+            player.sendMessage(getPrefixComponent().append(LegacyComponentSerializer.legacySection().deserialize(balanceLine)));
+        }
+        if (promptLink) {
+            player.sendMessage(getPrefixComponent().append(linkPrompt(onboarding.linkPrompt())));
+        }
+    }
+
+    /** {@code text}, then the button that runs /account link (code with click-to-copy, register URL). */
+    private Component linkPrompt(String text) {
+        return OnboardingMessages.linkPrompt(text, onboarding.linkButton(), onboarding.linkButtonHover());
+    }
+
+    /**
      * Send prompt for duplicate account resolution.
      */
     private void sendDuplicateAccountPrompt(Player player, PlayerUserData userData) {
@@ -227,35 +263,6 @@ public class UserAccountListener implements Listener {
                     .color(NamedTextColor.GOLD)
                     .decorate(TextDecoration.UNDERLINED))
                 .append(Component.text(" to resolve your accounts.")
-                    .color(NamedTextColor.GRAY))
-        );
-        
-        player.sendMessage(Component.empty());
-    }
-    
-    /**
-     * Send suggestion to link account with email for web app access.
-     */
-    private void sendAccountLinkSuggestion(Player player) {
-        player.sendMessage(Component.empty());
-        
-        player.sendMessage(
-            getPrefixComponent()
-                .append(Component.text("💡 TIP: ")
-                    .color(NamedTextColor.AQUA)
-                    .decorate(TextDecoration.BOLD))
-                .append(Component.text("Link your account to access the web app!")
-                    .color(NamedTextColor.GRAY))
-        );
-        
-        player.sendMessage(
-            getPrefixComponent()
-                .append(Component.text("Use ")
-                    .color(NamedTextColor.GRAY))
-                .append(Component.text("/account link")
-                    .color(NamedTextColor.GOLD)
-                    .decorate(TextDecoration.UNDERLINED))
-                .append(Component.text(" with a code from the web app to get started.")
                     .color(NamedTextColor.GRAY))
         );
         

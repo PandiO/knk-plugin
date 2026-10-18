@@ -18,6 +18,8 @@ public class CommandRegistry {
     private final Map<String, String> aliases = new HashMap<>();
     private CommandPermissions permissions = CommandPermissions.bukkitOnly();
     private final Map<String, java.util.function.Predicate<CommandSender>> visibility = new HashMap<>();
+    /** Nodes a visibility predicate reads from the cache, asked for with {@link #permissionNodes()}. */
+    private final Map<String, Collection<String>> visibilityNodes = new HashMap<>();
 
     /** The permission check for {@link #execute} and {@link #listAvailable}; Bukkit-only until set. */
     public void setPermissions(CommandPermissions permissions) {
@@ -25,15 +27,27 @@ public class CommandRegistry {
     }
 
     /**
-     * Runs the subcommand if the sender holds its metadata permission (none = open); otherwise
+     * Runs the subcommand if the sender holds its metadata permission (none = open; for a nodeless one
+     * with visibility nodes, any of those - KNG-107); otherwise
      * tells them they lack it, or that it couldn't be checked. May run after this returns, on the
      * main thread, when the in-house check has to ask knk-web-api.
      */
     public void execute(CommandSender sender, RegisteredCommand cmd, String[] args) {
+        Collection<String> anyOf = cmd.metadata().permission() == null
+                ? visibilityNodes.get(cmd.metadata().name().toLowerCase()) : null;
+        if (anyOf != null && !anyOf.isEmpty()) {
+            // KNG-107: a nodeless subcommand whose actions each check a node - a sender holding none of
+            // them is told they lack permission, not shown its usage. The actions still check their own.
+            permissions.whenAnyAllowed(sender, anyOf, () -> cmd.executor().execute(sender, args));
+            return;
+        }
         permissions.whenAllowed(sender, cmd.metadata().permission(), () -> cmd.executor().execute(sender, args));
     }
 
-    /** Every subcommand's metadata permission, for {@link CommandPermissions#warm}. */
+    /**
+     * Every subcommand's metadata permission and the nodes its visibility predicate reads, for
+     * {@link CommandPermissions#warm} before a listing.
+     */
     public Set<String> permissionNodes() {
         Set<String> nodes = new LinkedHashSet<>();
         commands.values().forEach(cmd -> {
@@ -41,6 +55,7 @@ public class CommandRegistry {
                 nodes.add(cmd.metadata().permission());
             }
         });
+        visibilityNodes.values().forEach(nodes::addAll);
         return nodes;
     }
 
@@ -83,13 +98,37 @@ public class CommandRegistry {
     }
 
     /**
-     * List all commands the sender has permission for (cache-only for in-house grants - see
-     * {@link CommandPermissions#has}).
+     * As {@link #setVisibility(String, java.util.function.Predicate)}, naming the nodes the predicate
+     * reads from the cache so a listing can ask for them first ({@link #permissionNodes()}).
      */
+    public void setVisibility(String name, java.util.function.Predicate<CommandSender> visibleTo, Collection<String> nodes) {
+        setVisibility(name, visibleTo);
+        visibilityNodes.put(name.toLowerCase(), List.copyOf(nodes));
+    }
+
+    /**
+     * KNG-107: lists {@code name} only to senders holding at least one of {@code nodes} (cached check),
+     * for a subcommand registered without a top-level node whose actions each check one of them.
+     */
+    public void setVisibleToAny(String name, Collection<String> nodes) {
+        List<String> anyOf = List.copyOf(nodes);
+        setVisibility(name, sender -> anyOf.stream().anyMatch(node -> permissions.has(sender, node)), anyOf);
+    }
+
+    /**
+     * Whether help and tab completion offer {@code cmd} to the sender: its metadata permission
+     * (cache-only for in-house grants - see {@link CommandPermissions#has}) and its visibility
+     * predicate, if any. Running it doesn't depend on this.
+     */
+    public boolean isListed(CommandSender sender, RegisteredCommand cmd) {
+        return permissions.has(sender, cmd.metadata().permission())
+                && visibility.getOrDefault(cmd.metadata().name().toLowerCase(), s -> true).test(sender);
+    }
+
+    /** Every subcommand listed to the sender ({@link #isListed}). */
     public List<RegisteredCommand> listAvailable(CommandSender sender) {
         return commands.values().stream()
-                .filter(cmd -> permissions.has(sender, cmd.metadata().permission()))
-                .filter(cmd -> visibility.getOrDefault(cmd.metadata().name().toLowerCase(), s -> true).test(sender))
+                .filter(cmd -> isListed(sender, cmd))
                 .toList();
     }
 

@@ -42,7 +42,7 @@ public class MinecraftMaterialRefsDataAccess {
         this.cache = new MinecraftMaterialRefCache(ttl);
         this.queryApi = Objects.requireNonNull(queryApi, "queryApi must not be null");
         this.settings = Objects.requireNonNullElse(settings, DataAccessSettings.defaults());
-        this.executor = new DataAccessExecutor<>(cache, this.settings.retryPolicy(), "MinecraftMaterialRef");
+        this.executor = new DataAccessExecutor<>(cache, this.settings, "MinecraftMaterialRef");
     }
 
     public CompletableFuture<FetchResult<KnkMinecraftMaterialRef>> getByIdAsync(int id, FetchPolicy policy) {

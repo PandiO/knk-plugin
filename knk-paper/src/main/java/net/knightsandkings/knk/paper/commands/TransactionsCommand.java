@@ -62,10 +62,18 @@ public class TransactionsCommand implements TabExecutor {
         if (args.length == 0) {
             return List.of();
         }
+        // KNG-107: the filters with knk.transactions, other players' names with knk.transactions.others.
+        boolean own = currency.holds(sender, PlayerCurrencyService.TRANSACTIONS_NODE);
+        boolean others = currency.holds(sender, PlayerCurrencyService.TRANSACTIONS_OTHERS_NODE);
+        if (!own && !others) {
+            return List.of();
+        }
         String last = args[args.length - 1].toLowerCase(Locale.ROOT);
         List<String> filters = List.of("coins", "gems", "xp").stream().filter(c -> c.startsWith(last)).toList();
         if (args.length == 1) {
-            return java.util.stream.Stream.concat(currency.visiblePlayers().names(sender, args[0]).stream(), filters.stream()).toList();
+            return others
+                ? java.util.stream.Stream.concat(currency.visiblePlayers().names(sender, args[0]).stream(), filters.stream()).toList()
+                : filters;
         }
         return filters;
     }

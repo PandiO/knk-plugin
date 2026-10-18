@@ -330,14 +330,19 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
         }
         String sub = args[0].toLowerCase(Locale.ROOT);
         if (args.length == 2) {
+            // KNG-107: no arguments for a subcommand the sender wasn't offered.
             return switch (sub) {
-                case "join", "info", "skip" -> filter(service.lobbies().stream().map(SiegeLobbyRuntime::key), args[1]);
-                case "vote" -> filter(Stream.concat(Stream.of("random"), voteNames(sender)), args[1]);
+                case "join", "info" -> canSuggest(sender, SiegeService.PERMISSION_PLAY)
+                        ? filter(service.lobbies().stream().map(SiegeLobbyRuntime::key), args[1]) : List.of();
+                case "skip" -> canSuggest(sender, SiegeService.PERMISSION_SKIP)
+                        ? filter(service.lobbies().stream().map(SiegeLobbyRuntime::key), args[1]) : List.of();
+                case "vote" -> canSuggest(sender, SiegeService.PERMISSION_PLAY)
+                        ? filter(Stream.concat(Stream.of("random"), voteNames(sender)), args[1]) : List.of();
                 case "admin" -> filter(adminActions(sender), args[1]);
                 default -> List.of();
             };
         }
-        if (args.length == 3 && sub.equals("admin")) {
+        if (args.length == 3 && sub.equals("admin") && canSuggest(sender, SiegeService.PERMISSION_ADMIN_CONTROL)) {
             String adminSub = args[1].toLowerCase(Locale.ROOT);
             if (List.of("start", "stop", "skip").contains(adminSub)) {
                 return filter(service.lobbies().stream().map(SiegeLobbyRuntime::key), args[2]);

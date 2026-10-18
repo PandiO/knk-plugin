@@ -1,7 +1,9 @@
 package net.knightsandkings.knk.core.discovery;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -33,7 +35,8 @@ import net.knightsandkings.knk.core.ports.api.DiscoveriesApi;
  *   the server's final word and is only logged. Grants
  *   still in flight at shutdown are spooled by {@link #spoolInFlight()}.</li>
  *   <li><b>Replay</b> spooled discoveries ({@link #replay()} on enable and on a timer, {@link #replay(UUID)}
- *   on the player's next join) with source Replay, 50 ids per request. The server is idempotent, so a
+ *   on the player's next join) with source Replay, 50 ids per request, one world per request (entries
+ *   spooled before KNG-118 have no world and go out world-blind). The server is idempotent, so a
  *   replay of something already granted just comes back as already discovered.</li>
  *   <li><b>Unknown user ids</b> (a player who joined while the API was down,
  *   {@link DiscoveryTracker#UNRESOLVED_USER}): a grant or a replayed file first looks the user id up by
@@ -113,7 +116,8 @@ public final class DiscoveryRecorder {
     }
 
     /**
-     * Sends one grant request; spools it when the API can't be reached. A {@code userId} of
+     * Sends one grant request for entries of one world (a {@link DiscoveryTracker.Batch}; mixed worlds
+     * would be sent world-blind); spools it when the API can't be reached. A {@code userId} of
      * {@link DiscoveryTracker#UNRESOLVED_USER} is looked up by the player's UUID first; the outcome
      * carries the id it found.
      */
@@ -143,9 +147,10 @@ public final class DiscoveryRecorder {
 
     private CompletableFuture<Outcome> send(UUID playerId, int userId, List<PendingDiscovery> entries, DiscoverySource source) {
         List<String> regionIds = regionIds(entries);
+        String world = commonWorld(entries);
         CompletableFuture<DiscoveryGrantResult> call;
         try {
-            call = retryPolicy.executeAsync(() -> api.grant(userId, regionIds, source));
+            call = retryPolicy.executeAsync(() -> api.grant(userId, world, regionIds, source));
         } catch (RuntimeException e) {
             call = CompletableFuture.failedFuture(e);
         }
@@ -285,7 +290,7 @@ public final class DiscoveryRecorder {
                 unreachable.set(true);
                 logger.fine("[Discovery] Spooled discoveries of " + file.playerId() + " wait: their user id can't be looked up yet");
             } else {
-                spool.remove(file.playerId(), regionIds(file.entries()));
+                spool.remove(file.playerId(), file.entries());
                 logger.warning("[Discovery] Dropped " + file.entries().size() + " spooled discovery(ies) of player "
                         + file.playerId() + ": no knk account has that UUID");
             }
@@ -295,13 +300,20 @@ public final class DiscoveryRecorder {
 
     private CompletableFuture<Void> replayChunks(DiscoverySpool.Pending file, int userId, List<Replayed> delivered,
                                                  AtomicBoolean unreachable) {
-        List<PendingDiscovery> entries = file.entries();
+        // One world per request: group the file's entries by world (in file order), then chunk.
+        Map<String, List<PendingDiscovery>> byWorld = new LinkedHashMap<>();
+        for (PendingDiscovery entry : file.entries()) {
+            String world = entry.world() == null ? "" : entry.world().toLowerCase(Locale.ROOT);
+            byWorld.computeIfAbsent(world, w -> new ArrayList<>()).add(entry);
+        }
         CompletableFuture<Void> chain = CompletableFuture.completedFuture(null);
-        for (int from = 0; from < entries.size(); from += DiscoveriesApi.MAX_IDS_PER_REQUEST) {
-            List<PendingDiscovery> chunk = List.copyOf(entries.subList(from, Math.min(entries.size(), from + DiscoveriesApi.MAX_IDS_PER_REQUEST)));
-            chain = chain.thenCompose(ignored -> unreachable.get()
-                    ? CompletableFuture.completedFuture(null)
-                    : replayChunk(file.playerId(), userId, chunk, delivered, unreachable));
+        for (List<PendingDiscovery> entries : byWorld.values()) {
+            for (int from = 0; from < entries.size(); from += DiscoveriesApi.MAX_IDS_PER_REQUEST) {
+                List<PendingDiscovery> chunk = List.copyOf(entries.subList(from, Math.min(entries.size(), from + DiscoveriesApi.MAX_IDS_PER_REQUEST)));
+                chain = chain.thenCompose(ignored -> unreachable.get()
+                        ? CompletableFuture.completedFuture(null)
+                        : replayChunk(file.playerId(), userId, chunk, delivered, unreachable));
+            }
         }
         return chain;
     }
@@ -309,22 +321,23 @@ public final class DiscoveryRecorder {
     private CompletableFuture<Void> replayChunk(UUID playerId, int userId, List<PendingDiscovery> chunk,
                                                 List<Replayed> delivered, AtomicBoolean unreachable) {
         List<String> regionIds = regionIds(chunk);
+        String world = commonWorld(chunk);
         CompletableFuture<DiscoveryGrantResult> call;
         try {
-            call = retryPolicy.executeAsync(() -> api.grant(userId, regionIds, DiscoverySource.REPLAY));
+            call = retryPolicy.executeAsync(() -> api.grant(userId, world, regionIds, DiscoverySource.REPLAY));
         } catch (RuntimeException e) {
             call = CompletableFuture.failedFuture(e);
         }
         return call.handle((result, error) -> {
             if (error == null && result != null) {
-                spool.remove(playerId, regionIds);
+                spool.remove(playerId, chunk);
                 synchronized (delivered) {
                     delivered.add(new Replayed(playerId, userId, chunk, result));
                 }
                 logger.info("[Discovery] Delivered " + regionIds.size() + " spooled discovery(ies) of user " + userId
                         + ": " + result.granted().size() + " new");
             } else if (error != null && isFinalRejection(error)) {
-                spool.remove(playerId, regionIds);
+                spool.remove(playerId, chunk);
                 logger.warning("[Discovery] Dropped " + regionIds.size() + " spooled discovery(ies) of user " + userId
                         + ": the API refused them (" + describe(error) + ")");
             } else {
@@ -337,6 +350,22 @@ public final class DiscoveryRecorder {
 
     private static List<String> regionIds(List<PendingDiscovery> entries) {
         return entries.stream().map(PendingDiscovery::regionId).toList();
+    }
+
+    /** The world all entries share (case-insensitively), or null when it is unknown or they differ. */
+    static String commonWorld(List<PendingDiscovery> entries) {
+        String world = null;
+        for (PendingDiscovery entry : entries) {
+            if (entry.world() == null) {
+                return null;
+            }
+            if (world == null) {
+                world = entry.world();
+            } else if (!world.equalsIgnoreCase(entry.world())) {
+                return null;
+            }
+        }
+        return world;
     }
 
     private static String who(UUID playerId, int userId) {

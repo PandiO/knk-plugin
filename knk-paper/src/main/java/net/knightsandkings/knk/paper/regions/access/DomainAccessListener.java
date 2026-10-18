@@ -40,7 +40,8 @@ import net.kyori.adventure.text.Component;
  *       block above the death spot, the death spot. WorldGuard's session is then re-synced.</li>
  *   <li><b>Join</b>: a player standing in a domain they may not enter (with the region data already
  *       on disk, so also while the API is down) is sent to the world spawn once their account has
- *       loaded (bypass is known then).</li>
+ *       loaded (bypass is known then). Not inside the selected hub: hub admission placed them there (hub DESIGN §1),
+ *       and the hub's own AllowEntry does not apply to it.</li>
  * </ul>
  */
 public final class DomainAccessListener implements Listener {
@@ -48,6 +49,7 @@ public final class DomainAccessListener implements Listener {
     private final DomainAccessService access;
     private final Consumer<Player> resyncWorldGuardSession;
     private final Predicate<Player> respawnExempt;
+    private final Predicate<Location> joinExempt;
     private final Map<UUID, Location> deathLocations = new ConcurrentHashMap<>();
 
     /**
@@ -58,9 +60,18 @@ public final class DomainAccessListener implements Listener {
      */
     public DomainAccessListener(DomainAccessService access, Consumer<Player> resyncWorldGuardSession,
                                 Predicate<Player> respawnExempt) {
+        this(access, resyncWorldGuardSession, respawnExempt, location -> false);
+    }
+
+    /**
+     * @param joinExempt spots where a joining player is never moved: the selected hub, where hub admission placed them
+     */
+    public DomainAccessListener(DomainAccessService access, Consumer<Player> resyncWorldGuardSession,
+                                Predicate<Player> respawnExempt, Predicate<Location> joinExempt) {
         this.access = access;
         this.resyncWorldGuardSession = resyncWorldGuardSession;
         this.respawnExempt = respawnExempt != null ? respawnExempt : player -> false;
+        this.joinExempt = joinExempt != null ? joinExempt : location -> false;
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
@@ -107,7 +118,7 @@ public final class DomainAccessListener implements Listener {
     @EventHandler(priority = EventPriority.MONITOR)
     public void onUserDataLoaded(UserDataLoadedEvent event) {
         Player player = event.getPlayer();
-        if (player == null || !player.isOnline()) {
+        if (player == null || !player.isOnline() || joinExempt.test(player.getLocation())) {
             return;
         }
         Optional<Refusal> refusal = access.refusedToBeAt(player, player.getLocation());
