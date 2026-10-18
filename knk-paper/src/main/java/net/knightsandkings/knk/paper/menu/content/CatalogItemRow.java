@@ -1,34 +1,43 @@
 package net.knightsandkings.knk.paper.menu.content;
 
+import net.knightsandkings.knk.api.impl.enchantment.LocalEnchantmentRepositoryImpl;
 import net.knightsandkings.knk.core.domain.item.KnkItemBlueprint;
 import net.knightsandkings.knk.core.menu.MenuRowKey;
-import net.knightsandkings.knk.paper.mapper.ItemBlueprintBukkitMapper;
+import net.knightsandkings.knk.paper.item.BlueprintItemAssembler;
 import net.knightsandkings.knk.paper.menu.MenuItemStackRow;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.List;
+import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
  * One row of {@code items.catalog} (menu follow-up 2026-09-26): an item blueprint shown as a player
- * receives it - {@link ItemBlueprintBukkitMapper#fromBlueprint}, the base step of
- * {@code BlueprintItemAssembler}, which kit grants ({@code KitGrantPlacer}) and
- * {@code /knk itemblueprints give} use. The preview leaves off the default enchantments those add.
+ * receives it - {@link BlueprintItemAssembler#assembleDefaults}, the call kit grants ({@code KitGrantPlacer})
+ * and {@code /knk itemblueprints give} use, so the preview carries the blueprint's default enchantments
+ * (KNG-175). They come from the full blueprint's own rows; nothing extra is fetched.
  * The ItemStack is built lazily on the main thread (render step 4) and kept for this row object.
  */
 public final class CatalogItemRow implements MenuItemStackRow, MenuRowKey {
 
     private static final Logger LOGGER = Logger.getLogger(CatalogItemRow.class.getName());
+    private static final BlueprintItemAssembler ITEM_ASSEMBLER = new BlueprintItemAssembler(new LocalEnchantmentRepositoryImpl());
 
     private final KnkItemBlueprint blueprint;
     private final String materialKey;
+    private final BlueprintItemAssembler itemAssembler;
     private ItemStack built;
     private boolean attempted;
 
     CatalogItemRow(KnkItemBlueprint blueprint, String materialKey) {
+        this(blueprint, materialKey, ITEM_ASSEMBLER);
+    }
+
+    CatalogItemRow(KnkItemBlueprint blueprint, String materialKey, BlueprintItemAssembler itemAssembler) {
         this.blueprint = blueprint;
         this.materialKey = materialKey;
+        this.itemAssembler = itemAssembler;
     }
 
     @Override
@@ -36,13 +45,21 @@ public final class CatalogItemRow implements MenuItemStackRow, MenuRowKey {
         if (!attempted) {
             attempted = true;
             try {
-                built = materialKey == null || materialKey.isBlank() ? null : ItemBlueprintBukkitMapper.fromBlueprint(blueprint, materialKey);
+                built = materialKey == null || materialKey.isBlank() ? null : assemble();
             } catch (RuntimeException e) {
                 LOGGER.log(Level.FINE, "items.catalog: blueprint " + blueprint.id() + " has no usable material (" + materialKey + ")", e);
                 built = null;
             }
         }
         return built;
+    }
+
+    private ItemStack assemble() {
+        BlueprintItemAssembler.Result result = itemAssembler.assembleDefaults(blueprint, materialKey, Map.of(), null);
+        if (!result.skipped().isEmpty()) {
+            LOGGER.fine("items.catalog: blueprint " + blueprint.id() + " skipped enchantments: " + String.join(", ", result.skipped()));
+        }
+        return result.itemStack();
     }
 
     public int getBlueprintId() {
