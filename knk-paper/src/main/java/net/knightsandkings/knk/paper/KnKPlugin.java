@@ -214,6 +214,8 @@ public class KnKPlugin extends JavaPlugin {
     private KnkPermissible knkPermissible;
     private net.knightsandkings.knk.paper.commands.support.CommandPermissions commandPermissions;
     private JoinLoadingGuard joinLoadingGuard;
+    /** A brand-new player's first minutes: first-join welcome, held discovery announcements (KNG-128). */
+    private net.knightsandkings.knk.paper.onboarding.NewPlayerWindow newPlayerWindow;
     private ModeService modeService;
     private net.knightsandkings.knk.paper.user.AdminFreezeManager adminFreezeManager;
     private net.knightsandkings.knk.paper.user.MessagingService messagingService;
@@ -323,6 +325,8 @@ public class KnKPlugin extends JavaPlugin {
             saveDefaultConfig();
             config = ConfigLoader.load(getConfig());
             getLogger().info("Configuration loaded successfully");
+            newPlayerWindow = new net.knightsandkings.knk.paper.onboarding.NewPlayerWindow(
+                java.time.Clock.systemUTC(), config.onboarding().discoveryQuiet());
             // KNG-114: load the worlds in worlds.load first, so gates, region repair, Game Settings and admission all
             // start with every world there (hub DESIGN §16 decision 1: a minimal KnK loader, no Multiverse).
             knkWorlds.loadAndGuard(this);
@@ -1418,6 +1422,7 @@ public class KnKPlugin extends JavaPlugin {
             this, discoveryConfig, usersDataAccess,
             (player, summary) -> net.knightsandkings.knk.paper.utils.ScoreboardUtil.setScoreboard(List.of(player), knkPermissible, summary)
         );
+        discoveryEffects.holdWhileQuiet(newPlayerWindow::isQuiet, config.onboarding().discoverySettledSummary());
         this.discoveryFlushTask = new net.knightsandkings.knk.paper.discovery.DiscoveryFlushTask(
             this, discoveryTracker, discoveryRecorder, discoveryEffects, clock,
             discoveryConfig.batchWindowTicks(), discoveryConfig.replayIntervalSeconds()
@@ -1821,14 +1826,15 @@ public class KnKPlugin extends JavaPlugin {
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.GameSettingsMotdListener(gameSettingsManager), this);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.GameSettingsWeatherCommandListener(gameSettingsManager), this);
         }
-        PlayerListener playerListener = new PlayerListener(usersDataAccess, gameSettingsManager, this.getCacheManager(), knkPermissible, usersCommandApi, kitsCommandApi, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, ignoreService);
+        PlayerListener playerListener = new PlayerListener(usersDataAccess, gameSettingsManager, this.getCacheManager(), knkPermissible, usersCommandApi, kitsCommandApi, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, ignoreService, newPlayerWindow);
         playerListener.setHubAdmitted(uuid -> hubService != null && hubService.consumeAdmitted(uuid));
         pluginManager.registerEvents(playerListener, this);
         if (playerCurrencyService != null) {
             // Drops a leaving player's open /pay confirmation and its expiry notice.
             pluginManager.registerEvents(playerCurrencyService, this);
         }
-        pluginManager.registerEvents(new UserAccountListener(this, userManager, joinLoadingGuard, config.messages(), getLogger(), playerCurrencyService), this);
+        pluginManager.registerEvents(new UserAccountListener(this, userManager, joinLoadingGuard, config.messages(), getLogger(), playerCurrencyService,
+            newPlayerWindow, config.onboarding()), this);
         getLogger().info("Registered UserAccountListener for account management");
         pluginManager.registerEvents(new JoinLoadingRestrictionListener(joinLoadingGuard), this);
         pluginManager.registerEvents(new ModeListener(modeService), this);

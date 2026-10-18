@@ -2,8 +2,10 @@ package net.knightsandkings.knk.paper.discovery;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.BiConsumer;
+import java.util.function.Predicate;
 import java.util.logging.Logger;
 
 import org.bukkit.Bukkit;
@@ -42,6 +44,10 @@ public final class DiscoveryEffects {
     private final Particle particle;
     /** Told about every presented grant result (diagnostic telemetry, KNG-34 link 6); default no-op. */
     private BiConsumer<Player, DiscoveryGrantResult> grantObserver = (player, result) -> { };
+    /** A new player's quiet minutes (KNG-128): their announcements wait in {@link #held}. Default: nobody. */
+    private Predicate<UUID> quiet = playerId -> false;
+    private String settledSummaryTemplate = "";
+    private final HeldDiscoveries held = new HeldDiscoveries();
 
     public DiscoveryEffects(Plugin plugin, KnkConfig.DiscoveryConfig config, UsersDataAccess usersDataAccess,
                             BiConsumer<Player, UserSummary> displayRefresher) {
@@ -113,6 +119,53 @@ public final class DiscoveryEffects {
         };
     }
 
+    /**
+     * Holds the announcements of players for whom {@code quiet} is true (a new player's first minutes,
+     * KNG-128) and shows them as one summary ({@code summaryTemplate}, {count}) once it turns false.
+     */
+    public void holdWhileQuiet(Predicate<UUID> quiet, String summaryTemplate) {
+        this.quiet = quiet == null ? playerId -> false : quiet;
+        this.settledSummaryTemplate = summaryTemplate == null ? "" : summaryTemplate;
+    }
+
+    /**
+     * Grants of a quiet player are observed (telemetry) and the scoreboard shows the new balance, but
+     * the moment waits. Returns whether it was held.
+     */
+    private boolean heldBack(Player player, DiscoveryGrantResult result) {
+        UUID uuid = player.getUniqueId();
+        if (!quiet.test(uuid)) {
+            return false;
+        }
+        observeGrants(player, result);
+        held.hold(uuid, result);
+        refreshDisplay(uuid);
+        return true;
+    }
+
+    /**
+     * Shows the held discoveries of every player whose quiet minutes are over: one sound, the count
+     * and the totals, then a title change if there was one. A player who left meanwhile gets nothing
+     * (the discoveries menu lists them). Called by the flush timer.
+     */
+    public void releaseSettled() {
+        if (held.isEmpty()) {
+            return;
+        }
+        for (Map.Entry<UUID, DiscoveryGrantResult> entry : held.releaseWhere(quiet).entrySet()) {
+            Player player = Bukkit.getPlayer(entry.getKey());
+            if (player == null) {
+                continue;
+            }
+            DiscoveryGrantResult result = entry.getValue();
+            playSound(player);
+            DiscoveryMessages.replaySummary(settledSummaryTemplate, result).forEach(player::sendMessage);
+            if (result.titleChange() != null) {
+                PromotionEffects.show(player, result.titleChange());
+            }
+        }
+    }
+
     private void observeGrants(Player player, DiscoveryGrantResult result) {
         try {
             grantObserver.accept(player, result);
@@ -123,7 +176,7 @@ public final class DiscoveryEffects {
 
     /** Everything, for a discovery the player just made. */
     public void show(Player player, DiscoveryGrantResult result) {
-        if (result == null || !result.hasGrants()) {
+        if (result == null || !result.hasGrants() || heldBack(player, result)) {
             return;
         }
         observeGrants(player, result);
@@ -158,7 +211,7 @@ public final class DiscoveryEffects {
      * promotion if there was one.
      */
     public void showSummary(Player player, DiscoveryGrantResult result) {
-        if (result == null || !result.hasGrants()) {
+        if (result == null || !result.hasGrants() || heldBack(player, result)) {
             return;
         }
         observeGrants(player, result);
