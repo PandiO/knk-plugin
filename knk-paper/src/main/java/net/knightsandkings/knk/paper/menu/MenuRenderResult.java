@@ -36,6 +36,10 @@ import java.util.Map;
  * {@code materialNamespaceKeys} the material-ref lookups this pass needed,
  * kept so an auto-refresh (E4) never has to repeat them; {@code menuContext}
  * (E1) the ctx params the pass rendered with.
+ * <p>
+ * {@code blinkTicksBySlot} (KNG-125): the slots whose item renders as
+ * {@code BLINK}, with their blink interval in ticks - toggled by
+ * {@link MenuItemBlinker} without a re-render.
  */
 public record MenuRenderResult(
         Map<Integer, ItemStack> itemStacksBySlot,
@@ -48,6 +52,7 @@ public record MenuRenderResult(
         MenuContextParams menuContext,
         // Menu follow-up 2026-09-26: the Inventory size this render needs (a DYNAMIC menu can be
         // shorter than its template height).
-        int totalSlots
+        int totalSlots,
+        Map<Integer, Integer> blinkTicksBySlot
 ) {
 }

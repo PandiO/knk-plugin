@@ -20,11 +20,12 @@ import java.util.Optional;
  * @param updatedAt            the API's last-edit timestamp as sent, informational
  * @param motd                 server-list MOTD ({@code &}-coded, up to two lines); null = server.properties
  * @param groupOverrides       per-group overrides in precedence order (KNG-52); never null
+ * @param hub                  the hub (hub DESIGN §16 Phase 4); never null, {@link KnkHubSettings#none()} without one
  */
 public record KnkGameSettings(String joinSpawnMode, KnkSpawnReference joinSpawnReference, String joinAnnouncement,
                               String leaveAnnouncement, KnkRespawnPolicy defaultRespawnPolicy,
                               List<KnkWorldSettings> worldSettings, String updatedAt, String motd,
-                              List<KnkGroupOverride> groupOverrides) {
+                              List<KnkGroupOverride> groupOverrides, KnkHubSettings hub) {
 
     public static final String WORLD_SPAWN = "WorldSpawn";
     public static final String CUSTOM_REFERENCE = "CustomReference";
@@ -36,6 +37,16 @@ public record KnkGameSettings(String joinSpawnMode, KnkSpawnReference joinSpawnR
         groupOverrides = groupOverrides == null ? List.of()
             : groupOverrides.stream().filter(Objects::nonNull)
                 .sorted(Comparator.comparingInt(KnkGroupOverride::precedence)).toList();
+        hub = hub != null ? hub : KnkHubSettings.none();
+    }
+
+    /** Without a hub (KNG-52 shape). */
+    public KnkGameSettings(String joinSpawnMode, KnkSpawnReference joinSpawnReference, String joinAnnouncement,
+                           String leaveAnnouncement, KnkRespawnPolicy defaultRespawnPolicy,
+                           List<KnkWorldSettings> worldSettings, String updatedAt, String motd,
+                           List<KnkGroupOverride> groupOverrides) {
+        this(joinSpawnMode, joinSpawnReference, joinAnnouncement, leaveAnnouncement, defaultRespawnPolicy, worldSettings,
+            updatedAt, motd, groupOverrides, KnkHubSettings.none());
     }
 
     /** Without MOTD and group overrides (the first KNG-52 round). */

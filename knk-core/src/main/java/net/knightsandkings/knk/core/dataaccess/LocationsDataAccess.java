@@ -65,7 +65,7 @@ public class LocationsDataAccess {
         this.locationCache = new LocationCache(ttl);
         this.locationsQueryApi = Objects.requireNonNull(locationsQueryApi, "locationsQueryApi must not be null");
         this.settings = Objects.requireNonNullElse(settings, DataAccessSettings.defaults());
-        this.executor = new DataAccessExecutor<>(locationCache, this.settings.retryPolicy(), "Location");
+        this.executor = new DataAccessExecutor<>(locationCache, this.settings, "Location");
     }
     
     /**

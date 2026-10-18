@@ -10,6 +10,7 @@ public record EffectivePermissionEntryDto(
     @JsonProperty("value") boolean value,
     @JsonProperty("sourceHolderId") Integer sourceHolderId,
     @JsonProperty("sourceHolderType") String sourceHolderType,
-    @JsonProperty("sourceHolderName") String sourceHolderName
+    @JsonProperty("sourceHolderName") String sourceHolderName,
+    @JsonProperty("sourceRank") Integer sourceRank
 ) {
 }

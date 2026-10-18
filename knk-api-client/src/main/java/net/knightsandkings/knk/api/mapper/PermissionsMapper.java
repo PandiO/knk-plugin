@@ -37,7 +37,7 @@ public class PermissionsMapper {
 
     private static EffectivePermission mapEffectiveEntry(EffectivePermissionEntryDto dto) {
         PermissionHolder source = new PermissionHolder(dto.sourceHolderId(), dto.sourceHolderType(), dto.sourceHolderName());
-        return new EffectivePermission(dto.node(), dto.value(), source);
+        return new EffectivePermission(dto.node(), dto.value(), source, dto.sourceRank());
     }
 
     private static PermissionResolution parseResolution(String wireValue) {

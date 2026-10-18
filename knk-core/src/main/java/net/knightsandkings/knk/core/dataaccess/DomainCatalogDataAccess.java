@@ -52,7 +52,7 @@ public class DomainCatalogDataAccess {
         this.cache = new DomainSummaryCache(ttl);
         this.queryApi = Objects.requireNonNull(queryApi, "queryApi must not be null");
         this.settings = Objects.requireNonNullElse(settings, DataAccessSettings.defaults());
-        this.executor = new DataAccessExecutor<>(cache, this.settings.retryPolicy(), "DomainCatalog");
+        this.executor = new DataAccessExecutor<>(cache, this.settings, "DomainCatalog");
     }
 
     public CompletableFuture<FetchResult<KnkDomainSummary>> getByIdAsync(int id, FetchPolicy policy) {

@@ -1,6 +1,8 @@
 package net.knightsandkings.knk.core.dataaccess;
 
 import net.knightsandkings.knk.core.cache.BaseCache;
+import net.knightsandkings.knk.core.connectivity.ApiOutageSignal;
+import net.knightsandkings.knk.core.exception.ApiDownException;
 
 import java.util.Objects;
 import java.util.Optional;
@@ -16,6 +18,14 @@ import java.util.logging.Logger;
  * handles write-through caching, stale fallback, retry logic, and metrics.
  * Designed to be reused by domain-specific gateway classes to avoid
  * duplicating policy logic.
+ * <p>
+ * KNG-171: while the {@link ApiOutageSignal} reports DOWN, no API call is made. A read then ends
+ * the way it would after a failed call (an {@link ApiDownException} in place of the connection
+ * error), only at once and without retries: CACHE_FIRST and API_ONLY answer ERROR on a miss,
+ * STALE_OK serves a stale entry, API_THEN_CACHE_REFRESH serves a fresh cached entry. A fresh cache
+ * hit is answered as always. The signal is read before the first attempt and again before every
+ * retry, so a retry already scheduled when the state turns DOWN is not sent either. Writes don't go
+ * through this class and stay API-authoritative.
  *
  * @param <K> Cache key type
  * @param <V> Entity/value type
@@ -27,6 +37,7 @@ public final class DataAccessExecutor<K, V> {
     private final BaseCache<K, V> cache;
     private final RetryPolicy retryPolicy;
     private final String entityName; // For logging/metrics context
+    private final ApiOutageSignal apiOutage;
     
     /**
      * Create a DataAccessExecutor with the given cache and retry policy.
@@ -40,8 +51,36 @@ public final class DataAccessExecutor<K, V> {
         RetryPolicy retryPolicy,
         String entityName
     ) {
+        this(cache, retryPolicy, ApiOutageSignal.NEVER, entityName);
+    }
+
+    /**
+     * Create a DataAccessExecutor with the retry policy and API outage signal of {@code settings}.
+     *
+     * @param cache Cache instance for this entity type
+     * @param settings Gateway settings (retry policy, API outage signal)
+     * @param entityName Human-readable entity name (e.g., "User", "Town") for logging
+     */
+    public DataAccessExecutor(
+        BaseCache<K, V> cache,
+        DataAccessSettings settings,
+        String entityName
+    ) {
+        this(cache, settings.retryPolicy(), settings.apiOutage(), entityName);
+    }
+
+    /**
+     * @param apiOutage while it reports DOWN, reads make no API call (KNG-171)
+     */
+    public DataAccessExecutor(
+        BaseCache<K, V> cache,
+        RetryPolicy retryPolicy,
+        ApiOutageSignal apiOutage,
+        String entityName
+    ) {
         this.cache = Objects.requireNonNull(cache, "cache must not be null");
         this.retryPolicy = Objects.requireNonNull(retryPolicy, "retryPolicy must not be null");
+        this.apiOutage = Objects.requireNonNullElse(apiOutage, ApiOutageSignal.NEVER);
         this.entityName = Objects.requireNonNull(entityName, "entityName must not be null");
     }
     
@@ -199,7 +238,7 @@ public final class DataAccessExecutor<K, V> {
         
         // 2. Cache miss -> fetch from API with retry
         try {
-            V apiValue = retryPolicy.execute(apiSupplier);
+            V apiValue = callApi(apiSupplier);
             
             if (apiValue == null) {
                 logApiNotFound(key);
@@ -220,7 +259,7 @@ public final class DataAccessExecutor<K, V> {
     private FetchResult<V> executeApiOnly(K key, Supplier<V> apiSupplier) {
         // Bypass cache for read, but still write-through on success
         try {
-            V apiValue = retryPolicy.execute(apiSupplier);
+            V apiValue = callApi(apiSupplier);
             
             if (apiValue == null) {
                 logApiNotFound(key);
@@ -241,7 +280,7 @@ public final class DataAccessExecutor<K, V> {
     private FetchResult<V> executeApiThenCache(K key, Supplier<V> apiSupplier) {
         // Try API first; on failure fall back to cache
         try {
-            V apiValue = retryPolicy.execute(apiSupplier);
+            V apiValue = callApi(apiSupplier);
             
             if (apiValue == null) {
                 logApiNotFound(key);
@@ -281,7 +320,7 @@ public final class DataAccessExecutor<K, V> {
         
         // Cache miss -> try API
         try {
-            V apiValue = retryPolicy.execute(apiSupplier);
+            V apiValue = callApi(apiSupplier);
             
             if (apiValue == null) {
                 logApiNotFound(key);
@@ -333,7 +372,7 @@ public final class DataAccessExecutor<K, V> {
         logCacheMiss(key);
         
         // 2. Cache miss -> fetch from API with retry
-        return retryPolicy.executeAsync(apiSupplier)
+        return callApiAsync(apiSupplier)
             .thenApply(apiValue -> {
                 if (apiValue == null) {
                     logApiNotFound(key);
@@ -355,7 +394,7 @@ public final class DataAccessExecutor<K, V> {
         K key,
         Supplier<CompletableFuture<V>> apiSupplier
     ) {
-        return retryPolicy.executeAsync(apiSupplier)
+        return callApiAsync(apiSupplier)
             .thenApply(apiValue -> {
                 if (apiValue == null) {
                     logApiNotFound(key);
@@ -376,7 +415,7 @@ public final class DataAccessExecutor<K, V> {
         K key,
         Supplier<CompletableFuture<V>> apiSupplier
     ) {
-        return retryPolicy.executeAsync(apiSupplier)
+        return callApiAsync(apiSupplier)
             .thenApply(apiValue -> {
                 if (apiValue == null) {
                     logApiNotFound(key);
@@ -418,7 +457,7 @@ public final class DataAccessExecutor<K, V> {
         logCacheMiss(key);
         
         // Cache miss -> try API
-        return retryPolicy.executeAsync(apiSupplier)
+        return callApiAsync(apiSupplier)
             .thenApply(apiValue -> {
                 if (apiValue == null) {
                     logApiNotFound(key);
@@ -442,6 +481,35 @@ public final class DataAccessExecutor<K, V> {
             });
     }
     
+    // ==================== API calls (KNG-171 outage gate) ====================
+
+    /** The API call with retries, unless the API is DOWN: then it throws without calling. */
+    private V callApi(Supplier<V> apiSupplier) throws Exception {
+        if (apiOutage.isApiDown()) {
+            throw apiDown();
+        }
+        return retryPolicy.execute(() -> {
+            if (apiOutage.isApiDown()) {
+                throw apiDown();
+            }
+            return apiSupplier.get();
+        });
+    }
+
+    /** The API call with retries, unless the API is DOWN: then it fails at once without calling. */
+    private CompletableFuture<V> callApiAsync(Supplier<CompletableFuture<V>> apiSupplier) {
+        if (apiOutage.isApiDown()) {
+            return CompletableFuture.failedFuture(apiDown());
+        }
+        return retryPolicy.executeAsync(() -> apiOutage.isApiDown()
+            ? CompletableFuture.failedFuture(apiDown())
+            : apiSupplier.get());
+    }
+
+    private ApiDownException apiDown() {
+        return new ApiDownException(entityName);
+    }
+
     // ==================== Logging Helpers ====================
     
     private void logCacheHit(K key) {
@@ -461,6 +529,11 @@ public final class DataAccessExecutor<K, V> {
     }
     
     private void logApiError(K key, Throwable error) {
+        if (ApiDownException.isApiDown(error)) {
+            // Expected on every miss during an outage; the connectivity monitor already logged DOWN.
+            LOGGER.fine(() -> String.format("[%s] API is DOWN, not requested: %s", entityName, key));
+            return;
+        }
         LOGGER.log(
             Level.WARNING,
             String.format("[%s] API fetch failed for: %s", entityName, key),

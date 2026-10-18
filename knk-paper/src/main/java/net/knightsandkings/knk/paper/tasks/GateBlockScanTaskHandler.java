@@ -14,6 +14,7 @@ import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
 import net.knightsandkings.knk.core.util.CoordinateParser;
 import net.knightsandkings.knk.paper.utils.TickBudget;
 import net.knightsandkings.knk.core.util.VectorMath;
+import net.knightsandkings.knk.paper.gates.GateReferencePoints;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -118,6 +119,16 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
     }
 
     private void startPlaneGridScan(int taskId, GateDoorDto gate, boolean useOpenAnchor, Runnable onFinished) {
+        // KNG-132: a sheared basis scans the wrong blocks and the door jams when it moves.
+        String pointsProblem = GateReferencePoints.referencePoint2Problem(
+            CoordinateParser.parseCoordinate(gate.getAnchorPoint()),
+            CoordinateParser.parseCoordinate(gate.getReferencePoint1()),
+            CoordinateParser.parseCoordinate(gate.getReferencePoint2()));
+        if (pointsProblem != null) {
+            fail(taskId, "Gate '" + gate.getName() + "' cannot be scanned: " + pointsProblem, onFinished);
+            return;
+        }
+
         List<ScanWing> wings = buildScanWings(gate, useOpenAnchor);
         if (wings.isEmpty()) {
             String anchorLabel = useOpenAnchor ? "OpenAnchorPoint" : "anchor";

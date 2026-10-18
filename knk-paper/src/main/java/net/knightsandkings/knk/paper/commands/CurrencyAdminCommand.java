@@ -4,10 +4,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.function.BiPredicate;
 
+import org.bukkit.ChatColor;
 import org.bukkit.command.CommandSender;
 
 import net.knightsandkings.knk.core.domain.users.BalanceCurrency;
+import net.knightsandkings.knk.paper.commands.support.CommandPermissions;
 import net.knightsandkings.knk.paper.currency.PlayerCurrencyService;
 
 /**
@@ -22,22 +26,41 @@ public class CurrencyAdminCommand {
     static final List<String> ACTIONS = List.of("reverse", "history", "lock", "unlock", "alerts");
     private static final String PARTIAL_FLAG = "--partial";
 
+    /** The node each action checks (inside {@link PlayerCurrencyService}); completion offers only the held ones. */
+    static final Map<String, String> NODE_BY_ACTION = Map.of(
+            "reverse", PlayerCurrencyService.CURRENCY_REVERSE_NODE,
+            "history", PlayerCurrencyService.CURRENCY_HISTORY_NODE,
+            "lock", PlayerCurrencyService.CURRENCY_LOCK_NODE,
+            "unlock", PlayerCurrencyService.CURRENCY_LOCK_NODE,
+            "alerts", PlayerCurrencyService.CURRENCY_ALERTS_NODE);
+    /** Every action node: /knk currency is listed to holders of at least one (KNG-107). */
+    public static final List<String> NODES = List.of(PlayerCurrencyService.CURRENCY_REVERSE_NODE,
+            PlayerCurrencyService.CURRENCY_HISTORY_NODE, PlayerCurrencyService.CURRENCY_LOCK_NODE,
+            PlayerCurrencyService.CURRENCY_ALERTS_NODE);
+
     private final PlayerCurrencyService currencyService;
+    private final BiPredicate<CommandSender, String> holdsCached;
 
     public CurrencyAdminCommand(PlayerCurrencyService currencyService) {
+        this(currencyService, CommandPermissions.bukkitOnly()::has);
+    }
+
+    /** {@code holdsCached}: the immediate (cache-only) node check used for tab completion. */
+    public CurrencyAdminCommand(PlayerCurrencyService currencyService, BiPredicate<CommandSender, String> holdsCached) {
         this.currencyService = currencyService;
+        this.holdsCached = holdsCached;
     }
 
     public boolean execute(CommandSender sender, String[] args) {
         if (args.length == 0 || !ACTIONS.contains(args[0].toLowerCase(Locale.ROOT))) {
-            usage(sender);
+            usage(sender, null);
             return true;
         }
         String action = args[0].toLowerCase(Locale.ROOT);
         switch (action) {
             case "reverse" -> {
                 if (args.length < 3) {
-                    usage(sender);
+                    usage(sender, action);
                     return true;
                 }
                 List<String> words = new ArrayList<>(Arrays.asList(args).subList(2, args.length));
@@ -46,7 +69,7 @@ public class CurrencyAdminCommand {
             }
             case "history" -> {
                 if (args.length < 2) {
-                    usage(sender);
+                    usage(sender, action);
                     return true;
                 }
                 BalanceCurrency currency = null;
@@ -60,7 +83,7 @@ public class CurrencyAdminCommand {
                     try {
                         page = Math.max(1, Integer.parseInt(args[i]));
                     } catch (NumberFormatException ex) {
-                        usage(sender);
+                        usage(sender, action);
                         return true;
                     }
                 }
@@ -68,7 +91,7 @@ public class CurrencyAdminCommand {
             }
             case "lock" -> {
                 if (args.length < 3) {
-                    usage(sender);
+                    usage(sender, action);
                     return true;
                 }
                 currencyService.staffLock(sender, args[1], String.join(" ", Arrays.copyOfRange(args, 2, args.length)));
@@ -78,7 +101,7 @@ public class CurrencyAdminCommand {
             }
             default -> {
                 if (args.length != 2) {
-                    usage(sender);
+                    usage(sender, action);
                     return true;
                 }
                 currencyService.staffUnlock(sender, args[1]);
@@ -91,7 +114,7 @@ public class CurrencyAdminCommand {
     private boolean alerts(CommandSender sender, String[] args) {
         if (args.length > 0 && "ack".equalsIgnoreCase(args[0])) {
             if (args.length != 2) {
-                usage(sender);
+                usage(sender, "alerts");
                 return true;
             }
             currencyService.staffAcknowledgeAlert(sender, args[1]);
@@ -107,7 +130,7 @@ public class CurrencyAdminCommand {
             try {
                 page = Math.max(1, Integer.parseInt(arg));
             } catch (NumberFormatException ex) {
-                usage(sender);
+                usage(sender, "alerts");
                 return true;
             }
         }
@@ -115,13 +138,19 @@ public class CurrencyAdminCommand {
         return true;
     }
 
-    /** Suggestions after {@code /knk currency}: the action, then a visible player's name where one goes. */
+    /**
+     * Suggestions after {@code /knk currency}: the actions whose node the sender holds (cached check,
+     * KNG-107), then a visible player's name where one goes - nothing for an action they can't run.
+     */
     public List<String> complete(CommandSender sender, String[] args) {
         if (args.length <= 1) {
             String prefix = args.length == 0 ? "" : args[0].toLowerCase(Locale.ROOT);
-            return ACTIONS.stream().filter(a -> a.startsWith(prefix)).toList();
+            return ACTIONS.stream().filter(a -> a.startsWith(prefix) && holds(sender, a)).toList();
         }
         String action = args[0].toLowerCase(Locale.ROOT);
+        if (!ACTIONS.contains(action) || !holds(sender, action)) {
+            return List.of();
+        }
         if ("alerts".equals(action)) {
             return args.length == 2
                 ? List.of("all", "ack").stream().filter(o -> o.startsWith(args[1].toLowerCase(Locale.ROOT))).toList()
@@ -139,6 +168,10 @@ public class CurrencyAdminCommand {
         return List.of();
     }
 
+    private boolean holds(CommandSender sender, String action) {
+        return holdsCached.test(sender, NODE_BY_ACTION.get(action));
+    }
+
     static BalanceCurrency parseCurrency(String value) {
         return switch (value.toLowerCase(Locale.ROOT)) {
             case "coins", "coin" -> BalanceCurrency.COINS;
@@ -148,7 +181,30 @@ public class CurrencyAdminCommand {
         };
     }
 
-    private void usage(CommandSender sender) {
-        sender.sendMessage(currencyService.settings().message("currency-admin-usage"));
+    /** Each action's form, for a usage line that names only what the sender typed or may use (KNG-107). */
+    private static final Map<String, String> FORM_BY_ACTION = Map.of(
+            "reverse", "reverse <txId> [--partial] <reason...>",
+            "history", "history <player> [coins|gems|xp] [page]",
+            "lock", "lock <player> <reason...>",
+            "unlock", "unlock <player>",
+            "alerts", "alerts [all] [page] | alerts ack <id>");
+
+    /**
+     * The usage of {@code action} alone; without one, the forms of the actions the sender holds (the
+     * configurable {@code currency-admin-usage} message when they hold all of them). KNG-107 live test:
+     * {@code /knk currency lock} printed the whole command tree.
+     */
+    private void usage(CommandSender sender, String action) {
+        if (action != null) {
+            sender.sendMessage(ChatColor.YELLOW + "Usage: /knk currency " + FORM_BY_ACTION.get(action));
+            return;
+        }
+        List<String> held = ACTIONS.stream().filter(a -> holds(sender, a)).toList();
+        if (held.size() == ACTIONS.size() || held.isEmpty()) {
+            sender.sendMessage(currencyService.settings().message("currency-admin-usage"));
+            return;
+        }
+        sender.sendMessage(ChatColor.YELLOW + "Usage: /knk currency "
+                + String.join(ChatColor.GRAY + " | " + ChatColor.YELLOW, held.stream().map(FORM_BY_ACTION::get).toList()));
     }
 }

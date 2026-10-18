@@ -90,7 +90,15 @@ public class RestoreCommand implements TabExecutor {
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length > 1) {
-            sender.sendMessage(ChatColor.YELLOW + "Usage: /" + kind.label + " [player|all]");
+            // KNG-107: only the forms the sender holds the node for.
+            List<String> forms = new java.util.ArrayList<>();
+            if (support.holds(sender, kind.othersNode())) {
+                forms.add("player");
+            }
+            if (support.holds(sender, kind.allNode())) {
+                forms.add("all");
+            }
+            sender.sendMessage(ChatColor.YELLOW + "Usage: /" + kind.label + (forms.isEmpty() ? "" : " [" + String.join("|", forms) + "]"));
             return true;
         }
 
@@ -166,7 +174,11 @@ public class RestoreCommand implements TabExecutor {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
-            return support.completePlayers(sender, args[0], ALL);
+            // KNG-107: player names with the .others node, "all" with the .all node (cached checks).
+            List<String> extra = support.holds(sender, kind.allNode()) ? List.of(ALL) : List.of();
+            return support.holds(sender, kind.othersNode())
+                ? support.completePlayers(sender, args[0], extra.toArray(String[]::new))
+                : PlayerCommandSupport.completeWords(args[0], extra);
         }
         return Collections.emptyList();
     }

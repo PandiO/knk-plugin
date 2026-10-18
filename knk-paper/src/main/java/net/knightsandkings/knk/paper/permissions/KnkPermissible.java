@@ -16,6 +16,7 @@ import net.knightsandkings.knk.core.dataaccess.PermissionsDataAccess;
 import net.knightsandkings.knk.core.domain.permissions.PermissionCheckResult;
 import net.knightsandkings.knk.core.domain.permissions.PermissionDecision;
 import net.knightsandkings.knk.core.domain.users.UserSummary;
+import net.knightsandkings.knk.core.exception.ApiDownException;
 import net.knightsandkings.knk.core.offline.OfflineSecurityStore;
 
 /**
@@ -52,6 +53,11 @@ import net.knightsandkings.knk.core.offline.OfflineSecurityStore;
  * {@link OfflineSecurityStore} (on disk, bounded by age; an unknown or too-old answer still means
  * no). The same store fills the gap after the 30 s memory TTL, so the first check after it no
  * longer fails closed while the refresh is under way.
+ * <p>
+ * KNG-171: while the service-wide connectivity state is DOWN, {@link PermissionsDataAccess} makes
+ * no API call (no retries, no connection wait): a fresh in-memory answer is used as always, else
+ * the check reads as UNAVAILABLE at once and is answered from the offline store as above. A
+ * last-known deny stays a deny and an answer past its max age is unknown (no).
  */
 public class KnkPermissible {
 
@@ -127,8 +133,14 @@ public class KnkPermissible {
             .thenApply(result -> {
                 PermissionDecision decision = PermissionsDataAccess.decide(result);
                 if (decision == PermissionDecision.UNAVAILABLE) {
-                    LOGGER.log(Level.WARNING, "Permission check failed for user " + userId + ", node " + node,
-                        result != null ? result.error().orElse(null) : null);
+                    Throwable error = result != null ? result.error().orElse(null) : null;
+                    if (ApiDownException.isApiDown(error)) {
+                        // KNG-171: not asked because the API is DOWN; expected, so no warning per check.
+                        LOGGER.fine(() -> "API DOWN: permission for user " + userId + ", node " + node
+                            + " answered from the offline store");
+                    } else {
+                        LOGGER.log(Level.WARNING, "Permission check failed for user " + userId + ", node " + node, error);
+                    }
                     return lastKnown(userId, node);
                 }
                 return decision;
@@ -137,6 +149,41 @@ public class KnkPermissible {
                 LOGGER.log(Level.WARNING, "Permission check failed for user " + userId + ", node " + node, ex);
                 return lastKnown(userId, node);
             });
+    }
+
+    /**
+     * KNG-107: loads the player's permission set ahead of their first check (at login), so the join
+     * itself and their first command or listing answer from memory. Completes normally either way.
+     */
+    public CompletableFuture<Void> preload(UUID uuid) {
+        Integer userId = resolveUserId(uuid);
+        if (userId == null) {
+            return CompletableFuture.completedFuture(null);
+        }
+        return permissionsDataAccess.preload(userId).exceptionally(ex -> {
+            LOGGER.log(Level.FINE, "Permission preload failed for user " + userId, ex);
+            return null;
+        });
+    }
+
+    /**
+     * KNG-107: whether cache-only checks for the player answer from their loaded permission set (ops
+     * always), so a listing need not wait for the API.
+     */
+    public boolean listingReady(OfflinePlayer player) {
+        if (player.isOp()) {
+            return true;
+        }
+        Integer userId = resolveUserId(player.getUniqueId());
+        return userId != null && permissionsDataAccess.hasLoadedSet(userId);
+    }
+
+    /** Drops the player's loaded permission set (they left). */
+    public void forget(UUID uuid) {
+        Integer userId = resolveUserId(uuid);
+        if (userId != null) {
+            permissionsDataAccess.forget(userId);
+        }
     }
 
     private Integer resolveUserId(UUID uuid) {

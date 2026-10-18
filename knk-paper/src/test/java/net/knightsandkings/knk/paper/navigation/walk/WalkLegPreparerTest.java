@@ -61,7 +61,7 @@ class WalkLegPreparerTest {
         WalkGoal goal = WalkGoal.within(6.5, 64, 6.5, 0.25);
 
         Supplier<WalkRequest> supplier = await(preparer.prepare(player, new double[] {1.5, 65.0, 1.5},
-            new double[] {6.5, 64, 6.5}, goal));
+            new double[] {6.5, 64, 6.5}, goal, null));
         WalkRequest request = supplier.get();
 
         assertSame(goal, request.goal());
@@ -80,7 +80,7 @@ class WalkLegPreparerTest {
         chunks.unloaded.add(WalkChunk.key(0, 0));
 
         CompletableFuture<Supplier<WalkRequest>> future = preparer.prepare(player, new double[] {1.5, 65.0, 1.5},
-            new double[] {6.5, 64, 6.5}, WalkGoal.within(6.5, 64, 6.5, 1));
+            new double[] {6.5, 64, 6.5}, WalkGoal.within(6.5, 64, 6.5, 1), null);
 
         assertTrue(future.isDone(), "no waiting for a chunk that is not there");
         assertNull(future.join(), "null = keep the straight line");
@@ -89,7 +89,7 @@ class WalkLegPreparerTest {
     @Test
     void cancellingTheLegCancelsTheCapture() {
         CompletableFuture<Supplier<WalkRequest>> future = preparer.prepare(player, new double[] {1.5, 65.0, 1.5},
-            new double[] {6.5, 64, 6.5}, WalkGoal.within(6.5, 64, 6.5, 1));
+            new double[] {6.5, 64, 6.5}, WalkGoal.within(6.5, 64, 6.5, 1), null);
         assertEquals(1, snapshots.stats().pendingRequests());
 
         future.cancel(false);

@@ -85,4 +85,43 @@ class GatedCommandVisibilityListenerTest {
         assertEquals(7, send().size());
         verify(player, times(1)).updateCommands();
     }
+
+    // KNG-107: a command with several forms is shown when any one of its nodes is held.
+    @Test
+    void anAnyOfCommandIsShownToHoldersOfOneNode() {
+        listener.gate(List.of("inventory"), List.of("knk.inventory.open", "knk.inventory.clear"));
+        live("knk.staffchat", PermissionDecision.DENIED);
+        live("knk.freeze", PermissionDecision.DENIED);
+        live("knk.inventory.open", PermissionDecision.DENIED);
+        live("knk.inventory.clear", PermissionDecision.ALLOWED);
+        when(permissible.hasPermission(player, "knk.inventory.clear")).thenReturn(true);
+
+        Collection<String> commands = new ArrayList<>(List.of("msg", "inventory", "knightsandkings:inventory"));
+        listener.onCommandSend(new PlayerCommandSendEvent(player, commands));
+        assertEquals(List.of("msg", "inventory", "knightsandkings:inventory"), List.copyOf(commands));
+
+        when(permissible.hasPermission(player, "knk.inventory.clear")).thenReturn(false);
+        live("knk.inventory.clear", PermissionDecision.DENIED);
+        GatedCommandVisibilityListener fresh = new GatedCommandVisibilityListener(CommandPermissions.of(permissible, Runnable::run), Runnable::run);
+        fresh.gate(List.of("inventory"), List.of("knk.inventory.open", "knk.inventory.clear"));
+        Collection<String> hidden = new ArrayList<>(List.of("msg", "inventory"));
+        fresh.onCommandSend(new PlayerCommandSendEvent(player, hidden));
+        assertEquals(List.of("msg"), List.copyOf(hidden));
+    }
+
+    // KNG-107 live test: no namespaced forms, and other plugins' commands only when the filter allows them.
+    @Test
+    void namespacedLabelsAndHiddenOtherCommandsAreLeftOut_withoutAnyPermissionCheckForThem() {
+        GatedCommandVisibilityListener plain = new GatedCommandVisibilityListener(CommandPermissions.of(permissible, Runnable::run), Runnable::run);
+        plain.setHideNamespaced(true);
+        plain.setOtherCommandsHidden((p, label) -> label.equals("autopluginloader") || label.equals("/pos1"));
+
+        Collection<String> commands = new ArrayList<>(List.of("msg", "knightsandkings:msg", "worldedit:/pos1", "/pos1",
+            "autopluginloader", "autopluginloader:apl", "spawn"));
+        plain.onCommandSend(new PlayerCommandSendEvent(player, commands));
+
+        assertEquals(List.of("msg", "spawn"), List.copyOf(commands));
+        verify(permissible, never()).checkAsync(any(), anyString());
+        verify(player, never()).updateCommands();
+    }
 }

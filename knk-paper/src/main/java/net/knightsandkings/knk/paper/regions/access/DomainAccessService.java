@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import java.util.function.Predicate;
@@ -61,6 +62,8 @@ public class DomainAccessService {
     private final Consumer<Runnable> nextTick;
     private volatile Predicate<Player> bypass = player -> false;
     private volatile Enforcer enforcer;
+    /** Rewords a refusal for where the player stands (the hub tells them to use its portal); identity by default. */
+    private volatile BiFunction<Location, Refusal, Refusal> wording = (from, refusal) -> refusal;
     // Players being moved by the plugin itself to undo or prevent a refused move: never judged.
     private final Set<UUID> exempt = new HashSet<>();
 
@@ -77,6 +80,18 @@ public class DomainAccessService {
 
     public void setEnforcer(Enforcer enforcer) {
         this.enforcer = enforcer;
+    }
+
+    /**
+     * Rewords refusals by where the player is leaving from, e.g. the hub's "use the portal" instead of "You are not
+     * allowed to leave Kardenna." (smoke test 2026-10-17). Null restores the plain messages.
+     */
+    public void setRefusalWording(BiFunction<Location, Refusal, Refusal> wording) {
+        this.wording = wording != null ? wording : (from, refusal) -> refusal;
+    }
+
+    private Optional<Refusal> worded(Location from, Optional<Refusal> refusal) {
+        return from == null ? refusal : refusal.map(r -> wording.apply(from, r));
     }
 
     public boolean bypasses(Player player, Location where) {
@@ -101,7 +116,7 @@ public class DomainAccessService {
         if ((entered == null || entered.isEmpty()) && (exited == null || exited.isEmpty())) {
             return Optional.empty();
         }
-        Optional<Refusal> refusal = rules.evaluate(entered, exited);
+        Optional<Refusal> refusal = worded(player.getLocation(), rules.evaluate(entered, exited));
         if (refusal.isEmpty() || !cancellable || bypasses(player, to)) {
             return Optional.empty();
         }
@@ -129,7 +144,7 @@ public class DomainAccessService {
         if (entered.isEmpty() && exited.isEmpty()) {
             return Optional.empty();
         }
-        Optional<Refusal> refusal = rules.evaluate(entered, exited);
+        Optional<Refusal> refusal = worded(from, rules.evaluate(entered, exited));
         if (refusal.isEmpty() || bypasses(player, to)) {
             return Optional.empty();
         }

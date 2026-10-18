@@ -70,6 +70,8 @@ public final class MenuService {
     private final Set<String> validatedMenus = ConcurrentHashMap.newKeySet();
     /** Diagnostic telemetry / funnel hooks (KNG-34 link 6); empty unless a feature registers one. */
     private final MenuObservers observers = new MenuObservers();
+    /** KNG-125: toggles BLINK items each tick ({@link #processBlinks}). */
+    private final MenuItemBlinker blinker = new MenuItemBlinker();
 
     public MenuService(
             Plugin plugin,
@@ -229,6 +231,26 @@ public final class MenuService {
         }
     }
 
+    /**
+     * KNG-125: one tick of the item blinker - swaps every open menu's {@code BLINK} slots between
+     * their item and the yellow pane when their interval says so. Called by
+     * {@link MenuAutoRefreshTask} on the main thread, after {@link #processDueRefreshes}. Menus with
+     * no blinking slot cost one map lookup; a closed menu has no context and is not visited.
+     */
+    public void processBlinks() {
+        long now = MenuRenderer.currentTick();
+        for (OpenMenuContext context : openMenuContextRegistry.all()) {
+            if (context.blinkTicksBySlot().isEmpty()) {
+                continue;
+            }
+            Player player = context.player();
+            if (!player.isOnline() || !player.getOpenInventory().getTopInventory().equals(context.inventory())) {
+                continue;
+            }
+            blinker.tick(context, now, player.isSneaking());
+        }
+    }
+
     /** Re-renders an open menu in place from its cached template and material keys (no re-fetch). */
     private void refresh(OpenMenuContext context, MenuSession session) {
         Player player = context.player();
@@ -251,6 +273,8 @@ public final class MenuService {
                         }
                         renderer.applyToInventory(context.inventory(), result, player.isSneaking());
                         context.update(menu, result);
+                        // KNG-125: a slot in its pane phase gets the pane back in this same tick.
+                        blinker.tick(context, MenuRenderer.currentTick(), player.isSneaking());
                     }
                 }, mainThread);
     }
@@ -446,6 +470,7 @@ public final class MenuService {
                 && player.getOpenInventory().getTopInventory().equals(existing.get().inventory())) {
             renderer.applyToInventory(existing.get().inventory(), result, revealControls);
             existing.get().update(menu, result);
+            blinker.tick(existing.get(), MenuRenderer.currentTick(), revealControls);
             refreshSchedule.track(player.getUniqueId(), menu.autoRefreshTicks(), MenuRenderer.currentTick());
             return;
         }
@@ -504,7 +529,10 @@ public final class MenuService {
         refreshSchedule.untrack(playerId);
     }
 
-    /** Called when a KnK menu Inventory is closed: stop auto-refreshing it (the session itself survives). */
+    /**
+     * Called when a KnK menu Inventory is closed: stop auto-refreshing it (the session itself survives).
+     * The caller then drops the {@link OpenMenuContext}, which also stops its blinking items (KNG-125).
+     */
     public void onMenuInventoryClosed(UUID playerId) {
         if (!observers.isEmpty()) {
             observers.closed(playerId, openMenuContextRegistry.get(playerId).map(c -> c.menu().key()).orElse(null));

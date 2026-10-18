@@ -36,7 +36,8 @@ import net.knightsandkings.knk.paper.navigation.NavigationAccess;
  *   <li><b>Domains</b> — the WorldGuard regions overlapping the box, copied into Bukkit-free
  *       {@link RegionShape}s (decision L3-2: {@code ProtectedRegion.contains} is not documented as
  *       thread-safe and regions can be redefined while a search runs), each marked "the player is in it
- *       now"; {@link WalkAccess#resolve} keeps the entry/exit-denying ones ({@link DeniedRegionAccess}).</li>
+ *       now"; {@link WalkAccess#resolve} keeps the entry/exit-denying ones ({@link DeniedRegionAccess}), and with
+ *       the destination's regions the ones the player could not leave again (KNG-121).</li>
  *   <li><b>Doors</b> — each hand-openable door block in the box is checked once: WorldGuard's own
  *       answer to a click ({@code testBuild} with {@code INTERACT} and {@code USE}, as the region
  *       protection listener does for doors), WorldGuard's region bypass or KnK's
@@ -66,18 +67,32 @@ public final class WalkAccessFactory {
      * Immutable; {@link #resolve} may run on any thread.
      */
     public record WalkAccess(GateCellAccess gates, DoorCellAccess doors, List<DeniedRegionAccess.Candidate> regions,
-                             boolean bypass, DomainAvailability.DomainLookup lookup, DomainAccessEvaluator evaluator) {
+                             boolean bypass, DomainAvailability.DomainLookup lookup, DomainAccessEvaluator evaluator,
+                             Set<String> destinationRegions) {
+        /**
+         * @param destinationRegions KNG-121: the regions the navigation's destination lies in, for the "no way out"
+         *                           rule ({@link DeniedRegionAccess#resolve(List, Set, DomainAvailability.DomainLookup,
+         *                           DomainAccessEvaluator, boolean)}); null = not known, no such rule
+         */
         public WalkAccess {
             Objects.requireNonNull(gates, "gates");
             Objects.requireNonNull(doors, "doors");
             regions = List.copyOf(Objects.requireNonNull(regions, "regions"));
             Objects.requireNonNull(lookup, "lookup");
             Objects.requireNonNull(evaluator, "evaluator");
+            destinationRegions = destinationRegions == null ? null : Set.copyOf(destinationRegions);
+        }
+
+        /** Without the destination's regions (no "no way out" rule). */
+        public WalkAccess(GateCellAccess gates, DoorCellAccess doors, List<DeniedRegionAccess.Candidate> regions,
+                          boolean bypass, DomainAvailability.DomainLookup lookup, DomainAccessEvaluator evaluator) {
+            this(gates, doors, regions, bypass, lookup, evaluator, null);
         }
 
         /** Routing thread: looks the regions' domains up (may block briefly) and composes gates, doors and domains. */
         public CellAccess resolve() {
-            return CellAccess.all(gates, doors, DeniedRegionAccess.resolve(regions, lookup, evaluator, bypass));
+            return CellAccess.all(gates, doors,
+                DeniedRegionAccess.resolve(regions, destinationRegions, lookup, evaluator, bypass));
         }
     }
 
@@ -135,6 +150,16 @@ public final class WalkAccessFactory {
      */
     public WalkAccess prepare(Player player, World world, GateCells gates, WalkSnapshotService.WalkCapture capture,
                               int headroom) {
+        return prepare(player, world, gates, capture, headroom, null);
+    }
+
+    /**
+     * As above, with the "no way out" rule (KNG-121).
+     *
+     * @param destinationRegions the regions the navigation's destination lies in; null = not known (no such rule)
+     */
+    public WalkAccess prepare(Player player, World world, GateCells gates, WalkSnapshotService.WalkCapture capture,
+                              int headroom, Set<String> destinationRegions) {
         Objects.requireNonNull(player, "player");
         Objects.requireNonNull(capture, "capture");
         if (!capture.ready()) {
@@ -168,7 +193,7 @@ public final class WalkAccessFactory {
         }
         String worldName = world == null ? null : world.getName();
         return new WalkAccess(gateAccess, doorAccess, candidates, bypasses,
-            regionId -> lookup.apply(worldName, regionId), evaluator);
+            regionId -> lookup.apply(worldName, regionId), evaluator, destinationRegions);
     }
 
     /** Door ids of a {@link GateCells} that is not an index (tests): scan the box. */

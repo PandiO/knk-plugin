@@ -88,6 +88,37 @@ public final class PlayerCommandSupport {
                 }));
     }
 
+    /**
+     * Immediate answer for tab completion (KNG-107): the cached in-house answer
+     * ({@link KnkPermissible#hasPermission}; ops pass, the console passes). Never waits on
+     * knk-web-api: on a "no" it asks in the background, so a cold or expired cache shows the real
+     * answer from the next keystroke on (a cached "no" is answered from the cache, no API call).
+     * Running the command still checks for real ({@link #whenAllowed}).
+     */
+    public boolean holds(CommandSender sender, String node) {
+        if (!(sender instanceof Player player)) {
+            return true;
+        }
+        if (knkPermissible.hasPermission(player, node)) {
+            return true;
+        }
+        try {
+            knkPermissible.checkAsync(player, node);
+        } catch (RuntimeException ex) {
+            LOGGER.log(Level.FINE, "Background permission check failed for " + player.getName() + ", node " + node, ex);
+        }
+        return false;
+    }
+
+    /** {@link #holds} for any one of {@code nodes}. */
+    public boolean holdsAny(CommandSender sender, Collection<String> nodes) {
+        boolean any = false;
+        for (String node : nodes) {
+            any |= holds(sender, node);
+        }
+        return any;
+    }
+
     /** Whether {@code player} holds {@code node}, quietly: false when it couldn't be checked. Any thread. */
     public CompletableFuture<Boolean> hasAsync(Player player, String node) {
         try {
@@ -179,6 +210,12 @@ public final class PlayerCommandSupport {
     }
 
     /** Vanish-safe online player names starting with {@code prefix}, plus any fixed options. */
+    /** The {@code words} starting with {@code prefix} (case-insensitive), for completions without player names. */
+    public static List<String> completeWords(String prefix, Collection<String> words) {
+        String lower = prefix.toLowerCase(Locale.ROOT);
+        return words.stream().filter(word -> word.toLowerCase(Locale.ROOT).startsWith(lower)).toList();
+    }
+
     public List<String> completePlayers(CommandSender sender, String prefix, String... extra) {
         return completePlayers(sender, prefix, false, extra);
     }

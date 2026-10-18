@@ -97,4 +97,113 @@ class CommandRegistryPermissionsTest {
         registry.execute(staff, registry.get("location").orElseThrow(), new String[0]);
         verify(towns).execute(staff, new String[0]);
     }
+
+    // ===== KNG-107: nodeless subcommands listed only to holders of one of their action nodes =====
+
+    @Test
+    void visibleToAny_listsANodelessSubcommandOnlyToHoldersOfOneOfItsNodes() {
+        registry.register(new CommandMetadata("currency", "d", "/knk currency", null), towns);
+        registry.setVisibleToAny("currency", List.of("knk.admin.currency.history", "knk.admin.currency.lock"));
+
+        assertTrue(names(registry.listAvailable(staff)).stream().noneMatch("currency"::equals));
+        assertTrue(!registry.isListed(staff, registry.get("currency").orElseThrow()));
+
+        when(permissible.hasPermission(staff, "knk.admin.currency.lock")).thenReturn(true);
+        assertTrue(registry.isListed(staff, registry.get("currency").orElseThrow()));
+    }
+
+    @Test
+    void permissionNodes_includesTheVisibilityNodes_soAListingAsksForThemFirst() {
+        registry.setVisibleToAny("currency", List.of("knk.admin.currency.history"));
+        registry.setVisibility("location", sender -> false, List.of("knk.admin.location"));
+        assertEquals(Set.of("knk.admin.towns", "knk.admin.currency.history", "knk.admin.location"), registry.permissionNodes());
+    }
+
+    @Test
+    void aNodelessSubcommand_refusesASenderHoldingNoneOfItsNodes_insteadOfShowingItsUsage() {
+        SubcommandExecutor currency = mock(SubcommandExecutor.class);
+        registry.register(new CommandMetadata("currency", "d", "/knk currency", null), currency);
+        registry.setVisibleToAny("currency", List.of("knk.admin.currency.history", "knk.admin.currency.lock"));
+        live("knk.admin.currency.history", PermissionDecision.DENIED);
+        live("knk.admin.currency.lock", PermissionDecision.DENIED);
+
+        registry.execute(staff, registry.get("currency").orElseThrow(), new String[0]);
+        verify(currency, never()).execute(any(), any());
+        verify(staff).sendMessage(CommandPermissions.NO_PERMISSION_MESSAGE);
+
+        live("knk.admin.currency.lock", PermissionDecision.ALLOWED);
+        registry.execute(staff, registry.get("currency").orElseThrow(), new String[0]);
+        verify(currency).execute(eq(staff), any());
+    }
+
+    @Test
+    void help_listsTheOtherCommandsTheSenderMayUse() {
+        List<String> sent = new java.util.ArrayList<>();
+        org.mockito.Mockito.doAnswer(inv -> sent.add(inv.getArgument(0))).when(staff).sendMessage(anyString());
+        HelpSubcommand help = new HelpSubcommand(registry);
+        help.setOtherCommands(() -> List.of(
+                new HelpSubcommand.OtherCommand("msg", "Message a player", "/msg <player> <message>", List.of("m"), List.of()),
+                new HelpSubcommand.OtherCommand("inventory", "Open a player's inventory", "/inventory open <player>", List.of(),
+                        List.of("knk.inventory.open"))),
+                (sender, nodes) -> nodes.stream().anyMatch(node -> registry.isListed(sender,
+                        new CommandRegistry.RegisteredCommand(new CommandMetadata("x", "", "", node), towns))));
+
+        help.execute(staff, new String[0]);
+        assertTrue(sent.stream().anyMatch(m -> m.contains("/msg") && m.contains("Message a player")), sent::toString);
+        assertTrue(sent.stream().noneMatch(m -> m.contains("/inventory") || m.contains("No commands available")), sent::toString);
+
+        sent.clear();
+        help.execute(staff, new String[] {"m"});
+        assertTrue(sent.stream().anyMatch(m -> m.contains("/msg <player> <message>")), sent::toString);
+        sent.clear();
+        help.execute(staff, new String[] {"inventory"});
+        assertTrue(sent.stream().anyMatch(m -> m.contains("Unknown command: inventory")), sent::toString);
+
+        when(permissible.hasPermission(staff, "knk.inventory.open")).thenReturn(true);
+        assertEquals(List.of("help", "msg", "inventory"), help.completionNames(staff));
+    }
+
+    @Test
+    void helpDetail_treatsASubcommandTheSenderIsNotOfferedAsUnknown() {
+        List<String> sent = new java.util.ArrayList<>();
+        org.mockito.Mockito.doAnswer(inv -> sent.add(inv.getArgument(0))).when(staff).sendMessage(anyString());
+
+        new HelpSubcommand(registry).execute(staff, new String[] {"towns"});
+
+        assertTrue(sent.stream().anyMatch(m -> m.contains("Unknown command: towns")));
+        assertTrue(sent.stream().noneMatch(m -> m.contains("knk.admin.towns")));
+    }
+
+    @Test
+    void help_isPaged_eightLinesAPage() {
+        List<String> sent = new java.util.ArrayList<>();
+        org.mockito.Mockito.doAnswer(inv -> sent.add(inv.getArgument(0))).when(staff).sendMessage(anyString());
+        List<HelpSubcommand.OtherCommand> others = new java.util.ArrayList<>();
+        for (int i = 1; i <= 19; i++) {
+            others.add(new HelpSubcommand.OtherCommand(String.format("cmd%02d", i), "Command " + i, "/cmd" + i, List.of(), List.of()));
+        }
+        HelpSubcommand help = new HelpSubcommand(registry);
+        help.setOtherCommands(() -> others, (sender, nodes) -> true);
+
+        help.execute(staff, new String[0]);
+        assertTrue(sent.get(0).contains("page 1/3"), sent::toString);
+        assertTrue(sent.stream().anyMatch(m -> m.contains("/cmd08")) && sent.stream().noneMatch(m -> m.contains("/cmd09")), sent::toString);
+        verify(staff).sendMessage(any(net.kyori.adventure.text.Component.class)); // the clickable page footer
+
+        sent.clear();
+        help.execute(staff, new String[] {"3"});
+        assertTrue(sent.get(0).contains("page 3/3"), sent::toString);
+        assertEquals(3, sent.stream().filter(m -> m.contains("/cmd")).count(), sent::toString);
+
+        sent.clear();
+        help.execute(staff, new String[] {"99"});
+        assertTrue(sent.get(0).contains("page 3/3"), sent::toString);
+    }
+
+    @Test
+    void theConsoleIsOfferedEverything() {
+        org.bukkit.command.CommandSender console = mock(org.bukkit.command.ConsoleCommandSender.class);
+        registry.setVisibleToAny("towns", List.of("knk.admin.whatever"));
+        assertTrue(registry.isListed(console, registry.get("towns").orElseThrow()));
+    }
 }

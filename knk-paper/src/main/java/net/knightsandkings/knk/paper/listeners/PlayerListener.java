@@ -64,6 +64,7 @@ import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 public class PlayerListener implements Listener {
 	private static final Logger LOGGER = Logger.getLogger(PlayerListener.class.getName());
 	private static final long MENTION_SOUND_COOLDOWN_MILLIS = 5_000L;
+	private static final long PERMISSION_PRELOAD_WAIT_MS = 2_000L;
 	private static final Map<UUID, Long> mentionSoundCooldowns = new ConcurrentHashMap<>();
 
 	private final UsersDataAccess usersDataAccess;
@@ -79,6 +80,13 @@ public class PlayerListener implements Listener {
 	private final IgnoreService ignoreService;
 	/** KNG-128: an account created at this join opens the new player's window (welcome, quiet discoveries). */
 	private final NewPlayerWindow newPlayers;
+
+	/** Whether hub admission placed a joining player at the hub spawn (answers once per join); none without a hub. */
+	private java.util.function.Predicate<UUID> hubAdmitted = uuid -> false;
+
+	public void setHubAdmitted(java.util.function.Predicate<UUID> hubAdmitted) {
+		this.hubAdmitted = hubAdmitted != null ? hubAdmitted : uuid -> false;
+	}
 
 	public PlayerListener(
 			UsersDataAccess usersDataAccess,
@@ -121,6 +129,7 @@ public class PlayerListener implements Listener {
 
 			if (result.isSuccess()) {
 				LOGGER.fine("User " + uuid + " loaded via " + result.source() + " (" + result.status() + ")");
+				preloadPermissions(uuid);
 				return;
 			}
 
@@ -128,6 +137,7 @@ public class PlayerListener implements Listener {
 				FetchResult<UserSummary> usernameLookup = usersDataAccess.getByUsernameAsync(username).join();
 				if (usernameLookup.isSuccess()) {
 					LOGGER.info("Loaded user " + username + " via username lookup (UUID: " + uuid + ")");
+					preloadPermissions(uuid);
 					return;
 				}
 
@@ -135,6 +145,7 @@ public class PlayerListener implements Listener {
 				FetchResult<UserSummary> created = usersDataAccess.getOrCreateAsync(uuid, true, newUser).join();
 				if (created.isSuccess()) {
 					LOGGER.info("Created and cached new user " + username + " (UUID: " + uuid + ")");
+					preloadPermissions(uuid);
 				} else if (created.status() == FetchStatus.ERROR) {
 					LOGGER.warning("Failed to create user " + uuid + ": " + created.error().map(Throwable::getMessage).orElse("unknown error"));
 				}
@@ -147,6 +158,26 @@ public class PlayerListener implements Listener {
 		} catch (Exception ex) {
 			LOGGER.log(Level.WARNING, "Unexpected error loading user " + uuid + " from data access", ex);
 			// Allow login to proceed even if data fetch fails
+		}
+	}
+
+	/**
+	 * KNG-107: the player's permission set, loaded while they connect (this is the async pre-login thread),
+	 * so the join and their first command, help listing or "/" list need no API call. Waits at most
+	 * {@link #PERMISSION_PRELOAD_WAIT_MS}; a slower load finishes in the background.
+	 */
+	private void preloadPermissions(UUID uuid) {
+		if (knkPermissible == null) {
+			return;
+		}
+		try {
+			knkPermissible.preload(uuid).get(PERMISSION_PRELOAD_WAIT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+		} catch (java.util.concurrent.TimeoutException ex) {
+			LOGGER.fine("Permission preload for " + uuid + " still running after " + PERMISSION_PRELOAD_WAIT_MS + " ms");
+		} catch (InterruptedException ex) {
+			Thread.currentThread().interrupt();
+		} catch (java.util.concurrent.ExecutionException ex) {
+			LOGGER.log(Level.FINE, "Permission preload for " + uuid + " failed", ex);
 		}
 	}
 
@@ -185,7 +216,17 @@ public class PlayerListener implements Listener {
 			e.joinMessage(Component.text("► " + "Player " + player.getName() + " joined").color(ColorOptions.message));
 		}
 
-		if (!knkPermissible.hasPermission(player, "knk.mode.owner")) {
+		if (hubAdmitted.test(player.getUniqueId())) {
+			// Hub DESIGN §16 Phase 5: the hub admission already placed the player at the hub spawn while they were
+			// connecting, in place of the server spawn; no join teleport. The game mode is that of the world they arrived
+			// in. Owners and the groups' own join settings never get here (HubJoinRoute).
+			if (!knkPermissible.hasPermission(player, "knk.mode.owner")) {
+				// Owners keep their game mode and flight, as without a hub.
+				player.setGameMode(gameSettings.gameModeFor(player.getWorld()));
+				player.setFlying(false);
+			}
+		} else if (!knkPermissible.hasPermission(player, "knk.mode.owner") && !inStaffOrOwnerMode(user)) {
+			// Players in staff or owner mode join where they logged out, like owners (decision 2026-10-12).
 			// The server spawn /spawn uses, in its world's default game mode (DESIGN §3.2/§3.4). Never
 			// waits on the API: the spot was resolved in the background. JoinLoadingGuard.hold (later
 			// in this join) switches to ADVENTURE and hands this mode back when the account is loaded.
@@ -267,6 +308,14 @@ public class PlayerListener implements Listener {
 				LOGGER.log(Level.WARNING, "Failed to grant first-join kits for user " + userId, ex);
 				return null;
 			});
+	}
+
+	/** KNG-107: drop the player's permission set after every other quit handler had it; the next join loads it again. */
+	@EventHandler(priority = org.bukkit.event.EventPriority.MONITOR)
+	public void forgetPermissions(PlayerQuitEvent e) {
+		if (knkPermissible != null) {
+			knkPermissible.forget(e.getPlayer().getUniqueId());
+		}
 	}
 
 	@EventHandler
@@ -406,6 +455,11 @@ public class PlayerListener implements Listener {
 	/** The player's title name for {title} in join/leave messages (KNG-52 round 3); null when none or not cached yet. */
 	private static String titleOf(UserSummary user) {
 		return user != null ? user.titleName() : null;
+	}
+
+	private static boolean inStaffOrOwnerMode(UserSummary user) {
+		return user != null && user.activeMode() != null
+			&& user.activeMode() != net.knightsandkings.knk.core.domain.users.ActiveMode.NONE;
 	}
 
 	private static List<PermissionGroupRef> groupsOf(UserSummary user) {

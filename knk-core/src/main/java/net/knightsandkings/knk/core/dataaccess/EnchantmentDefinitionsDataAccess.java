@@ -49,7 +49,7 @@ public class EnchantmentDefinitionsDataAccess {
         this.cache = new EnchantmentDefinitionCache(ttl);
         this.queryApi = Objects.requireNonNull(queryApi, "queryApi must not be null");
         this.settings = Objects.requireNonNullElse(settings, DataAccessSettings.defaults());
-        this.executor = new DataAccessExecutor<>(cache, this.settings.retryPolicy(), "EnchantmentDefinition");
+        this.executor = new DataAccessExecutor<>(cache, this.settings, "EnchantmentDefinition");
     }
 
     public CompletableFuture<FetchResult<KnkEnchantmentDefinition>> getByIdAsync(int id, FetchPolicy policy) {

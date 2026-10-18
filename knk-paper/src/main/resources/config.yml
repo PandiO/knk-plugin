@@ -56,6 +56,10 @@ api:
     # API root that serves /health/ready. Empty = base-url without its trailing /api
     # (http://localhost:5294/api -> http://localhost:5294/health/ready).
     health-root-url: ""
+    # KNG-171: while the state is DOWN, reads (permission checks, users, catalogs...) make no API
+    # call: answered at once from the in-memory caches, else the offline store (KNG-58). Writes still
+    # go to the API. false = keep calling (and retrying) the API during an outage.
+    skip-api-while-down: true
 
 # Region HTTP server: knk-web-api calls it back for region renames and containment checks.
 region-http:
@@ -177,6 +181,9 @@ game-settings:
   # How often the loaded worlds are checked; they are reported to the API only when they changed
   # (or every 10 minutes). Seconds, min 5. The report needs the plugin API key (api.auth.type: apikey).
   runtime-sync-interval-seconds: 30
+  # This game server's id in that report (KNG-118). Each server's report replaces only its own worlds, so give
+  # every game server that shares one API its own id. Blank = "default" (the id of reports from older plugins).
+  server-id: "default"
   # Earlier versions of the settings kept in plugins/KnightsAndKings/game-settings-backups/ (0 = none).
   # The latest version is always cached in game-settings-cache.json and used when the API is down at startup.
   backup-history-limit: 48
@@ -663,10 +670,24 @@ lootboxes:
     slowest-step-ticks: 8          # the last step's delay; the reel starts at 1 tick per step and eases out
     show-result-ticks: 50          # how long the menu stays open on the result
     public-effects: true           # particles and sounds at the player that others nearby see and hear
+# Extra worlds KnK loads at startup (KNG-114), next to the level-name world (the gameplay world) and its nether/end,
+# which the server loads itself. Loaded before gates, region repair and Game Settings start. A world added here comes up
+# at the next restart; a listed world is never unloaded while the server runs. KnK never deletes or regenerates a world.
+#   name:        the world folder (and world name), letters, digits, _ and - only
+#   environment: normal | nether | the_end
+#   generator:   default | flat | void - how new chunks are generated; void is empty with a small stone platform at
+#                0,64,0 (for a hub that is built, not generated). Applied at every load, so keep it the same.
+#   create:      create the world when its folder does not exist yet (default false)
+#   required:    while it is missing, only operators may join (default true)
+# Go to a loaded world with KnK's staff teleport: /tp 2 65 2 <name> (a void world's platform is at 0..4, 64, 0..4).
+worlds:
+  load: []
+  #  - { name: hub, environment: normal, generator: void, create: true, required: true }
 # Managed WorldGuard regions (docs/architecture/managed-worldguard-regions.md in knk-workspace).
 # Knights and Kings gives every Town/District/Structure/Gate region its parent, priority and category flags when the region
 # is created, and re-checks all of them at each startup. It only ever touches those three things; owners, members and
 # every other flag (greetings, custom ones) stay as they are, and no region is created or deleted.
+
 regions:
   managed:
     startup-repair:
@@ -720,6 +741,13 @@ regions:
       max-refusals-per-second: 20
       window-seconds: 3
       escalation-window-seconds: 60
+# What players see when they type "/" (KNG-107). Commands are only left out of the suggestions; typing one still
+# works as before (each command still checks its own permission). Ops see everything.
+command-visibility:
+  hide-namespaced: true                      # leave out every "plugin:command" form (worldedit:/pos1, knightsandkings:msg)
+  hide-other-plugins-without-permission: true  # other plugins' commands the player can't run, or that declare no permission
+  always-show: []                            # labels never left out by the rule above, e.g. [rules, discord]
+
 # Offline security cache (KNG-58). The last account (UUID -> knk user id), freeze, owner/staff mode and permission
 # answers knk-web-api gave are kept in one file, so permissions, freezes and vanish still apply after a restart while
 # the API is down. Used ONLY when the API can't be asked; every API answer overwrites it. Holds no email or balances.
@@ -888,3 +916,11 @@ cache:
       allow-stale: true
       retry-attempts: 3
       retry-backoff-ms: 100
+      # KNG-107: answer permission checks from each player's whole permission set (one API call per
+      # player per ttl-seconds, loaded at join) instead of one API call per node. false = one call
+      # per node, the old way. Needs a knk-web-api that sends sourceRank; an older one falls back.
+      resolve-from-effective-set: true
+      # Help, tab completion and the "/" list answer from a player's last set past ttl-seconds while it
+      # is reloaded in the background (never waiting for the API); while the API is DOWN only for this
+      # many seconds more, then the offline cache answers. Running a command always waits for a fresh set.
+      effective-set-stale-seconds: 90

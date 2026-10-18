@@ -171,6 +171,66 @@ class WalkCellAccessTest {
     }
 
     @Test
+    void aRegionTheMoverCouldNotLeaveAgainIsBlockedUnlessTheDestinationIsInIt() {
+        // KNG-121: the walk-path half of KNG-110's "no way out" rule
+        RegionShape pen = RegionShape.cuboid(10, 0, 0, 20, 100, 10);
+        RegionShape east = RegionShape.cuboid(30, 0, 0, 40, 100, 10);
+        DomainAvailability.DomainLookup lookup = lookup(
+            domain(1, "Sheep Pen", "pen", true, false),
+            domain(2, "Eastwatch", "east", false, false));
+        List<DeniedRegionAccess.Candidate> outside = List.of(
+            new DeniedRegionAccess.Candidate("pen", pen, false),
+            new DeniedRegionAccess.Candidate("east", east, false));
+        DomainAccessEvaluator evaluator = new DomainAccessEvaluator();
+
+        DeniedRegionAccess trap = DeniedRegionAccess.resolve(outside, Set.of("town"), lookup, evaluator, false);
+        assertEquals(List.of("east", "pen"), trap.rules().stream().map(DeniedRegionAccess.Rule::regionId).toList());
+        assertEquals(CellAccess.BLOCKED, trap.extraCost(12, 65, 5), "the destination lies outside the pen");
+        assertEquals(Optional.of("you could not leave Sheep Pen again"), trap.denyReason(12, 65, 5));
+        assertEquals(Optional.of("you may not enter Eastwatch"), trap.denyReason(32, 65, 5), "entry denied: the entry reason");
+        assertEquals(0.0, trap.extraCost(5, 65, 5), "outside both");
+
+        DeniedRegionAccess destinationInside = DeniedRegionAccess.resolve(outside, Set.of("town", "pen"), lookup,
+            evaluator, false);
+        assertEquals(List.of("east"), destinationInside.rules().stream().map(DeniedRegionAccess.Rule::regionId).toList(),
+            "the destination is in the pen: it is reached");
+
+        assertEquals(List.of("east"), DeniedRegionAccess.resolve(outside, null, lookup, evaluator, false).rules().stream()
+            .map(DeniedRegionAccess.Rule::regionId).toList(), "destination unknown: no such rule, as before");
+        assertEquals(List.of("east"), DeniedRegionAccess.resolve(outside, lookup, evaluator, false).rules().stream()
+            .map(DeniedRegionAccess.Rule::regionId).toList());
+
+        DeniedRegionAccess inside = DeniedRegionAccess.resolve(List.of(new DeniedRegionAccess.Candidate("pen", pen, true)),
+            Set.of("town"), lookup, evaluator, false);
+        assertEquals(1, inside.rules().size());
+        assertTrue(inside.rules().get(0).exit(), "the mover is in the pen: its exit rule, as before");
+        assertEquals(Optional.of("you may not leave Sheep Pen"), inside.denyReason(5, 65, 5));
+
+        assertTrue(DeniedRegionAccess.resolve(outside, Set.of("town"), lookup, evaluator, true).rules().isEmpty(), "bypass");
+    }
+
+    @Test
+    void theSearchGoesAroundARegionItCouldNotLeaveAgainAndIntoItForADestinationInside() {
+        WalkFixture f = new WalkFixture().floor(0, 0, 10, 6, 64, G);
+        RegionShape pen = RegionShape.cuboid(3, 0, 0, 7, 100, 4);
+        DomainAvailability.DomainLookup lookup = lookup(domain(1, "Sheep Pen", "pen", true, false));
+        List<DeniedRegionAccess.Candidate> candidates = List.of(new DeniedRegionAccess.Candidate("pen", pen, false));
+
+        DeniedRegionAccess outsideTarget = DeniedRegionAccess.resolve(candidates, Set.of(), lookup,
+            new DomainAccessEvaluator(), false);
+        WalkPath around = found(new WalkSearch().find(f.request(0, 64, 2, 10, 64, 2).withAccess(outsideTarget)));
+        for (int i = 0; i < around.size(); i++) {
+            int x = BlockKey.x(around.cell(i));
+            int z = BlockKey.z(around.cell(i));
+            assertFalse(x >= 3 && x <= 7 && z <= 4, "went into the pen at " + x + "," + z);
+        }
+
+        DeniedRegionAccess insideTarget = DeniedRegionAccess.resolve(candidates, Set.of("pen"), lookup,
+            new DomainAccessEvaluator(), false);
+        found(new WalkSearch().find(f.request(0, 64, 2, 5, 64, 2).withAccess(insideTarget)));
+    }
+
+    @Test
     void containmentUsesTheFeetBlockAgainstTheRegionsYBand() {
         DeniedRegionAccess access = new DeniedRegionAccess(List.of(
             new DeniedRegionAccess.Rule("r", RegionShape.cuboid(0, 70, 0, 4, 80, 4), false, "no")));
