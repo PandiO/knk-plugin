@@ -16,7 +16,7 @@ branches, issue, plan and tracker.
 `knk-core` (shared domain/ports), `knk-api-client` (REST client to
 knk-web-api), `knk-paper` (the actual Spigot/Paper plugin). No Maven —
 confirmed no `pom.xml` anywhere in the repo. Targets Paper API
-26.2; the build is set once as `paperApiVersion` in `gradle.properties`
+26.3; the build is set once as `paperApiVersion` in `gradle.properties`
 (Paper's `<mcversion>.build.<build>-<status>` scheme). Gradle 8.14 runs on
 Java 21 and compiles/tests with the Java 25 toolchain, so have both JDKs
 installed (a JDK 25 Gradle doesn't detect can be passed with
@@ -77,7 +77,7 @@ installed (a JDK 25 Gradle doesn't detect can be passed with
   `WgRegionIdTaskHandler`, `LocationTaskHandler`, `TempRegionRetentionTask`,
   `GateRegionDataFormat`) build on it for gate-structure and world-task
   region tracking.
-- Target Minecraft version: 26.2 (Paper). Since 26.1 a world's player files
+- Target Minecraft version: 26.3 (Paper). Since 26.1 a world's player files
   are in `<world>/players/data`, not `<world>/playerdata`, and every world
   (nether, end, plugin-created ones like the hub) lives in the main world's
   `dimensions/<namespace>/<key>/`; Paper imports an old `<container>/<name>/`

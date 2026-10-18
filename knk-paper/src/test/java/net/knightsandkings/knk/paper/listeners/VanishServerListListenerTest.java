@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.paper.listeners;
 
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -19,6 +20,8 @@ import static org.mockito.Mockito.mock;
  * Players in owner/staff mode are left out of the server-list sample and online count.
  */
 class VanishServerListListenerTest {
+
+    private static final InetSocketAddress LOOPBACK = new InetSocketAddress(InetAddress.getLoopbackAddress(), 0);
 
     private final Player visible = mock(Player.class);
     private final Player staff = mock(Player.class);
@@ -45,7 +48,7 @@ class VanishServerListListenerTest {
     @Test
     void aPingWithoutAPlayerListIsIgnored() {
         // Bukkit's base event throws on iterator(); the listener must not fail the ping.
-        ServerListPingEvent ping = new ServerListPingEvent("", InetAddress.getLoopbackAddress(), Component.text("motd"), 3, 20);
+        ServerListPingEvent ping = new ServerListPingEvent("", LOOPBACK, Component.text("motd"), 3, 20);
         new VanishServerListListener(player -> true).onServerListPing(ping);
 
         assertEquals(3, ping.getNumPlayers());
@@ -56,7 +59,7 @@ class VanishServerListListenerTest {
         final List<Player> players;
 
         ListedPing(List<Player> players) {
-            super("", InetAddress.getLoopbackAddress(), Component.text("motd"), players.size(), 20);
+            super("", LOOPBACK, Component.text("motd"), players.size(), 20);
             this.players = new ArrayList<>(players);
         }
 

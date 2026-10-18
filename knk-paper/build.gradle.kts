@@ -17,8 +17,8 @@ dependencies {
     implementation(project(":knk-api-client"))
 
     compileOnly("io.papermc.paper:paper-api:${property("paperApiVersion")}")
-    compileOnly("com.sk89q.worldedit:worldedit-bukkit:7.4.4")
-    compileOnly("com.sk89q.worldguard:worldguard-bukkit:7.0.19")
+    compileOnly("com.sk89q.worldedit:worldedit-bukkit:7.4.6")
+    compileOnly("com.sk89q.worldguard:worldguard-bukkit:7.0.20")
     // Log4j core (provided by the server) for the private-message command-log filter (KNG-18 Phase 3)
     compileOnly("org.apache.logging.log4j:log4j-core:2.24.1")
     
@@ -31,8 +31,8 @@ dependencies {
     testImplementation("org.apache.logging.log4j:log4j-core:2.24.1")
     // KNG-103: region rename/replace tests build real WorldGuard regions around a mocked RegionManager (core
     // artifacts only: the bukkit ones bring an older spigot-api).
-    testImplementation("com.sk89q.worldedit:worldedit-core:7.2.13")
-    testImplementation("com.sk89q.worldguard:worldguard-core:7.0.10")
+    testImplementation("com.sk89q.worldedit:worldedit-core:7.4.6")
+    testImplementation("com.sk89q.worldguard:worldguard-core:7.0.20")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
