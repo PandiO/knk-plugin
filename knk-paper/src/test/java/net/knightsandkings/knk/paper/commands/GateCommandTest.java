@@ -459,4 +459,51 @@ class GateCommandTest {
         door.setWorldName("world");
         return door;
     }
+
+    // ===== KNG-107: completion and help offer only what the sender can use =====
+
+    @Test
+    void completion_withoutNodes_onlyTheOpenSubcommands() {
+        granted = Set.of();
+        assertEquals(List.of("info", "list", "passthrough", "help"), gateCommand.complete(player, new String[]{""}));
+        assertEquals(List.of(), gateCommand.complete(player, new String[]{"open", ""}));
+        assertEquals(List.of(), gateCommand.complete(player, new String[]{"repair", ""}));
+        assertEquals(List.of("info", "list", "help"), gateCommand.doorCommand().complete(player, new String[]{""}));
+        assertEquals(List.of(), gateCommand.doorCommand().complete(player, new String[]{"toggle", ""}));
+    }
+
+    @Test
+    void completion_withOneGatesOpenNode_controlsOnlyThatGate() {
+        CachedGateStructure south = new CachedGateStructure(4, "South");
+        when(gateManager.getAllStructures()).thenReturn(Map.of(3, north, 4, south));
+        granted = Set.of("knk.gate.open.4");
+
+        assertTrue(gateCommand.complete(player, new String[]{""}).containsAll(List.of("open", "close", "toggle")));
+        assertTrue(!gateCommand.complete(player, new String[]{""}).contains("repair"));
+        List<String> targets = gateCommand.complete(player, new String[]{"open", ""});
+        assertTrue(targets.contains("4") && targets.contains("South"), targets::toString);
+        assertTrue(!targets.contains("3"), targets::toString);
+        assertTrue(gateCommand.completionNodes().containsAll(List.of("knk.gate.open.4", "knk.gate.close.3")));
+    }
+
+    @Test
+    void help_withoutNodes_showsOnlyTheOpenForms() {
+        granted = Set.of();
+        gateCommand.onCommand(player, null, "gate", new String[0]);
+        assertTrue(messages.stream().anyMatch(m -> m.contains("/gate info")), messages::toString);
+        assertTrue(messages.stream().noneMatch(m -> m.contains("/gate open") || m.contains("/gate repair") || m.contains("/gate reload")),
+            messages::toString);
+
+        messages.clear();
+        gateCommand.doorCommand().onCommand(player, null, "gatedoor", new String[0]);
+        assertTrue(messages.stream().noneMatch(m -> m.contains("/gatedoor health") || m.contains("/gatedoor open")), messages::toString);
+    }
+
+    @Test
+    void help_forAnAdmin_showsEverything() {
+        granted = Set.of(GateCommandSupport.GATE_ADMIN);
+        gateCommand.onCommand(player, null, "gate", new String[0]);
+        assertTrue(messages.stream().anyMatch(m -> m.contains("/gate open|close|toggle")), messages::toString);
+        assertTrue(messages.stream().anyMatch(m -> m.contains("/gate reload")), messages::toString);
+    }
 }

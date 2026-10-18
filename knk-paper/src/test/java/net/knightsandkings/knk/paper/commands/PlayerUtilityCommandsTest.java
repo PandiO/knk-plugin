@@ -86,6 +86,9 @@ class PlayerUtilityCommandsTest {
 
     PlayerUtilityCommandsTest() {
         when(alice.canSee(bob)).thenReturn(true);
+        // The cached answer tab completion reads (KNG-107).
+        when(permissible.hasPermission(any(Player.class), anyString()))
+                .thenAnswer(inv -> granted.contains(inv.<String>getArgument(1)));
         when(permissible.checkAsync(any(), anyString())).thenAnswer(inv -> {
             String node = inv.getArgument(1);
             checkedNodes.add(node);
@@ -417,6 +420,8 @@ class PlayerUtilityCommandsTest {
 
     @Test
     void tabCompletionOffersKeywordsAndOnlinePlayers() {
+        grant("knk.heal.others", "knk.heal.all", "knk.fly", "knk.fly.others", "knk.inventory.open", "knk.inventory.clear",
+                "knk.enderchest.open");
         assertEquals(List.of("Alice", "all"),
                 new RestoreCommand(support, RestoreCommand.Kind.HEAL).onTabComplete(alice, mock(Command.class), "heal", new String[]{"a"}));
         assertEquals(List.of("Bob"),
@@ -432,8 +437,38 @@ class PlayerUtilityCommandsTest {
                 .onTabComplete(alice, mock(Command.class), "fly", new String[]{"c"}).isEmpty());
     }
 
+    // ===== KNG-107: only what the sender can run =====
+
+    @Test
+    void withoutNodes_noSuggestions() {
+        Command command = mock(Command.class);
+        assertTrue(new RestoreCommand(support, RestoreCommand.Kind.HEAL).onTabComplete(alice, command, "heal", new String[]{""}).isEmpty());
+        assertTrue(new FlyCommand(support).onTabComplete(alice, command, "fly", new String[]{""}).isEmpty());
+        assertTrue(new FlyCommand(support).onTabComplete(alice, command, "fly", new String[]{"on", ""}).isEmpty());
+        assertTrue(new EnderchestCommand(support, rankCheck, offlineStorage).onTabComplete(alice, command, "ec", new String[]{""}).isEmpty());
+        assertTrue(new InventoryCommand(support, rankCheck, offlineStorage).onTabComplete(alice, command, "inventory", new String[]{""}).isEmpty());
+        assertTrue(new InventoryCommand(support, rankCheck, offlineStorage)
+                .onTabComplete(alice, command, "inventory", new String[]{"open", ""}).isEmpty());
+    }
+
+    @Test
+    void oneNode_onlyWhatItAllows() {
+        Command command = mock(Command.class);
+        grant("knk.heal.all");
+        assertEquals(List.of("all"), new RestoreCommand(support, RestoreCommand.Kind.HEAL).onTabComplete(alice, command, "heal", new String[]{""}));
+        grant("knk.fly");
+        assertEquals(List.of("off", "on"), new FlyCommand(support).onTabComplete(alice, command, "fly", new String[]{""}).stream().sorted().toList());
+        assertTrue(new FlyCommand(support).onTabComplete(alice, command, "fly", new String[]{"on", ""}).isEmpty());
+        grant("knk.inventory.clear");
+        assertEquals(List.of("clear"), new InventoryCommand(support, rankCheck, offlineStorage)
+                .onTabComplete(alice, command, "inventory", new String[]{""}));
+        assertTrue(new InventoryCommand(support, rankCheck, offlineStorage)
+                .onTabComplete(alice, command, "inventory", new String[]{"open", ""}).isEmpty());
+    }
+
     @Test
     void tabCompletionHidesPlayersTheSenderCannotSee() {
+        grant("knk.fly.others", "knk.inventory.open");
         when(alice.canSee(bob)).thenReturn(false);
 
         assertTrue(new FlyCommand(support)

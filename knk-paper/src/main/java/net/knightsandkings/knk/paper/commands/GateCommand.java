@@ -158,19 +158,58 @@ public class GateCommand implements CommandExecutor {
     }
 
     private void sendHelp(CommandSender sender) {
+        // KNG-107: only the forms the sender can use (cached check).
+        boolean control = controlsAny(sender);
+        boolean admin = support.isStructureAdmin(sender);
         sender.sendMessage(ChatColor.GOLD + "━━━ Gate Commands (whole gate, all its doors) ━━━");
         sender.sendMessage(ChatColor.GRAY + "<structure> = gate structure id or name, or 'here'. "
-            + "Left out on open/close/toggle/info/repair: the gate you look at.");
-        sender.sendMessage(ChatColor.GRAY + "/gate open|close|toggle [structure]");
+            + "Left out on " + (control ? "open/close/toggle/" : "") + "info" + (admin ? "/repair" : "") + ": the gate you look at.");
+        if (control) {
+            sender.sendMessage(ChatColor.GRAY + "/gate open|close|toggle [structure]");
+        }
         sender.sendMessage(ChatColor.GRAY + "/gate info [structure]");
         sender.sendMessage(ChatColor.GRAY + "/gate list");
-        sender.sendMessage(ChatColor.GRAY + "/gate repair [structure]");
-        sender.sendMessage(ChatColor.GRAY + "/gate tp <structure>");
-        sender.sendMessage(ChatColor.GRAY + "/gate override <structure> <field> <value|clear>");
-        sender.sendMessage(ChatColor.GRAY + "  fields: active, destroyed, invincible, canrespawn, openedstate");
-        sender.sendMessage(ChatColor.GRAY + "/gate reload [district <id>]");
+        if (admin) {
+            sender.sendMessage(ChatColor.GRAY + "/gate repair [structure]");
+            sender.sendMessage(ChatColor.GRAY + "/gate tp <structure>");
+            sender.sendMessage(ChatColor.GRAY + "/gate override <structure> <field> <value|clear>");
+            sender.sendMessage(ChatColor.GRAY + "  fields: active, destroyed, invincible, canrespawn, openedstate");
+            sender.sendMessage(ChatColor.GRAY + "/gate reload [district <id>]");
+        }
         sender.sendMessage(ChatColor.GRAY + "/gate passthrough <default|instant|teleport>");
         sender.sendMessage(ChatColor.GRAY + "One door: /gatedoor help. Long form: /knk gate ...");
+    }
+
+    /** Each loaded gate's open/close nodes, warmed for tab completion (KNG-107). */
+    public List<String> completionNodes() {
+        return gateManager.getAllStructures().values().stream()
+            .flatMap(structure -> GateCommandSupport.structureControlNodes(structure).stream())
+            .toList();
+    }
+
+    /** Whether the sender may open or close at least one loaded gate (or every gate). Cached check. */
+    private boolean controlsAny(CommandSender sender) {
+        return support.isStructureAdmin(sender)
+            || gateManager.getAllStructures().values().stream().anyMatch(structure -> controls(sender, structure));
+    }
+
+    private boolean controls(CommandSender sender, CachedGateStructure structure) {
+        return support.mayControlStructure(sender, "open", structure.getId())
+            || support.mayControlStructure(sender, "close", structure.getId());
+    }
+
+    /** KNG-107: the subcommands the sender can use - info, list and passthrough are open to everyone. */
+    private List<String> subcommandsFor(CommandSender sender) {
+        List<String> actions = new ArrayList<>();
+        if (controlsAny(sender)) {
+            actions.addAll(List.of("open", "close", "toggle"));
+        }
+        actions.addAll(List.of("info", "list"));
+        if (support.isStructureAdmin(sender)) {
+            actions.addAll(List.of("repair", "tp", "override", "reload"));
+        }
+        actions.addAll(List.of("passthrough", "help"));
+        return actions;
     }
 
     // === open / close / toggle ===
@@ -750,12 +789,20 @@ public class GateCommand implements CommandExecutor {
             return List.of();
         }
         String current = args[args.length - 1];
+        // KNG-107: only what the sender can run, and for open/close/toggle only the gates they control.
+        List<String> allowed = subcommandsFor(sender);
         if (args.length == 1) {
-            return filterByPrefix(SUBCOMMANDS, current);
+            return filterByPrefix(allowed, current);
         }
         String sub = args[0].toLowerCase(Locale.ROOT);
+        if (!allowed.contains(sub)) {
+            return List.of();
+        }
         switch (sub) {
-            case "open", "close", "toggle", "info", "repair", "tp" -> {
+            case "open", "close", "toggle" -> {
+                return args.length == 2 ? filterByPrefix(structureSelectors(s -> controls(sender, s)), current) : List.of();
+            }
+            case "info", "repair", "tp" -> {
                 return args.length == 2 ? filterByPrefix(structureSelectors(), current) : List.of();
             }
             case "override" -> {
@@ -785,9 +832,13 @@ public class GateCommand implements CommandExecutor {
     }
 
     private List<String> structureSelectors() {
+        return structureSelectors(structure -> true);
+    }
+
+    private List<String> structureSelectors(java.util.function.Predicate<CachedGateStructure> include) {
         List<String> selectors = new ArrayList<>();
         selectors.add(GateCommandKeywords.HERE);
-        selectors.addAll(doorCommand.structureSelectors());
+        selectors.addAll(doorCommand.structureSelectors(include));
         return selectors;
     }
 }

@@ -79,6 +79,8 @@ public final class UserAdminService {
     private final BiConsumer<Player, UserSummary> displayRefresher;
     /** Bukkit-or-in-house node checks (KNG-24); Bukkit-only until KnKPlugin sets the KnkPermissible one. */
     private CommandPermissions permissions = CommandPermissions.bukkitOnly();
+    /** Drops and reloads a user's cached permission set after a change made here (KNG-107); none until set. */
+    private java.util.function.IntFunction<CompletableFuture<Void>> permissionsChanged = userId -> CompletableFuture.completedFuture(null);
 
     public UserAdminService(Executor mainThread, UsersDataAccess usersDataAccess, UsersCommandApi usersCommandApi,
                             PermissionGroupsQueryApi permissionGroupsQueryApi, RankHierarchy rankHierarchy,
@@ -109,6 +111,14 @@ public final class UserAdminService {
      */
     public void setPermissions(CommandPermissions permissions) {
         this.permissions = java.util.Objects.requireNonNull(permissions, "permissions must not be null");
+    }
+
+    /**
+     * KNG-107: called with the target's user id after a group, rank or node change made here; completes
+     * once their permission set is current again, before visibility and the "/" list are refreshed.
+     */
+    public void setPermissionsChanged(java.util.function.IntFunction<CompletableFuture<Void>> permissionsChanged) {
+        this.permissionsChanged = permissionsChanged != null ? permissionsChanged : userId -> CompletableFuture.completedFuture(null);
     }
 
     /** Bukkit grant or cached in-house grant; see {@link CommandPermissions#has}. */
@@ -642,13 +652,19 @@ public final class UserAdminService {
      * item 3. No-op if the target is offline or modeService wasn't wired.
      */
     private void refreshTargetVisibility(UserSummary target) {
+        CompletableFuture<Void> current = target.id() != null
+                ? permissionsChanged.apply(target.id()).exceptionally(ex -> null)
+                : CompletableFuture.completedFuture(null);
         if (modeService == null) {
             return;
         }
-        Player targetPlayer = Bukkit.getPlayerExact(target.username());
-        if (targetPlayer != null) {
-            modeService.refreshVisibilityFor(targetPlayer);
-        }
+        current.thenRun(() -> mainThread.execute(() -> {
+            Player targetPlayer = Bukkit.getPlayerExact(target.username());
+            if (targetPlayer != null) {
+                modeService.refreshVisibilityFor(targetPlayer);
+                targetPlayer.updateCommands(); // KNG-107: the "/" list follows the change at once
+            }
+        }));
     }
 
     private void notifyRankChange(UserSummary target, PermissionGroupSummary rank) {

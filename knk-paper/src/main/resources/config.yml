@@ -722,6 +722,13 @@ regions:
       max-refusals-per-second: 20
       window-seconds: 3
       escalation-window-seconds: 60
+# What players see when they type "/" (KNG-107). Commands are only left out of the suggestions; typing one still
+# works as before (each command still checks its own permission). Ops see everything.
+command-visibility:
+  hide-namespaced: true                      # leave out every "plugin:command" form (worldedit:/pos1, knightsandkings:msg)
+  hide-other-plugins-without-permission: true  # other plugins' commands the player can't run, or that declare no permission
+  always-show: []                            # labels never left out by the rule above, e.g. [rules, discord]
+
 # Offline security cache (KNG-58). The last account (UUID -> knk user id), freeze, owner/staff mode and permission
 # answers knk-web-api gave are kept in one file, so permissions, freezes and vanish still apply after a restart while
 # the API is down. Used ONLY when the API can't be asked; every API answer overwrites it. Holds no email or balances.
@@ -890,3 +897,11 @@ cache:
       allow-stale: true
       retry-attempts: 3
       retry-backoff-ms: 100
+      # KNG-107: answer permission checks from each player's whole permission set (one API call per
+      # player per ttl-seconds, loaded at join) instead of one API call per node. false = one call
+      # per node, the old way. Needs a knk-web-api that sends sourceRank; an older one falls back.
+      resolve-from-effective-set: true
+      # Help, tab completion and the "/" list answer from a player's last set past ttl-seconds while it
+      # is reloaded in the background (never waiting for the API); while the API is DOWN only for this
+      # many seconds more, then the offline cache answers. Running a command always waits for a fresh set.
+      effective-set-stale-seconds: 90

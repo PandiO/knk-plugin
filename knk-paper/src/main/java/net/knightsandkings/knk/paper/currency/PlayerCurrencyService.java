@@ -126,6 +126,7 @@ public class PlayerCurrencyService implements Listener {
     private final CurrencySettings settings;
     private final Clock clock;
     private final Scheduler scheduler;
+    private java.util.function.BiPredicate<Player, String> cachedPermissions = (player, node) -> false;
 
     private final Set<UUID> inFlight = ConcurrentHashMap.newKeySet();
     private final Map<UUID, Instant> lastPaidAt = new ConcurrentHashMap<>();
@@ -164,6 +165,22 @@ public class PlayerCurrencyService implements Listener {
 
     public VisiblePlayers visiblePlayers() {
         return visiblePlayers;
+    }
+
+    /**
+     * The immediate (cache-only) check tab completion uses (KNG-107) - e.g. KnkPermissible's
+     * {@code hasPermission}. Until set, a Bukkit grant.
+     */
+    public void setCachedPermissions(java.util.function.BiPredicate<Player, String> cachedPermissions) {
+        this.cachedPermissions = java.util.Objects.requireNonNull(cachedPermissions, "cachedPermissions must not be null");
+    }
+
+    /**
+     * Whether tab completion offers what {@code node} gates: the console always, a player through
+     * {@link #setCachedPermissions} (never waits on the API; the command itself checks for real).
+     */
+    public boolean holds(CommandSender sender, String node) {
+        return !(sender instanceof Player player) || player.hasPermission(node) || cachedPermissions.test(player, node);
     }
 
     // ===== /pay =====

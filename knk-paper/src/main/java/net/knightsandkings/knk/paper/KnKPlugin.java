@@ -614,6 +614,11 @@ public class KnKPlugin extends JavaPlugin {
                 menuTemplatesQueryApi
             );
             this.permissionsDataAccess = dataAccessFactory.createPermissionsDataAccess(permissionsApi);
+            if (getConfig().getBoolean("cache.entities.permissions.resolve-from-effective-set", true)) {
+                // KNG-107: one API call per player per TTL instead of one per node checked.
+                permissionsDataAccess.resolveFromEffectiveSets(java.time.Duration.ofSeconds(
+                    Math.max(0, getConfig().getInt("cache.entities.permissions.effective-set-stale-seconds", 90))));
+            }
             this.offlineSecurity = createOfflineSecurity();
             this.knkPermissible = new KnkPermissible(cacheManager.getUserCache(), permissionsDataAccess, offlineSecurity);
             // Gate pass-through (and navigation's gate verdicts) honour KnK's permission model as well as Bukkit's.
@@ -713,6 +718,13 @@ public class KnKPlugin extends JavaPlugin {
             );
             // KNG-24: knk.admin.user.* checked through KnkPermissible as well as Bukkit.
             this.userAdminService.setPermissions(commandPermissions());
+            if (permissionsDataAccess != null) {
+                // KNG-107: a change made in game applies at once instead of after the set's TTL.
+                this.userAdminService.setPermissionsChanged(userId -> {
+                    permissionsDataAccess.invalidateEffective(userId);
+                    return permissionsDataAccess.preload(userId);
+                });
+            }
             // Salary on join (offline gap) and every hour online; the scoreboard is redrawn after a payout.
             this.salaryPayoutScheduler = new net.knightsandkings.knk.paper.user.SalaryPayoutScheduler(
                 this, usersCommandApi, cacheManager.getUserCache(), usersDataAccess,
@@ -752,6 +764,8 @@ public class KnKPlugin extends JavaPlugin {
                 // The /pay confirmation expiry notice (main thread; cancelled when settled or on quit).
                 (delay, task) -> getServer().getScheduler().runTaskLater(this, task, Math.max(1L, delay.toMillis() / 50L))::cancel
             );
+            // KNG-107: tab completion offers only what the player holds (cached; a miss is asked in the background).
+            this.playerCurrencyService.setCachedPermissions(commandPermissions()::hasForCompletion);
             if (playerNotificationPoller != null) {
                 // "You received N coins from X" - right away when online, else on the next join.
                 var paymentHandler = new net.knightsandkings.knk.paper.currency.PaymentNotificationHandler(
@@ -1950,6 +1964,8 @@ public class KnKPlugin extends JavaPlugin {
                             "/knk lootbox area create spawn", "/knk lootbox area delete spawn")),
                     lootboxAdmin::execute,
                     lootboxAdmin::tabComplete);
+                knkAdminCommand.setSubcommandVisibility("lootbox", lootboxAdmin::visibleTo,
+                    net.knightsandkings.knk.paper.commands.LootboxAdminCommand.nodes()); // KNG-107
             }
             if (userAdminService != null) {
                 // Domain discovery (KNG-20): /knk discovery list|reset|status, node knk.admin.discovery.
@@ -1983,6 +1999,8 @@ public class KnKPlugin extends JavaPlugin {
                         return java.util.List.of();
                     }
                 );
+                knkAdminCommand.setSubcommandVisibleToAny("discovery",
+                    java.util.List.of(net.knightsandkings.knk.paper.commands.DiscoveryAdminCommand.NODE)); // KNG-107
             }
             // Road navigation (KNG-27): /knk road …, node knk.admin.road. registerCommands() runs before
             // initializeRoads(), so every service is read lazily; a null one means navigation is disabled.
@@ -1997,6 +2015,8 @@ public class KnKPlugin extends JavaPlugin {
             roadAdmin.setLiveTags(() -> liveEdgeTags);
             knkAdminCommand.registerSubcommand(
                 net.knightsandkings.knk.paper.roads.RoadAdminCommand.metadata(), roadAdmin, roadAdmin::complete);
+            knkAdminCommand.setSubcommandVisibleToAny("road",
+                java.util.List.of(net.knightsandkings.knk.paper.roads.RoadAdminCommand.NODE)); // KNG-107
             // Road navigation Phase 4: /navigate (/nav), DESIGN §6.1. The services are read lazily - they
             // exist only when navigation.enabled and the road cache started (initializeNavigation).
             registerTabCommand("navigate", new net.knightsandkings.knk.paper.navigation.NavigateCommand(
@@ -2021,7 +2041,8 @@ public class KnKPlugin extends JavaPlugin {
                 knkAdminCommand.registerSubcommand(
                     net.knightsandkings.knk.paper.locations.LocationAdminCommand.metadata(), locationAdmin, locationAdmin::complete);
                 // No top-level node (each action checks its own), so only list it to holders of one of them.
-                knkAdminCommand.setSubcommandVisibility("location", locationAdmin::visibleTo);
+                knkAdminCommand.setSubcommandVisibility("location", locationAdmin::visibleTo,
+                    net.knightsandkings.knk.paper.locations.LocationAdminCommand.NODES);
             }
             // KNG-80: the weekly orphan check's digest, for online staff with knk.admin.location.orphans.notify
             // (or the next one to join when none is online).
@@ -2033,6 +2054,7 @@ public class KnKPlugin extends JavaPlugin {
                 getServer().getPluginManager().registerEvents(orphanNotifier, this);
             }
             knkAdminCommand.setCommandPermissions(commandPermissions());
+            knkAdminCommand.setOtherCommands(this::otherCommandsForHelp); // KNG-107
             knkCommand.setExecutor(knkAdminCommand);
             knkCommand.setTabCompleter(knkAdminCommand);
             getLogger().info("Registered /knk admin command");
@@ -2073,6 +2095,20 @@ public class KnKPlugin extends JavaPlugin {
             new net.knightsandkings.knk.paper.commands.StaffChatCommand(commandPermissions::hasAsync,
                 MenuService.mainThreadExecutor(this), org.bukkit.Bukkit::getOnlinePlayers),
             commandPermissions, gatedCommandVisibility);
+        // KNG-107: every command whose forms all need a node is left out of "/" for players holding none.
+        for (String gatedName : net.knightsandkings.knk.paper.commands.support.CommandNodes.commands()) {
+            PluginCommand gatedCommand = getCommand(gatedName);
+            if (gatedCommand != null) {
+                gatedCommandVisibility.gate(gatedCommand, net.knightsandkings.knk.paper.commands.support.CommandNodes.anyOf(gatedName));
+            }
+        }
+        // KNG-107: "/" shows only what the player can run - no namespaced forms, no other plugins' commands they can't use.
+        gatedCommandVisibility.setHideNamespaced(getConfig().getBoolean("command-visibility.hide-namespaced", true));
+        if (getConfig().getBoolean("command-visibility.hide-other-plugins-without-permission", true)) {
+            gatedCommandVisibility.setOtherCommandsHidden(new net.knightsandkings.knk.paper.commands.support.OtherPluginCommandVisibility(
+                label -> org.bukkit.Bukkit.getCommandMap().getCommand(label), this,
+                java.util.Set.copyOf(getConfig().getStringList("command-visibility.always-show"))));
+        }
         getServer().getPluginManager().registerEvents(gatedCommandVisibility, this);
         registerTabCommand("msg", new net.knightsandkings.knk.paper.commands.MessageCommand(messagingService, visiblePlayers));
         registerTabCommand("reply", new net.knightsandkings.knk.paper.commands.ReplyCommand(messagingService));
@@ -3142,12 +3178,46 @@ public class KnKPlugin extends JavaPlugin {
     private void registerTabCommand(String name, org.bukkit.command.TabExecutor executor) {
         PluginCommand pluginCommand = getCommand(name);
         if (pluginCommand != null) {
+            executor = gatedOnCommandNodes(name, executor);
             pluginCommand.setExecutor(executor);
             pluginCommand.setTabCompleter(executor);
             getLogger().info("Registered /" + name + " command");
         } else {
             getLogger().warning("Failed to register /" + name + " command - not defined in plugin.yml?");
         }
+    }
+
+    /**
+     * KNG-107: the plugin's commands besides /knk for {@code /knk help}, from plugin.yml - only those
+     * registered (a disabled feature leaves its command unset) - with the nodes from
+     * {@code CommandNodes}, or the plugin.yml {@code permission:} (checked by Bukkit).
+     */
+    private java.util.List<net.knightsandkings.knk.paper.commands.HelpSubcommand.OtherCommand> otherCommandsForHelp() {
+        java.util.List<net.knightsandkings.knk.paper.commands.HelpSubcommand.OtherCommand> commands = new java.util.ArrayList<>();
+        for (String name : getDescription().getCommands().keySet()) {
+            PluginCommand pluginCommand = getCommand(name);
+            if ("knk".equalsIgnoreCase(name) || pluginCommand == null || pluginCommand.getExecutor() == this) {
+                continue;
+            }
+            java.util.List<String> nodes = net.knightsandkings.knk.paper.commands.support.CommandNodes.anyOf(name);
+            if (nodes.isEmpty() && pluginCommand.getPermission() != null) {
+                nodes = java.util.List.of(pluginCommand.getPermission());
+            }
+            commands.add(new net.knightsandkings.knk.paper.commands.HelpSubcommand.OtherCommand(
+                name, pluginCommand.getDescription(), pluginCommand.getUsage(), pluginCommand.getAliases(), nodes));
+        }
+        commands.sort(java.util.Comparator.comparing(net.knightsandkings.knk.paper.commands.HelpSubcommand.OtherCommand::name));
+        return commands;
+    }
+
+    /**
+     * KNG-107: a command listed in {@code CommandNodes} answers "no permission" (not its usage) and
+     * completes nothing for a sender holding none of its nodes; the executor's own checks still apply.
+     */
+    private org.bukkit.command.TabExecutor gatedOnCommandNodes(String name, org.bukkit.command.TabExecutor executor) {
+        java.util.List<String> nodes = net.knightsandkings.knk.paper.commands.support.CommandNodes.anyOf(name);
+        return nodes.isEmpty() ? executor
+            : new net.knightsandkings.knk.paper.commands.support.PermissionGatedCommand(nodes, executor, commandPermissions());
     }
 
     /** Bukkit-or-in-house permission checks for commands (KNG-24); Bukkit-only when the API isn't configured. */
@@ -3191,7 +3261,8 @@ public class KnKPlugin extends JavaPlugin {
     private void registerModeCommand(String name, ActiveMode mode) {
         PluginCommand modeCommand = getCommand(name);
         if (modeCommand != null) {
-            ModeCommand executor = new ModeCommand(modeService, mode);
+            org.bukkit.command.TabExecutor executor = gatedOnCommandNodes(name,
+                new ModeCommand(modeService, mode, commandPermissions()::hasForCompletion));
             modeCommand.setExecutor(executor);
             modeCommand.setTabCompleter(executor);
             getLogger().info("Registered /" + name + " command");
