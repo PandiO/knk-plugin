@@ -22,6 +22,7 @@ import com.sk89q.worldguard.protection.regions.ProtectedPolygonalRegion;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import net.knightsandkings.knk.core.domain.validation.ValidationResult;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
+import net.knightsandkings.knk.paper.regions.WorldGuardRegionRenamer;
 import net.knightsandkings.knk.paper.tasks.validation.ParentRegionFeedback;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
@@ -626,7 +627,18 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      */
     public boolean renameRegion(String oldRegionId, String newRegionId, String domainType, String parentRegionId,
                                 String world) {
-        boolean renamed = renameRegionInternal(oldRegionId, newRegionId, world);
+        return renameRegion(oldRegionId, newRegionId, domainType, parentRegionId, world, null);
+    }
+
+    /**
+     * KNG-103: as {@link #renameRegion(String, String, String, String, String)}, replacing {@code replaceRegionId}, the
+     * domain's region before its region step was run again (null: none). When that is the final name itself the existing
+     * region is redefined in place with the new shape; a previous temp-named region is removed. See
+     * {@link WorldGuardRegionRenamer} and {@link net.knightsandkings.knk.core.regions.RegionRenamePlan}.
+     */
+    public boolean renameRegion(String oldRegionId, String newRegionId, String domainType, String parentRegionId,
+                                String world, String replaceRegionId) {
+        boolean renamed = renameRegionInternal(oldRegionId, newRegionId, world, replaceRegionId);
         RegionFinalizer finalizer = regionFinalizer;
         if (renamed && finalizer != null && domainType != null && !domainType.isBlank()) {
             try {
@@ -644,7 +656,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
         return renamed;
     }
 
-    private boolean renameRegionInternal(String oldRegionId, String newRegionId, String worldName) {
+    private boolean renameRegionInternal(String oldRegionId, String newRegionId, String worldName, String replaceRegionId) {
         if (oldRegionId == null || oldRegionId.trim().isEmpty() || 
             newRegionId == null || newRegionId.trim().isEmpty()) {
             LOGGER.warning("Cannot rename region: oldRegionId or newRegionId is null/empty");
@@ -671,98 +683,16 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 LOGGER.warning("Failed to rename region: could not access region manager for world " + world.getName());
                 return false;
             }
-            
-            ProtectedRegion region = regionManager.getRegion(oldRegionId);
-            if (region == null) {
-                LOGGER.warning("Failed to rename region: region not found: " + oldRegionId);
+
+            WorldGuardRegionRenamer.Result result =
+                WorldGuardRegionRenamer.rename(regionManager, oldRegionId, newRegionId, replaceRegionId);
+            if (!result.success()) {
+                LOGGER.warning("Failed to rename region " + oldRegionId + " to " + newRegionId + " in " + world.getName()
+                    + ": " + result.detail());
                 return false;
             }
-            
-            // Check if target name already exists
-            if (regionManager.getRegion(newRegionId) != null) {
-                LOGGER.warning("Failed to rename region: target region name already exists: " + newRegionId);
-                return false;
-            }
-            
-            // Regions whose parent is this one (e.g. a Town's Districts): WorldGuard unsets their parent when the old
-            // region is removed, so they are pointed at the renamed region below.
-            List<ProtectedRegion> children = new ArrayList<>();
-            for (ProtectedRegion candidate : regionManager.getRegions().values()) {
-                if (candidate.getParent() == region) {
-                    children.add(candidate);
-                }
-            }
-
-            // Remove old region and create new one with updated name
-            regionManager.removeRegion(oldRegionId);
-            
-            // Create new region with same properties but new ID
-            ProtectedRegion newRegion;
-            if (region instanceof ProtectedPolygonalRegion) {
-                ProtectedPolygonalRegion polyRegion = (ProtectedPolygonalRegion) region;
-                newRegion = new ProtectedPolygonalRegion(
-                    newRegionId,
-                    polyRegion.getPoints(),
-                    polyRegion.getMinimumPoint().getBlockY(),
-                    polyRegion.getMaximumPoint().getBlockY()
-                );
-            } else if (region instanceof com.sk89q.worldguard.protection.regions.ProtectedCuboidRegion) {
-                com.sk89q.worldguard.protection.regions.ProtectedCuboidRegion cuboidRegion = 
-                    (com.sk89q.worldguard.protection.regions.ProtectedCuboidRegion) region;
-                newRegion = new com.sk89q.worldguard.protection.regions.ProtectedCuboidRegion(
-                    newRegionId,
-                    cuboidRegion.getMinimumPoint(),
-                    cuboidRegion.getMaximumPoint()
-                );
-            } else {
-                LOGGER.warning("Failed to rename region: unsupported region type");
-                // Restore old region (and its children's link to it) if we can't handle the type
-                regionManager.addRegion(region);
-                for (ProtectedRegion child : children) {
-                    try {
-                        child.setParent(region);
-                    } catch (ProtectedRegion.CircularInheritanceException ignored) {
-                        // It was their parent a moment ago, so this can't form a cycle
-                    }
-                }
-                return false;
-            }
-            
-            // Copy properties from old region (owners and members too: a rename must not strip player ownership)
-            newRegion.setPriority(region.getPriority());
-            newRegion.setOwners(region.getOwners());
-            newRegion.setMembers(region.getMembers());
-            
-            // Copy flags
-            for (Flag<?> flag : region.getFlags().keySet()) {
-                try {
-                    Object value = region.getFlag(flag);
-                    newRegion.setFlag((Flag) flag, value);
-                } catch (Exception e) {
-                    LOGGER.warning("Failed to copy flag " + flag.getName() + ": " + e.getMessage());
-                }
-            }
-            
-            // Keep the region in the hierarchy: its own parent and its children's link to it
-            try {
-                newRegion.setParent(region.getParent());
-            } catch (ProtectedRegion.CircularInheritanceException e) {
-                LOGGER.warning("Could not keep the parent of renamed region " + newRegionId + ": " + e.getMessage());
-            }
-
-            // Add the new region
-            regionManager.addRegion(newRegion);
-
-            for (ProtectedRegion child : children) {
-                try {
-                    child.setParent(newRegion);
-                } catch (ProtectedRegion.CircularInheritanceException e) {
-                    LOGGER.warning("Could not re-link child region " + child.getId() + " to " + newRegionId + ": " + e.getMessage());
-                }
-            }
-            
-            LOGGER.info("Successfully renamed region from " + oldRegionId + " to " + newRegionId
-                    + (children.isEmpty() ? "" : " (" + children.size() + " child region(s) re-linked)"));
+            LOGGER.info("Successfully renamed region from " + oldRegionId + " to " + newRegionId + " in " + world.getName()
+                + ": " + result.detail());
             return true;
             
         } catch (Exception e) {

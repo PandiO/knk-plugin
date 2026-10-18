@@ -1950,12 +1950,12 @@ public class KnKPlugin extends JavaPlugin {
             registerKnkShortcut("gate", knkAdminCommand);
             registerKnkShortcut("gatedoor", knkAdminCommand);
             if (managedRegions != null) {
-                var regionsCommand = new net.knightsandkings.knk.paper.commands.RegionsAdminCommand(managedRegions, domainAccessSync, this);
+                var regionsCommand = new net.knightsandkings.knk.paper.commands.RegionsAdminCommand(managedRegions, domainAccessSync, this,
+                    tempRegionRetentionTask);
                 knkAdminCommand.registerSubcommand(
                     net.knightsandkings.knk.paper.commands.RegionsAdminCommand.metadata(),
                     regionsCommand::execute,
-                    (sender, args) -> args.length == 1 && "repair".startsWith(args[0].toLowerCase(java.util.Locale.ROOT))
-                        ? java.util.List.of("repair") : java.util.List.of());
+                    regionsCommand::complete);
             }
             if (lootboxAdminCommand != null) {
                 var lootboxAdmin = lootboxAdminCommand;
