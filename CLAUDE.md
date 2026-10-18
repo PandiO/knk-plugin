@@ -29,6 +29,9 @@ confirmed no `pom.xml` anywhere in the repo. Targets Paper API
   `plugins/` folder of the dev server at the path set by the
   `devServerDirectory` Gradle property (currently
   `gradle.properties` → `MinecraftServer/Servers/DEV_SERVER_1.21.10`)
+- CI: `.github/workflows/build.yml` runs `./gradlew build` (all modules +
+  unit tests) on every push and PR. Cloud agent sessions can't reach
+  `repo.papermc.io` and so can't build locally: push and check the GitHub run.
 
 **Structure** (all under
 `knk-paper/src/main/java/net/knightsandkings/knk/paper/` unless noted):
@@ -55,7 +58,8 @@ confirmed no `pom.xml` anywhere in the repo. Targets Paper API
   `bearer` (`BearerAuthProvider`); protected game-server writes require the
   configured plugin service key (`Security:PluginApiKey`) unless the API's
   explicit development bypass applies. `PlayerNotificationPoller` polls
-  the API for player notifications; consult the actual endpoint attributes
+  the API for player notifications and `HeadlessWorldTaskPoller` for
+  player-less WorldTasks (both in `tasks/`); consult the actual endpoint attributes
   when changing authentication.
 - `dataaccess/DataAccessFactory.java` builds REST-backed, cache-first
   gateways (`FetchPolicy.CACHE_FIRST` by default, per-entity configurable).
