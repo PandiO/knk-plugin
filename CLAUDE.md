@@ -41,7 +41,10 @@ confirmed no `pom.xml` anywhere in the repo. Targets Paper API
   `gates/`
 - Managed WorldGuard regions (parent/priority/category flags + startup repair):
   policy and reconciler in `knk-core/.../core/regions/managed/`, WorldGuard adapter and
-  wiring in `regions/managed/`, `/knk regions repair` in `commands/RegionsAdminCommand.java`;
+  wiring in `regions/managed/`, `/knk regions repair` and `/knk regions temp [purge]` in
+  `commands/RegionsAdminCommand.java`. Renames of `tempregion_worldtask_<n>` to `domain_<id>`, including
+  replacing a domain's previous region when its region step is re-run (KNG-103), are decided by
+  `knk-core/.../core/regions/RegionRenamePlan` and applied by `regions/WorldGuardRegionRenamer`;
   see `docs/architecture/managed-worldguard-regions.md` in `knk-workspace`
 - Config: `src/main/resources/config.yml`, `plugin.yml`
 - Inventory menu runtime lives in `knk-paper/.../paper/menu/`, with feature

@@ -328,7 +328,7 @@ permissions:
     default: false
 
   knk.admin.regions:
-    description: Access to /knk regions repair (re-applies the managed WorldGuard parent, priority and flags to every Knights and Kings region)
+    description: Access to /knk regions repair (re-applies the managed WorldGuard parent, priority and flags to every Knights and Kings region) and /knk regions temp [purge [hours]] (reports leftover tempregion_worldtask_* regions and unused domain_<id> regions; purge deletes unused temp regions)
     default: false
 
   knk.admin.cache:
