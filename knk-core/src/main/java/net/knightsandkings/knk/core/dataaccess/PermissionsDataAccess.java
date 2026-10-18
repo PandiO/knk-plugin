@@ -1,10 +1,17 @@
 package net.knightsandkings.knk.core.dataaccess;
 
 import java.time.Duration;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.LongSupplier;
+import java.util.logging.Logger;
 
 import net.knightsandkings.knk.core.cache.BaseCache;
+import net.knightsandkings.knk.core.domain.permissions.EffectivePermissionResolver;
 import net.knightsandkings.knk.core.domain.permissions.EffectivePermissionSet;
 import net.knightsandkings.knk.core.domain.permissions.PermissionCheckResult;
 import net.knightsandkings.knk.core.domain.permissions.PermissionDecision;
@@ -25,20 +32,44 @@ import net.knightsandkings.knk.core.ports.api.PermissionsApi;
  * phase), so {@link #invalidateAll()} is the only invalidation available for now; a future phase
  * wiring up in-game grant/revoke commands should call it after a mutation rather than waiting out
  * the TTL.
+ * <p>
+ * KNG-171: built with {@link DataAccessSettings#apiOutage()}, so while knk-web-api is DOWN a check
+ * that isn't in the fresh cache makes no API call and ends at once as an ERROR result
+ * ({@link PermissionDecision#UNAVAILABLE}); the caller answers it from the offline store.
+ * <p>
+ * KNG-107: with {@link #resolveFromEffectiveSets} on, a check is answered from the user's effective
+ * set - one API call per user per TTL, however many nodes are asked, with concurrent loads of the
+ * same user's set shared - resolved locally by {@link EffectivePermissionResolver}. A cache-only
+ * check answers from the user's last set after its TTL while it is reloaded in the background, so
+ * listings neither wait nor flicker to "no" at every TTL; while the API is DOWN only up to
+ * {@code staleFor} past the TTL (then the offline store answers). {@link #forget} drops a user's set
+ * (at quit). From an API whose sets carry no ranks the set still answers every node it can decide
+ * without the chain order; only a node two groups disagree about is asked with a single-node check.
  */
 public class PermissionsDataAccess {
 
+    private static final Logger LOGGER = Logger.getLogger(PermissionsDataAccess.class.getName());
+
     private final CheckCache checkCache;
     private final EffectiveCache effectiveCache;
+    private final Duration effectiveTtl;
     private final PermissionsApi api;
     private final DataAccessSettings settings;
     private final DataAccessExecutor<PermissionCheckKey, PermissionCheckResult> checkExecutor;
     private final DataAccessExecutor<Integer, EffectivePermissionSet> effectiveExecutor;
     private volatile AnswerListener answerListener = (userId, node, result) -> { };
+    private volatile boolean resolveFromEffectiveSets;
+    private volatile Duration staleFor = Duration.ZERO;
+    private volatile LongSupplier clockMillis = System::currentTimeMillis;
+    /** Logged once: the API's sets carry no ranks, so group conflicts are asked node by node. */
+    private volatile boolean unrankedLogged;
+    private final Map<Integer, CompletableFuture<FetchResult<EffectivePermissionSet>>> effectiveLoads = new ConcurrentHashMap<>();
+    private final Map<Integer, LoadedSet> loadedSets = new ConcurrentHashMap<>();
 
     /**
      * Told about every answer the API gives a check (KNG-58: the offline security cache keeps the
-     * last one). {@code result} is null when the API knows no such user.
+     * last one). {@code result} is null when the API knows no such user ({@code node} is then null when
+     * it was an effective-set load that found no user, KNG-107).
      */
     @FunctionalInterface
     public interface AnswerListener {
@@ -46,6 +77,14 @@ public class PermissionsDataAccess {
     }
 
     private record PermissionCheckKey(int userId, String node) {
+    }
+
+    /**
+     * A user's set as last loaded: its resolver, when it was loaded, and the nodes already passed to the
+     * {@link AnswerListener} from it (each once per load, as single-node checks did once per fetch).
+     */
+    private record LoadedSet(EffectivePermissionSet set, EffectivePermissionResolver resolver, long loadedAtMillis,
+                             Set<String> reported) {
     }
 
     private static class CheckCache extends BaseCache<PermissionCheckKey, PermissionCheckResult> {
@@ -67,10 +106,11 @@ public class PermissionsDataAccess {
     public PermissionsDataAccess(Duration ttl, PermissionsApi api, DataAccessSettings settings) {
         this.checkCache = new CheckCache(ttl);
         this.effectiveCache = new EffectiveCache(ttl);
+        this.effectiveTtl = ttl != null ? ttl : Duration.ofMinutes(1);
         this.api = Objects.requireNonNull(api, "api must not be null");
         this.settings = Objects.requireNonNullElse(settings, DataAccessSettings.defaults());
-        this.checkExecutor = new DataAccessExecutor<>(checkCache, this.settings.retryPolicy(), "PermissionCheck");
-        this.effectiveExecutor = new DataAccessExecutor<>(effectiveCache, this.settings.retryPolicy(), "EffectivePermissions");
+        this.checkExecutor = new DataAccessExecutor<>(checkCache, this.settings, "PermissionCheck");
+        this.effectiveExecutor = new DataAccessExecutor<>(effectiveCache, this.settings, "EffectivePermissions");
     }
 
     /**
@@ -86,6 +126,13 @@ public class PermissionsDataAccess {
     public CompletableFuture<FetchResult<PermissionCheckResult>> checkAsync(int userId, String node, FetchPolicy policy) {
         Objects.requireNonNull(node, "node must not be null");
         FetchPolicy effective = settings.resolvePolicy(policy);
+        if (resolveFromEffectiveSets) {
+            return checkFromEffectiveSet(userId, node, effective);
+        }
+        return checkSingleNode(userId, node, effective);
+    }
+
+    private CompletableFuture<FetchResult<PermissionCheckResult>> checkSingleNode(int userId, String node, FetchPolicy effective) {
         PermissionCheckKey key = new PermissionCheckKey(userId, node);
 
         return checkExecutor.fetchAsync(
@@ -103,6 +150,158 @@ public class PermissionsDataAccess {
     }
 
     /**
+     * KNG-107: answer checks from each user's effective set (see the class comment). {@code staleFor}: how
+     * long past its TTL a set may still answer a cache-only check while it is reloaded.
+     */
+    public void resolveFromEffectiveSets(Duration staleFor) {
+        resolveFromEffectiveSets(staleFor, System::currentTimeMillis);
+    }
+
+    /** As {@link #resolveFromEffectiveSets(Duration)} with the clock the stale window is measured on (tests). */
+    void resolveFromEffectiveSets(Duration staleFor, LongSupplier clockMillis) {
+        this.staleFor = staleFor == null || staleFor.isNegative() ? Duration.ZERO : staleFor;
+        this.clockMillis = Objects.requireNonNull(clockMillis, "clockMillis must not be null");
+        this.resolveFromEffectiveSets = true;
+    }
+
+    /**
+     * Loads the user's effective set unless a fresh one is cached (KNG-107: at join, so the player's first
+     * command or listing needs no API call). Does nothing unless checks resolve from effective sets.
+     */
+    public CompletableFuture<Void> preload(int userId) {
+        if (!resolveFromEffectiveSets) {
+            return CompletableFuture.completedFuture(null);
+        }
+        return loadEffective(userId).thenAccept(result -> { });
+    }
+
+    /**
+     * Whether cache-only checks for the user answer from a loaded set (fresh or being reloaded), so a
+     * listing can be shown without waiting for the API (KNG-107: {@code /knk help towns} waited ~10 s
+     * for a reload after the TTL).
+     */
+    public boolean hasLoadedSet(int userId) {
+        if (!resolveFromEffectiveSets) {
+            return false;
+        }
+        LoadedSet last = loadedSets.get(userId);
+        return last != null && (effectiveCache.get(userId).isPresent() || mayServeExpired(last));
+    }
+
+    /** Drops the user's set (they left); their next check loads it again. */
+    public void forget(int userId) {
+        invalidateEffective(userId);
+    }
+
+    private CompletableFuture<FetchResult<PermissionCheckResult>> checkFromEffectiveSet(int userId, String node, FetchPolicy policy) {
+        if (policy == FetchPolicy.CACHE_ONLY) {
+            return CompletableFuture.completedFuture(checkCachedSet(userId, node));
+        }
+        CompletableFuture<FetchResult<EffectivePermissionSet>> load = policy == FetchPolicy.CACHE_FIRST
+            ? loadEffective(userId)
+            : getEffectiveAsync(userId, policy);
+        return load.thenCompose(result -> {
+            if (!result.isSuccess()) {
+                return CompletableFuture.completedFuture(result.map(set -> (PermissionCheckResult) null));
+            }
+            Optional<PermissionCheckResult> answer = answer(userId, node, loaded(userId, result.value().orElseThrow()));
+            return answer.isPresent()
+                ? CompletableFuture.completedFuture(result.map(set -> answer.get()))
+                : checkSingleNode(userId, node, policy); // two groups disagree and the set has no ranks
+
+        });
+    }
+
+    /**
+     * Cache-only: the fresh set, else the last one (and reload it) - while the API is DOWN only if it
+     * expired less than {@code staleFor} ago - else a miss.
+     */
+    private FetchResult<PermissionCheckResult> checkCachedSet(int userId, String node) {
+        Optional<EffectivePermissionSet> fresh = effectiveCache.get(userId);
+        if (fresh.isPresent()) {
+            return answer(userId, node, loaded(userId, fresh.get()))
+                .map(FetchResult::hit)
+                .orElseGet(() -> checkSingleNodeCacheOnly(userId, node));
+        }
+        LoadedSet last = loadedSets.get(userId);
+        if (last != null && mayServeExpired(last)) {
+            loadEffective(userId);
+            // Not passed to the answer listener: the offline store keeps API answers, not expired ones.
+            return last.resolver().resolve(node)
+                .map(FetchResult::staleServed)
+                .orElseGet(() -> checkSingleNodeCacheOnly(userId, node));
+        }
+        return FetchResult.notFound();
+    }
+
+    /** An expired set still answers cache-only checks: always while the API is up, else for {@code staleFor}. */
+    private boolean mayServeExpired(LoadedSet last) {
+        return !settings.apiOutage().isApiDown()
+            || clockMillis.getAsLong() - last.loadedAtMillis() <= settingsTtlMillis() + staleFor.toMillis();
+    }
+
+    private FetchResult<PermissionCheckResult> checkSingleNodeCacheOnly(int userId, String node) {
+        return checkSingleNode(userId, node, FetchPolicy.CACHE_ONLY).join();
+    }
+
+    private long settingsTtlMillis() {
+        return effectiveTtl.toMillis();
+    }
+
+    /** One load of the user's set at a time: concurrent checks on a cold cache share it. */
+    private CompletableFuture<FetchResult<EffectivePermissionSet>> loadEffective(int userId) {
+        Optional<EffectivePermissionSet> fresh = effectiveCache.get(userId);
+        if (fresh.isPresent()) {
+            return CompletableFuture.completedFuture(FetchResult.hit(fresh.get()));
+        }
+        CompletableFuture<FetchResult<EffectivePermissionSet>> running = effectiveLoads.get(userId);
+        if (running != null) {
+            return running;
+        }
+        CompletableFuture<FetchResult<EffectivePermissionSet>> load = new CompletableFuture<>();
+        running = effectiveLoads.putIfAbsent(userId, load);
+        if (running != null) {
+            return running;
+        }
+        getEffectiveAsync(userId, FetchPolicy.CACHE_FIRST).whenComplete((result, error) -> {
+            effectiveLoads.remove(userId, load);
+            if (result != null && result.isSuccess()) {
+                loaded(userId, result.value().orElseThrow());
+            } else if (result != null && result.status() == FetchStatus.NOT_FOUND) {
+                answerListener.answered(userId, null, null); // the API knows no such user (KNG-58 erasure)
+            }
+            load.complete(error != null ? FetchResult.error(error) : result);
+        });
+        return load;
+    }
+
+    /** The loaded state for {@code set}, kept per user and replaced by a newer set. */
+    private LoadedSet loaded(int userId, EffectivePermissionSet set) {
+        LoadedSet current = loadedSets.get(userId);
+        if (current != null && current.set() == set) {
+            return current;
+        }
+        EffectivePermissionResolver resolver = EffectivePermissionResolver.of(set);
+        if (!resolver.ranked() && !unrankedLogged) {
+            unrankedLogged = true;
+            LOGGER.info("knk-web-api sends effective permission sets without sourceRank (an API older than KNG-107): "
+                + "nodes are still resolved from the set; only a node two groups disagree about is checked with the API");
+        }
+        LoadedSet loaded = new LoadedSet(set, resolver, clockMillis.getAsLong(), ConcurrentHashMap.newKeySet());
+        loadedSets.put(userId, loaded);
+        return loaded;
+    }
+
+    /** The set's answer for {@code node} (told to the listener once per set); empty when the API must be asked. */
+    private Optional<PermissionCheckResult> answer(int userId, String node, LoadedSet loaded) {
+        Optional<PermissionCheckResult> result = loaded.resolver().resolve(node);
+        if (result.isPresent() && loaded.reported().add(node)) {
+            answerListener.answered(userId, node, result.get());
+        }
+        return result;
+    }
+
+    /**
      * Check a single node using CACHE_FIRST policy (default).
      */
     public CompletableFuture<FetchResult<PermissionCheckResult>> checkAsync(int userId, String node) {
@@ -112,7 +311,8 @@ public class PermissionsDataAccess {
     /**
      * {@link #checkAsync(int, String)} as a {@link PermissionDecision}: {@code ALLOWED} for a
      * grant, {@code DENIED} for a real "no" (deny, undeclared, or a user the API doesn't know),
-     * {@code UNAVAILABLE} when the API couldn't be asked (error after retries, no cached answer).
+     * {@code UNAVAILABLE} when the API couldn't be asked (error after retries, or the API is DOWN,
+     * with no cached answer).
      * Never completes exceptionally.
      */
     public CompletableFuture<PermissionDecision> decideAsync(int userId, String node) {
@@ -166,10 +366,15 @@ public class PermissionsDataAccess {
     public void invalidateAll() {
         checkExecutor.invalidateAll();
         effectiveExecutor.invalidateAll();
+        loadedSets.clear();
     }
 
-    /** Invalidate just one user's cached effective set (e.g. after a targeted admin action). */
+    /**
+     * Invalidate just one user's cached effective set (e.g. after a targeted admin action). With checks
+     * resolved from effective sets, the user's next check loads the set again.
+     */
     public void invalidateEffective(int userId) {
         effectiveExecutor.invalidate(userId);
+        loadedSets.remove(userId);
     }
 }

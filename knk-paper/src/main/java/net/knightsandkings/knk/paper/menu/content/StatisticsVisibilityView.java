@@ -8,7 +8,7 @@ import net.knightsandkings.knk.core.domain.statistics.StatisticsVisibilitySettin
 
 /**
  * The {@code statsvis} root of {@code statistics.visibility}: which group is selected (its selector
- * item is HIGHLIGHTed), a count line for it, and the preview of a pending group action
+ * item BLINKs - KNG-125, the v1/v2 item blinker; it was a HIGHLIGHT glint before), a count line for it, and the preview of a pending group action
  * ({@code setting: current → proposed}, shown on the Confirm button). Built from the last settings
  * {@link StatisticsVisibilityMenuFeature} read; "loading" until they arrive.
  */
@@ -52,7 +52,7 @@ public final class StatisticsVisibilityView {
     }
 
     private String mode(String group) {
-        return group.equalsIgnoreCase(selectedGroup) ? "HIGHLIGHT" : "NORMAL";
+        return group.equalsIgnoreCase(selectedGroup) ? "BLINK" : "NORMAL";
     }
 
     // Selector names and hints (finding 9: the open group must be obvious, not only a glint).

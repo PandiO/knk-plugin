@@ -50,7 +50,7 @@ public class KitsDataAccess {
         this.cache = new KitCache(ttl);
         this.queryApi = Objects.requireNonNull(queryApi, "queryApi must not be null");
         this.settings = Objects.requireNonNullElse(settings, DataAccessSettings.defaults());
-        this.executor = new DataAccessExecutor<>(cache, this.settings.retryPolicy(), "Kit");
+        this.executor = new DataAccessExecutor<>(cache, this.settings, "Kit");
     }
 
     public CompletableFuture<FetchResult<KnkKit>> getByIdAsync(int id, FetchPolicy policy) {

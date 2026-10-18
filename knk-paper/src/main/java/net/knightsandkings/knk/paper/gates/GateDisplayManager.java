@@ -198,6 +198,15 @@ public class GateDisplayManager {
                 LOGGER.info("Removed orphaned gate display entity for gate ID " + gateId);
                 continue;
             }
+            String gateWorld = gateManager.getGate(gateId).getWorldName();
+            if (gateWorld != null && !gateWorld.isBlank() && !gateWorld.equalsIgnoreCase(world.getName())) {
+                // KNG-113: a display in another world than its gate (from before doors kept their world) is never
+                // adopted, so the gate's own display is the one that stays
+                entity.remove();
+                LOGGER.info("Removed gate display entity for gate ID " + gateId + " from world " + world.getName()
+                    + " (the gate is in " + gateWorld + ")");
+                continue;
+            }
 
             TextDisplay alreadyAdopted = displays.get(gateId);
             if (alreadyAdopted != null && alreadyAdopted.isValid() && !alreadyAdopted.equals(entity)) {

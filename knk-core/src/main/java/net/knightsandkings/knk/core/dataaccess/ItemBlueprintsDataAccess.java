@@ -45,7 +45,7 @@ public class ItemBlueprintsDataAccess {
         this.cache = new ItemBlueprintCache(ttl);
         this.queryApi = Objects.requireNonNull(queryApi, "queryApi must not be null");
         this.settings = Objects.requireNonNullElse(settings, DataAccessSettings.defaults());
-        this.executor = new DataAccessExecutor<>(cache, this.settings.retryPolicy(), "ItemBlueprint");
+        this.executor = new DataAccessExecutor<>(cache, this.settings, "ItemBlueprint");
     }
 
     public CompletableFuture<FetchResult<KnkItemBlueprint>> getByIdAsync(int id, FetchPolicy policy) {

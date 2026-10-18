@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.paper.commands;
 
 import net.knightsandkings.knk.core.connectivity.ApiConnectivity;
+import net.knightsandkings.knk.core.connectivity.ApiConnectivityState;
 import net.knightsandkings.knk.core.domain.HealthStatus;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.HealthApi;
@@ -132,6 +133,14 @@ public class HealthCommand implements CommandExecutor {
         sender.sendMessage(color + "API connectivity: " + s.state() + ChatColor.GRAY
             + " (for " + ago(s.since(), now) + "; DOWN after " + connectivity.failuresToDown()
             + " failed probes, UP after " + connectivity.successesToUp() + " passing)");
+        if (plugin instanceof KnKPlugin knkPlugin) {
+            if (!knkPlugin.isSkipApiWhileDownEnabled()) {
+                sender.sendMessage(ChatColor.GRAY + "  reads call the API even while DOWN (skip-api-while-down: false)");
+            } else if (s.state() == ApiConnectivityState.DOWN) {
+                // KNG-171
+                sender.sendMessage(ChatColor.GRAY + "  reads skip the API until UP: answered from caches and the offline store");
+            }
+        }
         if (s.lastProbeAt() != null) {
             sender.sendMessage(ChatColor.GRAY + "  last probe " + ago(s.lastProbeAt(), now) + " ago: "
                 + (s.lastProbeSucceeded() ? "ok" : "failed") + " - " + s.lastProbeDetail()

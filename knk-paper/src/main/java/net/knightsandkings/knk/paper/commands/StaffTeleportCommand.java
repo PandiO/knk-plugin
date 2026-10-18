@@ -357,24 +357,41 @@ public class StaffTeleportCommand implements TabExecutor {
         if (args.length == 0) {
             return Collections.emptyList();
         }
+        // KNG-107: only what the sender can run (cached check; running it checks for real).
+        boolean self = support.holdsAny(sender, List.of(TeleportNodes.STAFF, TeleportNodes.LEGACY_ADMIN_TP));
+        boolean others = support.holds(sender, TeleportNodes.STAFF_OTHERS);
+        boolean silent = (self || others) && support.holds(sender, TeleportNodes.STAFF_SILENT);
         String last = args[args.length - 1];
         if (form == Form.TPHERE) {
-            return args.length == 1 ? targets.complete(sender, last) : prefixed(List.of("-s"), last);
+            if (!others) {
+                return Collections.emptyList();
+            }
+            return args.length == 1 ? targets.complete(sender, last) : silentFlag(silent, last);
         }
         if (args.length == 1) {
-            return targets.complete(sender, last);
+            return self || others ? targets.complete(sender, last) : Collections.emptyList();
         }
         boolean coordinates = isCoordinate(args[0]);
         if (coordinates) {
+            if (!self) {
+                return Collections.emptyList();
+            }
             if (args.length <= 3) {
                 return prefixed(List.of("~"), last);
             }
             return args.length == 4 ? prefixed(worldNames.get(), last) : Collections.emptyList();
         }
         if (args.length == 2) {
-            return targets.complete(sender, last, "-s");
+            if (others) {
+                return silent ? targets.complete(sender, last, "-s") : targets.complete(sender, last);
+            }
+            return self ? silentFlag(silent, last) : Collections.emptyList();
         }
-        return args.length == 3 ? prefixed(List.of("-s"), last) : Collections.emptyList();
+        return args.length == 3 && others ? silentFlag(silent, last) : Collections.emptyList();
+    }
+
+    private static List<String> silentFlag(boolean silent, String last) {
+        return silent ? prefixed(List.of("-s"), last) : Collections.emptyList();
     }
 
     private static List<String> prefixed(List<String> options, String prefix) {

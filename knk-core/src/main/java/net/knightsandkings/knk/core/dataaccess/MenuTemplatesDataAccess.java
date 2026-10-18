@@ -59,7 +59,7 @@ public class MenuTemplatesDataAccess {
         this.cache = new MenuTemplateCache(ttl);
         this.queryApi = Objects.requireNonNull(queryApi, "queryApi must not be null");
         this.settings = Objects.requireNonNullElse(settings, DataAccessSettings.defaults());
-        this.executor = new DataAccessExecutor<>(cache, this.settings.retryPolicy(), "MenuTemplate");
+        this.executor = new DataAccessExecutor<>(cache, this.settings, "MenuTemplate");
     }
 
     public CompletableFuture<FetchResult<KnkMenuTemplate>> getByKeyAsync(String key, FetchPolicy policy) {

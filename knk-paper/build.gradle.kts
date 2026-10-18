@@ -29,6 +29,10 @@ dependencies {
     testImplementation("org.mockito:mockito-core:5.24.0")
     testImplementation("org.mockito:mockito-junit-jupiter:5.24.0")
     testImplementation("org.apache.logging.log4j:log4j-core:2.24.1")
+    // KNG-103: region rename/replace tests build real WorldGuard regions around a mocked RegionManager (core
+    // artifacts only: the bukkit ones bring an older spigot-api).
+    testImplementation("com.sk89q.worldedit:worldedit-core:7.2.13")
+    testImplementation("com.sk89q.worldguard:worldguard-core:7.0.10")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

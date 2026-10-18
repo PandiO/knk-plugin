@@ -52,6 +52,32 @@ class CommandPermissionsTest {
         return ran.get();
     }
 
+    // KNG-107 retest: /knk help towns waited ~10 s for the set to reload after its TTL.
+    @Test
+    void warmForListing_withALoadedSet_runsAtOnce_andRefreshesInTheBackground() {
+        when(permissible.listingReady(staff)).thenReturn(true);
+        when(permissible.checkAsync(any(), anyString())).thenReturn(new CompletableFuture<>()); // a slow API
+        AtomicBoolean ran = new AtomicBoolean();
+
+        permissions.warmForListing(staff, java.util.List.of(NODE), () -> ran.set(true));
+
+        assertTrue(ran.get());
+        verify(permissible).preload(any());
+    }
+
+    @Test
+    void warmForListing_withoutALoadedSet_waitsLikeWarm() {
+        CompletableFuture<PermissionDecision> answer = new CompletableFuture<>();
+        when(permissible.checkAsync(any(), anyString())).thenReturn(answer);
+        AtomicBoolean ran = new AtomicBoolean();
+
+        permissions.warmForListing(staff, java.util.List.of(NODE), () -> ran.set(true));
+        assertFalse(ran.get());
+
+        answer.complete(PermissionDecision.ALLOWED);
+        assertTrue(ran.get());
+    }
+
     @Test
     void nonOpStaffWithAnInHouseGrantPasses() {
         inHouse(PermissionDecision.ALLOWED);
@@ -163,5 +189,45 @@ class CommandPermissionsTest {
         when(permissible.hasPermission(staff, NODE)).thenReturn(true);
         var gated = new PermissionGatedCommand(NODE, mock(CommandExecutor.class), permissions);
         assertEquals(List.of(), gated.onTabComplete(staff, mock(Command.class), "freeze", new String[] {""}));
+    }
+
+    // KNG-107: completion reads the cache only; a miss is asked in the background for the next keystroke.
+    @Test
+    void hasForCompletion_answersFromTheCache_andAsksAMissInTheBackground() {
+        inHouse(PermissionDecision.ALLOWED);
+        assertFalse(permissions.hasForCompletion(staff, NODE));
+        verify(permissible).checkAsync(staff, NODE);
+
+        when(permissible.hasPermission(staff, NODE)).thenReturn(true);
+        assertTrue(permissions.hasForCompletion(staff, NODE));
+        assertTrue(permissions.hasForCompletion(mock(ConsoleCommandSender.class), NODE));
+    }
+
+    // KNG-107: a command whose forms need different nodes - any one of them lets the sender in.
+    @Test
+    void anyOfGate_runsForAHolderOfOneNode_refusesWithNoPermissionOtherwise() {
+        CommandExecutor delegate = mock(CommandExecutor.class);
+        var gated = new PermissionGatedCommand(List.of("knk.inventory.open", "knk.inventory.clear"), delegate, permissions);
+        when(permissible.checkAsync(any(), eq("knk.inventory.open"))).thenReturn(CompletableFuture.completedFuture(PermissionDecision.DENIED));
+        when(permissible.checkAsync(any(), eq("knk.inventory.clear"))).thenReturn(CompletableFuture.completedFuture(PermissionDecision.DENIED));
+
+        gated.onCommand(staff, mock(Command.class), "inventory", new String[0]);
+        verify(delegate, never()).onCommand(any(), any(), anyString(), any());
+        verify(staff).sendMessage(CommandPermissions.NO_PERMISSION_MESSAGE);
+
+        when(permissible.checkAsync(any(), eq("knk.inventory.clear"))).thenReturn(CompletableFuture.completedFuture(PermissionDecision.ALLOWED));
+        gated.onCommand(staff, mock(Command.class), "inventory", new String[0]);
+        verify(delegate).onCommand(eq(staff), any(), eq("inventory"), any());
+    }
+
+    @Test
+    void anyOfGate_unreachableServiceIsNotReportedAsNoPermission() {
+        CommandExecutor delegate = mock(CommandExecutor.class);
+        var gated = new PermissionGatedCommand(List.of("knk.a", "knk.b"), delegate, permissions);
+        when(permissible.checkAsync(any(), eq("knk.a"))).thenReturn(CompletableFuture.completedFuture(PermissionDecision.DENIED));
+        when(permissible.checkAsync(any(), eq("knk.b"))).thenReturn(CompletableFuture.completedFuture(PermissionDecision.UNAVAILABLE));
+
+        gated.onCommand(staff, mock(Command.class), "x", new String[0]);
+        verify(staff).sendMessage(PlayerCommandSupport.UNAVAILABLE_MESSAGE);
     }
 }

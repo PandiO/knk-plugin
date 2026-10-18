@@ -122,7 +122,8 @@ public class ConfigLoader {
             loadTelemetry(config.getConfigurationSection("telemetry")),
             loadWorldAnalytics(config.getConfigurationSection("world-analytics")),
             loadRegionHttp(config.getConfigurationSection("region-http")),
-            loadWeb(config.getConfigurationSection("web")));
+            loadWeb(config.getConfigurationSection("web")),
+            loadOnboarding(config.getConfigurationSection("onboarding")));
         knkConfig.validate();
         
         return knkConfig;
@@ -146,6 +147,25 @@ public class ConfigLoader {
             return KnkConfig.WebConfig.defaults();
         }
         return new KnkConfig.WebConfig(section.getString("public-url", ""));
+    }
+
+    /** New-player onboarding (KNG-128/129); every key has a default, so a missing section means "on, with defaults". */
+    static KnkConfig.OnboardingConfig loadOnboarding(ConfigurationSection section) {
+        KnkConfig.OnboardingConfig defaults = KnkConfig.OnboardingConfig.defaults();
+        if (section == null) {
+            return defaults;
+        }
+        ConfigurationSection reminder = section.getConfigurationSection("unlinked-reminder");
+        return new KnkConfig.OnboardingConfig(
+            section.contains("first-join-welcome") ? section.getStringList("first-join-welcome") : defaults.firstJoinWelcome(),
+            section.getString("link-prompt", defaults.linkPrompt()),
+            section.getString("link-button", defaults.linkButton()),
+            section.getString("link-button-hover", defaults.linkButtonHover()),
+            section.getInt("discovery-quiet-minutes", defaults.discoveryQuietMinutes()),
+            section.getString("discovery-settled-summary", defaults.discoverySettledSummary()),
+            reminder == null ? defaults.unlinkedReminderEnabled() : reminder.getBoolean("enabled", defaults.unlinkedReminderEnabled()),
+            reminder == null ? defaults.unlinkedReminder() : reminder.getString("message", defaults.unlinkedReminder())
+        );
     }
 
     /** The teleport: block (docs/specs/teleport/DESIGN.md §3.11); missing keys fall back to the defaults. */

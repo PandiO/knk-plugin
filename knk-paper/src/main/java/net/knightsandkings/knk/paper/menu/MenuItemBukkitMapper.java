@@ -180,9 +180,11 @@ public final class MenuItemBukkitMapper {
      * HIGHLIGHT (FR-2.4.1 "render with emphasis/glow") uses the common
      * add-a-hidden-enchant trick, since Bukkit has no first-class "glowing
      * item" API. DISABLED styling is the lore line added in {@link #applyLore}.
+     * BLINK (KNG-125) gets the same glint on its own phase; the yellow-pane
+     * phase is swapped in by {@link MenuItemBlinker}.
      */
     private static void applyDisplayModeStyling(RuntimeMenuItem item, ItemMeta meta) {
-        if (item.displayMode() == MenuDisplayMode.HIGHLIGHT) {
+        if (item.displayMode() == MenuDisplayMode.HIGHLIGHT || item.displayMode() == MenuDisplayMode.BLINK) {
             Enchantment glow = Registry.ENCHANTMENT.get(NamespacedKey.minecraft("unbreaking"));
             if (glow != null) {
                 meta.addEnchant(glow, 1, true);

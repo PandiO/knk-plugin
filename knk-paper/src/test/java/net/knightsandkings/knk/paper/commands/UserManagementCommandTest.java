@@ -102,4 +102,32 @@ class UserManagementCommandTest {
         verify(service).setFrozen(sender, steve, true, "griefing again");
         verify(service).setFrozen(sender, steve, false, null);
     }
+
+    // ===== KNG-107: tab completion offers only the properties the sender holds =====
+
+    @Test
+    void propertiesHeld_noNodes_nothing_oneNode_itAndInfo() {
+        CommandSender staff = mock(CommandSender.class);
+        org.junit.jupiter.api.Assertions.assertEquals(java.util.List.of(),
+                UserManagementCommand.propertiesHeld(staff, (s, node) -> false));
+        org.junit.jupiter.api.Assertions.assertEquals(java.util.List.of("info", "coins"),
+                UserManagementCommand.propertiesHeld(staff, (s, node) -> node.equals("knk.admin.user.coins")));
+        org.junit.jupiter.api.Assertions.assertEquals(UserManagementCommand.CHECKED_NODES.size(),
+                UserManagementCommand.propertiesHeld(staff, (s, node) -> true).size());
+    }
+
+    @Test
+    void usage_namesOnlyTheTypedProperty_orTheHeldOnes() {
+        when(service.requireProperty(sender, "gems")).thenReturn(true);
+        when(service.hasPermission(sender, "knk.admin.user.gems")).thenReturn(true);
+        UserManagementCommand command = new UserManagementCommand(service);
+
+        command.onCommand(sender, null, "user", new String[] {"Steve", "gems"});
+        verify(sender).sendMessage(org.bukkit.ChatColor.YELLOW + "  /knk user <player> gems set|add|remove <amount> <reason...>");
+        verify(sender, never()).sendMessage(org.bukkit.ChatColor.YELLOW + "  /knk user <player> coins set|add|remove <amount> <reason...>");
+
+        command.onCommand(sender, null, "user", new String[] {"Steve"});
+        verify(sender).sendMessage(org.bukkit.ChatColor.YELLOW + "  /knk user <player> info");
+        verify(sender, never()).sendMessage(org.bukkit.ChatColor.YELLOW + "  /knk user <player> perm grant|revoke <node> [duration]");
+    }
 }

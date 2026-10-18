@@ -264,6 +264,9 @@ commands:
     description: "Guide yourself along the roads to a place, town, district, structure, street or road node"
     usage: "/navigate <destination> [spawn|region] | /navigate stop | /navigate"
     aliases: [nav]
+  hub:
+    description: Return to where you were before an API outage (the button in the chat)
+    usage: /hub return
   lootbox:
     description: "Lootboxes: help, and what a box can give (docs/specs/lootboxes/DESIGN.md §3.4)"
     usage: "/lootbox | /lootbox odds <category> [stars]"
@@ -325,7 +328,7 @@ permissions:
     default: false
 
   knk.admin.regions:
-    description: Access to /knk regions repair (re-applies the managed WorldGuard parent, priority and flags to every Knights and Kings region)
+    description: Access to /knk regions repair (re-applies the managed WorldGuard parent, priority and flags to every Knights and Kings region) and /knk regions temp [purge [hours]] (reports leftover tempregion_worldtask_* regions and unused domain_<id> regions; purge deletes unused temp regions)
     default: false
 
   knk.admin.cache:
@@ -980,6 +983,12 @@ permissions:
 
   knk.teleport.bypass.combat:
     description: Player teleports are allowed while combat-tagged.
+    default: op
+
+  knk.hub.bypass:
+    description: >-
+      Build and use doors, storage, item frames and NPCs in the hub whatever its rules (staff building the hub).
+      The hub's damage rules still apply.
     default: op
 
   knk.region.bypass:

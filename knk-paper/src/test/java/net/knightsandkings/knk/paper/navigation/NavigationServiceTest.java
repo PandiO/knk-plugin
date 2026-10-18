@@ -111,6 +111,7 @@ class NavigationServiceTest {
     // KNG-51 walk paths: the fake capture and search
     private final List<double[]> walkTargets = new ArrayList<>();
     private final List<WalkGoal> walkGoals = new ArrayList<>();
+    private final List<Set<String>> walkDestinationRegions = new ArrayList<>();
     private final List<CompletableFuture<Supplier<WalkRequest>>> walkCaptures = new ArrayList<>();
     private final List<Runnable> walkSearches = new ArrayList<>();
     private boolean walkCaptureReady = true;
@@ -155,9 +156,10 @@ class NavigationServiceTest {
      * capture and the search are this test's fakes; searches wait for {@link #runSearches}.
      */
     private NavigationService walkService(NavigationConfig config) {
-        NavigationService.WalkPreparer preparer = (p, from, target, goal) -> {
+        NavigationService.WalkPreparer preparer = (p, from, target, goal, destinationRegions) -> {
             walkTargets.add(target.clone());
             walkGoals.add(goal);
+            walkDestinationRegions.add(destinationRegions);
             CompletableFuture<Supplier<WalkRequest>> capture = new CompletableFuture<>();
             walkCaptures.add(capture);
             if (!walkCaptureHeld) {
@@ -1211,6 +1213,37 @@ class NavigationServiceTest {
     }
 
     @Test
+    void walkLegsKnowTheRegionsOfTheNavigationsDestination() {
+        // KNG-121: the walk preparer gets the router's destination regions - for the walk to the road the final
+        // destination's, not the road start's
+        NavigationService.PolicyFactory base = policies;
+        policies = new NavigationService.PolicyFactory() {
+            @Override
+            public AccessPolicy policyFor(Player p, RoadNetworkSnapshot snapshot) {
+                return base.policyFor(p, snapshot);
+            }
+
+            @Override
+            public Set<String> regionsAt(World w, double[] floorPoint) {
+                return floorPoint[0] >= 150 ? Set.of("town_1", "keep_court") : Set.of("town_1", "market");
+            }
+        };
+        walkFinder = r -> found(List.of(new double[] {50.5, 64, 30.5}, new double[] {50.5, 64, 0.5}));
+        NavigationService walking = walkService(NavigationConfig.defaults());
+
+        moveTo(50.5, 65, 30.5);
+        walking.navigate(player, cinixKeep()); // the start leg to (50.5, 64, 0); the keep at x 200
+        assertTrue(walking.startLegOf(playerId).isPresent());
+        assertEquals(Set.of("town_1", "keep_court"), walkDestinationRegions.get(0));
+        walking.stop(player);
+
+        moveTo(0.5, 65, 0.5);
+        walking.navigate(player, well()); // direct mode
+        assertTrue(walking.isDirect(playerId));
+        assertEquals(Set.of("town_1", "market"), walkDestinationRegions.get(walkDestinationRegions.size() - 1));
+    }
+
+    @Test
     void walkingAwayFromTheRoadReRoutesFromTheRoadNowNearest() {
         walkFinder = r -> found(List.of(new double[] {50.5, 64, 30.5}, new double[] {50.5, 64, 0.5}));
         NavigationService walking = walkService(NavigationConfig.defaults());
@@ -1289,6 +1322,93 @@ class NavigationServiceTest {
         moveTo(50.5, 65, 2.5);
         ticks(1);
         assertTrue(walking.startLegOf(playerId).isEmpty());
+    }
+
+    @Test
+    void aPlayerShutInCloseToTheRoadIsToldSoOnce() {
+        // KNG-124 (finding N18): within reroute-distance of the route, but shut in - before, no search ran at all
+        walkFinder = r -> WalkResult.noPath("unreachable", 9);
+        NavigationService walking = walkService(NavigationConfig.defaults());
+        moveTo(50.5, 65, 4.5); // 4.5 blocks off Main Street
+
+        walking.navigate(player, cinixKeep());
+
+        NavigationService.DirectLeg check = walking.startLegOf(playerId).orElseThrow();
+        assertTrue(check.nearRoute);
+        assertArrayEquals(new double[] {50.5, 64, 0}, walkTargets.get(0), 1e-6, "to the route's nearest point");
+        assertTrue(walkGoals.get(0).reached(50.5, 64, 1.5), "the road itself");
+        assertFalse(walkGoals.get(0).reached(50.5, 64, 3.5), "not arrive-distance 4: the box could be inside that");
+        verify(trail).drawRoute(any(), any(), anyDouble(), any()); // today's trail while the check runs
+        runSearches();
+
+        assertEquals(NavigationService.DirectLeg.Status.NO_PATH, check.status);
+        assertEquals(1, messages().stream().filter(m -> m.contains("No conventional path to the road found.")).count());
+        assertEquals(NavigationSession.State.GUIDING, walking.sessionOf(playerId).orElseThrow().state(), "the session guides");
+        clearInvocations(trail);
+        ticks(20);
+        verify(trail, never()).drawRoute(any(), any(), anyDouble(), any()); // no straight line through the box
+        verify(trail, atLeastOnce()).drawRoute(any(), any(), anyDouble(), any(), org.mockito.ArgumentMatchers.eq(false));
+        verify(trail, never()).drawPath(any(), any());
+
+        ticks(NavigationService.RECHECK_TICKS * 6); // the path's age: searched again, said once
+        assertEquals(2, walkTargets.size());
+        runSearches();
+        assertEquals(1, messages().stream().filter(m -> m.contains("No conventional path to the road found.")).count());
+
+        walkFinder = r -> found(List.of(new double[] {50.5, 64, 4.5}, new double[] {50.5, 64, 0.5})); // a door opened
+        ticks(NavigationService.RECHECK_TICKS * 6);
+        runSearches();
+        assertTrue(walking.startLegOf(playerId).isEmpty(), "out: the check ends");
+        clearInvocations(trail);
+        ticks(20);
+        verify(trail, atLeastOnce()).drawRoute(any(), any(), anyDouble(), any());
+        verify(trail, never()).drawPath(any(), any());
+    }
+
+    @Test
+    void closeToTheRoadAFoundPathOrRunningOutOfBudgetChangesNothing() {
+        // KNG-124: the check is a check only - a found path is not drawn, out of budget says nothing
+        walkFinder = r -> found(List.of(new double[] {50.5, 64, 4.5}, new double[] {50.5, 64, 0.5}));
+        NavigationService walking = walkService(NavigationConfig.defaults());
+        moveTo(50.5, 65, 4.5);
+        walking.navigate(player, cinixKeep());
+        assertTrue(walking.startLegOf(playerId).isPresent());
+        runSearches();
+        assertTrue(walking.startLegOf(playerId).isEmpty());
+        ticks(20);
+        verify(trail, never()).drawPath(any(), any());
+        verify(trail, never()).drawRoute(any(), any(), anyDouble(), any(), org.mockito.ArgumentMatchers.eq(false));
+        walking.stop(player);
+
+        walkFinder = r -> WalkResult.fallback("length cap", 900);
+        walking.navigate(player, cinixKeep());
+        runSearches();
+        assertTrue(walking.startLegOf(playerId).isEmpty());
+        assertTrue(messages().stream().noneMatch(m -> m.contains("No conventional path") || m.contains("Having trouble")),
+            messages().toString());
+    }
+
+    @Test
+    void onTheRoadNoCheckRunsButAboveItOneDoes() {
+        // KNG-124: within 1.5 blocks of the route horizontally and in height - on it, as before (S8)
+        NavigationService walking = walkService(NavigationConfig.defaults());
+        moveTo(50.5, 65, 1.5);
+        walking.navigate(player, cinixKeep());
+        assertTrue(walking.startLegOf(playerId).isEmpty());
+        assertTrue(walkTargets.isEmpty());
+        walking.stop(player);
+
+        moveTo(50.5, 70, 0.5); // a balcony 5 above the road
+        walking.navigate(player, cinixKeep());
+        assertTrue(walking.startLegOf(playerId).orElseThrow().nearRoute);
+        assertEquals(1, walkTargets.size());
+        walking.stop(player);
+
+        NavigationService straight = new NavigationService(new NavigationService.Deps(null, NavigationConfig.defaults(),
+            w -> network.snapshot, policies, shapes, eligibility, hud, trail, Runnable::run, Runnable::run, tick::get,
+            events::add, Logger.getLogger("test")));
+        straight.navigate(player, cinixKeep());
+        assertTrue(straight.startLegOf(playerId).isEmpty(), "without walk paths nothing changes");
     }
 
     @Test

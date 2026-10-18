@@ -68,7 +68,8 @@ public class SocialSpyCommand implements TabExecutor {
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        if (args.length == 1) {
+        // KNG-107: only for holders of knk.socialspy (cached check).
+        if (args.length == 1 && support.holds(sender, PrivateMessageNodes.SOCIAL_SPY)) {
             String prefix = args[0].toLowerCase(Locale.ROOT);
             return List.of("on", "off").stream().filter(option -> option.startsWith(prefix)).toList();
         }

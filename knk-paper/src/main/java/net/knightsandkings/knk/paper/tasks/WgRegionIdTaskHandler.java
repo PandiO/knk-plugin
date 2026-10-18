@@ -9,6 +9,7 @@ import com.sk89q.worldedit.WorldEdit;
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldedit.math.BlockVector2;
 import com.sk89q.worldedit.math.BlockVector3;
+import com.sk89q.worldedit.regions.CuboidRegion;
 import com.sk89q.worldedit.regions.Polygonal2DRegion;
 import com.sk89q.worldedit.regions.Region;
 import com.sk89q.worldguard.WorldGuard;
@@ -21,13 +22,15 @@ import com.sk89q.worldguard.protection.regions.ProtectedPolygonalRegion;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import net.knightsandkings.knk.core.domain.validation.ValidationResult;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
-import net.knightsandkings.knk.paper.utils.PlaceholderInterpolationUtil;
+import net.knightsandkings.knk.paper.regions.WorldGuardRegionRenamer;
+import net.knightsandkings.knk.paper.tasks.validation.ParentRegionFeedback;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.logging.Logger;
@@ -232,33 +235,25 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                     return;
                 }
 
-                // NEW: Validate region against validation rules from InputJson
+                // Validate region against validation rules from InputJson (KNG-173: a warning saves, a block refuses)
                 player.sendMessage("§7Validating region selection...");
-                ValidationResult validation = validateRegion(player, selection, context);
-                if (!validation.isValid()) {
-                    player.sendMessage("§c✗ Validation Failed:");
-                    player.sendMessage("§c" + validation.getMessage());
-                    player.sendMessage("§e");
-                    if (validation.isBlocking()) {
-                        player.sendMessage("§eRegion not saved. Please adjust your selection and type 'save' again.");
-                        player.sendMessage("§eOr type 'cancel' to abort the task.");
-                        player.sendMessage("§eIf you believe this is an error, contact a developer.");
-                        return; // Block save
-                    } else {
-                        player.sendMessage("§eWarning only - proceeding with save.");
-                    }
+                ValidationResult validation = validateRegion(player, world, selectionPoints(selection),
+                    "Your selection", context);
+                if (!reportValidation(player, validation)) {
+                    return; // Block save
                 }
 
                 // Validate parent region containment if required (legacy check)
                 if (context.parentRegionId != null) {
                     RegionManager regionManager = WorldGuard.getInstance().getPlatform().getRegionContainer()
                         .get(BukkitAdapter.adapt(world));
-                    
+
                     if (regionManager != null) {
                         ProtectedRegion parentRegion = regionManager.getRegion(context.parentRegionId);
-                        
+
                         if (parentRegion == null) {
-                            player.sendMessage("§c[WorldTask] Parent region not found: " + context.parentRegionId);
+                            player.sendMessage("§c[WorldTask] Parent region " + context.parentRegionId
+                                + " doesn't exist in world " + world.getName() + ".");
                             return;
                         }
                         
@@ -344,13 +339,22 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                     player.sendMessage("§7Available regions: " + String.join(", ", regionManager.getRegions().keySet()));
                     return;
                 }
-                
+
+                // KNG-173: the task's validation rules apply to a selected region the same as to a drawn one
+                player.sendMessage("§7Validating region " + regionName + "...");
+                ValidationResult validation = validateRegion(player, world, regionPoints(region),
+                    "Region " + regionName, context);
+                if (!reportValidation(player, validation)) {
+                    return;
+                }
+
                 // Validate parent region containment if required
                 if (context.parentRegionId != null) {
                     ProtectedRegion parentRegion = regionManager.getRegion(context.parentRegionId);
-                    
+
                     if (parentRegion == null) {
-                        player.sendMessage("§c[WorldTask] Parent region not found: " + context.parentRegionId);
+                        player.sendMessage("§c[WorldTask] Parent region " + context.parentRegionId
+                            + " doesn't exist in world " + world.getName() + ".");
                         return;
                     }
                     
@@ -623,7 +627,18 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      */
     public boolean renameRegion(String oldRegionId, String newRegionId, String domainType, String parentRegionId,
                                 String world) {
-        boolean renamed = renameRegionInternal(oldRegionId, newRegionId, world);
+        return renameRegion(oldRegionId, newRegionId, domainType, parentRegionId, world, null);
+    }
+
+    /**
+     * KNG-103: as {@link #renameRegion(String, String, String, String, String)}, replacing {@code replaceRegionId}, the
+     * domain's region before its region step was run again (null: none). When that is the final name itself the existing
+     * region is redefined in place with the new shape; a previous temp-named region is removed. See
+     * {@link WorldGuardRegionRenamer} and {@link net.knightsandkings.knk.core.regions.RegionRenamePlan}.
+     */
+    public boolean renameRegion(String oldRegionId, String newRegionId, String domainType, String parentRegionId,
+                                String world, String replaceRegionId) {
+        boolean renamed = renameRegionInternal(oldRegionId, newRegionId, world, replaceRegionId);
         RegionFinalizer finalizer = regionFinalizer;
         if (renamed && finalizer != null && domainType != null && !domainType.isBlank()) {
             try {
@@ -641,7 +656,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
         return renamed;
     }
 
-    private boolean renameRegionInternal(String oldRegionId, String newRegionId, String worldName) {
+    private boolean renameRegionInternal(String oldRegionId, String newRegionId, String worldName, String replaceRegionId) {
         if (oldRegionId == null || oldRegionId.trim().isEmpty() || 
             newRegionId == null || newRegionId.trim().isEmpty()) {
             LOGGER.warning("Cannot rename region: oldRegionId or newRegionId is null/empty");
@@ -668,98 +683,16 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 LOGGER.warning("Failed to rename region: could not access region manager for world " + world.getName());
                 return false;
             }
-            
-            ProtectedRegion region = regionManager.getRegion(oldRegionId);
-            if (region == null) {
-                LOGGER.warning("Failed to rename region: region not found: " + oldRegionId);
+
+            WorldGuardRegionRenamer.Result result =
+                WorldGuardRegionRenamer.rename(regionManager, oldRegionId, newRegionId, replaceRegionId);
+            if (!result.success()) {
+                LOGGER.warning("Failed to rename region " + oldRegionId + " to " + newRegionId + " in " + world.getName()
+                    + ": " + result.detail());
                 return false;
             }
-            
-            // Check if target name already exists
-            if (regionManager.getRegion(newRegionId) != null) {
-                LOGGER.warning("Failed to rename region: target region name already exists: " + newRegionId);
-                return false;
-            }
-            
-            // Regions whose parent is this one (e.g. a Town's Districts): WorldGuard unsets their parent when the old
-            // region is removed, so they are pointed at the renamed region below.
-            List<ProtectedRegion> children = new ArrayList<>();
-            for (ProtectedRegion candidate : regionManager.getRegions().values()) {
-                if (candidate.getParent() == region) {
-                    children.add(candidate);
-                }
-            }
-
-            // Remove old region and create new one with updated name
-            regionManager.removeRegion(oldRegionId);
-            
-            // Create new region with same properties but new ID
-            ProtectedRegion newRegion;
-            if (region instanceof ProtectedPolygonalRegion) {
-                ProtectedPolygonalRegion polyRegion = (ProtectedPolygonalRegion) region;
-                newRegion = new ProtectedPolygonalRegion(
-                    newRegionId,
-                    polyRegion.getPoints(),
-                    polyRegion.getMinimumPoint().getBlockY(),
-                    polyRegion.getMaximumPoint().getBlockY()
-                );
-            } else if (region instanceof com.sk89q.worldguard.protection.regions.ProtectedCuboidRegion) {
-                com.sk89q.worldguard.protection.regions.ProtectedCuboidRegion cuboidRegion = 
-                    (com.sk89q.worldguard.protection.regions.ProtectedCuboidRegion) region;
-                newRegion = new com.sk89q.worldguard.protection.regions.ProtectedCuboidRegion(
-                    newRegionId,
-                    cuboidRegion.getMinimumPoint(),
-                    cuboidRegion.getMaximumPoint()
-                );
-            } else {
-                LOGGER.warning("Failed to rename region: unsupported region type");
-                // Restore old region (and its children's link to it) if we can't handle the type
-                regionManager.addRegion(region);
-                for (ProtectedRegion child : children) {
-                    try {
-                        child.setParent(region);
-                    } catch (ProtectedRegion.CircularInheritanceException ignored) {
-                        // It was their parent a moment ago, so this can't form a cycle
-                    }
-                }
-                return false;
-            }
-            
-            // Copy properties from old region (owners and members too: a rename must not strip player ownership)
-            newRegion.setPriority(region.getPriority());
-            newRegion.setOwners(region.getOwners());
-            newRegion.setMembers(region.getMembers());
-            
-            // Copy flags
-            for (Flag<?> flag : region.getFlags().keySet()) {
-                try {
-                    Object value = region.getFlag(flag);
-                    newRegion.setFlag((Flag) flag, value);
-                } catch (Exception e) {
-                    LOGGER.warning("Failed to copy flag " + flag.getName() + ": " + e.getMessage());
-                }
-            }
-            
-            // Keep the region in the hierarchy: its own parent and its children's link to it
-            try {
-                newRegion.setParent(region.getParent());
-            } catch (ProtectedRegion.CircularInheritanceException e) {
-                LOGGER.warning("Could not keep the parent of renamed region " + newRegionId + ": " + e.getMessage());
-            }
-
-            // Add the new region
-            regionManager.addRegion(newRegion);
-
-            for (ProtectedRegion child : children) {
-                try {
-                    child.setParent(newRegion);
-                } catch (ProtectedRegion.CircularInheritanceException e) {
-                    LOGGER.warning("Could not re-link child region " + child.getId() + " to " + newRegionId + ": " + e.getMessage());
-                }
-            }
-            
-            LOGGER.info("Successfully renamed region from " + oldRegionId + " to " + newRegionId
-                    + (children.isEmpty() ? "" : " (" + children.size() + " child region(s) re-linked)"));
+            LOGGER.info("Successfully renamed region from " + oldRegionId + " to " + newRegionId + " in " + world.getName()
+                + ": " + result.detail());
             return true;
             
         } catch (Exception e) {
@@ -890,59 +823,80 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
             LOGGER.warning("Failed to cleanup temp region " + regionId + ": " + e.getMessage());
         }
     }
+
+    private static final List<String> BLOCKED_ADVICE = List.of(
+        "Region not saved. Please adjust your selection and type 'save' again, or 'select' another region.",
+        "Or type 'cancel' to abort the task.",
+        "If you believe this is an error, contact a developer.");
+
     /**
-     * Validate region selection against validation rules from InputJson.
-     * Executes all configured validation rules and returns the first failure.
-     * 
-     * @param player The player
-     * @param selection The WorldEdit selection
-     * @param context Task context containing InputJson with validation rules
+     * KNG-173: tells the player how the validation went. A block refuses; a warning is shown and the save goes on.
+     *
+     * @return true when the region may be saved
+     */
+    private static boolean reportValidation(Player player, ValidationResult validation) {
+        for (String line : ParentRegionFeedback.chatLines(validation, BLOCKED_ADVICE,
+                "Warning only - saving the region anyway.")) {
+            player.sendMessage(line);
+        }
+        return validation.isValid() || !validation.isBlocking();
+    }
+
+    /**
+     * Validate a region against the validation rules from InputJson. Every rule runs; a block from any rule wins
+     * over warnings (KNG-173).
+     *
+     * @param subjectWorld the world the region is in
+     * @param points       the region's corner points to check
+     * @param what         what is checked, starting a sentence ("Your selection", "Region gate_1")
+     * @param context      task context containing InputJson with validation rules
      * @return ValidationResult indicating success or failure
      */
-    private ValidationResult validateRegion(Player player, Region selection, TaskContext context) {
+    private ValidationResult validateRegion(Player player, World subjectWorld, List<BlockVector3> points, String what,
+                                            TaskContext context) {
         try {
             // Parse validation context from InputJson
             LOGGER.info("validateRegion called for task " + context.taskId);
             LOGGER.info("InputJson: " + context.inputJson);
-            
+
             if (context.inputJson == null || context.inputJson.isEmpty()) {
                 LOGGER.info("InputJson is empty - skipping validation");
                 return ValidationResult.success("No validation configured");
             }
-            
+
             JsonObject input = JsonParser.parseString(context.inputJson).getAsJsonObject();
-            if (!input.has("validationContext")) {
+            if (!input.has("validationContext") || !input.get("validationContext").isJsonObject()) {
                 LOGGER.info("No validationContext in InputJson - skipping validation");
                 return ValidationResult.success("No validation configured");
             }
-            
+
             JsonObject validationContext = input.getAsJsonObject("validationContext");
-            if (!validationContext.has("validationRules")) {
+            if (!validationContext.has("validationRules") || !validationContext.get("validationRules").isJsonArray()) {
                 LOGGER.info("No validationRules in context - skipping validation");
                 return ValidationResult.success("No validation rules");
             }
-            
+
             JsonArray rules = validationContext.getAsJsonArray("validationRules");
             LOGGER.info("Found " + rules.size() + " validation rule(s)");
-            
-            // Execute each validation rule
+
+            List<ValidationResult> results = new ArrayList<>();
             for (JsonElement ruleElement : rules) {
                 JsonObject rule = ruleElement.getAsJsonObject();
                 String validationType = rule.get("validationType").getAsString();
                 LOGGER.info("Processing validation rule: " + validationType);
-                
+
                 if ("RegionContainment".equals(validationType)) {
-                    ValidationResult result = validateRegionContainment(player, selection, rule);
+                    ValidationResult result = validateRegionContainment(player, subjectWorld, points, what, rule);
                     if (!result.isValid()) {
-                        LOGGER.info("Validation failed: " + result.getMessage());
-                        return result; // Return first failure
+                        LOGGER.info("Validation failed (blocking: " + result.isBlocking() + "): " + result.getMessage());
                     }
+                    results.add(result);
                 }
                 // Add more validation types here as needed
             }
-            
-            return ValidationResult.success("All validations passed");
-            
+
+            return ParentRegionFeedback.combine(results);
+
         } catch (Exception e) {
             LOGGER.warning("Region validation error for task " + context.taskId + ": " + e.getMessage());
             e.printStackTrace();
@@ -952,196 +906,213 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
     }
 
     /**
-     * Validate that a region selection is fully contained within a parent region.
-     * 
-     * @param player The player
-     * @param childSelection The child region selection to validate
-     * @param rule The validation rule configuration
+     * Validate that a region is fully contained within the region of the rule's dependency (e.g. the District).
+     * Every failure follows the rule's isBlocking and names the dependency and its region (KNG-173).
+     *
+     * @param subjectWorld the world the region is in
+     * @param points       the region's corner points
+     * @param what         what is checked, starting a sentence
+     * @param rule         the validation rule configuration
      * @return ValidationResult
      */
-    private ValidationResult validateRegionContainment(Player player, Region childSelection, JsonObject rule) {
+    private ValidationResult validateRegionContainment(Player player, World subjectWorld, List<BlockVector3> points,
+                                                       String what, JsonObject rule) {
         try {
             // Parse config
-            JsonObject config = JsonParser.parseString(rule.get("configJson").getAsString()).getAsJsonObject();
-            
+            JsonObject config = rule.has("configJson") && !rule.get("configJson").isJsonNull()
+                ? JsonParser.parseString(rule.get("configJson").getAsString()).getAsJsonObject()
+                : new JsonObject();
+
             // Log config for debugging
             LOGGER.info("Validating RegionContainment with config: " + config.toString());
-            
+
             // Get pre-resolved placeholders from InputJson (if provided by frontend)
             JsonObject preResolvedPlaceholders = new JsonObject();
-            if (rule.has("preResolvedPlaceholders") && !rule.get("preResolvedPlaceholders").isJsonNull()) {
+            if (rule.has("preResolvedPlaceholders") && rule.get("preResolvedPlaceholders").isJsonObject()) {
                 preResolvedPlaceholders = rule.getAsJsonObject("preResolvedPlaceholders");
                 LOGGER.info("Pre-resolved placeholders from frontend: " + preResolvedPlaceholders.toString());
             }
-            
+
             // Log dependency path information for debugging multi-layer resolution
-            String dependencyPath = rule.has("dependencyPath") && !rule.get("dependencyPath").isJsonNull() 
-                ? rule.get("dependencyPath").getAsString() 
+            String dependencyPath = rule.has("dependencyPath") && !rule.get("dependencyPath").isJsonNull()
+                ? rule.get("dependencyPath").getAsString()
                 : "(none)";
             LOGGER.info("Dependency path configured: " + dependencyPath);
-            
+
             // Get parent region ID from dependency field value
             if (!rule.has("dependencyFieldValue") || rule.get("dependencyFieldValue").isJsonNull()) {
                 LOGGER.info("No dependency value - validation skipped");
                 return ValidationResult.success("No dependency value - validation skipped");
             }
-            
+
             JsonElement depValue = rule.get("dependencyFieldValue");
             LOGGER.info("Dependency field value: " + depValue.toString());
-            
+
             // Extract parent region ID from dependency (e.g., Town entity)
             String parentRegionId = extractParentRegionId(depValue, config);
             if (parentRegionId == null || parentRegionId.isEmpty()) {
                 LOGGER.info("No parent region ID resolved - validation skipped");
                 return ValidationResult.success("No parent region ID - validation skipped");
             }
-            
+
             LOGGER.info("Resolved parent region ID: " + parentRegionId + " from dependency path: " + dependencyPath);
-            
-            // Get WorldGuard region manager
+            ParentRegionFeedback parent = ParentRegionFeedback.of(rule, depValue, parentRegionId);
+
+            // The parent region lives in the dependency's world when it names a loaded one, else the player's
+            World parentWorld = resolveParentWorld(parent.worldName(), subjectWorld);
             RegionManager regionManager = WorldGuard.getInstance()
                 .getPlatform()
                 .getRegionContainer()
-                .get(BukkitAdapter.adapt(player.getWorld()));
-            
+                .get(BukkitAdapter.adapt(parentWorld));
+
             if (regionManager == null) {
-                return ValidationResult.blockingFailure("WorldGuard region manager not available for this world");
+                return parent.noRegionData(parentWorld.getName());
             }
-            
-            // Get parent region
+
             ProtectedRegion parentRegion = regionManager.getRegion(parentRegionId);
             if (parentRegion == null) {
-                // Create computed placeholders
-                JsonObject computedPlaceholders = new JsonObject();
-                computedPlaceholders.addProperty("regionName", parentRegionId);
-                
-                // Merge with pre-resolved placeholders
-                JsonObject allPlaceholders = PlaceholderInterpolationUtil.mergePlaceholders(
-                    preResolvedPlaceholders, computedPlaceholders);
-                
-                // Interpolate error message
-                String errorMsg = rule.get("errorMessage").getAsString();
-                errorMsg = PlaceholderInterpolationUtil.interpolate(errorMsg, allPlaceholders);
-                LOGGER.info("RegionContainment validation failed: Parent region not found - " + errorMsg);
-                
-                return ValidationResult.blockingFailure(errorMsg);
+                // The check could not run, so the rule's "not inside" message would be wrong.
+                ValidationResult missing = parent.parentRegionMissing(parentWorld.getName());
+                LOGGER.info("RegionContainment validation failed: " + missing.getMessage());
+                return missing;
             }
-            
-            // Check if all vertices of childSelection are inside parentRegion
-            // For polygon regions, check each vertex at min and max Y
-            // This is more efficient than checking every block
-            boolean allPointsInside = true;
+
+            if (!parentWorld.getName().equals(subjectWorld.getName())) {
+                return parent.wrongWorld(what, subjectWorld.getName(), parentWorld.getName());
+            }
+
+            // Check every corner point of the region against the parent region
             StringBuilder violations = new StringBuilder();
             int violationCount = 0;
             final int maxViolations = 5; // Limit violation output
-            
-            player.sendMessage("§7Checking region vertices against parent region '" + parentRegion.getId() + "'...");
-            LOGGER.info("Checking selection containment for region type: " + childSelection.getClass().getSimpleName());
-            
-            if (childSelection instanceof Polygonal2DRegion) {
-                Polygonal2DRegion poly = (Polygonal2DRegion) childSelection;
-                LOGGER.info("Polygonal region with " + poly.getPoints().size() + " vertices, Y range: " + poly.getMinimumY() + " to " + poly.getMaximumY());
-                
-                for (BlockVector2 v2 : poly.getPoints()) {
-                    BlockVector3 v3Min = v2.toBlockVector3(poly.getMinimumY());
-                    BlockVector3 v3Max = v2.toBlockVector3(poly.getMaximumY());
-                    
-                    if (!parentRegion.contains(v3Min)) {
-                        allPointsInside = false;
-                        violationCount++;
-                        if (violationCount <= maxViolations) {
-                            if (violations.length() > 0) violations.append(", ");
-                            violations.append(String.format("(%.0f, %.0f, %.0f)", 
-                                (double)v3Min.x(), (double)v3Min.y(), (double)v3Min.z()));
-                        }
-                    }
-                    
-                    if (!parentRegion.contains(v3Max)) {
-                        allPointsInside = false;
-                        violationCount++;
-                        if (violationCount <= maxViolations) {
-                            if (violations.length() > 0) violations.append(", ");
-                            violations.append(String.format("(%.0f, %.0f, %.0f)", 
-                                (double)v3Max.x(), (double)v3Max.y(), (double)v3Max.z()));
-                        }
-                    }
-                }
-            } else {
-                // For other selection types, check min/max points (fallback)
-                LOGGER.info("Non-polygonal region, checking min/max points");
-                BlockVector3 min = childSelection.getMinimumPoint();
-                BlockVector3 max = childSelection.getMaximumPoint();
-                
-                if (!parentRegion.contains(min)) {
-                    allPointsInside = false;
+
+            player.sendMessage("§7Checking against " + parent.describe() + "...");
+            for (BlockVector3 point : points) {
+                if (!parentRegion.contains(point)) {
                     violationCount++;
-                    violations.append(String.format("(%.0f, %.0f, %.0f)", 
-                        (double)min.x(), (double)min.y(), (double)min.z()));
-                }
-                
-                if (!parentRegion.contains(max)) {
-                    allPointsInside = false;
-                    violationCount++;
-                    if (violations.length() > 0) violations.append(", ");
-                    violations.append(String.format("(%.0f, %.0f, %.0f)", 
-                        (double)max.x(), (double)max.y(), (double)max.z()));
+                    if (violationCount <= maxViolations) {
+                        if (violations.length() > 0) violations.append(", ");
+                        violations.append("(").append(point.x()).append(", ").append(point.y()).append(", ")
+                            .append(point.z()).append(")");
+                    }
                 }
             }
-            
-            LOGGER.info("Containment check complete. All points inside: " + allPointsInside + ", Violations: " + violationCount);
-            
-            if (!allPointsInside) {
-                // Create computed placeholders (plugin-only values)
-                JsonObject computedPlaceholders = new JsonObject();
-                computedPlaceholders.addProperty("regionName", parentRegion.getId());
-                computedPlaceholders.addProperty("parentRegionName", parentRegion.getId());
-                computedPlaceholders.addProperty("violationCount", String.valueOf(violationCount));
-                
-                // Add violations list
+
+            LOGGER.info("Containment check complete. Points checked: " + points.size() + ", outside: " + violationCount);
+
+            if (violationCount > 0) {
                 if (violationCount > maxViolations) {
                     violations.append(String.format(" ... and %d more", violationCount - maxViolations));
                 }
+                // Plugin-computed values; they override the pre-resolved placeholders from the API
+                JsonObject computedPlaceholders = new JsonObject();
+                computedPlaceholders.addProperty("violationCount", String.valueOf(violationCount));
                 computedPlaceholders.addProperty("violations", violations.toString());
-                
-                // Merge pre-resolved placeholders with computed placeholders
-                // Computed placeholders take precedence (override)
-                JsonObject allPlaceholders = PlaceholderInterpolationUtil.mergePlaceholders(
-                    preResolvedPlaceholders, computedPlaceholders);
-                
-                // Interpolate error message with all placeholders
-                String errorMsg = rule.get("errorMessage").getAsString();
-                errorMsg = PlaceholderInterpolationUtil.interpolate(errorMsg, allPlaceholders);
-                
-                boolean isBlocking = rule.has("isBlocking") && rule.get("isBlocking").getAsBoolean();
-                LOGGER.info("RegionContainment validation failed: " + violationCount + " point(s) outside parent region. Blocking: " + isBlocking);
-                return new ValidationResult(false, errorMsg, isBlocking);
+
+                String errorMsg = rule.has("errorMessage") && !rule.get("errorMessage").isJsonNull()
+                    ? parent.interpolate(rule.get("errorMessage").getAsString(), preResolvedPlaceholders,
+                        computedPlaceholders)
+                    : null;
+                ValidationResult result = parent.notInside(errorMsg, "Corners outside it: " + violations);
+                LOGGER.info("RegionContainment validation failed: " + violationCount
+                    + " point(s) outside parent region. Blocking: " + result.isBlocking());
+                return result;
             }
-            
+
             // Success - interpolate success message if present
             String successMsg = "Region is fully contained";
             if (rule.has("successMessage") && !rule.get("successMessage").isJsonNull()) {
-                // Create computed placeholders for success message
-                JsonObject computedPlaceholders = new JsonObject();
-                computedPlaceholders.addProperty("regionName", parentRegion.getId());
-                computedPlaceholders.addProperty("parentRegionName", parentRegion.getId());
-                
-                JsonObject allPlaceholders = PlaceholderInterpolationUtil.mergePlaceholders(
-                    preResolvedPlaceholders, computedPlaceholders);
-                
-                successMsg = rule.get("successMessage").getAsString();
-                successMsg = PlaceholderInterpolationUtil.interpolate(successMsg, allPlaceholders);
+                successMsg = parent.interpolate(rule.get("successMessage").getAsString(), preResolvedPlaceholders,
+                    null);
             }
-            
+
             player.sendMessage("§a✓ " + successMsg);
             LOGGER.info("RegionContainment validation passed: " + successMsg);
             return ValidationResult.success(successMsg);
-            
+
         } catch (Exception e) {
             LOGGER.warning("RegionContainment validation error: " + e.getMessage());
             e.printStackTrace();
             // Fail-open
             return ValidationResult.success("Validation skipped due to error");
         }
+    }
+
+    /** The dependency's world when it names one that is loaded, else {@code fallback} (KNG-173). */
+    private World resolveParentWorld(String dependencyWorld, World fallback) {
+        if (dependencyWorld != null) {
+            World named = plugin.getServer().getWorld(dependencyWorld);
+            if (named != null) {
+                return named;
+            }
+            LOGGER.warning("World " + dependencyWorld + " named by the validation dependency is not loaded; "
+                + "looking for the parent region in " + fallback.getName());
+        }
+        return fallback;
+    }
+
+    /**
+     * The points of a WorldEdit selection checked against a parent region: a polygon's vertices at its lowest and
+     * highest Y, a cuboid's eight corners, else the minimum and maximum point.
+     */
+    static List<BlockVector3> selectionPoints(Region selection) {
+        if (selection instanceof Polygonal2DRegion poly) {
+            return polygonPoints(poly.getPoints(), poly.getMinimumY(), poly.getMaximumY());
+        }
+        if (selection instanceof CuboidRegion) {
+            return cuboidCorners(selection.getMinimumPoint(), selection.getMaximumPoint());
+        }
+        return List.of(selection.getMinimumPoint(), selection.getMaximumPoint());
+    }
+
+    /** As {@link #selectionPoints(Region)} for an existing WorldGuard region. */
+    static List<BlockVector3> regionPoints(ProtectedRegion region) {
+        if (region instanceof ProtectedPolygonalRegion poly) {
+            return polygonPoints(poly.getPoints(), poly.getMinimumPoint().y(), poly.getMaximumPoint().y());
+        }
+        if (region instanceof ProtectedCuboidRegion) {
+            return cuboidCorners(region.getMinimumPoint(), region.getMaximumPoint());
+        }
+        if ("ProtectedPolyhedralRegion".equals(region.getClass().getSimpleName())) {
+            try {
+                Object pointsObject = region.getClass().getMethod("getPoints").invoke(region);
+                if (pointsObject instanceof Iterable<?> iterable) {
+                    List<BlockVector3> points = new ArrayList<>();
+                    for (Object point : iterable) {
+                        if (point instanceof BlockVector3 vector) {
+                            points.add(vector);
+                        }
+                    }
+                    if (!points.isEmpty()) {
+                        return points;
+                    }
+                }
+            } catch (Exception e) {
+                LOGGER.warning("Could not read the points of polyhedral region " + region.getId() + ": " + e.getMessage());
+            }
+        }
+        return List.of(region.getMinimumPoint(), region.getMaximumPoint());
+    }
+
+    private static List<BlockVector3> polygonPoints(List<BlockVector2> vertices, int minY, int maxY) {
+        List<BlockVector3> points = new ArrayList<>();
+        for (BlockVector2 vertex : vertices) {
+            points.add(vertex.toBlockVector3(minY));
+            points.add(vertex.toBlockVector3(maxY));
+        }
+        return new ArrayList<>(new LinkedHashSet<>(points));
+    }
+
+    private static List<BlockVector3> cuboidCorners(BlockVector3 min, BlockVector3 max) {
+        List<BlockVector3> corners = new ArrayList<>();
+        for (int x : new int[] {min.x(), max.x()}) {
+            for (int y : new int[] {min.y(), max.y()}) {
+                for (int z : new int[] {min.z(), max.z()}) {
+                    corners.add(BlockVector3.at(x, y, z));
+                }
+            }
+        }
+        return new ArrayList<>(new LinkedHashSet<>(corners)); // a flat cuboid has fewer distinct corners
     }
 
     /**

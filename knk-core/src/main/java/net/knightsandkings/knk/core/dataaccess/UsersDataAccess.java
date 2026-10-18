@@ -94,7 +94,7 @@ public class UsersDataAccess {
         this.usersQueryApi = Objects.requireNonNull(usersQueryApi, "usersQueryApi must not be null");
         this.usersCommandApi = Objects.requireNonNull(usersCommandApi, "usersCommandApi must not be null");
         this.settings = Objects.requireNonNullElse(settings, DataAccessSettings.defaults());
-        this.executor = new DataAccessExecutor<>(userCache, this.settings.retryPolicy(), "User");
+        this.executor = new DataAccessExecutor<>(userCache, this.settings, "User");
     }
     
     /**

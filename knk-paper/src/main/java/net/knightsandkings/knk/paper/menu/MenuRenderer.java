@@ -10,7 +10,9 @@ import net.knightsandkings.knk.core.menu.ConditionRegistry;
 import net.knightsandkings.knk.core.menu.MenuContentQuery;
 import net.knightsandkings.knk.core.menu.MenuContentSourceRegistry;
 import net.knightsandkings.knk.core.menu.MenuContentSourceRegistry.MenuContentPage;
+import net.knightsandkings.knk.core.menu.MenuBlink;
 import net.knightsandkings.knk.core.menu.MenuContextParams;
+import net.knightsandkings.knk.core.menu.MenuDisplayMode;
 import net.knightsandkings.knk.core.menu.MenuParams;
 import net.knightsandkings.knk.core.menu.MenuRenderPriority;
 import net.knightsandkings.knk.core.menu.MenuSectionRenderer;
@@ -253,6 +255,7 @@ public final class MenuRenderer {
         Map<Integer, List<String>> controlHintLoreBySlot = new HashMap<>();
         Map<Integer, Object> rowsBySlot = new HashMap<>();
         Map<Integer, SectionView> sectionViews = new HashMap<>();
+        Map<Integer, Integer> blinkTicksBySlot = new HashMap<>();
 
         List<RuntimeMenuSection> sectionsByRenderOrder = menu.sections().stream()
                 .sorted(Comparator.comparingInt(section -> priorityRank(section.priority())))
@@ -324,6 +327,9 @@ public final class MenuRenderer {
                 if (slot.row() != null) {
                     rowsBySlot.put(slot.slot(), slot.row());
                 }
+                if (item.displayMode() == MenuDisplayMode.BLINK) {
+                    blinkTicksBySlot.put(slot.slot(), MenuBlink.intervalTicks(slot.presentation().blinkTicks()));
+                }
                 List<String> hints = resolveControlHints(item);
                 if (!hints.isEmpty()) {
                     controlHintLoreBySlot.put(slot.slot(), hints);
@@ -348,6 +354,7 @@ public final class MenuRenderer {
             sectionsBySlot = remapped(layout, sectionsBySlot);
             controlHintLoreBySlot = remapped(layout, controlHintLoreBySlot);
             rowsBySlot = remapped(layout, rowsBySlot);
+            blinkTicksBySlot = remapped(layout, blinkTicksBySlot);
         }
 
         fillBackground(menu, keys, itemStacksBySlot, layout.totalSlots());
@@ -355,7 +362,7 @@ public final class MenuRenderer {
 
         return new MenuRenderResult(Map.copyOf(itemStacksBySlot), Map.copyOf(itemsBySlot), Map.copyOf(sectionsBySlot),
                 Map.copyOf(controlHintLoreBySlot), Map.copyOf(rowsBySlot), Map.copyOf(sectionViews), Map.copyOf(keys),
-                menuContext, layout.totalSlots());
+                menuContext, layout.totalSlots(), Map.copyOf(blinkTicksBySlot));
     }
 
     /** Menu follow-up 2026-09-26: see {@link MenuItemStackRow}. */
@@ -640,19 +647,29 @@ public final class MenuRenderer {
     public void applyToInventory(Inventory inventory, MenuRenderResult result, boolean revealControls) {
         int size = inventory.getSize();
         for (int slot = 0; slot < size; slot++) {
-            ItemStack desired = result.itemStacksBySlot().get(slot);
-            if (desired != null && revealControls) {
-                List<String> hints = result.controlHintLoreBySlot().get(slot);
-                if (hints != null && !hints.isEmpty()) {
-                    desired = desired.clone();
-                    appendLoreLines(desired, hints);
-                }
-            }
+            ItemStack desired = stackFor(result, slot, revealControls);
             ItemStack current = inventory.getItem(slot);
             if (!Objects.equals(isEmpty(current) ? null : current, desired)) {
                 inventory.setItem(slot, desired);
             }
         }
+    }
+
+    /**
+     * The {@code ItemStack} a render puts in {@code slot} (null: empty), with the control hints
+     * appended when {@code revealControls} - also what {@link MenuItemBlinker} puts back after the
+     * yellow-pane phase.
+     */
+    static ItemStack stackFor(MenuRenderResult result, int slot, boolean revealControls) {
+        ItemStack desired = result.itemStacksBySlot().get(slot);
+        if (desired != null && revealControls) {
+            List<String> hints = result.controlHintLoreBySlot().get(slot);
+            if (hints != null && !hints.isEmpty()) {
+                desired = desired.clone();
+                appendLoreLines(desired, hints);
+            }
+        }
+        return desired;
     }
 
     private static boolean isEmpty(ItemStack itemStack) {

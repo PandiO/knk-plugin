@@ -172,7 +172,9 @@ public final class LootboxCommand implements TabExecutor {
                     ? List.of("help") : List.of("help", "odds");
             return filter(roots, args[0]);
         }
-        if (args.length == 2 && "odds".equalsIgnoreCase(args[0])) {
+        // KNG-107: no categories for odds without its node.
+        if (args.length == 2 && "odds".equalsIgnoreCase(args[0])
+                && !(sender instanceof Player player && !permission.test(player, ODDS_NODE))) {
             return filter(config.get().types().stream()
                     .map(t -> t.categoryName() == null ? "" : t.categoryName().replace(' ', '_').toLowerCase(Locale.ROOT))
                     .toList(), args[1]);

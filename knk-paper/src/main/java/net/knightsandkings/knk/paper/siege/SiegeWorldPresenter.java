@@ -70,6 +70,8 @@ public final class SiegeWorldPresenter implements SiegeMatchObserver, Listener {
     private final Plugin plugin;
     private final Logger logger;
     private final File blockLog;
+    /** KNG-118 (S3): logged banners in worlds that were not loaded at recovery, kept for the next start. */
+    private final List<String> unrecovered = new ArrayList<>();
     private final NamespacedKey displayKey;
     private final Map<String, Map<Integer, ObjectiveVisual>> visualsByMatch = new HashMap<>();
     private final Map<String, String> warnedPatterns = new HashMap<>();
@@ -378,7 +380,7 @@ public final class SiegeWorldPresenter implements SiegeMatchObserver, Listener {
     }
 
     private void writeBlockLog() {
-        List<String> entries = new ArrayList<>();
+        List<String> entries = new ArrayList<>(unrecovered);
         visualsByMatch.values().forEach(m -> m.values().forEach(v -> {
             if (v.placedBanner != null) {
                 Block b = v.placedBanner;
@@ -409,7 +411,11 @@ public final class SiegeWorldPresenter implements SiegeMatchObserver, Listener {
             String[] parts = entry.split(";");
             if (parts.length != 4) continue;
             World world = Bukkit.getWorld(parts[0]);
-            if (world == null) continue;
+            if (world == null) {
+                // KNG-118 (S3): its world is not loaded now; keep it for a start where it is
+                unrecovered.add(entry);
+                continue;
+            }
             try {
                 Block block = world.getBlockAt(Integer.parseInt(parts[1]), Integer.parseInt(parts[2]), Integer.parseInt(parts[3]));
                 if (Tag.BANNERS.isTagged(block.getType())) {
@@ -418,7 +424,13 @@ public final class SiegeWorldPresenter implements SiegeMatchObserver, Listener {
                 }
             } catch (NumberFormatException ignored) { }
         }
-        if (!blockLog.delete()) logger.warning("[Siege] Could not delete " + blockLog);
+        if (unrecovered.isEmpty()) {
+            if (!blockLog.delete()) logger.warning("[Siege] Could not delete " + blockLog);
+        } else {
+            writeBlockLog();
+            logger.warning("[Siege] " + unrecovered.size() + " objective banner(s) left by an interrupted match are in a world "
+                + "that is not loaded; they are removed at a start where it is");
+        }
         if (cleared > 0) logger.info("[Siege] Removed " + cleared + " objective banner(s) left by an interrupted match");
     }
 }

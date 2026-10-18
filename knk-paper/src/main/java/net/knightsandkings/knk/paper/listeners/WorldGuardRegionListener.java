@@ -7,6 +7,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerMoveEvent;
+import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
@@ -47,6 +48,15 @@ public class WorldGuardRegionListener implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onPlayerTeleport(PlayerTeleportEvent event) {
         handle(event.getPlayer(), event.getFrom(), event.getTo());
+    }
+
+    /**
+     * KNG-118 (R10): a world change that is no teleport the tracker saw - a respawn in another world, a portal whose
+     * exit the server moved - is judged from the tracked regions to where the player is now.
+     */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onWorldChange(PlayerChangedWorldEvent event) {
+        handle(event.getPlayer(), null, event.getPlayer().getLocation());
     }
 
     @EventHandler(priority = EventPriority.MONITOR)

@@ -45,7 +45,7 @@ public class GradesDataAccess {
         this.cache = new GradeCache(ttl);
         this.queryApi = Objects.requireNonNull(queryApi, "queryApi must not be null");
         this.settings = Objects.requireNonNullElse(settings, DataAccessSettings.defaults());
-        this.executor = new DataAccessExecutor<>(cache, this.settings.retryPolicy(), "Grade");
+        this.executor = new DataAccessExecutor<>(cache, this.settings, "Grade");
     }
 
     public CompletableFuture<FetchResult<KnkGrade>> getByIdAsync(int id, FetchPolicy policy) {

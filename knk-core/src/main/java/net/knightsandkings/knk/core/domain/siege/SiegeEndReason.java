@@ -10,11 +10,13 @@ public enum SiegeEndReason {
     TEAM_ELIMINATED,
     NOT_ENOUGH_PLAYERS,
     ADMIN_STOPPED,
-    SERVER_RESTART;
+    SERVER_RESTART,
+    /** An API-outage action evacuated a participant (hub DESIGN §16.4 decision 6). */
+    API_OUTAGE;
 
-    /** True for admin stop and server restart: aborted, no winner, no rewards. */
+    /** True for admin stop, server restart and an API outage: aborted, no winner, no rewards. */
     public boolean isAbort() {
-        return this == ADMIN_STOPPED || this == SERVER_RESTART;
+        return this == ADMIN_STOPPED || this == SERVER_RESTART || this == API_OUTAGE;
     }
 
     /** The API's PascalCase name ({@code SiegeMatchEndReason}), e.g. {@code InstantVictory}. */

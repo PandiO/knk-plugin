@@ -411,6 +411,13 @@ public class WarpCommand implements TabExecutor {
         if (form == Form.LIST || args.length == 0) {
             return Collections.emptyList();
         }
+        // KNG-107: places for holders of the warp node (or staff sending others), player names only
+        // with knk.teleport.staff.others, -s only with knk.teleport.staff.silent (cached checks).
+        boolean warp = deps.support().holds(sender, TeleportNodes.WARP);
+        boolean others = deps.support().holds(sender, TeleportNodes.STAFF_OTHERS);
+        if (!warp && !others) {
+            return Collections.emptyList();
+        }
         List<String> words = Arrays.asList(args);
         List<String> out = new ArrayList<>();
         if (args.length == 1 && "list".startsWith(args[0].toLowerCase(Locale.ROOT))) {
@@ -428,7 +435,7 @@ public class WarpCommand implements TabExecutor {
                 prefetch(player);
             }
         }
-        if (args.length >= 2) {
+        if (args.length >= 2 && others) {
             String current = args[args.length - 1];
             // Staff form: /warp <place> <player> [-s] - the player once the words before name a place
             // (the console can't tab-complete places, so it gets player names after the first word).
@@ -436,6 +443,7 @@ public class WarpCommand implements TabExecutor {
             if (!(sender instanceof Player) || WarpTargets.resolve(known, before).found()) {
                 out.addAll(deps.targets().complete(sender, current));
             } else if (args.length >= 3 && "-s".startsWith(current.toLowerCase(Locale.ROOT))
+                    && deps.support().holds(sender, TeleportNodes.STAFF_SILENT)
                     && WarpTargets.resolve(known, String.join(" ", words.subList(0, args.length - 2))).found()) {
                 out.add("-s");
             }
