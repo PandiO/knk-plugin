@@ -16,7 +16,10 @@ public final class WorldLoader {
     public interface Host {
         boolean isLoaded(String name);
 
-        /** Whether the world container has a world folder of that name ({@code <name>/level.dat}). */
+        /**
+         * Whether the world exists on disk: a world folder of that name in the world container ({@code <name>/level.dat},
+         * the pre-26.1 layout) or, since Minecraft 26.1, its folder under the main world's {@code dimensions/}.
+         */
         boolean folderExists(String name);
 
         /** Loads (or, for a new folder, creates) the world; throws when the server refuses or fails. */
