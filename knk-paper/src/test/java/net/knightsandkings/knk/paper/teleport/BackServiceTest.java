@@ -473,6 +473,11 @@ class BackServiceTest {
     }
 
     @Test
+    void aHubTeleportCountsAsASpawn() {
+        assertEquals(BackKind.SPAWN, BackService.kindOf(TeleportPlan.hub(alice, () -> town, "the hub")));
+    }
+
+    @Test
     void aBackIsNeverRecorded_NoPingPong() {
         grant(alice, TeleportNodes.BACK_ALL);
         warpAway(alice, field);

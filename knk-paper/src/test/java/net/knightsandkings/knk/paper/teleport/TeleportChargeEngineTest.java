@@ -500,6 +500,43 @@ class TeleportChargeEngineTest {
     }
 
     @Test
+    void aHub_IsPricedByTheGroupsSpawnSettings_ThroughTheSpawnFeeRoute() {
+        Location hub = new Location(world, 0.5, 64, 0.5);
+        useGroupSettings();
+        CompletableFuture<TeleportOutcome> free = engine.start(TeleportPlan.hub(alice, () -> hub, "the hub").withCharge(charges.hubFee(alice)));
+        advance(5_000);
+        assertTrue(free.join().isTeleported());
+        assertTrue(api.feeCalls.isEmpty(), "free /hub: no server call");
+
+        groupPolicy = new KnkTeleportPolicy(null, null, fixed(30, 0, 0));
+        useGroupSettings();
+        api.next = TeleportChargeResult.allowed("Coins", 30, 70, false, null);
+        CompletableFuture<TeleportOutcome> paid = engine.start(TeleportPlan.hub(bob, () -> hub, "the hub").withCharge(charges.hubFee(bob)));
+        advance(5_000);
+
+        assertTrue(paid.join().isTeleported());
+        assertEquals(1, api.feeCalls.size());
+        assertTrue(api.feeCalls.get(0).startsWith("8:spawn:hub:"), api.feeCalls.get(0));
+    }
+
+    @Test
+    void aHubHasItsOwnCooldown_FromTheGroupsSpawnSettings() {
+        groupPolicy = new KnkTeleportPolicy(null, null, new KnkTeleportPolicy.Kind("None", null, null, null, null, 7));
+        useGroupSettings();
+
+        Location hub = new Location(world, 0.5, 64, 0.5);
+        CompletableFuture<TeleportOutcome> first = engine.start(TeleportPlan.hub(alice, () -> hub, "the hub"));
+        advance(5_000);
+        assertTrue(first.join().isTeleported());
+        assertEquals(7, engine.cooldownSeconds(alice.getUniqueId(), TeleportKind.HUB));
+        CompletableFuture<TeleportOutcome> spawn = engine.start(TeleportPlan.spawn(alice, hub, "Spawn"));
+        advance(5_000);
+        assertTrue(spawn.join().isTeleported(), "a /hub doesn't start the /spawn cooldown");
+        CompletableFuture<TeleportOutcome> again = engine.start(TeleportPlan.hub(alice, () -> hub, "the hub"));
+        assertEquals(TeleportOutcome.Status.DENIED, again.join().status());
+    }
+
+    @Test
     void aGroupCooldownReplacesTheConfiguredOne() {
         groupPolicy = new KnkTeleportPolicy(null, new KnkTeleportPolicy.Kind("None", null, null, null, null, 5), null);
         useGroupSettings();
