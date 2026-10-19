@@ -58,6 +58,29 @@ class GateManagerTest {
         assertEquals(1, manager.getSpatialIndex().lookup(reloaded.getWorldName(), 200, 64, 200));
     }
 
+    // === KNG-193: a keyframed drawbridge occupies its keyframe's cells ===
+
+    @Test
+    void cacheGateIndexesAKeyframedDrawbridgesKeyframeCells() {
+        GateManager manager = new GateManager();
+        CachedGateDoor gate = GateFrameCalculatorTest.buildRealGate14(4, 8, new Vector(1378, 44, -588));
+        gate.setWorldName("world");
+        DrawbridgeKeyframes.Result result = DrawbridgeKeyframes.build(gate, 0, DrawbridgeKeyframes.Orienter.IDENTITY);
+        assertNotNull(result.plan(), result.fallbackReason());
+        gate.setDrawbridgeKeyframes(result.plan());
+        gate.setCurrentState(AnimationState.OPEN);
+        gate.setCurrentFrame(gate.getAnimationDurationTicks());
+
+        manager.cacheGate(gate);
+
+        // the deck lies flat at the hinge's height: strip k=1 at i=0 is (1377,44,-588); the closed column is empty
+        assertEquals(14, manager.getSpatialIndex().lookup("world", 1377, 44, -588));
+        assertEquals(14, manager.getSpatialIndex().lookup("world", 1371, 44, -594), "the far strip k=13 at a=0.5");
+        assertNull(manager.getSpatialIndex().lookup("world", 1378, 51, -588));
+        assertEquals(32, manager.closedFootprint(14).size());
+        assertTrue(manager.closedFootprint(14).contains(new Vector(1378, 51, -588)));
+    }
+
     // === closedFootprint (R3) ===
 
     @Test

@@ -530,6 +530,16 @@ gates:
   # (Mechanism 2) is never affected either way - that always takes priority over this.
   rotationGapFill:
     rasterization-enabled: true
+  # Drawbridge keyframes (KNG-193, docs/specs/gate-structure-animation/DRAWBRIDGE_KEYFRAME_ANIMATION.md):
+  # every ROTATION door with a horizontal hinge (drawbridges, hatches set to ROTATION) is drawn as a
+  # whole straight plank per keyframe, precomputed at load: the closed scan, the open scan (or a
+  # deck MotionDistanceBlocks long, counted in blocks; 0 = the door's height) and every tilt in
+  # between, including arched or otherwise non-rectangular doors scanned in REGION mode. Set to
+  # false to fall back to the previous per-block rotation (Mechanism 1 above and the open-scan
+  # blend) server-wide; read once at startup (restart after changing it). The old path is removed
+  # once the live check of the keyframes passes.
+  rotation:
+    keyframes-enabled: true
   # World/DB sync (docs/features/gate-structure-animation/GATE_WORLD_SYNC_DESIGN.md): a gate's
   # physical world blocks are kept converging on its DB-loaded state via three mechanisms - a
   # startup diagnostic pass (logs mismatches only, never forces a chunk load or a block write),

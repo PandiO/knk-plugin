@@ -44,6 +44,49 @@ class GateSweepTest {
         return gate;
     }
 
+    /** KNG-193: a cardinal 2 wide x 3 tall drawbridge with its keyframed plank, hinge along +x at (100,64,100). */
+    private static CachedGateDoor keyframedDrawbridge(AnimationState state) {
+        CachedGateDoor gate = new CachedGateDoor(4, 4, "Keyframed Drawbridge", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
+            60, 1, new Vector(100, 64, 100), 2, 3, 1, 500.0, 500.0, true, false, true, 90, "south");
+        gate.setUStep(new Vector(1, 0, 0));
+        gate.setVStep(new Vector(0, 1, 0));
+        gate.setNStep(new Vector(0, 0, 1));
+        gate.setHingeAxis(new Vector(1, 0, 0));
+        gate.setMotionVector(new Vector(0, 0, 0));
+        int id = 1;
+        for (int i = 0; i < 2; i++) {
+            for (int j = 0; j < 3; j++) {
+                gate.addBlock(new BlockSnapshot(id++, new Vector(i, j, 0), 1, "stone", id));
+            }
+        }
+        net.knightsandkings.knk.core.gates.DrawbridgeKeyframes.Result result =
+            net.knightsandkings.knk.core.gates.DrawbridgeKeyframes.build(gate, 0, net.knightsandkings.knk.core.gates.DrawbridgeKeyframes.Orienter.IDENTITY);
+        gate.setDrawbridgeKeyframes(result.plan());
+        gate.setCurrentState(state);
+        return gate;
+    }
+
+    @Test
+    void aKeyframedDrawbridgeSweepsTheUnionOfItsKeyframes() {
+        CachedGateDoor gate = keyframedDrawbridge(AnimationState.OPENING);
+        var plan = gate.getDrawbridgeKeyframes();
+        assertTrue(plan.size() >= 3);
+
+        Set<Long> whole = GateSweep.cells(gate, 0, 60);
+        assertEquals(plan.cellsBetween(0, plan.size() - 1), whole);
+        assertTrue(has(whole, 100, 66, 100), "the closed top row");
+        assertTrue(has(whole, 100, 64, 102), "the open deck's far end");
+        assertTrue(has(whole, 101, 65, 101), "the mid-swing diagonal");
+
+        Set<Long> atRest = GateSweep.cells(gate, 0, 0);
+        assertEquals(plan.first().packedPositions(), atRest);
+        assertFalse(has(atRest, 100, 64, 102));
+
+        // closing: the same union, counted down
+        gate.setCurrentState(AnimationState.CLOSING);
+        assertEquals(whole, GateSweep.cells(gate, 60, 0));
+    }
+
     private static boolean has(Set<Long> cells, int x, int y, int z) {
         return cells.contains(GateSpatialIndex.packCell(x, y, z));
     }

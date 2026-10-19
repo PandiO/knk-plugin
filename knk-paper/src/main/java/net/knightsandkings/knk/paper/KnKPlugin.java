@@ -435,8 +435,12 @@ public class KnKPlugin extends JavaPlugin {
             // freshly-(re)loaded gates for a world/DB sync check-and-fix pass (Mechanism B) -
             // the primary correction path, bounded to whatever district a player just entered.
             // KNG-113: a door without a world in its anchor point belongs to the main (level-name) world
+            // KNG-193 (DRAWBRIDGE_KEYFRAME_ANIMATION.md, D6): the keyframed plank of every drawbridge,
+            // built at load; false = today's per-block rotation path. Read once, at startup.
+            boolean rotationKeyframesEnabled = getConfig().getBoolean("gates.rotation.keyframes-enabled", true);
             GateLoaderAdapter gateLoader = new GateLoaderAdapter(gateManager,
-                () -> getServer().getWorlds().isEmpty() ? null : getServer().getWorlds().get(0).getName());
+                () -> getServer().getWorlds().isEmpty() ? null : getServer().getWorlds().get(0).getName(),
+                rotationKeyframesEnabled);
             gateManager.setReloadAction(() -> gateLoader.loadAll(gateStructuresApi));
             this.districtGateLoader = new DistrictGateLoader(gateLoader, gateStructuresApi, gateStateSyncTask);
 

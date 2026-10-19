@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.core.domain.gates;
 
+import net.knightsandkings.knk.core.gates.DrawbridgeKeyframes;
 import net.knightsandkings.knk.core.gates.RigidTransform;
 import org.bukkit.util.Vector;
 
@@ -113,6 +114,15 @@ public class CachedGateDoor {
     // only popping into existence at the open resting frame (item 6.9's accepted trade-off, now
     // lifted where a fit is available). Empty when fittedOpenTransform is null.
     private final Map<Integer, Vector> openOnlyBlockSynthesizedRelativePositions = new HashMap<>();
+
+    // === KNG-193: keyframed plank (DRAWBRIDGE_KEYFRAME_ANIMATION.md) ===
+    // The precomputed whole-door keyframes of a ROTATION door with a horizontal hinge, built once at
+    // load by GateLoaderAdapter (DrawbridgeKeyframes.build). Null for every other door, for a door the
+    // builder refused (it then keeps the per-block path above: GateFrameCalculator, the open-scan
+    // pairing/fit, Mechanism 1), and for every door while gates.rotation.keyframes-enabled is false.
+    // Non-null is the trigger: GateAnimationTask, GateRestingFramePlacer, GateSweep, GateManager and
+    // HealthSystem read the keyframe cells instead of per-block positions.
+    private DrawbridgeKeyframes.Plan drawbridgeKeyframes;
 
     // === Health & State ===
     private double healthCurrent;
@@ -697,6 +707,20 @@ public class CachedGateDoor {
      */
     public Vector getOpenOnlyBlockSynthesizedRelativePosition(int openBlockId) {
         return openOnlyBlockSynthesizedRelativePositions.get(openBlockId);
+    }
+
+    /** KNG-193: the door's keyframed plank, or null when it animates per block (see the field). */
+    public DrawbridgeKeyframes.Plan getDrawbridgeKeyframes() {
+        return drawbridgeKeyframes;
+    }
+
+    public void setDrawbridgeKeyframes(DrawbridgeKeyframes.Plan drawbridgeKeyframes) {
+        this.drawbridgeKeyframes = drawbridgeKeyframes;
+    }
+
+    /** True when this door is played back as precomputed keyframes (KNG-193) rather than per block. */
+    public boolean hasDrawbridgeKeyframes() {
+        return drawbridgeKeyframes != null;
     }
 
     public void setMotionVector(Vector motionVector) {
