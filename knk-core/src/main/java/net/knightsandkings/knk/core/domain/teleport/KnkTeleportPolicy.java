@@ -25,12 +25,15 @@ public record KnkTeleportPolicy(Kind request, Kind warp, Kind spawn) {
         spawn = spawn != null ? spawn : Kind.NONE;
     }
 
-    /** The settings of {@code kind}'s teleports; {@link Kind#NONE} for kinds groups can't set (staff, /back). */
+    /**
+     * The settings of {@code kind}'s teleports; {@link Kind#NONE} for kinds groups can't set (staff, /back).
+     * A {@code /hub} uses the spawn settings (KNG-188): the API has no hub column.
+     */
     public Kind of(TeleportKind kind) {
         return switch (kind) {
             case REQUEST -> request;
             case WARP -> warp;
-            case SPAWN -> spawn;
+            case SPAWN, HUB -> spawn;
             default -> Kind.NONE;
         };
     }

@@ -292,6 +292,8 @@ public class KnKPlugin extends JavaPlugin {
     /** Global Game Settings (KNG-52); null without the API client. */
     private net.knightsandkings.knk.paper.settings.GameSettingsManager gameSettingsManager;
     private net.knightsandkings.knk.paper.commands.SpawnCommand spawnCommand;
+    /** {@code /hub [<player>]} (KNG-188); null without the teleport engine. */
+    private net.knightsandkings.knk.paper.commands.HubTeleportCommand hubTeleportCommand;
     private net.knightsandkings.knk.core.dataaccess.TeleportDestinationsDataAccess teleportDestinationsDataAccess;
     private net.knightsandkings.knk.paper.commands.WarpCommand warpCommand;
     private net.knightsandkings.knk.paper.teleport.BackService backService;
@@ -2278,6 +2280,15 @@ public class KnKPlugin extends JavaPlugin {
         if (spawnCommand != null) {
             spawnCommand.setCharges(charges);
         }
+        // KNG-188: /hub to the hub spawn of the Game Settings, a HUB teleport (the hub starts after the teleports).
+        this.hubTeleportCommand = new net.knightsandkings.knk.paper.commands.HubTeleportCommand(support, rankCheck,
+            targets, teleportService,
+            () -> hubService != null ? hubService.admissionSpawn() : java.util.Optional.empty(),
+            () -> hubService == null || !hubService.configured()
+                ? java.util.Optional.of("no hub is selected on the Game Settings page") : hubService.unusable(),
+            modeService::isVanished);
+        hubTeleportCommand.setCharges(charges);
+        hubTeleportCommand.setSettleInWorld(this::settleInWorld);
         // Phase 5: /warp, /warps (DESIGN.md §3.7).
         this.warpCommand = createWarpCommand(support, rankCheck, targets, charges);
         if (warpCommand != null) {
@@ -2674,6 +2685,7 @@ public class KnKPlugin extends JavaPlugin {
                 }
                 return java.util.Optional.empty();
             });
+            executor.setTeleport(hubTeleportCommand);
             hubCommand.setExecutor(executor);
             hubCommand.setTabCompleter(executor);
         }

@@ -21,8 +21,8 @@ public enum BackKind {
     WARPS("warps", "where you were before your warp"),
     /** Where the player stood before a {@code /tpa}/{@code /tpahere} or their own staff {@code /tp}. */
     TELEPORT("teleport", "where you were before your teleport"),
-    /** Where the player stood before a {@code /spawn}. */
-    SPAWN("spawn", "where you were before /spawn");
+    /** Where the player stood before a {@code /spawn} or a {@code /hub} (KNG-188). */
+    SPAWN("spawn", "where you were before /spawn or /hub");
 
     private final String configKey;
     private final String description;

@@ -221,7 +221,7 @@ public class BackService {
     static BackKind kindOf(TeleportPlan plan) {
         return switch (plan.kind()) {
             case WARP -> BackKind.WARPS;
-            case SPAWN -> BackKind.SPAWN;
+            case SPAWN, HUB -> BackKind.SPAWN;
             case REQUEST -> BackKind.TELEPORT;
             case STAFF -> plan.movesActor() ? BackKind.TELEPORT : null;
             case BACK -> null;
@@ -381,7 +381,7 @@ public class BackService {
             case DEATH -> "die";
             case WARPS -> "warp";
             case TELEPORT -> "teleport";
-            case SPAWN -> "use /spawn";
+            case SPAWN -> "use /spawn or /hub";
         };
     }
 

@@ -88,6 +88,14 @@ public record TeleportPlan(
     }
 
     /**
+     * A player's own {@code /hub} (KNG-188): like {@code /spawn}, with its own cooldown. {@code destination}
+     * is read again when the warmup ends and answers null once the hub can't take players.
+     */
+    public static TeleportPlan hub(Player subject, Supplier<Location> destination, String label) {
+        return new TeleportPlan(subject, destination, TeleportKind.HUB, subject, null, false, label);
+    }
+
+    /**
      * A player's own {@code /warp} to a domain (Phase 5): warmup and every guard, then {@code charge}
      * authorizes it server-side (title, premium tier, discovery) and takes the gem price.
      */
