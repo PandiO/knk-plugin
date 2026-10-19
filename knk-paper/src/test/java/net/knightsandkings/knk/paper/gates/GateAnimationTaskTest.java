@@ -62,6 +62,39 @@ class GateAnimationTaskTest {
     }
 
     @Test
+    void keyframeDiff_SplitsLeavingCellsFromReorientedOnes() {
+        // KNG-193: between two keyframes the cells that leave are removed and the cells that stay
+        // in place with a new blockdata (a log's axis at the new tilt) are cleared and re-placed.
+        GateRestingFramePlacer.RestingCell leaving =
+            new GateRestingFramePlacer.RestingCell(new Vector(0, 5, 0), "minecraft:spruce_log[axis=y]");
+        GateRestingFramePlacer.RestingCell reoriented =
+            new GateRestingFramePlacer.RestingCell(new Vector(0, 1, 0), "minecraft:spruce_log[axis=y]");
+        GateRestingFramePlacer.RestingCell unchanged =
+            new GateRestingFramePlacer.RestingCell(new Vector(0, 0, 0), "minecraft:spruce_log[axis=y]");
+        List<GateRestingFramePlacer.RestingCell> target = List.of(
+            unchanged,
+            new GateRestingFramePlacer.RestingCell(new Vector(0, 1, 0), "minecraft:spruce_log[axis=z]"),
+            new GateRestingFramePlacer.RestingCell(new Vector(0, 1, 1), "minecraft:spruce_log[axis=z]"));
+
+        GateAnimationTask.KeyframeDiff diff = GateAnimationTask.keyframeDiff(List.of(leaving, reoriented, unchanged), target);
+
+        assertEquals(List.of(leaving), diff.leaving());
+        assertEquals(List.of(reoriented), diff.changed());
+    }
+
+    @Test
+    void keyframeDiff_SameKeyframeAgain_HasNothingToDo() {
+        List<GateRestingFramePlacer.RestingCell> cells = List.of(
+            new GateRestingFramePlacer.RestingCell(new Vector(0, 0, 0), "minecraft:spruce_planks"),
+            new GateRestingFramePlacer.RestingCell(new Vector(1, 0, 0), "minecraft:spruce_planks"));
+
+        GateAnimationTask.KeyframeDiff diff = GateAnimationTask.keyframeDiff(cells, cells);
+
+        assertTrue(diff.leaving().isEmpty());
+        assertTrue(diff.changed().isEmpty());
+    }
+
+    @Test
     void resolveVacateCells_CellReoccupiedThisFrame_IsNotVacated() {
         // A cell in the previous set that's also part of this frame's target must not be cleared
         // - otherwise a later block's placement would be erased by an earlier one's vacancy, the

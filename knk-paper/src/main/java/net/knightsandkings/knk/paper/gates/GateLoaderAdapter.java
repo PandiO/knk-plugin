@@ -6,6 +6,7 @@ import net.knightsandkings.knk.api.dto.GateStructureDto;
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.domain.gates.CachedGateStructure;
+import net.knightsandkings.knk.core.gates.DrawbridgeKeyframes;
 import net.knightsandkings.knk.core.gates.GateBlockPairing;
 import net.knightsandkings.knk.core.gates.GateFrameCalculator;
 import net.knightsandkings.knk.core.gates.GateManager;
@@ -13,6 +14,7 @@ import net.knightsandkings.knk.core.gates.RigidTransform;
 import net.knightsandkings.knk.core.util.CoordinateParser;
 import net.knightsandkings.knk.core.util.VectorMath;
 import net.knightsandkings.knk.paper.tasks.GateRegionDataFormat;
+import org.bukkit.Bukkit;
 import org.bukkit.util.Vector;
 
 import java.util.Comparator;
@@ -50,13 +52,26 @@ public class GateLoaderAdapter {
      */
     private final java.util.function.Supplier<String> defaultWorld;
 
+    /**
+     * KNG-193: {@code gates.rotation.keyframes-enabled}. True builds the keyframed plank for every
+     * ROTATION door with a horizontal hinge (DRAWBRIDGE_KEYFRAME_ANIMATION.md); false leaves
+     * {@link CachedGateDoor#getDrawbridgeKeyframes()} null everywhere, which is today's exact
+     * per-block path (Mechanism 1 and the open-scan blend included, decision D6).
+     */
+    private final boolean keyframesEnabled;
+
     public GateLoaderAdapter(GateManager gateManager) {
         this(gateManager, () -> null);
     }
 
     public GateLoaderAdapter(GateManager gateManager, java.util.function.Supplier<String> defaultWorld) {
+        this(gateManager, defaultWorld, true);
+    }
+
+    public GateLoaderAdapter(GateManager gateManager, java.util.function.Supplier<String> defaultWorld, boolean keyframesEnabled) {
         this.defaultWorld = defaultWorld != null ? defaultWorld : () -> null;
         this.gateManager = gateManager;
+        this.keyframesEnabled = keyframesEnabled;
     }
 
     /**
@@ -285,7 +300,7 @@ public class GateLoaderAdapter {
         door.setOpenAnchorPoint(CoordinateParser.parseCoordinate(dto.getOpenAnchorPoint()));
 
         // Precompute local basis vectors
-        precomputeBasisVectors(door, dto);
+        String referencePointsProblem = precomputeBasisVectors(door, dto);
 
         // REGION mode (item 6.6): project the captured world-space footprint(s) into the u/v
         // index space precomputeBasisVectors just established. Must run after it - the basis
@@ -303,6 +318,10 @@ public class GateLoaderAdapter {
         // these ends up with an empty openBlocks/openBlockPairing, which is itself the trigger
         // GateFrameCalculator uses to fall through to today's exact procedural behavior.
         loadOpenBlockSnapshots(door, dto.getOpenedBlockSnapshots());
+
+        // KNG-193: the keyframed plank of a drawbridge, from everything loaded above (basis, hinge,
+        // closed scan, optional open scan). Null = the per-block path.
+        precomputeDrawbridgeKeyframes(door, dto, referencePointsProblem);
 
         // Set initial state from OpenedState (CLOSED/OPENING/OPEN/CLOSING/JAMMED - decision 5.0-C).
         String openedState = dto.getOpenedState();
@@ -322,8 +341,10 @@ public class GateLoaderAdapter {
     /**
      * Precompute local basis vectors (u, v, n) from reference points.
      * For PLANE_GRID geometry mode.
+     *
+     * @return KNG-132's complaint about the reference points, or null when they are fine or missing
      */
-    private void precomputeBasisVectors(CachedGateDoor gate, GateDoorDto dto) {
+    private String precomputeBasisVectors(CachedGateDoor gate, GateDoorDto dto) {
         Vector ref1 = CoordinateParser.parseCoordinate(dto.getReferencePoint1());
         Vector ref2 = CoordinateParser.parseCoordinate(dto.getReferencePoint2());
         Vector anchor = gate.getAnchorPoint();
@@ -368,6 +389,7 @@ public class GateLoaderAdapter {
                 LOGGER.warning("Gate door " + gate.getName() + " (ID: " + gate.getId() + ") has sheared reference points: "
                     + pointsProblem);
             }
+            return pointsProblem;
         } else {
             // Fallback to standard axes
             gate.setUAxis(new Vector(1, 0, 0));
@@ -378,7 +400,49 @@ public class GateLoaderAdapter {
             gate.setNStep(new Vector(0, 0, 1));
             gate.setSublatticeIndex(1);
             LOGGER.warning("Gate " + gate.getName() + " missing reference points, using default axes");
+            return null;
         }
+    }
+
+    /**
+     * KNG-193 (DRAWBRIDGE_KEYFRAME_ANIMATION.md §9 step 2): builds and caches the keyframed plank of
+     * a ROTATION door. Skipped, with the door keeping today's per-block path, when the switch is
+     * off, for non-ROTATION doors, for a door KNG-132 refuses (its scan is sheared, so the shape
+     * mask would be too - the basis check comes first, as the design requires), and for everything
+     * {@link DrawbridgeKeyframes#build} refuses (a slope without a unit-axis strip direction,
+     * closed blocks off the hinge plane, DOUBLE_DOORS, an angle outside (0, 90], a missing basis);
+     * each refusal is one warning at load. A non-zero MotionDistanceBlocks that disagrees with the
+     * open scan is also warned about once (D2); the open scan wins.
+     */
+    private void precomputeDrawbridgeKeyframes(CachedGateDoor door, GateDoorDto dto, String referencePointsProblem) {
+        door.setDrawbridgeKeyframes(null);
+        if (!keyframesEnabled || !"ROTATION".equals(door.getMotionType())) {
+            return;
+        }
+        String label = "Gate door " + door.getName() + " (ID: " + door.getId() + ")";
+        if (referencePointsProblem != null) {
+            LOGGER.warning(label + " keeps the per-block rotation path: its reference points are sheared (KNG-132), "
+                + "so no keyframes were built.");
+            return;
+        }
+
+        int motionDistanceBlocks = dto.getMotionDistanceBlocks() != null ? dto.getMotionDistanceBlocks() : 0;
+        DrawbridgeKeyframes.Orienter orienter = (blockData, angle) ->
+            Bukkit.getServer() == null ? blockData : GateBlockOrientation.applyRotation(blockData, door, angle);
+        DrawbridgeKeyframes.Result result = DrawbridgeKeyframes.build(door, motionDistanceBlocks, orienter);
+        for (String warning : result.warnings()) {
+            LOGGER.warning(label + ": " + warning);
+        }
+        if (!result.hasPlan()) {
+            LOGGER.warning(label + " keeps the per-block rotation path: " + result.fallbackReason());
+            return;
+        }
+
+        DrawbridgeKeyframes.Plan plan = result.plan();
+        door.setDrawbridgeKeyframes(plan);
+        LOGGER.info(label + ": keyframed plank with " + plan.size() + " keyframes, " + plan.first().cells().size()
+            + " cells closed -> " + plan.last().cells().size() + " open, reach K=" + plan.reach() + " strip(s) along "
+            + plan.e() + " (" + (door.getOpenBlocks().isEmpty() ? "deck length " + DrawbridgeKeyframes.deckLengthBlocks(door, motionDistanceBlocks, plan.height()) + " blocks" : "from the open scan") + ").");
     }
 
     /**

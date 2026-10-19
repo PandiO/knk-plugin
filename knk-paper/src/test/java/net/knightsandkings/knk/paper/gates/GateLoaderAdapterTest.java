@@ -509,6 +509,144 @@ class GateLoaderAdapterTest {
         return dto;
     }
 
+    // === KNG-193: the keyframed plank is built at load (DRAWBRIDGE_KEYFRAME_ANIMATION.md) ===
+
+    private static GateDoorDto cardinalDrawbridgeDto(int id, int width, int height) {
+        GateDoorDto door = doorOf(id, id, "Drawbridge " + id);
+        door.setGateType("DRAWBRIDGE");
+        door.setMotionType("ROTATION");
+        door.setGeometryDefinitionMode("PLANE_GRID");
+        door.setAnimationDurationTicks(90);
+        door.setAnimationTickRate(1);
+        door.setRotationMaxAngleDegrees(90);
+        door.setGeometryWidth(width);
+        door.setGeometryHeight(height);
+        door.setGeometryDepth(1);
+        door.setAnchorPoint("{\"x\":100,\"y\":64,\"z\":100,\"world\":\"world\"}");
+        door.setReferencePoint1("{\"x\":" + (100 + width - 1) + ",\"y\":64,\"z\":100,\"world\":\"world\"}");
+        door.setReferencePoint2("{\"x\":100,\"y\":" + (64 + height - 1) + ",\"z\":100,\"world\":\"world\"}");
+        List<GateBlockSnapshotDto> blocks = new ArrayList<>();
+        int snapshotId = 1;
+        for (int i = 0; i < width; i++) {
+            for (int j = 0; j < height; j++) {
+                blocks.add(new GateBlockSnapshotDto(snapshotId, id, i, j, 0, 100 + i, 64 + j, 100,
+                    "minecraft:spruce_planks", "minecraft:spruce_planks", "{}", snapshotId));
+                snapshotId++;
+            }
+        }
+        door.setBlockSnapshots(blocks);
+        return door;
+    }
+
+    @Test
+    void loadAndCacheStructure_BuildsTheKeyframedPlankOfADrawbridge() {
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world", true);
+
+        adapter.loadAndCacheStructure(structureOf(60, "Drawbridge Gate", cardinalDrawbridgeDto(60, 4, 6)));
+
+        CachedGateDoor gate = gateManager.getGate(60);
+        assertNotNull(gate);
+        assertTrue(gate.hasDrawbridgeKeyframes());
+        assertEquals(11, gate.getDrawbridgeKeyframes().size());
+        assertEquals(24, gate.getDrawbridgeKeyframes().first().cells().size());
+        assertEquals(24, gate.getDrawbridgeKeyframes().last().cells().size());
+        assertEquals(5, gate.getDrawbridgeKeyframes().reach(), "deck length = GeometryHeight when MotionDistanceBlocks is 0");
+        // the spatial index holds keyframe 0 (the closed scan) for the closed door
+        assertEquals(60, gateManager.getSpatialIndex().lookup("world", 103, 69, 100));
+        assertEquals(24, gateManager.closedFootprint(60).size());
+    }
+
+    @Test
+    void loadAndCacheStructure_MotionDistanceBlocksSetsADrawbridgesDeckLength() {
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world", true);
+        GateDoorDto door = cardinalDrawbridgeDto(61, 4, 6);
+        door.setMotionDistanceBlocks(9);
+
+        adapter.loadAndCacheStructure(structureOf(61, "Long Drawbridge Gate", door));
+
+        CachedGateDoor gate = gateManager.getGate(61);
+        assertTrue(gate.hasDrawbridgeKeyframes());
+        assertEquals(8, gate.getDrawbridgeKeyframes().reach());
+        assertEquals(36, gate.getDrawbridgeKeyframes().last().cells().size(), "a 4-wide deck 9 blocks long");
+    }
+
+    @Test
+    void loadAndCacheStructure_KeyframeSwitchOff_KeepsThePerBlockPath() {
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world", false);
+
+        adapter.loadAndCacheStructure(structureOf(62, "Drawbridge Gate", cardinalDrawbridgeDto(62, 4, 6)));
+
+        CachedGateDoor gate = gateManager.getGate(62);
+        assertNotNull(gate);
+        assertFalse(gate.hasDrawbridgeKeyframes());
+        assertEquals(24, gateManager.closedFootprint(62).size(), "the per-block path still answers");
+    }
+
+    @Test
+    void loadAndCacheStructure_ShearedReferencePoints_KeepThePerBlockPath() {
+        // KNG-132's basis check comes first: a door it refuses never reaches the keyframes.
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world", true);
+        GateDoorDto door = cardinalDrawbridgeDto(63, 4, 6);
+        door.setReferencePoint2("{\"x\":103,\"y\":69,\"z\":100,\"world\":\"world\"}");
+
+        adapter.loadAndCacheStructure(structureOf(63, "Sheared Drawbridge Gate", door));
+
+        CachedGateDoor gate = gateManager.getGate(63);
+        assertNotNull(gate);
+        assertFalse(gate.hasDrawbridgeKeyframes());
+    }
+
+    @Test
+    void loadAndCacheStructure_DoubleDoorsAndSlidingDoors_HaveNoKeyframes() {
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world", true);
+        GateDoorDto doubleDoors = cardinalDrawbridgeDto(64, 4, 6);
+        doubleDoors.setGateType("DOUBLE_DOORS");
+        GateDoorDto portcullis = cardinalDrawbridgeDto(65, 4, 6);
+        portcullis.setGateType("SLIDING");
+        portcullis.setMotionType("VERTICAL");
+
+        adapter.loadAndCacheStructure(structureOf(64, "Mixed Gate", doubleDoors, portcullis));
+
+        assertFalse(gateManager.getGate(64).hasDrawbridgeKeyframes());
+        assertFalse(gateManager.getGate(65).hasDrawbridgeKeyframes());
+    }
+
+    @Test
+    void loadAndCacheStructure_DrawbridgeWithAnOpenScan_TakesItsReachAndLastKeyframeFromTheScan() {
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world", true);
+        GateDoorDto door = cardinalDrawbridgeDto(66, 2, 3);
+        // the deck built 4 blocks out from the hinge (K = 3), scanned from an open anchor at the hinge
+        door.setOpenAnchorPoint("{\"x\":100,\"y\":64,\"z\":100,\"world\":\"world\"}");
+        List<GateBlockSnapshotDto> open = new ArrayList<>();
+        int snapshotId = 500;
+        for (int i = 0; i < 2; i++) {
+            for (int k = 0; k <= 3; k++) {
+                open.add(new GateBlockSnapshotDto(snapshotId, 66, i, 0, k, 100 + i, 64, 100 + k,
+                    "minecraft:spruce_log", "minecraft:spruce_log[axis=z]", "{}", snapshotId));
+                snapshotId++;
+            }
+        }
+        door.setOpenedBlockSnapshots(open);
+        door.setMotionDistanceBlocks(7); // disagrees with the scan: warned, the scan wins (D2)
+
+        adapter.loadAndCacheStructure(structureOf(66, "Scanned Drawbridge Gate", door));
+
+        CachedGateDoor gate = gateManager.getGate(66);
+        assertTrue(gate.hasDrawbridgeKeyframes());
+        assertEquals(3, gate.getDrawbridgeKeyframes().reach());
+        assertEquals(8, gate.getDrawbridgeKeyframes().last().cells().size());
+        for (var cell : gate.getDrawbridgeKeyframes().last().cells()) {
+            assertEquals("minecraft:spruce_log[axis=z]", cell.blockData(), "the open scan is placed verbatim");
+        }
+        assertEquals(1, gate.getDrawbridgeKeyframes().warnings().size());
+    }
+
     // === Mechanism 2: loading + pairing the optional open-state scan (ROTATION_GAP_FILL_DESIGN.md) ===
 
     @Test

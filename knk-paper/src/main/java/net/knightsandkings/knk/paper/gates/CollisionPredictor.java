@@ -19,7 +19,8 @@ import org.bukkit.util.BoundingBox;
  * block crosses between frames (a drawbridge's or rotating door's arc). When that window reaches
  * the resting frame, the resting frame's own cells (rasterized gap-fill included) are added too.
  * Before KNG-106 this predicted frames upwards only, so a closing door - the case that crushes
- * people - was checked against frames it had already passed.
+ * people - was checked against frames it had already passed. A keyframed drawbridge (KNG-193) is
+ * predicted per keyframe: the previous, current and next {@link #LOOKAHEAD_UPDATES} keyframes.
  */
 public class CollisionPredictor {
     /** How many updates ahead count as "about to be placed". */
@@ -34,6 +35,15 @@ public class CollisionPredictor {
      * {@link #LOOKAHEAD_UPDATES} updates after {@code currentFrame}.
      */
     public static Set<Long> upcomingCells(CachedGateDoor gate, int currentFrame, boolean rasterizationEnabled) {
+        // KNG-193: a keyframed drawbridge changes per keyframe, not per tick-rate update, so the
+        // window is the keyframe before the current one through the next LOOKAHEAD_UPDATES
+        // keyframes in the door's direction; its resting keyframe is the last one, so it is in.
+        if (gate.hasDrawbridgeKeyframes()) {
+            var plan = gate.getDrawbridgeKeyframes();
+            int current = plan.indexAtFrame(gate, currentFrame);
+            int step = GateSweep.step(gate);
+            return plan.cellsBetween(current - step, current + step * LOOKAHEAD_UPDATES);
+        }
         int tickRate = Math.max(1, gate.getAnimationTickRate());
         int from = GateSweep.ahead(gate, currentFrame, 0) - GateSweep.step(gate) * tickRate;
         from = Math.max(0, Math.min(gate.getAnimationDurationTicks(), from));
@@ -44,6 +54,10 @@ public class CollisionPredictor {
     /** Every cell the door will still fill from {@code currentFrame} until it comes to rest. */
     public static Set<Long> remainingCells(CachedGateDoor gate, int currentFrame, boolean rasterizationEnabled) {
         int end = GateSweep.endFrame(gate);
+        if (gate.hasDrawbridgeKeyframes()) {
+            var plan = gate.getDrawbridgeKeyframes();
+            return plan.cellsBetween(plan.indexAtFrame(gate, currentFrame), plan.indexAtFrame(gate, end));
+        }
         return withRestingCells(gate, GateSweep.cells(gate, currentFrame, end), end, rasterizationEnabled);
     }
 

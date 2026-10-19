@@ -21,6 +21,8 @@ import net.knightsandkings.knk.core.gates.GateSpatialIndex;
  * along an arc (a drawbridge, a rotating door), still covers every cell it crosses. Both the
  * closed-scan blocks and the open-only blocks that animate across the swing (gate item 6.10) count.
  * Closing counts frames down (duration to 0), opening counts them up, like {@code GateAnimationTask}.
+ * A keyframed drawbridge (KNG-193, {@link CachedGateDoor#getDrawbridgeKeyframes()}) sweeps the union
+ * of the keyframes between the two frames instead.
  * Bukkit-free apart from {@link Vector}, which knk-core already uses for gate geometry.
  */
 public final class GateSweep {
@@ -54,6 +56,12 @@ public final class GateSweep {
         Set<Long> cells = new HashSet<>();
         if (gate == null) {
             return cells;
+        }
+        // KNG-193: a keyframed drawbridge is exactly the union of the keyframes shown between the
+        // two frames - every cell it fills on the way, nothing it only flies past.
+        if (gate.hasDrawbridgeKeyframes()) {
+            var plan = gate.getDrawbridgeKeyframes();
+            return plan.cellsBetween(plan.indexAtFrame(gate, fromFrame), plan.indexAtFrame(gate, toFrame));
         }
         int direction = toFrame >= fromFrame ? 1 : -1;
         for (BlockSnapshot block : gate.getBlocks()) {

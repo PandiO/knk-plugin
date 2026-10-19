@@ -4,6 +4,7 @@ import net.knightsandkings.knk.api.GateDoorsApi;
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
+import net.knightsandkings.knk.core.gates.DrawbridgeKeyframes;
 import net.knightsandkings.knk.core.gates.GateFrameCalculator;
 import net.knightsandkings.knk.core.gates.GateManager;
 import org.bukkit.Bukkit;
@@ -223,17 +224,7 @@ public class HealthSystem {
 
             List<Vector> positions = new ArrayList<>();
             int blocksRemoved = 0;
-            for (BlockSnapshot blockSnapshot : gate.getBlocks()) {
-                Vector worldPos = GateFrameCalculator.calculateBlockPosition(
-                    gate,
-                    blockSnapshot,
-                    frame
-                );
-
-                if (worldPos == null) {
-                    continue;
-                }
-
+            for (Vector worldPos : doorCellsAt(gate, frame)) {
                 positions.add(worldPos);
 
                 Block block = world.getBlockAt(
@@ -270,6 +261,24 @@ public class HealthSystem {
         } catch (Exception e) {
             LOGGER.warning("Error removing gate blocks: " + e.getMessage());
         }
+    }
+
+    /**
+     * The world cells the door's blocks occupy at a frame: a keyframed drawbridge's keyframe cells
+     * (KNG-193), otherwise every scanned block's computed position (minus the ones clipped away).
+     */
+    private static List<Vector> doorCellsAt(CachedGateDoor gate, int frame) {
+        if (gate.hasDrawbridgeKeyframes()) {
+            return gate.getDrawbridgeKeyframes().keyframeAtFrame(gate, frame).positions();
+        }
+        List<Vector> positions = new ArrayList<>();
+        for (BlockSnapshot blockSnapshot : gate.getBlocks()) {
+            Vector worldPos = GateFrameCalculator.calculateBlockPosition(gate, blockSnapshot, frame);
+            if (worldPos != null) {
+                positions.add(worldPos);
+            }
+        }
+        return positions;
     }
 
     /**
@@ -363,14 +372,22 @@ public class HealthSystem {
             }
 
             List<Vector> positions = new ArrayList<>();
-            for (BlockSnapshot blockSnapshot : gate.getBlocks()) {
-                Vector worldPos = GateFrameCalculator.calculateBlockPosition(gate, blockSnapshot, 0);
-                if (worldPos == null) {
-                    continue;
+            if (gate.hasDrawbridgeKeyframes()) {
+                // KNG-193: keyframe 0 is the closed scan verbatim
+                for (DrawbridgeKeyframes.Cell cell : gate.getDrawbridgeKeyframes().first().cells()) {
+                    positions.add(cell.position());
+                    GateBlockPlacer.placeBlock(world, cell.position(), cell.blockData(), Material.STONE);
                 }
+            } else {
+                for (BlockSnapshot blockSnapshot : gate.getBlocks()) {
+                    Vector worldPos = GateFrameCalculator.calculateBlockPosition(gate, blockSnapshot, 0);
+                    if (worldPos == null) {
+                        continue;
+                    }
 
-                positions.add(worldPos);
-                GateBlockPlacer.placeBlock(world, worldPos, blockSnapshot.getBlockData(), Material.STONE);
+                    positions.add(worldPos);
+                    GateBlockPlacer.placeBlock(world, worldPos, blockSnapshot.getBlockData(), Material.STONE);
+                }
             }
 
             if (gateManager != null) {
