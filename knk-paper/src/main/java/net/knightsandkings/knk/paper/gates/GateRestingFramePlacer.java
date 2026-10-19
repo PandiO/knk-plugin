@@ -2,6 +2,7 @@ package net.knightsandkings.knk.paper.gates;
 
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
+import net.knightsandkings.knk.core.gates.DrawbridgeKeyframes;
 import net.knightsandkings.knk.core.gates.GateFrameCalculator;
 import net.knightsandkings.knk.core.gates.GateSpatialIndex;
 import org.bukkit.Material;
@@ -18,7 +19,8 @@ import java.util.logging.Logger;
  * Shared logic for what a gate's blocks actually look like at one of its two resting
  * (closed/open) endpoint frames - Mechanism 1's rasterized gap-fill and Mechanism 2's open-scan
  * pairing from docs/features/gate-structure-animation/ROTATION_GAP_FILL_DESIGN.md, both of which
- * only apply at these resting frames, never mid-swing (Decision 3).
+ * only apply at these resting frames, never mid-swing (Decision 3). A keyframed drawbridge (KNG-193,
+ * {@link CachedGateDoor#getDrawbridgeKeyframes()}) rests on its first or last keyframe instead.
  *
  * <p>Used by both {@link GateAnimationTask} (when an open/close animation completes) and
  * {@link GateStateSyncTask} (reconciling the world to a gate's already-resting DB state at server
@@ -56,6 +58,18 @@ final class GateRestingFramePlacer {
      */
     static List<RestingCell> restingFrameCells(CachedGateDoor gate, int frame, boolean rasterizationEnabled) {
         List<RestingCell> cells = new ArrayList<>();
+
+        // KNG-193: a keyframed drawbridge rests on keyframe 0 (the closed scan verbatim) or its last
+        // keyframe (the open scan verbatim when there is one, else the rasterized deck). Startup
+        // sync, the world-sync check and the siege view all come through here, so they follow.
+        if (gate.hasDrawbridgeKeyframes()) {
+            for (DrawbridgeKeyframes.Cell cell : gate.getDrawbridgeKeyframes().keyframeAtFrame(gate, frame).cells()) {
+                cells.add(new RestingCell(cell.position(), cell.blockData()));
+            }
+            LOGGER.fine("[GateRestingFrame] Gate '" + gate.getName() + "' (ID: " + gate.getId() + ") frame " + frame
+                + ": " + cells.size() + " cell(s) from keyframe " + gate.getDrawbridgeKeyframes().indexAtFrame(gate, frame) + ".");
+            return cells;
+        }
 
         // Item 6.9: at the true OPEN resting frame, render every real open-scan block directly
         // rather than only the ones GateBlockPairing managed to pair to a closed block.

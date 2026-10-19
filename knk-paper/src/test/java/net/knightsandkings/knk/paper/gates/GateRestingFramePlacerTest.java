@@ -49,6 +49,56 @@ class GateRestingFramePlacerTest {
     }
 
     @Test
+    void restingFrameCells_KeyframedDrawbridge_RestsOnKeyframe0AndTheLastKeyframe() {
+        // KNG-193: a keyframed drawbridge's resting frames are its first and last keyframe, so startup
+        // sync, the world-sync check and the siege view (all through restingFrameCells) follow.
+        CachedGateDoor door = DrawbridgeKeyframeFixtures.keyframedCardinalDrawbridge(
+            net.knightsandkings.knk.core.domain.gates.AnimationState.CLOSED);
+
+        List<GateRestingFramePlacer.RestingCell> closed = GateRestingFramePlacer.restingFrameCells(door, 0, true);
+        List<GateRestingFramePlacer.RestingCell> open = GateRestingFramePlacer.restingFrameCells(door, 60, true);
+
+        assertEquals(24, closed.size());
+        assertEquals(24, open.size());
+        java.util.Set<Vector> closedPositions = new java.util.HashSet<>();
+        for (GateRestingFramePlacer.RestingCell cell : closed) {
+            closedPositions.add(cell.position());
+            assertEquals("minecraft:spruce_planks", cell.blockData());
+        }
+        java.util.Set<Vector> openPositions = new java.util.HashSet<>();
+        for (GateRestingFramePlacer.RestingCell cell : open) {
+            openPositions.add(cell.position());
+        }
+        for (int i = 0; i < 4; i++) {
+            for (int j = 0; j < 6; j++) {
+                assertTrue(closedPositions.contains(new Vector(100 + i, 64 + j, 100)), "closed column " + i + " row " + j);
+                assertTrue(openPositions.contains(new Vector(100 + i, 64, 100 + j)), "open deck strip " + j);
+            }
+        }
+        // the same cells feed the positions-only view and the siege view
+        assertEquals(24, GateRestingFramePlacer.restingFramePositions(door, 60, true).size());
+        assertEquals(24, GateViewCells.restingCells(door, true, true).size());
+        // the kill switch of Mechanism 1 is irrelevant for a keyframed door
+        assertEquals(openPositions.size(), GateRestingFramePlacer.restingFrameCells(door, 60, false).size());
+    }
+
+    @Test
+    void transitionRestingFrame_KeyframedDrawbridge_ClearsTheClosedColumnThatIsNotPartOfTheDeck() {
+        CachedGateDoor door = DrawbridgeKeyframeFixtures.keyframedCardinalDrawbridge(
+            net.knightsandkings.knk.core.domain.gates.AnimationState.CLOSED);
+
+        List<GateRestingFramePlacer.RestingCell> toClear = GateRestingFramePlacer.cellsToClear(
+            GateRestingFramePlacer.restingFrameCells(door, 0, true),
+            GateRestingFramePlacer.restingFrameCells(door, 60, true));
+
+        // the hinge row (y 64) is shared; the 5 rows above it leave
+        assertEquals(20, toClear.size());
+        for (GateRestingFramePlacer.RestingCell cell : toClear) {
+            assertTrue(cell.position().getBlockY() > 64);
+        }
+    }
+
+    @Test
     void useRasterization_DiagonalRotationGateAtEndpointWithNoOpenScan_IsEligible() {
         CachedGateDoor gate = buildDiagonalDrawbridge(8, 4);
 

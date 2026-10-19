@@ -98,6 +98,43 @@ class CollisionPredictorTest {
     }
 
     @Test
+    void aKeyframedDrawbridgePredictsItsNextKeyframesNotPerBlockArcs() {
+        // KNG-193: the cells about to be filled are the next LOOKAHEAD_UPDATES keyframes (and the
+        // one before the current one), whole planks, not the per-block arcs of the old path.
+        CachedGateDoor door = DrawbridgeKeyframeFixtures.keyframedCardinalDrawbridge(AnimationState.OPENING);
+        var plan = door.getDrawbridgeKeyframes();
+        int frame = 30;
+        int current = plan.indexAtFrame(door, frame);
+        assertTrue(current > 0 && current < plan.size() - 1);
+
+        Set<Long> upcoming = CollisionPredictor.upcomingCells(door, frame, true);
+
+        assertEquals(plan.cellsBetween(current - 1, current + CollisionPredictor.LOOKAHEAD_UPDATES), upcoming);
+        for (long cell : plan.keyframe(current + 1).packedPositions()) {
+            assertTrue(upcoming.contains(cell), "the next keyframe is predicted");
+        }
+        assertFalse(upcoming.containsAll(plan.last().packedPositions()), "the deck is not predicted yet at mid-swing");
+
+        Set<Long> remaining = CollisionPredictor.remainingCells(door, frame, true);
+        assertEquals(plan.cellsBetween(current, plan.size() - 1), remaining);
+        assertTrue(remaining.containsAll(plan.last().packedPositions()), "the resting deck is part of what remains");
+    }
+
+    @Test
+    void aClosingKeyframedDrawbridgeLooksTowardTheClosedKeyframe() {
+        CachedGateDoor door = DrawbridgeKeyframeFixtures.keyframedCardinalDrawbridge(AnimationState.CLOSING);
+        var plan = door.getDrawbridgeKeyframes();
+        int frame = 4;
+        int current = plan.indexAtFrame(door, frame);
+
+        Set<Long> upcoming = CollisionPredictor.upcomingCells(door, frame, true);
+
+        assertEquals(plan.cellsBetween(current + 1, Math.max(0, current - CollisionPredictor.LOOKAHEAD_UPDATES)), upcoming);
+        assertTrue(upcoming.containsAll(plan.first().packedPositions()), "the closed door's cells are predicted");
+        assertEquals(plan.cellsBetween(current, 0), CollisionPredictor.remainingCells(door, frame, true));
+    }
+
+    @Test
     void entitiesBesideTheDoorAreNotInTheWay() {
         CachedGateDoor gate = portcullis(AnimationState.CLOSING);
         Set<Long> upcoming = CollisionPredictor.upcomingCells(gate, 3, true);

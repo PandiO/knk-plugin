@@ -4,6 +4,7 @@ import net.knightsandkings.knk.api.GateDoorsApi;
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
+import net.knightsandkings.knk.core.gates.DrawbridgeKeyframes;
 import net.knightsandkings.knk.core.gates.GateFrameCalculator;
 import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.core.gates.GateSpatialIndex;
@@ -66,7 +67,7 @@ public class GateAnimationTask extends BukkitRunnable {
     // what each field means. Volume is roughly (blockCount * frameCount) lines per animation -
     // flip to false (or delete this flag, logTrace, and its call sites) once the investigation
     // concludes; not meant to stay enabled long-term.
-    private static final boolean TRACE_LOGGING_ENABLED = true;
+    private static final boolean TRACE_LOGGING_ENABLED = false;
 
     private final GateManager gateManager;
     private final World world;
@@ -94,6 +95,9 @@ public class GateAnimationTask extends BukkitRunnable {
     // last successful updateGateBlocks call - see resolveVacateCells for why this replaced a
     // frame-arithmetic guess.
     private final Map<Integer, List<RestingCell>> lastPlacedCellsByGate = new HashMap<>();
+    // KNG-193: the keyframe a keyframed drawbridge currently shows, per gate, while it animates.
+    // Between keyframes nothing is placed; the entry goes with lastPlacedCellsByGate's.
+    private final Map<Integer, Integer> shownKeyframeByGate = new HashMap<>();
 
     /**
      * Create a new gate animation task with Mechanism 1 rasterization enabled by default.
@@ -160,7 +164,10 @@ public class GateAnimationTask extends BukkitRunnable {
                     + ", rotationMaxAngleDegrees=" + gate.getRotationMaxAngleDegrees()
                     + ", clipToGeometryBounds=" + gate.isClipToGeometryBounds()
                     + " (W=" + gate.getGeometryWidth() + ", H=" + gate.getGeometryHeight()
-                    + ", D=" + gate.getGeometryDepth() + ")");
+                    + ", D=" + gate.getGeometryDepth() + ")"
+                    + (gate.hasDrawbridgeKeyframes()
+                        ? ", keyframed plank with " + gate.getDrawbridgeKeyframes().size() + " keyframes (KNG-193)"
+                        : ", per-block path"));
             }
 
             // Only process gates that are animating
@@ -171,6 +178,7 @@ public class GateAnimationTask extends BukkitRunnable {
                 // the world; nothing needs to survive to the next animation, which correctly
                 // re-seeds via resolveVacateCells' fallback.
                 lastPlacedCellsByGate.remove(gate.getId());
+                shownKeyframeByGate.remove(gate.getId());
                 continue;
             }
 
@@ -225,23 +233,35 @@ public class GateAnimationTask extends BukkitRunnable {
 
             // Check if animation should update this frame (always retry every tick while
             // jammed, regardless of AnimationTickRate, so an obstruction clearing is noticed
-            // promptly rather than waiting for the next tick-rate-aligned frame).
-            if (!gate.isJammed() && !GateFrameCalculator.shouldUpdateFrame(gate, currentFrame)) {
+            // promptly rather than waiting for the next tick-rate-aligned frame). A keyframed
+            // drawbridge (KNG-193) is checked every tick instead: it only changes when its
+            // keyframe does, and that tick is set by the swing angle, not by AnimationTickRate.
+            boolean keyframed = gate.hasDrawbridgeKeyframes();
+            if (!keyframed && !gate.isJammed() && !GateFrameCalculator.shouldUpdateFrame(gate, currentFrame)) {
                 continue;
             }
 
-            // If lagging, skip to final position
+            // If lagging, skip to final position (a keyframed drawbridge: to its last keyframe)
             if (isLagging && currentFrame > totalFrames / 2) {
                 LOGGER.fine("Server lagging, skipping to final position for gate: " + gate.getName());
                 currentFrame = state == AnimationState.OPENING ? totalFrames : 0;
                 gate.setCurrentFrame(currentFrame);
             }
 
-            // Handle entity push before updating blocks
-            handleEntityPush(gate, currentFrame);
+            if (keyframed) {
+                // KNG-193: the whole plank changes at once, on the tick its next keyframe starts
+                // (and every tick while jammed, to retry); nothing is placed in between.
+                if (keyframeDue(gate, currentFrame)) {
+                    handleEntityPush(gate, currentFrame);
+                    applyKeyframe(gate, currentFrame);
+                }
+            } else {
+                // Handle entity push before updating blocks
+                handleEntityPush(gate, currentFrame);
 
-            // Update all block positions for this frame
-            updateGateBlocks(gate, currentFrame);
+                // Update all block positions for this frame
+                updateGateBlocks(gate, currentFrame);
+            }
 
             // Check if animation is complete
             if (currentFrame >= totalFrames && state == AnimationState.OPENING) {
@@ -409,6 +429,105 @@ public class GateAnimationTask extends BukkitRunnable {
         lastPlacedCellsByGate.put(gate.getId(), targetCells);
 
         handleJamTracking(gate, blockedCount);
+    }
+
+    /** KNG-193: whether the keyframe shown at {@code frame} differs from the one on the ground (or a jam needs a retry). */
+    private boolean keyframeDue(CachedGateDoor gate, int frame) {
+        Integer shown = shownKeyframeByGate.get(gate.getId());
+        return shown == null || gate.isJammed() || shown != gate.getDrawbridgeKeyframes().indexAtFrame(gate, frame);
+    }
+
+    /**
+     * KNG-193 (DRAWBRIDGE_KEYFRAME_ANIMATION.md §5.4): shows the keyframe of {@code frame}, applying
+     * only the difference from what the door's blocks occupy now, atomically in this tick: the cells
+     * that leave are removed, the cells that enter or change blockdata are placed. What the door
+     * occupies now is the remembered placement (item 6.8's {@link #lastPlacedCellsByGate}), or, on
+     * the first update of an animation, the resting keyframe it started from. Placement goes through
+     * {@code placeBlockIfVacant} like the per-block path, so a foreign block still blocks the door
+     * and {@link #handleJamTracking} still jams it after {@link #JAM_THRESHOLD_TICKS}; while jammed
+     * the same keyframe is retried every tick.
+     */
+    private void applyKeyframe(CachedGateDoor gate, int frame) {
+        DrawbridgeKeyframes.Plan plan = gate.getDrawbridgeKeyframes();
+        int index = plan.indexAtFrame(gate, frame);
+        List<RestingCell> targetCells = toRestingCells(plan.keyframe(index));
+
+        for (RestingCell cell : targetCells) {
+            if (!GateBlockPlacer.isChunkLoaded(world, cell.position())) {
+                LOGGER.fine("Gate " + gate.getName() + " is in unloaded chunk, pausing animation");
+                return;
+            }
+        }
+
+        List<RestingCell> previousCells = lastPlacedCellsByGate.get(gate.getId());
+        if (previousCells == null) {
+            previousCells = toRestingCells(gate.getCurrentState() == AnimationState.OPENING ? plan.first() : plan.last());
+        }
+        KeyframeDiff diff = keyframeDiff(previousCells, targetCells);
+
+        for (RestingCell leaving : diff.leaving()) {
+            GateBlockPlacer.removeBlockIfMatches(world, leaving.position(), leaving.blockData(), fallbackMaterial);
+        }
+        for (RestingCell changed : diff.changed()) {
+            // same cell, new blockdata (e.g. a log's axis at the new tilt): clear the old one first
+            GateBlockPlacer.removeBlockIfMatches(world, changed.position(), changed.blockData(), fallbackMaterial);
+        }
+        int blockedCount = 0;
+        for (RestingCell placement : targetCells) {
+            if (!GateBlockPlacer.placeBlockIfVacant(world, placement.position(), placement.blockData(), fallbackMaterial)) {
+                blockedCount++;
+            }
+        }
+
+        GateSpatialIndex spatialIndex = gateManager.getSpatialIndex();
+        spatialIndex.removeAll(gate.getWorldName(), positionsOf(diff.leaving()));
+        spatialIndex.putAll(gate.getWorldName(), positionsOf(targetCells), gate.getId());
+
+        Integer shown = shownKeyframeByGate.put(gate.getId(), index);
+        lastPlacedCellsByGate.put(gate.getId(), targetCells);
+
+        if (shown == null || shown != index) {
+            LOGGER.fine("[GateAnimation] Gate '" + gate.getName() + "' (ID: " + gate.getId() + ") frame " + frame
+                + ": keyframe " + index + "/" + (plan.size() - 1) + " (" + targetCells.size() + " cells, "
+                + diff.leaving().size() + " removed, " + diff.changed().size() + " re-oriented"
+                + (blockedCount > 0 ? ", " + blockedCount + " blocked" : "") + ")");
+        } else if (blockedCount > 0 && frame % 20 == 0) {
+            LOGGER.warning("[GateAnimation] Gate '" + gate.getName() + "' (ID: " + gate.getId() + ") frame " + frame
+                + ": " + blockedCount + "/" + targetCells.size() + " keyframe cell(s) blocked by an existing, non-matching block.");
+        }
+
+        handleJamTracking(gate, blockedCount);
+    }
+
+    /** The cells of the previous placement that leave in the next one, and the ones that stay put with new blockdata. */
+    record KeyframeDiff(List<RestingCell> leaving, List<RestingCell> changed) {
+    }
+
+    /** Pure (Bukkit-free) half of {@link #applyKeyframe}, unit-tested in {@code GateAnimationTaskTest}. */
+    static KeyframeDiff keyframeDiff(List<RestingCell> previousCells, List<RestingCell> targetCells) {
+        Map<Long, String> targetByPosition = new HashMap<>();
+        for (RestingCell cell : targetCells) {
+            targetByPosition.put(GateSpatialIndex.packCell(cell.position()), cell.blockData());
+        }
+        List<RestingCell> leaving = new ArrayList<>();
+        List<RestingCell> changed = new ArrayList<>();
+        for (RestingCell previous : previousCells) {
+            String target = targetByPosition.get(GateSpatialIndex.packCell(previous.position()));
+            if (target == null) {
+                leaving.add(previous);
+            } else if (!target.equals(previous.blockData())) {
+                changed.add(previous);
+            }
+        }
+        return new KeyframeDiff(leaving, changed);
+    }
+
+    private static List<RestingCell> toRestingCells(DrawbridgeKeyframes.Keyframe keyframe) {
+        List<RestingCell> cells = new ArrayList<>(keyframe.cells().size());
+        for (DrawbridgeKeyframes.Cell cell : keyframe.cells()) {
+            cells.add(new RestingCell(cell.position(), cell.blockData()));
+        }
+        return cells;
     }
 
     /**

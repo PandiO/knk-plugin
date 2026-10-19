@@ -223,6 +223,10 @@ public class GateManager {
      * block clipped away by ClipToGeometryBounds (see GateFrameCalculator).
      */
     private static List<Vector> doorBlockPositions(CachedGateDoor gate, int frame) {
+        // KNG-193: a keyframed drawbridge occupies exactly its keyframe's cells at this frame.
+        if (gate.hasDrawbridgeKeyframes()) {
+            return gate.getDrawbridgeKeyframes().keyframeAtFrame(gate, frame).positions();
+        }
         List<Vector> positions = new ArrayList<>();
         for (BlockSnapshot block : gate.getBlocks()) {
             if (block == null) {

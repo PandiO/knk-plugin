@@ -364,13 +364,20 @@ class GateFrameCalculatorTest {
     }
 
     private CachedGateDoor buildRealGate14(int width, int height) {
-        // Exact basis vectors from the live server's own log line for gate #14 (north-west
-        // facing, not the south-east fixture used elsewhere in this file) - a sign-mirrored
-        // variant of buildDiagonalDrawbridge, used to rule out a directionality-dependent bug.
+        return buildRealGate14(width, height, new Vector(0, 0, 0));
+    }
+
+    /**
+     * Exact basis vectors from the live server's own log line for gate #14 (north-west facing, not
+     * the south-east fixture used elsewhere in this file) - a sign-mirrored variant of
+     * buildDiagonalDrawbridge, used to rule out a directionality-dependent bug. Shared with
+     * {@code DrawbridgeKeyframesTest} (KNG-193), which places it at the door's real anchor.
+     */
+    static CachedGateDoor buildRealGate14(int width, int height, Vector anchor) {
         CachedGateDoor rotationGate = new CachedGateDoor(
             14, 14, "Northern Gate", "DRAWBRIDGE", "ROTATION", "PLANE_GRID",
             90, 1,
-            new Vector(0, 0, 0), width, height, 0,
+            anchor, width, height, 0,
             2000.0, 2000.0, true, false, false, 90,
             "north-west"
         );
