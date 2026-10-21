@@ -96,12 +96,65 @@ class StakeContractValidatorTest {
         assertTrue(codes(coins(10_000, 0), off).isEmpty());
     }
 
+    /** The runtime's valuation: the blueprint's BasePriceMin × amount; 0 for an item without a blueprint. */
+    private static long blueprintValue(StakeItem item) {
+        return switch (item.material()) {
+            case "DIAMOND_SWORD" -> 600L * item.amount();
+            case "IRON_INGOT" -> 10L * item.amount();
+            default -> 0L;
+        };
+    }
+
+    private static List<StakeViolation> valued(StakeContract contract) {
+        return StakeContractValidator.validate(contract, settings(3), null, StakeContractValidatorTest::blueprintValue);
+    }
+
     @Test
-    void itemsAreCollateralForTheRatio() {
-        // DESIGN §6.2: "I stake my diamond sword, you stake 500 coins".
+    void itemsCountTowardTheRatioByTheirValue() {
+        // DESIGN §6.2: "I stake my diamond sword, you stake 500 coins" — allowed when the sword is worth enough.
         StakeContract swordFor500 = new StakeContract(GearMode.OWN_GEAR_DROP, null,
                 new Stake(0, List.of(item("s", "DIAMOND_SWORD"))), Stake.coins(500));
-        assertTrue(codes(swordFor500, settings(3)).isEmpty());
+        assertTrue(valued(swordFor500).isEmpty(), "600 vs 500");
+        StakeContract swordFor2000 = new StakeContract(GearMode.OWN_GEAR_DROP, null,
+                new Stake(0, List.of(item("s", "DIAMOND_SWORD"))), Stake.coins(2_000));
+        List<StakeViolation> low = valued(swordFor2000);
+        assertEquals(List.of(Code.STAKE_RATIO), low.stream().map(StakeViolation::code).toList());
+        assertEquals(DuelSide.CHALLENGER, low.getFirst().side());
+        assertEquals("1000", low.getFirst().detail(), "the minimum stake value");
+    }
+
+    @Test
+    void coinsAndItemValueAddUpPerSide() {
+        // 300 coins + 64 iron (640) = 940 vs 1,800 coins: 940 >= 900.
+        StakeContract mixed = new StakeContract(GearMode.OWN_GEAR_KEEP, null,
+                new Stake(300, List.of(new StakeItem("i", "IRON_INGOT", 64))), Stake.coins(1_800));
+        assertTrue(valued(mixed).isEmpty());
+        assertEquals(940, StakeContractValidator.stakeValue(mixed.challenger(), StakeContractValidatorTest::blueprintValue));
+        // Items count on the larger side too: the sword (600) + 1,000 coins vs 700 coins needs 800.
+        StakeContract richer = new StakeContract(GearMode.OWN_GEAR_KEEP, null,
+                new Stake(1_000, List.of(item("s", "DIAMOND_SWORD"))), Stake.coins(700));
+        assertEquals(List.of(Code.STAKE_RATIO), valued(richer).stream().map(StakeViolation::code).toList());
+    }
+
+    @Test
+    void anItemWithoutABlueprintIsWorthNothing() {
+        StakeContract dirtFor500 = new StakeContract(GearMode.OWN_GEAR_KEEP, null,
+                new Stake(0, List.of(item("d", "DIRT"))), Stake.coins(500));
+        assertEquals(Code.STAKE_RATIO, valued(dirtFor500).getFirst().code());
+        // Without a valuation only coins count.
+        StakeContract swordFor500 = new StakeContract(GearMode.OWN_GEAR_KEEP, null,
+                new Stake(0, List.of(item("s", "DIAMOND_SWORD"))), Stake.coins(500));
+        assertEquals(List.of(Code.STAKE_RATIO), codes(swordFor500, settings(3)));
+    }
+
+    @Test
+    void itemsAgainstItemsUseTheirValues() {
+        StakeContract swordForIron = new StakeContract(GearMode.OWN_GEAR_KEEP, null,
+                new Stake(0, List.of(item("s", "DIAMOND_SWORD"))), new Stake(0, List.of(new StakeItem("i", "IRON_INGOT", 30))));
+        assertTrue(valued(swordForIron).isEmpty(), "600 vs 300");
+        StakeContract swordForLessIron = new StakeContract(GearMode.OWN_GEAR_KEEP, null,
+                new Stake(0, List.of(item("s", "DIAMOND_SWORD"))), new Stake(0, List.of(new StakeItem("i", "IRON_INGOT", 29))));
+        assertEquals(Code.STAKE_RATIO, valued(swordForLessIron).getFirst().code());
     }
 
     @Test

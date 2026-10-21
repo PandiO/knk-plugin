@@ -5,20 +5,26 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
+import java.util.function.ToLongFunction;
 
 /**
  * Contract checks the plugin can make on its own (DESIGN §6.3, §7.6): advisory when an offer is sent,
  * binding at lock-in. Item presence ({@code isSimilar} + amount), eligibility (D14) and the pair/daily
  * limits (§10.2) are checked by the runtime and the API, not here.
  *
- * <p><b>Stake ratio</b> ({@code MinStakeRatioPercent}): the smaller coin stake must be at least that
- * percentage of the larger, so "I stake 10,000, you stake 0" is refused. When the side with fewer coins
- * stakes items, the items are its collateral and the ratio isn't applied, so DESIGN §6.2's example
- * "I stake my diamond sword, you stake 500 coins" stays possible. (Interpretation recorded in the
- * P3 report; the API applies its own copy of the rule at lock-in.)
+ * <p><b>Stake ratio</b> ({@code MinStakeRatioPercent}): each side's stake value is its coins plus the
+ * coin value of its items, and the smaller value must be at least that percentage of the larger. So
+ * "I stake 10,000, you stake 0" is refused, and "I stake my diamond sword, you stake 500 coins" is
+ * allowed when the sword is worth enough (DESIGN §6.2, §10.2). The caller values items
+ * ({@link #NO_ITEM_VALUE} values none); the runtime uses the base price of the item instance's
+ * {@code ItemBlueprint} ({@code BasePriceMin} × amount), and an item that is no blueprint instance is
+ * worth 0 (developer, 2026-10-21, KNG-197). The API applies the same rule at lock-in (P2).
  */
 public final class StakeContractValidator {
     private StakeContractValidator() {}
+
+    /** Values every item at 0 coins: only coins count toward the ratio. */
+    public static final ToLongFunction<StakeItem> NO_ITEM_VALUE = item -> 0;
 
     /**
      * Checks a contract against the arena's settings.
@@ -29,6 +35,17 @@ public final class StakeContractValidator {
      */
     public static List<StakeViolation> validate(StakeContract contract, DuelArenaSettings settings,
                                                 Predicate<StakeItem> blocked) {
+        return validate(contract, settings, blocked, NO_ITEM_VALUE);
+    }
+
+    /**
+     * Checks a contract against the arena's settings, valuing items for the stake ratio.
+     *
+     * @param blocked   as in {@link #validate(StakeContract, DuelArenaSettings, Predicate)}
+     * @param itemValue the coin value of a whole stack (amount included), never negative; null = {@link #NO_ITEM_VALUE}
+     */
+    public static List<StakeViolation> validate(StakeContract contract, DuelArenaSettings settings,
+                                                Predicate<StakeItem> blocked, ToLongFunction<StakeItem> itemValue) {
         List<StakeViolation> out = new ArrayList<>();
         GearMode mode = contract.gearMode();
         if (!settings.allows(mode)) {
@@ -50,7 +67,7 @@ public final class StakeContractValidator {
         for (DuelSide side : DuelSide.values()) {
             checkSide(side, contract.stakeOf(side), settings, blocked, out);
         }
-        checkRatio(contract, settings, out);
+        checkRatio(contract, settings, itemValue == null ? NO_ITEM_VALUE : itemValue, out);
         return List.copyOf(out);
     }
 
@@ -86,8 +103,9 @@ public final class StakeContractValidator {
 
     /** {@link #validate} plus {@link #validateItemOwnership}. */
     public static List<StakeViolation> validateOffer(StakeContract previous, StakeContract next, DuelSide author,
-                                                     DuelArenaSettings settings, Predicate<StakeItem> blocked) {
-        List<StakeViolation> out = new ArrayList<>(validate(next, settings, blocked));
+                                                     DuelArenaSettings settings, Predicate<StakeItem> blocked,
+                                                     ToLongFunction<StakeItem> itemValue) {
+        List<StakeViolation> out = new ArrayList<>(validate(next, settings, blocked, itemValue));
         out.addAll(validateItemOwnership(previous, next, author));
         return List.copyOf(out);
     }
@@ -122,23 +140,33 @@ public final class StakeContractValidator {
         }
     }
 
-    private static void checkRatio(StakeContract contract, DuelArenaSettings settings, List<StakeViolation> out) {
+    private static void checkRatio(StakeContract contract, DuelArenaSettings settings,
+                                   ToLongFunction<StakeItem> itemValue, List<StakeViolation> out) {
         int ratio = settings.minStakeRatioPercent();
         if (ratio == 0) return;
         long a = contract.challenger().coins();
         long b = contract.opponent().coins();
-        if (a < 0 || b < 0 || a == b) return;
+        if (a < 0 || b < 0) return; // NEGATIVE_COINS already
+        a = stakeValue(contract.challenger(), itemValue);
+        b = stakeValue(contract.opponent(), itemValue);
+        if (a == b) return;
         DuelSide smaller = a < b ? DuelSide.CHALLENGER : DuelSide.OPPONENT;
-        long low = Math.min(a, b);
-        long high = Math.max(a, b);
-        if (!contract.stakeOf(smaller).items().isEmpty()) return; // items are the collateral
-        long minimum = minimumMatchingStake(high, ratio);
-        if (low < minimum) {
+        long minimum = minimumMatchingStake(Math.max(a, b), ratio);
+        if (Math.min(a, b) < minimum) {
             out.add(new StakeViolation(StakeViolation.Code.STAKE_RATIO, smaller, String.valueOf(minimum)));
         }
     }
 
-    /** The smallest coin stake that matches {@code larger} at {@code ratioPercent} (rounded up). */
+    /** Coins plus the value of every staked stack (negative item values count as 0). */
+    public static long stakeValue(Stake stake, ToLongFunction<StakeItem> itemValue) {
+        long value = Math.max(0, stake.coins());
+        for (StakeItem item : stake.items()) {
+            value = Math.addExact(value, Math.max(0, itemValue.applyAsLong(item)));
+        }
+        return value;
+    }
+
+    /** The smallest stake value that matches {@code larger} at {@code ratioPercent} (rounded up). */
     public static long minimumMatchingStake(long larger, int ratioPercent) {
         if (larger <= 0 || ratioPercent <= 0) return 0;
         return (larger * ratioPercent + 99) / 100;

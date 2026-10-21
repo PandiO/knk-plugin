@@ -27,7 +27,12 @@ class DuelOfferBookTest {
     private final UUID dave = UUID.randomUUID();
     private final UUID erin = UUID.randomUUID();
 
-    private final DuelOfferBook book = new DuelOfferBook(3, 10, s -> s.material().equals("WRITTEN_BOOK"));
+    private final DuelOfferBook book = new DuelOfferBook(3, 10, s -> s.material().equals("WRITTEN_BOOK"),
+            s -> switch (s.material()) {
+                case "DIAMOND_SWORD" -> 1_000L * s.amount();
+                case "BOW" -> 400L * s.amount();
+                default -> 0L;
+            });
 
     @ParameterizedTest
     @ValueSource(ints = {1, 2, 3, 4})
@@ -235,6 +240,18 @@ class DuelOfferBookTest {
         assertEquals(Status.INVALID_CONTRACT, book.counter(alice, second.offerId(), aliceEdits, 2).status());
         StakeContract aliceRemoves = new StakeContract(GearMode.OWN_GEAR_KEEP, null, Stake.coins(500), Stake.coins(250));
         assertTrue(book.counter(alice, second.offerId(), aliceRemoves, 2).ok());
+    }
+
+    @Test
+    void theStakeRatioUsesTheItemValues() {
+        StakeContract dirtFor500 = new StakeContract(GearMode.OWN_GEAR_KEEP, null,
+                new Stake(0, List.of(item("d", "DIRT"))), Stake.coins(500));
+        Outcome refused = book.invite(alice, bob, settings(3), dirtFor500, 0);
+        assertEquals(Status.INVALID_CONTRACT, refused.status());
+        assertEquals(StakeViolation.Code.STAKE_RATIO, refused.violations().getFirst().code());
+        StakeContract swordFor500 = new StakeContract(GearMode.OWN_GEAR_KEEP, null,
+                new Stake(0, List.of(item("s", "DIAMOND_SWORD"))), Stake.coins(500));
+        assertTrue(book.invite(alice, bob, settings(3), swordFor500, 0).ok());
     }
 
     @Test

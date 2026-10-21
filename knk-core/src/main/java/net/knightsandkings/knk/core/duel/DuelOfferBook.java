@@ -11,6 +11,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Predicate;
+import java.util.function.ToLongFunction;
 
 /**
  * All open negotiations on the server (DESIGN §6.1, §6.3): invitations, offers and counters, turn
@@ -108,6 +109,7 @@ public final class DuelOfferBook {
     private final int maxIncoming;
     private final long sendCooldownTicks;
     private final Predicate<StakeItem> blocked;
+    private final ToLongFunction<StakeItem> itemValue;
 
     private final Map<Long, DuelNegotiation> open = new LinkedHashMap<>();
     private final Map<UUID, Long> cooldownUntilTick = new HashMap<>();
@@ -115,15 +117,24 @@ public final class DuelOfferBook {
     private long nextNegotiationId = 1;
     private long nextOfferId = 1;
 
-    /**
-     * @param blocked the stake blocklist predicate (DESIGN §7.6), applied to every offer; null = none
-     */
+    /** Without item values: only coins count toward the stake ratio. */
     public DuelOfferBook(int maxIncoming, int sendCooldownSeconds, Predicate<StakeItem> blocked) {
+        this(maxIncoming, sendCooldownSeconds, blocked, StakeContractValidator.NO_ITEM_VALUE);
+    }
+
+    /**
+     * @param blocked   the stake blocklist predicate (DESIGN §7.6), applied to every offer; null = none
+     * @param itemValue the coin value of a staked stack for the stake ratio (the blueprint's
+     *                  {@code BasePriceMin} × amount; 0 for an item without one); null = none
+     */
+    public DuelOfferBook(int maxIncoming, int sendCooldownSeconds, Predicate<StakeItem> blocked,
+                         ToLongFunction<StakeItem> itemValue) {
         if (maxIncoming < 1) throw new IllegalArgumentException("maxIncoming must be >= 1");
         if (sendCooldownSeconds < 0) throw new IllegalArgumentException("sendCooldownSeconds must be >= 0");
         this.maxIncoming = maxIncoming;
         this.sendCooldownTicks = DuelTicks.ofSeconds(sendCooldownSeconds);
         this.blocked = blocked;
+        this.itemValue = itemValue == null ? StakeContractValidator.NO_ITEM_VALUE : itemValue;
     }
 
     // ==================== Toggle ====================
@@ -164,7 +175,7 @@ public final class DuelOfferBook {
         if (incomingOf(invitee).size() >= maxIncoming) return Outcome.of(Status.TOO_MANY_INCOMING);
 
         List<StakeViolation> violations =
-                StakeContractValidator.validateOffer(null, contract, DuelSide.CHALLENGER, settings, blocked);
+                StakeContractValidator.validateOffer(null, contract, DuelSide.CHALLENGER, settings, blocked, itemValue);
         if (!violations.isEmpty()) return new Outcome(Status.INVALID_CONTRACT, null, null, violations, 0);
 
         DuelNegotiation negotiation = new DuelNegotiation(nextNegotiationId++, inviter, invitee, settings);
@@ -184,7 +195,7 @@ public final class DuelOfferBook {
         if (!current.canBeCountered()) return Outcome.of(Status.NO_COUNTERS_LEFT, negotiation);
         DuelSide side = negotiation.sideOf(author);
         List<StakeViolation> violations = StakeContractValidator.validateOffer(
-                current.contract(), contract, side, negotiation.settings(), blocked);
+                current.contract(), contract, side, negotiation.settings(), blocked, itemValue);
         if (!violations.isEmpty()) return new Outcome(Status.INVALID_CONTRACT, negotiation, current, violations, 0);
         DuelOffer offer = newOffer(negotiation, side, contract, nowTick);
         return new Outcome(Status.OK, negotiation, offer, List.of(), 0);
