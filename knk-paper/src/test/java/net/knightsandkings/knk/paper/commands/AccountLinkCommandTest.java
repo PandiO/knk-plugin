@@ -147,7 +147,8 @@ class AccountLinkCommandTest {
         assertEquals(List.of(
             "[KnK] Your link code is " + CODE + ". It expires in 20 minutes.",
             "[KnK] New to the website? Register at https://app.knightsandkings.net/auth/register",
-            "[KnK] Enter the code when you register on the website, or on your Account page if you already have a web login."
+            "[KnK] Enter the code when you register on the website, or on your Account page if you already have a web login.",
+            "[KnK] Never give this code to anyone; staff never ask for it."
         ), sent);
         assertTrue(logged.stream().anyMatch(line -> line.contains("Link code generated for Steve")), logged.toString());
         logged.forEach(line -> assertFalse(line.contains(CODE) || line.contains("QX7K2P"), "logged the code: " + line));
@@ -162,6 +163,7 @@ class AccountLinkCommandTest {
         assertEquals(ClickEvent.copyToClipboard(CODE), components.get(0).clickEvent());
         assertEquals(ClickEvent.openUrl("https://app.knightsandkings.net/auth/register"), components.get(1).clickEvent());
         assertNull(components.get(2).clickEvent());
+        assertNull(components.get(3).clickEvent());
     }
 
     @Test
@@ -184,8 +186,9 @@ class AccountLinkCommandTest {
 
         command("").onCommand(player, null, "link", new String[0]);
 
-        assertEquals(2, sent.size(), sent.toString());
+        assertEquals(3, sent.size(), sent.toString());
         sent.forEach(line -> assertFalse(line.contains("/auth/register"), line));
+        assertTrue(sent.get(2).contains("Never give this code to anyone"), sent.toString());
     }
 
     @Test

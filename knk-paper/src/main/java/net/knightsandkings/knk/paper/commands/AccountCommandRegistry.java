@@ -75,7 +75,7 @@ public class AccountCommandRegistry implements TabExecutor {
         var registered = registry.get(subcommandName);
         if (registered.isEmpty()) {
             sendPrefixed(sender, "&cUnknown command: " + subcommandName);
-            sendPrefixed(sender, "&7Usage: &f/account [create|link|status]");
+            sendPrefixed(sender, "&7Usage: &f/account [link|status]");
             return true;
         }
 

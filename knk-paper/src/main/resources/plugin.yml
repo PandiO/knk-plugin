@@ -30,8 +30,8 @@ commands:
     # No permission: here (KNG-77) - gated on knk.gatedoor.* / knk.gate.* inside GateDoorCommand.
 
   account:
-    description: "Manage your in-game account (create, link, view status)"
-    usage: "/account [create|link|status]"
+    description: "Manage your in-game account (link a web login, view status)"
+    usage: "/account [link|status]"
     aliases: [acc]
     permission: knk.account.use
 

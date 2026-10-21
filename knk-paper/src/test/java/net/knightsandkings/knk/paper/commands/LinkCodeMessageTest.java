@@ -23,7 +23,8 @@ class LinkCodeMessageTest {
         assertEquals(List.of(
             "&aYour link code is &6ABC-123&a. It expires in 20 minutes.",
             "&aNew to the website? Register at &ehttps://app.knightsandkings.net/auth/register",
-            "&aEnter the code when you register on the website, or on your Account page if you already have a web login."
+            "&aEnter the code when you register on the website, or on your Account page if you already have a web login.",
+            "&cNever give this code to anyone; staff never ask for it."
         ), lines);
     }
 
@@ -34,7 +35,8 @@ class LinkCodeMessageTest {
 
             assertEquals(List.of(
                 "&aYour link code is &6ABC-123&a. It expires in 20 minutes.",
-                "&aEnter the code when you register on the website, or on your Account page if you already have a web login."
+                "&aEnter the code when you register on the website, or on your Account page if you already have a web login.",
+                "&cNever give this code to anyone; staff never ask for it."
             ), lines);
             lines.forEach(line -> assertFalse(line.contains("{url}") || line.contains("/auth/register"), line));
         }
