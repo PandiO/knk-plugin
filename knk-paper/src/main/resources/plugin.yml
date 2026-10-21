@@ -273,6 +273,10 @@ commands:
     description: "Arena duels: challenge a player with stakes, answer offers, pick a kit, draw, toggle invites, claim (docs/specs/arena-duels/DESIGN.md §6.1)"
     usage: "/duel <player> [quick] | /duel accept|counter|decline|view <id> | /duel cancel [id] | /duel kit [kit] | /duel draw | /duel toggle | /duel claim"
     # KNG-219: node knk.duel (default true) through CommandNodes; staff actions are /knk duel (knk.admin.duel).
+  duels:
+    description: "Live arena duels: watch, see the stakes, spectate (docs/specs/arena-duels/DESIGN.md §9.2)"
+    usage: "/duels | /duels view <match> | /duels spectate <arena id>"
+    # KNG-219: node knk.duel through CommandNodes; the menus are P6's (KNG-220) through DuelMenuPort.
   arena:
     description: "The arena you stand in (or the named one): queue, live duels, challenge a player, claims"
     usage: "/arena [name]"
@@ -1066,7 +1070,7 @@ permissions:
 
   knk.duel:
     description: >-
-      /duel and /arena - challenge players in an arena, negotiate stakes, answer offers, pick a kit, offer a draw,
+      /duel, /duels and /arena - challenge players in an arena, negotiate stakes, answer offers, pick a kit, offer a draw,
       toggle invites and claim winnings (arena duels, KNG-219). Everyone by default; the in-house permission system
       can take it away per group.
     default: true

@@ -308,6 +308,8 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.duel.ui.DuelNegotiationUi duelUi;
     /** /arena (KNG-219); P6's arena menu plugs in through {@code setMenu}. */
     private net.knightsandkings.knk.paper.commands.ArenaCommand arenaCommand;
+    /** P6's duel menus (KNG-220) for /duels and /arena; null until set, and the commands answer in chat. */
+    private volatile net.knightsandkings.knk.paper.duel.ui.DuelMenuPort duelMenuPort;
     /**
      * Every minigame's membership for the plugin-wide hooks (arena duels DESIGN §11). Created before the hooks that
      * read it; siege registers when its runtime starts, so until then (or without it) nobody is a member.
@@ -3637,8 +3639,9 @@ public class KnKPlugin extends JavaPlugin {
             };
         this.arenaCommand = new net.knightsandkings.knk.paper.commands.ArenaCommand(() -> duelService,
             () -> arenasDataAccess == null ? java.util.List.of() : arenasDataAccess.cachedArenas().orElse(java.util.List.of()),
-            arenaAt);
+            arenaAt, () -> duelMenuPort);
         registerTabCommand("arena", arenaCommand);
+        registerTabCommand("duels", new net.knightsandkings.knk.paper.commands.DuelsCommand(() -> duelService, () -> duelMenuPort));
         registerTabCommand("duel", new net.knightsandkings.knk.paper.commands.DuelCommand(() -> duelUi, visiblePlayers));
         if (duelService == null) return;
         try {
@@ -3698,6 +3701,11 @@ public class KnKPlugin extends JavaPlugin {
             this.duelUi = null;
             getLogger().log(java.util.logging.Level.SEVERE, "Arena duels UI failed to initialize; /duel stays off", e);
         }
+    }
+
+    /** P6 (KNG-220): the duel menus /duels and /arena open; null switches back to the chat answers. */
+    public void setDuelMenuPort(net.knightsandkings.knk.paper.duel.ui.DuelMenuPort port) {
+        this.duelMenuPort = port;
     }
 
     /** /arena for P6's arena menu ({@code ArenaCommand.setMenu}); null before startup registered it. */

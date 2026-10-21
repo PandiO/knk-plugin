@@ -60,6 +60,7 @@ public final class CommandNodes {
             Map.entry("siegemenu", List.of(SiegeService.PERMISSION_PLAY)),
             Map.entry("duel", List.of(DuelCommand.NODE)),
             Map.entry("arena", List.of(DuelCommand.NODE)),
+            Map.entry("duels", List.of(DuelCommand.NODE)),
             Map.entry("freeze", List.of("knk.freeze")),
             Map.entry("unfreeze", List.of("knk.unfreeze")),
             Map.entry("staffchat", List.of("knk.staffchat")));

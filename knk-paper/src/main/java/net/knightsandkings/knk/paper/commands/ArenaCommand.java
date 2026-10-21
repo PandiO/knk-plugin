@@ -24,7 +24,7 @@ import java.util.function.Supplier;
 
 /**
  * {@code /arena [name]} (arena duels DESIGN §6.1, §9.3): the arena you stand in, or the named one. The arena menu
- * ({@code arena_main}) is P6's (KNG-220): it plugs in through {@link #setMenu}. Until then, and whenever no menu is
+ * ({@code arena_main}) is P6's (KNG-220): it opens through the {@code DuelMenuPort} (or {@link #setMenu}). Until then, and whenever no menu is
  * set, the command answers in chat: the queue, the live matches, and buttons to challenge a player and to claim.
  * Node {@code knk.duel}.
  */
@@ -33,13 +33,16 @@ public final class ArenaCommand implements TabExecutor {
     private final Supplier<DuelService> service;
     private final Supplier<List<KnkArena>> arenas;
     private final Function<Player, Optional<KnkArena>> arenaAt;
+    private final Supplier<net.knightsandkings.knk.paper.duel.ui.DuelMenuPort> menus;
     private volatile BiConsumer<Player, KnkArena> menu;
 
     public ArenaCommand(Supplier<DuelService> service, Supplier<List<KnkArena>> arenas,
-                        Function<Player, Optional<KnkArena>> arenaAt) {
+                        Function<Player, Optional<KnkArena>> arenaAt,
+                        Supplier<net.knightsandkings.knk.paper.duel.ui.DuelMenuPort> menus) {
         this.service = service;
         this.arenas = arenas;
         this.arenaAt = arenaAt;
+        this.menus = menus == null ? () -> null : menus;
     }
 
     /** P6: open the {@code arena_main} menu for a player and an arena instead of the chat summary. */
@@ -60,6 +63,8 @@ public final class ArenaCommand implements TabExecutor {
                     : "You aren't in an arena.") + (names.isEmpty() ? "" : " Arenas: " + String.join(", ", names)));
             return true;
         }
+        var port = menus.get();
+        if (port != null && port.openArena(player, args.length > 0 ? String.join(" ", args) : null)) return true;
         BiConsumer<Player, KnkArena> open = menu;
         if (open != null) {
             open.accept(player, arena.get());

@@ -92,4 +92,28 @@ class DuelCommandsTest {
         assertTrue(h.service.matches().isEmpty() || h.service.matches().getFirst().machine().ended());
         assertEquals(List.of("list", "cancel", "refund", "review"), admin.complete(staff, new String[] {""}));
     }
+
+    @Test
+    void duelsRoutesTheAnnouncementButtonsToP6sMenus() {
+        java.util.List<String> calls = new java.util.ArrayList<>();
+        var port = new net.knightsandkings.knk.paper.duel.ui.DuelMenuPort() {
+            public boolean openMatches(Player p) { calls.add("matches"); return true; }
+            public boolean openMatch(Player p, java.util.UUID token) { calls.add("match " + token); return true; }
+            public boolean openArena(Player p, String name) { calls.add("arena " + name); return true; }
+            public void spectate(Player p, int arenaId) { calls.add("spectate " + arenaId); }
+        };
+        var duels = new net.knightsandkings.knk.paper.commands.DuelsCommand(() -> h.service, () -> port);
+        run(h.alice, "Bob", "quick");
+        run(h.bob, "accept", String.valueOf(h.service.offers().outgoingOf(h.alice.id()).currentOffer().offerId()));
+        h.runNextTicks();
+        java.util.UUID token = h.service.matches().getFirst().token();
+
+        duels.onCommand(h.alice.player(), command, "duels", new String[0]);
+        duels.onCommand(h.alice.player(), command, "duels", new String[] {"view", token.toString()});
+        duels.onCommand(h.alice.player(), command, "duels", new String[] {"spectate", "7"});
+        new net.knightsandkings.knk.paper.commands.ArenaCommand(() -> h.service, java.util.List::of,
+                p -> java.util.Optional.of(h.arena), () -> port).onCommand(h.alice.player(), command, "arena", new String[0]);
+
+        assertEquals(List.of("matches", "match " + token, "spectate 7", "arena null"), calls);
+    }
 }
