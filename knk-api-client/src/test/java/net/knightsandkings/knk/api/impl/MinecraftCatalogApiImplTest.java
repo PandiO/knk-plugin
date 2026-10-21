@@ -41,6 +41,7 @@ class MinecraftCatalogApiImplTest {
     private final ObjectMapper mapper = new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     private final List<Request> seen = new ArrayList<>();
     private final List<String> bodies = new ArrayList<>();
+    private final List<Integer> readTimeouts = new ArrayList<>();
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private int status = 200;
     private String responseJson = "{\"id\":12,\"status\":\"Completed\"}";
@@ -48,6 +49,7 @@ class MinecraftCatalogApiImplTest {
     private final OkHttpClient client = new OkHttpClient.Builder().addInterceptor(chain -> {
         Request request = chain.request();
         seen.add(request);
+        readTimeouts.add(chain.readTimeoutMillis());
         Buffer buffer = new Buffer();
         request.body().writeTo(buffer);
         bodies.add(buffer.readUtf8());
@@ -67,6 +69,13 @@ class MinecraftCatalogApiImplTest {
         return MinecraftCatalogSnapshotDto.from(CatalogSnapshot.of("1.21.10", "git-Paper-123 (MC: 1.21.10)", List.of(
             new CatalogEntry("minecraft:stone", true, true, 64, "block.minecraft.stone", "Stone", "minecraft:stone"),
             new CatalogEntry("minecraft:apple", true, false, 64, "item.minecraft.apple", null, null))));
+    }
+
+    @Test
+    void putSnapshot_waitsLongerThanTheSharedReadTimeout_ForTheApiToApplyIt() {
+        api.putSnapshot(12, snapshot()).join();
+
+        assertEquals((int) MinecraftCatalogApiImpl.SNAPSHOT_READ_TIMEOUT.toMillis(), readTimeouts.get(0));
     }
 
     @Test
