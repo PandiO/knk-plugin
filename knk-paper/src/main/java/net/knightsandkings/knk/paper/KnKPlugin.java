@@ -302,6 +302,8 @@ public class KnKPlugin extends JavaPlugin {
     /** What the teleport menu uses; set once the teleport engine started (after the menu registries lock). */
     private volatile net.knightsandkings.knk.paper.menu.content.TeleportMenuFeature.Teleports teleportMenuParts;
     private SiegeService siegeService;
+    /** Arena duels runtime (KNG-217); null when duels are off or couldn't start. */
+    private net.knightsandkings.knk.paper.duel.DuelService duelService;
     /**
      * Every minigame's membership for the plugin-wide hooks (arena duels DESIGN §11). Created before the hooks that
      * read it; siege registers when its runtime starts, so until then (or without it) nobody is a member.
@@ -1056,6 +1058,7 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().info("Region transition service initialized with domain resolver and gate control");
 
             initializeSiege();
+            initializeDuels();
             initializeMinigameHooks();
 
             // Road navigation (KNG-27) Phase 3: the admin side (survey, build, review); Phase 4: /navigate.
@@ -1111,6 +1114,15 @@ public class KnKPlugin extends JavaPlugin {
                 siegeService.shutdown();
             } catch (RuntimeException e) {
                 getLogger().log(java.util.logging.Level.SEVERE, "Siege shutdown failed", e);
+            }
+        }
+        // Arena duels (KNG-217): running matches are aborted and every duelist's gear and items come back while the
+        // players exist; the coin refunds follow from abort-unfinished on the next start.
+        if (duelService != null) {
+            try {
+                duelService.shutdown();
+            } catch (RuntimeException e) {
+                getLogger().log(java.util.logging.Level.SEVERE, "Duel shutdown failed", e);
             }
         }
         // Phase 6: match results still being sent (incl. the shutdown aborts above) go to the spool,
@@ -3484,6 +3496,107 @@ public class KnKPlugin extends JavaPlugin {
 
     public SiegeService getSiegeService() {
         return siegeService;
+    }
+
+    /**
+     * Arena duels runtime (arena duels DESIGN §5-§8, plan Phase 4, KNG-217): the duel service and its escrow spool,
+     * pending results and startup recovery under {@code duel-escrow/}, the kit vault in {@code duel-vault/}, the
+     * participation in the minigame registry, the battleground exemptions, the listeners and a 1 s ticker. The
+     * proposal UI, commands and menus (P5/P6) build on {@link #getDuelService()}. A failure here disables duels only.
+     */
+    private void initializeDuels() {
+        if (!getConfig().getBoolean("duels.enabled", true)) {
+            getLogger().info("Arena duels are turned off (duels.enabled: false)");
+            return;
+        }
+        if (teleportService == null || arenasDataAccess == null || kitsQueryApi == null) {
+            getLogger().warning("Arena duels disabled: the teleport engine, the arena gateway or the kit API isn't available");
+            return;
+        }
+        try {
+            var config = net.knightsandkings.knk.paper.duel.DuelConfig.from(getConfig().getConfigurationSection("duels"));
+            var scheduler = net.knightsandkings.knk.paper.duel.DuelScheduler.bukkit(this);
+            var api = apiClient.getDuelMatchesApi();
+            java.io.File escrowDirectory = new java.io.File(getDataFolder(), "duel-escrow");
+            var spool = new net.knightsandkings.knk.paper.duel.DuelEscrowSpool(escrowDirectory, getLogger());
+            var results = new net.knightsandkings.knk.paper.duel.DuelPendingResults(api,
+                new java.io.File(escrowDirectory, "pending-results"), getLogger());
+            outageBacklogChecks.add(results::isEmpty);
+            var recovery = new net.knightsandkings.knk.paper.duel.DuelRecovery(api, spool, results,
+                scheduler.mainThread(), getLogger());
+            var items = net.knightsandkings.knk.paper.duel.DuelItems.paper(config.itemBlocklist(), config.refuseFilledContainers());
+            var kits = new net.knightsandkings.knk.paper.duel.DuelKitLoans.Paper(kitsQueryApi, itemBlueprintsDataAccess,
+                minecraftMaterialRefsDataAccess, items, scheduler.mainThread());
+            var access = new net.knightsandkings.knk.paper.duel.DuelBattlegroundAccess();
+            net.knightsandkings.knk.paper.duel.DuelService[] self = new net.knightsandkings.knk.paper.duel.DuelService[1];
+            // The kit vault teleports only when it restores on join (crash, quit): back to where the duelist was
+            // before the lobby teleport, outside the engine like the siege vault. The runtime's own restores happen
+            // in place; it sends the duelists to the arena exit itself.
+            var vault = new net.knightsandkings.knk.paper.minigame.MinigamePlayerVault(
+                net.knightsandkings.knk.paper.duel.DuelService.MINIGAME_ID, new java.io.File(getDataFolder(), "duel-vault"),
+                (player, location) -> {
+                    if (self[0] == null || !self[0].restoresInPlace(player)) {
+                        net.knightsandkings.knk.paper.siege.SiegeBukkit.teleport(player, location);
+                    }
+                }, getLogger());
+            var ports = new net.knightsandkings.knk.paper.duel.DuelService.Ports(
+                api,
+                net.knightsandkings.knk.paper.duel.DuelTeleporter.engine(teleportService),
+                kits,
+                items,
+                vault,
+                spool,
+                results,
+                recovery,
+                access,
+                scheduler,
+                org.bukkit.Bukkit::getPlayer,
+                uuid -> cacheManager.getUserCache().getStale(uuid)
+                    .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null),
+                arenasDataAccess::cachedById,
+                net.knightsandkings.knk.paper.utils.KnkLocations::toLocation,
+                uuid -> minigames.minigames().stream()
+                    .filter(m -> !net.knightsandkings.knk.paper.duel.DuelService.MINIGAME_ID.equals(m.id()))
+                    .anyMatch(m -> m.participationOf(uuid).isPresent()),
+                uuid -> adminFreezeManager != null && adminFreezeManager.isFrozen(uuid),
+                this::deliverLootboxItemsAfterSiege,
+                getLogger());
+            var duels = new net.knightsandkings.knk.paper.duel.DuelService(ports, config);
+            self[0] = duels;
+            this.duelService = duels;
+
+            minigames.register(new net.knightsandkings.knk.paper.duel.DuelParticipation(duels));
+            domainAccessExemptions.register(access);
+            if (siegeService != null) siegeService.setOtherMinigameRefusal(duels::siegeJoinRefusal);
+
+            var pluginManager = getServer().getPluginManager();
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.DuelCombatListener(duels,
+                uuid -> adminFreezeManager.isFrozen(uuid) || joinLoadingGuard.isLoading(uuid)), this);
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.DuelWorldGuardPvpListener(duels), this);
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.DuelCommandFilterListener(duels,
+                () -> duels.config().commandAllowList(),
+                net.knightsandkings.knk.paper.siege.SiegeCommandAliases.resolver(() -> getServer().getCommandMap()),
+                player -> knkPermissible.hasPermission(player, net.knightsandkings.knk.paper.duel.DuelService.ADMIN_NODE)), this);
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.DuelInventoryGuardListener(duels,
+                player -> modeService.getActiveMode(player) != ActiveMode.NONE), this);
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.DuelDeathRespawnListener(duels,
+                scheduler::nextTick), this);
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.DuelSessionListener(duels,
+                (ticks, task) -> scheduler.later(ticks, task)), this);
+
+            arenasDataAccess.refreshAsync();
+            duels.start();
+            getServer().getScheduler().runTaskTimer(this, duels::tick, 20L, 20L);
+            getLogger().info("Arena duels runtime initialized");
+        } catch (Exception e) {
+            this.duelService = null;
+            getLogger().log(java.util.logging.Level.SEVERE, "Arena duels failed to initialize; they stay off", e);
+        }
+    }
+
+    /** The arena duels runtime for the duel commands, menus and announcements (P5/P6); null when duels are off. */
+    public net.knightsandkings.knk.paper.duel.DuelService getDuelService() {
+        return duelService;
     }
 
     /** The siege gate controller (read-only use: locked gates, non-member carry rule); null when siege or gates didn't start. */

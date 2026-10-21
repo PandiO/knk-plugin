@@ -30,13 +30,16 @@ import static org.mockito.Mockito.when;
  */
 final class DuelTestItems {
 
-    private final Map<String, ItemStack[]> encoded = new HashMap<>();
+    /** Shared by every instance, so a "restarted" runtime reads what the first one wrote. */
+    private static final Map<String, ItemStack[]> ENCODED = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.concurrent.atomic.AtomicInteger KEYS = new java.util.concurrent.atomic.AtomicInteger();
 
     ItemStack item(String name) {
         ItemStack item = mock(ItemStack.class, name);
         when(item.clone()).thenReturn(item);
         when(item.getAmount()).thenReturn(1);
         when(item.isSimilar(item)).thenReturn(true);
+        when(item.getType()).thenReturn(org.bukkit.Material.DIAMOND_SWORD);
         return item;
     }
 
@@ -44,14 +47,14 @@ final class DuelTestItems {
         return new MinigamePlayerVault.ItemCodec() {
             @Override
             public byte[] encode(ItemStack[] contents) {
-                String key = "items-" + encoded.size();
-                encoded.put(key, contents.clone());
+                String key = "items-" + KEYS.incrementAndGet();
+                ENCODED.put(key, contents.clone());
                 return key.getBytes(StandardCharsets.UTF_8);
             }
 
             @Override
             public ItemStack[] decode(byte[] bytes) {
-                return encoded.get(new String(bytes, StandardCharsets.UTF_8)).clone();
+                return ENCODED.get(new String(bytes, StandardCharsets.UTF_8)).clone();
             }
         };
     }

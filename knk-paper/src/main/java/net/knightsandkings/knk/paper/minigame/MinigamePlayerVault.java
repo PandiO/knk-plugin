@@ -128,8 +128,8 @@ public final class MinigamePlayerVault {
                 () -> Bukkit.getWorlds().get(0).getSpawnLocation(), MinigamePlayerVault::maxHealthOf);
     }
 
-    /** Tests: items, worlds, the fallback spawn and max health without a server. */
-    MinigamePlayerVault(String minigame, File directory, BiConsumer<Player, Location> teleporter, Logger logger,
+    /** Tests (also the duel runtime's): items, worlds, the fallback spawn and max health without a server. */
+    public MinigamePlayerVault(String minigame, File directory, BiConsumer<Player, Location> teleporter, Logger logger,
                         ItemCodec items, Function<String, World> worlds, Supplier<Location> fallbackLocation,
                         ToDoubleFunction<Player> maxHealth) {
         this.minigame = Objects.requireNonNull(minigame, "minigame");

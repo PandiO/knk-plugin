@@ -680,6 +680,24 @@ lootboxes:
     slowest-step-ticks: 8          # the last step's delay; the reel starts at 1 tick per step and eases out
     show-result-ticks: 50          # how long the menu stays open on the result
     public-effects: true           # particles and sounds at the player that others nearby see and hear
+# Arena duels (docs/specs/arena-duels/DESIGN.md §12 in knk-workspace, KNG-217). Only the technical knobs live here;
+# every gameplay setting (gear modes, stakes, fee, limits, timings, the queue cap, kits) is set per Arena in the web
+# app. Staked items wait in plugins/KnightsAndKings/duel-escrow/ until they are delivered; the kit vault is in
+# duel-vault/. Restart to apply a change.
+duels:
+  enabled: true
+  invite:
+    max-incoming: 3                # open invites a player can receive at once
+    send-cooldown-seconds: 10      # between two invites by the same player
+  agreed-draw-window-seconds: 15   # /duel draw by one side, then the other within this
+  command-allow-list: [/duel, /msg, /r, /staffchat]   # the only commands in the countdown and the fight
+  item-blocklist: [WRITTEN_BOOK, BARRIER, COMMAND_BLOCK, STRUCTURE_VOID, DEBUG_STICK]   # never stakeable
+  refuse-filled-containers: true   # shulker boxes and bundles must be empty to be staked
+  announce:
+    cooldown-seconds: 120          # spam guard of the duel announcements (P6)
+  api-timeout-seconds: 10          # a lock-in without an answer by then is checked by token and refunded
+  result-retry-seconds: 30         # how often results that couldn't be sent (outage) are sent again
+  held-refresh-seconds: 300        # how often a result held for staff review is checked for a release or void
 # Extra worlds KnK loads at startup (KNG-114), next to the level-name world (the gameplay world) and its nether/end,
 # which the server loads itself. Loaded before gates, region repair and Game Settings start. A world added here comes up
 # at the next restart; a listed world is never unloaded while the server runs. KnK never deletes or regenerates a world.

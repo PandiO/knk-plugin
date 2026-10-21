@@ -76,7 +76,7 @@ public final class NavigationMessages {
     }
 
     public static Component inSiege() {
-        return bad("You can't navigate while you are in a siege.");
+        return bad("You can't navigate while you are in a siege or a duel.");
     }
 
     public static Component noNetworkHere(String world) {
@@ -261,7 +261,7 @@ public final class NavigationMessages {
             case STOPPED -> stopped();
             case TIMEOUT -> info("Navigation to " + name + " ended - the session timed out.");
             case QUIT, DEATH, WORLD_CHANGE, TELEPORT -> info("Navigation to " + name + " ended.");
-            case SIEGE -> info("Navigation to " + name + " ended - you joined a siege.");
+            case SIEGE -> info("Navigation to " + name + " ended - you joined a siege or a duel.");
             case DESTINATION_LOST -> warn("Navigation to " + name + " ended - the road network changed.");
             case NO_ROUTE -> noRoute(name);
             case DIFFERENT_COMPONENTS -> noRoadConnects(name);
