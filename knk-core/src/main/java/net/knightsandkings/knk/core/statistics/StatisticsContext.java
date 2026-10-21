@@ -6,7 +6,8 @@ import java.util.regex.Pattern;
 
 /**
  * The game context a statistic happened in (DESIGN.md §F.1): {@code open_world} by default,
- * {@code siege} inside a running Siege match. Future contexts ({@code arena}, {@code dungeon}, …)
+ * {@code siege} inside a running Siege match, {@code duel} in an arena duel's fight (KNG-221; the API
+ * projects duel wins/losses/draws itself and refuses them from the plugin). Future contexts ({@code dungeon}, …)
  * are new keys, no code change in the buffer. Non-contextual metrics use {@link #NONE} ({@code ""}).
  * Keys follow the API's pattern {@code ^[a-z][a-z0-9_]{0,31}$}.
  */
@@ -17,6 +18,7 @@ public record StatisticsContext(String key) {
     public static final StatisticsContext NONE = new StatisticsContext("");
     public static final StatisticsContext OPEN_WORLD = new StatisticsContext("open_world");
     public static final StatisticsContext SIEGE = new StatisticsContext("siege");
+    public static final StatisticsContext DUEL = new StatisticsContext("duel");
 
     public StatisticsContext {
         key = key == null ? "" : key.trim().toLowerCase(Locale.ROOT);
@@ -31,6 +33,7 @@ public record StatisticsContext(String key) {
             case "" -> NONE;
             case "open_world" -> OPEN_WORLD;
             case "siege" -> SIEGE;
+            case "duel" -> DUEL;
             default -> new StatisticsContext(normalized);
         };
     }
