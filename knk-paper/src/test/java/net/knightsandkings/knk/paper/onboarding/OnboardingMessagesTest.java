@@ -37,7 +37,7 @@ class OnboardingMessagesTest {
         ClickEvent click = button.clickEvent();
         assertNotNull(click);
         assertEquals(ClickEvent.Action.RUN_COMMAND, click.action());
-        assertEquals("/account link", click.value());
+        assertEquals("/account link", ((ClickEvent.Payload.Text) click.payload()).value());
         assertNotNull(button.hoverEvent());
     }
 }

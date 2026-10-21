@@ -142,6 +142,20 @@ class SiegeTeleportRestrictionTest {
     }
 
     @Test
+    void aMembersOwnHubIsRefused_AlsoWhenTheSiegeStartsMidWarmup() {
+        // KNG-188: /hub is a player teleport like /spawn; staff /hub <member> is a staff teleport, refused like staff /spawn <member> below.
+        joinSiege(alice);
+        assertSiegeDenial("You can't teleport during a siege. Use /siege leave to leave it.",
+            done(engine.start(TeleportPlan.hub(alice, () -> spawn, "the hub"))));
+
+        CompletableFuture<TeleportOutcome> bobsHub = engine.start(TeleportPlan.hub(bob, () -> spawn, "the hub"));
+        joinSiege(bob);
+        assertEquals(TeleportOutcome.Status.DENIED, finish(bobsHub).status());
+        verify(alice, never()).teleportAsync(any(Location.class), any(TeleportCause.class));
+        verify(bob, never()).teleportAsync(any(Location.class), any(TeleportCause.class));
+    }
+
+    @Test
     void aMemberHoldingTheSiegeBypassMayTeleportThemselves() {
         joinSiege(alice);
         grant(alice, SiegeTeleportRestriction.BYPASS_NODE);

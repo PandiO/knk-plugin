@@ -10,7 +10,7 @@ and avoid conflicting remote edits. Recheck old handoffs against current code
 and plans. See [CLAUDE.md](CLAUDE.md) for local Gradle/module conventions;
 its `@...` import is Claude Code syntax and may depend on checkout layout.
 
-This is the Paper plugin (Java 21, Gradle modules `knk-core`,
+This is the Paper plugin (Java 25, Minecraft 26.3, Gradle modules `knk-core`,
 `knk-api-client`, `knk-paper`). Run `./gradlew test` for tests. A normal
 `./gradlew build` depends on `deployToDevServer` and can copy a jar to the
 configured dev server; use `./gradlew build -x deployToDevServer` to build

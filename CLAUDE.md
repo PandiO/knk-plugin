@@ -12,11 +12,15 @@ branches, issue, plan and tracker.
 
 ## Repo-specific conventions (knk-plugin)
 
-**Stack:** Multi-module Gradle project (Kotlin DSL), Java 21 toolchain —
+**Stack:** Multi-module Gradle project (Kotlin DSL), Java 25 toolchain —
 `knk-core` (shared domain/ports), `knk-api-client` (REST client to
 knk-web-api), `knk-paper` (the actual Spigot/Paper plugin). No Maven —
 confirmed no `pom.xml` anywhere in the repo. Targets Paper API
-`1.21.10-R0.1-SNAPSHOT`.
+26.3; the build is set once as `paperApiVersion` in `gradle.properties`
+(Paper's `<mcversion>.build.<build>-<status>` scheme). Gradle 8.14 runs on
+Java 21 and compiles/tests with the Java 25 toolchain, so have both JDKs
+installed (a JDK 25 Gradle doesn't detect can be passed with
+`-Porg.gradle.java.installations.paths=<jdk dir>`).
 
 **Common commands:**
 - Build all modules without copying the jar to the configured dev server:
@@ -73,7 +77,11 @@ confirmed no `pom.xml` anywhere in the repo. Targets Paper API
   `WgRegionIdTaskHandler`, `LocationTaskHandler`, `TempRegionRetentionTask`,
   `GateRegionDataFormat`) build on it for gate-structure and world-task
   region tracking.
-- Target Minecraft version: 1.21.10 (Paper).
+- Target Minecraft version: 26.3 (Paper). Since 26.1 a world's player files
+  are in `<world>/players/data`, not `<world>/playerdata`, and every world
+  (nether, end, plugin-created ones like the hub) lives in the main world's
+  `dimensions/<namespace>/<key>/`; Paper imports an old `<container>/<name>/`
+  folder on its first load and deletes it (`worlds/BukkitWorldHost`).
 - Tests: never build a `Location` around an inline `mock(World.class)`.
   `Location` holds its world only through a `WeakReference` and
   `getWorld()` throws `IllegalArgumentException("World unloaded")` once it's

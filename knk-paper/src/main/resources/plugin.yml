@@ -2,7 +2,7 @@ name: KnightsAndKings
 api: "1.21"
 version: 0.1.0
 main: net.knightsandkings.knk.paper.KnKPlugin
-api-version: "1.21"
+api-version: "26.3"
 depend:
   - WorldGuard
 softdepend:
@@ -265,8 +265,10 @@ commands:
     usage: "/navigate <destination> [spawn|region] | /navigate stop | /navigate"
     aliases: [nav]
   hub:
-    description: Return to where you were before an API outage (the button in the chat)
-    usage: /hub return
+    description: "Teleport to the hub (the hub spawn on the Game Settings page); /hub return is the outage return button"
+    usage: "/hub | /hub <player> [-s] | /hub return"
+    # KNG-188: /hub is open to every player (no node) and goes through the teleport engine like /spawn (warmup,
+    # cooldown, the groups' spawn price). /hub <player> [-s] needs knk.teleport.staff.others (and .silent).
   lootbox:
     description: "Lootboxes: help, and what a box can give (docs/specs/lootboxes/DESIGN.md §3.4)"
     usage: "/lootbox | /lootbox odds <category> [stars]"
@@ -948,7 +950,7 @@ permissions:
     default: op
 
   knk.teleport.back.spawn:
-    description: /back - return to where you were before your last /spawn (KNG-42).
+    description: /back - return to where you were before your last /spawn or /hub (KNG-42, KNG-188).
     default: op
 
   knk.teleport.back.all:

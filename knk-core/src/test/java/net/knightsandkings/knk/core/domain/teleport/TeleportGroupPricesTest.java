@@ -77,6 +77,7 @@ class TeleportGroupPricesTest {
         KnkTeleportPolicy policy = new KnkTeleportPolicy(null, null, spawn);
 
         assertSame(spawn, policy.of(TeleportKind.SPAWN));
+        assertSame(spawn, policy.of(TeleportKind.HUB), "KNG-188: /hub uses the spawn settings");
         assertSame(KnkTeleportPolicy.Kind.NONE, policy.of(TeleportKind.REQUEST));
         assertSame(KnkTeleportPolicy.Kind.NONE, policy.of(TeleportKind.STAFF));
         assertSame(KnkTeleportPolicy.Kind.NONE, policy.of(TeleportKind.BACK));

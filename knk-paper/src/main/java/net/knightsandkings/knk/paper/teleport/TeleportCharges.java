@@ -132,6 +132,18 @@ public class TeleportCharges {
         });
     }
 
+    /**
+     * The fee of {@code player}'s own {@code /hub} (KNG-188): priced like {@code /spawn}, by their
+     * permission groups' spawn settings only, and charged through the same spawn-fee route.
+     */
+    public TeleportCharge hubFee(Player player) {
+        UUID payer = player.getUniqueId();
+        return new PolicyCharge(player, TeleportKind.HUB, 0, settings -> {
+            String key = TeleportCharger.newKey("hub");
+            return new Charge(payer, key, userId -> charger.chargeSpawnFee(userId, key)) { };
+        });
+    }
+
     /** The flat coin fee of {@code player}'s own {@code /back} (Linear KNG-42), for the ledger tagged with {@code kind}. */
     public TeleportCharge backFee(Player player, int coins, BackKind kind) {
         UUID payer = player.getUniqueId();

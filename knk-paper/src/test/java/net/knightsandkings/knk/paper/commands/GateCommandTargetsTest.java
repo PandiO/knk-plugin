@@ -309,7 +309,7 @@ class GateCommandTargetsTest {
             .map(Component::clickEvent)
             .filter(java.util.Objects::nonNull)
             .filter(click -> click.action() == ClickEvent.Action.RUN_COMMAND)
-            .map(ClickEvent::value)
+            .map(click -> ((ClickEvent.Payload.Text) click.payload()).value())
             .toList();
     }
 

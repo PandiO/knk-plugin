@@ -12,6 +12,8 @@ public enum TeleportKind {
     REQUEST,
     /** {@code /spawn} (Phase 4). */
     SPAWN,
+    /** {@code /hub}: to the hub spawn set on the Game Settings page (KNG-188). Priced and cooled down by the groups' spawn settings. */
+    HUB,
     /** {@code /warp} and the teleport menu (Phases 5-6). */
     WARP,
     /** {@code /back} (Phase 7). */
