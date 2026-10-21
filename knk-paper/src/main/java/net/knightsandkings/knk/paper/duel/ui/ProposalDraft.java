@@ -240,7 +240,7 @@ public final class ProposalDraft {
 
     /**
      * The offer book's rules for this offer (DESIGN §6.3, advisory here): shown as warnings in the editor. With items
-     * staked, the stake ratio is the API's to judge (it values items; the plugin can't yet), so it is left out here.
+     * staked, the stake ratio is the API's to judge (it values items; the plugin can't yet, KNG-224), so it is left out here.
      */
     public List<StakeViolation> violations(Predicate<StakeItem> blocked, ToLongFunction<StakeItem> itemValue) {
         StakeContract contract = contract();

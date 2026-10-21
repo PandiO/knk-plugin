@@ -411,7 +411,7 @@ public final class DuelNegotiationUi implements DuelObserver, DuelProposalEditor
      * The settings the offer book gets: the arena's, with the stake ratio left to the API. The plugin can't value
      * staked items yet (no blueprint base price on its side), so P3's check would value every item at 0 and refuse
      * DESIGN §6.2's own example ("my sword, your 500 coins"). The API values items and applies the ratio in the
-     * editor's advisory check and, binding, at lock-in. Reversible once the plugin can value items.
+     * editor's advisory check and, binding, at lock-in. Reversible once the plugin can value items (KNG-224).
      */
     static DuelArenaSettings bookSettings(DuelArenaSettings s) {
         if (s.minStakeRatioPercent() == 0) return s;
