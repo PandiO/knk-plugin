@@ -23,6 +23,9 @@ import com.sk89q.worldguard.session.handler.Handler;
  * that position (and stop or send back a vehicle). Its own bookkeeping only advances on an allowed
  * move, so holding W into a border is refused on every step.
  *
+ * <p>The service also asks the player's {@code DomainAccessExemptions} (arena duels DESIGN §8.2): an entry exemption
+ * lets them into a region they are otherwise refused, a confinement keeps them in one they could otherwise leave.
+ *
  * <p>Respawning is not cancellable in WorldGuard; {@code DomainAccessListener} corrects the respawn
  * location instead.
  */

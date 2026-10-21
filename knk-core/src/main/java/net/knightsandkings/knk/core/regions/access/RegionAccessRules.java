@@ -4,6 +4,7 @@ import net.knightsandkings.knk.core.regions.RegionTransitionType;
 
 import java.util.Collection;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * The domain AllowEntry/AllowExit rule, on WorldGuard regions (KNG-56).
@@ -41,9 +42,22 @@ public final class RegionAccessRules {
     }
 
     public Optional<Refusal> evaluate(Collection<? extends RegionView> entered, Collection<? extends RegionView> exited) {
+        return evaluate(null, entered, exited, DomainAccessExemptions.NONE);
+    }
+
+    /**
+     * The rule with the player's {@link DomainAccessExemptions} (arena duels DESIGN §8.2): an entry exemption passes
+     * that region's entry deny; a confinement refuses leaving that region, whatever its exit state.
+     *
+     * @param playerId the moving player; null asks no exemptions
+     */
+    public Optional<Refusal> evaluate(UUID playerId, Collection<? extends RegionView> entered,
+                                      Collection<? extends RegionView> exited, DomainAccessExemptions exemptions) {
+        DomainAccessExemptions asked = playerId == null || exemptions == null ? DomainAccessExemptions.NONE : exemptions;
         if (entered != null) {
             for (RegionView region : entered) {
-                if (region.entry() == AccessState.DENY && !region.isMember()) {
+                if (region.entry() == AccessState.DENY && !region.isMember()
+                        && !asked.exemptFromEntry(playerId, region.regionId())) {
                     return Optional.of(new Refusal(RegionTransitionType.ENTER, region.regionId(),
                         "You are not allowed to enter " + name(region) + "."));
                 }
@@ -51,6 +65,10 @@ public final class RegionAccessRules {
         }
         if (exited != null) {
             for (RegionView region : exited) {
+                Optional<String> confined = asked.confinement(playerId, region.regionId());
+                if (confined.isPresent()) {
+                    return Optional.of(new Refusal(RegionTransitionType.EXIT, region.regionId(), confined.get()));
+                }
                 if (region.exit() == AccessState.DENY && !region.isMember()) {
                     return Optional.of(new Refusal(RegionTransitionType.EXIT, region.regionId(),
                         "You are not allowed to leave " + name(region) + "."));

@@ -25,7 +25,7 @@ import java.util.stream.Stream;
 /**
  * Match results the API didn't accept in time (siege Phase 6): one JSON file per match,
  * {@code <directory>/<matchId>.json} (the plugin uses {@code siege-vault/pending-results/}), written
- * atomically (temp file + move, like {@code SiegePlayerVault}). {@link SiegeMatchRecorder} writes a
+ * atomically (temp file + move, like {@code MinigamePlayerVault}). {@link SiegeMatchRecorder} writes a
  * file when a {@code complete}/{@code abort} call fails transiently, and replays the files on the next
  * enable (and at the next draw); the server's idempotency makes a replay safe. A later write for the
  * same match replaces the earlier one. Thread-safe (every method is synchronized); no Bukkit types.

@@ -36,6 +36,9 @@ import net.knightsandkings.knk.core.domain.settings.KnkSpawnReference;
 import net.knightsandkings.knk.core.domain.users.ActiveMode;
 import net.knightsandkings.knk.core.domain.users.PermissionGroupRef;
 import net.knightsandkings.knk.core.hub.HubOutageStore;
+import net.knightsandkings.knk.core.minigame.MinigameParticipation;
+import net.knightsandkings.knk.core.minigame.MinigameRegistry;
+import net.knightsandkings.knk.core.minigame.Participation;
 
 /** Hub DESIGN §12, §13 and decisions 2026-10-12: the outage actions, exemptions, Siege release and the return. */
 class HubOutageServiceTest {
@@ -50,6 +53,7 @@ class HubOutageServiceTest {
     private final Map<UUID, List<PermissionGroupRef>> groups = new java.util.HashMap<>();
     private final Map<UUID, ActiveMode> modes = new java.util.HashMap<>();
     private final Set<UUID> inMatchEnding = new HashSet<>();
+    private int minigameResumes;
     private final List<Player> online = new ArrayList<>();
     private final List<Player> settled = new ArrayList<>();
     private final List<Location> transfers = new ArrayList<>();
@@ -75,9 +79,36 @@ class HubOutageServiceTest {
             location -> location.getWorld() == hubWorld && location.getX() < 100 ? Set.of("town_4") : Set.of());
         outage = new HubOutageService(hub, () -> settings, uuid -> groups.getOrDefault(uuid, List.of()),
             player -> modes.getOrDefault(player.getUniqueId(), ActiveMode.NONE), store, () -> true,
-            uuid -> !inMatchEnding.contains(uuid), settled::add, (player, to) -> transfers.add(to) && player.teleport(to),
+            minigames(), settled::add, (player, to) -> transfers.add(to) && player.teleport(to),
             Clock.fixed(T0, ZoneOffset.UTC));
         outage.useForTests(() -> online, name -> worlds.get(name), (world, at) -> at.getY() > 0 ? Optional.of(at) : Optional.empty());
+    }
+
+    /** A minigame whose members in {@link #inMatchEnding} can't be released yet (siege: the match is ending). */
+    private MinigameRegistry minigames() {
+        MinigameRegistry registry = new MinigameRegistry();
+        registry.register(new MinigameParticipation() {
+            @Override
+            public String id() {
+                return "siege";
+            }
+
+            @Override
+            public Optional<Participation> participationOf(UUID playerId) {
+                return Optional.empty();
+            }
+
+            @Override
+            public boolean releaseForOutage(UUID playerId) {
+                return !inMatchEnding.contains(playerId);
+            }
+
+            @Override
+            public void resumeAfterOutage() {
+                minigameResumes++;
+            }
+        });
+        return registry;
     }
 
     private Player player(Location at, PermissionGroupRef... groupRefs) {
@@ -174,7 +205,9 @@ class HubOutageServiceTest {
         settled.clear();
 
         assertEquals(HubOutageService.ReturnOutcome.SERVICES_DOWN, outage.returnTo(alice, token, open, free));
+        assertEquals(0, minigameResumes);
         outage.connectivityChanged(ApiConnectivityState.UP);
+        assertEquals(1, minigameResumes, "the minigames resume when the API is back");
         assertEquals(HubOutageService.ReturnOutcome.STALE, outage.returnTo(alice, token - 1, open, free));
         assertEquals(HubOutageService.ReturnOutcome.BLOCKED, outage.returnTo(alice, token, open, player -> Optional.of("You are frozen.")));
         assertEquals(HubOutageService.ReturnOutcome.RETURNED, outage.returnTo(alice, token, open, free));

@@ -69,7 +69,7 @@ class HubPortalListenerTest {
                 return location.getX() >= 10 && location.getX() < 20 ? Set.of("town_4", "portal_north") : Set.of("town_4");
             });
         outage = new HubOutageService(hub, () -> settings, uuid -> List.of(), player -> ActiveMode.NONE, store, () -> true,
-            uuid -> true, player -> { }, (player, to) -> true, Clock.fixed(Instant.parse("2026-10-12T10:00:00Z"), ZoneOffset.UTC));
+            new net.knightsandkings.knk.core.minigame.MinigameRegistry(), player -> { }, (player, to) -> true, Clock.fixed(Instant.parse("2026-10-12T10:00:00Z"), ZoneOffset.UTC));
         outage.useForTests(List::of, worlds::get, (world, at) -> Optional.of(at));
         portals = new HubPortalListener(hub, outage, player -> !loading.contains(player.getUniqueId()), player -> destination,
             (player, at) -> refusal, (player, to) -> moved.add(to), player -> { }, () -> now);

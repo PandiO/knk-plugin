@@ -134,7 +134,6 @@ import net.knightsandkings.knk.paper.tasks.ItemScanTaskHandler;
 import net.knightsandkings.knk.paper.tasks.KitScanTaskHandler;
 import net.knightsandkings.knk.paper.user.JoinLoadingGuard;
 import net.knightsandkings.knk.paper.user.UserManager;
-import net.knightsandkings.knk.paper.siege.SiegePlayerVault;
 import net.knightsandkings.knk.paper.siege.SiegeService;
 import net.knightsandkings.knk.paper.commands.SiegeCommand;
 import net.knightsandkings.knk.paper.listeners.SiegeSessionListener;
@@ -301,6 +300,18 @@ public class KnKPlugin extends JavaPlugin {
     /** What the teleport menu uses; set once the teleport engine started (after the menu registries lock). */
     private volatile net.knightsandkings.knk.paper.menu.content.TeleportMenuFeature.Teleports teleportMenuParts;
     private SiegeService siegeService;
+    /**
+     * Every minigame's membership for the plugin-wide hooks (arena duels DESIGN §11). Created before the hooks that
+     * read it; siege registers when its runtime starts, so until then (or without it) nobody is a member.
+     */
+    private final net.knightsandkings.knk.core.minigame.MinigameRegistry minigames =
+        new net.knightsandkings.knk.core.minigame.MinigameRegistry();
+    /**
+     * Per-player domain entry exemptions and confinements (arena duels DESIGN §8.2), asked by the domain-access
+     * handler. Empty until a minigame runtime registers its provider.
+     */
+    private final net.knightsandkings.knk.core.regions.access.DomainAccessExemptions.Registry domainAccessExemptions =
+        new net.knightsandkings.knk.core.regions.access.DomainAccessExemptions.Registry();
     /** The siege gate lockdowns (Phase 7a); read-only for road navigation (KNG-27 plan R24). Null without the gate system. */
     private net.knightsandkings.knk.paper.siege.SiegeGateController siegeGates;
     private net.knightsandkings.knk.core.siege.SiegeMatchRecorder siegeMatchRecorder;
@@ -895,10 +906,10 @@ public class KnKPlugin extends JavaPlugin {
             // KNG-104: /knk cache refresh forgets the region → domain map too (registered before the navigation hooks)
             cacheManager.registerRefreshHook("region domains", regionDomainResolver::clearRegionCache);
 
-            // KNG-11: hits the siege rules allow stay exempt, so enchantments keep working in sieges fought
-            // in towns. siegeService is created later (initializeSiege), so it's read per hit.
+            // KNG-11: hits a minigame's rules allow (siege) stay exempt, so enchantments keep working in sieges
+            // fought in towns. Minigames register later (initializeSiege), so the registry is asked per hit.
             initializeEnchantmentRuntime(new WorldGuardCombatSafezones(regionDomainResolver,
-                (attacker, victim) -> siegeService != null && siegeService.allowsCombat(attacker, victim)));
+                (attacker, victim) -> minigames.allowsCombat(attacker.getUniqueId(), victim.getUniqueId())));
             getLogger().info("Registered custom enchantment runtime listeners and /ce command");
 
             // Teleport engine + staff teleports (docs/specs/teleport, Phase 1) - before the commands,
@@ -1041,6 +1052,7 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().info("Region transition service initialized with domain resolver and gate control");
 
             initializeSiege();
+            initializeMinigameHooks();
 
             // Road navigation (KNG-27) Phase 3: the admin side (survey, build, review); Phase 4: /navigate.
             initializeRoads();
@@ -1327,7 +1339,7 @@ public class KnKPlugin extends JavaPlugin {
         );
         this.statisticsService = new net.knightsandkings.knk.paper.statistics.StatisticsService(
             statisticsConfig, new net.knightsandkings.knk.core.statistics.StatisticsBuffer(),
-            net.knightsandkings.knk.paper.statistics.StatisticsContextResolver.siege(() -> siegeService),
+            net.knightsandkings.knk.paper.statistics.StatisticsContextResolver.of(minigames),
             new net.knightsandkings.knk.paper.statistics.AfkPresentation(
                 statisticsConfig.afk().tabListMarker(), statisticsConfig.afk().markerText()),
             clock
@@ -1360,7 +1372,7 @@ public class KnKPlugin extends JavaPlugin {
         if (statisticsConfig.combat().enabled()) {
             getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.statistics.CombatStatisticsListener(
                 statisticsService, statisticsConfig.combat(),
-                net.knightsandkings.knk.paper.statistics.CombatStatisticsListener.siegeHeadshots(() -> siegeService)), this);
+                net.knightsandkings.knk.paper.statistics.CombatStatisticsListener.minigameHeadshots(minigames)), this);
         }
         if (statisticsConfig.gates().enabled()) {
             // Installed into the gate fire system and consequence listener when the gates start (below).
@@ -1402,10 +1414,10 @@ public class KnKPlugin extends JavaPlugin {
             true, joinLoadingGuard::isLoading, modeService::getActiveMode, adminFreezeManager::isFrozen,
             discoveryConfig.excludedGameModes(), discoveryConfig.excludeSiegeParticipants()
         );
-        // Siege members discover nothing (discovery.exclude-siege-participants). siegeService is
-        // created later (initializeSiege), so the check reads it on every call.
+        // Siege members discover nothing (discovery.exclude-siege-participants). Minigames register later
+        // (initializeSiege), so the check asks the registry on every call.
         discoveryEligibility.setSiegeParticipantCheck(
-            net.knightsandkings.knk.paper.discovery.DiscoveryEligibility.siegeParticipants(() -> siegeService));
+            net.knightsandkings.knk.paper.discovery.DiscoveryEligibility.minigameParticipants(minigames));
         this.discoveryTracker =
             new net.knightsandkings.knk.core.discovery.DiscoveryTracker(discoveryConfig.maxRequestsPerMinute());
         this.discoverySpool = new net.knightsandkings.knk.core.discovery.DiscoverySpool(
@@ -1558,7 +1570,7 @@ public class KnKPlugin extends JavaPlugin {
         var eligibility = new net.knightsandkings.knk.paper.navigation.NavigationEligibility(
             uuid -> joinLoadingGuard != null && joinLoadingGuard.isLoading(uuid),
             uuid -> adminFreezeManager != null && adminFreezeManager.isFrozen(uuid),
-            net.knightsandkings.knk.paper.navigation.NavigationEligibility.siegeMembers(() -> siegeService));
+            net.knightsandkings.knk.paper.navigation.NavigationEligibility.minigameMembers(minigames));
         this.navigationRouting = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "knk-navigation-routing");
             t.setDaemon(true);
@@ -2199,7 +2211,7 @@ public class KnKPlugin extends JavaPlugin {
 
     /**
      * Teleport engine (docs/specs/teleport/DESIGN.md §3.4), the staff teleport commands (Phase 1) and
-     * player teleport requests (Phase 3). Siege guards plug in later through {@link #registerTeleportRestriction}.
+     * player teleport requests (Phase 3). Minigame guards plug in later through {@link #registerTeleportRestriction}.
      */
     private void initializeTeleports() {
         if (knkPermissible == null || userAdminService == null || modeService == null || adminFreezeManager == null) {
@@ -2643,15 +2655,10 @@ public class KnKPlugin extends JavaPlugin {
             player -> modeService != null ? modeService.getActiveMode(player) : net.knightsandkings.knk.core.domain.users.ActiveMode.NONE,
             store,
             () -> outageBacklogChecks.stream().allMatch(java.util.function.BooleanSupplier::getAsBoolean),
-            uuid -> siegeService == null || siegeService.releaseForOutage(uuid),
+            minigames,
             this::settleInWorld,
             this::hubTransfer,
             java.time.Clock.systemUTC());
-        hubOutageService.setOnRecovery(() -> {
-            if (siegeService != null) {
-                siegeService.resumeAfterOutage();
-            }
-        });
         hubAdmission.setOutageAdmission(hubOutageService::savedOnJoin);
         var domainSpawns = hubDomainSpawns();
         if (domainSpawns != null) {
@@ -2680,10 +2687,7 @@ public class KnKPlugin extends JavaPlugin {
                 if (adminFreezeManager != null && adminFreezeManager.isFrozen(player.getUniqueId())) {
                     return java.util.Optional.of("You are frozen.");
                 }
-                if (siegeService != null && siegeService.isParticipant(player.getUniqueId())) {
-                    return java.util.Optional.of("You are in a siege.");
-                }
-                return java.util.Optional.empty();
+                return minigames.hubRefusal(player.getUniqueId());
             });
             executor.setTeleport(hubTeleportCommand);
             hubCommand.setExecutor(executor);
@@ -2764,6 +2768,7 @@ public class KnKPlugin extends JavaPlugin {
             task -> org.bukkit.Bukkit.getScheduler().runTask(this, task));
 
         domainAccess.setBypass(this::hasRegionBypass);
+        domainAccess.setExemptions(domainAccessExemptions);
         domainAccess.setEnforcer(new net.knightsandkings.knk.paper.regions.access.DomainAccessService.Enforcer() {
             @Override
             public void sendToSpawn(org.bukkit.entity.Player player) {
@@ -2785,7 +2790,7 @@ public class KnKPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(
             new net.knightsandkings.knk.paper.regions.access.DomainAccessListener(domainAccess,
                 this::resyncWorldGuardSession,
-                player -> siegeService != null && siegeService.isParticipant(player.getUniqueId()),
+                player -> minigames.hasLeftOpenWorld(player.getUniqueId()),
                 location -> hubService != null && hubService.inHub(location)),
             this);
         if (teleportService != null) {
@@ -2814,9 +2819,10 @@ public class KnKPlugin extends JavaPlugin {
     }
 
     /**
-     * Add a teleport guard (docs/specs/teleport/DESIGN.md §4 D9) - how the siege minigame blocks
-     * teleports of match members ({@code SiegeTeleportRestriction}, registered in initializeSiege)
-     * without the teleport engine depending on the siege code. No-op when the teleport engine didn't start.
+     * Add a teleport guard (docs/specs/teleport/DESIGN.md §4 D9) - how the minigames block teleports of
+     * match members ({@code MinigameTeleportRestriction} over the registry, registered in
+     * initializeMinigameHooks) without the teleport engine depending on them. No-op when the teleport
+     * engine didn't start.
      */
     public void registerTeleportRestriction(net.knightsandkings.knk.paper.teleport.TeleportRestriction restriction) {
         if (teleportService != null) {
@@ -2826,14 +2832,24 @@ public class KnKPlugin extends JavaPlugin {
 
     /**
      * Keep some deaths from giving a {@code /back} (docs/specs/teleport Phase 7, developer decision Q5:
-     * not after a siege death) - initializeSiege registers
-     * {@code SiegeTeleportRestriction.backDeathExclusion()} here, next to the siege teleport
+     * not after a siege death) - initializeMinigameHooks registers
+     * {@code MinigameTeleportRestriction.backDeathExclusion()} here, next to the minigame teleport
      * restriction. No-op when the teleport engine didn't start.
      */
     public void registerBackDeathExclusion(net.knightsandkings.knk.paper.teleport.BackDeathExclusion exclusion) {
         if (backService != null) {
             backService.registerDeathExclusion(exclusion);
         }
+    }
+
+    /** Every minigame's membership for the shared hooks; a minigame runtime registers itself here (DESIGN §11). */
+    public net.knightsandkings.knk.core.minigame.MinigameRegistry getMinigames() {
+        return minigames;
+    }
+
+    /** Where a minigame runtime registers its domain entry exemptions and confinements (arena duels DESIGN §8.2). */
+    public net.knightsandkings.knk.core.regions.access.DomainAccessExemptions.Registry getDomainAccessExemptions() {
+        return domainAccessExemptions;
     }
 
     public net.knightsandkings.knk.paper.teleport.TeleportService getTeleportService() {
@@ -2973,9 +2989,9 @@ public class KnKPlugin extends JavaPlugin {
             java.util.function.Function<org.bukkit.entity.Player, Integer> userIdOf = player -> cacheManager.getUserCache()
                 .getStale(player.getUniqueId()).map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null);
             // Siege (hub or match): the player's inventory is the siege one and is replaced afterwards, so no claims,
-            // token opens or token hand-overs then. siegeService is created later (initializeSiege), so it's read per call.
-            java.util.function.Predicate<java.util.UUID> inSiege =
-                uuid -> siegeService != null && siegeService.activeLobbyOf(uuid).isPresent();
+            // token opens or token hand-overs then. Minigames register later (initializeSiege), so the registry is
+            // asked per call.
+            java.util.function.Predicate<java.util.UUID> inSiege = minigames::holdsLootDrops;
 
             var runtime = new net.knightsandkings.knk.paper.lootbox.LootboxRuntime(
                 this, queryApi, () -> getConfig().getConfigurationSection("lootboxes"), clock);
@@ -3090,7 +3106,7 @@ public class KnKPlugin extends JavaPlugin {
         getServer().getScheduler().runTaskLater(this, () -> {
             org.bukkit.entity.Player online = getServer().getPlayer(uuid);
             if (online != null && online.isOnline()
-                && (siegeService == null || siegeService.activeLobbyOf(uuid).isEmpty())) {
+                && !minigames.holdsLootDrops(uuid)) {
                 if (opening != null) {
                     opening.deliverWaiting(online);
                 }
@@ -3320,6 +3336,20 @@ public class KnKPlugin extends JavaPlugin {
     }
 
     /**
+     * The minigame hooks that are registered once rather than read per call (arena duels DESIGN §11), right after
+     * the minigames start. Hourly salary and rank refreshes reset scoreboards; members keep their match board.
+     * Teleport guards (docs/specs/teleport/DESIGN.md §4 D8/D9): no /tp, /tpa, /spawn, /warp, menu warp or /back moves
+     * a member while away in a minigame, and a match death gives no /back. A minigame's own teleports bypass the
+     * engine (siege: SiegeBukkit.teleport, cause PLUGIN).
+     */
+    private void initializeMinigameHooks() {
+        net.knightsandkings.knk.paper.utils.ScoreboardUtil.setMinigames(minigames);
+        var minigameTeleports = new net.knightsandkings.knk.paper.minigame.MinigameTeleportRestriction(minigames);
+        registerTeleportRestriction(minigameTeleports);
+        registerBackDeathExclusion(minigameTeleports.backDeathExclusion());
+    }
+
+    /**
      * Siege minigame runtime (docs/specs/siege-minigame/IMPLEMENTATION_PLAN.md Phase 5): the
      * runtime-config gateway, one SiegeService (one shared SiegeRuntimeLocks and one long-lived
      * RandomGenerator inside), the /siege command and the siege listeners. Match results (Phase 6)
@@ -3333,7 +3363,10 @@ public class KnKPlugin extends JavaPlugin {
             apiClient.getSiegeScenariosQueryApi()
         );
         java.io.File siegeVaultDirectory = new java.io.File(getDataFolder(), "siege-vault");
-        SiegePlayerVault siegeVault = new SiegePlayerVault(siegeVaultDirectory, getLogger());
+        // Siege keeps its own vault directory, so files written before the shared vault still restore.
+        var siegeVault = new net.knightsandkings.knk.paper.minigame.MinigamePlayerVault(
+            net.knightsandkings.knk.paper.siege.SiegeParticipation.ID, siegeVaultDirectory,
+            net.knightsandkings.knk.paper.siege.SiegeBukkit::teleport, getLogger());
         // One long-lived generator for draws, splits and book drops (a new Random per draw correlates draws).
         java.util.random.RandomGenerator siegeRandom = new java.util.SplittableRandom();
         var siegeResultSpool = new net.knightsandkings.knk.core.siege.SiegeResultSpool(
@@ -3432,16 +3465,9 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().warning("Siege gate integration disabled: the gate system isn't initialized");
         }
 
-        // Hourly salary and rank refreshes reset scoreboards; siege members keep their match board.
-        net.knightsandkings.knk.paper.utils.ScoreboardUtil.setKeepOwnScoreboard(
-            p -> siegeService.activeLobbyOf(p.getUniqueId()).isPresent());
-
-        // Teleport guards (docs/specs/teleport/DESIGN.md §4 D8/D9): no /tp, /tpa, /spawn, /warp, menu warp
-        // or /back moves a member while away in a siege, and a match death gives no /back. The siege's
-        // own teleports bypass the engine (SiegeBukkit.teleport, cause PLUGIN).
-        var siegeTeleports = net.knightsandkings.knk.paper.siege.SiegeTeleportRestriction.of(siegeService);
-        registerTeleportRestriction(siegeTeleports);
-        registerBackDeathExclusion(siegeTeleports.backDeathExclusion());
+        // The shared hooks (safezone, statistics, discovery, navigation, outage, /hub, respawn, lootbox,
+        // scoreboard, teleport guards) see siege members through the registry (arena duels DESIGN §11).
+        minigames.register(new net.knightsandkings.knk.paper.siege.SiegeParticipation(siegeService));
 
         siegeService.start();
         getLogger().info("Siege runtime initialized");

@@ -59,6 +59,7 @@ import net.knightsandkings.knk.core.siege.VoteTally;
 import net.knightsandkings.knk.core.siege.VoteTally.VoteChoice;
 import net.knightsandkings.knk.core.siege.VoteTally.VoteResult;
 import net.knightsandkings.knk.core.siege.WinResolver;
+import net.knightsandkings.knk.paper.minigame.MinigamePlayerVault;
 import net.knightsandkings.knk.paper.permissions.KnkPermissible;
 import net.knightsandkings.knk.paper.chat.RewardMessageFormat;
 import net.kyori.adventure.text.Component;
@@ -151,7 +152,7 @@ public final class SiegeService {
     private final SiegeDataAccess dataAccess;
     private final TitleBracketsQueryApi titleBracketsApi;
     private final SiegeMatchesCommandApi matchApi;
-    private final SiegePlayerVault vault;
+    private final MinigamePlayerVault vault;
     private final KnkPermissible permissions;
     private final UserCache userCache;
     private final SiegeRuntimeLocks locks = new SiegeRuntimeLocks();
@@ -180,7 +181,7 @@ public final class SiegeService {
             SiegeDataAccess dataAccess,
             TitleBracketsQueryApi titleBracketsApi,
             SiegeMatchesCommandApi matchApi,
-            SiegePlayerVault vault,
+            MinigamePlayerVault vault,
             KnkPermissible permissions,
             UserCache userCache,
             RandomGenerator random
@@ -477,7 +478,7 @@ public final class SiegeService {
             }
             if (player.isDead()) player.spigot().respawn();
             player.closeInventory();
-            if (!vault.snapshot(player, rt.id(), token)) {
+            if (!vault.snapshot(player, token, rt.id())) {
                 player.sendMessage(SiegeMessages.bad("Your inventory couldn't be saved safely, so you can't take part "
                         + "in this siege. Please tell an admin."));
                 removeMember(rt, id, LeaveCause.SNAPSHOT_FAILED, false);
@@ -1632,7 +1633,7 @@ public final class SiegeService {
         return locks;
     }
 
-    public SiegePlayerVault vault() {
+    public MinigamePlayerVault vault() {
         return vault;
     }
 

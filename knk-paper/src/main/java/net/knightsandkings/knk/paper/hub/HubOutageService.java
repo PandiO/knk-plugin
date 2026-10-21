@@ -15,7 +15,6 @@ import java.util.function.BiFunction;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.logging.Logger;
 
@@ -39,6 +38,7 @@ import net.knightsandkings.knk.core.hub.HubOutageStore;
 import net.knightsandkings.knk.core.hub.HubOutageStore.ReturnRecord;
 import net.knightsandkings.knk.core.hub.OutageClock;
 import net.knightsandkings.knk.core.hub.OutagePolicy;
+import net.knightsandkings.knk.core.minigame.MinigameRegistry;
 import net.knightsandkings.knk.paper.events.ApiConnectivityChangedEvent;
 import net.knightsandkings.knk.paper.events.UserDataLoadedEvent;
 import net.knightsandkings.knk.paper.utils.ColorOptions;
@@ -75,7 +75,7 @@ public final class HubOutageService implements Listener {
     private final Function<Player, ActiveMode> activeMode;
     private final HubOutageStore store;
     private final BooleanSupplier synced;
-    private final Predicate<UUID> releaseFromMinigame;
+    private final MinigameRegistry minigames;
     private final Consumer<Player> settle;
     private final Transfer transfer;
     private final Clock clock;
@@ -98,20 +98,21 @@ public final class HubOutageService implements Listener {
     /**
      * @param groups              a player's groups in precedence order (empty when unknown)
      * @param synced              every durable spool is empty (the backlog is synced)
-     * @param releaseFromMinigame frees the player from a Siege round (aborting it); false = not now, try later
+     * @param minigames           frees the player from a minigame round (siege aborts it; false = not now, try later)
+     *                            and resumes the minigames when the API is back
      * @param settle              after the plugin moved a player into another world: that world's game mode, as on a join
      * @param transfer            moves a player on the plugin's behalf (exit pass, WorldGuard resync)
      */
     public HubOutageService(HubService hub, Supplier<KnkGameSettings> settings, Function<UUID, List<PermissionGroupRef>> groups,
                             Function<Player, ActiveMode> activeMode, HubOutageStore store, BooleanSupplier synced,
-                            Predicate<UUID> releaseFromMinigame, Consumer<Player> settle, Transfer transfer, Clock clock) {
+                            MinigameRegistry minigames, Consumer<Player> settle, Transfer transfer, Clock clock) {
         this.hub = Objects.requireNonNull(hub, "hub");
         this.settings = Objects.requireNonNull(settings, "settings");
         this.groups = Objects.requireNonNull(groups, "groups");
         this.activeMode = Objects.requireNonNull(activeMode, "activeMode");
         this.store = Objects.requireNonNull(store, "store");
         this.synced = Objects.requireNonNull(synced, "synced");
-        this.releaseFromMinigame = Objects.requireNonNull(releaseFromMinigame, "releaseFromMinigame");
+        this.minigames = Objects.requireNonNull(minigames, "minigames");
         this.settle = Objects.requireNonNull(settle, "settle");
         this.transfer = Objects.requireNonNull(transfer, "transfer");
         this.clock = Objects.requireNonNull(clock, "clock");
@@ -135,7 +136,7 @@ public final class HubOutageService implements Listener {
         this.mainThread = Objects.requireNonNull(mainThread, "mainThread");
     }
 
-    /** Runs when the API comes back after an outage (main thread), e.g. restarting the Siege lobbies it stopped. */
+    /** Runs when the API comes back after an outage (main thread), after the minigames resumed (Siege restarts the lobbies it stopped). */
     public void setOnRecovery(Runnable onRecovery) {
         this.onRecovery = onRecovery != null ? onRecovery : () -> { };
     }
@@ -212,6 +213,7 @@ public final class HubOutageService implements Listener {
             outage.up(now);
             if (wasOutage) {
                 LOGGER.info("[KnK Hub] API back; the outage timer resets once the backlog is synced");
+                minigames.resumeAfterOutage();
                 onRecovery.run();
                 for (Player player : List.copyOf(online.get())) {
                     offerReturn(player);
@@ -323,7 +325,7 @@ public final class HubOutageService implements Listener {
 
     /** Frees the player from a minigame and saves their spot. False = not now (a match is ending). */
     private boolean prepare(Player player, Instant now) {
-        if (!releaseFromMinigame.test(player.getUniqueId())) {
+        if (!minigames.releaseForOutage(player.getUniqueId())) {
             return false;
         }
         saveReturn(player, now);

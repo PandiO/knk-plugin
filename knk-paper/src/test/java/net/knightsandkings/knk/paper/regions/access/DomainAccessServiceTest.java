@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.paper.regions.access;
 
 import net.knightsandkings.knk.core.regions.RegionTransitionType;
+import net.knightsandkings.knk.core.regions.access.DomainAccessExemptions;
 import net.knightsandkings.knk.core.regions.access.RefusalGuard;
 import net.knightsandkings.knk.core.regions.access.RegionAccessRules.AccessState;
 import net.knightsandkings.knk.core.regions.access.RegionAccessRules.Refusal;
@@ -416,5 +417,60 @@ class DomainAccessServiceTest {
         listener.onUserDataLoaded(new UserDataLoadedEvent(resident, null));
 
         assertEquals(5, resident.getLocation().getX());
+    }
+
+    // ---- arena duels Phase 0 (KNG-209): DomainAccessExemptions, empty by default ----
+
+    /** Lets {@code allowed} into the Old Quarter and keeps them in it. */
+    private static DomainAccessExemptions oldQuarterFor(UUID allowed) {
+        return new DomainAccessExemptions() {
+            @Override
+            public boolean exemptFromEntry(UUID playerId, String regionId) {
+                return allowed.equals(playerId) && "domain_7".equals(regionId);
+            }
+
+            @Override
+            public Optional<String> confinement(UUID playerId, String regionId) {
+                return allowed.equals(playerId) && "domain_7".equals(regionId)
+                    ? Optional.of("You can't leave the battleground now.") : Optional.empty();
+            }
+        };
+    }
+
+    @Test
+    void anEmptyExemptionRegistryChangesNothing() {
+        access.setExemptions(new DomainAccessExemptions.Registry());
+        Player noble = player(-1);
+
+        assertEquals(RegionTransitionType.ENTER, cross(noble, -1, 0).orElseThrow().type());
+        assertEquals(RegionTransitionType.EXIT, cross(noble, -150, -50).orElseThrow().type());
+        assertTrue(cross(noble, 5, 50).isEmpty(), "the Old Quarter may be left");
+        assertTrue(access.preview(noble, at(-1), at(5)).isPresent());
+    }
+
+    @Test
+    void anEntryExemptionLetsThatPlayerInOnFootAndByTeleportAndConfinementKeepsThemIn() {
+        Player duelist = player(-1);
+        Player other = player(-1);
+        DomainAccessExemptions.Registry registry = new DomainAccessExemptions.Registry();
+        registry.register(oldQuarterFor(duelist.getUniqueId()));
+        access.setExemptions(registry);
+
+        assertTrue(cross(duelist, -1, 0).isEmpty(), "walking in");
+        assertTrue(access.preview(duelist, at(-1), at(5)).isEmpty(), "teleporting in");
+        assertTrue(access.refusedToBeAt(duelist, at(5)).isEmpty(), "joining inside");
+        assertTrue(cross(other, -1, 0).isPresent(), "nobody else");
+
+        Optional<Refusal> leaving = cross(duelist, 5, 50);
+        assertEquals(RegionTransitionType.EXIT, leaving.orElseThrow().type());
+        assertEquals("You can't leave the battleground now.", leaving.get().message());
+        assertTrue(access.preview(duelist, at(5), at(50)).isPresent(), "no teleport out either");
+        verify(duelist).sendActionBar(any(Component.class));
+
+        access.exemptWhile(duelist, () -> assertTrue(cross(duelist, 5, 50).isEmpty(), "the runtime's own exit move"));
+
+        access.setExemptions(null);
+        assertTrue(cross(duelist, 5, 50).isEmpty(), "cleared: the Old Quarter may be left again");
+        assertTrue(cross(duelist, -1, 0).isPresent(), "cleared: entry refused again");
     }
 }

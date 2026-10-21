@@ -5,13 +5,12 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.function.Predicate;
-import java.util.function.Supplier;
 
 import org.bukkit.GameMode;
 import org.bukkit.entity.Player;
 
 import net.knightsandkings.knk.core.domain.users.ActiveMode;
-import net.knightsandkings.knk.paper.siege.SiegeService;
+import net.knightsandkings.knk.core.minigame.MinigameRegistry;
 
 /**
  * Who can discover places right now (docs/specs/domain-discovery DESIGN.md §3.6, D7). A player is
@@ -42,8 +41,8 @@ public final class DiscoveryEligibility {
     private final Set<GameMode> excludedGameModes;
     private final boolean excludeSiegeParticipants;
     /**
-     * Siege participation: nobody is a participant until KnKPlugin plugs in
-     * {@link #siegeParticipants} through {@link #setSiegeParticipantCheck}.
+     * Minigame participation: nobody is a participant until KnKPlugin plugs in
+     * {@link #minigameParticipants} through {@link #setSiegeParticipantCheck}.
      */
     private volatile Predicate<UUID> siegeParticipant = uuid -> false;
 
@@ -62,22 +61,18 @@ public final class DiscoveryEligibility {
         this.excludeSiegeParticipants = excludeSiegeParticipants;
     }
 
-    /** Hook for the siege minigame: players this returns true for discover nothing. */
+    /** Hook for the minigames (siege): players this returns true for discover nothing. */
     public void setSiegeParticipantCheck(Predicate<UUID> check) {
         this.siegeParticipant = check == null ? uuid -> false : check;
     }
 
     /**
-     * The siege hook: {@link SiegeService#isParticipant} of whatever service {@code siege} returns
-     * when asked. Discovery starts before the siege runtime (and without one, e.g. when siege failed
-     * to initialize), so the service is looked up on every check; no service = nobody participates.
+     * The minigame hook: {@link MinigameRegistry#hasLeftOpenWorld} (siege: {@code isParticipant}). Discovery starts
+     * before the minigame runtimes; until one registers (or when it failed to start) nobody participates.
      */
-    public static Predicate<UUID> siegeParticipants(Supplier<SiegeService> siege) {
-        Objects.requireNonNull(siege, "siege");
-        return uuid -> {
-            SiegeService service = siege.get();
-            return service != null && service.isParticipant(uuid);
-        };
+    public static Predicate<UUID> minigameParticipants(MinigameRegistry minigames) {
+        Objects.requireNonNull(minigames, "minigames");
+        return minigames::hasLeftOpenWorld;
     }
 
     public boolean isEligible(Player player) {

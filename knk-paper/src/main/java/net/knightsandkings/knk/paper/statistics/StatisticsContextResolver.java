@@ -1,37 +1,41 @@
 package net.knightsandkings.knk.paper.statistics;
 
+import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.function.Predicate;
-import java.util.function.Supplier;
 
 import org.bukkit.entity.Player;
 
+import net.knightsandkings.knk.core.minigame.MinigameRegistry;
 import net.knightsandkings.knk.core.statistics.StatisticsContext;
-import net.knightsandkings.knk.paper.siege.SiegeService;
 
 /**
- * The game context of a player's statistics right now (DESIGN.md §F.1): {@code siege} while they are
- * a member of a running Siege match, otherwise {@code open_world}. The Siege service is created after
- * statistics start (and is null when Siege is disabled), so it is looked up on every call.
+ * The game context of a player's statistics right now (DESIGN.md §F.1): the minigame's context ({@code siege})
+ * while they play one of its matches, otherwise {@code open_world}. Membership is read live from the minigame
+ * registry (arena duels DESIGN §11), which minigames join when they start.
  */
 public final class StatisticsContextResolver {
 
-    private final Predicate<UUID> inRunningMatch;
+    private final Function<UUID, Optional<StatisticsContext>> matchContext;
 
+    /** Tests: {@code siege} while {@code inRunningMatch}. */
     public StatisticsContextResolver(Predicate<UUID> inRunningMatch) {
-        this.inRunningMatch = inRunningMatch == null ? uuid -> false : inRunningMatch;
+        Predicate<UUID> playing = inRunningMatch == null ? uuid -> false : inRunningMatch;
+        this.matchContext = uuid -> playing.test(uuid) ? Optional.of(StatisticsContext.SIEGE) : Optional.empty();
     }
 
-    /** Siege membership read from {@code siegeService.runningMatchOf} - null-safe when Siege is off. */
-    public static StatisticsContextResolver siege(Supplier<SiegeService> siegeService) {
-        return new StatisticsContextResolver(uuid -> {
-            SiegeService service = siegeService.get();
-            return service != null && service.runningMatchOf(uuid).isPresent();
-        });
+    private StatisticsContextResolver(Function<UUID, Optional<StatisticsContext>> matchContext) {
+        this.matchContext = matchContext;
+    }
+
+    /** The context of the match the player plays in, from {@link MinigameRegistry#statisticsContextOf}. */
+    public static StatisticsContextResolver of(MinigameRegistry minigames) {
+        return new StatisticsContextResolver(minigames::statisticsContextOf);
     }
 
     public StatisticsContext contextOf(UUID playerId) {
-        return playerId != null && inRunningMatch.test(playerId) ? StatisticsContext.SIEGE : StatisticsContext.OPEN_WORLD;
+        return playerId == null ? StatisticsContext.OPEN_WORLD : matchContext.apply(playerId).orElse(StatisticsContext.OPEN_WORLD);
     }
 
     public StatisticsContext contextOf(Player player) {

@@ -1,4 +1,4 @@
-package net.knightsandkings.knk.paper.siege;
+package net.knightsandkings.knk.paper.minigame;
 
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
@@ -17,40 +17,75 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.Supplier;
+import java.util.function.ToDoubleFunction;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Own-gear snapshot and restore (DESIGN §9.1–9.2, D2). At the hub teleport a member's inventory
- * (storage, armour, off-hand), XP, health, food, saturation, potion effects, game mode and location
- * are written to {@code plugins/<plugin>/siege-vault/<uuid>.yml} <b>before</b> anything else happens,
- * and kept in memory. The player keeps their gear for the match.
+ * Own-gear snapshot and restore for a minigame (siege DESIGN §9.1–9.2, D2; arena duels DESIGN §11), extracted from
+ * the siege vault. One vault per minigame, with its own directory; a snapshot is keyed by the player and records the
+ * minigame and match token it was taken for (plus an optional instance id: the siege lobby).
  * <p>
- * Restore: on end, leave, kick or elimination: clear inventory → snapshot → teleport back → delete
- * the file. On quit mid-match the inventory and stats are restored inside {@code PlayerQuitEvent}
- * (the player is still valid there) and the file is marked {@code inventoryRestored}; the return
- * location is applied on the next join. A leftover file with no active membership (crash, restart,
- * a failed restore) triggers a full restore + teleport on join. A member who is dead at the end gets
- * their inventory back at once and is sent to the return location when they respawn.
+ * When a member is taken away their inventory (storage, armour, off-hand), XP, health, food, saturation, potion
+ * effects, game mode and location are written to {@code <directory>/<uuid>.yml} <b>before</b> anything else happens,
+ * and kept in memory. What the member plays with is the minigame's business (siege: their own gear; KNG-199 and
+ * duel kit modes: a kit).
  * <p>
- * Items use Paper's {@code ItemStack.serializeItemsAsBytes} (data-version aware). Main thread only;
- * the file writes are small and must finish before the teleport, so they are synchronous.
+ * Restore: on end, leave, kick or elimination: clear inventory → snapshot → teleport back → delete the file. On quit
+ * mid-match the inventory and stats are restored inside {@code PlayerQuitEvent} (the player is still valid there)
+ * and the file is marked {@code inventoryRestored}; the return location is applied on the next join. A leftover file
+ * with no active membership (crash, restart, a failed restore) triggers a full restore + teleport on join. A member
+ * who is dead at the end gets their inventory back at once and is sent to the return location when they respawn.
+ * <p>
+ * Items use Paper's {@code ItemStack.serializeItemsAsBytes} (data-version aware). The file format is the siege
+ * vault's (version 1), so siege files written before the extraction still restore; {@code minigame} and
+ * {@code instanceId} were added (an old file's {@code lobbyId} is read as the instance id). Main thread only; the
+ * file writes are small and must finish before the teleport, so they are synchronous.
  */
-public final class SiegePlayerVault {
+public final class MinigamePlayerVault {
 
     private static final int FORMAT_VERSION = 1;
+
+    /** Items to and from the file's bytes. */
+    public interface ItemCodec {
+        byte[] encode(ItemStack[] contents);
+
+        ItemStack[] decode(byte[] bytes);
+
+        /** Paper's data-version-aware serialization; empty slots become air, which round-trips as empty. */
+        ItemCodec PAPER = new ItemCodec() {
+            @Override
+            public byte[] encode(ItemStack[] contents) {
+                ItemStack[] copy = new ItemStack[contents.length];
+                for (int i = 0; i < contents.length; i++) {
+                    copy[i] = contents[i] == null ? ItemStack.empty() : contents[i];
+                }
+                return ItemStack.serializeItemsAsBytes(copy);
+            }
+
+            @Override
+            public ItemStack[] decode(byte[] bytes) {
+                return ItemStack.deserializeItemsFromBytes(bytes);
+            }
+        };
+    }
 
     /** An in-memory snapshot. */
     public record Snapshot(
             UUID playerId,
-            int lobbyId,
+            String minigame,
             String matchToken,
+            int instanceId,
             Instant takenAt,
             ItemStack[] contents,
             int level,
@@ -64,24 +99,56 @@ public final class SiegePlayerVault {
             boolean inventoryRestored
     ) {
         Snapshot withInventoryRestored() {
-            return new Snapshot(playerId, lobbyId, matchToken, takenAt, contents, level, exp, health, foodLevel,
-                    saturation, effects, gameMode, returnLocation, true);
+            return new Snapshot(playerId, minigame, matchToken, instanceId, takenAt, contents, level, exp, health,
+                    foodLevel, saturation, effects, gameMode, returnLocation, true);
         }
     }
 
+    private final String minigame;
+    private final String logPrefix;
     private final File directory;
+    private final BiConsumer<Player, Location> teleporter;
     private final Logger logger;
+    private final ItemCodec items;
+    private final Function<String, World> worlds;
+    private final Supplier<Location> fallbackLocation;
+    private final ToDoubleFunction<Player> maxHealth;
     private final Map<UUID, Snapshot> snapshots = new ConcurrentHashMap<>();
     /** Members who were dead when their match ended: sent to this location on respawn. */
     private final Map<UUID, Location> pendingRespawn = new ConcurrentHashMap<>();
     private Consumer<Player> afterRestore = player -> { };
 
-    public SiegePlayerVault(File directory, Logger logger) {
-        this.directory = Objects.requireNonNull(directory, "directory");
-        this.logger = Objects.requireNonNull(logger, "logger");
+    /**
+     * @param minigame   the minigame's id (written into each file; the log prefix)
+     * @param directory  where this minigame's vault files live (siege: {@code siege-vault/})
+     * @param teleporter the minigame's own teleport back (it must not go through the teleport engine's guards)
+     */
+    public MinigamePlayerVault(String minigame, File directory, BiConsumer<Player, Location> teleporter, Logger logger) {
+        this(minigame, directory, teleporter, logger, ItemCodec.PAPER, Bukkit::getWorld,
+                () -> Bukkit.getWorlds().get(0).getSpawnLocation(), MinigamePlayerVault::maxHealthOf);
     }
 
-    /** Runs after every inventory restore (5c: the siege-enchantment stripping sweep). */
+    /** Tests: items, worlds, the fallback spawn and max health without a server. */
+    MinigamePlayerVault(String minigame, File directory, BiConsumer<Player, Location> teleporter, Logger logger,
+                        ItemCodec items, Function<String, World> worlds, Supplier<Location> fallbackLocation,
+                        ToDoubleFunction<Player> maxHealth) {
+        this.minigame = Objects.requireNonNull(minigame, "minigame");
+        this.directory = Objects.requireNonNull(directory, "directory");
+        this.teleporter = Objects.requireNonNull(teleporter, "teleporter");
+        this.logger = Objects.requireNonNull(logger, "logger");
+        this.items = Objects.requireNonNull(items, "items");
+        this.worlds = Objects.requireNonNull(worlds, "worlds");
+        this.fallbackLocation = Objects.requireNonNull(fallbackLocation, "fallbackLocation");
+        this.maxHealth = Objects.requireNonNull(maxHealth, "maxHealth");
+        this.logPrefix = "[" + (minigame.isEmpty() ? "Minigame"
+                : minigame.substring(0, 1).toUpperCase(Locale.ROOT) + minigame.substring(1)) + "] ";
+    }
+
+    public String minigame() {
+        return minigame;
+    }
+
+    /** Runs after every inventory restore (siege 5c: the siege-enchantment stripping sweep). */
     public void setAfterRestore(Consumer<Player> afterRestore) {
         this.afterRestore = afterRestore == null ? player -> { } : afterRestore;
     }
@@ -91,12 +158,16 @@ public final class SiegePlayerVault {
     /**
      * Snapshot to file, then memory. Returns false (and leaves nothing behind) when the file can't
      * be written: the caller must then not take the player into the match.
+     *
+     * @param matchToken the match the snapshot is taken for
+     * @param instanceId the minigame's instance (siege: the lobby id), or 0
      */
-    public boolean snapshot(Player player, int lobbyId, String matchToken) {
+    public boolean snapshot(Player player, String matchToken, int instanceId) {
         Snapshot snapshot = new Snapshot(
                 player.getUniqueId(),
-                lobbyId,
+                minigame,
                 matchToken,
+                instanceId,
                 Instant.now(),
                 cloneContents(player.getInventory().getContents()),
                 player.getLevel(),
@@ -111,7 +182,7 @@ public final class SiegePlayerVault {
         try {
             write(snapshot);
         } catch (IOException | RuntimeException e) {
-            logger.log(Level.SEVERE, "[Siege] Could not write the vault file for " + player.getName()
+            logger.log(Level.SEVERE, logPrefix + "Could not write the vault file for " + player.getName()
                     + "; not taking them into the match", e);
             deleteFile(player.getUniqueId());
             return false;
@@ -126,6 +197,16 @@ public final class SiegePlayerVault {
 
     public boolean hasFile(UUID playerId) {
         return file(playerId).isFile();
+    }
+
+    /** The snapshot held for this player (memory first, then the file), without restoring it. */
+    public Optional<Snapshot> peek(UUID playerId) {
+        return load(playerId);
+    }
+
+    /** The match the player's snapshot was taken for. */
+    public Optional<String> matchTokenOf(UUID playerId) {
+        return load(playerId).map(Snapshot::matchToken);
     }
 
     // ==================== Restore ====================
@@ -147,7 +228,7 @@ public final class SiegePlayerVault {
         if (player.isDead()) {
             pendingRespawn.put(player.getUniqueId(), resolveLocation(snapshot.returnLocation()));
         } else {
-            teleportBack(player, snapshot);
+            teleporter.accept(player, resolveLocation(snapshot.returnLocation()));
         }
         forget(player.getUniqueId());
         afterRestore.accept(player);
@@ -155,7 +236,7 @@ public final class SiegePlayerVault {
     }
 
     /**
-     * Quit mid-match: inventory and stats now, location on the next join (DESIGN §9.2). The file stays,
+     * Quit mid-match: inventory and stats now, location on the next join (siege DESIGN §9.2). The file stays,
      * marked {@code inventoryRestored}, so a crash before the rejoin still gets the player home.
      */
     public void restoreOnQuit(Player player) {
@@ -171,7 +252,7 @@ public final class SiegePlayerVault {
         try {
             write(marked);
         } catch (IOException | RuntimeException e) {
-            logger.log(Level.WARNING, "[Siege] Could not mark the vault of " + player.getName()
+            logger.log(Level.WARNING, logPrefix + "Could not mark the vault of " + player.getName()
                     + " as restored; the next join restores it again (same snapshot)", e);
         }
         snapshots.remove(player.getUniqueId());
@@ -190,7 +271,7 @@ public final class SiegePlayerVault {
         return Optional.ofNullable(pendingRespawn.remove(playerId));
     }
 
-    /** The member's snapshot location (for Phase 7 lockdown exits, menus). */
+    /** The member's snapshot location (siege Phase 7 lockdown exits, menus). */
     public Optional<Location> returnLocation(UUID playerId) {
         Snapshot s = snapshots.get(playerId);
         return s == null ? Optional.empty() : Optional.of(s.returnLocation().clone());
@@ -210,7 +291,7 @@ public final class SiegePlayerVault {
 
     private void applyStats(Player player, Snapshot snapshot) {
         if (!player.isDead()) {
-            double max = maxHealth(player);
+            double max = maxHealth.applyAsDouble(player);
             player.setHealth(Math.max(0.5, Math.min(max, snapshot.health())));
             player.setFoodLevel(snapshot.foodLevel());
             player.setSaturation(snapshot.saturation());
@@ -222,16 +303,12 @@ public final class SiegePlayerVault {
         player.setFallDistance(0f);
     }
 
-    private void teleportBack(Player player, Snapshot snapshot) {
-        SiegeBukkit.teleport(player, resolveLocation(snapshot.returnLocation()));
-    }
-
     private Location resolveLocation(Location location) {
         if (location != null && location.getWorld() != null) return location.clone();
-        return Bukkit.getWorlds().get(0).getSpawnLocation();
+        return fallbackLocation.get();
     }
 
-    private static double maxHealth(Player player) {
+    private static double maxHealthOf(Player player) {
         AttributeInstance attribute = player.getAttribute(Attribute.MAX_HEALTH);
         return attribute != null ? attribute.getValue() : 20.0;
     }
@@ -249,7 +326,7 @@ public final class SiegePlayerVault {
         try {
             return Optional.of(read(playerId, file));
         } catch (RuntimeException e) {
-            logger.log(Level.SEVERE, "[Siege] Vault file " + file.getName() + " is unreadable; left in place for a manual restore", e);
+            logger.log(Level.SEVERE, logPrefix + "Vault file " + file.getName() + " is unreadable; left in place for a manual restore", e);
             return Optional.empty();
         }
     }
@@ -261,11 +338,12 @@ public final class SiegePlayerVault {
         YamlConfiguration yaml = new YamlConfiguration();
         yaml.set("version", FORMAT_VERSION);
         yaml.set("uuid", s.playerId().toString());
-        yaml.set("lobbyId", s.lobbyId());
+        yaml.set("minigame", s.minigame());
+        yaml.set("instanceId", s.instanceId());
         yaml.set("matchToken", s.matchToken());
         yaml.set("takenAt", s.takenAt().toString());
         yaml.set("inventoryRestored", s.inventoryRestored());
-        yaml.set("items", Base64.getEncoder().encodeToString(ItemStack.serializeItemsAsBytes(nonNull(s.contents()))));
+        yaml.set("items", Base64.getEncoder().encodeToString(items.encode(s.contents())));
         yaml.set("level", s.level());
         yaml.set("exp", (double) s.exp());
         yaml.set("health", s.health());
@@ -295,10 +373,10 @@ public final class SiegePlayerVault {
 
     private Snapshot read(UUID playerId, File file) {
         YamlConfiguration yaml = YamlConfiguration.loadConfiguration(file);
-        String items = yaml.getString("items", "");
-        ItemStack[] contents = items.isEmpty()
+        String encoded = yaml.getString("items", "");
+        ItemStack[] contents = encoded.isEmpty()
                 ? new ItemStack[0]
-                : ItemStack.deserializeItemsFromBytes(Base64.getDecoder().decode(items));
+                : items.decode(Base64.getDecoder().decode(encoded));
         List<PotionEffect> effects = new ArrayList<>();
         for (Object o : yaml.getList("effects", List.of())) {
             if (o instanceof PotionEffect effect) effects.add(effect);
@@ -312,7 +390,7 @@ public final class SiegePlayerVault {
         }
         Location location = null;
         String worldName = yaml.getString("location.world");
-        World world = worldName != null ? Bukkit.getWorld(worldName) : null;
+        World world = worldName != null ? worlds.apply(worldName) : null;
         if (world != null) {
             location = new Location(world, yaml.getDouble("location.x"), yaml.getDouble("location.y"),
                     yaml.getDouble("location.z"), (float) yaml.getDouble("location.yaw"), (float) yaml.getDouble("location.pitch"));
@@ -323,8 +401,10 @@ public final class SiegePlayerVault {
         } catch (RuntimeException e) {
             takenAt = Instant.EPOCH;
         }
-        return new Snapshot(playerId, yaml.getInt("lobbyId"), yaml.getString("matchToken"), takenAt, contents,
-                yaml.getInt("level"), (float) yaml.getDouble("exp"), yaml.getDouble("health", 20.0),
+        // Siege files from before the extraction have no minigame and keep the lobby in lobbyId.
+        int instanceId = yaml.contains("instanceId") ? yaml.getInt("instanceId") : yaml.getInt("lobbyId");
+        return new Snapshot(playerId, yaml.getString("minigame", minigame), yaml.getString("matchToken"), instanceId,
+                takenAt, contents, yaml.getInt("level"), (float) yaml.getDouble("exp"), yaml.getDouble("health", 20.0),
                 yaml.getInt("food", 20), (float) yaml.getDouble("saturation", 5.0), effects, gameMode, location,
                 yaml.getBoolean("inventoryRestored", false));
     }
@@ -336,7 +416,7 @@ public final class SiegePlayerVault {
     private void deleteFile(UUID playerId) {
         File file = file(playerId);
         if (file.exists() && !file.delete()) {
-            logger.warning("[Siege] Could not delete vault file " + file.getName());
+            logger.warning(logPrefix + "Could not delete vault file " + file.getName());
         }
     }
 
@@ -344,15 +424,6 @@ public final class SiegePlayerVault {
         ItemStack[] copy = new ItemStack[contents.length];
         for (int i = 0; i < contents.length; i++) {
             copy[i] = contents[i] == null ? null : contents[i].clone();
-        }
-        return copy;
-    }
-
-    /** serializeItemsAsBytes wants no nulls: empty slots become air, which round-trips as empty. */
-    private static ItemStack[] nonNull(ItemStack[] contents) {
-        ItemStack[] copy = new ItemStack[contents.length];
-        for (int i = 0; i < contents.length; i++) {
-            copy[i] = contents[i] == null ? ItemStack.empty() : contents[i];
         }
         return copy;
     }

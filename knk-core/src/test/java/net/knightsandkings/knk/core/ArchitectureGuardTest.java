@@ -28,7 +28,9 @@ class ArchitectureGuardTest {
     private static final List<String> BUKKIT_FREE_PACKAGES = List.of(
         "roads",
         "navigation",
-        "domain/roads"
+        "domain/roads",
+        // arena duels DESIGN §11: the minigame participation port and registry
+        "minigame"
     );
 
     /** Individual files that must stay Bukkit-free (must exist - they are Phase 2a's extractions). */

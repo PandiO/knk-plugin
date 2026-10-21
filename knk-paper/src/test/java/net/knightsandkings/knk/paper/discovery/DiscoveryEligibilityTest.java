@@ -9,9 +9,9 @@ import static org.mockito.Mockito.when;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
 
 import org.bukkit.GameMode;
 import org.bukkit.entity.Player;
@@ -20,6 +20,10 @@ import org.junit.jupiter.api.Test;
 
 import net.knightsandkings.knk.core.domain.users.ActiveMode;
 import net.knightsandkings.knk.paper.discovery.DiscoveryEligibility.Exclusion;
+import net.knightsandkings.knk.core.minigame.MinigameRegistry;
+import net.knightsandkings.knk.core.siege.SiegePhase;
+import net.knightsandkings.knk.paper.siege.SiegeLobbyRuntime;
+import net.knightsandkings.knk.paper.siege.SiegeParticipation;
 import net.knightsandkings.knk.paper.siege.SiegeService;
 
 class DiscoveryEligibilityTest {
@@ -94,29 +98,34 @@ class DiscoveryEligibilityTest {
     }
 
     @Test
-    void theSiegeHookAsksTheSiegeServiceOnceItExists() {
-        AtomicReference<SiegeService> siege = new AtomicReference<>();
+    void theMinigameHookAsksTheSiegeOnceItRegisters() {
+        MinigameRegistry minigames = new MinigameRegistry();
         DiscoveryEligibility eligibility = eligibility(true, true);
-        eligibility.setSiegeParticipantCheck(DiscoveryEligibility.siegeParticipants(siege::get));
+        eligibility.setSiegeParticipantCheck(DiscoveryEligibility.minigameParticipants(minigames));
         assertTrue(eligibility.isEligible(player), "no siege runtime yet: nobody participates");
 
         SiegeService service = mock(SiegeService.class);
-        siege.set(service);
+        when(service.lobbyOf(uuid)).thenReturn(Optional.empty());
+        minigames.register(new SiegeParticipation(service));
         assertTrue(eligibility.isEligible(player), "not a lobby member");
 
-        when(service.isParticipant(uuid)).thenReturn(true);
+        SiegeLobbyRuntime lobby = mock(SiegeLobbyRuntime.class);
+        when(lobby.match()).thenReturn(Optional.empty());
+        when(service.lobbyOf(uuid)).thenReturn(Optional.of(lobby));
+        when(lobby.phase()).thenReturn(SiegePhase.MATCHMAKING);
+        assertTrue(eligibility.isEligible(player), "queued members still discover");
+
+        when(lobby.phase()).thenReturn(SiegePhase.HUB);
         assertEquals(Exclusion.SIEGE, eligibility.exclusion(player));
 
-        when(service.isParticipant(uuid)).thenReturn(false);
+        when(service.lobbyOf(uuid)).thenReturn(Optional.empty());
         assertTrue(eligibility.isEligible(player), "left the lobby: discovers again");
     }
 
     @Test
     void siegeMembershipIsIgnoredWhenNotExcludingSiegeParticipants() {
-        SiegeService service = mock(SiegeService.class);
-        when(service.isParticipant(uuid)).thenReturn(true);
         DiscoveryEligibility eligibility = eligibility(true, false);
-        eligibility.setSiegeParticipantCheck(DiscoveryEligibility.siegeParticipants(() -> service));
+        eligibility.setSiegeParticipantCheck(uuid::equals);
         assertTrue(eligibility.isEligible(player));
     }
 }

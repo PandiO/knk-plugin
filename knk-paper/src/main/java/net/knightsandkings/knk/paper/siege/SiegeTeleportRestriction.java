@@ -6,9 +6,9 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Predicate;
 
-import org.bukkit.entity.Player;
-
+import net.knightsandkings.knk.core.minigame.MinigameTeleportAttempt;
 import net.knightsandkings.knk.core.teleport.TeleportDenial;
+import net.knightsandkings.knk.paper.minigame.MinigameTeleportRestriction;
 import net.knightsandkings.knk.paper.teleport.BackDeathExclusion;
 import net.knightsandkings.knk.paper.teleport.TeleportCheck;
 import net.knightsandkings.knk.paper.teleport.TeleportRestriction;
@@ -31,6 +31,8 @@ import net.knightsandkings.knk.paper.teleport.TeleportRestriction;
  * all: they call {@code Player.teleport} with {@code TeleportCause.PLUGIN} ({@link SiegeBukkit#teleport}),
  * so this restriction never sees them. The scenario area is open to non-members (the area lockdown was
  * removed, siege DESIGN §8.5), so there is no destination check.
+ * <p>
+ * The plugin asks it through {@link SiegeParticipation} and the minigame registry ({@link MinigameTeleportRestriction}).
  */
 public final class SiegeTeleportRestriction implements TeleportRestriction {
 
@@ -52,22 +54,26 @@ public final class SiegeTeleportRestriction implements TeleportRestriction {
 
     @Override
     public Optional<TeleportDenial> deny(TeleportCheck check) {
-        Player subject = check.subject();
-        if (inActiveSiege.test(subject.getUniqueId())) {
-            boolean movesSelf = check.actor() instanceof Player actor && actor.getUniqueId().equals(subject.getUniqueId());
-            if (check.kind().isStaff() && !movesSelf) {
+        return deny(MinigameTeleportRestriction.attemptOf(check));
+    }
+
+    /** The same rules on the engine-free form of the request (minigame registry). */
+    public Optional<TeleportDenial> deny(MinigameTeleportAttempt attempt) {
+        if (inActiveSiege.test(attempt.subject())) {
+            boolean movesSelf = attempt.movesSelf();
+            if (attempt.kind().isStaff() && !movesSelf) {
                 return Optional.of(TeleportDenial.of(TeleportDenial.SIEGE,
-                    subject.getName() + " is in a siege match; use /siege admin kick first."));
+                    attempt.subjectName() + " is in a siege match; use /siege admin kick first."));
             }
-            if (!check.hasBypass(BYPASS_NODE)) {
+            if (!attempt.hasBypass(BYPASS_NODE)) {
                 return Optional.of(TeleportDenial.of(TeleportDenial.SIEGE, movesSelf
                     ? "You can't teleport during a siege. Use /siege leave to leave it."
-                    : subject.getName() + " is in a siege match."));
+                    : attempt.subjectName() + " is in a siege match."));
             }
         }
-        Player visited = check.visited();
-        if (!check.kind().isStaff() && visited != null && inActiveSiege.test(visited.getUniqueId())) {
-            return Optional.of(TeleportDenial.of(TeleportDenial.SIEGE, visited.getName() + " is in a siege match."));
+        UUID visited = attempt.visited();
+        if (!attempt.kind().isStaff() && visited != null && inActiveSiege.test(visited)) {
+            return Optional.of(TeleportDenial.of(TeleportDenial.SIEGE, attempt.visitedName() + " is in a siege match."));
         }
         return Optional.empty();
     }

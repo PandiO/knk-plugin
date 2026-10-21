@@ -17,6 +17,7 @@ import java.util.logging.Logger;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 
+import net.knightsandkings.knk.core.regions.access.DomainAccessExemptions;
 import net.knightsandkings.knk.core.regions.access.RefusalGuard;
 import net.knightsandkings.knk.core.regions.access.RegionAccessRules;
 import net.knightsandkings.knk.core.regions.access.RegionAccessRules.Refusal;
@@ -61,6 +62,8 @@ public class DomainAccessService {
     private final LongSupplier clock;
     private final Consumer<Runnable> nextTick;
     private volatile Predicate<Player> bypass = player -> false;
+    /** Per-player entry exemptions and confinements (arena duels DESIGN §8.2); none by default. */
+    private volatile DomainAccessExemptions exemptions = DomainAccessExemptions.NONE;
     private volatile Enforcer enforcer;
     /** Rewords a refusal for where the player stands (the hub tells them to use its portal); identity by default. */
     private volatile BiFunction<Location, Refusal, Refusal> wording = (from, refusal) -> refusal;
@@ -76,6 +79,14 @@ public class DomainAccessService {
 
     public void setBypass(Predicate<Player> bypass) {
         this.bypass = bypass != null ? bypass : player -> false;
+    }
+
+    /**
+     * The exemptions every crossing, preview and join check asks (a minigame runtime registers its own in the
+     * {@link DomainAccessExemptions.Registry} it is given). Null restores none.
+     */
+    public void setExemptions(DomainAccessExemptions exemptions) {
+        this.exemptions = exemptions != null ? exemptions : DomainAccessExemptions.NONE;
     }
 
     public void setEnforcer(Enforcer enforcer) {
@@ -116,7 +127,7 @@ public class DomainAccessService {
         if ((entered == null || entered.isEmpty()) && (exited == null || exited.isEmpty())) {
             return Optional.empty();
         }
-        Optional<Refusal> refusal = worded(player.getLocation(), rules.evaluate(entered, exited));
+        Optional<Refusal> refusal = worded(player.getLocation(), rules.evaluate(player.getUniqueId(), entered, exited, exemptions));
         if (refusal.isEmpty() || !cancellable || bypasses(player, to)) {
             return Optional.empty();
         }
@@ -144,7 +155,7 @@ public class DomainAccessService {
         if (entered.isEmpty() && exited.isEmpty()) {
             return Optional.empty();
         }
-        Optional<Refusal> refusal = worded(from, rules.evaluate(entered, exited));
+        Optional<Refusal> refusal = worded(from, rules.evaluate(player.getUniqueId(), entered, exited, exemptions));
         if (refusal.isEmpty() || bypasses(player, to)) {
             return Optional.empty();
         }

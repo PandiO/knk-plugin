@@ -15,6 +15,7 @@ import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.Team;
 
 import net.knightsandkings.knk.core.domain.users.UserSummary;
+import net.knightsandkings.knk.core.minigame.MinigameRegistry;
 import net.knightsandkings.knk.paper.permissions.KnkPermissible;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -56,12 +57,18 @@ public class ScoreboardUtil {
     /**
      * Players who keep the scoreboard they have (siege audit 2026-09-26: a siege member's match
      * scoreboard): their tab team and header/footer still update, but {@link Player#setScoreboard}
-     * isn't called. Set by the siege runtime; the siege restores the shared board when they leave.
+     * isn't called. Asked of the minigame registry ({@link #setMinigames}); the minigame restores the shared board
+     * when they leave.
      */
     private static Predicate<Player> keepOwnScoreboard = p -> false;
 
     public static void setKeepOwnScoreboard(Predicate<Player> predicate) {
         keepOwnScoreboard = predicate == null ? p -> false : predicate;
+    }
+
+    /** Members the registry says keep their own board ({@link MinigameRegistry#keepsOwnScoreboard}). */
+    public static void setMinigames(MinigameRegistry minigames) {
+        setKeepOwnScoreboard(minigames == null ? null : p -> minigames.keepsOwnScoreboard(p.getUniqueId()));
     }
 
     public static void setScoreboard(List<Player> players, KnkPermissible knkPermissible) {

@@ -2,7 +2,6 @@ package net.knightsandkings.knk.paper.statistics;
 
 import java.util.Set;
 import java.util.UUID;
-import java.util.function.Supplier;
 
 import org.bukkit.entity.AbstractArrow;
 import org.bukkit.entity.ArmorStand;
@@ -31,7 +30,7 @@ import net.knightsandkings.knk.core.statistics.KillstreakTracker;
 import net.knightsandkings.knk.core.statistics.StatisticsContext;
 import net.knightsandkings.knk.core.statistics.StatisticsMetric;
 import net.knightsandkings.knk.paper.config.KnkConfig;
-import net.knightsandkings.knk.paper.siege.SiegeService;
+import net.knightsandkings.knk.core.minigame.MinigameRegistry;
 
 /**
  * Combat statistics (KNG-34, DESIGN.md §F.7, IMPLEMENTATION_PLAN.md §5.2 link 4), all observed at
@@ -73,19 +72,11 @@ public final class CombatStatisticsListener implements Listener {
     }
 
     /**
-     * Siege's rule (DESIGN §6.7 of the Siege spec): both players in one lobby, that lobby's multiplier.
-     * The service is created after statistics start and is null when Siege is off, so it is looked up per hit.
+     * The minigames' rule, from the registry (Siege spec DESIGN §6.7: both players in one lobby, that lobby's
+     * multiplier). Minigames join the registry when they start, so it is asked per hit.
      */
-    public static HeadshotMultiplier siegeHeadshots(Supplier<SiegeService> siegeService) {
-        return (attacker, victim) -> {
-            SiegeService siege = siegeService.get();
-            if (siege == null) {
-                return 1.0;
-            }
-            SiegeCombatRules.Combatant a = siege.combatantOf(attacker);
-            SiegeCombatRules.Combatant v = siege.combatantOf(victim);
-            return a != null && v != null && a.lobbyId() == v.lobbyId() ? siege.headshotMultiplier(v.lobbyId()) : 1.0;
-        };
+    public static HeadshotMultiplier minigameHeadshots(MinigameRegistry minigames) {
+        return (attacker, victim) -> minigames.headshotMultiplier(attacker.getUniqueId(), victim.getUniqueId());
     }
 
     KillstreakTracker streaks() {

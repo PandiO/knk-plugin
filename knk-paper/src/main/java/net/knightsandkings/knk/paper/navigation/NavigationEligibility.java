@@ -3,11 +3,10 @@ package net.knightsandkings.knk.paper.navigation;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Predicate;
-import java.util.function.Supplier;
 
 import org.bukkit.entity.Player;
 
-import net.knightsandkings.knk.paper.siege.SiegeService;
+import net.knightsandkings.knk.core.minigame.MinigameRegistry;
 
 /**
  * Who may start (and keep) a navigation (road navigation plan Phase 4 task 9, reuse map R23: the
@@ -36,15 +35,12 @@ public final class NavigationEligibility {
     }
 
     /**
-     * The siege hook: a member of any siege lobby ({@link SiegeService#lobbyOf}) of whatever service
-     * {@code siege} returns when asked (it may not exist yet, or at all).
+     * The minigame hook: a member of any minigame at any stage ({@link MinigameRegistry#isMember}; siege: a member
+     * of any lobby). Minigames join the registry when they start (or not at all).
      */
-    public static Predicate<UUID> siegeMembers(Supplier<SiegeService> siege) {
-        Objects.requireNonNull(siege, "siege");
-        return uuid -> {
-            SiegeService service = siege.get();
-            return service != null && service.lobbyOf(uuid).isPresent();
-        };
+    public static Predicate<UUID> minigameMembers(MinigameRegistry minigames) {
+        Objects.requireNonNull(minigames, "minigames");
+        return minigames::isMember;
     }
 
     public boolean isEligible(Player player) {
