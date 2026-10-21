@@ -65,6 +65,7 @@ public final class DuelMenuFeature implements MenuFeature {
 
     static final String UNAVAILABLE = "Duels aren't running right now.";
     static final long STATS_FRESH_MILLIS = 10_000L;
+    static final int MAX_REMEMBERED = 256;
 
     private static final Logger LOGGER = Logger.getLogger(DuelMenuFeature.class.getName());
 
@@ -309,7 +310,11 @@ public final class DuelMenuFeature implements MenuFeature {
                 LOGGER.log(Level.FINE, "duel.match-side: statistics of user " + target + " failed", error);
             }
             PlayerStatistics value = error == null ? stats : null;
-            if (value != null) statistics.put(key, new Loaded(clock.millis(), value));
+            if (value != null) {
+                long at = clock.millis();
+                if (statistics.size() >= MAX_REMEMBERED) statistics.values().removeIf(l -> at - l.atMillis() >= STATS_FRESH_MILLIS);
+                statistics.put(key, new Loaded(at, value));
+            }
             return pageOf(List.of(DuelSideCardView.of(m, side, value)));
         });
     }
