@@ -275,6 +275,11 @@ public final class DuelService {
         return ports.spool().owedCount(playerId);
     }
 
+    /** Every escrow file (running, held and unclaimed matches) for staff {@code /knk duel list|review} (P5). */
+    public List<DuelEscrowSpool.Entry> escrowEntries() {
+        return List.copyOf(ports.spool().entries());
+    }
+
     /** {@code /duel claim}: hand over what the escrow owes (not during a match). */
     public DuelEscrowSpool.Delivery claim(Player player) {
         if (matchOfPlayer.containsKey(player.getUniqueId())) return DuelEscrowSpool.Delivery.NOTHING;
@@ -776,6 +781,11 @@ public final class DuelService {
         DuelOfferBook.Closed closed = offers.lockFailed(negotiation.negotiationId());
         if (closed != null) notify(o -> o.negotiationsClosed(List.of(closed)));
         notify(o -> o.lockRefused(negotiation, message));
+        // Both players hear why, as after a refused lock-in (failLock); the UI (P5) relies on lockRefused meaning "told".
+        for (UUID id : List.of(negotiation.inviter(), negotiation.invitee())) {
+            Player p = ports.players().apply(id);
+            if (p != null && p.isOnline()) p.sendMessage(ChatColor.RED + "Duel not started: " + message);
+        }
         return LockOutcome.refused(message);
     }
 

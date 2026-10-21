@@ -7,6 +7,7 @@ import net.knightsandkings.knk.core.duel.view.DuelMenuIds;
 import net.knightsandkings.knk.core.menu.MenuContextParams;
 import net.knightsandkings.knk.paper.duel.DuelMatch;
 import net.knightsandkings.knk.paper.duel.DuelObserver;
+import net.knightsandkings.knk.paper.duel.ui.DuelMenuPort;
 import net.knightsandkings.knk.paper.menu.MenuService;
 import org.bukkit.entity.Player;
 
@@ -20,10 +21,10 @@ import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
- * How {@code /duels}, {@code /arena} (P5's commands) and the announcement buttons open the duel menus (plan
- * Phase 6), and the repaint of open duel menus on every phase change. {@code KnKPlugin.getDuelMenus()}. Main thread.
+ * How {@code /duels}, {@code /arena} (P5's commands, through {@link DuelMenuPort}) and the announcement buttons open
+ * the duel menus (plan Phase 6), and the repaint of open duel menus on every phase change. Main thread.
  */
-public final class DuelMenus implements DuelObserver {
+public final class DuelMenus implements DuelObserver, DuelMenuPort {
 
     static final Set<String> KEYS = Set.of(DuelMenuIds.MENU_MATCHES, DuelMenuIds.MENU_MATCH_DETAIL,
             DuelMenuIds.MENU_ARENA, DuelMenuIds.MENU_CHALLENGE);
@@ -39,11 +40,13 @@ public final class DuelMenus implements DuelObserver {
     }
 
     /** {@code /duels}: live matches of every arena. False when the menu isn't available. */
+    @Override
     public boolean openMatches(Player player) {
         return open(player, DuelMenuIds.MENU_MATCHES, MenuContextParams.EMPTY);
     }
 
     /** {@code /duels view <token>} ({@code [Details]}): one match. False when the menu isn't available. */
+    @Override
     public boolean openMatch(Player player, UUID token) {
         return open(player, DuelMenuIds.MENU_MATCH_DETAIL,
                 MenuContextParams.of(Map.of(DuelMenuIds.CTX_TOKEN, token.toString())));
@@ -54,6 +57,7 @@ public final class DuelMenus implements DuelObserver {
      * null the one the player stands in, else the first. False when the menu isn't available or no arena has that
      * name.
      */
+    @Override
     public boolean openArena(Player player, String name) {
         if (name == null || name.isBlank()) return open(player, DuelMenuIds.MENU_ARENA, MenuContextParams.EMPTY);
         Optional<KnkArena> arena = find(name);
@@ -62,6 +66,7 @@ public final class DuelMenus implements DuelObserver {
     }
 
     /** {@code /duels spectate <arenaId>} ({@code [Spectate]}): the spectator area's warp. */
+    @Override
     public void spectate(Player player, int arenaId) {
         feature.spectate(player, arenaId);
     }

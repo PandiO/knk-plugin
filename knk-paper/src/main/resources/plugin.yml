@@ -269,6 +269,18 @@ commands:
     usage: "/hub | /hub <player> [-s] | /hub return"
     # KNG-188: /hub is open to every player (no node) and goes through the teleport engine like /spawn (warmup,
     # cooldown, the groups' spawn price). /hub <player> [-s] needs knk.teleport.staff.others (and .silent).
+  duel:
+    description: "Arena duels: challenge a player with stakes, answer offers, pick a kit, draw, toggle invites, claim (docs/specs/arena-duels/DESIGN.md §6.1)"
+    usage: "/duel <player> [quick] | /duel accept|counter|decline|view <id> | /duel cancel [id] | /duel kit [kit] | /duel draw | /duel toggle | /duel claim"
+    # KNG-219: node knk.duel (default true) through CommandNodes; staff actions are /knk duel (knk.admin.duel).
+  duels:
+    description: "Live arena duels: watch, see the stakes, spectate (docs/specs/arena-duels/DESIGN.md §9.2)"
+    usage: "/duels | /duels view <match> | /duels spectate <arena id>"
+    # KNG-219: node knk.duel through CommandNodes; the menus are P6's (KNG-220) through DuelMenuPort.
+  arena:
+    description: "The arena you stand in (or the named one): queue, live duels, challenge a player, claims"
+    usage: "/arena [name]"
+    # KNG-219: node knk.duel through CommandNodes. P6 (KNG-220) opens the arena menu from here.
   lootbox:
     description: "Lootboxes: help, and what a box can give (docs/specs/lootboxes/DESIGN.md §3.4)"
     usage: "/lootbox | /lootbox odds <category> [stars]"
@@ -324,6 +336,8 @@ permissions:
       knk.admin.discovery: true
       knk.admin.currency: true
       knk.admin.road: true
+      knk.admin.duel: true
+      knk.admin.duel.review: true
 
   knk.admin.health:
     description: Access to /knk health
@@ -1052,6 +1066,26 @@ permissions:
       walks that learn road profiles, tile builds, the particle overlay, street labels, node/edge
       fixes and seeds. The same node gates the web app's road admin pages. Also granted through the
       in-house permission system.
+    default: false
+
+  knk.duel:
+    description: >-
+      /duel, /duels and /arena - challenge players in an arena, negotiate stakes, answer offers, pick a kit, offer a draw,
+      toggle invites and claim winnings (arena duels, KNG-219). Everyone by default; the in-house permission system
+      can take it away per group.
+    default: true
+
+  knk.admin.duel:
+    description: >-
+      /knk duel list|cancel|refund - running duels and held or unclaimed escrow, cancel a running duel with a
+      refund (arena duels DESIGN §6.1). Also lets staff teleport a duelist (the duel teleport guard) and run any
+      command during a duel. Also granted through the in-house permission system.
+    default: false
+
+  knk.admin.duel.review:
+    description: >-
+      /knk duel review <match> release|void - release or void a duel result held for review (DESIGN §7.4, §10.3).
+      The same node gates the web app's duel review actions. Also granted through the in-house permission system.
     default: false
 
   knk.navigate:
