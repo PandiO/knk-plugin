@@ -11,8 +11,9 @@ import net.knightsandkings.knk.core.minigame.MinigameRegistry;
 import net.knightsandkings.knk.core.statistics.StatisticsContext;
 
 /**
- * The game context of a player's statistics right now (DESIGN.md §F.1): the minigame's context ({@code siege})
- * while they play one of its matches, otherwise {@code open_world}. Membership is read live from the minigame
+ * The game context of a player's statistics right now (DESIGN.md §F.1): the minigame's context ({@code siege},
+ * {@code duel}: a minigame's context is its registry id) while they play one of its matches
+ * ({@link net.knightsandkings.knk.core.minigame.Participation.Stage#PLAYING}), otherwise {@code open_world}. Membership is read live from the minigame
  * registry (arena duels DESIGN §11), which minigames join when they start.
  */
 public final class StatisticsContextResolver {
