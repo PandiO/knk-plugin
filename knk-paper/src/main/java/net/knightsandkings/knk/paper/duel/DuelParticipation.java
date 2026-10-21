@@ -16,8 +16,8 @@ import java.util.UUID;
  * Arena duels as a {@link MinigameParticipation} (DESIGN §11, P0's suggested mapping): a duelist is a member from
  * LOCKING until their gear is back.
  * <ul>
- *   <li>stages: LOCKING, TRAVELLING, WARMUP, BATTLE_COUNTDOWN → {@code STAGING}; FIGHT → {@code PLAYING} (the
- *       {@code duel} statistics context); ENDING → {@code FINISHING};</li>
+ *   <li>stages: LOCKING, TRAVELLING, WARMUP → {@code STAGING}; BATTLE_COUNTDOWN, FIGHT → {@code PLAYING} (on the
+ *       battleground: the {@code duel} statistics context, as P7 expects); ENDING → {@code FINISHING};</li>
  *   <li>{@link #holdsLootDrops}: from LOCKING until the restore, ENDING included (DESIGN §8.4) - lootbox reel items
  *       and other deliveries are handed over afterwards, and opening a lootbox is refused;</li>
  *   <li>combat: the fighting pair of one match (the KNG-11 enchantment safezone exemption);</li>
@@ -49,7 +49,7 @@ public final class DuelParticipation implements MinigameParticipation {
 
     static Participation.Stage stageOf(DuelPhase phase) {
         return switch (phase) {
-            case FIGHT -> Participation.Stage.PLAYING;
+            case BATTLE_COUNTDOWN, FIGHT -> Participation.Stage.PLAYING;
             case ENDING, CLOSED -> Participation.Stage.FINISHING;
             default -> Participation.Stage.STAGING;
         };

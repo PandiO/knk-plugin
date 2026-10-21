@@ -242,6 +242,16 @@ class DuelServiceTest {
     }
 
     @Test
+    void theRegistryStagesFollowThePhases() {
+        assertEquals(Participation.Stage.STAGING, DuelParticipation.stageOf(DuelPhase.LOCKING));
+        assertEquals(Participation.Stage.STAGING, DuelParticipation.stageOf(DuelPhase.TRAVELLING));
+        assertEquals(Participation.Stage.STAGING, DuelParticipation.stageOf(DuelPhase.WARMUP));
+        assertEquals(Participation.Stage.PLAYING, DuelParticipation.stageOf(DuelPhase.BATTLE_COUNTDOWN));
+        assertEquals(Participation.Stage.PLAYING, DuelParticipation.stageOf(DuelPhase.FIGHT));
+        assertEquals(Participation.Stage.FINISHING, DuelParticipation.stageOf(DuelPhase.ENDING));
+    }
+
+    @Test
     void theSiegeRefusesDuelistsAndNegotiators() {
         harness();
         h.service.offers().invite(h.alice.id(), h.bob.id(), h.settings(),
