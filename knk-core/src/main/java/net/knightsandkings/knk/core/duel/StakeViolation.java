@@ -23,7 +23,7 @@ public record StakeViolation(Code code, DuelSide side, String detail) {
         NEGATIVE_COINS,
         /** More than {@code MaxCoinStake}; {@code detail} is the maximum. */
         COINS_OVER_MAX,
-        /** {@code detail} is the minimum coins this side must stake. */
+        /** The side's stake value (coins + item value) is below the ratio; {@code detail} is the minimum value. */
         STAKE_RATIO,
         /** More than {@code MaxItemStacks}; {@code detail} is the maximum. */
         TOO_MANY_STACKS,
