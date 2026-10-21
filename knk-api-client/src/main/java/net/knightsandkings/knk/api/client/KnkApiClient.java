@@ -116,6 +116,7 @@ public class KnkApiClient {
     private final UsersQueryApi usersQueryApi;
     private final UsersCommandApi usersCommandApi;
     private final PlayerNotificationsApi playerNotificationsApi;
+    private final net.knightsandkings.knk.core.ports.api.AdmissionApi admissionApi;
     private final DiscoveriesApi discoveriesApi;
     private final StatisticsApiImpl statisticsApi;
     private final net.knightsandkings.knk.core.ports.api.TelemetryApi telemetryApi;
@@ -191,6 +192,7 @@ public class KnkApiClient {
         this.usersQueryApi = new UsersQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.usersCommandApi = new UsersCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.playerNotificationsApi = new PlayerNotificationsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.admissionApi = new net.knightsandkings.knk.api.impl.AdmissionApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.discoveriesApi = new DiscoveriesApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.statisticsApi = new StatisticsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.leaderboardsApi = new LeaderboardsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -341,6 +343,11 @@ public class KnkApiClient {
 
     public PlayerNotificationsApi getPlayerNotificationsApi() {
         return playerNotificationsApi;
+    }
+
+    /** The admission gate (invitations, KNG-214): {@code api/Admission/{uuid}?name=}. */
+    public net.knightsandkings.knk.core.ports.api.AdmissionApi getAdmissionApi() {
+        return admissionApi;
     }
 
     /** Domain discovery (KNG-20): {@code api/users/{userId}/discoveries}. */

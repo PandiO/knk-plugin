@@ -175,7 +175,9 @@ public class UsersMapper {
             dto.id(), dto.userId(), dto.uuid(), dto.username(), dto.type(), mapTitleChange(dto.titleChange()),
             CurrencyMapper.mapPaymentNotice(dto.payment()), CurrencyMapper.mapAlertNotice(dto.currencyAlert()),
             LootboxMapper.toCore(dto.lootboxWorldChanged()),
-            net.knightsandkings.knk.api.impl.LocationRetentionApiImpl.mapDigest(dto.locationOrphanDigest())
+            net.knightsandkings.knk.api.impl.LocationRetentionApiImpl.mapDigest(dto.locationOrphanDigest()),
+            dto.accountLinked() == null ? null
+                : new net.knightsandkings.knk.core.domain.users.AccountLinkedNotice(dto.accountLinked().maskedEmail())
         );
     }
 

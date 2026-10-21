@@ -75,6 +75,26 @@ web:
   # leave the link out.
   public-url: ""
 
+# Admission gate (invitations, KNG-214; knk-workspace docs/specs/invitations/DESIGN.md §5.2). At pre-login, after
+# Mojang authentication, the plugin asks knk-web-api whether the UUID belongs to an admitted account. A stranger is
+# turned away with a claim code on the disconnect screen, to enter at link-url.
+#   whitelist (default): no gate; the vanilla whitelist (when on) decides, as before. Also the kill switch.
+#   open:                no gate.
+#   invite:              operators bypass; admitted accounts get in; everyone else gets the code. When the API can't
+#                        answer within api-timeout-ms, players the offline cache knows get in and strangers are told
+#                        to retry (fail-closed). Switch the API's Security:Registration:Mode to Invite at the same time.
+# Changing the mode needs a restart. Messages: & colour codes; \n starts a new line.
+admission:
+  mode: whitelist
+  api-timeout-ms: 3000
+  link-url: ""                     # empty: {web.public-url}/link
+  # Placeholders {url}, {code} (formatted XXXX-XXXX), {minutes} (from the code's expiry).
+  kick: "&6Knights & Kings is invite-only.\n&fGo to &e{url} &fand enter\n&e&l{code}\n&7(valid {minutes} minutes)\n&cNever give this code to anyone; staff never ask for it."
+  unavailable: "&cCan't check your access right now.\n&fTry again in a minute."
+  deactivated: "&cThis account is deactivated.\n&fContact staff if you think this is a mistake."
+  # In-game message after a link (on the next join when offline). Placeholder {maskedEmail}.
+  account-linked: "&aYour Minecraft account is now linked to the web account &e{maskedEmail}&a.\n&cNot you? Tell staff right away."
+
 # A new player's first minutes and the web-account reminder (KNG-128/129). & colour codes.
 onboarding:
   # Sent instead of "Welcome back" when the account was created at this join. {player}

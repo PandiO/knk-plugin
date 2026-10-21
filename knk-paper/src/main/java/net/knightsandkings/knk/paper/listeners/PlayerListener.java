@@ -114,6 +114,11 @@ public class PlayerListener implements Listener {
 
 	@EventHandler
 	public void onValidateLogin(AsyncPlayerPreLoginEvent e) {
+		// Invitations (KNG-214): the admission gate (LOWEST) may already have turned this player away; a denied
+		// connection must not create an account, or every stranger would fill the users table.
+		if (e.getLoginResult() != AsyncPlayerPreLoginEvent.Result.ALLOWED) {
+			return;
+		}
 		UUID uuid = e.getUniqueId();
 		String username = e.getName();
 
@@ -147,6 +152,8 @@ public class PlayerListener implements Listener {
 					LOGGER.info("Created and cached new user " + username + " (UUID: " + uuid + ")");
 					preloadPermissions(uuid);
 				} else if (created.status() == FetchStatus.ERROR) {
+					// Under the API's Registration:Mode=Invite this is a 403 NotAdmitted for a UUID without an admitted
+					// account - an operator who bypassed the admission gate. The join goes on without an account.
 					LOGGER.warning("Failed to create user " + uuid + ": " + created.error().map(Throwable::getMessage).orElse("unknown error"));
 				}
 				return;
