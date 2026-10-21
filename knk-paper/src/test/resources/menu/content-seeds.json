@@ -8287,5 +8287,2394 @@
         "variableBindings": []
       }
     ]
+  },
+  {
+    "id": 28,
+    "key": "duel_matches",
+    "name": "&8Live duels",
+    "description": "Live duels of every arena (duel.matches), two heads per match. Arena duels P6, DESIGN §9.2.",
+    "height": 6,
+    "growth": "Dynamic",
+    "backgroundMaterialRefId": null,
+    "autoRefreshTicks": 20,
+    "minHeight": 3,
+    "backgroundMaterial": null,
+    "sections": [
+      {
+        "id": 59,
+        "name": "Header",
+        "kind": "StaticButtons",
+        "sortOrder": 0,
+        "displaySlot": 0,
+        "width": 9,
+        "height": 1,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "minHeight": null,
+        "searchable": false,
+        "contentSourceId": null,
+        "contentSourceParamsJson": "{}",
+        "items": [
+          {
+            "id": 228,
+            "sortOrder": 0,
+            "slotOverride": 4,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 764,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "IRON_SWORD",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 765,
+                "targetProperty": "Amount",
+                "sortOrder": 0,
+                "expression": "$duels.getLiveCountOrOne$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 766,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&6Live duels",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 767,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$duels.getLines$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 229,
+            "sortOrder": 1,
+            "slotOverride": 8,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 768,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BARRIER",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 769,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&c$menu.getBackLabel$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 770,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7$menu.getBackHint$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 145,
+                "actionTypeId": "menu.back",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      },
+      {
+        "id": 60,
+        "name": "Duels",
+        "kind": "ContentGrid",
+        "sortOrder": 1,
+        "displaySlot": 9,
+        "width": 8,
+        "height": 4,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Scroll",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "minHeight": null,
+        "searchable": false,
+        "contentSourceId": "duel.matches",
+        "contentSourceParamsJson": "{}",
+        "items": [
+          {
+            "id": 233,
+            "sortOrder": 0,
+            "slotOverride": null,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": true,
+            "variableBindings": [
+              {
+                "id": 781,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "$row.getMaterial$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 782,
+                "targetProperty": "SkullOwner",
+                "sortOrder": 0,
+                "expression": "$row.getSkullOwner$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 783,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "$row.getName$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 784,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$row.getLines$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              }
+            ],
+            "actions": [
+              {
+                "id": 148,
+                "actionTypeId": "menu.open",
+                "paramsJson": "{\"key\":\"duel_match_detail\",\"ctx.token\":\"$row.getToken$\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 232,
+            "sortOrder": 50,
+            "slotOverride": 22,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 777,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BARRIER",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 778,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&cNo duels right now",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 779,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Nobody is fighting at the moment.",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 780,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "&7Challenge someone in an arena: &f/duel <player>",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": [
+              {
+                "id": 64,
+                "conditionTypeId": "duel.matches-empty",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "phase": "Render"
+              }
+            ]
+          },
+          {
+            "id": 230,
+            "sortOrder": 145,
+            "slotOverride": 45,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 771,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "ARROW",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 772,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aPrevious page",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 773,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 146,
+                "actionTypeId": "menu.page.prev",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 231,
+            "sortOrder": 153,
+            "slotOverride": 53,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 774,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "ARROW",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 775,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aNext page",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 776,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 147,
+                "actionTypeId": "menu.page.next",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      }
+    ]
+  },
+  {
+    "id": 29,
+    "key": "duel_match_detail",
+    "name": "&8Duel",
+    "description": "One live duel (ctx.token): both duelists, their stakes and statistics. Arena duels P6, DESIGN §9.2.",
+    "height": 6,
+    "growth": "Static",
+    "backgroundMaterialRefId": null,
+    "autoRefreshTicks": 20,
+    "minHeight": null,
+    "backgroundMaterial": null,
+    "sections": [
+      {
+        "id": 61,
+        "name": "Challenger",
+        "kind": "ContentGrid",
+        "sortOrder": 0,
+        "displaySlot": 0,
+        "width": 1,
+        "height": 1,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "minHeight": null,
+        "searchable": false,
+        "contentSourceId": "duel.match-side",
+        "contentSourceParamsJson": "{\"token\":\"$ctx.token$\",\"side\":\"CHALLENGER\"}",
+        "items": [
+          {
+            "id": 234,
+            "sortOrder": 0,
+            "slotOverride": null,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": true,
+            "variableBindings": [
+              {
+                "id": 785,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "$row.getMaterial$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 786,
+                "targetProperty": "SkullOwner",
+                "sortOrder": 0,
+                "expression": "$row.getSkullOwner$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 787,
+                "targetProperty": "DisplayMode",
+                "sortOrder": 0,
+                "expression": "$row.getDisplayMode$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 788,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "$row.getTitle$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 789,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$row.getLines$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      },
+      {
+        "id": 62,
+        "name": "Versus",
+        "kind": "StaticButtons",
+        "sortOrder": 1,
+        "displaySlot": 1,
+        "width": 7,
+        "height": 1,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "minHeight": null,
+        "searchable": false,
+        "contentSourceId": null,
+        "contentSourceParamsJson": "{}",
+        "items": [
+          {
+            "id": 235,
+            "sortOrder": 0,
+            "slotOverride": 4,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 790,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "$duelMatch.getVsMaterial$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 791,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "$duelMatch.getVsTitle$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 792,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$duelMatch.getVsLines$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      },
+      {
+        "id": 63,
+        "name": "Opponent",
+        "kind": "ContentGrid",
+        "sortOrder": 2,
+        "displaySlot": 8,
+        "width": 1,
+        "height": 1,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "minHeight": null,
+        "searchable": false,
+        "contentSourceId": "duel.match-side",
+        "contentSourceParamsJson": "{\"token\":\"$ctx.token$\",\"side\":\"OPPONENT\"}",
+        "items": [
+          {
+            "id": 236,
+            "sortOrder": 0,
+            "slotOverride": null,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": true,
+            "variableBindings": [
+              {
+                "id": 793,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "$row.getMaterial$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 794,
+                "targetProperty": "SkullOwner",
+                "sortOrder": 0,
+                "expression": "$row.getSkullOwner$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 795,
+                "targetProperty": "DisplayMode",
+                "sortOrder": 0,
+                "expression": "$row.getDisplayMode$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 796,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "$row.getTitle$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 797,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$row.getLines$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      },
+      {
+        "id": 64,
+        "name": "Challenger stakes",
+        "kind": "ContentGrid",
+        "sortOrder": 3,
+        "displaySlot": 9,
+        "width": 4,
+        "height": 4,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "minHeight": null,
+        "searchable": false,
+        "contentSourceId": "duel.stakes",
+        "contentSourceParamsJson": "{\"token\":\"$ctx.token$\",\"side\":\"CHALLENGER\"}",
+        "items": [
+          {
+            "id": 237,
+            "sortOrder": 0,
+            "slotOverride": null,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": true,
+            "variableBindings": [
+              {
+                "id": 798,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "$row.getMaterial$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 799,
+                "targetProperty": "Amount",
+                "sortOrder": 0,
+                "expression": "$row.getAmount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 800,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "$row.getName$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 801,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$row.getLines$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      },
+      {
+        "id": 65,
+        "name": "Divider",
+        "kind": "StaticButtons",
+        "sortOrder": 4,
+        "displaySlot": 13,
+        "width": 1,
+        "height": 4,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "minHeight": null,
+        "searchable": false,
+        "contentSourceId": null,
+        "contentSourceParamsJson": "{}",
+        "items": [
+          {
+            "id": 238,
+            "sortOrder": 13,
+            "slotOverride": 13,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 802,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BLACK_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 803,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": " ",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 239,
+            "sortOrder": 22,
+            "slotOverride": 22,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 804,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BLACK_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 805,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": " ",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 240,
+            "sortOrder": 31,
+            "slotOverride": 31,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 806,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BLACK_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 807,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": " ",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 241,
+            "sortOrder": 40,
+            "slotOverride": 40,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 808,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BLACK_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 809,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": " ",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      },
+      {
+        "id": 66,
+        "name": "Opponent stakes",
+        "kind": "ContentGrid",
+        "sortOrder": 5,
+        "displaySlot": 14,
+        "width": 4,
+        "height": 4,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "minHeight": null,
+        "searchable": false,
+        "contentSourceId": "duel.stakes",
+        "contentSourceParamsJson": "{\"token\":\"$ctx.token$\",\"side\":\"OPPONENT\"}",
+        "items": [
+          {
+            "id": 242,
+            "sortOrder": 0,
+            "slotOverride": null,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": true,
+            "variableBindings": [
+              {
+                "id": 810,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "$row.getMaterial$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 811,
+                "targetProperty": "Amount",
+                "sortOrder": 0,
+                "expression": "$row.getAmount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 812,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "$row.getName$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 813,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$row.getLines$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      },
+      {
+        "id": 67,
+        "name": "Footer",
+        "kind": "StaticButtons",
+        "sortOrder": 6,
+        "displaySlot": 45,
+        "width": 9,
+        "height": 1,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "minHeight": null,
+        "searchable": false,
+        "contentSourceId": null,
+        "contentSourceParamsJson": "{}",
+        "items": [
+          {
+            "id": 243,
+            "sortOrder": 0,
+            "slotOverride": 45,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 814,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "ENDER_EYE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 815,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aGo to the spectator area",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 816,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Teleports you to this arena's",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 817,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "&7spectator area by its warp:",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 818,
+                "targetProperty": "Lore",
+                "sortOrder": 2,
+                "expression": "&7its title, premium, discovery",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 819,
+                "targetProperty": "Lore",
+                "sortOrder": 3,
+                "expression": "&7and gem price apply.",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 149,
+                "actionTypeId": "duel.spectate",
+                "paramsJson": "{\"token\":\"$ctx.token$\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 65,
+                "conditionTypeId": "value-equals",
+                "paramsJson": "{\"value\":\"$duelMatch.getKnown$\",\"expected\":\"true\"}",
+                "sortOrder": 0,
+                "phase": "Render"
+              }
+            ]
+          },
+          {
+            "id": 244,
+            "sortOrder": 1,
+            "slotOverride": 49,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 820,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BARRIER",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 821,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&c$menu.getBackLabel$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 822,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7$menu.getBackHint$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 150,
+                "actionTypeId": "menu.back",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 245,
+            "sortOrder": 2,
+            "slotOverride": 53,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 823,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BARRIER",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 824,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&cClose",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 151,
+                "actionTypeId": "menu.close",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      }
+    ]
+  },
+  {
+    "id": 30,
+    "key": "arena_main",
+    "name": "&8Arena",
+    "description": "One arena (ctx.arena, else the viewer's): info, rules, queue, live duels, spectate, challenge, claims. Arena duels P6, DESIGN §9.3.",
+    "height": 6,
+    "growth": "Static",
+    "backgroundMaterialRefId": null,
+    "autoRefreshTicks": 20,
+    "minHeight": null,
+    "backgroundMaterial": null,
+    "sections": [
+      {
+        "id": 68,
+        "name": "Header",
+        "kind": "StaticButtons",
+        "sortOrder": 0,
+        "displaySlot": 0,
+        "width": 9,
+        "height": 1,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "minHeight": null,
+        "searchable": false,
+        "contentSourceId": null,
+        "contentSourceParamsJson": "{}",
+        "items": [
+          {
+            "id": 246,
+            "sortOrder": 0,
+            "slotOverride": 0,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 825,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "SHIELD",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 826,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "$arena.getName$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 827,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$arena.getInfoLines$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 247,
+            "sortOrder": 1,
+            "slotOverride": 1,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 828,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BOOK",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 829,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&eRules",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 830,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$arena.getRulesLines$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 100
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 248,
+            "sortOrder": 2,
+            "slotOverride": 2,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 831,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "ENDER_EYE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 832,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aSpectate",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 833,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$arena.getSpectateLines$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 834,
+                "targetProperty": "DisplayMode",
+                "sortOrder": 0,
+                "expression": "$arena.getSpectateDisplayMode$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              }
+            ],
+            "actions": [
+              {
+                "id": 152,
+                "actionTypeId": "duel.spectate",
+                "paramsJson": "{\"arenaId\":\"$ctx.arena$\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 249,
+            "sortOrder": 3,
+            "slotOverride": 4,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 835,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "CLOCK",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 836,
+                "targetProperty": "Amount",
+                "sortOrder": 0,
+                "expression": "$arena.getQueueAmount$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 837,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&eQueue",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 838,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$arena.getQueueLines$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 250,
+            "sortOrder": 4,
+            "slotOverride": 6,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 839,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "IRON_SWORD",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 840,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aChallenge a player",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 841,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$arena.getChallengeLines$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 842,
+                "targetProperty": "DisplayMode",
+                "sortOrder": 0,
+                "expression": "$arena.getChallengeDisplayMode$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              }
+            ],
+            "actions": [
+              {
+                "id": 153,
+                "actionTypeId": "menu.open",
+                "paramsJson": "{\"key\":\"duel_challenge\",\"ctx.arena\":\"$ctx.arena$\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 66,
+                "conditionTypeId": "duel.in-arena",
+                "paramsJson": "{\"arenaId\":\"$ctx.arena$\"}",
+                "sortOrder": 0,
+                "phase": "Click"
+              }
+            ]
+          },
+          {
+            "id": 251,
+            "sortOrder": 5,
+            "slotOverride": 7,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 843,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "CHEST",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 844,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&6My claims",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 845,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$arena.getClaimsLines$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 846,
+                "targetProperty": "DisplayMode",
+                "sortOrder": 0,
+                "expression": "$arena.getClaimsDisplayMode$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              }
+            ],
+            "actions": [
+              {
+                "id": 154,
+                "actionTypeId": "duel.claim",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 252,
+            "sortOrder": 6,
+            "slotOverride": 8,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 847,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BARRIER",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 848,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&c$menu.getBackLabel$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 849,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7$menu.getBackHint$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 155,
+                "actionTypeId": "menu.back",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      },
+      {
+        "id": 69,
+        "name": "Divider",
+        "kind": "StaticButtons",
+        "sortOrder": 1,
+        "displaySlot": 9,
+        "width": 9,
+        "height": 1,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "minHeight": null,
+        "searchable": false,
+        "contentSourceId": null,
+        "contentSourceParamsJson": "{}",
+        "items": [
+          {
+            "id": 261,
+            "sortOrder": 0,
+            "slotOverride": 13,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 866,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "IRON_SWORD",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 867,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&6Live duels here",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 868,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Click a duelist for the stakes",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 869,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "&7and both players' statistics.",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 253,
+            "sortOrder": 9,
+            "slotOverride": 9,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 850,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BLACK_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 851,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": " ",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 254,
+            "sortOrder": 10,
+            "slotOverride": 10,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 852,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BLACK_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 853,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": " ",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 255,
+            "sortOrder": 11,
+            "slotOverride": 11,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 854,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BLACK_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 855,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": " ",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 256,
+            "sortOrder": 12,
+            "slotOverride": 12,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 856,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BLACK_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 857,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": " ",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 257,
+            "sortOrder": 14,
+            "slotOverride": 14,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 858,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BLACK_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 859,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": " ",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 258,
+            "sortOrder": 15,
+            "slotOverride": 15,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 860,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BLACK_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 861,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": " ",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 259,
+            "sortOrder": 16,
+            "slotOverride": 16,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 862,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BLACK_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 863,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": " ",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 260,
+            "sortOrder": 17,
+            "slotOverride": 17,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 864,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BLACK_STAINED_GLASS_PANE",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 865,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": " ",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      },
+      {
+        "id": 70,
+        "name": "Live duels",
+        "kind": "ContentGrid",
+        "sortOrder": 2,
+        "displaySlot": 18,
+        "width": 8,
+        "height": 3,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Scroll",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "minHeight": null,
+        "searchable": false,
+        "contentSourceId": "duel.matches",
+        "contentSourceParamsJson": "{\"arenaId\":\"$ctx.arena$\"}",
+        "items": [
+          {
+            "id": 265,
+            "sortOrder": 0,
+            "slotOverride": null,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": true,
+            "variableBindings": [
+              {
+                "id": 879,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "$row.getMaterial$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 880,
+                "targetProperty": "SkullOwner",
+                "sortOrder": 0,
+                "expression": "$row.getSkullOwner$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 881,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "$row.getName$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 882,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$row.getLines$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              }
+            ],
+            "actions": [
+              {
+                "id": 158,
+                "actionTypeId": "menu.open",
+                "paramsJson": "{\"key\":\"duel_match_detail\",\"ctx.token\":\"$row.getToken$\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 264,
+            "sortOrder": 50,
+            "slotOverride": 31,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 876,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BARRIER",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 877,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&cNo duels here right now",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 878,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Challenge someone: &f/duel <player>",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": [
+              {
+                "id": 67,
+                "conditionTypeId": "duel.matches-empty",
+                "paramsJson": "{\"arenaId\":\"$ctx.arena$\"}",
+                "sortOrder": 0,
+                "phase": "Render"
+              }
+            ]
+          },
+          {
+            "id": 262,
+            "sortOrder": 145,
+            "slotOverride": 45,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 870,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "ARROW",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 871,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aPrevious page",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 872,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 156,
+                "actionTypeId": "menu.page.prev",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 263,
+            "sortOrder": 153,
+            "slotOverride": 53,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 873,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "ARROW",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 874,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aNext page",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 875,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 157,
+                "actionTypeId": "menu.page.next",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      }
+    ]
+  },
+  {
+    "id": 31,
+    "key": "duel_challenge",
+    "name": "&8Challenge a player",
+    "description": "Online players to challenge from the arena menu (ctx.arena); a pick opens the proposal editor (/duel <name>). Arena duels P6, DESIGN §9.3.",
+    "height": 6,
+    "growth": "Dynamic",
+    "backgroundMaterialRefId": null,
+    "autoRefreshTicks": 40,
+    "minHeight": 3,
+    "backgroundMaterial": null,
+    "sections": [
+      {
+        "id": 71,
+        "name": "Header",
+        "kind": "StaticButtons",
+        "sortOrder": 0,
+        "displaySlot": 0,
+        "width": 9,
+        "height": 1,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Hide",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "minHeight": null,
+        "searchable": false,
+        "contentSourceId": null,
+        "contentSourceParamsJson": "{}",
+        "items": [
+          {
+            "id": 266,
+            "sortOrder": 0,
+            "slotOverride": 4,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 883,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "IRON_SWORD",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 884,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aChallenge a player",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 885,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Pick who to duel; you set the",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 886,
+                "targetProperty": "Lore",
+                "sortOrder": 1,
+                "expression": "&7stakes and gear in the next step.",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [],
+            "conditions": []
+          },
+          {
+            "id": 267,
+            "sortOrder": 1,
+            "slotOverride": 8,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 887,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "BARRIER",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 888,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&c$menu.getBackLabel$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 889,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7$menu.getBackHint$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 159,
+                "actionTypeId": "menu.back",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      },
+      {
+        "id": 72,
+        "name": "Players",
+        "kind": "ContentGrid",
+        "sortOrder": 1,
+        "displaySlot": 9,
+        "width": 9,
+        "height": 4,
+        "positionMode": "Static",
+        "alignVertical": "Top",
+        "alignHorizontal": "Left",
+        "overflow": "Scroll",
+        "listMode": "Default",
+        "priority": "Medium",
+        "visibilityPermission": null,
+        "minHeight": null,
+        "searchable": false,
+        "contentSourceId": "duel.challenge-candidates",
+        "contentSourceParamsJson": "{\"arenaId\":\"$ctx.arena$\"}",
+        "items": [
+          {
+            "id": 270,
+            "sortOrder": 0,
+            "slotOverride": null,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": true,
+            "variableBindings": [
+              {
+                "id": 896,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "$row.getMaterial$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 897,
+                "targetProperty": "SkullOwner",
+                "sortOrder": 0,
+                "expression": "$row.getSkullOwner$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              },
+              {
+                "id": 898,
+                "targetProperty": "DisplayMode",
+                "sortOrder": 0,
+                "expression": "$row.getDisplayMode$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 899,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "$row.getTitle$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              },
+              {
+                "id": 900,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "$row.getLines$",
+                "refreshPolicy": "Ttl",
+                "ttlTicks": 20
+              }
+            ],
+            "actions": [
+              {
+                "id": 162,
+                "actionTypeId": "duel.challenge",
+                "paramsJson": "{\"name\":\"$row.getName$\"}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": [
+              {
+                "id": 68,
+                "conditionTypeId": "duel.in-arena",
+                "paramsJson": "{\"arenaId\":\"$ctx.arena$\"}",
+                "sortOrder": 0,
+                "phase": "Click"
+              }
+            ]
+          },
+          {
+            "id": 268,
+            "sortOrder": 145,
+            "slotOverride": 45,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 890,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "ARROW",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 891,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aPrevious page",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 892,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 160,
+                "actionTypeId": "menu.page.prev",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          },
+          {
+            "id": 269,
+            "sortOrder": 153,
+            "slotOverride": 53,
+            "materialRefId": null,
+            "amount": 1,
+            "chatColorName": null,
+            "chatColorDescription": null,
+            "displayMode": "Normal",
+            "visibilityPermission": null,
+            "actionPermission": null,
+            "isRowTemplate": false,
+            "variableBindings": [
+              {
+                "id": 893,
+                "targetProperty": "Material",
+                "sortOrder": 0,
+                "expression": "ARROW",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 894,
+                "targetProperty": "Name",
+                "sortOrder": 0,
+                "expression": "&aNext page",
+                "refreshPolicy": "Static",
+                "ttlTicks": null
+              },
+              {
+                "id": 895,
+                "targetProperty": "Lore",
+                "sortOrder": 0,
+                "expression": "&7Page &a$section.getPage$&7/&a$section.getPageCount$",
+                "refreshPolicy": "OnDirty",
+                "ttlTicks": null
+              }
+            ],
+            "actions": [
+              {
+                "id": 161,
+                "actionTypeId": "menu.page.next",
+                "paramsJson": "{}",
+                "sortOrder": 0,
+                "conditions": []
+              }
+            ],
+            "conditions": []
+          }
+        ],
+        "variableBindings": []
+      }
+    ]
   }
 ]

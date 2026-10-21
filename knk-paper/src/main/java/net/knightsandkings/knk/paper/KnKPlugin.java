@@ -304,6 +304,12 @@ public class KnKPlugin extends JavaPlugin {
     private SiegeService siegeService;
     /** Arena duels runtime (KNG-217); null when duels are off or couldn't start. */
     private net.knightsandkings.knk.paper.duel.DuelService duelService;
+    // Arena duels P6 (KNG-220): the duel menus' runtime parts (built after the menus are registered), the menus'
+    // openers for /duels and /arena, and the duel sidebar/boss bar.
+    private volatile net.knightsandkings.knk.paper.menu.content.DuelMenuFeature.Parts duelMenuParts;
+    private net.knightsandkings.knk.paper.menu.content.DuelMenuFeature duelMenuFeature;
+    private net.knightsandkings.knk.paper.menu.content.DuelMenus duelMenus;
+    private net.knightsandkings.knk.paper.duel.DuelHud duelHud;
     /**
      * Every minigame's membership for the plugin-wide hooks (arena duels DESIGN §11). Created before the hooks that
      * read it; siege registers when its runtime starts, so until then (or without it) nobody is a member.
@@ -846,6 +852,9 @@ public class KnKPlugin extends JavaPlugin {
                 // Siege Phase 8b: the siege menus. SiegeService is created later (initializeSiege),
                 // so the feature looks it up on every call.
                 new net.knightsandkings.knk.paper.siege.SiegeMenuFeature(() -> siegeService),
+                // Arena duels P6: /duels, /arena and the match detail; the runtime starts later (initializeDuels).
+                duelMenuFeature = new net.knightsandkings.knk.paper.menu.content.DuelMenuFeature(() -> duelMenuParts,
+                    java.time.Clock.systemUTC()),
                 statisticsVisibilityMenuFeature,
                 statisticsMenuFeature,
                 leaderboardsMenuFeature
@@ -1059,6 +1068,7 @@ public class KnKPlugin extends JavaPlugin {
 
             initializeSiege();
             initializeDuels();
+            initializeDuelPresentation();
             initializeMinigameHooks();
 
             // Road navigation (KNG-27) Phase 3: the admin side (survey, build, review); Phase 4: /navigate.
@@ -1118,6 +1128,9 @@ public class KnKPlugin extends JavaPlugin {
         }
         // Arena duels (KNG-217): running matches are aborted and every duelist's gear and items come back while the
         // players exist; the coin refunds follow from abort-unfinished on the next start.
+        if (duelHud != null) {
+            duelHud.shutdown();
+        }
         if (duelService != null) {
             try {
                 duelService.shutdown();
@@ -3592,6 +3605,76 @@ public class KnKPlugin extends JavaPlugin {
             this.duelService = null;
             getLogger().log(java.util.logging.Level.SEVERE, "Arena duels failed to initialize; they stay off", e);
         }
+    }
+
+    /**
+     * Arena duels P6 (DESIGN §9, KNG-220): the announcer (warmup broadcast with [Spectate] [Details], results, draws,
+     * "pending review"), the duel sidebar and boss bar for duelists and spectators (the registry keeps their board:
+     * {@code DuelParticipation.keepsOwnScoreboard}), and the duel menus' runtime parts. Off with the runtime.
+     */
+    private void initializeDuelPresentation() {
+        if (duelService == null) {
+            return;
+        }
+        try {
+            var duels = duelService;
+            var regionIds = regionTracker != null ? regionTracker.regionIds() : null;
+            java.util.function.Supplier<java.util.List<net.knightsandkings.knk.core.domain.arenas.KnkArena>> arenas =
+                () -> arenasDataAccess.cachedArenas().orElse(java.util.List.of());
+            var spectators = new net.knightsandkings.knk.paper.duel.DuelSpectators(org.bukkit.Bukkit::getOnlinePlayers,
+                location -> regionIds != null ? regionIds.at(location) : java.util.Set.of(), arenas);
+
+            duels.addObserver(new net.knightsandkings.knk.paper.duel.DuelAnnouncer(duels, spectators,
+                org.bukkit.Bukkit::broadcast, org.bukkit.Bukkit::getPlayer,
+                () -> net.knightsandkings.knk.paper.duel.DuelAnnouncer.templatesFrom(getConfig().getConfigurationSection("duels.announce"))));
+
+            var hud = new net.knightsandkings.knk.paper.duel.DuelHud(duels, spectators, org.bukkit.Bukkit::getPlayer,
+                net.knightsandkings.knk.paper.duel.DuelHud.bukkitBoards(), getLogger());
+            this.duelHud = hud;
+            duels.setDuelBoardViewers(hud::isViewing);
+            duels.addObserver(hud);
+            getServer().getScheduler().runTaskTimer(this, hud::tick, 20L, 20L);
+
+            var statistics = apiClient.getStatisticsApi();
+            this.duelMenuParts = new net.knightsandkings.knk.paper.menu.content.DuelMenuFeature.Parts(
+                new net.knightsandkings.knk.paper.duel.DuelMenuData(duels),
+                arenas,
+                new net.knightsandkings.knk.paper.menu.content.DuelMenuFeature.Places() {
+                    @Override
+                    public java.util.Optional<net.knightsandkings.knk.core.domain.arenas.KnkArena> arenaAt(org.bukkit.entity.Player player) {
+                        return spectators.arenaAt(player);
+                    }
+
+                    @Override
+                    public boolean isInside(org.bukkit.entity.Player player, net.knightsandkings.knk.core.domain.arenas.KnkArena arena) {
+                        return spectators.isInside(player, arena);
+                    }
+                },
+                // The /warp <name> path: node, lock reasons, warmup, engine guards, then the server-side charge.
+                () -> {
+                    var teleports = teleportMenuParts;
+                    return teleports != null && teleports.warps() != null ? teleports.warps()::warpTo : null;
+                },
+                statistics,
+                uuid -> cacheManager.getUserCache().getStale(uuid)
+                    .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null),
+                org.bukkit.Bukkit::getOnlinePlayers);
+            if (menuService != null && duelMenuFeature != null) {
+                this.duelMenus = new net.knightsandkings.knk.paper.menu.content.DuelMenus(menuService, duelMenuFeature, arenas);
+                duels.addObserver(duelMenus);
+            }
+            getLogger().info("Arena duels announcements, sidebar and menus initialized");
+        } catch (Exception e) {
+            getLogger().log(java.util.logging.Level.SEVERE, "Arena duels announcements/menus failed to initialize", e);
+        }
+    }
+
+    /**
+     * How P5's {@code /duels} and {@code /arena} open the duel menus and start a spectator warp (P6); null when the
+     * menus or duels are off.
+     */
+    public net.knightsandkings.knk.paper.menu.content.DuelMenus getDuelMenus() {
+        return duelMenus;
     }
 
     /** The arena duels runtime for the duel commands, menus and announcements (P5/P6); null when duels are off. */

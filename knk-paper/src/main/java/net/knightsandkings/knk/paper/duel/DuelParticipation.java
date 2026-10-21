@@ -76,6 +76,15 @@ public final class DuelParticipation implements MinigameParticipation {
         return service.isParticipating(playerId);
     }
 
+    /**
+     * Members keep their board as by default, and so does everyone the duel sidebar is shown to, spectators included
+     * (P6, DESIGN §8.7): the registry is the scoreboard predicate.
+     */
+    @Override
+    public boolean keepsOwnScoreboard(UUID playerId) {
+        return MinigameParticipation.super.keepsOwnScoreboard(playerId) || service.showsDuelBoard(playerId);
+    }
+
     @Override
     public Optional<TeleportDenial> teleportRefusal(MinigameTeleportAttempt attempt) {
         return teleports.deny(attempt);

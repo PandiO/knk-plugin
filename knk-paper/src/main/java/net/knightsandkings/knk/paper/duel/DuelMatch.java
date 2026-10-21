@@ -182,6 +182,20 @@ public final class DuelMatch {
         return machine.drawOfferExpiresAt(side, nowTick);
     }
 
+    /**
+     * Copies of the side's stake stacks as they were taken at lock-in, in the contract's item order (the detail
+     * menu's real icons, P6); empty before the lock-in took them.
+     */
+    public List<ItemStack> stakeStacksOf(DuelSide side) {
+        List<ItemStack> stacks = stakeStacks.get(side);
+        return stacks == null ? List.of() : stacks.stream().map(ItemStack::clone).toList();
+    }
+
+    /** The tick the fight started, or -1 before it. */
+    public long fightStartTick() {
+        return fightStartTick;
+    }
+
     DuelStateMachine machine() {
         return machine;
     }

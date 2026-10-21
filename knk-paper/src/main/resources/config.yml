@@ -694,7 +694,16 @@ duels:
   item-blocklist: [WRITTEN_BOOK, BARRIER, COMMAND_BLOCK, STRUCTURE_VOID, DEBUG_STICK]   # never stakeable
   refuse-filled-containers: true   # shulker boxes and bundles must be empty to be staked
   announce:
-    cooldown-seconds: 120          # spam guard of the duel announcements (P6)
+    cooldown-seconds: 120          # one warmup broadcast per duelist per this many seconds (spam guard)
+    # Chat templates (& colours). Leave a key out to keep its default. Placeholders: {arena} {challenger} {opponent}
+    # {gear} {stakes} (warmup); {winner} {loser} {time} {won} (result, forfeit); {reason} (draw, cancel).
+    # templates:
+    #   warmup: "&6⚔ Duel at &e{arena}&6: &e{challenger} &6vs &e{opponent} &7- {gear} - stakes: &f{stakes}"
+    #   result: "&6⚔ &e{winner} &6defeated &e{loser} &6in &f{time}{won}&6."
+    #   forfeit: "&6⚔ &e{winner} &6won by forfeit against &e{loser}{won}&6."
+    #   draw: "&6⚔ &e{challenger} &6and &e{opponent} &6drew at &e{arena} &7({reason})&6."
+    #   cancel: "&7The duel &f{challenger} &7vs &f{opponent} &7was cancelled: {reason}"
+    #   death: "&c{loser} &7was defeated by &c{winner}&7."
   api-timeout-seconds: 10          # a lock-in without an answer by then is checked by token and refunded
   result-retry-seconds: 30         # how often results that couldn't be sent (outage) are sent again
   held-refresh-seconds: 300        # how often a result held for staff review is checked for a release or void

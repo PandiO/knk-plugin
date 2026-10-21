@@ -157,6 +157,8 @@ public final class DuelService {
     /** The vault restores without its own teleport while the runtime moves the player itself. */
     private final Set<UUID> restoringInPlace = new HashSet<>();
     private final List<DuelObserver> observers = new CopyOnWriteArrayList<>();
+    /** Players shown the duel sidebar (P6's {@code DuelHud}: duelists and spectators), asked by the registry. */
+    private volatile java.util.function.Predicate<UUID> duelBoardViewers = id -> false;
     private long lastRetryTick = Long.MIN_VALUE;
     private long lastHeldRefreshTick = Long.MIN_VALUE;
     private boolean shuttingDown;
@@ -173,6 +175,16 @@ public final class DuelService {
 
     public void addObserver(DuelObserver observer) {
         observers.add(Objects.requireNonNull(observer, "observer"));
+    }
+
+    /** Who sees the duel sidebar (P6), so rank/salary scoreboard refreshes leave their board alone (DESIGN §8.7). */
+    public void setDuelBoardViewers(java.util.function.Predicate<UUID> viewers) {
+        this.duelBoardViewers = viewers != null ? viewers : id -> false;
+    }
+
+    /** Whether {@code playerId} is shown the duel sidebar right now (a duelist or a spectator, P6). */
+    public boolean showsDuelBoard(UUID playerId) {
+        return duelBoardViewers.test(playerId);
     }
 
     public DuelConfig config() {
