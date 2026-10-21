@@ -129,6 +129,7 @@ import net.knightsandkings.knk.paper.tasks.WorldTaskHandlerRegistry;
 import net.knightsandkings.knk.paper.tasks.HeadlessWorldTaskPoller;
 import net.knightsandkings.knk.paper.tasks.PlayerNotificationPoller;
 import net.knightsandkings.knk.paper.tasks.GateBlockScanTaskHandler;
+import net.knightsandkings.knk.paper.tasks.MinecraftCatalogScanTaskHandler;
 import net.knightsandkings.knk.paper.tasks.GateDoorRegionCaptureHandler;
 import net.knightsandkings.knk.paper.tasks.ItemScanTaskHandler;
 import net.knightsandkings.knk.paper.tasks.KitScanTaskHandler;
@@ -582,6 +583,8 @@ public class KnKPlugin extends JavaPlugin {
             // Start headless WorldTask poller (webapp-initiated tasks that need no player)
             headlessWorldTaskPoller = new HeadlessWorldTaskPoller(worldTasksApi, this);
             headlessWorldTaskPoller.registerHandler(new GateBlockScanTaskHandler(gateDoorsApi, worldTasksApi, this));
+            headlessWorldTaskPoller.registerHandler(new MinecraftCatalogScanTaskHandler(
+                apiClient.getMinecraftCatalogApi(), worldTasksApi, this));
             headlessWorldTaskPoller.start();
 
             // Promotion effects etc. for writes made through the web app (not a plugin command)
