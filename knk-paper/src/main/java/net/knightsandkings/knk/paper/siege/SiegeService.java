@@ -175,6 +175,7 @@ public final class SiegeService {
     private MenuHooks menuHooks;
     /** Command label -> primary command name, over the server's command map (for the command filter). */
     private final java.util.function.UnaryOperator<String> commandAliases;
+    private volatile java.util.function.Function<UUID, Optional<String>> otherMinigameRefusal;
 
     public SiegeService(
             Plugin plugin,
@@ -883,6 +884,10 @@ public final class SiegeService {
             }
             rt = byKey.get();
         }
+        Optional<String> elsewhere = otherMinigameRefusal(id);
+        if (elsewhere.isPresent()) {
+            return joinRefused(rt, player, "in_other_minigame", SiegeMessages.bad(elsewhere.get()));
+        }
         if (current.isPresent()) {
             return joinRefused(rt, player, current.get() == rt ? "already_member" : "in_other_lobby", current.get() == rt
                     ? SiegeMessages.info("You are already in " + rt.displayName() + ".")
@@ -1069,6 +1074,8 @@ public final class SiegeService {
             return Optional.of(current.get() == rt ? "You are already in " + rt.displayName() + "."
                     : "You are already in " + current.get().displayName() + ".");
         }
+        Optional<String> elsewhere = otherMinigameRefusal(id);
+        if (elsewhere.isPresent()) return elsewhere;
         SiegeLobbyStateMachine machine = rt.machine();
         if (!machine.isJoinable()) return Optional.of(notJoinableReason(rt));
         int capacity = machine.joinCapacity();
@@ -1082,6 +1089,26 @@ public final class SiegeService {
         Optional<Integer> claimed = locks.lobbyOfPlayer(id);
         if (claimed.isPresent() && claimed.get() != rt.id()) return Optional.of("You are already in another siege.");
         return Optional.empty();
+    }
+
+    /**
+     * Another minigame that keeps this player out of sieges (arena duels DESIGN §8.7: a duelist in a negotiation or a
+     * match can't join). Asked by {@link #join} and {@link #joinDenial}; null = none.
+     */
+    public void setOtherMinigameRefusal(java.util.function.Function<UUID, Optional<String>> refusal) {
+        this.otherMinigameRefusal = refusal;
+    }
+
+    private Optional<String> otherMinigameRefusal(UUID playerId) {
+        java.util.function.Function<UUID, Optional<String>> refusal = otherMinigameRefusal;
+        if (refusal == null) return Optional.empty();
+        try {
+            Optional<String> answer = refusal.apply(playerId);
+            return answer == null ? Optional.empty() : answer;
+        } catch (RuntimeException e) {
+            plugin.getLogger().log(java.util.logging.Level.WARNING, "[Siege] The other-minigame join check failed", e);
+            return Optional.empty();
+        }
     }
 
     /** Phase 8b: a player's cached profile (names/titles in the menus); never blocks. */

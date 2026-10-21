@@ -26,6 +26,23 @@ class WarmupPolicyTest {
     }
 
     @Test
+    void anArenaLobbyTeleportWaitsLikeAPlayerOneAndTheRuntimesOwnMovesNever() {
+        assertEquals(5, policy.warmupSeconds(TeleportKind.ARENA, false, false));
+        assertEquals(3, policy.warmupSeconds(TeleportKind.ARENA, true, false));
+        assertEquals(0, policy.warmupSeconds(TeleportKind.ARENA_SYSTEM, false, false));
+    }
+
+    @Test
+    void arenaKindsHaveNoCooldown() {
+        assertEquals(false, TeleportKind.ARENA.usesCooldown());
+        assertEquals(false, TeleportKind.ARENA_SYSTEM.usesCooldown());
+        assertEquals(false, TeleportKind.STAFF.usesCooldown());
+        assertEquals(true, TeleportKind.SPAWN.usesCooldown());
+        assertEquals(true, TeleportKind.ARENA_SYSTEM.isSystem());
+        assertEquals(false, TeleportKind.ARENA.isSystem());
+    }
+
+    @Test
     void shortWarmupIsNeverLongerThanTheNormalOne() {
         WarmupPolicy misconfigured = new WarmupPolicy(new TeleportSettings(2, 8, 30, 10, 3));
 

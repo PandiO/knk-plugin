@@ -26,6 +26,9 @@ import net.knightsandkings.knk.core.teleport.TeleportKind;
  * @param backTrip         a {@code /back}, the player's own or a staff {@code /back <player>} (KNG-42): its
  *                         origin is never recorded for another {@code /back} (no ping-pong), and a staff one
  *                         still looks for a safe spot (the place may be a lava death)
+ * @param beforeMove       the plan's pre-commit hook (arena duels DESIGN §8.4: the kit vault): runs on the main thread
+ *                         after every guard, the charge and the safe-spot search, right before the player is handed
+ *                         to Bukkit. False refuses the move (outcome FAILED); null = nothing to do
  */
 public record TeleportPlan(
     Player subject,
@@ -36,14 +39,28 @@ public record TeleportPlan(
     boolean silent,
     String destinationLabel,
     TeleportCharge charge,
-    boolean backTrip
+    boolean backTrip,
+    BeforeMove beforeMove
 ) {
+    /** A step a plan runs just before its move ({@link #beforeMove}). */
+    @FunctionalInterface
+    public interface BeforeMove {
+        /** @return false to refuse the move: nothing was changed, or the hook undid it */
+        boolean prepare(Player subject);
+    }
+
     public TeleportPlan {
         Objects.requireNonNull(subject, "subject must not be null");
         Objects.requireNonNull(destination, "destination must not be null");
         Objects.requireNonNull(kind, "kind must not be null");
         actor = actor != null ? actor : subject;
         destinationLabel = destinationLabel != null ? destinationLabel : "?";
+    }
+
+    /** A plan without a pre-commit hook. */
+    public TeleportPlan(Player subject, Supplier<Location> destination, TeleportKind kind, CommandSender actor,
+                        Player visited, boolean silent, String destinationLabel, TeleportCharge charge, boolean backTrip) {
+        this(subject, destination, kind, actor, visited, silent, destinationLabel, charge, backTrip, null);
     }
 
     /** A plan that isn't a {@code /back}. */
@@ -60,7 +77,14 @@ public record TeleportPlan(
 
     /** This plan, paid for (or authorized) by {@code charge} when it commits. */
     public TeleportPlan withCharge(TeleportCharge charge) {
-        return new TeleportPlan(subject, destination, kind, actor, visited, silent, destinationLabel, charge, backTrip);
+        return new TeleportPlan(subject, destination, kind, actor, visited, silent, destinationLabel, charge, backTrip,
+            beforeMove);
+    }
+
+    /** This plan, running {@code beforeMove} right before the move. */
+    public TeleportPlan withBeforeMove(BeforeMove beforeMove) {
+        return new TeleportPlan(subject, destination, kind, actor, visited, silent, destinationLabel, charge, backTrip,
+            beforeMove);
     }
 
     /** A staff teleport of {@code subject} to {@code visited}'s live location. */
@@ -120,6 +144,24 @@ public record TeleportPlan(
     public static TeleportPlan staffBack(CommandSender actor, Player subject, Supplier<Location> destination,
                                          String label, boolean silent) {
         return new TeleportPlan(subject, destination, TeleportKind.STAFF, actor, null, silent, label, null, true);
+    }
+
+    /**
+     * An arena duel's lobby teleport (arena duels DESIGN D6): warmup and the combat-tag guard, no cooldown or charge.
+     * {@code beforeMove} is the duel's commit step (the kit vault), or null.
+     */
+    public static TeleportPlan arena(Player subject, Supplier<Location> destination, String label, BeforeMove beforeMove) {
+        return new TeleportPlan(subject, destination, TeleportKind.ARENA, subject, null, true, label, null, false,
+            beforeMove);
+    }
+
+    /**
+     * The duel runtime's own move (arena duels DESIGN D7): to a battleground spawn or the arena exit. Instant, no
+     * cooldown, combat tag or charge; a safe spot is looked for; not audited.
+     */
+    public static TeleportPlan arenaSystem(Player subject, Location destination, String label) {
+        Location target = destination.clone();
+        return new TeleportPlan(subject, target::clone, TeleportKind.ARENA_SYSTEM, subject, null, true, label);
     }
 
     public boolean movesActor() {

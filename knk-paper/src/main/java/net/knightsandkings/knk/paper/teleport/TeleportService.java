@@ -60,6 +60,10 @@ import net.kyori.adventure.text.Component;
  *       {@code teleportAsync(loc, TeleportCause.COMMAND)} - never the default {@code PLUGIN} cause,
  *       so the region listener sees these teleports like vanilla ones (the siege's own teleports use
  *       {@code PLUGIN} and stay outside the engine).</li>
+ *   <li><b>Arena duels</b> (arena duels DESIGN D6/D7): {@link TeleportKind#ARENA} is a player teleport without
+ *       cooldown or charge; {@link TeleportKind#ARENA_SYSTEM} is instant and skips the combat tag and cooldown but
+ *       keeps the guards and the safe spot. A plan's {@link TeleportPlan#beforeMove} hook runs last, right before
+ *       the move (the duel's kit vault).</li>
  *   <li><b>After</b>: cooldown (player teleports; a permission group may set its own, {@link CooldownPolicy}), a log line (INFO for staff teleports), for
  *       staff teleports an audit entry in the web API ({@link TeleportAuditor}, Phase 2), and the
  *       {@link TeleportArrivalListener}s ({@code /back} origins, KNG-42).</li>
@@ -318,7 +322,7 @@ public class TeleportService {
             result.complete(TeleportOutcome.denied(denial.get()));
             return;
         }
-        if (!plan.kind().isStaff()) {
+        if (plan.kind().usesCooldown()) {
             // Fresh group settings by the time the cooldown starts (after the warmup).
             prefetchPolicy(subject.getUniqueId());
         }
@@ -482,6 +486,10 @@ public class TeleportService {
             // not a shutdown - the player most likely arrives even if the plugin is going away.
             openCharges.remove(plan.charge());
         }
+        if (plan.beforeMove() != null && !plan.beforeMove().prepare(subject)) {
+            result.complete(TeleportOutcome.failed("The teleport couldn't be prepared."));
+            return;
+        }
         inFlight.put(id, authority);
         CompletableFuture<Boolean> teleported;
         try {
@@ -499,7 +507,7 @@ public class TeleportService {
                 result.complete(TeleportOutcome.failed("The teleport was blocked."));
                 return;
             }
-            if (!plan.kind().isStaff()) {
+            if (plan.kind().usesCooldown()) {
                 cooldowns.start(id, plan.kind(), clock.getAsLong(), cooldownSeconds(id, plan.kind()));
             }
             if (plan.charge() != null) {
@@ -593,7 +601,7 @@ public class TeleportService {
                 return denial;
             }
         }
-        if (plan.kind().isStaff()) {
+        if (plan.kind().isStaff() || plan.kind().isSystem()) {
             return Optional.empty();
         }
         UUID id = subject.getUniqueId();
@@ -602,7 +610,7 @@ public class TeleportService {
             return Optional.of(TeleportDenial.of(TeleportDenial.COMBAT, "You were in combat "
                 + combatTags.secondsSinceCombat(id, now) + " s ago; wait " + combatTags.remainingSeconds(id, now) + " s."));
         }
-        if (!authority.has(TeleportNodes.BYPASS_COOLDOWN)) {
+        if (plan.kind().usesCooldown() && !authority.has(TeleportNodes.BYPASS_COOLDOWN)) {
             int remaining = cooldowns.remainingSeconds(id, plan.kind(), now);
             if (remaining > 0) {
                 return Optional.of(TeleportDenial.of(TeleportDenial.COOLDOWN, "You can teleport again in " + remaining + " s."));

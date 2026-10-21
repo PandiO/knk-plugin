@@ -7,7 +7,8 @@ import java.util.Objects;
  * staff teleports and holders of {@code knk.teleport.bypass.warmup} go instantly; holders of
  * {@code knk.teleport.warmup.short} wait the short warmup (v1: 3 s for any donator rank); everyone
  * else waits the normal one (v1: 5 s). The short warmup never makes a teleport slower than the
- * normal one, even if the config sets it higher.
+ * normal one, even if the config sets it higher. An arena duel's lobby teleport ({@link TeleportKind#ARENA}) waits
+ * like a player teleport; the duel runtime's own moves ({@link TeleportKind#ARENA_SYSTEM}) never wait.
  */
 public final class WarmupPolicy {
 
@@ -18,7 +19,7 @@ public final class WarmupPolicy {
     }
 
     public int warmupSeconds(TeleportKind kind, boolean shortWarmup, boolean bypassWarmup) {
-        if (kind.isStaff() || bypassWarmup) {
+        if (kind.isStaff() || kind.isSystem() || bypassWarmup) {
             return 0;
         }
         if (shortWarmup) {

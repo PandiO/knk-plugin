@@ -451,4 +451,91 @@ class TeleportServiceTest {
         assertTrue(done(result).isTeleported());
         verify(alice).teleportAsync(eq(new Location(world, 50.5, 64, 50.5, 90, 0)), eq(TeleportCause.COMMAND));
     }
+
+    // ===== arena duels (KNG-217): ARENA, ARENA_SYSTEM and the pre-commit hook =====
+
+    @Test
+    void anArenaLobbyTeleportWarmsUpButStartsNoCooldown() {
+        CompletableFuture<TeleportOutcome> first = service.start(TeleportPlan.arena(alice, () -> spawn, "lobby", null));
+        assertTrue(service.isWarmingUp(alice.getUniqueId()));
+        advance(5_000);
+        assertTrue(done(first).isTeleported());
+
+        CompletableFuture<TeleportOutcome> again = service.start(TeleportPlan.arena(alice, () -> spawn, "lobby", null));
+        assertTrue(service.isWarmingUp(alice.getUniqueId()), "no cooldown refuses the next arena teleport");
+        advance(5_000);
+        assertTrue(done(again).isTeleported());
+        grant(alice, TeleportNodes.BYPASS_WARMUP);
+        assertTrue(done(service.start(spawnPlan(alice))).isTeleported(), "nor does it start the /spawn cooldown");
+    }
+
+    @Test
+    void anArenaLobbyTeleportKeepsTheCombatTagGuard() {
+        service.combatTags().tag(alice.getUniqueId(), now);
+
+        TeleportOutcome outcome = done(service.start(TeleportPlan.arena(alice, () -> spawn, "lobby", null)));
+
+        assertEquals(TeleportDenial.COMBAT, outcome.code());
+    }
+
+    @Test
+    void anArenaSystemTeleportIsInstantIgnoresTagAndCooldownFindsASafeSpotAndIsNotAudited() {
+        TeleportAuditor auditor = mock(TeleportAuditor.class);
+        service.setAuditor(auditor);
+        service.combatTags().tag(alice.getUniqueId(), now);
+        Location inTheAir = new Location(world, 50.5, 66, 50.5, 90, 0);
+
+        assertTrue(done(service.start(TeleportPlan.arenaSystem(alice, inTheAir, "spawn A"))).isTeleported());
+        assertTrue(done(service.start(TeleportPlan.arenaSystem(alice, inTheAir, "spawn A"))).isTeleported());
+
+        verify(alice, times(2)).teleportAsync(eq(new Location(world, 50.5, 64, 50.5, 90, 0)), eq(TeleportCause.COMMAND));
+        verify(auditor, never()).record(any(), any(), any());
+    }
+
+    @Test
+    void anArenaSystemTeleportStillAsksTheGuards() {
+        service.registerRestriction(check -> Optional.of(TeleportDenial.of("NO", "no")));
+
+        assertEquals("NO", done(service.start(TeleportPlan.arenaSystem(alice, spawn, "exit"))).code());
+    }
+
+    @Test
+    void theBeforeMoveHookRunsAfterTheWarmupRightBeforeTheMove() {
+        AtomicBoolean prepared = new AtomicBoolean();
+        CompletableFuture<TeleportOutcome> result = service.start(TeleportPlan.arena(alice, () -> spawn, "lobby", subject -> {
+            verify(subject, never()).teleportAsync(any(Location.class), any(TeleportCause.class));
+            prepared.set(true);
+            return true;
+        }));
+        assertFalse(prepared.get(), "not during the warmup");
+
+        advance(5_000);
+
+        assertTrue(prepared.get());
+        assertTrue(done(result).isTeleported());
+    }
+
+    @Test
+    void aRefusingBeforeMoveHookFailsTheTeleportWithoutMoving() {
+        TeleportOutcome outcome = done(service.start(TeleportPlan.arenaSystem(alice, spawn, "x")
+            .withBeforeMove(subject -> false)));
+
+        assertEquals(TeleportOutcome.Status.FAILED, outcome.status());
+        verify(alice, never()).teleportAsync(any(Location.class), any(TeleportCause.class));
+    }
+
+    @Test
+    void aCancelledWarmupNeverRunsTheBeforeMoveHook() {
+        AtomicBoolean prepared = new AtomicBoolean();
+        CompletableFuture<TeleportOutcome> result = service.start(TeleportPlan.arena(alice, () -> spawn, "lobby", subject -> {
+            prepared.set(true);
+            return true;
+        }));
+
+        service.cancelWarmup(alice.getUniqueId(), WarmupCancelReason.MOVED);
+        advance(5_000);
+
+        assertEquals(TeleportOutcome.Status.CANCELLED, done(result).status());
+        assertFalse(prepared.get());
+    }
 }

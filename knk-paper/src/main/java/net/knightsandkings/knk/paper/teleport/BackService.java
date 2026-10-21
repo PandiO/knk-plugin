@@ -224,7 +224,7 @@ public class BackService {
             case SPAWN, HUB -> BackKind.SPAWN;
             case REQUEST -> BackKind.TELEPORT;
             case STAFF -> plan.movesActor() ? BackKind.TELEPORT : null;
-            case BACK -> null;
+            case BACK, ARENA, ARENA_SYSTEM -> null; // a duel restores and moves its players itself
         };
     }
 
