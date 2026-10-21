@@ -172,6 +172,8 @@ public class KnKPlugin extends JavaPlugin {
     private EnchantmentDefinitionsDataAccess enchantmentDefinitionsDataAccess;
     private ItemBlueprintsDataAccess itemBlueprintsDataAccess;
     private KitsDataAccess kitsDataAccess;
+    // Arena duels (KNG-210): every arena with its settings, battlegrounds, spectator areas and kits, cache-first.
+    private net.knightsandkings.knk.core.dataaccess.ArenasDataAccess arenasDataAccess;
     private MenuTemplatesDataAccess menuTemplatesDataAccess;
     private net.knightsandkings.knk.paper.kit.KitGrantFlow kitGrantFlow;
     private net.knightsandkings.knk.core.dataaccess.TitleBracketsDataAccess titleBracketsDataAccess;
@@ -534,8 +536,9 @@ public class KnKPlugin extends JavaPlugin {
             // Managed WorldGuard regions: parent + priority + category flags for Town/District/Structure/Gate regions,
             // applied when a world task's region gets its final name and repaired at every startup
             // (docs/architecture/managed-worldguard-regions.md).
+            // Arena duels (KNG-210): arenas, battlegrounds and spectator areas are managed by domain type too.
             this.managedRegions = new ManagedRegionsBootstrap(this, ManagedRegionsBootstrap.readConfig(this),
-                townsQueryApi, districtsQueryApi, structuresQueryApi, domainCatalogQueryApi);
+                townsQueryApi, districtsQueryApi, structuresQueryApi, domainCatalogQueryApi, apiClient.getArenasApi());
             // KNG-56: every domain's AllowEntry/AllowExit onto its region as flags WorldGuard saves, so the rules hold
             // while the API is down. Startup + periodic sync; a newly finalized region is synced right away.
             this.domainAccessSync = new net.knightsandkings.knk.paper.regions.access.DomainAccessFlagSync(this,
@@ -630,6 +633,7 @@ public class KnKPlugin extends JavaPlugin {
                 config.cache().ttl(),
                 kitsQueryApi
             );
+            this.arenasDataAccess = dataAccessFactory.createArenasDataAccess(apiClient.getArenasApi());
             this.menuTemplatesDataAccess = dataAccessFactory.createMenuTemplatesDataAccess(
                 config.cache().ttl(),
                 menuTemplatesQueryApi
@@ -1748,6 +1752,11 @@ public class KnKPlugin extends JavaPlugin {
     }
 
     /** The road network cache (null while navigation is disabled); Phase 4's /navigate reads it. */
+    /** Arena duels (KNG-210): the cache-first arena gateway the duel runtime (P4) and menus (P6) read. */
+    public net.knightsandkings.knk.core.dataaccess.ArenasDataAccess getArenasDataAccess() {
+        return arenasDataAccess;
+    }
+
     public net.knightsandkings.knk.paper.roads.RoadNetworkCache getRoadNetworkCache() {
         return roadNetworkCache;
     }

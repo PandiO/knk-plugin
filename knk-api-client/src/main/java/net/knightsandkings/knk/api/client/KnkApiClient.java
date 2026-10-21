@@ -38,6 +38,7 @@ import net.knightsandkings.knk.api.impl.PermissionsApiImpl;
 import net.knightsandkings.knk.api.impl.PermissionGroupsQueryApiImpl;
 import net.knightsandkings.knk.api.impl.ClansQueryApiImpl;
 import net.knightsandkings.knk.api.impl.SiegeLobbiesQueryApiImpl;
+import net.knightsandkings.knk.api.impl.ArenasApiImpl;
 import net.knightsandkings.knk.api.impl.SiegeMatchesCommandApiImpl;
 import net.knightsandkings.knk.api.impl.SiegeGatesCommandApiImpl;
 import net.knightsandkings.knk.api.impl.SiegeScenariosQueryApiImpl;
@@ -74,6 +75,7 @@ import net.knightsandkings.knk.core.ports.api.PermissionsApi;
 import net.knightsandkings.knk.core.ports.api.PermissionGroupsQueryApi;
 import net.knightsandkings.knk.core.ports.api.ClansQueryApi;
 import net.knightsandkings.knk.core.ports.api.SiegeLobbiesQueryApi;
+import net.knightsandkings.knk.core.ports.api.ArenasApi;
 import net.knightsandkings.knk.core.ports.api.SiegeMatchesCommandApi;
 import net.knightsandkings.knk.core.ports.api.SiegeGatesCommandApi;
 import net.knightsandkings.knk.core.ports.api.SiegeScenariosQueryApi;
@@ -135,6 +137,7 @@ public class KnkApiClient {
     private final PermissionGroupsQueryApi permissionGroupsQueryApi;
     private final ClansQueryApi clansQueryApi;
     private final SiegeLobbiesQueryApi siegeLobbiesQueryApi;
+    private final ArenasApi arenasApi;
     private final SiegeScenariosQueryApi siegeScenariosQueryApi;
     private final SiegeMatchesCommandApi siegeMatchesCommandApi;
     private final SiegeGatesCommandApi siegeGatesCommandApi;
@@ -208,6 +211,7 @@ public class KnkApiClient {
         this.permissionGroupsQueryApi = new PermissionGroupsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.clansQueryApi = new ClansQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeLobbiesQueryApi = new SiegeLobbiesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.arenasApi = new ArenasApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeScenariosQueryApi = new SiegeScenariosQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeMatchesCommandApi = new SiegeMatchesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeGatesCommandApi = new SiegeGatesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -444,6 +448,11 @@ public class KnkApiClient {
 
     public SiegeLobbiesQueryApi getSiegeLobbiesQueryApi() {
         return siegeLobbiesQueryApi;
+    }
+
+    /** Arena duels (KNG-210): read through ArenasDataAccess. */
+    public ArenasApi getArenasApi() {
+        return arenasApi;
     }
 
     public SiegeScenariosQueryApi getSiegeScenariosQueryApi() {

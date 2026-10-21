@@ -5,14 +5,18 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import net.knightsandkings.knk.core.domain.arenas.KnkArena;
+import net.knightsandkings.knk.core.domain.arenas.KnkArenaBattleground;
+import net.knightsandkings.knk.core.domain.arenas.KnkArenaSpectatorArea;
 import net.knightsandkings.knk.core.domain.districts.DistrictSummary;
 import net.knightsandkings.knk.core.domain.structures.StructureSummary;
 import net.knightsandkings.knk.core.domain.towns.TownSummary;
 
 /**
  * Builds the {@link ManagedRegionSpec}s implied by the v3 domain data: Town -> District -> Structure, each backed by the
- * WorldGuard region in its {@code wgRegionId}. A Structure's subtype (Gate, ...) comes from {@code domainTypes}, the
- * {@code domainType} the API reports per domain id.
+ * WorldGuard region in its {@code wgRegionId}. A Structure's subtype (Gate, Arena, ...) comes from {@code domainTypes},
+ * the {@code domainType} the API reports per domain id. An Arena's battlegrounds and spectator areas (KNG-210) come from
+ * the arenas list and hang under their Arena's region.
  */
 public final class DomainRegionSpecs {
 
@@ -28,6 +32,11 @@ public final class DomainRegionSpecs {
 
     public static Result build(List<TownSummary> towns, List<DistrictSummary> districts, List<StructureSummary> structures,
                                Map<Integer, String> domainTypes) {
+        return build(towns, districts, structures, domainTypes, List.of());
+    }
+
+    public static Result build(List<TownSummary> towns, List<DistrictSummary> districts, List<StructureSummary> structures,
+                               Map<Integer, String> domainTypes, List<KnkArena> arenas) {
         List<ManagedRegionSpec> specs = new ArrayList<>();
         List<Skipped> skipped = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
@@ -74,11 +83,38 @@ public final class DomainRegionSpecs {
             if (parent == null) {
                 warnings.add(label + ": its District (id " + structure.districtId() + ") is unknown or has no region; no parent set");
             }
-            ManagedRegionKind kind = ManagedRegionKind.fromDomainType(type).filter(ManagedRegionKind::isStructureTier)
+            // An Arena is a Structure subtype with its own kind (KNG-210).
+            ManagedRegionKind kind = ManagedRegionKind.fromDomainType(type)
+                    .filter(k -> k.isStructureTier() || k == ManagedRegionKind.ARENA)
                     .orElse(ManagedRegionKind.STRUCTURE);
             String world = firstNonBlank(structure.worldName(),
                     structure.districtId() != null ? districtWorlds.get(structure.districtId()) : null);
             specs.add(new ManagedRegionSpec(structure.wgRegionId(), kind, parent, label, world));
+        }
+        for (KnkArena arena : nullSafe(arenas)) {
+            String arenaLabel = "Arena#" + arena.id() + " '" + arena.name() + "'";
+            if (isBlank(arena.wgRegionId())) {
+                warnings.add(arenaLabel + ": no region; its battlegrounds and spectator areas get no parent");
+            }
+            String parent = isBlank(arena.wgRegionId()) ? null : arena.wgRegionId();
+            for (KnkArenaBattleground battleground : arena.battlegrounds()) {
+                String label = "ArenaBattleground#" + battleground.id() + " '" + battleground.name() + "'";
+                if (isBlank(battleground.wgRegionId())) {
+                    skipped.add(new Skipped(label, "no wgRegionId"));
+                    continue;
+                }
+                specs.add(new ManagedRegionSpec(battleground.wgRegionId(), ManagedRegionKind.BATTLEGROUND, parent, label,
+                        firstNonBlank(battleground.worldName(), arena.worldName())));
+            }
+            for (KnkArenaSpectatorArea area : arena.spectatorAreas()) {
+                String label = "ArenaSpectatorArea#" + area.id() + " '" + area.name() + "'";
+                if (isBlank(area.wgRegionId())) {
+                    skipped.add(new Skipped(label, "no wgRegionId"));
+                    continue;
+                }
+                specs.add(new ManagedRegionSpec(area.wgRegionId(), ManagedRegionKind.SPECTATOR_AREA, parent, label,
+                        firstNonBlank(area.worldName(), arena.worldName())));
+            }
         }
         return new Result(specs, skipped, warnings);
     }

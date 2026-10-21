@@ -325,6 +325,18 @@ public class DataAccessFactory {
         return new SiegeDataAccess(entityConfig.ttl(), siegeLobbiesQueryApi, siegeScenariosQueryApi, settings);
     }
 
+    /**
+     * Create the ArenasDataAccess gateway (arena duels KNG-210): every arena in one cache-first entry.
+     *
+     * @param arenasApi Arenas API port
+     * @return Configured ArenasDataAccess instance
+     */
+    public ArenasDataAccess createArenasDataAccess(ArenasApi arenasApi) {
+        KnkConfig.EntitySettings entityConfig = entitySettings.arenas();
+        DataAccessSettings settings = buildSettings(entityConfig, "Arenas");
+        return new ArenasDataAccess(entityConfig.ttl(), arenasApi, settings);
+    }
+
     // ==================== Helper Methods ====================
     
     /**

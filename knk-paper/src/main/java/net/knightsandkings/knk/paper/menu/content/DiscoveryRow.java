@@ -79,6 +79,8 @@ public final class DiscoveryRow implements MenuRowKey {
             case "district" -> "District";
             case "structure" -> "Structure";
             case "gatestructure" -> "Gate";
+            case "arena" -> "Arena";
+            case "arenaspectatorarea" -> "Spectator area";
             default -> "Place";
         };
     }

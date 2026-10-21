@@ -81,7 +81,24 @@ class ManagedRegionPolicyTest {
     void battlegroundPvpIsAnEnforcedException() {
         assertEquals(FlagState.ALLOW, rule(ManagedRegionKind.BATTLEGROUND, "pvp").value());
         assertEquals(FlagMode.ENFORCE, rule(ManagedRegionKind.BATTLEGROUND, "pvp").mode());
-        assertEquals(FlagState.DENY, rule(ManagedRegionKind.BATTLEGROUND, "entry").value());
+    }
+
+    /**
+     * Arena duels D16 (KNG-210): no WorldGuard {@code entry deny} on battlegrounds any more - the domain-access handler
+     * enforces the battleground's AllowEntry=false and lets the duelists in. The v1 {@code entry deny} is corrected.
+     */
+    @Test
+    void battlegroundEntryIsLeftToTheDomainAccessHandler() {
+        assertEquals(FlagState.ALLOW, rule(ManagedRegionKind.BATTLEGROUND, "entry").value());
+        assertEquals(FlagMode.ENFORCE, rule(ManagedRegionKind.BATTLEGROUND, "entry").mode());
+        assertFalse(policy.flagRules(ManagedRegionKind.BATTLEGROUND).stream()
+                .anyMatch(r -> r.flag().equals("entry") && r.value() == FlagState.DENY));
+    }
+
+    @Test
+    void spectatorAreaIsAPlainChildOfItsArena() {
+        assertTrue(policy.flagRules(ManagedRegionKind.SPECTATOR_AREA).isEmpty());
+        assertEquals(50, policy.priorityFor(ManagedRegionKind.SPECTATOR_AREA, 40));
     }
 
     @Test
@@ -107,6 +124,10 @@ class ManagedRegionPolicyTest {
         assertEquals(Optional.of(ManagedRegionKind.GATE), ManagedRegionKind.fromDomainType("GateStructure"));
         assertEquals(Optional.of(ManagedRegionKind.STRUCTURE), ManagedRegionKind.fromDomainType("Warehouse"));
         assertEquals(Optional.empty(), ManagedRegionKind.fromDomainType(" "));
+        // KNG-210: the arena domain types
+        assertEquals(Optional.of(ManagedRegionKind.ARENA), ManagedRegionKind.fromDomainType("Arena"));
+        assertEquals(Optional.of(ManagedRegionKind.BATTLEGROUND), ManagedRegionKind.fromDomainType("ArenaBattleground"));
+        assertEquals(Optional.of(ManagedRegionKind.SPECTATOR_AREA), ManagedRegionKind.fromDomainType("arenaspectatorarea"));
         assertEquals(Optional.of(ManagedRegionKind.RESOURCE_PRODUCTION), ManagedRegionKind.parse("resource-production"));
         assertEquals(Optional.of(ManagedRegionKind.BATTLEGROUND), ManagedRegionKind.parse("Battleground"));
         assertEquals(Optional.empty(), ManagedRegionKind.parse("castle"));

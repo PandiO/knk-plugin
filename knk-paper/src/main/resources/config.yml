@@ -900,6 +900,16 @@ cache:
       retry-attempts: 3
       retry-backoff-ms: 200
 
+    # Duel arenas with their settings, battlegrounds, spectator areas and kits (arena duels KNG-210,
+    # ArenasDataAccess). Refreshed when the settings may have changed; a failed refresh keeps the last copy.
+    arenas:
+      ttl-minutes: 15
+      max-ttl-minutes: 240
+      default-policy: CACHE_FIRST
+      allow-stale: true
+      retry-attempts: 3
+      retry-backoff-ms: 200
+
     health:
       ttl-seconds: 30          # Health uses seconds (short TTL)
       max-ttl-seconds: 120

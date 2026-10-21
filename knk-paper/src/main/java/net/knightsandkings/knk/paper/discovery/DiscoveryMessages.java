@@ -34,6 +34,8 @@ public final class DiscoveryMessages {
             case "district" -> "the district";
             case "structure" -> "the structure";
             case "gatestructure" -> "the gate";
+            case "arena" -> "the arena";
+            case "arenaspectatorarea" -> "the spectator area";
             default -> "the place";
         };
     }

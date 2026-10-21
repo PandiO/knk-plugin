@@ -98,6 +98,9 @@ public final class DiscoveriesView {
             case "district" -> "Districts";
             case "structure" -> "Structures";
             case "gatestructure" -> "Gates";
+            case "arena" -> "Arenas";
+            case "arenaspectatorarea" -> "Spectator areas";
+            case "arenabattleground" -> "Battlegrounds";
             default -> domainType;
         };
     }

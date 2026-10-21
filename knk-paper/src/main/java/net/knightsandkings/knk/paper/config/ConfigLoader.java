@@ -524,7 +524,8 @@ public class ConfigLoader {
             loadEntitySettings(entitiesSection, "tags"),
             loadEntitySettings(entitiesSection, "domainCatalog"),
             loadEntitySettings(entitiesSection, "siege"),
-            loadEntitySettings(entitiesSection, "kits")
+            loadEntitySettings(entitiesSection, "kits"),
+            loadEntitySettings(entitiesSection, "arenas")
         );
     }
     

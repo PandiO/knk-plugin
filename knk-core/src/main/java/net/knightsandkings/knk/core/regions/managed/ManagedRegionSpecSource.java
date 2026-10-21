@@ -10,13 +10,18 @@ import java.util.function.Function;
 
 import net.knightsandkings.knk.core.domain.common.Page;
 import net.knightsandkings.knk.core.domain.common.PagedQuery;
+import net.knightsandkings.knk.core.domain.arenas.KnkArena;
 import net.knightsandkings.knk.core.domain.domains.KnkDomainSummary;
+import net.knightsandkings.knk.core.ports.api.ArenasApi;
 import net.knightsandkings.knk.core.ports.api.DistrictsQueryApi;
 import net.knightsandkings.knk.core.ports.api.DomainCatalogQueryApi;
 import net.knightsandkings.knk.core.ports.api.StructuresQueryApi;
 import net.knightsandkings.knk.core.ports.api.TownsQueryApi;
 
-/** Loads every Town, District and Structure from the API (paged) and turns them into {@link DomainRegionSpecs}. */
+/**
+ * Loads every Town, District and Structure from the API (paged), and the arenas with their battlegrounds and spectator
+ * areas (KNG-210), and turns them into {@link DomainRegionSpecs}.
+ */
 public class ManagedRegionSpecSource {
 
     private static final int MAX_PAGES = 500;
@@ -25,11 +30,19 @@ public class ManagedRegionSpecSource {
     private final DistrictsQueryApi districts;
     private final StructuresQueryApi structures;
     private final DomainCatalogQueryApi domainCatalog;
+    private final ArenasApi arenas;
     private final int pageSize;
 
     /** @param domainCatalog optional: without it every Structure is a plain STRUCTURE (Gates not told apart). */
     public ManagedRegionSpecSource(TownsQueryApi towns, DistrictsQueryApi districts, StructuresQueryApi structures,
                                    DomainCatalogQueryApi domainCatalog, int pageSize) {
+        this(towns, districts, structures, domainCatalog, null, pageSize);
+    }
+
+    /** @param arenas optional: without it (or while it fails) battlegrounds and spectator areas are left as they are. */
+    public ManagedRegionSpecSource(TownsQueryApi towns, DistrictsQueryApi districts, StructuresQueryApi structures,
+                                   DomainCatalogQueryApi domainCatalog, ArenasApi arenas, int pageSize) {
+        this.arenas = arenas;
         this.towns = towns;
         this.districts = districts;
         this.structures = structures;
@@ -58,9 +71,16 @@ public class ManagedRegionSpecSource {
                     return Map.<Integer, String>of();
                 });
 
-        return CompletableFuture.allOf(townsFuture, districtsFuture, structuresFuture, typesFuture).thenApply(ignored -> {
+        CompletableFuture<List<KnkArena>> arenasFuture = arenas == null
+                ? CompletableFuture.completedFuture(List.<KnkArena>of())
+                : arenas.getAll().exceptionally(error -> {
+                    extraWarnings.add("arenas unavailable (" + rootMessage(error) + "); battlegrounds and spectator areas left as they are");
+                    return List.<KnkArena>of();
+                });
+
+        return CompletableFuture.allOf(townsFuture, districtsFuture, structuresFuture, typesFuture, arenasFuture).thenApply(ignored -> {
             DomainRegionSpecs.Result built = DomainRegionSpecs.build(
-                    townsFuture.join(), districtsFuture.join(), structuresFuture.join(), typesFuture.join());
+                    townsFuture.join(), districtsFuture.join(), structuresFuture.join(), typesFuture.join(), arenasFuture.join());
             List<String> warnings = new ArrayList<>(built.warnings());
             warnings.addAll(extraWarnings);
             return new DomainRegionSpecs.Result(built.specs(), built.skipped(), warnings);

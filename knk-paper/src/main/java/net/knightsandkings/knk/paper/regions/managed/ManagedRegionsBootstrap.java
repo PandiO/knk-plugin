@@ -12,6 +12,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 import com.sk89q.worldguard.WorldGuard;
 import com.sk89q.worldguard.protection.managers.RegionManager;
 
+import net.knightsandkings.knk.core.ports.api.ArenasApi;
 import net.knightsandkings.knk.core.ports.api.DistrictsQueryApi;
 import net.knightsandkings.knk.core.ports.api.DomainCatalogQueryApi;
 import net.knightsandkings.knk.core.ports.api.StructuresQueryApi;
@@ -44,11 +45,19 @@ public class ManagedRegionsBootstrap {
     public ManagedRegionsBootstrap(JavaPlugin plugin, ManagedRegionsConfig config, TownsQueryApi towns,
                                    DistrictsQueryApi districts, StructuresQueryApi structures,
                                    DomainCatalogQueryApi domainCatalog) {
+        this(plugin, config, towns, districts, structures, domainCatalog, null);
+    }
+
+    /** @param arenas the arenas' battlegrounds and spectator areas (KNG-210); null leaves them out of the repair. */
+    public ManagedRegionsBootstrap(JavaPlugin plugin, ManagedRegionsConfig config, TownsQueryApi towns,
+                                   DistrictsQueryApi districts, StructuresQueryApi structures,
+                                   DomainCatalogQueryApi domainCatalog, ArenasApi arenas) {
         this.plugin = plugin;
         this.config = config;
         this.store = new WorldGuardManagedRegionStore(ManagedRegionsBootstrap::loadedManagers);
         this.reconciler = new ManagedRegionReconciler(new ManagedRegionPolicy(config.options()), config.overrides());
-        ManagedRegionSpecSource source = new ManagedRegionSpecSource(towns, districts, structures, domainCatalog, config.pageSize());
+        ManagedRegionSpecSource source = new ManagedRegionSpecSource(towns, districts, structures, domainCatalog, arenas,
+                config.pageSize());
         this.repairService = new ManagedRegionRepairService(source, reconciler, store, config.extraRegions(),
                 runnable -> Bukkit.getScheduler().runTask(plugin, runnable), LOGGER);
     }

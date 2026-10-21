@@ -370,7 +370,8 @@ public record KnkConfig(
         EntitySettings tags,
         EntitySettings domainCatalog,
         EntitySettings siege,
-        EntitySettings kits
+        EntitySettings kits,
+        EntitySettings arenas
     ) {
         public static EntityCacheSettings defaults() {
             return new EntityCacheSettings(
@@ -396,7 +397,10 @@ public record KnkConfig(
                 // siege runtime-config: refreshed explicitly between matches (Siege Phase 4), so a
                 // long TTL only bounds how old a cache-first read may be
                 new EntitySettings(30, null, 240, null, "CACHE_FIRST", true, 3, 200),
-                EntitySettings.defaults()  // kits
+                EntitySettings.defaults(), // kits
+                // arenas (KNG-210): refreshed when the settings may have changed (ArenasDataAccess), so the TTL only
+                // bounds how old a cache-first read may be
+                new EntitySettings(15, null, 240, null, "CACHE_FIRST", true, 3, 200)
             );
         }
     }

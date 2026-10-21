@@ -31,9 +31,14 @@ public enum ManagedRegionKind {
     GATE(30),
     /** v1 {@code room_N}: a sub-unit inside a house, so it sits above the structure tier. */
     ROOM(40),
-    /** v1 {@code arena_N} base region (no v3 domain entity: config-declared only). */
+    /** v1 {@code arena_N} base region -> v3 {@code Arena} (a Structure subtype, KNG-210; or config-declared). */
     ARENA(40),
-    /** v1 {@code arena_N-battleground...}: the PvP-allowed part of an arena; must beat the town's {@code pvp deny}. */
+    /** v3 {@code ArenaSpectatorArea} (KNG-210): a plain child of its Arena, no category flags. */
+    SPECTATOR_AREA(40),
+    /**
+     * v1 {@code arena_N-battleground...} -> v3 {@code ArenaBattleground} (KNG-210): the PvP-allowed part of an arena;
+     * must beat the town's {@code pvp deny}.
+     */
     BATTLEGROUND(50);
 
     private final int floorPriority;
@@ -55,6 +60,8 @@ public enum ManagedRegionKind {
     /**
      * The kind for a concrete v3 {@code Domain} subtype name (as the API reports it in {@code domainType}, any case).
      * Unknown Structure subtypes are plain {@link #STRUCTURE}s, never dropped: they still need their parent and priority.
+     * The arena types (KNG-210): {@code Arena} -> {@link #ARENA}, {@code ArenaBattleground} -> {@link #BATTLEGROUND},
+     * {@code ArenaSpectatorArea} -> {@link #SPECTATOR_AREA}.
      * Empty only for a null/blank name.
      */
     public static Optional<ManagedRegionKind> fromDomainType(String domainType) {
@@ -67,6 +74,9 @@ public enum ManagedRegionKind {
             case "GATE", "GATESTRUCTURE" -> GATE;
             case "HOUSE" -> HOUSE;
             case "PROPERTY", "RESOURCEPROPERTY" -> PROPERTY;
+            case "ARENA" -> ARENA;
+            case "ARENABATTLEGROUND", "BATTLEGROUND" -> BATTLEGROUND;
+            case "ARENASPECTATORAREA", "SPECTATORAREA" -> SPECTATOR_AREA;
             default -> STRUCTURE;
         });
     }
