@@ -304,6 +304,10 @@ public class KnKPlugin extends JavaPlugin {
     private SiegeService siegeService;
     /** Arena duels runtime (KNG-217); null when duels are off or couldn't start. */
     private net.knightsandkings.knk.paper.duel.DuelService duelService;
+    /** Arena duels negotiation UI (KNG-219): /duel, the proposal editor, offers, the kit picker; null when duels are off. */
+    private net.knightsandkings.knk.paper.duel.ui.DuelNegotiationUi duelUi;
+    /** /arena (KNG-219); P6's arena menu plugs in through {@code setMenu}. */
+    private net.knightsandkings.knk.paper.commands.ArenaCommand arenaCommand;
     /**
      * Every minigame's membership for the plugin-wide hooks (arena duels DESIGN §11). Created before the hooks that
      * read it; siege registers when its runtime starts, so until then (or without it) nobody is a member.
@@ -1059,6 +1063,7 @@ public class KnKPlugin extends JavaPlugin {
 
             initializeSiege();
             initializeDuels();
+            initializeDuelUi();
             initializeMinigameHooks();
 
             // Road navigation (KNG-27) Phase 3: the admin side (survey, build, review); Phase 4: /navigate.
@@ -1118,6 +1123,7 @@ public class KnKPlugin extends JavaPlugin {
         }
         // Arena duels (KNG-217): running matches are aborted and every duelist's gear and items come back while the
         // players exist; the coin refunds follow from abort-unfinished on the next start.
+        if (duelUi != null) duelUi.closeAll();
         if (duelService != null) {
             try {
                 duelService.shutdown();
@@ -2047,6 +2053,19 @@ public class KnKPlugin extends JavaPlugin {
                 knkAdminCommand.setSubcommandVisibleToAny("discovery",
                     java.util.List.of(net.knightsandkings.knk.paper.commands.DiscoveryAdminCommand.NODE)); // KNG-107
             }
+            // Arena duels (KNG-219): /knk duel list|cancel|refund|review, node knk.admin.duel. registerCommands() runs
+            // before initializeDuels(), so the runtime is read lazily; null means duels are off.
+            var duelAdmin = new net.knightsandkings.knk.paper.commands.DuelAdminCommand(
+                () -> duelService, () -> apiClient == null ? null : apiClient.getDuelMatchesApi(),
+                uuid -> cacheManager.getUserCache().getStale(uuid)
+                    .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null),
+                (sender, node) -> !(sender instanceof org.bukkit.entity.Player p)
+                    || (knkPermissible != null && knkPermissible.hasPermission(p, node)),
+                MenuService.mainThreadExecutor(this));
+            knkAdminCommand.registerSubcommand(
+                net.knightsandkings.knk.paper.commands.DuelAdminCommand.metadata(), duelAdmin::execute, duelAdmin::complete);
+            knkAdminCommand.setSubcommandVisibleToAny("duel",
+                java.util.List.of(net.knightsandkings.knk.paper.commands.DuelAdminCommand.NODE)); // KNG-107
             // Road navigation (KNG-27): /knk road …, node knk.admin.road. registerCommands() runs before
             // initializeRoads(), so every service is read lazily; a null one means navigation is disabled.
             var roadAdmin = new net.knightsandkings.knk.paper.roads.RoadAdminCommand(
@@ -3597,6 +3616,93 @@ public class KnKPlugin extends JavaPlugin {
     /** The arena duels runtime for the duel commands, menus and announcements (P5/P6); null when duels are off. */
     public net.knightsandkings.knk.paper.duel.DuelService getDuelService() {
         return duelService;
+    }
+
+    /**
+     * Arena duels negotiation UI (arena duels DESIGN §6, plan Phase 5, KNG-219): {@code /duel} and {@code /arena}
+     * (node {@code knk.duel}), the proposal editor, the offer view, the chat offers and their expiry warning, and the
+     * KIT_CHOICE picker, on top of {@link #getDuelService()}. The commands are registered even when duels are off,
+     * so they say so.
+     */
+    private void initializeDuelUi() {
+        java.util.function.Function<org.bukkit.entity.Player, java.util.Optional<net.knightsandkings.knk.core.domain.arenas.KnkArena>> arenaAt =
+            player -> {
+                if (arenasDataAccess == null || regionTracker == null) return java.util.Optional.empty();
+                java.util.Set<String> here = regionTracker.regionIds().at(player.getLocation());
+                String world = player.getWorld().getName();
+                return arenasDataAccess.cachedArenas().orElse(java.util.List.of()).stream()
+                    .filter(a -> a.wgRegionId() != null && here.contains(a.wgRegionId())
+                        && (a.worldName() == null || a.worldName().equalsIgnoreCase(world)))
+                    .findFirst();
+            };
+        this.arenaCommand = new net.knightsandkings.knk.paper.commands.ArenaCommand(() -> duelService,
+            () -> arenasDataAccess == null ? java.util.List.of() : arenasDataAccess.cachedArenas().orElse(java.util.List.of()),
+            arenaAt);
+        registerTabCommand("arena", arenaCommand);
+        registerTabCommand("duel", new net.knightsandkings.knk.paper.commands.DuelCommand(() -> duelUi, visiblePlayers));
+        if (duelService == null) return;
+        try {
+            var gui = net.knightsandkings.knk.paper.duel.ui.DuelGui.paper();
+            var config = duelService.config();
+            var teleporter = teleportService == null ? null
+                : net.knightsandkings.knk.paper.duel.DuelTeleporter.engine(teleportService);
+            var previews = kitsQueryApi == null ? null : new net.knightsandkings.knk.paper.duel.ui.DuelKitPreviews(
+                kitsQueryApi, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, gui, getLogger());
+            var ports = new net.knightsandkings.knk.paper.duel.ui.DuelNegotiationUi.Ports(
+                duelService,
+                apiClient.getDuelMatchesApi(),
+                net.knightsandkings.knk.paper.duel.DuelItems.paper(config.itemBlocklist(), config.refuseFilledContainers()),
+                arenaAt,
+                arenaId -> arenasDataAccess.refreshAsync().thenApply(r -> arenasDataAccess.cachedById(arenaId)),
+                (viewer, sender) -> ignoreService != null && ignoreService.ignores(viewer, sender),
+                net.knightsandkings.knk.paper.commands.support.VisiblePlayers::canSee,
+                org.bukkit.Bukkit::getPlayer,
+                uuid -> cacheManager.getUserCache().getStale(uuid)
+                    .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null),
+                uuid -> cacheManager.getUserCache().getStale(uuid)
+                    .map(u -> java.util.OptionalLong.of(u.coins())).orElse(java.util.OptionalLong.empty()),
+                teleporter == null ? null : (player, arena) -> net.knightsandkings.knk.paper.utils.KnkLocations
+                    .toLocation(arena.lobbyLocation())
+                    .map(lobby -> teleporter.checkLobby(player, lobby)
+                        .thenApply(denied -> denied.map(net.knightsandkings.knk.core.teleport.TeleportDenial::message)))
+                    .orElseGet(() -> java.util.concurrent.CompletableFuture.completedFuture(
+                        java.util.Optional.of("the arena has no lobby yet"))),
+                anvilCaptureManager == null ? (player, prompt, done, cancelled) -> {
+                    player.sendMessage(org.bukkit.ChatColor.RED + "Typing an amount isn't available; use the coin buttons.");
+                    cancelled.run();
+                } : anvilCaptureManager::startTextCapture,
+                gui,
+                previews,
+                new net.knightsandkings.knk.paper.duel.ui.DuelInviteToggles(new java.io.File(getDataFolder(), "duel-toggles.yml"), getLogger()),
+                MenuService.mainThreadExecutor(this),
+                task -> getServer().getScheduler().runTask(this, task),
+                getLogger());
+            this.duelUi = new net.knightsandkings.knk.paper.duel.ui.DuelNegotiationUi(ports);
+            if (previews != null) {
+                duelService.addObserver(new net.knightsandkings.knk.paper.duel.DuelObserver() {
+                    @Override
+                    public void phaseChanged(net.knightsandkings.knk.paper.duel.DuelMatch match,
+                                             net.knightsandkings.knk.core.duel.DuelPhase from,
+                                             net.knightsandkings.knk.core.duel.DuelPhase to) {
+                        if (to == net.knightsandkings.knk.core.duel.DuelPhase.TRAVELLING
+                            && match.gearMode() == net.knightsandkings.knk.core.duel.GearMode.KIT_CHOICE) {
+                            previews.warm(match.settings().eligibleKitIds());
+                        }
+                    }
+                });
+            }
+            getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.listeners.DuelMenuListener(duelUi), this);
+            getServer().getScheduler().runTaskTimer(this, duelUi::tick, 20L, 20L);
+            getLogger().info("Arena duels negotiation UI initialized");
+        } catch (Exception e) {
+            this.duelUi = null;
+            getLogger().log(java.util.logging.Level.SEVERE, "Arena duels UI failed to initialize; /duel stays off", e);
+        }
+    }
+
+    /** /arena for P6's arena menu ({@code ArenaCommand.setMenu}); null before startup registered it. */
+    public net.knightsandkings.knk.paper.commands.ArenaCommand getArenaCommand() {
+        return arenaCommand;
     }
 
     /** The siege gate controller (read-only use: locked gates, non-member carry rule); null when siege or gates didn't start. */

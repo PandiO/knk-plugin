@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.stream.Stream;
 
 import net.knightsandkings.knk.core.messaging.PrivateMessageNodes;
+import net.knightsandkings.knk.paper.commands.DuelCommand;
 import net.knightsandkings.knk.paper.commands.EnderchestCommand;
 import net.knightsandkings.knk.paper.commands.FlyCommand;
 import net.knightsandkings.knk.paper.commands.InventoryCommand;
@@ -57,6 +58,8 @@ public final class CommandNodes {
             Map.entry("kit", List.of("knk.kit.list", KitGrantFlow.GET_NODE, KitGrantFlow.GIVE_NODE, KitGrantFlow.PURCHASE_NODE,
                     "knk.kit.manage")),
             Map.entry("siegemenu", List.of(SiegeService.PERMISSION_PLAY)),
+            Map.entry("duel", List.of(DuelCommand.NODE)),
+            Map.entry("arena", List.of(DuelCommand.NODE)),
             Map.entry("freeze", List.of("knk.freeze")),
             Map.entry("unfreeze", List.of("knk.unfreeze")),
             Map.entry("staffchat", List.of("knk.staffchat")));
