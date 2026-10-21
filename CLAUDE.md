@@ -50,6 +50,13 @@ installed (a JDK 25 Gradle doesn't detect can be passed with
   replacing a domain's previous region when its region step is re-run (KNG-103), are decided by
   `knk-core/.../core/regions/RegionRenamePlan` and applied by `regions/WorldGuardRegionRenamer`;
   see `docs/architecture/managed-worldguard-regions.md` in `knk-workspace`
+- Minigame hooks shared by siege and duels: the `MinigameParticipation` port and
+  `MinigameRegistry` in `knk-core/.../core/minigame/`; `MinigamePlayerVault` and
+  `MinigameTeleportRestriction` in `minigame/`; the `DomainAccessExemptions` port in
+  `knk-core/.../core/regions/access/`
+- Arena duels: pure rules in `knk-core/.../core/duel/` (views in `core/duel/view/`), runtime in
+  `duel/`, negotiation UI in `duel/ui/`, menus in `menu/content/DuelMenuFeature` and `DuelMenus`;
+  see `docs/specs/arena-duels/` and `docs/guides/arena-duels.md` in `knk-workspace`
 - Config: `src/main/resources/config.yml`, `plugin.yml`
 - Inventory menu runtime lives in `knk-paper/.../paper/menu/`, with feature
   implementations in `menu/content/` and reusable logic in `knk-core`.
