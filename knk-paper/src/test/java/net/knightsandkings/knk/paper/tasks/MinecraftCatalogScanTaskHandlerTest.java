@@ -2,6 +2,7 @@ package net.knightsandkings.knk.paper.tasks;
 
 import net.knightsandkings.knk.api.dto.MinecraftCatalogSnapshotDto;
 import net.knightsandkings.knk.api.dto.WorldTaskDto;
+import net.knightsandkings.knk.core.catalog.CatalogEnchantment;
 import net.knightsandkings.knk.core.catalog.CatalogEntry;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.MinecraftCatalogApi;
@@ -26,7 +27,8 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
- * KNG-200: the catalogue scan handler sends the snapshot and completes or fails its WorldTask, calling
+ * KNG-200/KNG-250: the catalogue scan handler sends the schema-2 snapshot (materials and enchantments) and
+ * completes or fails its WorldTask, calling
  * onFinished once on every path. Runs on a fake {@link CatalogSource} and same-thread executors, so no
  * server is needed.
  */
@@ -35,6 +37,10 @@ class MinecraftCatalogScanTaskHandlerTest {
         "block.minecraft.stone", "Stone", "minecraft:stone");
     private static final CatalogEntry APPLE = new CatalogEntry("minecraft:apple", true, false, 64,
         "item.minecraft.apple", null, null);
+    private static final CatalogEnchantment SHARPNESS = new CatalogEnchantment("minecraft:sharpness", false, 5,
+        "enchantment.minecraft.sharpness", "Sharpness", null);
+    private static final CatalogEnchantment FLASH_CHAOS = new CatalogEnchantment("knk:flash_chaos", true, 1,
+        null, "Flash Chaos", "SUPPORT");
 
     private MinecraftCatalogApi catalogApi;
     private WorldTasksApi worldTasksApi;
@@ -49,6 +55,8 @@ class MinecraftCatalogScanTaskHandlerTest {
         source = new FakeSource();
         source.candidates.add(new FakeCandidate(STONE, false, false));
         source.candidates.add(new FakeCandidate(APPLE, false, false));
+        source.registryEnchantments.add(SHARPNESS);
+        source.customEnchantments.add(FLASH_CHAOS);
         handler = new MinecraftCatalogScanTaskHandler(catalogApi, worldTasksApi, source, Runnable::run, Runnable::run);
 
         when(worldTasksApi.fail(anyInt(), anyString())).thenReturn(CompletableFuture.completedFuture(null));
@@ -90,14 +98,16 @@ class MinecraftCatalogScanTaskHandlerTest {
 
         ArgumentCaptor<MinecraftCatalogSnapshotDto> snapshot = ArgumentCaptor.forClass(MinecraftCatalogSnapshotDto.class);
         verify(catalogApi).putSnapshot(eq(12), snapshot.capture());
-        assertEquals(1, snapshot.getValue().schemaVersion());
-        assertEquals("1.21.10", snapshot.getValue().minecraftVersion());
+        assertEquals(2, snapshot.getValue().schemaVersion());
+        assertEquals("26.3", snapshot.getValue().minecraftVersion());
         assertEquals("Paper test", snapshot.getValue().serverVersion());
-        assertEquals("86979e0606b8c36d782bf7bc0100dc2d3559aa53d714900419f0850431d5fb12", snapshot.getValue().contentHash());
+        assertEquals("ab2c65626e6508eb4c169dabefda5ef7570f94c8d966f31adecc624dfe823154", snapshot.getValue().contentHash());
         assertEquals(List.of("minecraft:apple", "minecraft:stone"),
             snapshot.getValue().entries().stream().map(e -> e.key()).toList());
+        assertEquals(List.of("knk:flash_chaos", "minecraft:sharpness"),
+            snapshot.getValue().enchantments().stream().map(e -> e.key()).toList());
 
-        verify(worldTasksApi).complete(7, "{\"scanId\":12,\"entryCount\":2}");
+        verify(worldTasksApi).complete(7, "{\"scanId\":12,\"entryCount\":2,\"enchantmentCount\":2}");
         verify(worldTasksApi, never()).fail(anyInt(), anyString());
         assertEquals(1, finished.get());
     }
@@ -115,7 +125,62 @@ class MinecraftCatalogScanTaskHandlerTest {
         }
 
         handler.execute(task("{\"scanId\":12}"), finished::incrementAndGet);
-        verify(worldTasksApi).complete(7, "{\"scanId\":12,\"entryCount\":2}");
+        verify(worldTasksApi).complete(7, "{\"scanId\":12,\"entryCount\":2,\"enchantmentCount\":2}");
+    }
+
+    @Test
+    void noEnchantments_stillSendsTheSnapshot_withTheEmptyListHash() {
+        source.registryEnchantments.clear();
+        source.customEnchantments.clear();
+
+        handler.execute(task("{\"scanId\":12}"), finished::incrementAndGet);
+
+        ArgumentCaptor<MinecraftCatalogSnapshotDto> snapshot = ArgumentCaptor.forClass(MinecraftCatalogSnapshotDto.class);
+        verify(catalogApi).putSnapshot(eq(12), snapshot.capture());
+        assertEquals(List.of(), snapshot.getValue().enchantments());
+        assertEquals("9846ad62d84d42d5a05e0cbac900ab6f671bf3bb0dd7c1bb5961aa2316f63c3e", snapshot.getValue().contentHash());
+        verify(worldTasksApi).complete(7, "{\"scanId\":12,\"entryCount\":2,\"enchantmentCount\":0}");
+        assertEquals(1, finished.get());
+    }
+
+    @Test
+    void aCustomEnchantmentCollidingWithARegistryKey_isLeftOut() {
+        source.customEnchantments.add(new CatalogEnchantment("minecraft:sharpness", true, 9, null, "Fake", "ATTACK"));
+
+        handler.execute(task("{\"scanId\":12}"), finished::incrementAndGet);
+
+        ArgumentCaptor<MinecraftCatalogSnapshotDto> snapshot = ArgumentCaptor.forClass(MinecraftCatalogSnapshotDto.class);
+        verify(catalogApi).putSnapshot(eq(12), snapshot.capture());
+        assertEquals("ab2c65626e6508eb4c169dabefda5ef7570f94c8d966f31adecc624dfe823154", snapshot.getValue().contentHash());
+        assertFalse(snapshot.getValue().enchantments().stream().anyMatch(e -> e.isCustom() && e.key().equals("minecraft:sharpness")));
+        verify(worldTasksApi).complete(7, "{\"scanId\":12,\"entryCount\":2,\"enchantmentCount\":2}");
+    }
+
+    @Test
+    void theDefaultCustomEnchantments_comeFromTheKnkRegistry() {
+        CatalogSource defaults = new CatalogSource() {
+            public String minecraftVersion() { return "26.3"; }
+            public String serverVersion() { return "Paper test"; }
+            public List<Candidate> candidates() { return List.of(); }
+            public List<CatalogEnchantment> registryEnchantments() { return List.of(SHARPNESS); }
+        };
+
+        List<CatalogEnchantment> enchantments = defaults.enchantments();
+
+        assertEquals(13, enchantments.size());
+        assertEquals(SHARPNESS, enchantments.get(0));
+        assertTrue(enchantments.contains(FLASH_CHAOS));
+    }
+
+    @Test
+    void anEnchantmentReaderError_failsTheTask_withoutSending() {
+        source.enchantmentError = new IllegalStateException("enchantment registry not ready");
+
+        handler.execute(task("{\"scanId\":12}"), finished::incrementAndGet);
+
+        verify(worldTasksApi).fail(eq(7), contains("enchantment registry not ready"));
+        verifyNoInteractions(catalogApi);
+        assertEquals(1, finished.get());
     }
 
     @Test
@@ -193,10 +258,13 @@ class MinecraftCatalogScanTaskHandlerTest {
 
     private static final class FakeSource implements CatalogSource {
         final List<Candidate> candidates = new ArrayList<>();
+        final List<CatalogEnchantment> registryEnchantments = new ArrayList<>();
+        final List<CatalogEnchantment> customEnchantments = new ArrayList<>();
+        RuntimeException enchantmentError;
 
         @Override
         public String minecraftVersion() {
-            return "1.21.10";
+            return "26.3";
         }
 
         @Override
@@ -207,6 +275,19 @@ class MinecraftCatalogScanTaskHandlerTest {
         @Override
         public List<Candidate> candidates() {
             return candidates;
+        }
+
+        @Override
+        public List<CatalogEnchantment> registryEnchantments() {
+            if (enchantmentError != null) {
+                throw enchantmentError;
+            }
+            return registryEnchantments;
+        }
+
+        @Override
+        public List<CatalogEnchantment> customEnchantments() {
+            return customEnchantments;
         }
     }
 
