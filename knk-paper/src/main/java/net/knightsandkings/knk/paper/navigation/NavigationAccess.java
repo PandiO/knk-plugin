@@ -14,6 +14,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 
+import net.knightsandkings.knk.core.domain.gates.AnimationState;
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.domain.roads.RoadEdge;
 import net.knightsandkings.knk.core.gates.GateManager;
@@ -154,6 +155,13 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
                 continue;
             }
             boolean locked = siege != null && siege.isLocked(door.getGateStructureId());
+            if (locked && siege.isLockdownMember(player, door.getGateStructureId())) {
+                // KNG-234: a match member's route (the navigation compass) goes through the siege's gates as if open:
+                // taking or holding them is the match, and the route must not stop at the first closed gate.
+                gates.put(doorId, new GateView(doorId, gateName(door), AnimationState.OPEN, false, false, true, false, false));
+                passable.put(doorId, true);
+                continue;
+            }
             boolean carries = locked && siege.canCarryNonMember(door);
             gates.put(doorId, new GateView(doorId, gateName(door), door.getCurrentState(), door.isJammed(),
                 door.isEffectivelyDestroyed(), door.isEffectivelyAllowPassThrough(), locked, carries));

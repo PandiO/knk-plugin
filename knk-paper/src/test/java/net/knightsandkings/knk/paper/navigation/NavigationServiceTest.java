@@ -675,6 +675,32 @@ class NavigationServiceTest {
     }
 
     @Test
+    void aLobbyChangeBeforeTheMatchRunsEndsTheMembersSession() {
+        service.navigate(player, cinixKeep());
+        var lobby = org.mockito.Mockito.mock(net.knightsandkings.knk.paper.siege.SiegeLobbyRuntime.class);
+        org.mockito.Mockito.when(lobby.isMember(playerId)).thenReturn(true);
+        org.mockito.Mockito.when(lobby.phase()).thenReturn(net.knightsandkings.knk.core.siege.SiegePhase.HUB);
+
+        service.lobbyChanged(lobby);
+
+        assertFalse(service.isNavigating(playerId));
+        assertEquals(EndReason.SIEGE, ((NavigationEndEvent) events.get(events.size() - 1)).getReason());
+    }
+
+    @Test
+    void aLobbyChangeInARunningMatchKeepsTheCompassRoute() {
+        // KNG-234: a vote or someone leaving fires lobbyChanged in the middle of a match
+        service.navigate(player, cinixKeep());
+        var lobby = org.mockito.Mockito.mock(net.knightsandkings.knk.paper.siege.SiegeLobbyRuntime.class);
+        org.mockito.Mockito.when(lobby.isMember(playerId)).thenReturn(true);
+        org.mockito.Mockito.when(lobby.phase()).thenReturn(net.knightsandkings.knk.core.siege.SiegePhase.IN_PROGRESS);
+
+        service.lobbyChanged(lobby);
+
+        assertTrue(service.isNavigating(playerId));
+    }
+
+    @Test
     void aLongTeleportEndsTheSessionButAShortOneDoesNot() {
         service.navigate(player, cinixKeep());
 

@@ -151,6 +151,7 @@ public class KnkApiClient {
     private final net.knightsandkings.knk.core.ports.api.LootboxesCommandApi lootboxesCommandApi;
     private final CurrencyApi currencyApi;
     private final RoadNetworkQueryApi roadNetworkQueryApi;
+    private final net.knightsandkings.knk.core.ports.api.NavigationCompassSettingsApi navigationCompassSettingsApi;
     private final RoadNetworkCommandApi roadNetworkCommandApi;
     private final net.knightsandkings.knk.core.ports.api.LocationRetentionApi locationRetentionApi;
 
@@ -224,6 +225,7 @@ public class KnkApiClient {
         this.lootboxesQueryApi = new net.knightsandkings.knk.api.impl.LootboxesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.lootboxesCommandApi = new net.knightsandkings.knk.api.impl.LootboxesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.roadNetworkQueryApi = new RoadNetworkQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.navigationCompassSettingsApi = new net.knightsandkings.knk.api.impl.NavigationCompassSettingsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.roadNetworkCommandApi = new RoadNetworkCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.locationRetentionApi = new net.knightsandkings.knk.api.impl.LocationRetentionApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
     }
@@ -376,6 +378,11 @@ public class KnkApiClient {
     /** Road navigation reads (KNG-27): tiles, conditional tile graphs, meta, profiles, surveys, seeds, edge search. */
     public RoadNetworkQueryApi getRoadNetworkQueryApi() {
         return roadNetworkQueryApi;
+    }
+
+    /** The navigation compass item rule and where it works (KNG-234). */
+    public net.knightsandkings.knk.core.ports.api.NavigationCompassSettingsApi getNavigationCompassSettingsApi() {
+        return navigationCompassSettingsApi;
     }
 
     /** Road navigation writes (KNG-27): build upload, dirty marks, profiles, surveys, seeds, node/edge review. */

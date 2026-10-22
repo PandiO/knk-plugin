@@ -418,6 +418,12 @@ public final class NavigationService implements SiegeMatchObserver {
         return active.containsKey(playerId);
     }
 
+    /** The display name of the player's current destination, or null without a session. */
+    public String destinationName(UUID playerId) {
+        Active a = active.get(playerId);
+        return a == null ? null : a.destination.name();
+    }
+
     public int activeCount() {
         return active.size();
     }
@@ -1812,6 +1818,11 @@ public final class NavigationService implements SiegeMatchObserver {
 
     @Override
     public void lobbyChanged(SiegeLobbyRuntime lobby) {
+        // KNG-234: a member of a running match navigates with the compass; every lobby change in the middle of a
+        // match (a vote, someone leaving) must not end their route. The eligibility re-check ends it once the match is over.
+        if (lobby.phase() == net.knightsandkings.knk.core.siege.SiegePhase.IN_PROGRESS) {
+            return;
+        }
         for (Active a : new ArrayList<>(active.values())) {
             if (lobby.isMember(a.player.getUniqueId())) {
                 end(a, EndReason.SIEGE);

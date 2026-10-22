@@ -1,0 +1,257 @@
+package net.knightsandkings.knk.paper.navigation;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.OptionalInt;
+import java.util.UUID;
+import java.util.concurrent.Executor;
+import java.util.function.BiPredicate;
+import java.util.function.Supplier;
+
+import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+
+import net.knightsandkings.knk.core.domain.location.KnkLocation;
+import net.knightsandkings.knk.core.navigation.compass.CompassCycle;
+import net.knightsandkings.knk.core.navigation.compass.CompassSettings;
+import net.knightsandkings.knk.core.navigation.compass.CompassUse;
+import net.knightsandkings.knk.core.siege.SiegeCompassTargets;
+import net.knightsandkings.knk.core.siege.SiegeCompassTargets.Target;
+import net.knightsandkings.knk.paper.navigation.NavigationDestinations.Located;
+import net.knightsandkings.knk.paper.navigation.NavigationDestinations.Resolution;
+import net.knightsandkings.knk.paper.siege.SiegeMatch;
+import net.knightsandkings.knk.paper.siege.SiegeService;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+
+/**
+ * The navigation compass (KNG-234): a right-click cycles through the places that matter to the player and
+ * navigates to the chosen one (the {@code /navigate} machinery, {@link NavigationService#navigate}); a
+ * shift-click switches navigation off, and on again to the last target.
+ *
+ * <ul>
+ *   <li><b>In a running siege match</b> the list is {@link SiegeCompassTargets}: the player's own objectives
+ *       (defenders) or the ones to capture (attackers), objectives under attack first, then the team spawn.</li>
+ *   <li><b>Elsewhere</b> it is the destinations the web app lists under the compass settings, in that order,
+ *       when the compass is enabled outside sieges.</li>
+ * </ul>
+ *
+ * Which item is a compass is not coded here: {@link #isCompass} asks the settings' material and display-name
+ * rule, so any item an admin hands out with those properties works at once. Main thread only.
+ */
+public final class NavigationCompassService {
+
+    /** Ignore a second click this soon after the last (a client can send one click twice). */
+    static final long CLICK_COOLDOWN_MILLIS = 250;
+
+    /** One line of the cycle: a stable key, what to call it, what to tell about it, where it leads. */
+    private record Entry(String key, String label, String detail, Destination destination, NavTarget lookup,
+                         NavigationDestinations.Mode mode) {
+        static Entry ofDestination(String key, String label, String detail, Destination destination) {
+            return new Entry(key, label, detail, destination, null, null);
+        }
+
+        static Entry ofLookup(String key, String label, NavTarget lookup, NavigationDestinations.Mode mode) {
+            return new Entry(key, label, null, null, lookup, mode);
+        }
+    }
+
+    /** What a player chose last, and in which situation (a different one starts the cycle afresh). */
+    private record Last(String situation, String key, Destination destination) {
+    }
+
+    private final Supplier<CompassSettings> settings;
+    private final Supplier<NavigationService> navigation;
+    private final Supplier<NavigationDestinations> catalogue;
+    private final Supplier<SiegeService> siege;
+    private final BiPredicate<Player, String> knkPermission;
+    private final Executor mainThread;
+    private final java.util.function.LongSupplier clock;
+
+    private final Map<UUID, Last> last = new HashMap<>();
+    private final Map<UUID, Long> lastClick = new HashMap<>();
+
+    public NavigationCompassService(Supplier<CompassSettings> settings, Supplier<NavigationService> navigation,
+                                    Supplier<NavigationDestinations> catalogue, Supplier<SiegeService> siege,
+                                    BiPredicate<Player, String> knkPermission, Executor mainThread,
+                                    java.util.function.LongSupplier clock) {
+        this.settings = Objects.requireNonNull(settings, "settings");
+        this.navigation = Objects.requireNonNull(navigation, "navigation");
+        this.catalogue = Objects.requireNonNull(catalogue, "catalogue");
+        this.siege = Objects.requireNonNull(siege, "siege");
+        this.knkPermission = knkPermission;
+        this.mainThread = Objects.requireNonNull(mainThread, "mainThread");
+        this.clock = Objects.requireNonNull(clock, "clock");
+    }
+
+    // ==================== the item ====================
+
+    /** Whether {@code item} is a navigation compass under the current settings (material + display name). */
+    public boolean isCompass(ItemStack item) {
+        if (item == null) {
+            return false;
+        }
+        return isCompass(item.getType().name(), displayNameOf(item));
+    }
+
+    /** As {@link #isCompass(ItemStack)} for an item's material name and display name (the display name may be null). */
+    public boolean isCompass(String material, String displayName) {
+        return settings.get().item().matches(material, displayName);
+    }
+
+    private static String displayNameOf(ItemStack item) {
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null || !meta.hasDisplayName()) {
+            return null;
+        }
+        return LegacyComponentSerializer.legacySection().serialize(meta.displayName());
+    }
+
+    // ==================== a click ====================
+
+    /**
+     * A click with a compass in hand. Returns false when the compass does nothing for this player right now
+     * (so the caller leaves the event alone), true when it handled the click.
+     */
+    public boolean use(Player player, boolean sneaking) {
+        NavigationService nav = navigation.get();
+        NavigationDestinations destinations = catalogue.get();
+        if (nav == null || destinations == null) {
+            player.sendMessage(CompassMessages.unavailable());
+            return true;
+        }
+        if (!hasNode(player)) {
+            player.sendMessage(CompassMessages.noPermission());
+            return true;
+        }
+        long now = clock.getAsLong();
+        Long previous = lastClick.put(player.getUniqueId(), now);
+        if (previous != null && now - previous < CLICK_COOLDOWN_MILLIS) {
+            return true;
+        }
+
+        CompassSettings config = settings.get();
+        SiegeService siegeService = siege.get();
+        SiegeMatch match = siegeService == null ? null : siegeService.runningMatchOf(player.getUniqueId()).orElse(null);
+        String situation;
+        List<Entry> entries;
+        if (match != null) {
+            if (!config.siegeEnabled()) {
+                player.sendMessage(CompassMessages.disabledInSiege());
+                return true;
+            }
+            situation = "siege:" + match.matchToken();
+            entries = siegeEntries(player, match);
+        } else if (siegeService != null && siegeService.lobbyOf(player.getUniqueId()).isPresent()) {
+            player.sendMessage(CompassMessages.waitForMatch());
+            return true;
+        } else if (config.generalEnabled()) {
+            situation = "general";
+            entries = generalEntries(player, config, destinations);
+        } else {
+            player.sendMessage(CompassMessages.disabledHere());
+            return true;
+        }
+
+        Last chosen = last.get(player.getUniqueId());
+        if (chosen != null && !chosen.situation().equals(situation)) {
+            last.remove(player.getUniqueId());
+            chosen = null;
+        }
+        switch (CompassUse.onClick(sneaking, nav.isNavigating(player.getUniqueId()), chosen != null)) {
+            case STOP -> {
+                if (!nav.stop(player)) {
+                    player.sendMessage(NavigationMessages.notNavigating());
+                }
+            }
+            case RESUME -> nav.navigate(player, chosen.destination());
+            case CYCLE -> cycle(player, nav, destinations, situation, entries, chosen);
+        }
+        return true;
+    }
+
+    private void cycle(Player player, NavigationService nav, NavigationDestinations destinations, String situation,
+                       List<Entry> entries, Last chosen) {
+        if (entries.isEmpty()) {
+            player.sendMessage(CompassMessages.disabledHere());
+            return;
+        }
+        List<String> keys = entries.stream().map(Entry::key).toList();
+        int index = CompassCycle.next(keys, chosen == null ? null : chosen.key());
+        Entry entry = entries.get(index);
+        player.sendMessage(CompassMessages.selected(index + 1, entries.size(), entry.label(), entry.detail()));
+        if (entry.destination() != null) {
+            go(player, nav, situation, entry.key(), entry.destination());
+            return;
+        }
+        destinations.locate(entry.lookup(), entry.mode(), player.getWorld().getName())
+            .whenComplete((located, error) -> mainThread.execute(() -> {
+                if (error != null || located == null || !located.ok()) {
+                    player.sendMessage(located == null || located.failure() == null
+                        ? NavigationMessages.unknownDestination(entry.label())
+                        : failure(located, entry.label()));
+                    return;
+                }
+                if (player.isOnline()) {
+                    go(player, nav, situation, entry.key(), located.destination());
+                }
+            }));
+    }
+
+    private static net.kyori.adventure.text.Component failure(Located located, String name) {
+        return switch (located.failure()) {
+            case OTHER_WORLD -> NavigationMessages.otherWorld(name);
+            case NO_LOCATION -> NavigationMessages.noLocation(name);
+            case NOT_FOUND -> NavigationMessages.unknownDestination(name);
+        };
+    }
+
+    private void go(Player player, NavigationService nav, String situation, String key, Destination destination) {
+        last.put(player.getUniqueId(), new Last(situation, key, destination));
+        nav.navigate(player, destination);
+    }
+
+    // ==================== the lists ====================
+
+    private List<Entry> siegeEntries(Player player, SiegeMatch match) {
+        OptionalInt team = match.roster().teamOf(player.getUniqueId());
+        if (team.isEmpty()) {
+            return List.of();
+        }
+        List<Entry> out = new ArrayList<>();
+        for (Target target : SiegeCompassTargets.forTeam(match.scenario(), match.board(), match.alliances(), team.getAsInt())) {
+            KnkLocation at = target.location();
+            out.add(Entry.ofDestination(target.key(), target.label(), CompassMessages.siegeDetail(target),
+                Destination.point(target.label(), at.world(), at.x(), at.y(), at.z())));
+        }
+        return out;
+    }
+
+    private List<Entry> generalEntries(Player player, CompassSettings config, NavigationDestinations destinations) {
+        String world = player.getWorld().getName();
+        List<Entry> out = new ArrayList<>();
+        for (String text : config.generalTargets()) {
+            NavigateCommand.Parsed parsed = NavigateCommand.parse(text.split("\\s+"));
+            Resolution resolution = destinations.resolve(parsed.destination(), world);
+            if (resolution.found()) {
+                out.add(Entry.ofLookup(text, resolution.target().name(), resolution.target(), parsed.mode()));
+            }
+        }
+        return out;
+    }
+
+    // ==================== housekeeping ====================
+
+    /** Forget a player's choice (quit). */
+    public void forget(UUID playerId) {
+        last.remove(playerId);
+        lastClick.remove(playerId);
+    }
+
+    private boolean hasNode(Player player) {
+        return player.hasPermission(NavigateCommand.NODE) || (knkPermission != null && knkPermission.test(player, NavigateCommand.NODE));
+    }
+}
