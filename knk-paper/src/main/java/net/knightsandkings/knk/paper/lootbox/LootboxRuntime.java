@@ -60,7 +60,7 @@ public final class LootboxRuntime {
         stop();
         long refreshTicks = settings.runtimeRefreshSeconds() * 20L;
         tasks.add(Bukkit.getScheduler().runTaskTimer(plugin, () -> refresh(), 20L, refreshTicks));
-        tasks.add(Bukkit.getScheduler().runTaskTimer(plugin, () -> tick(), 20L, 20L));
+        tasks.add(Bukkit.getScheduler().runTaskTimer(plugin, net.knightsandkings.knk.core.metrics.PluginMetrics.timed("lootbox.tick", () -> tick()), 20L, 20L));
     }
 
     public void stop() {

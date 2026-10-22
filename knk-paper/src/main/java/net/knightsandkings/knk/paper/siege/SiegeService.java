@@ -252,7 +252,7 @@ public final class SiegeService {
                     if (shuttingDown) return;
                     onRuntimeConfig(result, error, true);
                 }));
-        ticker = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 20L, 20L);
+        ticker = Bukkit.getScheduler().runTaskTimer(plugin, net.knightsandkings.knk.core.metrics.PluginMetrics.timed("siege.tick", this::tick), 20L, 20L);
         logger.info("[Siege] Runtime started (1 s ticker); fetching runtime config");
     }
 

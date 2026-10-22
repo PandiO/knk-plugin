@@ -401,7 +401,7 @@ public final class NavigationService implements SiegeMatchObserver {
     /** Starts the per-tick guidance (R27 shape). */
     public void start() {
         if (deps.plugin() != null && ticker == null) {
-            ticker = Bukkit.getScheduler().runTaskTimer(deps.plugin(), this::tickAll, 1L, 1L);
+            ticker = Bukkit.getScheduler().runTaskTimer(deps.plugin(), net.knightsandkings.knk.core.metrics.PluginMetrics.timed("navigation.tick", this::tickAll), 1L, 1L);
         }
     }
 

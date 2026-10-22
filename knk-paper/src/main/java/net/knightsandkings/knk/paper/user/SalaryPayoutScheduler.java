@@ -91,7 +91,7 @@ public class SalaryPayoutScheduler implements Listener {
             LOGGER.warning("SalaryPayoutScheduler not started: no UsersCommandApi");
             return;
         }
-        task = Bukkit.getScheduler().runTaskTimer(plugin, this::checkOnlinePlayers, CHECK_INTERVAL_TICKS, CHECK_INTERVAL_TICKS);
+        task = Bukkit.getScheduler().runTaskTimer(plugin, net.knightsandkings.knk.core.metrics.PluginMetrics.timed("salary.check", this::checkOnlinePlayers), CHECK_INTERVAL_TICKS, CHECK_INTERVAL_TICKS);
     }
 
     public void stop() {

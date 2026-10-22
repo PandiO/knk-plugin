@@ -69,6 +69,22 @@ region-http:
   # Port to listen on (the API's region callback URL must use the same port).
   port: 8081
 
+# Performance metrics (KNG-232): a Prometheus /metrics endpoint with TPS, tick time, players, chunks/entities per
+# world, JVM heap/off-heap/GC, process CPU and RSS, the container's memory and CPU (cgroup), API-call and task
+# durations. For sizing the server and building scaling curves - see knk-workspace
+# docs/guides/performance-metrics-and-capacity.md. Off by default; it never touches Bukkit from the HTTP thread.
+metrics:
+  enabled: false
+  # 127.0.0.1 only accepts a scraper on this host. For Prometheus in another container use the Docker
+  # host/bridge IP and set a token; never 0.0.0.0 on a public server.
+  bind-address: "127.0.0.1"
+  port: 9225
+  # Bearer token the scraper sends (Authorization: Bearer <token>). Required when bind-address is not
+  # loopback; plugin start refuses otherwise. e.g. `openssl rand -hex 32`.
+  token: ""
+  # How often the main thread samples TPS/tick time/chunks/entities (1-60)
+  sample-seconds: 5
+
 # Public web app, used in player messages (e.g. where to enter a /account link code).
 web:
   # Base URL without a trailing slash, e.g. "https://app.knightsandkings.net". Empty: messages
