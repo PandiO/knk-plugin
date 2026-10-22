@@ -246,6 +246,16 @@ public final class SiegeGateController implements SiegeMatchObserver {
         return lockdown.plan.canDamage(gateStructureId, team, lockdown.alliances);
     }
 
+    /**
+     * Is this player a defender of the locked gate - a member whose team is in the alliance of the gate's
+     * current owner? False for attackers, non-members, area gates (no owner) and gates no lockdown holds.
+     */
+    public boolean isDefender(Player player, int gateStructureId) {
+        Lockdown lockdown = byGate.get(gateStructureId);
+        if (lockdown == null) return false;
+        return lockdown.plan.isDefender(gateStructureId, teamOf(lockdown, player), lockdown.alliances);
+    }
+
     /** Phase 7b: every door of every applied lockdown (main thread). */
     public List<LockedDoor> lockedDoors() {
         List<LockedDoor> doors = new ArrayList<>();

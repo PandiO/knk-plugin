@@ -11,7 +11,8 @@ import org.bukkit.event.HandlerList;
  * Fired when a player, entity, projectile, or explosion hits a closed, active, non-destroyed
  * gate's door block, as resolved by GateDoorHitService. Deliberately carries no damage amount -
  * detection and the amount to apply are kept separate; see GateDamageConsequenceListener, which
- * owns the per-Cause damage amount and calls HealthSystem.applyDamage.
+ * owns the per-Cause damage amount and calls HealthSystem.applyDamage. The one exception is a source
+ * that has a damage figure of its own (an area enchantment): it passes it as {@link #getDamage()}.
  */
 public class GateDoorDamageEvent extends Event implements Cancellable {
     private static final HandlerList HANDLERS = new HandlerList();
@@ -20,20 +21,29 @@ public class GateDoorDamageEvent extends Event implements Cancellable {
         LEFT_CLICK,
         PROJECTILE,
         EXPLOSION,
-        BLOCK_BREAK
+        BLOCK_BREAK,
+        /** An area custom enchantment (chaos, flash_chaos) that reached the door; it brings its own damage. */
+        ENCHANTMENT
     }
 
     private final CachedGateDoor gate;
     private final Cause cause;
     private final Entity causingEntity;
     private final Block hitBlock;
+    private final Double damage;
     private boolean cancelled;
 
     public GateDoorDamageEvent(CachedGateDoor gate, Cause cause, Entity causingEntity, Block hitBlock) {
+        this(gate, cause, causingEntity, hitBlock, null);
+    }
+
+    /** @param damage the damage the source dealt itself, or null to use the consequence listener's amount for the cause */
+    public GateDoorDamageEvent(CachedGateDoor gate, Cause cause, Entity causingEntity, Block hitBlock, Double damage) {
         this.gate = gate;
         this.cause = cause;
         this.causingEntity = causingEntity;
         this.hitBlock = hitBlock;
+        this.damage = damage;
     }
 
     public CachedGateDoor getGate() {
@@ -54,6 +64,14 @@ public class GateDoorDamageEvent extends Event implements Cancellable {
 
     public Block getHitBlock() {
         return hitBlock;
+    }
+
+    /**
+     * The damage the source brought along (an enchantment's own damage), or null when the amount for the
+     * cause is the consequence listener's to pick.
+     */
+    public Double getDamage() {
+        return damage;
     }
 
     @Override

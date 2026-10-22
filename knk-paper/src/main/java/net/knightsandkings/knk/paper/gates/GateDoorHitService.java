@@ -9,6 +9,7 @@ import net.knightsandkings.knk.paper.events.GateDoorInteractEvent;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 
@@ -62,12 +63,21 @@ public class GateDoorHitService {
      * Returns the fired event, or null if the gate doesn't qualify.
      */
     public GateDoorDamageEvent handleDamage(CachedGateDoor gate, Entity causingEntity, Block hitBlock, GateDoorDamageEvent.Cause cause) {
+        return handleDamage(gate, causingEntity, hitBlock, cause, null);
+    }
+
+    /**
+     * As {@link #handleDamage(CachedGateDoor, Entity, Block, GateDoorDamageEvent.Cause)}, for a source that
+     * deals a damage figure of its own (an area enchantment); null keeps the amount for the cause.
+     */
+    public GateDoorDamageEvent handleDamage(CachedGateDoor gate, Entity causingEntity, Block hitBlock,
+                                            GateDoorDamageEvent.Cause cause, Double damage) {
         if (gate == null || gate.getCurrentState() != AnimationState.CLOSED || !gate.isEffectivelyActive() || gate.isEffectivelyDestroyed()
             || !isSurvivalOrNonPlayer(causingEntity)) {
             return null;
         }
 
-        GateDoorDamageEvent event = new GateDoorDamageEvent(gate, cause, causingEntity, hitBlock);
+        GateDoorDamageEvent event = new GateDoorDamageEvent(gate, cause, causingEntity, hitBlock, damage);
         Bukkit.getPluginManager().callEvent(event);
         return event;
     }
@@ -80,12 +90,18 @@ public class GateDoorHitService {
      * while CLOSED. Returns the fired event, or null if the gate doesn't qualify.
      */
     public GateDoorIgniteEvent handleIgnite(CachedGateDoor gate, Entity causingEntity, Block hitBlock, GateDoorIgniteEvent.Cause cause) {
+        return handleIgnite(gate, causingEntity, hitBlock, cause, null);
+    }
+
+    /** As above; {@code hitFace} is the side of {@code hitBlock} the ignition came from (null when unknown). */
+    public GateDoorIgniteEvent handleIgnite(CachedGateDoor gate, Entity causingEntity, Block hitBlock,
+                                            GateDoorIgniteEvent.Cause cause, BlockFace hitFace) {
         if (gate == null || gate.getCurrentState() != AnimationState.CLOSED || !gate.isEffectivelyActive() || gate.isEffectivelyDestroyed()
             || !isSurvivalOrNonPlayer(causingEntity)) {
             return null;
         }
 
-        GateDoorIgniteEvent event = new GateDoorIgniteEvent(gate, cause, causingEntity, hitBlock);
+        GateDoorIgniteEvent event = new GateDoorIgniteEvent(gate, cause, causingEntity, hitBlock, hitFace);
         Bukkit.getPluginManager().callEvent(event);
         return event;
     }

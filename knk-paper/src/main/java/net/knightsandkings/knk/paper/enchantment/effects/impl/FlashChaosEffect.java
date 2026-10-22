@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.enchantment.effects.impl;
 
+import net.knightsandkings.knk.paper.enchantment.GateAreaDamage;
 import net.knightsandkings.knk.paper.enchantment.effects.SupportEnchantmentEffect;
 import net.knightsandkings.knk.paper.regions.CombatSafezoneCheck;
 import org.bukkit.Effect;
@@ -16,12 +17,15 @@ import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.Vector;
 
+import java.util.function.Supplier;
+
 public class FlashChaosEffect extends SupportEnchantmentEffect {
     private static final double DAMAGE_RADIUS = 3.0d;
     private static final double EFFECT_RADIUS = 5.0d;
     private static final double DAMAGE_AMOUNT = 60.0d;
 
     private final CombatSafezoneCheck safezones;
+    private final Supplier<GateAreaDamage> gateAreaDamage;
 
     public FlashChaosEffect(Plugin plugin) {
         this(plugin, CombatSafezoneCheck.NONE);
@@ -29,8 +33,17 @@ public class FlashChaosEffect extends SupportEnchantmentEffect {
 
     /** @param safezones players in a combat safezone get no damage, knockback or debuffs (KNG-11) */
     public FlashChaosEffect(Plugin plugin, CombatSafezoneCheck safezones) {
+        this(plugin, safezones, () -> GateAreaDamage.NONE);
+    }
+
+    /**
+     * @param gateAreaDamage how the blast reaches gate doors in range, with this enchantment's damage; read per
+     *                       activation because the gates start after the enchantments
+     */
+    public FlashChaosEffect(Plugin plugin, CombatSafezoneCheck safezones, Supplier<GateAreaDamage> gateAreaDamage) {
         super("flash_chaos", plugin);
         this.safezones = safezones != null ? safezones : CombatSafezoneCheck.NONE;
+        this.gateAreaDamage = gateAreaDamage != null ? gateAreaDamage : () -> GateAreaDamage.NONE;
     }
 
     @Override
@@ -61,6 +74,8 @@ public class FlashChaosEffect extends SupportEnchantmentEffect {
                 targetPlayer.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, 250, 1));
             }
         }
+
+        gateAreaDamage.get().damageGatesAround(player, playerLocation, DAMAGE_RADIUS, DAMAGE_AMOUNT);
     }
 
     private boolean callDamageEventAndApply(Player attacker, LivingEntity target, double damage) {

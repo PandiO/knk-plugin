@@ -121,6 +121,18 @@ public final class SiegeGatePlan {
     }
 
     /**
+     * Does this player hold the gate - a match member on the side of the owner's alliance? False for the
+     * enemies of the owner, non-members, area gates (they have no owner) and gates outside the plan.
+     *
+     * @param playerTeamId the player's team in the running match, or null for non-members
+     */
+    public boolean isDefender(int gateStructureId, Integer playerTeamId, AllianceResolver alliances) {
+        if (!entries.containsKey(gateStructureId) || playerTeamId == null) return false;
+        OptionalInt owner = owner(gateStructureId);
+        return owner.isPresent() && alliances.areAllies(owner.getAsInt(), playerTeamId);
+    }
+
+    /**
      * May this attacker damage the gate? Only a match member whose team is an enemy of the current
      * owner, on a damageable selected gate. Non-members and unattributed damage (explosions without
      * a player) never count.

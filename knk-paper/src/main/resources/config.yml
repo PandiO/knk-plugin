@@ -514,6 +514,12 @@ gates:
   fire-duration-seconds: 8
   fire-damage-per-tick: 2.0
   fire-tick-interval-seconds: 1
+  # A burning door block is drawn as regular fire on the side of the block the attacker was on. It is
+  # a client-side picture only (it never exists in the world, so it can't spread or burn the gate).
+  # Damage cracks: a damaged gate's door blocks show vanilla's block-breaking cracks, 10 stages that
+  # follow the gate's HP (each stage is a tenth of its HP) until it is destroyed. Purely visual.
+  damage-cracks:
+    enabled: true
   # Pass-through system: InstantOpen mode removes only the door blocks within
   # passthrough-instant-open-radius-blocks of the triggering player's position (sideways, across
   # the gate's full depth), restoring them once the player crosses to the far side or after

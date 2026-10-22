@@ -253,6 +253,65 @@ class GateEventListenerTest {
     }
 
     @Test
+    void flamingArrowIgnitionRemembersTheStruckFace() {
+        Block block = doorBlock();
+        Projectile projectile = mock(Projectile.class);
+        when(projectile.getShooter()).thenReturn(mock(LivingEntity.class));
+        when(projectile.getFireTicks()).thenReturn(100);
+
+        ProjectileHitEvent event = mock(ProjectileHitEvent.class);
+        when(event.getHitBlock()).thenReturn(block);
+        when(event.getHitBlockFace()).thenReturn(BlockFace.SOUTH);
+        when(event.getEntity()).thenReturn(projectile);
+
+        listener.onProjectileHit(event);
+
+        ArgumentCaptor<org.bukkit.event.Event> captor = ArgumentCaptor.forClass(org.bukkit.event.Event.class);
+        verify(pluginManager, times(2)).callEvent(captor.capture());
+        GateDoorIgniteEvent igniteEvent = captor.getAllValues().stream()
+            .filter(GateDoorIgniteEvent.class::isInstance)
+            .map(GateDoorIgniteEvent.class::cast)
+            .findFirst()
+            .orElseThrow();
+        assertEquals(BlockFace.SOUTH, igniteEvent.getHitFace());
+    }
+
+    @Test
+    void anArrowShowingFlamesIgnitesEvenWhenItsFireTicksReadZero() {
+        Block block = doorBlock();
+        Projectile projectile = mock(Projectile.class);
+        when(projectile.getShooter()).thenReturn(mock(LivingEntity.class));
+        when(projectile.getFireTicks()).thenReturn(0);
+        when(projectile.isVisualFire()).thenReturn(true);
+
+        ProjectileHitEvent event = mock(ProjectileHitEvent.class);
+        when(event.getHitBlock()).thenReturn(block);
+        when(event.getEntity()).thenReturn(projectile);
+
+        listener.onProjectileHit(event);
+
+        ArgumentCaptor<org.bukkit.event.Event> captor = ArgumentCaptor.forClass(org.bukkit.event.Event.class);
+        verify(pluginManager, times(2)).callEvent(captor.capture());
+        assertTrue(captor.getAllValues().stream().anyMatch(GateDoorIgniteEvent.class::isInstance));
+    }
+
+    @Test
+    void anArrowWithoutFlamesOnlyDamages() {
+        Block block = doorBlock();
+        Projectile projectile = mock(Projectile.class);
+        when(projectile.getShooter()).thenReturn(mock(LivingEntity.class));
+
+        ProjectileHitEvent event = mock(ProjectileHitEvent.class);
+        when(event.getHitBlock()).thenReturn(block);
+        when(event.getEntity()).thenReturn(projectile);
+
+        listener.onProjectileHit(event);
+
+        verify(pluginManager, times(1)).callEvent(any(GateDoorDamageEvent.class));
+        verify(pluginManager, never()).callEvent(any(GateDoorIgniteEvent.class));
+    }
+
+    @Test
     void fireChargeHitIgnitesTheDoorBlock() {
         Block block = doorBlock();
         LivingEntity shooter = mock(LivingEntity.class);
@@ -302,6 +361,8 @@ class GateEventListenerTest {
         assertEquals(GateDoorIgniteEvent.Cause.FLINT_AND_STEEL, captor.getValue().getCause());
         assertSame(doorBlock, captor.getValue().getHitBlock());
         assertSame(player, captor.getValue().getCausingEntity());
+        // the door block lies WEST of the free cell that caught fire, so the fire belongs on the door's EAST side
+        assertEquals(BlockFace.EAST, captor.getValue().getHitFace());
     }
 
     @Test
@@ -431,5 +492,48 @@ class GateEventListenerTest {
         verify(pluginManager).callEvent(captor.capture());
         assertEquals(GateDoorDamageEvent.Cause.LEFT_CLICK, captor.getValue().getCause());
         assertSame(player, captor.getValue().getCausingEntity());
+    }
+
+    // ===== freeze weapon vs fire =====
+
+    @Test
+    void leftClickOnADoorBlockLetsTheFreezeExtinguisherHaveAGo() {
+        GateFreezeExtinguisher extinguisher = mock(GateFreezeExtinguisher.class);
+        GateEventListener withExtinguisher = new GateEventListener(new GateDoorHitService(gateManager), extinguisher);
+        Block block = doorBlock();
+        Player player = mock(Player.class);
+        when(player.getGameMode()).thenReturn(GameMode.SURVIVAL);
+
+        PlayerInteractEvent event = mock(PlayerInteractEvent.class);
+        when(event.getClickedBlock()).thenReturn(block);
+        when(event.getPlayer()).thenReturn(player);
+        when(event.getAction()).thenReturn(Action.LEFT_CLICK_BLOCK);
+
+        withExtinguisher.onPlayerInteract(event);
+
+        verify(extinguisher).onHit(player, gate, block);
+    }
+
+    @Test
+    void rightClickAndOtherBlocksNeverReachTheFreezeExtinguisher() {
+        GateFreezeExtinguisher extinguisher = mock(GateFreezeExtinguisher.class);
+        GateEventListener withExtinguisher = new GateEventListener(new GateDoorHitService(gateManager), extinguisher);
+        Player player = mock(Player.class);
+        Block door = doorBlock();
+        Block other = unrelatedBlock();
+
+        PlayerInteractEvent rightClick = mock(PlayerInteractEvent.class);
+        when(rightClick.getClickedBlock()).thenReturn(door);
+        when(rightClick.getPlayer()).thenReturn(player);
+        when(rightClick.getAction()).thenReturn(Action.RIGHT_CLICK_BLOCK);
+        withExtinguisher.onPlayerInteract(rightClick);
+
+        PlayerInteractEvent elsewhere = mock(PlayerInteractEvent.class);
+        when(elsewhere.getClickedBlock()).thenReturn(other);
+        when(elsewhere.getPlayer()).thenReturn(player);
+        when(elsewhere.getAction()).thenReturn(Action.LEFT_CLICK_BLOCK);
+        withExtinguisher.onPlayerInteract(elsewhere);
+
+        verifyNoInteractions(extinguisher);
     }
 }

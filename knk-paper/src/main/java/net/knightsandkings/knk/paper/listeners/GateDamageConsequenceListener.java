@@ -49,7 +49,10 @@ public class GateDamageConsequenceListener implements Listener {
             return;
         }
 
-        double amount = DAMAGE_BY_CAUSE.getOrDefault(event.getCause(), 10.0);
+        // A source with a damage figure of its own (an area enchantment) overrides the amount for the cause.
+        double amount = event.getDamage() != null
+            ? event.getDamage()
+            : DAMAGE_BY_CAUSE.getOrDefault(event.getCause(), 10.0);
         double loss = healthSystem.applyDamage(event.getGate(), amount);
         if (loss > 0) {
             try {
@@ -66,6 +69,6 @@ public class GateDamageConsequenceListener implements Listener {
             return;
         }
 
-        fireSystem.igniteBlock(event.getGate(), event.getHitBlock(), event.getCausingEntity());
+        fireSystem.igniteBlock(event.getGate(), event.getHitBlock(), event.getCausingEntity(), event.getHitFace());
     }
 }
