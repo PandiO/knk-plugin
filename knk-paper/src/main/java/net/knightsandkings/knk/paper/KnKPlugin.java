@@ -1607,9 +1607,13 @@ public class KnKPlugin extends JavaPlugin {
         this.navigationCompass = new net.knightsandkings.knk.paper.navigation.NavigationCompassService(
             compassSettings::get, () -> navigationService, () -> navigationDestinations, () -> siegeService,
             (player, node) -> knkPermissible != null && knkPermissible.hasPermission(player, node),
-            mainThread, System::currentTimeMillis);
+            mainThread, System::currentTimeMillis, new net.knightsandkings.knk.paper.navigation.BukkitCompassItems());
         getServer().getPluginManager().registerEvents(
             new net.knightsandkings.knk.paper.navigation.NavigationCompassListener(navigationCompass), this);
+        if (siegeService != null) {
+            // KNG-234: sieges that want it give the compass at the hub
+            siegeService.addObserver(navigationCompass);
+        }
         getLogger().info("Road navigation (/navigate) initialized");
     }
 

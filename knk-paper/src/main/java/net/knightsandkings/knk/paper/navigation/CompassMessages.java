@@ -69,4 +69,16 @@ public final class CompassMessages {
     public static Component nothingToResume() {
         return NavigationMessages.info("Right-click the compass to pick a destination.");
     }
+
+    /** The siege gave the player the compass at the hub. */
+    public static Component given(String itemName) {
+        return NavigationMessages.good("You received a " + itemName
+            + ". Once the match starts, right-click it to be guided to the objectives; shift-right-click stops the guidance.");
+    }
+
+    /** The siege wanted to give the compass but the inventory was full. */
+    public static Component noRoom(String itemName) {
+        return NavigationMessages.warn("Your inventory is full, so you did not get the " + itemName
+            + ". Make room and ask a staff member, or use /navigate.");
+    }
 }

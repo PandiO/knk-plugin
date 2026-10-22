@@ -25,6 +25,11 @@ import org.mockito.ArgumentCaptor;
 
 import net.knightsandkings.knk.core.domain.location.KnkLocation;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeConfiguration;
+import net.knightsandkings.knk.core.domain.siege.KnkSiegeLobby;
+import net.knightsandkings.knk.core.domain.siege.SiegeLobbyMode;
+import net.knightsandkings.knk.core.domain.siege.SiegeNavigationItemMode;
+import net.knightsandkings.knk.core.siege.SiegeLobbyStateMachine;
+import org.bukkit.inventory.ItemStack;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeMatchLength;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeObjective;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeScenario;
@@ -58,6 +63,7 @@ class NavigationCompassServiceTest {
     private final UUID id = UUID.randomUUID();
     private final AtomicLong clock = new AtomicLong(10_000);
     private CompassSettings settings = new CompassSettings(CompassItemRule.defaults(), true, false, List.of());
+    private final FakeItems items = new FakeItems();
     private NavigationCompassService compass;
 
     @BeforeEach
@@ -68,7 +74,7 @@ class NavigationCompassServiceTest {
         when(player.hasPermission(NavigateCommand.NODE)).thenReturn(true);
         when(player.isOnline()).thenReturn(true);
         compass = new NavigationCompassService(() -> settings, () -> navigation, () -> destinations, () -> siege,
-            (p, node) -> false, Runnable::run, clock::get);
+            (p, node) -> false, Runnable::run, clock::get, items);
     }
 
     private static KnkLocation at(int n) {
@@ -300,7 +306,7 @@ class NavigationCompassServiceTest {
     @Test
     void withoutNavigationTheCompassSaysSo() {
         NavigationCompassService off = new NavigationCompassService(() -> settings, () -> null, () -> null, () -> siege,
-            (p, node) -> false, Runnable::run, clock::get);
+            (p, node) -> false, Runnable::run, clock::get, items);
 
         assertTrue(off.use(player, false));
 
@@ -317,5 +323,136 @@ class NavigationCompassServiceTest {
         compass.use(player, false);
 
         verify(navigation, never()).navigate(any(), any());
+    }
+
+    // ==================== given by the siege at the hub ====================
+
+    /** Records what the siege hands out instead of touching Bukkit items. */
+    private static final class FakeItems implements CompassItems {
+        final ItemStack stack = mock(ItemStack.class);
+        boolean holds;
+        boolean fits = true;
+        boolean usable = true;
+        int given;
+
+        @Override
+        public ItemStack create(CompassItemRule rule) {
+            return usable ? stack : null;
+        }
+
+        @Override
+        public String nameOf(CompassItemRule rule) {
+            return "Navigation Compass";
+        }
+
+        @Override
+        public boolean holds(Player player, CompassItemRule rule) {
+            return holds;
+        }
+
+        @Override
+        public boolean give(Player player, ItemStack item) {
+            if (fits) {
+                given++;
+            }
+            return fits;
+        }
+    }
+
+    private SiegeLobbyRuntime lobby(SiegeNavigationItemMode lobbyChoice, boolean global) {
+        KnkSiegeConfiguration base = KnkSiegeConfiguration.legacyDefaults();
+        KnkSiegeConfiguration configuration = new KnkSiegeConfiguration(base.captureAttackBase(), base.captureAttackPerExtra(),
+            base.captureAttackPerExtraInstantVictory(), base.captureDefendBase(), base.captureDefendPerExtra(),
+            base.captureDefendPerExtraInstantVictory(), base.sideCaptureReduction(), base.voteCloseSecondsBeforeStart(),
+            base.drawSecondsBeforeStart(), base.hubSecondsBeforeStart(), base.teamSplitSecondsBeforeStart(),
+            base.matchmakingAnnouncementMarks(), base.killAnnouncementThresholds(), base.killStreakAnnounceAbove(),
+            base.headshotMultiplier(), base.allowedCommands(), base.spawnPickerDelayTicks(), base.enchantDropChancePerMille(),
+            base.allowedEnchantmentKeys(), base.enchantLevelMin(), base.enchantLevelMax(), base.maxBooksAlive(),
+            base.nonMemberGateView(), global);
+        SiegeLobbyRuntime runtime = mock(SiegeLobbyRuntime.class);
+        SiegeLobbyStateMachine machine = mock(SiegeLobbyStateMachine.class);
+        when(machine.configuration()).thenReturn(configuration);
+        when(runtime.machine()).thenReturn(machine);
+        when(runtime.lobby()).thenReturn(new KnkSiegeLobby(1, "Cinix", "cinix", SiegeLobbyMode.CONTINUOUS, 300, 900, 2, true,
+            List.of(), List.of(), lobbyChoice));
+        return runtime;
+    }
+
+    private static KnkSiegeScenario scenarioWith(SiegeNavigationItemMode choice) {
+        return new KnkSiegeScenario(1, "Kardenna", null, 5, "Kardenna", null, List.of(), null, 2, 20, null, null,
+            KnkSiegeMatchLength.DEFAULT, null, true, false, true, List.of(), List.of(), List.of(), List.of(), choice);
+    }
+
+    @Test
+    void theGlobalSettingGivesTheCompassWhenLobbyAndScenarioInherit() {
+        compass.memberReadiedAtHub(lobby(SiegeNavigationItemMode.INHERIT, true), scenarioWith(SiegeNavigationItemMode.INHERIT), player);
+
+        assertEquals(1, items.given);
+        assertTrue(lastMessage().contains("You received a Navigation Compass"), lastMessage());
+    }
+
+    @Test
+    void nothingIsGivenWhenEveryLevelLeavesItOff() {
+        compass.memberReadiedAtHub(lobby(SiegeNavigationItemMode.INHERIT, false), scenarioWith(SiegeNavigationItemMode.INHERIT), player);
+
+        assertEquals(0, items.given);
+    }
+
+    @Test
+    void aScenarioOverridesTheGlobalSetting() {
+        compass.memberReadiedAtHub(lobby(SiegeNavigationItemMode.INHERIT, false), scenarioWith(SiegeNavigationItemMode.GIVE), player);
+        assertEquals(1, items.given);
+
+        compass.memberReadiedAtHub(lobby(SiegeNavigationItemMode.INHERIT, true), scenarioWith(SiegeNavigationItemMode.DO_NOT_GIVE), player);
+        assertEquals(1, items.given, "the scenario said no");
+    }
+
+    @Test
+    void aLobbyOverridesTheScenario() {
+        compass.memberReadiedAtHub(lobby(SiegeNavigationItemMode.DO_NOT_GIVE, true), scenarioWith(SiegeNavigationItemMode.GIVE), player);
+        assertEquals(0, items.given);
+
+        compass.memberReadiedAtHub(lobby(SiegeNavigationItemMode.GIVE, false), scenarioWith(SiegeNavigationItemMode.DO_NOT_GIVE), player);
+        assertEquals(1, items.given);
+    }
+
+    @Test
+    void nothingIsGivenWhenTheCompassIsSwitchedOffForSiegesOrEntirely() {
+        settings = new CompassSettings(CompassItemRule.defaults(), false, false, List.of());
+        compass.memberReadiedAtHub(lobby(SiegeNavigationItemMode.GIVE, true), scenarioWith(SiegeNavigationItemMode.GIVE), player);
+
+        settings = new CompassSettings(new CompassItemRule(false, "COMPASS", "Navigation Compass", NameMatch.EXACT), true, false, List.of());
+        compass.memberReadiedAtHub(lobby(SiegeNavigationItemMode.GIVE, true), scenarioWith(SiegeNavigationItemMode.GIVE), player);
+
+        assertEquals(0, items.given);
+    }
+
+    @Test
+    void aPlayerWhoAlreadyCarriesACompassGetsNoSecondOne() {
+        items.holds = true;
+
+        compass.memberReadiedAtHub(lobby(SiegeNavigationItemMode.GIVE, false), scenarioWith(SiegeNavigationItemMode.INHERIT), player);
+
+        assertEquals(0, items.given);
+    }
+
+    @Test
+    void aFullInventoryIsToldSoAndNothingIsDropped() {
+        items.fits = false;
+
+        compass.memberReadiedAtHub(lobby(SiegeNavigationItemMode.GIVE, false), scenarioWith(SiegeNavigationItemMode.INHERIT), player);
+
+        assertEquals(0, items.given);
+        assertTrue(lastMessage().contains("inventory is full"), lastMessage());
+    }
+
+    @Test
+    void aRuleWithoutAUsableMaterialGivesNothingAndSaysNothing() {
+        items.usable = false;
+
+        compass.memberReadiedAtHub(lobby(SiegeNavigationItemMode.GIVE, false), scenarioWith(SiegeNavigationItemMode.INHERIT), player);
+
+        assertEquals(0, items.given);
+        verify(player, never()).sendMessage(any(Component.class));
     }
 }

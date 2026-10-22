@@ -19,11 +19,15 @@ import net.knightsandkings.knk.core.domain.location.KnkLocation;
 import net.knightsandkings.knk.core.navigation.compass.CompassCycle;
 import net.knightsandkings.knk.core.navigation.compass.CompassSettings;
 import net.knightsandkings.knk.core.navigation.compass.CompassUse;
+import net.knightsandkings.knk.core.domain.siege.KnkSiegeScenario;
 import net.knightsandkings.knk.core.siege.SiegeCompassTargets;
+import net.knightsandkings.knk.core.siege.SiegeNavigationItem;
 import net.knightsandkings.knk.core.siege.SiegeCompassTargets.Target;
 import net.knightsandkings.knk.paper.navigation.NavigationDestinations.Located;
 import net.knightsandkings.knk.paper.navigation.NavigationDestinations.Resolution;
+import net.knightsandkings.knk.paper.siege.SiegeLobbyRuntime;
 import net.knightsandkings.knk.paper.siege.SiegeMatch;
+import net.knightsandkings.knk.paper.siege.SiegeMatchObserver;
 import net.knightsandkings.knk.paper.siege.SiegeService;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 
@@ -42,7 +46,7 @@ import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
  * Which item is a compass is not coded here: {@link #isCompass} asks the settings' material and display-name
  * rule, so any item an admin hands out with those properties works at once. Main thread only.
  */
-public final class NavigationCompassService {
+public final class NavigationCompassService implements SiegeMatchObserver {
 
     /** Ignore a second click this soon after the last (a client can send one click twice). */
     static final long CLICK_COOLDOWN_MILLIS = 250;
@@ -70,6 +74,7 @@ public final class NavigationCompassService {
     private final BiPredicate<Player, String> knkPermission;
     private final Executor mainThread;
     private final java.util.function.LongSupplier clock;
+    private final CompassItems items;
 
     private final Map<UUID, Last> last = new HashMap<>();
     private final Map<UUID, Long> lastClick = new HashMap<>();
@@ -77,7 +82,7 @@ public final class NavigationCompassService {
     public NavigationCompassService(Supplier<CompassSettings> settings, Supplier<NavigationService> navigation,
                                     Supplier<NavigationDestinations> catalogue, Supplier<SiegeService> siege,
                                     BiPredicate<Player, String> knkPermission, Executor mainThread,
-                                    java.util.function.LongSupplier clock) {
+                                    java.util.function.LongSupplier clock, CompassItems items) {
         this.settings = Objects.requireNonNull(settings, "settings");
         this.navigation = Objects.requireNonNull(navigation, "navigation");
         this.catalogue = Objects.requireNonNull(catalogue, "catalogue");
@@ -85,6 +90,7 @@ public final class NavigationCompassService {
         this.knkPermission = knkPermission;
         this.mainThread = Objects.requireNonNull(mainThread, "mainThread");
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.items = Objects.requireNonNull(items, "items");
     }
 
     // ==================== the item ====================
@@ -241,6 +247,33 @@ public final class NavigationCompassService {
             }
         }
         return out;
+    }
+
+    // ==================== given by the siege (KNG-234) ====================
+
+    /**
+     * A siege member is at the hub, their inventory saved: give them the compass when lobby, scenario or the
+     * global siege configuration (in that order of say) wants it and the compass works in sieges. The item goes
+     * into the live inventory only - never the saved one - so the vault restore at the end of the match (or on
+     * leaving, kicking, quitting) takes it away with everything else the match put there.
+     */
+    @Override
+    public void memberReadiedAtHub(SiegeLobbyRuntime lobby, KnkSiegeScenario scenario, Player player) {
+        CompassSettings config = settings.get();
+        if (!config.item().enabled() || !config.siegeEnabled()) {
+            return;
+        }
+        boolean give = SiegeNavigationItem.resolve(lobby.lobby().navigationItem(), scenario.navigationItem(),
+            lobby.machine().configuration().giveNavigationItem());
+        if (!give || items.holds(player, config.item())) {
+            return;
+        }
+        ItemStack item = items.create(config.item());
+        if (item == null) {
+            return;
+        }
+        String name = items.nameOf(config.item());
+        player.sendMessage(items.give(player, item) ? CompassMessages.given(name) : CompassMessages.noRoom(name));
     }
 
     // ==================== housekeeping ====================
