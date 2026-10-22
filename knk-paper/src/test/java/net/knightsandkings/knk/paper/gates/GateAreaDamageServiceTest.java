@@ -44,7 +44,7 @@ class GateAreaDamageServiceTest {
     @BeforeEach
     void setUp() {
         gateManager = new GateManager();
-        service = new GateAreaDamageService(gateManager, new GateDoorHitService(gateManager));
+        service = new GateAreaDamageService(gateManager, new GateDoorHitService(gateManager), 5.0);
 
         gate = new CachedGateDoor(
             1, 1, "TestGate", "SLIDING", "VERTICAL", "PLANE_GRID",
@@ -97,7 +97,7 @@ class GateAreaDamageServiceTest {
     @Test
     void aGateInRangeTakesTheEnchantmentsOwnDamageOnce() {
         // the caster stands next to the gate; both of its door blocks are in range
-        service.damageGatesAround(caster, new Location(world, 100.5, 64, 98.5), 3.0, 60.0);
+        service.damageGatesAround(caster, new Location(world, 100.5, 64, 98.5), 60.0);
 
         List<GateDoorDamageEvent> events = damageEvents();
         assertEquals(1, events.size());
@@ -110,7 +110,7 @@ class GateAreaDamageServiceTest {
 
     @Test
     void theHitIsReportedOnTheDoorBlockNearestTheCaster() {
-        service.damageGatesAround(caster, new Location(world, 101.5, 64, 98.5), 3.0, 40.0);
+        service.damageGatesAround(caster, new Location(world, 101.5, 64, 98.5), 40.0);
 
         Block hit = damageEvents().get(0).getHitBlock();
         assertEquals(101, hit.getX());
@@ -120,7 +120,31 @@ class GateAreaDamageServiceTest {
 
     @Test
     void aGateOutOfRangeIsLeftAlone() {
-        service.damageGatesAround(caster, new Location(world, 100.5, 64, 90.5), 3.0, 60.0);
+        service.damageGatesAround(caster, new Location(world, 100.5, 64, 90.5), 60.0);
+
+        assertTrue(damageEvents().isEmpty());
+    }
+
+    @Test
+    void gatesAreReachedFurtherThanEntitiesAre() {
+        // 4.5 blocks from the door's near face: out of the 3-block entity radius, inside the gate radius of 5
+        service.damageGatesAround(caster, new Location(world, 100.5, 64, 95.5), 60.0);
+
+        assertEquals(1, damageEvents().size());
+    }
+
+    @Test
+    void theGateRadiusIsConfigurable() {
+        GateAreaDamageService narrow = new GateAreaDamageService(gateManager, new GateDoorHitService(gateManager), 3.0);
+
+        narrow.damageGatesAround(caster, new Location(world, 100.5, 64, 95.5), 60.0);
+
+        assertTrue(damageEvents().isEmpty());
+    }
+
+    @Test
+    void justBeyondTheGateRadiusIsOutOfRange() {
+        service.damageGatesAround(caster, new Location(world, 100.5, 64, 94.5), 60.0); // 5.5 from the near face
 
         assertTrue(damageEvents().isEmpty());
     }
@@ -131,7 +155,7 @@ class GateAreaDamageServiceTest {
         Location center = new Location(world, 100.5, 64.5, 97.0);
         assertEquals(3.0, GateAreaDamageService.distanceToBlock(center, 100, 64, 100), 1e-9);
 
-        service.damageGatesAround(caster, center, 3.0, 40.0);
+        service.damageGatesAround(caster, center, 40.0);
         assertEquals(1, damageEvents().size());
     }
 
@@ -139,7 +163,7 @@ class GateAreaDamageServiceTest {
     void aGateThatIsNotClosedIsLeftAlone() {
         gate.setCurrentState(AnimationState.OPENING);
 
-        service.damageGatesAround(caster, new Location(world, 100.5, 64, 98.5), 3.0, 60.0);
+        service.damageGatesAround(caster, new Location(world, 100.5, 64, 98.5), 60.0);
 
         assertTrue(damageEvents().isEmpty());
     }
@@ -148,17 +172,18 @@ class GateAreaDamageServiceTest {
     void aCreativeCasterDoesNoDamage() {
         when(caster.getGameMode()).thenReturn(GameMode.CREATIVE);
 
-        service.damageGatesAround(caster, new Location(world, 100.5, 64, 98.5), 3.0, 60.0);
+        service.damageGatesAround(caster, new Location(world, 100.5, 64, 98.5), 60.0);
 
         assertTrue(damageEvents().isEmpty());
     }
 
     @Test
     void nothingHappensWithoutAWorldOrDamage() {
-        service.damageGatesAround(caster, new Location(null, 100.5, 64, 98.5), 3.0, 60.0);
-        service.damageGatesAround(caster, new Location(world, 100.5, 64, 98.5), 3.0, 0.0);
-        service.damageGatesAround(caster, new Location(world, 100.5, 64, 98.5), 0.0, 60.0);
-        service.damageGatesAround(caster, null, 3.0, 60.0);
+        service.damageGatesAround(caster, new Location(null, 100.5, 64, 98.5), 60.0);
+        service.damageGatesAround(caster, new Location(world, 100.5, 64, 98.5), 0.0);
+        service.damageGatesAround(caster, null, 60.0);
+        new GateAreaDamageService(gateManager, new GateDoorHitService(gateManager), 0.0)
+            .damageGatesAround(caster, new Location(world, 100.5, 64, 98.5), 60.0);
 
         assertTrue(damageEvents().isEmpty());
     }

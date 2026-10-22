@@ -12,14 +12,16 @@ import org.bukkit.entity.Player;
 @FunctionalInterface
 public interface GateAreaDamage {
 
-    GateAreaDamage NONE = (source, center, radius, damage) -> {
+    GateAreaDamage NONE = (source, center, damage) -> {
     };
 
     /**
-     * Damage once each gate that has a door block within {@code radius} of {@code center}.
+     * Damage once each gate that has a door block in range of {@code center}. How far that reaches is the
+     * gate side's setting ({@code gates.area-enchantment-radius-blocks}), wider than the radius that hurts
+     * entities, because a gate is big and hard to stand next to in a siege.
      *
      * @param source the player whose enchantment went off (credited, and checked against siege rules)
      * @param damage the damage the enchantment deals to an entity in range
      */
-    void damageGatesAround(Player source, Location center, double radius, double damage);
+    void damageGatesAround(Player source, Location center, double damage);
 }

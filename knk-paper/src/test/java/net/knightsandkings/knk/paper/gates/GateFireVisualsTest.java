@@ -149,6 +149,47 @@ class GateFireVisualsTest {
     }
 
     @Test
+    void smokeRisesOffTheInsideFaceOppositeTheFire() {
+        Block door = doorBlock();
+
+        visuals.show(gate, door, attackerAt(100.5, 64, 90.5), null); // fire on the north side: the inside is south
+
+        // 0.6 beyond the door block's centre, on its south face (z = 100.5 + 0.6)
+        verify(world).spawnParticle(eq(org.bukkit.Particle.CAMPFIRE_COSY_SMOKE), eq(100.5), eq(64.5), eq(101.1),
+            eq(0), anyDouble(), anyDouble(), anyDouble(), anyDouble());
+        verify(world).spawnParticle(eq(org.bukkit.Particle.SMOKE), eq(100.5), eq(64.5), eq(101.1),
+            eq(6), eq(0.3), eq(0.3), eq(0.05), anyDouble());
+    }
+
+    @Test
+    void smokeIsRenewedOnEveryFireTickWhileTheBlockBurns() {
+        Block door = doorBlock();
+        gate.getBurningBlocks().put(new Vector(100, 64, 100), System.currentTimeMillis() + 5000L);
+        visuals.show(gate, door, attackerAt(100.5, 64, 90.5), null);
+        clearInvocations(world);
+
+        visuals.sync(gate);
+
+        verify(world).spawnParticle(eq(org.bukkit.Particle.CAMPFIRE_COSY_SMOKE), anyDouble(), anyDouble(), anyDouble(),
+            eq(0), anyDouble(), anyDouble(), anyDouble(), anyDouble());
+    }
+
+    @Test
+    void noSmokeOnceTheBlockStoppedBurning() {
+        Block door = doorBlock();
+        visuals.show(gate, door, attackerAt(100.5, 64, 90.5), null);
+        Block realBlock = mock(Block.class);
+        when(realBlock.getBlockData()).thenReturn(mock(BlockData.class));
+        when(world.getBlockAt(any(Location.class))).thenReturn(realBlock);
+        clearInvocations(world);
+
+        visuals.sync(gate); // not burning any more
+
+        verify(world, never()).spawnParticle(any(org.bukkit.Particle.class), anyDouble(), anyDouble(), anyDouble(),
+            anyInt(), anyDouble(), anyDouble(), anyDouble(), anyDouble());
+    }
+
+    @Test
     void theStruckFaceBeatsWhereTheAttackerStands() {
         Block door = doorBlock();
 

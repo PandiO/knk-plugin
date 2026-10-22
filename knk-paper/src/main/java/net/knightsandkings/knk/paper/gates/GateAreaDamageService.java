@@ -22,14 +22,17 @@ import java.util.Map;
 public class GateAreaDamageService implements GateAreaDamage {
     private final GateManager gateManager;
     private final GateDoorHitService hitService;
+    private final double radius;
 
-    public GateAreaDamageService(GateManager gateManager, GateDoorHitService hitService) {
+    /** @param radius how many blocks from the caster a door block still counts as in range */
+    public GateAreaDamageService(GateManager gateManager, GateDoorHitService hitService, double radius) {
         this.gateManager = gateManager;
         this.hitService = hitService;
+        this.radius = radius;
     }
 
     @Override
-    public void damageGatesAround(Player source, Location center, double radius, double damage) {
+    public void damageGatesAround(Player source, Location center, double damage) {
         World world = center == null ? null : center.getWorld();
         if (world == null || !(damage > 0) || !(radius > 0)) {
             return;

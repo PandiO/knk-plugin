@@ -4,6 +4,7 @@ import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.Particle;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
@@ -72,6 +73,7 @@ public class GateFireVisuals {
             cells.put(doorPosition, cell);
         }
         send(world, cell);
+        smoke(world, doorPosition, cell);
     }
 
     /**
@@ -90,6 +92,7 @@ public class GateFireVisuals {
             Map.Entry<Vector, Cell> entry = iterator.next();
             if (gate.getBurningBlocks().containsKey(entry.getKey())) {
                 send(world, entry.getValue());
+                smoke(world, entry.getKey(), entry.getValue());
             } else {
                 iterator.remove();
                 gone.add(entry.getValue());
@@ -187,6 +190,28 @@ public class GateFireVisuals {
         for (Player viewer : world.getNearbyPlayers(location, VIEW_RADIUS)) {
             viewer.sendBlockChange(location, fire);
         }
+    }
+
+    /**
+     * Smoke rising off the far face of a burning door block - the inside of the gate, away from the fire
+     * (which is on the attacker's side). The defenders can't see the fire from there, so this is what tells
+     * them which blocks to put out. Particles go to everyone in range, not just the fire's viewers.
+     */
+    private static void smoke(World world, Vector doorPosition, Cell cell) {
+        if (world == null) {
+            return;
+        }
+        BlockFace inside = cell.towardDoor();
+        double x = doorPosition.getX() + 0.5 + inside.getModX() * 0.6;
+        double y = doorPosition.getY() + 0.5 + inside.getModY() * 0.6;
+        double z = doorPosition.getZ() + 0.5 + inside.getModZ() * 0.6;
+        // spread over the face, not away from it
+        double spreadX = inside.getModX() == 0 ? 0.3 : 0.05;
+        double spreadY = inside.getModY() == 0 ? 0.3 : 0.05;
+        double spreadZ = inside.getModZ() == 0 ? 0.3 : 0.05;
+        // count 0 = the offset is the velocity: one slow, long-lived column per tick, plus a puff around it
+        world.spawnParticle(Particle.CAMPFIRE_COSY_SMOKE, x, y, z, 0, 0.0, 0.06, 0.0, 1.0);
+        world.spawnParticle(Particle.SMOKE, x, y, z, 6, spreadX, spreadY, spreadZ, 0.01);
     }
 
     /** Send the real block back to viewers, except for cells another still-burning block shows a fire in. */

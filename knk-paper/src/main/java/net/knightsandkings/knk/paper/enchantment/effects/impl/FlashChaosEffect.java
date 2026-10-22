@@ -75,7 +75,7 @@ public class FlashChaosEffect extends SupportEnchantmentEffect {
             }
         }
 
-        gateAreaDamage.get().damageGatesAround(player, playerLocation, DAMAGE_RADIUS, DAMAGE_AMOUNT);
+        gateAreaDamage.get().damageGatesAround(player, playerLocation, DAMAGE_AMOUNT);
     }
 
     private boolean callDamageEventAndApply(Player attacker, LivingEntity target, double damage) {

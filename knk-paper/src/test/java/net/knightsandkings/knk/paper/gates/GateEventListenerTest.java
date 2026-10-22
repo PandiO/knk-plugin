@@ -536,4 +536,82 @@ class GateEventListenerTest {
 
         verifyNoInteractions(extinguisher);
     }
+
+    // ===== the held item's damage =====
+
+    @Test
+    void leftClickUsesTheHeldItemsDamage() {
+        GateEventListener withMelee = new GateEventListener(new GateDoorHitService(gateManager), null,
+            new GateMeleeDamage(1.0, p -> 8.0, item -> 5));
+        Block block = doorBlock();
+        Player player = mock(Player.class);
+        when(player.getGameMode()).thenReturn(GameMode.SURVIVAL);
+        when(player.getInventory()).thenReturn(mock(org.bukkit.inventory.PlayerInventory.class));
+
+        PlayerInteractEvent event = mock(PlayerInteractEvent.class);
+        when(event.getClickedBlock()).thenReturn(block);
+        when(event.getPlayer()).thenReturn(player);
+        when(event.getAction()).thenReturn(Action.LEFT_CLICK_BLOCK);
+
+        withMelee.onPlayerInteract(event);
+
+        ArgumentCaptor<GateDoorDamageEvent> captor = ArgumentCaptor.forClass(GateDoorDamageEvent.class);
+        verify(pluginManager).callEvent(captor.capture());
+        assertEquals(11.0, captor.getValue().getDamage(), 1e-9);
+    }
+
+    @Test
+    void aBlockBreakAttemptUsesTheHeldItemsDamageToo() {
+        GateEventListener withMelee = new GateEventListener(new GateDoorHitService(gateManager), null,
+            new GateMeleeDamage(1.0, p -> 4.0, item -> 0));
+        Block block = doorBlock();
+        Player player = mock(Player.class);
+        when(player.hasPermission("knk.gate.admin")).thenReturn(false);
+        when(player.getGameMode()).thenReturn(GameMode.SURVIVAL);
+        when(player.getInventory()).thenReturn(mock(org.bukkit.inventory.PlayerInventory.class));
+        BlockBreakEvent event = mock(BlockBreakEvent.class);
+        when(event.getBlock()).thenReturn(block);
+        when(event.getPlayer()).thenReturn(player);
+
+        withMelee.onBlockBreak(event);
+
+        ArgumentCaptor<GateDoorDamageEvent> captor = ArgumentCaptor.forClass(GateDoorDamageEvent.class);
+        verify(pluginManager).callEvent(captor.capture());
+        assertEquals(4.0, captor.getValue().getDamage(), 1e-9);
+    }
+
+    @Test
+    void withoutItemDamageTheEventCarriesNoAmountSoTheFlatDefaultApplies() {
+        Block block = doorBlock();
+        Player player = mock(Player.class);
+        when(player.getGameMode()).thenReturn(GameMode.SURVIVAL);
+        PlayerInteractEvent event = mock(PlayerInteractEvent.class);
+        when(event.getClickedBlock()).thenReturn(block);
+        when(event.getPlayer()).thenReturn(player);
+        when(event.getAction()).thenReturn(Action.LEFT_CLICK_BLOCK);
+
+        listener.onPlayerInteract(event);
+
+        ArgumentCaptor<GateDoorDamageEvent> captor = ArgumentCaptor.forClass(GateDoorDamageEvent.class);
+        verify(pluginManager).callEvent(captor.capture());
+        assertNull(captor.getValue().getDamage());
+    }
+
+    @Test
+    void projectilesAndExplosionsKeepTheirFlatDamage() {
+        GateEventListener withMelee = new GateEventListener(new GateDoorHitService(gateManager), null,
+            new GateMeleeDamage(1.0, p -> 8.0, item -> 5));
+        Projectile projectile = mock(Projectile.class);
+        when(projectile.getShooter()).thenReturn(mock(LivingEntity.class));
+        ProjectileHitEvent hit = mock(ProjectileHitEvent.class);
+        Block block = doorBlock();
+        when(hit.getHitBlock()).thenReturn(block);
+        when(hit.getEntity()).thenReturn(projectile);
+
+        withMelee.onProjectileHit(hit);
+
+        ArgumentCaptor<GateDoorDamageEvent> captor = ArgumentCaptor.forClass(GateDoorDamageEvent.class);
+        verify(pluginManager).callEvent(captor.capture());
+        assertNull(captor.getValue().getDamage());
+    }
 }

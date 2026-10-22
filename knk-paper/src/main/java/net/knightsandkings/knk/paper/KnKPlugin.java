@@ -980,13 +980,17 @@ public class KnKPlugin extends JavaPlugin {
                 ? statisticsGateSink : net.knightsandkings.knk.paper.gates.GateDamageSink.NONE;
             gateFireSystem.setDamageSink(gateDamageSink);
 
-            this.gateAreaDamage = new net.knightsandkings.knk.paper.gates.GateAreaDamageService(gateManager, gateDoorHitService);
+            this.gateAreaDamage = new net.knightsandkings.knk.paper.gates.GateAreaDamageService(gateManager, gateDoorHitService,
+                getConfig().getDouble("gates.area-enchantment-radius-blocks", 5.0));
             // A defender who hits a burning door block with a freeze weapon puts that block's fire out. The
             // siege controller starts later, so it's read per hit; without a lockdown nobody is a defender.
             net.knightsandkings.knk.paper.gates.GateFreezeExtinguisher freezeExtinguisher = enchantmentRuntime == null ? null
                 : new net.knightsandkings.knk.paper.gates.GateFreezeExtinguisher(gateFireSystem, enchantmentRuntime.enchantmentRepository(),
                     (player, door) -> siegeGates != null && siegeGates.isDefender(player, door.getGateStructureId()));
-            getServer().getPluginManager().registerEvents(new GateEventListener(gateDoorHitService, freezeExtinguisher), this);
+            getServer().getPluginManager().registerEvents(new GateEventListener(gateDoorHitService, freezeExtinguisher,
+                getConfig().getBoolean("gates.melee-damage.from-held-item", true)
+                    ? new net.knightsandkings.knk.paper.gates.GateMeleeDamage(getConfig().getDouble("gates.melee-damage.multiplier", 1.0))
+                    : null), this);
             getServer().getPluginManager().registerEvents(new GateDamageConsequenceListener(healthSystem, gateFireSystem, gateDamageSink), this);
 
             int passThroughInstantOpenRadius = getConfig().getInt("gates.passthrough-instant-open-radius-blocks", 1);

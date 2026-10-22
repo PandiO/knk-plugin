@@ -83,7 +83,7 @@ public class ChaosEffect extends SupportEnchantmentEffect {
             applyKnockback(player, livingEntity);
         }
 
-        gateAreaDamage.get().damageGatesAround(player, playerLocation, DAMAGE_RADIUS, DAMAGE_AMOUNT);
+        gateAreaDamage.get().damageGatesAround(player, playerLocation, DAMAGE_AMOUNT);
     }
 
     protected boolean callDamageEventAndApply(Player attacker, LivingEntity target, double damage) {
