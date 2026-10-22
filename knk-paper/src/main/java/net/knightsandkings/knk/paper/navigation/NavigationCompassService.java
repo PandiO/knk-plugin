@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.UUID;
 import java.util.concurrent.Executor;
@@ -46,7 +47,7 @@ import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
  * Which item is a compass is not coded here: {@link #isCompass} asks the settings' material and display-name
  * rule, so any item an admin hands out with those properties works at once. Main thread only.
  */
-public final class NavigationCompassService implements SiegeMatchObserver {
+public final class NavigationCompassService implements SiegeMatchObserver, MatchNavigationScope {
 
     /** Ignore a second click this soon after the last (a client can send one click twice). */
     static final long CLICK_COOLDOWN_MILLIS = 250;
@@ -223,17 +224,47 @@ public final class NavigationCompassService implements SiegeMatchObserver {
     // ==================== the lists ====================
 
     private List<Entry> siegeEntries(Player player, SiegeMatch match) {
+        List<Entry> out = new ArrayList<>();
+        for (MatchDestination d : siegeDestinations(player, match)) {
+            out.add(Entry.ofDestination(d.key(), d.label(), d.detail(), d.destination()));
+        }
+        return out;
+    }
+
+    private List<MatchDestination> siegeDestinations(Player player, SiegeMatch match) {
         OptionalInt team = match.roster().teamOf(player.getUniqueId());
         if (team.isEmpty()) {
             return List.of();
         }
-        List<Entry> out = new ArrayList<>();
+        List<MatchDestination> out = new ArrayList<>();
         for (Target target : SiegeCompassTargets.forTeam(match.scenario(), match.board(), match.alliances(), team.getAsInt())) {
             KnkLocation at = target.location();
-            out.add(Entry.ofDestination(target.key(), target.label(), CompassMessages.siegeDetail(target),
+            out.add(new MatchDestination(target.key(), target.label(), CompassMessages.siegeDetail(target),
                 Destination.point(target.label(), at.world(), at.x(), at.y(), at.z())));
         }
         return out;
+    }
+
+    /**
+     * In a running siege match: the objectives and the team spawn, in the compass's order - the only places
+     * {@code /navigate} accepts and offers (KNG-234). Empty outside a match; an empty list when the compass is switched
+     * off for sieges (nothing is relevant then).
+     */
+    @Override
+    public Optional<List<MatchDestination>> destinationsOf(Player player) {
+        SiegeService siegeService = siege.get();
+        if (siegeService == null) {
+            return Optional.empty();
+        }
+        Optional<SiegeMatch> match = siegeService.runningMatchOf(player.getUniqueId());
+        if (match.isEmpty()) {
+            return Optional.empty();
+        }
+        CompassSettings config = settings.get();
+        if (!config.item().enabled() || !config.siegeEnabled()) {
+            return Optional.of(List.of());
+        }
+        return Optional.of(siegeDestinations(player, match.get()));
     }
 
     private List<Entry> generalEntries(Player player, CompassSettings config, NavigationDestinations destinations) {

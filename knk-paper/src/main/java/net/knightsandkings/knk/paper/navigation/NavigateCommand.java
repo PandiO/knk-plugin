@@ -5,6 +5,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.function.BiPredicate;
 import java.util.function.Supplier;
@@ -14,6 +15,7 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
 import org.bukkit.entity.Player;
 
+import net.knightsandkings.knk.paper.navigation.MatchNavigationScope.MatchDestination;
 import net.knightsandkings.knk.paper.navigation.NavigationDestinations.Located;
 import net.knightsandkings.knk.paper.navigation.NavigationDestinations.Mode;
 import net.knightsandkings.knk.paper.navigation.NavigationDestinations.Resolution;
@@ -34,6 +36,8 @@ public class NavigateCommand implements TabExecutor {
     private final Supplier<NavigationDestinations> destinations;
     private final BiPredicate<Player, String> knkPermission;
     private final Executor mainThread;
+    /** KNG-234: in a minigame match only the match's destinations are accepted and offered. */
+    private Supplier<MatchNavigationScope> matchScope = () -> null;
 
     public NavigateCommand(Supplier<NavigationService> service, Supplier<NavigationDestinations> destinations,
                            BiPredicate<Player, String> knkPermission, Executor mainThread) {
@@ -41,6 +45,16 @@ public class NavigateCommand implements TabExecutor {
         this.destinations = Objects.requireNonNull(destinations, "destinations");
         this.knkPermission = knkPermission;
         this.mainThread = Objects.requireNonNull(mainThread, "mainThread");
+    }
+
+    /** The rule for players in a minigame match (KNG-234); read lazily like the other services. */
+    public void setMatchScope(Supplier<MatchNavigationScope> matchScope) {
+        this.matchScope = Objects.requireNonNull(matchScope, "matchScope");
+    }
+
+    private Optional<List<MatchDestination>> matchOf(Player player) {
+        MatchNavigationScope scope = matchScope.get();
+        return scope == null ? Optional.empty() : scope.destinationsOf(player);
     }
 
     @Override
@@ -67,6 +81,11 @@ public class NavigateCommand implements TabExecutor {
             if (!navigation.stop(player)) {
                 player.sendMessage(NavigationMessages.notNavigating());
             }
+            return true;
+        }
+        Optional<List<MatchDestination>> inMatch = matchOf(player);
+        if (inMatch.isPresent()) {
+            navigateInMatch(player, navigation, String.join(" ", args).trim(), inMatch.get());
             return true;
         }
         Parsed parsed = parse(args);
@@ -102,6 +121,29 @@ public class NavigateCommand implements TabExecutor {
         return true;
     }
 
+    /**
+     * In a match only the match's destinations exist (KNG-234): the typed name must be one of them - exactly, or the
+     * start of exactly one.
+     */
+    private void navigateInMatch(Player player, NavigationService navigation, String typed, List<MatchDestination> offered) {
+        if (offered.isEmpty()) {
+            player.sendMessage(CompassMessages.noMatchDestinations());
+            return;
+        }
+        List<String> labels = offered.stream().map(MatchDestination::label).toList();
+        String wanted = typed.toLowerCase(Locale.ROOT);
+        List<MatchDestination> exact = offered.stream().filter(d -> d.label().toLowerCase(Locale.ROOT).equals(wanted)).toList();
+        List<MatchDestination> found = !exact.isEmpty() ? exact
+            : offered.stream().filter(d -> d.label().toLowerCase(Locale.ROOT).startsWith(wanted)).toList();
+        if (found.isEmpty()) {
+            player.sendMessage(CompassMessages.matchOnly(typed, labels));
+        } else if (found.size() > 1 && exact.isEmpty()) {
+            player.sendMessage(CompassMessages.matchAmbiguous(typed, found.stream().map(MatchDestination::label).toList()));
+        } else {
+            navigation.navigate(player, found.get(0).destination());
+        }
+    }
+
     /** The destination words and the trailing {@code spawn} / {@code region}, if any. */
     record Parsed(String destination, Mode mode) {
     }
@@ -128,6 +170,10 @@ public class NavigateCommand implements TabExecutor {
         if (!(sender instanceof Player player) || !hasNode(player) || args.length == 0) {
             return List.of();
         }
+        Optional<List<MatchDestination>> inMatch = matchOf(player);
+        if (inMatch.isPresent()) {
+            return completeInMatch(args, inMatch.get());
+        }
         NavigationDestinations catalogue = destinations.get();
         if (catalogue == null) {
             return List.of();
@@ -144,6 +190,31 @@ public class NavigateCommand implements TabExecutor {
             for (String mode : MODES) {
                 if (mode.startsWith(current) && !out.contains(mode)) {
                     out.add(mode);
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Tab completion in a match: only the match's destinations (and {@code stop}). The server replaces the last word,
+     * so a multi-word label is offered from the word being typed on.
+     */
+    static List<String> completeInMatch(String[] args, List<MatchDestination> offered) {
+        String typed = String.join(" ", args).toLowerCase(Locale.ROOT);
+        int wordIndex = args.length - 1;
+        List<String> out = new ArrayList<>();
+        if (args.length == 1 && "stop".startsWith(typed)) {
+            out.add("stop");
+        }
+        for (MatchDestination d : offered) {
+            if (d.label().toLowerCase(Locale.ROOT).startsWith(typed)) {
+                String[] words = d.label().split(" ");
+                if (wordIndex < words.length) {
+                    String rest = String.join(" ", Arrays.copyOfRange(words, wordIndex, words.length));
+                    if (!out.contains(rest)) {
+                        out.add(rest);
+                    }
                 }
             }
         }

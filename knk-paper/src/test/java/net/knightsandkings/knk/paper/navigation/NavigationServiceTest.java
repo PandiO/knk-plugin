@@ -675,6 +675,29 @@ class NavigationServiceTest {
     }
 
     @Test
+    void inAMatchOnlyTheMatchsOwnDestinationsMayBeNavigatedTo() {
+        // KNG-234: whatever asks (command, menu), the service itself refuses places that are not part of the match
+        MatchNavigationScope.MatchDestination objective = new MatchNavigationScope.MatchDestination("objective:1", "Cinix Keep", "defend", cinixKeep());
+        service.setMatchScope(p -> java.util.Optional.of(List.of(objective)));
+
+        service.navigate(player, Destination.point("Kardenna Castle", NavigationTestNetwork.WORLD, 200.5, 65, 200.5));
+        assertFalse(service.isNavigating(playerId));
+        assertTrue(messages().stream().anyMatch(m -> m.contains("\"Kardenna Castle\" is not part of this match") && m.contains("Cinix Keep")), messages().toString());
+
+        service.navigate(player, cinixKeep());
+        assertTrue(service.isNavigating(playerId));
+    }
+
+    @Test
+    void outsideAMatchTheScopeChangesNothing() {
+        service.setMatchScope(p -> java.util.Optional.empty());
+
+        service.navigate(player, cinixKeep());
+
+        assertTrue(service.isNavigating(playerId));
+    }
+
+    @Test
     void aLobbyChangeBeforeTheMatchRunsEndsTheMembersSession() {
         service.navigate(player, cinixKeep());
         var lobby = org.mockito.Mockito.mock(net.knightsandkings.knk.paper.siege.SiegeLobbyRuntime.class);

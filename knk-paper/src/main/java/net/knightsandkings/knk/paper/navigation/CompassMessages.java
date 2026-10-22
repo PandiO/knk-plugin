@@ -81,4 +81,32 @@ public final class CompassMessages {
         return NavigationMessages.warn("Your inventory is full, so you did not get the " + itemName
             + ". Make room and ask a staff member, or use /navigate.");
     }
+
+    /** In a match, a destination that is not one of the match's. */
+    public static Component matchOnly(String asked, List<String> labels) {
+        Component line = Component.text(asked == null || asked.isBlank() ? "In a match you can only navigate to: "
+            : "\"" + asked + "\" is not part of this match. You can navigate to: ", RoadMessages.INFO);
+        for (int i = 0; i < labels.size() && i < NavigationMessages.MAX_CHOICES; i++) {
+            if (i > 0) {
+                line = line.append(Component.text(", ", RoadMessages.INFO));
+            }
+            line = line.append(RoadMessages.suggest(labels.get(i), "/navigate " + labels.get(i)));
+        }
+        return NavigationMessages.prefixed(line);
+    }
+
+    public static Component noMatchDestinations() {
+        return NavigationMessages.info("This match has no destinations to navigate to.");
+    }
+
+    public static Component matchAmbiguous(String asked, List<String> labels) {
+        Component line = Component.text("Several destinations start with \"" + asked + "\": ", RoadMessages.INFO);
+        for (int i = 0; i < labels.size() && i < NavigationMessages.MAX_CHOICES; i++) {
+            if (i > 0) {
+                line = line.append(Component.text(", ", RoadMessages.INFO));
+            }
+            line = line.append(RoadMessages.command(labels.get(i), "/navigate " + labels.get(i)));
+        }
+        return NavigationMessages.prefixed(line);
+    }
 }

@@ -14,7 +14,6 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 
-import net.knightsandkings.knk.core.domain.gates.AnimationState;
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.domain.roads.RoadEdge;
 import net.knightsandkings.knk.core.gates.GateManager;
@@ -29,6 +28,7 @@ import net.knightsandkings.knk.core.roads.route.GateAvailability;
 import net.knightsandkings.knk.core.roads.route.GateAvailability.GateView;
 import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
 import net.knightsandkings.knk.core.roads.route.StaticFlagsAvailability;
+import net.knightsandkings.knk.core.siege.SiegeGateStance;
 import net.knightsandkings.knk.paper.gates.GatePassThroughRules;
 import net.knightsandkings.knk.paper.regions.RegionIds;
 import net.knightsandkings.knk.paper.siege.SiegeGateController;
@@ -154,18 +154,16 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
             if (door == null) {
                 continue;
             }
-            boolean locked = siege != null && siege.isLocked(door.getGateStructureId());
-            if (locked && siege.isLockdownMember(player, door.getGateStructureId())) {
-                // KNG-234: a match member's route (the navigation compass) goes through the siege's gates as if open:
-                // taking or holding them is the match, and the route must not stop at the first closed gate.
-                gates.put(doorId, new GateView(doorId, gateName(door), AnimationState.OPEN, false, false, true, false, false));
-                passable.put(doorId, true);
-                continue;
-            }
-            boolean carries = locked && siege.canCarryNonMember(door);
+            int structureId = door.getGateStructureId();
+            boolean locked = siege != null && siege.isLocked(structureId);
+            boolean member = locked && siege.isLockdownMember(player, structureId);
+            // KNG-234: the gate's real state decides. A match member is never routed through a closed gate that is
+            // not theirs to open (an attacker's route to the objective behind a gate objective stops at the gate).
+            SiegeGateStance stance = SiegeGateStance.of(locked, member, member && siege.mayControl(player, structureId),
+                locked && !member && siege.canCarryNonMember(door));
             gates.put(doorId, new GateView(doorId, gateName(door), door.getCurrentState(), door.isJammed(),
-                door.isEffectivelyDestroyed(), door.isEffectivelyAllowPassThrough(), locked, carries));
-            passable.put(doorId, GatePassThroughRules.canPass(admin, use, door));
+                door.isEffectivelyDestroyed(), door.isEffectivelyAllowPassThrough(), stance.siegeLocked(), stance.siegeCarries()));
+            passable.put(doorId, stance.passable() || GatePassThroughRules.canPass(admin, use, door));
         }
         GateAvailability.GateState gateState = doorId -> Optional.ofNullable(gates.get(doorId));
         GateAvailability.PassRule passRule = doorId -> passable.getOrDefault(doorId, false);

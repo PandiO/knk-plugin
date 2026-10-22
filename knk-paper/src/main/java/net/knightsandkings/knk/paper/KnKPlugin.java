@@ -1614,6 +1614,7 @@ public class KnKPlugin extends JavaPlugin {
             // KNG-234: sieges that want it give the compass at the hub
             siegeService.addObserver(navigationCompass);
         }
+        navigationService.setMatchScope(navigationCompass);
         getLogger().info("Road navigation (/navigate) initialized");
     }
 
@@ -2049,10 +2050,13 @@ public class KnKPlugin extends JavaPlugin {
                 java.util.List.of(net.knightsandkings.knk.paper.roads.RoadAdminCommand.NODE)); // KNG-107
             // Road navigation Phase 4: /navigate (/nav), DESIGN §6.1. The services are read lazily - they
             // exist only when navigation.enabled and the road cache started (initializeNavigation).
-            registerTabCommand("navigate", new net.knightsandkings.knk.paper.navigation.NavigateCommand(
+            var navigateCommand = new net.knightsandkings.knk.paper.navigation.NavigateCommand(
                 () -> navigationService, () -> navigationDestinations,
                 (player, node) -> knkPermissible != null && knkPermissible.hasPermission(player, node),
-                MenuService.mainThreadExecutor(this)));
+                MenuService.mainThreadExecutor(this));
+            // KNG-234: in a minigame match only the match's destinations are accepted and offered
+            navigateCommand.setMatchScope(() -> navigationCompass);
+            registerTabCommand("navigate", navigateCommand);
             // Location retention (KNG-80): /knk location here|tp|orphans replaces the built-in /knk location here;
             // each action checks its own knk.admin.location* node. tp goes through the KNG-17 teleport engine.
             if (apiClient != null) {

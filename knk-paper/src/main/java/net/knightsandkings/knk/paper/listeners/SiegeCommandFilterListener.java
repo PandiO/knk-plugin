@@ -34,7 +34,7 @@ public class SiegeCommandFilterListener implements Listener {
         List<String> allowed = service.allowedCommandsFor(player).stream()
                 .filter(c -> !SiegeCommandFilter.ALWAYS_ALLOWED_LABELS.contains(SiegeCommandFilter.label(c)))
                 .toList();
-        player.sendMessage(SiegeMessages.bad("You can't use that command during a siege. Allowed: /siege, /sgm"
+        player.sendMessage(SiegeMessages.bad("You can't use that command during a siege. Allowed: /siege, /sgm, /navigate"
                 + (allowed.isEmpty() ? "" : ", " + String.join(", ", allowed)) + "."));
     }
 }

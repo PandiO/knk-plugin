@@ -224,13 +224,24 @@ public final class SiegeGateController implements SiegeMatchObserver {
     }
 
     /**
-     * Whether the player is a member of the lobby whose lockdown holds this gate (KNG-234): navigation plans a
-     * match member's route through a locked gate - the gate is the fight, they open or break it - where it
-     * would stop a bystander. False for unlocked gates.
+     * Whether the player is a member of the lobby whose lockdown holds this gate (KNG-234): navigation reads a
+     * locked gate differently for members (they are never "carried through"; their own team's gates they can open).
+     * False for unlocked gates.
      */
     public boolean isLockdownMember(Player player, int gateStructureId) {
         Lockdown lockdown = byGate.get(gateStructureId);
         return lockdown != null && player != null && lockdown.runtime.isMember(player.getUniqueId());
+    }
+
+    /**
+     * Whether this match member may open and close the locked gate - their alliance owns it (an objective
+     * gate changes owner when it is captured). Read-only, for navigation (KNG-234). False for non-members and
+     * unlocked gates.
+     */
+    public boolean mayControl(Player player, int gateStructureId) {
+        Lockdown lockdown = byGate.get(gateStructureId);
+        if (lockdown == null) return false;
+        return lockdown.plan.canControl(gateStructureId, teamOf(lockdown, player), lockdown.alliances) == Control.ALLOWED;
     }
 
     /**

@@ -251,6 +251,35 @@ class NavigationCompassServiceTest {
         assertTrue(lastMessage().contains("switched off during sieges"), lastMessage());
     }
 
+    // ==================== the match scope of /navigate ====================
+
+    @Test
+    void inAMatchTheScopeIsTheCompassListAndNothingElse() {
+        inMatch(DEF);
+
+        var scope = compass.destinationsOf(player).orElseThrow();
+
+        assertEquals(List.of("Keep", "Gate"), scope.stream().map(MatchNavigationScope.MatchDestination::label).toList());
+        assertTrue(compass.allows(player, scope.get(0).destination()));
+        assertFalse(compass.allows(player, Destination.point("Kardenna Castle", "siege_world", 1, 64, 1)));
+    }
+
+    @Test
+    void outsideAMatchThereIsNoScope() {
+        when(siege.runningMatchOf(id)).thenReturn(Optional.empty());
+
+        assertTrue(compass.destinationsOf(player).isEmpty());
+        assertTrue(compass.allows(player, Destination.point("Anywhere", "siege_world", 1, 64, 1)));
+    }
+
+    @Test
+    void aSiegeWithTheCompassSwitchedOffHasAScopeWithoutDestinations() {
+        inMatch(DEF);
+        settings = new CompassSettings(CompassItemRule.defaults(), false, false, List.of());
+
+        assertEquals(List.of(), compass.destinationsOf(player).orElseThrow());
+    }
+
     // ==================== outside a siege ====================
 
     @Test
