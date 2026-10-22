@@ -98,14 +98,42 @@ class GateFireSystemTest {
 
     @Test
     @Disabled("Sound is a registry-backed enum that needs a live Paper server to initialize")
-    void igniteBlockSpawnsEffectsAtTheBlock() {
+    void igniteBlockPlaysTheIgniteSoundAtTheBlock() {
         Block door = blockAt(100, 64, 100);
 
         fireSystem.igniteBlock(gate, door);
 
-        verify(world).spawnParticle(eq(org.bukkit.Particle.FLAME), anyDouble(), anyDouble(), anyDouble(),
-            anyInt(), anyDouble(), anyDouble(), anyDouble(), anyDouble());
         verify(world).playSound(any(Location.class), eq(org.bukkit.Sound.ITEM_FIRECHARGE_USE), any(), anyFloat(), anyFloat());
+    }
+
+    @Test
+    void igniteBlockShowsRegularFireOnTheStruckSideInsteadOfParticles() {
+        GateFireVisuals visuals = mock(GateFireVisuals.class);
+        fireSystem.setVisuals(visuals);
+        Block door = mock(Block.class);
+        when(door.getX()).thenReturn(100);
+        when(door.getY()).thenReturn(64);
+        when(door.getZ()).thenReturn(100);
+        org.bukkit.entity.Entity attacker = mock(org.bukkit.entity.Entity.class);
+
+        fireSystem.igniteBlock(gate, door, attacker, org.bukkit.block.BlockFace.NORTH);
+
+        verify(visuals).show(gate, door, attacker, org.bukkit.block.BlockFace.NORTH);
+        verifyNoInteractions(world); // no flame particles any more
+    }
+
+    @Test
+    void theShortIgniteOverloadsHaveNoStruckSide() {
+        GateFireVisuals visuals = mock(GateFireVisuals.class);
+        fireSystem.setVisuals(visuals);
+        Block door = mock(Block.class);
+        when(door.getX()).thenReturn(100);
+        when(door.getY()).thenReturn(64);
+        when(door.getZ()).thenReturn(100);
+
+        fireSystem.igniteBlock(gate, door);
+
+        verify(visuals).show(gate, door, null, null);
     }
 
     @Test
@@ -182,5 +210,99 @@ class GateFireSystemTest {
         fireSystem.tick();
 
         assertFalse(gate.isOnFire());
+    }
+
+    @Test
+    void tickKeepsTheFireOnTheStillBurningBlocksInSyncWithoutTouchingTheWorld() {
+        GateFireVisuals visuals = mock(GateFireVisuals.class);
+        fireSystem.setVisuals(visuals);
+        gate.getBurningBlocks().put(new Vector(100, 64, 100), System.currentTimeMillis() + 5000L);
+
+        fireSystem.tick();
+
+        verify(visuals).sync(gate);
+        verifyNoInteractions(world); // the flame particles are gone: fire is the fire block
+    }
+
+    @Test
+    void tickTakesTheFireDownWhenTheGateStopsBurningAsAWhole() {
+        GateFireVisuals visuals = mock(GateFireVisuals.class);
+        fireSystem.setVisuals(visuals);
+        gate.getBurningBlocks().put(new Vector(100, 64, 100), System.currentTimeMillis() + 5000L);
+        gate.setCurrentState(AnimationState.OPENING);
+
+        fireSystem.tick();
+
+        verify(visuals).clear(gate);
+    }
+
+    @Test
+    void tickTakesTheFireDownWhenTheDamageDestroysTheGate() {
+        GateFireVisuals visuals = mock(GateFireVisuals.class);
+        fireSystem.setVisuals(visuals);
+        gate.getBurningBlocks().put(new Vector(100, 64, 100), System.currentTimeMillis() + 5000L);
+        doAnswer(invocation -> {
+            ((CachedGateDoor) invocation.getArgument(0)).setIsDestroyed(true);
+            return null;
+        }).when(healthSystem).applyContinuousDamage(eq(gate), anyDouble());
+
+        fireSystem.tick();
+
+        verify(visuals).clear(gate);
+    }
+
+    @Test
+    void extinguishBlockStopsThatBlocksBurnAndItsFireButNotTheOthers() {
+        GateFireVisuals visuals = mock(GateFireVisuals.class);
+        fireSystem.setVisuals(visuals);
+        long expiry = System.currentTimeMillis() + 5000L;
+        gate.getBurningBlocks().put(new Vector(100, 64, 100), expiry);
+        gate.getBurningBlocks().put(new Vector(101, 64, 100), expiry);
+        Block door = mock(Block.class);
+        when(door.getX()).thenReturn(100);
+        when(door.getY()).thenReturn(64);
+        when(door.getZ()).thenReturn(100);
+        when(door.getWorld()).thenReturn(null);
+
+        assertTrue(fireSystem.extinguishBlock(gate, door));
+
+        assertEquals(1, gate.getBurningBlocks().size());
+        assertTrue(gate.getBurningBlocks().containsKey(new Vector(101, 64, 100)));
+        verify(visuals).extinguish(gate, new Vector(100, 64, 100));
+    }
+
+    @Test
+    void extinguishedBlocksNoLongerAddToTheContinuousDamage() {
+        long expiry = System.currentTimeMillis() + 5000L;
+        gate.getBurningBlocks().put(new Vector(100, 64, 100), expiry);
+        gate.getBurningBlocks().put(new Vector(101, 64, 100), expiry);
+        fireSystem.setVisuals(mock(GateFireVisuals.class));
+        Block door = mock(Block.class);
+        when(door.getX()).thenReturn(100);
+        when(door.getY()).thenReturn(64);
+        when(door.getZ()).thenReturn(100);
+        fireSystem.extinguishBlock(gate, door);
+
+        fireSystem.tick();
+
+        verify(healthSystem).applyContinuousDamage(gate, DAMAGE_PER_BLOCK_PER_TICK * 1);
+    }
+
+    @Test
+    void extinguishBlockDoesNothingForABlockThatIsNotBurning() {
+        GateFireVisuals visuals = mock(GateFireVisuals.class);
+        fireSystem.setVisuals(visuals);
+        gate.getBurningBlocks().put(new Vector(101, 64, 100), System.currentTimeMillis() + 5000L);
+        Block door = mock(Block.class);
+        when(door.getX()).thenReturn(100);
+        when(door.getY()).thenReturn(64);
+        when(door.getZ()).thenReturn(100);
+
+        assertFalse(fireSystem.extinguishBlock(gate, door));
+        assertFalse(fireSystem.extinguishBlock(null, door));
+        assertFalse(fireSystem.extinguishBlock(gate, null));
+
+        assertEquals(1, gate.getBurningBlocks().size());
+        verifyNoInteractions(visuals);
     }
 }

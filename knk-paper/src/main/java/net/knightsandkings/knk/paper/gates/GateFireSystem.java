@@ -4,12 +4,11 @@ import net.knightsandkings.knk.core.domain.gates.AnimationState;
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.gates.GateFireAttribution;
 import net.knightsandkings.knk.core.gates.GateManager;
-import org.bukkit.Bukkit;
-import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Entity;
 import org.bukkit.util.Vector;
 
@@ -41,6 +40,8 @@ public class GateFireSystem {
     // KNG-34 (DESIGN.md §F.8): who set each burning block alight, for gate-damage statistics only.
     private final GateFireAttribution attribution = new GateFireAttribution();
     private GateDamageSink damageSink = GateDamageSink.NONE;
+    // The burn as the players see it: a regular fire block on the attacker's side of each burning door block.
+    private GateFireVisuals visuals = new GateFireVisuals();
 
     /**
      * @param healthSystem Applies the accumulated damage each tick
@@ -60,6 +61,11 @@ public class GateFireSystem {
         this.damageSink = damageSink == null ? GateDamageSink.NONE : damageSink;
     }
 
+    /** Replaces the fire visuals (tests). */
+    void setVisuals(GateFireVisuals visuals) {
+        this.visuals = visuals;
+    }
+
     GateFireAttribution attribution() {
         return attribution;
     }
@@ -77,6 +83,15 @@ public class GateFireSystem {
      * block's igniter for gate-damage statistics when the damage sink tracks fire.
      */
     public void igniteBlock(CachedGateDoor gate, Block block, Entity causingEntity) {
+        igniteBlock(gate, block, causingEntity, null);
+    }
+
+    /**
+     * As {@link #igniteBlock(CachedGateDoor, Block, Entity)}; the fire is drawn on {@code hitFace} of the
+     * block when that side is free (the side the ignition struck), otherwise on the free side that faces
+     * the causing entity.
+     */
+    public void igniteBlock(CachedGateDoor gate, Block block, Entity causingEntity, BlockFace hitFace) {
         if (gate == null || block == null) {
             return;
         }
@@ -91,12 +106,34 @@ public class GateFireSystem {
             }
         }
 
+        visuals.show(gate, block, causingEntity, hitFace);
         World world = block.getWorld();
         if (world != null) {
-            world.spawnParticle(Particle.FLAME, block.getX() + 0.5, block.getY() + 0.5, block.getZ() + 0.5,
-                8, 0.3, 0.3, 0.3, 0.01);
             world.playSound(block.getLocation(), Sound.ITEM_FIRECHARGE_USE, SoundCategory.BLOCKS, 1.0f, 1.0f);
         }
+    }
+
+    /**
+     * Put out the fire on one door block (a defender's freeze enchantment, see GateFreezeExtinguisher):
+     * it stops burning, so it stops adding to the gate's continuous damage, and its fire disappears.
+     *
+     * @return true when the block was burning
+     */
+    public boolean extinguishBlock(CachedGateDoor gate, Block block) {
+        if (gate == null || block == null) {
+            return false;
+        }
+        Vector position = new Vector(block.getX(), block.getY(), block.getZ());
+        if (gate.getBurningBlocks().remove(position) == null) {
+            return false;
+        }
+        attribution.ignite(gate.getId(), blockKey(position), null);
+        visuals.extinguish(gate, position);
+        World world = block.getWorld();
+        if (world != null) {
+            world.playSound(block.getLocation(), Sound.BLOCK_FIRE_EXTINGUISH, SoundCategory.BLOCKS, 1.0f, 1.0f);
+        }
+        return true;
     }
 
     /**
@@ -121,16 +158,16 @@ public class GateFireSystem {
         if (gate.isEffectivelyDestroyed() || !gate.isEffectivelyActive() || gate.getCurrentState() != AnimationState.CLOSED) {
             burning.clear();
             attribution.clear(gate.getId());
+            visuals.clear(gate);
             return;
         }
 
         burning.values().removeIf(expiresAt -> expiresAt <= now);
+        visuals.sync(gate);
         if (burning.isEmpty()) {
             attribution.clear(gate.getId());
             return;
         }
-
-        spawnBurnParticles(gate, burning.keySet());
 
         // Read before the damage: destroying the gate clears its burning blocks.
         List<Long> burned = damageSink.tracksFire() ? blockKeys(burning) : null;
@@ -144,6 +181,7 @@ public class GateFireSystem {
             LOGGER.fine("Gate '" + gate.getName() + "' destroyed by fire damage, extinguishing.");
             burning.clear();
             attribution.clear(gate.getId());
+            visuals.clear(gate);
         }
     }
 
@@ -167,16 +205,5 @@ public class GateFireSystem {
 
     private static long blockKey(Vector position) {
         return GateFireAttribution.blockKey(position.getBlockX(), position.getBlockY(), position.getBlockZ());
-    }
-
-    private void spawnBurnParticles(CachedGateDoor gate, Iterable<Vector> positions) {
-        World world = Bukkit.getWorld(gate.getWorldName());
-        if (world == null) {
-            return;
-        }
-        for (Vector position : positions) {
-            world.spawnParticle(Particle.FLAME, position.getX() + 0.5, position.getY() + 0.5, position.getZ() + 0.5,
-                3, 0.2, 0.2, 0.2, 0.0);
-        }
     }
 }

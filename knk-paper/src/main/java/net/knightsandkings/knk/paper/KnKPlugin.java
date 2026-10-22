@@ -97,6 +97,8 @@ import net.knightsandkings.knk.paper.gates.GateDisplayManager;
 import net.knightsandkings.knk.paper.gates.GateDisplayOrphanCleanupTask;
 import net.knightsandkings.knk.paper.gates.GateDisplayUpdateTask;
 import net.knightsandkings.knk.paper.gates.GateDoorHitService;
+import net.knightsandkings.knk.paper.gates.GateCrackVisuals;
+import net.knightsandkings.knk.paper.gates.GateCrackVisualsTask;
 import net.knightsandkings.knk.paper.gates.GateFireDamageTask;
 import net.knightsandkings.knk.paper.gates.GateFireSystem;
 import net.knightsandkings.knk.paper.gates.GatePassThroughService;
@@ -308,6 +310,9 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.core.siege.SiegeMatchRecorder siegeMatchRecorder;
     /** Kept for the siege gate controller (Phase 7a), which respawns doors a match destroyed. */
     private HealthSystem gateHealthSystem;
+    // How area enchantments (chaos, flash_chaos) damage gate doors in range; NONE until the gates start.
+    private volatile net.knightsandkings.knk.paper.enchantment.GateAreaDamage gateAreaDamage =
+        net.knightsandkings.knk.paper.enchantment.GateAreaDamage.NONE;
     private net.knightsandkings.knk.paper.connectivity.ApiConnectivityMonitor apiConnectivityMonitor;
     private volatile boolean skipApiWhileDown = true;
     /** Kept for the siege non-member pass-through (Phase 7b, TELEPORT mode only). */
@@ -980,7 +985,17 @@ public class KnKPlugin extends JavaPlugin {
                 ? statisticsGateSink : net.knightsandkings.knk.paper.gates.GateDamageSink.NONE;
             gateFireSystem.setDamageSink(gateDamageSink);
 
-            getServer().getPluginManager().registerEvents(new GateEventListener(gateDoorHitService), this);
+            this.gateAreaDamage = new net.knightsandkings.knk.paper.gates.GateAreaDamageService(gateManager, gateDoorHitService,
+                getConfig().getDouble("gates.area-enchantment-radius-blocks", 5.0));
+            // A defender who hits a burning door block with a freeze weapon puts that block's fire out. The
+            // siege controller starts later, so it's read per hit; without a lockdown nobody is a defender.
+            net.knightsandkings.knk.paper.gates.GateFreezeExtinguisher freezeExtinguisher = enchantmentRuntime == null ? null
+                : new net.knightsandkings.knk.paper.gates.GateFreezeExtinguisher(gateFireSystem, enchantmentRuntime.enchantmentRepository(),
+                    (player, door) -> siegeGates != null && siegeGates.isDefender(player, door.getGateStructureId()));
+            getServer().getPluginManager().registerEvents(new GateEventListener(gateDoorHitService, freezeExtinguisher,
+                getConfig().getBoolean("gates.melee-damage.from-held-item", true)
+                    ? new net.knightsandkings.knk.paper.gates.GateMeleeDamage(getConfig().getDouble("gates.melee-damage.multiplier", 1.0))
+                    : null), this);
             getServer().getPluginManager().registerEvents(new GateDamageConsequenceListener(healthSystem, gateFireSystem, gateDamageSink), this);
 
             int passThroughInstantOpenRadius = getConfig().getInt("gates.passthrough-instant-open-radius-blocks", 1);
@@ -995,6 +1010,13 @@ public class KnKPlugin extends JavaPlugin {
             int fireTickIntervalSeconds = getConfig().getInt("gates.fire-tick-interval-seconds", 1);
             long fireTickIntervalTicks = Math.max(1L, fireTickIntervalSeconds) * 20L;
             new GateFireDamageTask(gateFireSystem).runTaskTimer(this, fireTickIntervalTicks, fireTickIntervalTicks);
+
+            // A damaged gate's door blocks show vanilla's block-breaking cracks (10 stages over its HP).
+            if (getConfig().getBoolean("gates.damage-cracks.enabled", true)) {
+                GateCrackVisuals gateCrackVisuals = new GateCrackVisuals(gateManager);
+                healthSystem.setCrackVisuals(gateCrackVisuals);
+                new GateCrackVisualsTask(gateCrackVisuals).runTaskTimer(this, GateCrackVisualsTask.PERIOD_TICKS, GateCrackVisualsTask.PERIOD_TICKS);
+            }
 
             WorldGuardIntegration worldGuardIntegration = new WorldGuardIntegration(this);
             // KNG-113: one animation task per world, also for a world loaded later; stopped when its world unloads
@@ -3492,7 +3514,8 @@ public class KnKPlugin extends JavaPlugin {
     }
 
     private void initializeEnchantmentRuntime(CombatSafezoneCheck safezones) {
-        EnchantmentBootstrap bootstrap = new EnchantmentBootstrap(this, safezones);
+        // The gates start after the enchantments: chaos / flash_chaos read the gate seam when they go off.
+        EnchantmentBootstrap bootstrap = new EnchantmentBootstrap(this, safezones, () -> gateAreaDamage);
         this.enchantmentRuntime = bootstrap.initialize();
     }
 

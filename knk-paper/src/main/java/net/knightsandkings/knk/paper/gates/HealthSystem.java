@@ -36,6 +36,8 @@ public class HealthSystem {
     private final Plugin plugin;
     private final GateDisplayManager displayManager;
     private final GateManager gateManager;
+    // Shows the gates' damage as block cracks; null (tests) leaves the blocks as they are.
+    private GateCrackVisuals crackVisuals;
 
     /**
      * Create a new health system.
@@ -50,6 +52,11 @@ public class HealthSystem {
         this.plugin = plugin;
         this.displayManager = displayManager;
         this.gateManager = gateManager;
+    }
+
+    /** The damage cracks to refresh on every health change; null (the default) shows none. */
+    public void setCrackVisuals(GateCrackVisuals crackVisuals) {
+        this.crackVisuals = crackVisuals;
     }
 
     /**
@@ -92,6 +99,9 @@ public class HealthSystem {
         } else {
             if (displayManager != null) {
                 displayManager.syncDisplay(gate);
+            }
+            if (crackVisuals != null) {
+                crackVisuals.sync(gate, false);
             }
             // Persist health change to API asynchronously
             persistHealthChange(gate);
@@ -158,6 +168,10 @@ public class HealthSystem {
         gate.setCurrentFrame(0);
         gate.setAnimationStartTime(0);
         gate.setHealthCurrent(0);
+
+        if (crackVisuals != null) {
+            crackVisuals.sync(gate, false); // destroyed: takes the cracks down
+        }
 
         // Cosmetic destruction effect (particle + sound only - no real explosion, so it can't
         // damage terrain or knock back nearby players).
@@ -267,7 +281,7 @@ public class HealthSystem {
      * The world cells the door's blocks occupy at a frame: a keyframed drawbridge's keyframe cells
      * (KNG-193), otherwise every scanned block's computed position (minus the ones clipped away).
      */
-    private static List<Vector> doorCellsAt(CachedGateDoor gate, int frame) {
+    static List<Vector> doorCellsAt(CachedGateDoor gate, int frame) {
         if (gate.hasDrawbridgeKeyframes()) {
             return gate.getDrawbridgeKeyframes().keyframeAtFrame(gate, frame).positions();
         }
@@ -336,6 +350,9 @@ public class HealthSystem {
         gate.setRespawnScheduledTime(0);
 
         restoreGateBlocks(gate);
+        if (crackVisuals != null) {
+            crackVisuals.sync(gate, false); // full health again: no cracks
+        }
 
         if (displayManager != null) {
             displayManager.syncDisplay(gate);

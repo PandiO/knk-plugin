@@ -9,6 +9,7 @@ import net.knightsandkings.knk.paper.commands.enchantment.EnchantmentCommandHand
 import net.knightsandkings.knk.paper.config.EnchantmentConfigManager;
 import net.knightsandkings.knk.paper.enchantbook.EnchantBooks;
 import net.knightsandkings.knk.paper.enchantment.ExecutorImpl;
+import net.knightsandkings.knk.paper.enchantment.GateAreaDamage;
 import net.knightsandkings.knk.paper.enchantment.FrozenPlayerTracker;
 import net.knightsandkings.knk.paper.enchantment.InMemoryCooldownManager;
 import net.knightsandkings.knk.paper.listeners.EnchantBookListener;
@@ -21,10 +22,12 @@ import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.Plugin;
 
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Supplier;
 
 public class EnchantmentBootstrap {
         private final Plugin plugin;
         private final CombatSafezoneCheck safezones;
+    private final Supplier<GateAreaDamage> gateAreaDamage;
 
         public EnchantmentBootstrap(Plugin plugin) {
         this(plugin, CombatSafezoneCheck.NONE);
@@ -32,8 +35,14 @@ public class EnchantmentBootstrap {
 
     /** @param safezones Town/District combat safezones for enchantment effects and abilities (KNG-11) */
     public EnchantmentBootstrap(Plugin plugin, CombatSafezoneCheck safezones) {
+        this(plugin, safezones, () -> GateAreaDamage.NONE);
+    }
+
+    /** @param gateAreaDamage how the area enchantments (chaos, flash_chaos) damage gate doors in range; read per activation */
+    public EnchantmentBootstrap(Plugin plugin, CombatSafezoneCheck safezones, Supplier<GateAreaDamage> gateAreaDamage) {
         this.plugin = plugin;
         this.safezones = safezones != null ? safezones : CombatSafezoneCheck.NONE;
+        this.gateAreaDamage = gateAreaDamage != null ? gateAreaDamage : () -> GateAreaDamage.NONE;
     }
 
     public EnchantmentRuntime initialize() {
@@ -41,7 +50,7 @@ public class EnchantmentBootstrap {
         EnchantmentRepository enchantmentRepository = new LocalEnchantmentRepositoryImpl();
         CooldownManager cooldownManager = new InMemoryCooldownManager();
         FrozenPlayerTracker frozenPlayerTracker = new FrozenPlayerTracker(plugin);
-        EnchantmentExecutor enchantmentExecutor = new ExecutorImpl(plugin, cooldownManager, frozenPlayerTracker, safezones);
+        EnchantmentExecutor enchantmentExecutor = new ExecutorImpl(plugin, cooldownManager, frozenPlayerTracker, safezones, gateAreaDamage);
         EnchantmentCommandHandler commandHandler = new EnchantmentCommandHandler(
                 plugin,
                 configManager,

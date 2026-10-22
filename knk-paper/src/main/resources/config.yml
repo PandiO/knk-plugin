@@ -530,6 +530,24 @@ gates:
   fire-duration-seconds: 8
   fire-damage-per-tick: 2.0
   fire-tick-interval-seconds: 1
+  # A burning door block is drawn as regular fire on the side of the block the attacker was on, with smoke
+  # rising off the opposite (inside) face so defenders can see which blocks burn. It is a client-side
+  # picture only (it never exists in the world, so it can't spread or burn the gate).
+  # Damage cracks: a damaged gate's door blocks show vanilla's block-breaking cracks, 10 stages that
+  # follow the gate's HP (each stage is a tenth of its HP) until it is destroyed. Purely visual.
+  damage-cracks:
+    enabled: true
+  # A click or break attempt on a gate door does what the held item would do to a player: the player's
+  # attack damage (the item's "Attack Damage" tooltip line plus Strength) plus Sharpness, which the tooltip
+  # doesn't show. An empty hand does 1. from-held-item: false goes back to the flat 10 per hit; multiplier
+  # scales the item damage for balance. Arrows, explosions and fire are unchanged.
+  melee-damage:
+    from-held-item: true
+    multiplier: 1.0
+  # chaos / flash_chaos hurt every gate with a door block within this many blocks (measured to the nearest
+  # edge of the block) of whoever used them, with the enchantment's own damage. Entities are still only
+  # hurt within 3 blocks.
+  area-enchantment-radius-blocks: 5.0
   # Pass-through system: InstantOpen mode removes only the door blocks within
   # passthrough-instant-open-radius-blocks of the triggering player's position (sideways, across
   # the gate's full depth), restoring them once the player crosses to the far side or after
