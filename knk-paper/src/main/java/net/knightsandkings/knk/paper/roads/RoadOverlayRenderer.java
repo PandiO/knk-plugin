@@ -100,7 +100,7 @@ public final class RoadOverlayRenderer {
 
     private void ensureTicker() {
         if (ticker == null) {
-            ticker = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 1L, PERIOD_TICKS);
+            ticker = Bukkit.getScheduler().runTaskTimer(plugin, net.knightsandkings.knk.core.metrics.PluginMetrics.timed("roads.overlay", this::tick), 1L, PERIOD_TICKS);
         }
     }
 

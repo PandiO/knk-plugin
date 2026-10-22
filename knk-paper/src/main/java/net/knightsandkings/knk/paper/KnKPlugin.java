@@ -143,6 +143,8 @@ import net.knightsandkings.knk.paper.utils.CommandCooldownManager;
 public class KnKPlugin extends JavaPlugin {
     private KnkApiClient apiClient;
     private RegionHttpServer regionHttpServer;
+    /** KNG-232: performance metrics endpoint, sampler and instruments; null until onEnable reads the config. */
+    private net.knightsandkings.knk.paper.metrics.MetricsService metricsService;
     private KnkConfig config;
     private CacheManager cacheManager;
     /** KNG-58: last-known account, freeze, mode and permission answers on disk, for when the API is down. */
@@ -327,6 +329,9 @@ public class KnKPlugin extends JavaPlugin {
             saveDefaultConfig();
             config = ConfigLoader.load(getConfig());
             getLogger().info("Configuration loaded successfully");
+            // First, so the API calls of the rest of startup are timed as well (KNG-232).
+            metricsService = new net.knightsandkings.knk.paper.metrics.MetricsService(this, config.metrics());
+            metricsService.start();
             newPlayerWindow = new net.knightsandkings.knk.paper.onboarding.NewPlayerWindow(
                 java.time.Clock.systemUTC(), config.onboarding().discoveryQuiet());
             // KNG-114: load the worlds in worlds.load first, so gates, region repair, Game Settings and admission all
@@ -1221,6 +1226,9 @@ public class KnKPlugin extends JavaPlugin {
         if (regionHttpServer != null) {
             regionHttpServer.stop();
         }
+        if (metricsService != null) {
+            metricsService.stop();
+        }
         if (regionLookupExecutor != null) {
             regionLookupExecutor.shutdownNow();
         }
@@ -1260,8 +1268,8 @@ public class KnKPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.telemetry.TelemetryListener(
             telemetryEmitter, task -> getServer().getScheduler().runTask(this, task)), this);
         long sampleTicks = Math.max(1, telemetryConfig.enhancedMovementSampleSeconds()) * 20L;
-        getServer().getScheduler().runTaskTimer(this, new net.knightsandkings.knk.paper.telemetry.EnhancedMovementSampler(
-            telemetryEmitter, () -> getServer().getOnlinePlayers()), sampleTicks, sampleTicks);
+        getServer().getScheduler().runTaskTimer(this, net.knightsandkings.knk.core.metrics.PluginMetrics.timed("telemetry.movement_sample", new net.knightsandkings.knk.paper.telemetry.EnhancedMovementSampler(
+            telemetryEmitter, () -> getServer().getOnlinePlayers())), sampleTicks, sampleTicks);
         this.telemetryFlushTask = new net.knightsandkings.knk.paper.telemetry.TelemetryFlushTask(
             telemetryEmitter, apiClient.getTelemetryApi());
         telemetryFlushTask.start(this, telemetryConfig.flushIntervalSeconds(), telemetryConfig.configPollSeconds());
@@ -1288,10 +1296,11 @@ public class KnKPlugin extends JavaPlugin {
             analyticsConfig.maxPendingBatches());
         if (analyticsConfig.movement()) {
             long sampleTicks = analyticsConfig.movementSampleSeconds() * 20L;
-            getServer().getScheduler().runTaskTimer(this, new net.knightsandkings.knk.paper.analytics.MovementSampler(
+            getServer().getScheduler().runTaskTimer(this, net.knightsandkings.knk.core.metrics.PluginMetrics.timed(
+                "analytics.movement_sample", new net.knightsandkings.knk.paper.analytics.MovementSampler(
                 window, () -> getServer().getOnlinePlayers(),
                 uuid -> statisticsService != null && statisticsService.isAfk(uuid),
-                analyticsConfig.excludedGameModes()), sampleTicks, sampleTicks);
+                analyticsConfig.excludedGameModes())), sampleTicks, sampleTicks);
         }
         if (analyticsConfig.menuFunnels()) {
             this.menuFunnelRecorder = new net.knightsandkings.knk.paper.analytics.MenuFunnelRecorder(window);
@@ -1676,7 +1685,7 @@ public class KnKPlugin extends JavaPlugin {
             navigationDestinations.onRoadAccessChanged(() -> mainThread.execute(() -> tags.refreshAll(
                 org.bukkit.Bukkit.getWorlds().stream().map(org.bukkit.World::getName).toList())));
         }
-        org.bukkit.Bukkit.getScheduler().runTaskTimer(this, tags::tick, 1L, 1L);
+        org.bukkit.Bukkit.getScheduler().runTaskTimer(this, net.knightsandkings.knk.core.metrics.PluginMetrics.timed("nametags.tick", tags::tick), 1L, 1L);
         org.bukkit.Bukkit.getScheduler().runTaskTimer(this,
             () -> tags.refreshAll(org.bukkit.Bukkit.getWorlds().stream().map(org.bukkit.World::getName).toList()),
             net.knightsandkings.knk.paper.roads.LiveEdgeTags.INTERVAL_TICKS, net.knightsandkings.knk.paper.roads.LiveEdgeTags.INTERVAL_TICKS);
@@ -2658,7 +2667,7 @@ public class KnKPlugin extends JavaPlugin {
             hubOutageService.setDomainSpawn(domainSpawns, MenuService.mainThreadExecutor(this));
         }
         getServer().getPluginManager().registerEvents(hubOutageService, this);
-        getServer().getScheduler().runTaskTimer(this, hubOutageService::tick, 20L, 20L);
+        getServer().getScheduler().runTaskTimer(this, net.knightsandkings.knk.core.metrics.PluginMetrics.timed("hub.outage_tick", hubOutageService::tick), 20L, 20L);
         var connectivity = getApiConnectivity();
         if (connectivity != null && connectivity.state() != net.knightsandkings.knk.core.connectivity.ApiConnectivityState.UNKNOWN) {
             hubOutageService.connectivityChanged(connectivity.state());

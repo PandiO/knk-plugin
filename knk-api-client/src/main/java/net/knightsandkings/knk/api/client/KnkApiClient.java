@@ -562,6 +562,8 @@ public class KnkApiClient {
                 httpClientBuilder.hostnameVerifier((hostname, session) -> true);
             }
             
+            // KNG-232: duration of every REST call (no-op while metrics.enabled is false).
+            httpClientBuilder.eventListenerFactory(ApiCallMetricsListener.FACTORY);
             OkHttpClient httpClient = httpClientBuilder.build();
             
             JavaTimeModule javaTimeModule = new JavaTimeModule();

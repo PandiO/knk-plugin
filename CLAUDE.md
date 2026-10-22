@@ -50,6 +50,11 @@ installed (a JDK 25 Gradle doesn't detect can be passed with
   replacing a domain's previous region when its region step is re-run (KNG-103), are decided by
   `knk-core/.../core/regions/RegionRenamePlan` and applied by `regions/WorldGuardRegionRenamer`;
   see `docs/architecture/managed-worldguard-regions.md` in `knk-workspace`
+- Performance metrics (KNG-232, `metrics.enabled`, default off): Prometheus `/metrics` on its own port
+  (`metrics/MetricsHttpServer`, wired by `metrics/MetricsService`); collectors and instruments in
+  `knk-core/.../core/metrics/` (`PluginMetrics.timed(name, runnable)` wraps a recurring task,
+  `ApiCallMetricsListener` in `knk-api-client` times every REST call); see
+  `docs/guides/performance-metrics-and-capacity.md` in `knk-workspace`
 - Config: `src/main/resources/config.yml`, `plugin.yml`
 - Inventory menu runtime lives in `knk-paper/.../paper/menu/`, with feature
   implementations in `menu/content/` and reusable logic in `knk-core`.

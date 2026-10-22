@@ -66,8 +66,8 @@ public final class StatisticsFlushTask {
     }
 
     public void start() {
-        flushTimer = Bukkit.getScheduler().runTaskTimer(plugin, this::flush, flushIntervalTicks, flushIntervalTicks);
-        idleTimer = Bukkit.getScheduler().runTaskTimer(plugin, () -> service.checkIdle(Bukkit::getPlayer), 20L, 20L);
+        flushTimer = Bukkit.getScheduler().runTaskTimer(plugin, net.knightsandkings.knk.core.metrics.PluginMetrics.timed("statistics.flush", this::flush), flushIntervalTicks, flushIntervalTicks);
+        idleTimer = Bukkit.getScheduler().runTaskTimer(plugin, net.knightsandkings.knk.core.metrics.PluginMetrics.timed("statistics.idle_check", () -> service.checkIdle(Bukkit::getPlayer)), 20L, 20L);
         long replayTicks = replayIntervalSeconds * 20L;
         replayTimer = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
             replayAsync();

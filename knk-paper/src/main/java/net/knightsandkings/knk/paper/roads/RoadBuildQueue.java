@@ -128,7 +128,7 @@ public final class RoadBuildQueue {
                 notifyRequester(RoadMessages.info("Resuming your road build \"" + state.label() + "\": " + state.pendingCount() + " tile(s) left."));
             }));
         }
-        ticker = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, TICK_PERIOD, TICK_PERIOD);
+        ticker = Bukkit.getScheduler().runTaskTimer(plugin, net.knightsandkings.knk.core.metrics.PluginMetrics.timed("roads.build_queue", this::tick), TICK_PERIOD, TICK_PERIOD);
     }
 
     /** Stops the ticker and the build thread; the pending list stays on disk for the next start. */

@@ -68,7 +68,7 @@ public final class DiscoveryFlushTask {
 
     /** Starts both timers and replays whatever the last run left in the spool. */
     public void start() {
-        flushTimer = Bukkit.getScheduler().runTaskTimer(plugin, this::flush, batchWindowTicks, batchWindowTicks);
+        flushTimer = Bukkit.getScheduler().runTaskTimer(plugin, net.knightsandkings.knk.core.metrics.PluginMetrics.timed("discovery.flush", this::flush), batchWindowTicks, batchWindowTicks);
         replayTimer = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
             replayAll();
             resolveUnresolved();
