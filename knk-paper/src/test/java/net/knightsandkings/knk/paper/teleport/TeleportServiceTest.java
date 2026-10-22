@@ -372,6 +372,20 @@ class TeleportServiceTest {
         assertTrue(done(service.start(TeleportPlan.staffToLocation(bob, alice, spawn, "jail"))).isTeleported());
     }
 
+    @Test
+    void aFrozenPlayersHubIsRefused_AndFreezingMidWarmupCancelsIt() {
+        // KNG-188: /hub is a player teleport like /spawn, so the freeze guard applies to it as well.
+        service.registerRestriction(new FreezeTeleportRestriction(id -> id.equals(alice.getUniqueId())));
+        assertEquals(TeleportDenial.FROZEN, done(service.start(TeleportPlan.hub(alice, () -> spawn, "the hub"))).code());
+
+        CompletableFuture<TeleportOutcome> bobsHub = service.start(TeleportPlan.hub(bob, () -> spawn, "the hub"));
+        now += 1_000;
+        service.tick(id -> id.equals(bob.getUniqueId()));
+
+        assertEquals(WarmupCancelReason.FROZEN.name(), done(bobsHub).code());
+        verify(bob, never()).teleportAsync(any(Location.class), any(TeleportCause.class));
+    }
+
     // ===== cooldown, combat tag, safety =====
 
     @Test

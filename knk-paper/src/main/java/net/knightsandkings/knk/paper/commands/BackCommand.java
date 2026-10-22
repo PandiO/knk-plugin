@@ -153,7 +153,7 @@ public class BackCommand implements TabExecutor {
             case DEATH -> "where they died";
             case WARPS -> "where they were before their warp";
             case TELEPORT -> "where they were before their teleport";
-            case SPAWN -> "where they were before /spawn";
+            case SPAWN -> "where they were before /spawn or /hub";
         };
     }
 

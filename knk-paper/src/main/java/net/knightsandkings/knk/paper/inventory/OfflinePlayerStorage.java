@@ -20,7 +20,8 @@ import net.knightsandkings.knk.core.nbt.NbtTag.CompoundTag;
 import net.knightsandkings.knk.core.nbt.PlayerStorageNbt;
 
 /**
- * An offline player's saved data file, {@code <main world>/playerdata/<uuid>.dat} (KNG-13). Items go
+ * An offline player's saved data file, {@code <level directory>/players/data/<uuid>.dat} (KNG-13; before
+ * Minecraft 26.1 this was {@code <main world>/playerdata}). Items go
  * through Paper's own item serialization ({@link ItemStack#deserializeBytes}, which also upgrades
  * items saved by an older version, and {@link ItemStack#serializeAsBytes}), so no server internals.
  * <p>

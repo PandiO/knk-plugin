@@ -130,7 +130,7 @@ class TeleportRequestServiceTest {
     private static List<String> clickCommands(Component component) {
         List<String> commands = new ArrayList<>();
         if (component.clickEvent() != null) {
-            commands.add(component.clickEvent().value());
+            commands.add(((net.kyori.adventure.text.event.ClickEvent.Payload.Text) component.clickEvent().payload()).value());
         }
         for (Component child : component.children()) {
             commands.addAll(clickCommands(child));

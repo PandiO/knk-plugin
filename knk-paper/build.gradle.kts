@@ -1,7 +1,7 @@
 val devServerDirPath = (findProperty("devServerDirectory") as String?) ?: "../../DEV_SERVER_1.21.10"
 
 plugins {
-    id("com.gradleup.shadow") version "8.3.5"
+    id("com.gradleup.shadow") version "8.3.11"
 }
 
 repositories {
@@ -16,23 +16,23 @@ dependencies {
     implementation(project(":knk-core"))
     implementation(project(":knk-api-client"))
 
-    compileOnly("io.papermc.paper:paper-api:1.21.10-R0.1-SNAPSHOT")
-    compileOnly("com.sk89q.worldedit:worldedit-bukkit:7.2.13")
-    compileOnly("com.sk89q.worldguard:worldguard-bukkit:7.0.10")
+    compileOnly("io.papermc.paper:paper-api:${property("paperApiVersion")}")
+    compileOnly("com.sk89q.worldedit:worldedit-bukkit:7.4.6")
+    compileOnly("com.sk89q.worldguard:worldguard-bukkit:7.0.20")
     // Log4j core (provided by the server) for the private-message command-log filter (KNG-18 Phase 3)
     compileOnly("org.apache.logging.log4j:log4j-core:2.24.1")
     
-    testImplementation("io.papermc.paper:paper-api:1.21.10-R0.1-SNAPSHOT")
+    testImplementation("io.papermc.paper:paper-api:${property("paperApiVersion")}")
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.0")
     // Content-port seed contract test reads knk-web-api's exported seed JSON through the api-client DTOs.
     testImplementation("com.fasterxml.jackson.core:jackson-databind:2.17.2")
-    testImplementation("org.mockito:mockito-core:5.5.0")
-    testImplementation("org.mockito:mockito-junit-jupiter:5.5.0")
+    testImplementation("org.mockito:mockito-core:5.24.0")
+    testImplementation("org.mockito:mockito-junit-jupiter:5.24.0")
     testImplementation("org.apache.logging.log4j:log4j-core:2.24.1")
     // KNG-103: region rename/replace tests build real WorldGuard regions around a mocked RegionManager (core
     // artifacts only: the bukkit ones bring an older spigot-api).
-    testImplementation("com.sk89q.worldedit:worldedit-core:7.2.13")
-    testImplementation("com.sk89q.worldguard:worldguard-core:7.0.10")
+    testImplementation("com.sk89q.worldedit:worldedit-core:7.4.6")
+    testImplementation("com.sk89q.worldguard:worldguard-core:7.0.20")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

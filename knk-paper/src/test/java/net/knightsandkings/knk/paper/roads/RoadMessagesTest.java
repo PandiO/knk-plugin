@@ -32,11 +32,16 @@ class RoadMessagesTest {
         Component command = RoadMessages.command("/knk road show");
         assertNotNull(command.clickEvent());
         assertEquals(ClickEvent.Action.RUN_COMMAND, command.clickEvent().action());
-        assertEquals("/knk road show", command.clickEvent().value());
-        assertEquals("/knk road goto 10 64 -20", RoadMessages.teleport(10, 64, -20).clickEvent().value());
+        assertEquals("/knk road show", text(command.clickEvent()));
+        assertEquals("/knk road goto 10 64 -20", text(RoadMessages.teleport(10, 64, -20).clickEvent()));
         assertEquals(ClickEvent.Action.SUGGEST_COMMAND, RoadMessages.suggest("[edit]", "/knk road survey save ").clickEvent().action());
         assertEquals("46 m", RoadMessages.distance(46.4));
         assertEquals("1.2 km", RoadMessages.distance(1234));
         assertEquals("35%", RoadMessages.percent(0.351));
+    }
+
+    /** Adventure 5: a command click carries its text in a {@link ClickEvent.Payload.Text}. */
+    private static String text(ClickEvent<?> click) {
+        return ((ClickEvent.Payload.Text) click.payload()).value();
     }
 }

@@ -293,6 +293,8 @@ public class KnKPlugin extends JavaPlugin {
     /** Global Game Settings (KNG-52); null without the API client. */
     private net.knightsandkings.knk.paper.settings.GameSettingsManager gameSettingsManager;
     private net.knightsandkings.knk.paper.commands.SpawnCommand spawnCommand;
+    /** {@code /hub [<player>]} (KNG-188); null without the teleport engine. */
+    private net.knightsandkings.knk.paper.commands.HubTeleportCommand hubTeleportCommand;
     private net.knightsandkings.knk.core.dataaccess.TeleportDestinationsDataAccess teleportDestinationsDataAccess;
     private net.knightsandkings.knk.paper.commands.WarpCommand warpCommand;
     private net.knightsandkings.knk.paper.teleport.BackService backService;
@@ -2281,6 +2283,15 @@ public class KnKPlugin extends JavaPlugin {
         if (spawnCommand != null) {
             spawnCommand.setCharges(charges);
         }
+        // KNG-188: /hub to the hub spawn of the Game Settings, a HUB teleport (the hub starts after the teleports).
+        this.hubTeleportCommand = new net.knightsandkings.knk.paper.commands.HubTeleportCommand(support, rankCheck,
+            targets, teleportService,
+            () -> hubService != null ? hubService.admissionSpawn() : java.util.Optional.empty(),
+            () -> hubService == null || !hubService.configured()
+                ? java.util.Optional.of("no hub is selected on the Game Settings page") : hubService.unusable(),
+            modeService::isVanished);
+        hubTeleportCommand.setCharges(charges);
+        hubTeleportCommand.setSettleInWorld(this::settleInWorld);
         // Phase 5: /warp, /warps (DESIGN.md §3.7).
         this.warpCommand = createWarpCommand(support, rankCheck, targets, charges);
         if (warpCommand != null) {
@@ -2677,6 +2688,7 @@ public class KnKPlugin extends JavaPlugin {
                 }
                 return java.util.Optional.empty();
             });
+            executor.setTeleport(hubTeleportCommand);
             hubCommand.setExecutor(executor);
             hubCommand.setTabCompleter(executor);
         }
@@ -2925,11 +2937,12 @@ public class KnKPlugin extends JavaPlugin {
         net.knightsandkings.knk.paper.commands.support.TargetRankCheck rankCheck = (sender, targetName, onAllowed) ->
             userAdminService.resolveTarget(sender, targetName, summary ->
                 userAdminService.withRankCheck(sender, summary, api -> onAllowed.accept(summary), () -> { }));
-        // KNG-13: offline players' saved inventory/ender chest, read from and written to <main world>/playerdata.
+        // KNG-13: offline players' saved inventory/ender chest, read from and written to the level directory's
+        // players/data (26.1 moved it there from <main world>/playerdata; all dimensions share one level directory).
         @SuppressWarnings("deprecation") // Bukkit.getUnsafe().getDataVersion() has no replacement
         var offlineStorage = new net.knightsandkings.knk.paper.inventory.OfflineStorageViews(
             new net.knightsandkings.knk.paper.inventory.OfflinePlayerStorage(
-                () -> org.bukkit.Bukkit.getWorlds().get(0).getWorldFolder().toPath().resolve("playerdata"),
+                () -> org.bukkit.Bukkit.getServer().getLevelDirectory().resolve("players").resolve("data"),
                 () -> org.bukkit.Bukkit.getUnsafe().getDataVersion()
             )
         );

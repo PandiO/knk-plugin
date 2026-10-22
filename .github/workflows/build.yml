@@ -16,8 +16,14 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          # 25 compiles and tests (the toolchain, Minecraft 26.x); 21, listed last, becomes
+          # JAVA_HOME and runs Gradle itself, since Gradle 8.14 can't run on Java 25.
+          java-version: |
+            25
+            21
       - uses: gradle/actions/setup-gradle@v4
       - name: Build and test
         # `build` also runs deployToDevServer; point it at a throwaway folder.
-        run: ./gradlew build --no-daemon -PdevServerDirectory="$RUNNER_TEMP/devserver"
+        run: >-
+          ./gradlew build --no-daemon -PdevServerDirectory="$RUNNER_TEMP/devserver"
+          -Porg.gradle.java.installations.fromEnv=JAVA_HOME_25_X64

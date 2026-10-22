@@ -83,7 +83,9 @@ class DataAccessExecutorOutageTest {
 
     @Test
     void whileDown_staleOkServesTheStaleEntry_andApiFirstFallsBackToTheCache() {
-        TestCache expired = new TestCache(Duration.ZERO);
+        // Already past its TTL: with Duration.ZERO the entry stays fresh until the clock ticks, which on Windows
+        // is often not before the read.
+        TestCache expired = new TestCache(Duration.ofNanos(-1));
         expired.put("k", "old");
         TestCache fresh = new TestCache(Duration.ofMinutes(1));
         fresh.put("k", "cached");

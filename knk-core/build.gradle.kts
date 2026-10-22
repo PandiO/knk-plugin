@@ -5,7 +5,7 @@ repositories {
 
 dependencies {
     // Paper API for Bukkit/Spigot compatibility (compileOnly - API is provided at runtime)
-    compileOnly("io.papermc.paper:paper-api:1.21.10-R0.1-SNAPSHOT")
+    compileOnly("io.papermc.paper:paper-api:${property("paperApiVersion")}")
     
     // Jackson for JSON processing
     implementation("com.fasterxml.jackson.core:jackson-databind:2.15.2")
@@ -14,7 +14,7 @@ dependencies {
     testImplementation(platform("org.junit:junit-bom:5.10.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     // Paper API for tests (needed for Vector class in unit tests)
-    testImplementation("io.papermc.paper:paper-api:1.21.10-R0.1-SNAPSHOT")
+    testImplementation("io.papermc.paper:paper-api:${property("paperApiVersion")}")
 }
 
 tasks.test {
