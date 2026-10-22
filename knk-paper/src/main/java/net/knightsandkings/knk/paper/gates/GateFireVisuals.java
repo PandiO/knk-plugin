@@ -34,6 +34,10 @@ import java.util.function.Predicate;
  * real block is sent back. Main thread only.
  */
 public class GateFireVisuals {
+    /** Large smoke billows and small puffs per burning block per fire tick. */
+    static final int SMOKE_BILLOWS = 3;
+    static final int SMOKE_PUFFS = 14;
+
     /** Players within this many blocks of a fire see it. */
     static final double VIEW_RADIUS = 64.0;
 
@@ -209,9 +213,11 @@ public class GateFireVisuals {
         double spreadX = inside.getModX() == 0 ? 0.3 : 0.05;
         double spreadY = inside.getModY() == 0 ? 0.3 : 0.05;
         double spreadZ = inside.getModZ() == 0 ? 0.3 : 0.05;
-        // count 0 = the offset is the velocity: one slow, long-lived column per tick, plus a puff around it
+        // count 0 = the offset is the velocity: two slow, long-lived columns per tick, plus billows and puffs around them
         world.spawnParticle(Particle.CAMPFIRE_COSY_SMOKE, x, y, z, 0, 0.0, 0.06, 0.0, 1.0);
-        world.spawnParticle(Particle.SMOKE, x, y, z, 6, spreadX, spreadY, spreadZ, 0.01);
+        world.spawnParticle(Particle.CAMPFIRE_COSY_SMOKE, x, y, z, 0, 0.0, 0.08, 0.0, 1.0);
+        world.spawnParticle(Particle.LARGE_SMOKE, x, y, z, SMOKE_BILLOWS, spreadX, spreadY, spreadZ, 0.02);
+        world.spawnParticle(Particle.SMOKE, x, y, z, SMOKE_PUFFS, spreadX, spreadY, spreadZ, 0.02);
     }
 
     /** Send the real block back to viewers, except for cells another still-burning block shows a fire in. */

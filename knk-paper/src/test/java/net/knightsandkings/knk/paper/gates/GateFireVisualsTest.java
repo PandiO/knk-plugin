@@ -155,10 +155,12 @@ class GateFireVisualsTest {
         visuals.show(gate, door, attackerAt(100.5, 64, 90.5), null); // fire on the north side: the inside is south
 
         // 0.6 beyond the door block's centre, on its south face (z = 100.5 + 0.6)
-        verify(world).spawnParticle(eq(org.bukkit.Particle.CAMPFIRE_COSY_SMOKE), eq(100.5), eq(64.5), eq(101.1),
+        verify(world, times(2)).spawnParticle(eq(org.bukkit.Particle.CAMPFIRE_COSY_SMOKE), eq(100.5), eq(64.5), eq(101.1),
             eq(0), anyDouble(), anyDouble(), anyDouble(), anyDouble());
+        verify(world).spawnParticle(eq(org.bukkit.Particle.LARGE_SMOKE), eq(100.5), eq(64.5), eq(101.1),
+            eq(GateFireVisuals.SMOKE_BILLOWS), eq(0.3), eq(0.3), eq(0.05), anyDouble());
         verify(world).spawnParticle(eq(org.bukkit.Particle.SMOKE), eq(100.5), eq(64.5), eq(101.1),
-            eq(6), eq(0.3), eq(0.3), eq(0.05), anyDouble());
+            eq(GateFireVisuals.SMOKE_PUFFS), eq(0.3), eq(0.3), eq(0.05), anyDouble());
     }
 
     @Test
@@ -170,7 +172,7 @@ class GateFireVisualsTest {
 
         visuals.sync(gate);
 
-        verify(world).spawnParticle(eq(org.bukkit.Particle.CAMPFIRE_COSY_SMOKE), anyDouble(), anyDouble(), anyDouble(),
+        verify(world, times(2)).spawnParticle(eq(org.bukkit.Particle.CAMPFIRE_COSY_SMOKE), anyDouble(), anyDouble(), anyDouble(),
             eq(0), anyDouble(), anyDouble(), anyDouble(), anyDouble());
     }
 
