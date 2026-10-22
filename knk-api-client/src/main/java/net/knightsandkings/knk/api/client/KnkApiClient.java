@@ -120,6 +120,7 @@ public class KnkApiClient {
     private final StatisticsApiImpl statisticsApi;
     private final net.knightsandkings.knk.core.ports.api.TelemetryApi telemetryApi;
     private final net.knightsandkings.knk.core.ports.api.WorldAnalyticsApi worldAnalyticsApi;
+    private final net.knightsandkings.knk.core.ports.api.MinecraftCatalogApi minecraftCatalogApi;
     private final LeaderboardsApiImpl leaderboardsApi;
     private final UserIgnoresApi userIgnoresApi;
     private final PrivateMessageLogApi privateMessageLogApi;
@@ -173,6 +174,7 @@ public class KnkApiClient {
         this.executor = executor;
         this.telemetryApi = new net.knightsandkings.knk.api.impl.TelemetryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.worldAnalyticsApi = new net.knightsandkings.knk.api.impl.WorldAnalyticsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.minecraftCatalogApi = new net.knightsandkings.knk.api.impl.MinecraftCatalogApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         
         // Initialize API implementations
         this.healthApi = new HealthApiImpl(
@@ -361,6 +363,11 @@ public class KnkApiClient {
     /** World analytics (KNG-34 link 7): {@code api/world-analytics}. */
     public net.knightsandkings.knk.core.ports.api.WorldAnalyticsApi getWorldAnalyticsApi() {
         return worldAnalyticsApi;
+    }
+
+    /** Minecraft catalogue scan snapshots (KNG-200): {@code api/MinecraftCatalog}. */
+    public net.knightsandkings.knk.core.ports.api.MinecraftCatalogApi getMinecraftCatalogApi() {
+        return minecraftCatalogApi;
     }
 
     /** Leaderboards (KNG-34): {@code api/leaderboards}. */

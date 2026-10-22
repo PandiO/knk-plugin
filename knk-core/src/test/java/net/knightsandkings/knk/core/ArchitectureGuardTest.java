@@ -28,7 +28,8 @@ class ArchitectureGuardTest {
     private static final List<String> BUKKIT_FREE_PACKAGES = List.of(
         "roads",
         "navigation",
-        "domain/roads"
+        "domain/roads",
+        "catalog"
     );
 
     /** Individual files that must stay Bukkit-free (must exist - they are Phase 2a's extractions). */
