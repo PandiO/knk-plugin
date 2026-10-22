@@ -69,6 +69,22 @@ region-http:
   # Port to listen on (the API's region callback URL must use the same port).
   port: 8081
 
+# Performance metrics (KNG-232): a Prometheus /metrics endpoint with TPS, tick time, players, chunks/entities per
+# world, JVM heap/off-heap/GC, process CPU and RSS, the container's memory and CPU (cgroup), API-call and task
+# durations. For sizing the server and building scaling curves - see knk-workspace
+# docs/guides/performance-metrics-and-capacity.md. Off by default; it never touches Bukkit from the HTTP thread.
+metrics:
+  enabled: false
+  # 127.0.0.1 only accepts a scraper on this host. For Prometheus in another container use the Docker
+  # host/bridge IP and set a token; never 0.0.0.0 on a public server.
+  bind-address: "127.0.0.1"
+  port: 9225
+  # Bearer token the scraper sends (Authorization: Bearer <token>). Required when bind-address is not
+  # loopback; plugin start refuses otherwise. e.g. `openssl rand -hex 32`.
+  token: ""
+  # How often the main thread samples TPS/tick time/chunks/entities (1-60)
+  sample-seconds: 5
+
 # Public web app, used in player messages (e.g. where to enter a /account link code).
 web:
   # Base URL without a trailing slash, e.g. "https://app.knightsandkings.net". Empty: messages
@@ -514,6 +530,24 @@ gates:
   fire-duration-seconds: 8
   fire-damage-per-tick: 2.0
   fire-tick-interval-seconds: 1
+  # A burning door block is drawn as regular fire on the side of the block the attacker was on, with smoke
+  # rising off the opposite (inside) face so defenders can see which blocks burn. It is a client-side
+  # picture only (it never exists in the world, so it can't spread or burn the gate).
+  # Damage cracks: a damaged gate's door blocks show vanilla's block-breaking cracks, 10 stages that
+  # follow the gate's HP (each stage is a tenth of its HP) until it is destroyed. Purely visual.
+  damage-cracks:
+    enabled: true
+  # A click or break attempt on a gate door does what the held item would do to a player: the player's
+  # attack damage (the item's "Attack Damage" tooltip line plus Strength) plus Sharpness, which the tooltip
+  # doesn't show. An empty hand does 1. from-held-item: false goes back to the flat 10 per hit; multiplier
+  # scales the item damage for balance. Arrows, explosions and fire are unchanged.
+  melee-damage:
+    from-held-item: true
+    multiplier: 1.0
+  # chaos / flash_chaos hurt every gate with a door block within this many blocks (measured to the nearest
+  # edge of the block) of whoever used them, with the enchantment's own damage. Entities are still only
+  # hurt within 3 blocks.
+  area-enchantment-radius-blocks: 5.0
   # Pass-through system: InstantOpen mode removes only the door blocks within
   # passthrough-instant-open-radius-blocks of the triggering player's position (sideways, across
   # the gate's full depth), restoring them once the player crosses to the far side or after

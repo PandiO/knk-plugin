@@ -218,7 +218,7 @@ public final class WalkSnapshotService {
     /** Runs {@link #tick} every server tick. */
     public void start(Plugin plugin) {
         if (task == null) {
-            task = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 1L, 1L);
+            task = Bukkit.getScheduler().runTaskTimer(plugin, net.knightsandkings.knk.core.metrics.PluginMetrics.timed("navigation.walk_snapshot", this::tick), 1L, 1L);
         }
     }
 

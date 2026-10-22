@@ -29,6 +29,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Supplier;
 
 public class ExecutorImpl implements EnchantmentExecutor {
     private final Plugin plugin;
@@ -47,10 +48,19 @@ public class ExecutorImpl implements EnchantmentExecutor {
      */
     public ExecutorImpl(Plugin plugin, CooldownManager cooldownManager, FrozenPlayerTracker frozenPlayerTracker,
                         CombatSafezoneCheck safezones) {
+        this(plugin, cooldownManager, frozenPlayerTracker, safezones, () -> GateAreaDamage.NONE);
+    }
+
+    /**
+     * @param gateAreaDamage how the area abilities (chaos, flash_chaos) reach gate doors in range; read per
+     *                       activation, since the gates start after the enchantments do
+     */
+    public ExecutorImpl(Plugin plugin, CooldownManager cooldownManager, FrozenPlayerTracker frozenPlayerTracker,
+                        CombatSafezoneCheck safezones, Supplier<GateAreaDamage> gateAreaDamage) {
         this.plugin = plugin;
         this.cooldownManager = cooldownManager;
         this.attackEffects = buildAttackEffects(plugin, frozenPlayerTracker);
-        this.supportEffects = buildSupportEffects(plugin, safezones);
+        this.supportEffects = buildSupportEffects(plugin, safezones, gateAreaDamage);
     }
 
     @Override
@@ -180,14 +190,15 @@ public class ExecutorImpl implements EnchantmentExecutor {
         return map;
     }
 
-    private static Map<String, SupportEnchantmentEffect> buildSupportEffects(Plugin plugin, CombatSafezoneCheck safezones) {
+    private static Map<String, SupportEnchantmentEffect> buildSupportEffects(Plugin plugin, CombatSafezoneCheck safezones,
+                                                                           Supplier<GateAreaDamage> gateAreaDamage) {
         Map<String, SupportEnchantmentEffect> map = new LinkedHashMap<>();
         map.put("health_boost", new HealthBoostEffect(plugin));
         map.put("armor_repair", new ArmorRepairEffect(plugin));
         map.put("resistance", new ResistanceEffect(plugin));
         map.put("invisibility", new InvisibilityEffect(plugin));
-        map.put("chaos", new ChaosEffect(plugin, safezones));
-        map.put("flash_chaos", new FlashChaosEffect(plugin, safezones));
+        map.put("chaos", new ChaosEffect(plugin, safezones, gateAreaDamage));
+        map.put("flash_chaos", new FlashChaosEffect(plugin, safezones, gateAreaDamage));
         return map;
     }
 }

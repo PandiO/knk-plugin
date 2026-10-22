@@ -63,7 +63,7 @@ public final class LootboxSpawnScheduler {
     public void start() {
         stop();
         long ticks = runtime.settings().schedulerTickSeconds() * 20L;
-        task = Bukkit.getScheduler().runTaskTimer(plugin, () -> tick(), ticks, ticks);
+        task = Bukkit.getScheduler().runTaskTimer(plugin, net.knightsandkings.knk.core.metrics.PluginMetrics.timed("lootbox.spawn", () -> tick()), ticks, ticks);
     }
 
     public void stop() {

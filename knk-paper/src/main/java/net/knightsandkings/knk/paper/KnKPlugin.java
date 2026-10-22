@@ -97,6 +97,8 @@ import net.knightsandkings.knk.paper.gates.GateDisplayManager;
 import net.knightsandkings.knk.paper.gates.GateDisplayOrphanCleanupTask;
 import net.knightsandkings.knk.paper.gates.GateDisplayUpdateTask;
 import net.knightsandkings.knk.paper.gates.GateDoorHitService;
+import net.knightsandkings.knk.paper.gates.GateCrackVisuals;
+import net.knightsandkings.knk.paper.gates.GateCrackVisualsTask;
 import net.knightsandkings.knk.paper.gates.GateFireDamageTask;
 import net.knightsandkings.knk.paper.gates.GateFireSystem;
 import net.knightsandkings.knk.paper.gates.GatePassThroughService;
@@ -144,6 +146,8 @@ import net.knightsandkings.knk.paper.utils.CommandCooldownManager;
 public class KnKPlugin extends JavaPlugin {
     private KnkApiClient apiClient;
     private RegionHttpServer regionHttpServer;
+    /** KNG-232: performance metrics endpoint, sampler and instruments; null until onEnable reads the config. */
+    private net.knightsandkings.knk.paper.metrics.MetricsService metricsService;
     private KnkConfig config;
     private CacheManager cacheManager;
     /** KNG-58: last-known account, freeze, mode and permission answers on disk, for when the API is down. */
@@ -307,6 +311,9 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.core.siege.SiegeMatchRecorder siegeMatchRecorder;
     /** Kept for the siege gate controller (Phase 7a), which respawns doors a match destroyed. */
     private HealthSystem gateHealthSystem;
+    // How area enchantments (chaos, flash_chaos) damage gate doors in range; NONE until the gates start.
+    private volatile net.knightsandkings.knk.paper.enchantment.GateAreaDamage gateAreaDamage =
+        net.knightsandkings.knk.paper.enchantment.GateAreaDamage.NONE;
     private net.knightsandkings.knk.paper.connectivity.ApiConnectivityMonitor apiConnectivityMonitor;
     private volatile boolean skipApiWhileDown = true;
     /** Kept for the siege non-member pass-through (Phase 7b, TELEPORT mode only). */
@@ -328,6 +335,9 @@ public class KnKPlugin extends JavaPlugin {
             saveDefaultConfig();
             config = ConfigLoader.load(getConfig());
             getLogger().info("Configuration loaded successfully");
+            // First, so the API calls of the rest of startup are timed as well (KNG-232).
+            metricsService = new net.knightsandkings.knk.paper.metrics.MetricsService(this, config.metrics());
+            metricsService.start();
             newPlayerWindow = new net.knightsandkings.knk.paper.onboarding.NewPlayerWindow(
                 java.time.Clock.systemUTC(), config.onboarding().discoveryQuiet());
             // KNG-114: load the worlds in worlds.load first, so gates, region repair, Game Settings and admission all
@@ -978,7 +988,17 @@ public class KnKPlugin extends JavaPlugin {
                 ? statisticsGateSink : net.knightsandkings.knk.paper.gates.GateDamageSink.NONE;
             gateFireSystem.setDamageSink(gateDamageSink);
 
-            getServer().getPluginManager().registerEvents(new GateEventListener(gateDoorHitService), this);
+            this.gateAreaDamage = new net.knightsandkings.knk.paper.gates.GateAreaDamageService(gateManager, gateDoorHitService,
+                getConfig().getDouble("gates.area-enchantment-radius-blocks", 5.0));
+            // A defender who hits a burning door block with a freeze weapon puts that block's fire out. The
+            // siege controller starts later, so it's read per hit; without a lockdown nobody is a defender.
+            net.knightsandkings.knk.paper.gates.GateFreezeExtinguisher freezeExtinguisher = enchantmentRuntime == null ? null
+                : new net.knightsandkings.knk.paper.gates.GateFreezeExtinguisher(gateFireSystem, enchantmentRuntime.enchantmentRepository(),
+                    (player, door) -> siegeGates != null && siegeGates.isDefender(player, door.getGateStructureId()));
+            getServer().getPluginManager().registerEvents(new GateEventListener(gateDoorHitService, freezeExtinguisher,
+                getConfig().getBoolean("gates.melee-damage.from-held-item", true)
+                    ? new net.knightsandkings.knk.paper.gates.GateMeleeDamage(getConfig().getDouble("gates.melee-damage.multiplier", 1.0))
+                    : null), this);
             getServer().getPluginManager().registerEvents(new GateDamageConsequenceListener(healthSystem, gateFireSystem, gateDamageSink), this);
 
             int passThroughInstantOpenRadius = getConfig().getInt("gates.passthrough-instant-open-radius-blocks", 1);
@@ -993,6 +1013,13 @@ public class KnKPlugin extends JavaPlugin {
             int fireTickIntervalSeconds = getConfig().getInt("gates.fire-tick-interval-seconds", 1);
             long fireTickIntervalTicks = Math.max(1L, fireTickIntervalSeconds) * 20L;
             new GateFireDamageTask(gateFireSystem).runTaskTimer(this, fireTickIntervalTicks, fireTickIntervalTicks);
+
+            // A damaged gate's door blocks show vanilla's block-breaking cracks (10 stages over its HP).
+            if (getConfig().getBoolean("gates.damage-cracks.enabled", true)) {
+                GateCrackVisuals gateCrackVisuals = new GateCrackVisuals(gateManager);
+                healthSystem.setCrackVisuals(gateCrackVisuals);
+                new GateCrackVisualsTask(gateCrackVisuals).runTaskTimer(this, GateCrackVisualsTask.PERIOD_TICKS, GateCrackVisualsTask.PERIOD_TICKS);
+            }
 
             WorldGuardIntegration worldGuardIntegration = new WorldGuardIntegration(this);
             // KNG-113: one animation task per world, also for a world loaded later; stopped when its world unloads
@@ -1224,6 +1251,9 @@ public class KnKPlugin extends JavaPlugin {
         if (regionHttpServer != null) {
             regionHttpServer.stop();
         }
+        if (metricsService != null) {
+            metricsService.stop();
+        }
         if (regionLookupExecutor != null) {
             regionLookupExecutor.shutdownNow();
         }
@@ -1263,8 +1293,8 @@ public class KnKPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.telemetry.TelemetryListener(
             telemetryEmitter, task -> getServer().getScheduler().runTask(this, task)), this);
         long sampleTicks = Math.max(1, telemetryConfig.enhancedMovementSampleSeconds()) * 20L;
-        getServer().getScheduler().runTaskTimer(this, new net.knightsandkings.knk.paper.telemetry.EnhancedMovementSampler(
-            telemetryEmitter, () -> getServer().getOnlinePlayers()), sampleTicks, sampleTicks);
+        getServer().getScheduler().runTaskTimer(this, net.knightsandkings.knk.core.metrics.PluginMetrics.timed("telemetry.movement_sample", new net.knightsandkings.knk.paper.telemetry.EnhancedMovementSampler(
+            telemetryEmitter, () -> getServer().getOnlinePlayers())), sampleTicks, sampleTicks);
         this.telemetryFlushTask = new net.knightsandkings.knk.paper.telemetry.TelemetryFlushTask(
             telemetryEmitter, apiClient.getTelemetryApi());
         telemetryFlushTask.start(this, telemetryConfig.flushIntervalSeconds(), telemetryConfig.configPollSeconds());
@@ -1291,10 +1321,11 @@ public class KnKPlugin extends JavaPlugin {
             analyticsConfig.maxPendingBatches());
         if (analyticsConfig.movement()) {
             long sampleTicks = analyticsConfig.movementSampleSeconds() * 20L;
-            getServer().getScheduler().runTaskTimer(this, new net.knightsandkings.knk.paper.analytics.MovementSampler(
+            getServer().getScheduler().runTaskTimer(this, net.knightsandkings.knk.core.metrics.PluginMetrics.timed(
+                "analytics.movement_sample", new net.knightsandkings.knk.paper.analytics.MovementSampler(
                 window, () -> getServer().getOnlinePlayers(),
                 uuid -> statisticsService != null && statisticsService.isAfk(uuid),
-                analyticsConfig.excludedGameModes()), sampleTicks, sampleTicks);
+                analyticsConfig.excludedGameModes())), sampleTicks, sampleTicks);
         }
         if (analyticsConfig.menuFunnels()) {
             this.menuFunnelRecorder = new net.knightsandkings.knk.paper.analytics.MenuFunnelRecorder(window);
@@ -1679,7 +1710,7 @@ public class KnKPlugin extends JavaPlugin {
             navigationDestinations.onRoadAccessChanged(() -> mainThread.execute(() -> tags.refreshAll(
                 org.bukkit.Bukkit.getWorlds().stream().map(org.bukkit.World::getName).toList())));
         }
-        org.bukkit.Bukkit.getScheduler().runTaskTimer(this, tags::tick, 1L, 1L);
+        org.bukkit.Bukkit.getScheduler().runTaskTimer(this, net.knightsandkings.knk.core.metrics.PluginMetrics.timed("nametags.tick", tags::tick), 1L, 1L);
         org.bukkit.Bukkit.getScheduler().runTaskTimer(this,
             () -> tags.refreshAll(org.bukkit.Bukkit.getWorlds().stream().map(org.bukkit.World::getName).toList()),
             net.knightsandkings.knk.paper.roads.LiveEdgeTags.INTERVAL_TICKS, net.knightsandkings.knk.paper.roads.LiveEdgeTags.INTERVAL_TICKS);
@@ -2661,7 +2692,7 @@ public class KnKPlugin extends JavaPlugin {
             hubOutageService.setDomainSpawn(domainSpawns, MenuService.mainThreadExecutor(this));
         }
         getServer().getPluginManager().registerEvents(hubOutageService, this);
-        getServer().getScheduler().runTaskTimer(this, hubOutageService::tick, 20L, 20L);
+        getServer().getScheduler().runTaskTimer(this, net.knightsandkings.knk.core.metrics.PluginMetrics.timed("hub.outage_tick", hubOutageService::tick), 20L, 20L);
         var connectivity = getApiConnectivity();
         if (connectivity != null && connectivity.state() != net.knightsandkings.knk.core.connectivity.ApiConnectivityState.UNKNOWN) {
             hubOutageService.connectivityChanged(connectivity.state());
@@ -3486,7 +3517,8 @@ public class KnKPlugin extends JavaPlugin {
     }
 
     private void initializeEnchantmentRuntime(CombatSafezoneCheck safezones) {
-        EnchantmentBootstrap bootstrap = new EnchantmentBootstrap(this, safezones);
+        // The gates start after the enchantments: chaos / flash_chaos read the gate seam when they go off.
+        EnchantmentBootstrap bootstrap = new EnchantmentBootstrap(this, safezones, () -> gateAreaDamage);
         this.enchantmentRuntime = bootstrap.initialize();
     }
 
