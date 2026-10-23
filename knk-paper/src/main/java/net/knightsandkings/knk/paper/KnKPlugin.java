@@ -624,10 +624,9 @@ public class KnKPlugin extends JavaPlugin {
                 config.cache().ttl(),
                 enchantmentDefinitionsQueryApi
             );
-            this.itemBlueprintsDataAccess = dataAccessFactory.createItemBlueprintsDataAccess(
-                config.cache().ttl(),
-                itemBlueprintsQueryApi
-            );
+            // KNG-262: its own entities.itemBlueprints TTL; /knk cache refresh drops it after a web-app edit.
+            this.itemBlueprintsDataAccess = dataAccessFactory.createItemBlueprintsDataAccess(itemBlueprintsQueryApi);
+            cacheManager.registerRefreshHook("item blueprints", itemBlueprintsDataAccess::invalidateAll);
             this.kitsDataAccess = dataAccessFactory.createKitsDataAccess(
                 config.cache().ttl(),
                 kitsQueryApi
