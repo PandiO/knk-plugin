@@ -321,7 +321,8 @@ public class RegionDomainResolver {
         if (summary == null) {
             return false;
         }
-        if (regionId.equalsIgnoreCase(summary.wgRegionId())) {
+        if (regionId.equalsIgnoreCase(summary.wgRegionId())
+            || summary.subRegionIds().stream().anyMatch(regionId::equalsIgnoreCase)) {
             return true;
         }
         return summary.parentDomainDecisions() != null
@@ -400,7 +401,16 @@ public class RegionDomainResolver {
     }
 
     private void registerDomainFromSummary(String world, DomainRegionSummary summary) {
-        registerDomain(world, new DomainSnapshot(
+        DomainSnapshot snapshot = snapshotOf(summary);
+        registerDomain(world, snapshot);
+        // KNG-256: each sub-region is the same domain (DomainSnapshot is equal by domain id).
+        for (String subRegionId : summary.subRegionIds()) {
+            registerRegion(world, subRegionId, snapshot);
+        }
+    }
+
+    private static DomainSnapshot snapshotOf(DomainRegionSummary summary) {
+        return new DomainSnapshot(
             summary.id(),
             summary.name(),
             summary.description(),
@@ -420,7 +430,7 @@ public class RegionDomainResolver {
                     .collect(Collectors.toSet()),
             Set.of(),
             Set.of()
-        ));
+        );
     }
 
     /**
@@ -521,6 +531,14 @@ public class RegionDomainResolver {
     public void registerDomain(String world, DomainSnapshot domain) {
         if (domain != null && domain.wgRegionId() != null) {
             domainsByRegion.put(RegionKey.of(world, domain.wgRegionId()), new CachedValue<>(domain, Instant.now()));
+            domainCacheMetrics.recordPut();
+        }
+    }
+
+    /** KNG-256: caches {@code domain} as the domain of {@code regionId}, one of its sub-regions, in {@code world}. */
+    public void registerRegion(String world, String regionId, DomainSnapshot domain) {
+        if (domain != null && regionId != null && !regionId.isBlank()) {
+            domainsByRegion.put(RegionKey.of(world, regionId), new CachedValue<>(domain, Instant.now()));
             domainCacheMetrics.recordPut();
         }
     }
@@ -834,6 +852,11 @@ public class RegionDomainResolver {
         Set<DomainSnapshot> domains
     ) {}
 
+    /**
+     * A domain as the region tracker sees it. KNG-256: equal by domain id (a domain with several regions - its main region
+     * and sub-regions - is one domain in a set of entered or left domains, and moving between its regions changes
+     * nothing); without an id, by main region as before.
+     */
     public record DomainSnapshot(
         Integer id,
         String name,
@@ -846,7 +869,29 @@ public class RegionDomainResolver {
         Set<String> parentDomainNames,
         Set<Integer> childDomainIds,
         Set<String> childDomainNames
-    ) {}
+    ) {
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof DomainSnapshot that)) {
+                return false;
+            }
+            if (id != null || that.id != null) {
+                return Objects.equals(id, that.id);
+            }
+            return wgRegionId == null ? that.wgRegionId == null : wgRegionId.equalsIgnoreCase(that.wgRegionId);
+        }
+
+        @Override
+        public int hashCode() {
+            if (id != null) {
+                return id.hashCode();
+            }
+            return wgRegionId == null ? 0 : wgRegionId.toLowerCase(Locale.ROOT).hashCode();
+        }
+    }
 
     public record StructureSnapshot(
         Integer id,
