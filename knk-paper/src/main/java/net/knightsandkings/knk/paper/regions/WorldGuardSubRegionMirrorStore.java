@@ -91,8 +91,16 @@ public final class WorldGuardSubRegionMirrorStore implements SubRegionMirror.Sto
                     flags.put(own.getKey(), own.getValue());
                 }
             }
+            // The main region's own flag objects first: a flag WorldGuard doesn't know (a v1 leftover) is a different
+            // object per region and isn't in the registry.
+            Map<String, Flag<?>> byName = new HashMap<>();
+            if (parent != null) {
+                for (Flag<?> flag : parent.getFlags().keySet()) {
+                    byName.put(flag.getName().toLowerCase(Locale.ROOT), flag);
+                }
+            }
             for (Map.Entry<String, Object> wanted : desired.flags().entrySet()) {
-                Flag<?> flag = registry.get(wanted.getKey());
+                Flag<?> flag = byName.getOrDefault(wanted.getKey(), registry.get(wanted.getKey()));
                 if (flag == null) {
                     throw new IllegalStateException("unknown flag " + wanted.getKey());
                 }

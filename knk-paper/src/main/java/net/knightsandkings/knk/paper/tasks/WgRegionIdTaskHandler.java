@@ -14,7 +14,6 @@ import com.sk89q.worldedit.regions.Polygonal2DRegion;
 import com.sk89q.worldedit.regions.Region;
 import com.sk89q.worldguard.WorldGuard;
 import com.sk89q.worldguard.protection.flags.Flag;
-import com.sk89q.worldguard.protection.flags.StringFlag;
 import com.sk89q.worldguard.protection.managers.RegionManager;
 import com.sk89q.worldguard.protection.managers.RemovalStrategy;
 import com.sk89q.worldguard.protection.regions.ProtectedCuboidRegion;
@@ -49,8 +48,6 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
     private static final String FIELD_NAME = "WgRegionId";
     private static final String TEMP_REGION_PREFIX = "tempregion_worldtask_";
     
-    // Custom flag to store creation timestamp
-    public static final StringFlag CREATION_TIMESTAMP = new StringFlag("knk-creation-timestamp");
 
     private final WorldTasksApi worldTasksApi;
     private final Plugin plugin;
@@ -290,7 +287,9 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                     .ifPresent(note -> player.sendMessage("§7[WorldTask] " + note + "."));
                 
                 // Store creation timestamp for retention policy
-                region.setFlag(CREATION_TIMESTAMP, String.valueOf(System.currentTimeMillis()));
+                net.knightsandkings.knk.paper.regions.RegionBookkeepingFlags.set(region,
+                    net.knightsandkings.knk.paper.regions.RegionBookkeepingFlags.CREATION_TIMESTAMP,
+                    String.valueOf(System.currentTimeMillis()));
                 
                 // Apply flags if any
                 if (!context.flags.isEmpty()) {

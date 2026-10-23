@@ -326,6 +326,8 @@ public class KnKPlugin extends JavaPlugin {
     @Override
     public void onLoad() {
         net.knightsandkings.knk.paper.regions.access.DomainAccessFlags.register(getLogger());
+        // KNG-258: the creation timestamp and orphan mark must survive a restart (read back by name either way)
+        net.knightsandkings.knk.paper.regions.RegionBookkeepingFlags.register(getLogger());
     }
 
     @Override

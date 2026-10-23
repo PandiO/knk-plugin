@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.Supplier;
 
-import com.sk89q.worldguard.protection.flags.StringFlag;
 import com.sk89q.worldguard.protection.managers.RegionManager;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 
@@ -15,14 +14,11 @@ import net.knightsandkings.knk.core.regions.SubRegionMirror;
 import net.knightsandkings.knk.paper.regions.access.DomainAccessFlags;
 
 /**
- * {@link OrphanedSubRegions.Store} on WorldGuard (KNG-258). The {@code knk-orphaned-since} flag is a plain
- * {@link StringFlag} like {@code knk-creation-timestamp}: WorldGuard keeps flags it doesn't know in its region file. Main
- * thread only.
+ * {@link OrphanedSubRegions.Store} on WorldGuard (KNG-258). The {@code knk-orphaned-since} flag is read and written by
+ * name ({@link RegionBookkeepingFlags}), so it is found again after a restart. Main thread only.
  */
 public final class WorldGuardOrphanedSubRegionStore implements OrphanedSubRegions.Store {
 
-    /** Read and written by name, as {@code TempRegionRetentionTask} reads {@code knk-creation-timestamp}. */
-    public static final StringFlag ORPHANED_SINCE = new StringFlag(OrphanedSubRegions.ORPHANED_SINCE_FLAG);
 
     private final Supplier<List<RegionManager>> managers;
     private final Set<RegionManager> dirty = new HashSet<>();
@@ -37,7 +33,8 @@ public final class WorldGuardOrphanedSubRegionStore implements OrphanedSubRegion
         for (RegionManager manager : managers.get()) {
             for (ProtectedRegion region : manager.getRegions().values()) {
                 if (SubRegionMirror.isSubRegionName(region.getId())) {
-                    refs.add(new OrphanedSubRegions.RegionRef(manager.getName(), region.getId(), region.getFlag(ORPHANED_SINCE)));
+                    refs.add(new OrphanedSubRegions.RegionRef(manager.getName(), region.getId(),
+                        RegionBookkeepingFlags.get(region, RegionBookkeepingFlags.ORPHANED_SINCE)));
                 }
             }
         }
@@ -64,7 +61,7 @@ public final class WorldGuardOrphanedSubRegionStore implements OrphanedSubRegion
         } catch (ProtectedRegion.CircularInheritanceException impossible) {
             // Clearing a parent never forms a cycle.
         }
-        region.setFlag(ORPHANED_SINCE, String.valueOf(orphanedSince));
+        RegionBookkeepingFlags.set(region, RegionBookkeepingFlags.ORPHANED_SINCE, String.valueOf(orphanedSince));
         dirty.add(manager);
     }
 
@@ -73,7 +70,7 @@ public final class WorldGuardOrphanedSubRegionStore implements OrphanedSubRegion
         RegionManager manager = managerOf(world);
         ProtectedRegion region = manager == null ? null : manager.getRegion(regionId);
         if (region != null) {
-            region.setFlag(ORPHANED_SINCE, null);
+            RegionBookkeepingFlags.set(region, RegionBookkeepingFlags.ORPHANED_SINCE, null);
             dirty.add(manager);
         }
     }

@@ -2,7 +2,6 @@ package net.knightsandkings.knk.paper.tasks;
 
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldguard.WorldGuard;
-import com.sk89q.worldguard.protection.flags.StringFlag;
 import com.sk89q.worldguard.protection.managers.RegionManager;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import net.knightsandkings.knk.core.exception.ApiException;
@@ -43,8 +42,9 @@ public class TempRegionRetentionTask {
     private static final long LOOKUP_TIMEOUT_SECONDS = 15;
 
     // Custom flag to read creation timestamp (must match the one in WgRegionIdTaskHandler)
-    private static final StringFlag CREATION_TIMESTAMP = new StringFlag("knk-creation-timestamp");
-    private static final StringFlag ORPHANED_SINCE = net.knightsandkings.knk.paper.regions.WorldGuardOrphanedSubRegionStore.ORPHANED_SINCE;
+    // Read by name (RegionBookkeepingFlags): an unregistered flag comes back from the region file as another object.
+    private static final String CREATION_TIMESTAMP = net.knightsandkings.knk.paper.regions.RegionBookkeepingFlags.CREATION_TIMESTAMP;
+    private static final String ORPHANED_SINCE = net.knightsandkings.knk.paper.regions.RegionBookkeepingFlags.ORPHANED_SINCE;
 
     private final Plugin plugin;
     private final long retentionMillis;
@@ -199,7 +199,7 @@ public class TempRegionRetentionTask {
                 if (SubRegionMirror.isSubRegionName(region.getId())) {
                     // KNG-258: an orphaned domain sub-region, counted from when it was orphaned
                     Decision orphan = TempRegionCleanupPolicy.decideOrphanedSubRegion(region.getId(),
-                            region.getFlag(ORPHANED_SINCE), cutoffMillis, listedSubRegion, domainUsage);
+                            flag(region, ORPHANED_SINCE), cutoffMillis, listedSubRegion, domainUsage);
                     if (orphan == Decision.DELETE) {
                         orphanedSubRegionsToDelete.add(region.getId());
                     } else if (orphan != Decision.KEEP_KNOWN_DOMAIN_REGION && orphan != Decision.KEEP_IN_USE) {
@@ -215,7 +215,7 @@ public class TempRegionRetentionTask {
                     }
                     continue;
                 }
-                Decision decision = TempRegionCleanupPolicy.decide(region.getId(), region.getFlag(CREATION_TIMESTAMP),
+                Decision decision = TempRegionCleanupPolicy.decide(region.getId(), flag(region, CREATION_TIMESTAMP),
                         cutoffMillis, knownDomainRegion, domainUsage);
                 switch (decision) {
                     case DELETE -> regionsToDelete.add(region.getId());
@@ -228,7 +228,7 @@ public class TempRegionRetentionTask {
                     case KEEP_INVALID_TIMESTAMP -> {
                         sweep.noTimestamp().add(name);
                         LOGGER.warning("Invalid creation timestamp for region " + region.getId()
-                                + ": " + region.getFlag(CREATION_TIMESTAMP));
+                                + ": " + flag(region, CREATION_TIMESTAMP));
                     }
                     default -> sweep.noTimestamp().add(name);
                 }
@@ -269,5 +269,9 @@ public class TempRegionRetentionTask {
             }
         }
         return sweep;
+    }
+
+    private static String flag(ProtectedRegion region, String name) {
+        return net.knightsandkings.knk.paper.regions.RegionBookkeepingFlags.get(region, name);
     }
 }
