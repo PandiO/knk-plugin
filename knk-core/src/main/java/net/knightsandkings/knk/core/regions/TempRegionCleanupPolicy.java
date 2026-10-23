@@ -48,6 +48,28 @@ public final class TempRegionCleanupPolicy {
     private TempRegionCleanupPolicy() {
     }
 
+    /**
+     * KNG-258: the same checks for a domain sub-region ({@code domain_<d>_sub_<s>}) that no domain lists any more
+     * ({@link OrphanedSubRegions}). The retention period counts from when it was orphaned ({@code knk-orphaned-since}),
+     * not from its creation: a sub-region removed today was often drawn long ago.
+     * <ol>
+     *   <li>the name is a sub-region's, else {@link Decision#NOT_TEMPORARY};</li>
+     *   <li>the last access sync listed it (or hasn't run): {@link Decision#KEEP_KNOWN_DOMAIN_REGION};</li>
+     *   <li>it was never marked orphaned: {@link Decision#KEEP_NO_TIMESTAMP} (the next sync marks it);</li>
+     *   <li>marked before the cutoff, and a fresh API lookup finds no domain using it.</li>
+     * </ol>
+     */
+    public static Decision decideOrphanedSubRegion(String regionId, String orphanedSince, long cutoffMillis,
+                                                   Predicate<String> listedSubRegion, Function<String, Usage> freshUsage) {
+        if (!SubRegionMirror.isSubRegionName(regionId)) {
+            return Decision.NOT_TEMPORARY;
+        }
+        if (listedSubRegion.test(regionId)) {
+            return Decision.KEEP_KNOWN_DOMAIN_REGION;
+        }
+        return decideByAge(regionId, orphanedSince, cutoffMillis, freshUsage);
+    }
+
     public static boolean isTemporary(String regionId) {
         return regionId != null && regionId.toLowerCase(Locale.ROOT).startsWith(TEMP_REGION_PREFIX);
     }
@@ -66,6 +88,11 @@ public final class TempRegionCleanupPolicy {
         if (knownDomainRegion.test(regionId)) {
             return Decision.KEEP_KNOWN_DOMAIN_REGION;
         }
+        return decideByAge(regionId, creationTimestamp, cutoffMillis, freshUsage);
+    }
+
+    private static Decision decideByAge(String regionId, String creationTimestamp, long cutoffMillis,
+                                        Function<String, Usage> freshUsage) {
         if (creationTimestamp == null || creationTimestamp.isBlank()) {
             return Decision.KEEP_NO_TIMESTAMP;
         }

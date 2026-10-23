@@ -592,9 +592,11 @@ public class KnKPlugin extends JavaPlugin {
                 config.regionHttp().bindAddress(), config.regionHttp().port(), config.api().auth().apiKey());
             regionHttpServer.start();
 
-            // Start temp region retention task (14 day retention policy; never deletes a region a domain uses)
-            tempRegionRetentionTask = new TempRegionRetentionTask(this, 14, managedRegions::protectsFromCleanup,
-                    TempRegionRetentionTask.domainUsageVia(domainsQueryApi));
+            // Start temp region retention task (regions.temp-retention.days, default 14; never deletes a region a domain
+            // uses). KNG-258: also orphaned domain sub-regions, counted from when they were orphaned.
+            tempRegionRetentionTask = new TempRegionRetentionTask(this,
+                    Math.max(1, getConfig().getLong("regions.temp-retention.days", 14)), managedRegions::protectsFromCleanup,
+                    TempRegionRetentionTask.domainUsageVia(domainsQueryApi), domainAccessSync::listsSubRegion);
             tempRegionRetentionTask.start();
 
             // Start headless WorldTask poller (webapp-initiated tasks that need no player)

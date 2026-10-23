@@ -1,6 +1,8 @@
 package net.knightsandkings.knk.paper.regions.access;
 
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Logger;
@@ -12,8 +14,10 @@ import com.sk89q.worldguard.WorldGuard;
 import com.sk89q.worldguard.protection.managers.RegionManager;
 
 import net.knightsandkings.knk.core.ports.api.DomainAccessRulesApi;
+import net.knightsandkings.knk.core.regions.OrphanedSubRegions;
 import net.knightsandkings.knk.core.regions.SubRegionMirror;
 import net.knightsandkings.knk.core.regions.access.AccessFlagSync;
+import net.knightsandkings.knk.paper.regions.WorldGuardOrphanedSubRegionStore;
 import net.knightsandkings.knk.paper.regions.WorldGuardSubRegionMirrorStore;
 
 /**
@@ -26,7 +30,9 @@ import net.knightsandkings.knk.paper.regions.WorldGuardSubRegionMirrorStore;
  * force, so enforcement never depends on the API being up.
  *
  * <p>KNG-255: each run then makes every domain's sub-regions copies of its main region ({@link SubRegionMirror}), so an
- * admin's flag on the main region reaches them within {@code interval-minutes}.
+ * admin's flag on the main region reaches them within {@code interval-minutes}. KNG-258: then it marks the
+ * {@code domain_<d>_sub_<s>} regions no domain lists any more as orphans ({@link OrphanedSubRegions}), which the daily
+ * temp-region cleanup deletes after the retention period.
  */
 public final class DomainAccessFlagSync {
     private static final Logger LOGGER = Logger.getLogger(DomainAccessFlagSync.class.getName());
@@ -53,6 +59,10 @@ public final class DomainAccessFlagSync {
     private final SubRegionMirror mirror = new SubRegionMirror();
     private final WorldGuardSubRegionMirrorStore mirrorStore = new WorldGuardSubRegionMirrorStore(DomainAccessFlagSync::loadedManagers);
     private volatile SubRegionMirror.Report lastSubRegionReport;
+    private final OrphanedSubRegions orphans = new OrphanedSubRegions();
+    private final WorldGuardOrphanedSubRegionStore orphanStore = new WorldGuardOrphanedSubRegionStore(DomainAccessFlagSync::loadedManagers);
+    /** KNG-258: the sub-region ids the last completed sync listed (lower-case); null before the first. */
+    private volatile Set<String> listedSubRegions;
 
     public DomainAccessFlagSync(JavaPlugin plugin, DomainAccessRulesApi api, Settings settings) {
         this.plugin = plugin;
@@ -108,6 +118,18 @@ public final class DomainAccessFlagSync {
                         lastSubRegionReport = null;
                         LOGGER.warning("[KnK Regions] Sub-region sync failed: " + e.getMessage());
                     }
+                    listedSubRegions = rules.stream().flatMap(rule -> rule.subRegionIds().stream())
+                        .map(id -> id.toLowerCase(Locale.ROOT)).collect(java.util.stream.Collectors.toUnmodifiableSet());
+                    try {
+                        OrphanedSubRegions.Report orphaned = orphans.run(rules, orphanStore, System.currentTimeMillis());
+                        if (orphaned.changed() || !orphaned.failures().isEmpty()) {
+                            LOGGER.info("[KnK Regions] Orphaned sub-regions: " + orphaned.summary()
+                                + (orphaned.marked().isEmpty() ? "" : " - newly orphaned: " + orphaned.marked()));
+                        }
+                        orphaned.failures().stream().limit(10).forEach(failure -> LOGGER.warning("[KnK Regions] " + failure));
+                    } catch (RuntimeException e) {
+                        LOGGER.warning("[KnK Regions] Orphaned sub-region check failed: " + e.getMessage());
+                    }
                     result.complete(report);
                 } catch (RuntimeException e) {
                     result.completeExceptionally(e);
@@ -117,6 +139,15 @@ public final class DomainAccessFlagSync {
             });
         });
         return result;
+    }
+
+    /**
+     * KNG-258: whether the last completed sync listed {@code regionId} as a domain's sub-region; true for every region
+     * until a sync has completed, so the temp-region cleanup deletes nothing it can't rule out.
+     */
+    public boolean listsSubRegion(String regionId) {
+        Set<String> listed = listedSubRegions;
+        return listed == null || (regionId != null && listed.contains(regionId.toLowerCase(Locale.ROOT)));
     }
 
     /** KNG-255: what the sub-region mirror did in the last completed sync (null before the first, or when it failed). */

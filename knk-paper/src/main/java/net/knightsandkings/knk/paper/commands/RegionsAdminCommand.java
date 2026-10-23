@@ -25,6 +25,8 @@ import net.knightsandkings.knk.paper.tasks.TempRegionRetentionTask;
  * as the daily 14-day cleanup ({@link TempRegionRetentionTask}), plus {@code domain_<id>} regions no domain uses (report
  * only). {@code /knk regions temp purge [hours]} deletes the temp regions no domain uses that are older than
  * {@code hours} (default {@value #DEFAULT_PURGE_HOURS}, at least 1, so a region step still in progress is safe).
+ * KNG-258: it also lists the orphaned domain sub-regions (no domain lists them any more), and purge deletes the ones
+ * orphaned longer than {@code hours}.
  *
  * <p>{@code /knk regions sync} (KNG-255) runs the domain access sync now, which also makes every domain's sub-regions
  * copies of its main region (flags, owners, members, priority); otherwise that happens every few minutes.
@@ -185,6 +187,11 @@ public class RegionsAdminCommand {
         list(sender, purge ? "Deleted" : "Unused (purge deletes)", purge ? sweep.deleted() : sweep.deletable());
         list(sender, "Used by a domain (POST /api/Regions/finalize-temp-names renames them)", sweep.inUse());
         list(sender, "Delete failed", sweep.deleteFailed());
+        // KNG-258
+        list(sender, purge ? "Orphaned sub-regions deleted" : "Orphaned sub-regions past the retention (purge deletes)",
+                sweep.orphanedSubRegions());
+        list(sender, "Orphaned sub-regions not old enough yet (adopt one again with 'select' in a sub-region task)",
+                sweep.orphanedSubRegionsWaiting());
         if (!purge) {
             list(sender, "domain_<id> regions no domain uses (not deleted; check /rg info first)", sweep.orphanedFinalNames());
             if (!sweep.deletable().isEmpty()) {
