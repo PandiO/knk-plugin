@@ -14,16 +14,23 @@ import net.knightsandkings.knk.core.menu.RuntimeMenuSection;
 import net.knightsandkings.knk.paper.utils.DisplayTextFormatter;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
+import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.Plugin;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
 import java.util.function.UnaryOperator;
 import java.util.logging.Level;
@@ -72,6 +79,10 @@ public final class MenuService {
     private final MenuObservers observers = new MenuObservers();
     /** KNG-125: toggles BLINK items each tick ({@link #processBlinks}). */
     private final MenuItemBlinker blinker = new MenuItemBlinker();
+    /** KNG-231: page loads in flight, one per player. */
+    private final MenuPageLoads pageLoads = new MenuPageLoads();
+    /** KNG-231: a page load still running after this many ticks also says so in the action bar. */
+    static final long LOADING_ACTION_BAR_DELAY_TICKS = 10L;
 
     public MenuService(
             Plugin plugin,
@@ -329,7 +340,9 @@ public final class MenuService {
     /**
      * Shared plumbing for every section-page mutation: re-fetches the current
      * menu (see {@link #nextPage}), resolves the named section, applies
-     * {@code mutation} on the main thread, then re-renders.
+     * {@code mutation} on the main thread, then re-renders. When that menu is
+     * the one on screen, {@link #changePageInPlace} does it without the
+     * re-fetch (KNG-231).
      */
     private void mutateSectionPage(Player player, String sectionName, SectionPageMutation mutation) {
         Optional<MenuSession> sessionOpt = sessionRegistry.get(player.getUniqueId());
@@ -339,6 +352,12 @@ public final class MenuService {
             return;
         }
         MenuSession session = sessionOpt.get();
+
+        Optional<OpenMenuContext> open = openMenuShowing(player, currentMenuKey.get());
+        if (open.isPresent()) {
+            changePageInPlace(player, open.get(), session, sectionName, mutation);
+            return;
+        }
 
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             RuntimeMenu menu = loadAndAssemble(player, currentMenuKey.get());
@@ -361,6 +380,115 @@ public final class MenuService {
                 renderAndShow(player, menu, session, materialKeys);
             });
         });
+    }
+
+    /** Main thread: the player's open KnK menu when it is {@code menuKey} and still on screen. */
+    private Optional<OpenMenuContext> openMenuShowing(Player player, String menuKey) {
+        if (!Bukkit.isPrimaryThread()) {
+            return Optional.empty();
+        }
+        return openMenuContextRegistry.get(player.getUniqueId())
+                .filter(context -> context.menuKey().equals(menuKey))
+                .filter(context -> player.getOpenInventory().getTopInventory().equals(context.inventory()));
+    }
+
+    /**
+     * KNG-231: a page change (or search/filter change) in the menu the player is looking at, on the
+     * main thread. Re-renders from the open menu's assembled template and material keys, so only the
+     * content is fetched (the template used to be re-fetched and re-assembled on every click). While
+     * the content loads, the section's pager buttons show a clock "Loading page N…", and after
+     * {@link #LOADING_ACTION_BAR_DELAY_TICKS} the action bar says the same; further page clicks are
+     * ignored until it is done. A failed fetch puts the previous page back and tells the player.
+     * In-memory content renders within the click, with no loading item at all.
+     */
+    private void changePageInPlace(Player player, OpenMenuContext context, MenuSession session,
+                                   String sectionName, SectionPageMutation mutation) {
+        RuntimeMenu menu = context.menu();
+        Optional<RuntimeMenuSection> found = menu.findSection(sectionName);
+        if (found.isEmpty()) {
+            String available = menu.sections().stream().map(RuntimeMenuSection::name)
+                    .collect(Collectors.joining(", "));
+            player.sendMessage(ChatColor.YELLOW + "No section named '" + sectionName + "' in this menu. Available: " + available);
+            return;
+        }
+        RuntimeMenuSection section = found.get();
+        UUID playerId = player.getUniqueId();
+        OptionalLong started = pageLoads.tryBegin(playerId, System.currentTimeMillis());
+        if (started.isEmpty()) {
+            return;
+        }
+        long load = started.getAsLong();
+        int pageBefore = session.getPage(section.id());
+        MenuContentQuery queryBefore = session.getContentQuery(section.id());
+        long startedNanos = System.nanoTime();
+
+        CompletableFuture<MenuRenderResult> render;
+        try {
+            mutation.apply(menu, section, session);
+            render = renderer.render(menu, session, player, context.materialNamespaceKeys(), this, true);
+        } catch (RuntimeException e) {
+            render = CompletableFuture.failedFuture(e);
+        }
+
+        AtomicBoolean actionBarShown = new AtomicBoolean();
+        if (!render.isDone()) {
+            int page = MenuPageLoads.displayPage(session.getPage(section.id()), context.sectionView(section.id()));
+            showLoading(context, section, page);
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                if (pageLoads.isCurrent(playerId, load) && player.isOnline()) {
+                    player.sendActionBar(DisplayTextFormatter.toComponent(MenuPageLoads.loadingText(page)));
+                    actionBarShown.set(true);
+                }
+            }, LOADING_ACTION_BAR_DELAY_TICKS);
+        }
+
+        render.whenCompleteAsync((result, error) -> {
+            boolean wasCurrent = pageLoads.isCurrent(playerId, load);
+            pageLoads.finish(playerId, load);
+            if (actionBarShown.get() && player.isOnline()) {
+                player.sendActionBar(net.kyori.adventure.text.Component.empty());
+            }
+            Optional<OpenMenuContext> current = openMenuContextRegistry.get(playerId);
+            boolean stillShowing = wasCurrent && player.isOnline() && current.isPresent() && current.get() == context
+                    && player.getOpenInventory().getTopInventory().equals(context.inventory());
+            if (error != null) {
+                session.setPage(section.id(), pageBefore);
+                session.setContentQuery(section.id(), queryBefore);
+                Throwable cause = error instanceof CompletionException && error.getCause() != null ? error.getCause() : error;
+                if (!(cause instanceof MenuRenderer.ContentFetchFailedException)) {
+                    logger.log(Level.WARNING, "Changing page of menu '" + menu.key() + "' for " + player.getName() + " failed", cause);
+                }
+                if (stillShowing) {
+                    MenuRenderResult previous = context.lastRender();
+                    renderer.applyToInventory(context.inventory(), previous, player.isSneaking());
+                    context.update(context.menu(), previous);
+                    player.sendMessage(ChatColor.RED + "Couldn't load that page right now. Try again in a moment.");
+                }
+                return;
+            }
+            logger.fine(() -> "Menu '" + menu.key() + "' page change for " + player.getName() + " took "
+                    + (System.nanoTime() - startedNanos) / 1_000_000L + " ms");
+            if (stillShowing) {
+                show(player, menu, result);
+            }
+        }, mainThread);
+    }
+
+    /** KNG-231: puts the "Loading page N…" clock on {@code section}'s pager buttons in the open Inventory. */
+    private static void showLoading(OpenMenuContext context, RuntimeMenuSection section, int page) {
+        Set<Integer> slots = MenuPageLoads.pagerSlots(context.itemsBySlot(), context.sectionsBySlot(), section);
+        if (slots.isEmpty()) {
+            return;
+        }
+        ItemStack clock = new ItemStack(Material.CLOCK);
+        ItemMeta meta = clock.getItemMeta();
+        if (meta != null) {
+            meta.setDisplayName(DisplayTextFormatter.translateToLegacy(MenuPageLoads.loadingText(page)));
+            clock.setItemMeta(meta);
+        }
+        for (int slot : slots) {
+            context.inventory().setItem(slot, clock);
+        }
     }
 
     @FunctionalInterface
@@ -524,6 +652,7 @@ public final class MenuService {
 
     /** Called from {@code PlayerQuitEvent} - closes gap #4 (v1's static per-player maps never cleared). */
     public void closeSession(UUID playerId) {
+        pageLoads.cancel(playerId);
         openMenuContextRegistry.close(playerId);
         sessionRegistry.close(playerId);
         refreshSchedule.untrack(playerId);
@@ -538,6 +667,7 @@ public final class MenuService {
             observers.closed(playerId, openMenuContextRegistry.get(playerId).map(c -> c.menu().key()).orElse(null));
         }
         refreshSchedule.untrack(playerId);
+        pageLoads.cancel(playerId);
     }
 
     /**

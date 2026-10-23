@@ -135,6 +135,19 @@ public final class MenuRenderer {
      */
     public CompletableFuture<MenuRenderResult> render(RuntimeMenu menu, MenuSession session, Player player,
                                                       Map<Integer, String> materialKeys, MenuService menuService) {
+        return render(menu, session, player, materialKeys, menuService, false);
+    }
+
+    /**
+     * KNG-231: as {@link #render(RuntimeMenu, MenuSession, Player, Map, MenuService)}; with
+     * {@code failOnContentError} a content source that fails fails the render with a
+     * {@link ContentFetchFailedException} instead of rendering its section empty - a page change
+     * puts the previous page back rather than showing an empty one.
+     */
+    public CompletableFuture<MenuRenderResult> render(RuntimeMenu menu, MenuSession session, Player player,
+                                                      Map<Integer, String> materialKeys, MenuService menuService,
+                                                      boolean failOnContentError) {
+        java.util.concurrent.atomic.AtomicBoolean contentFailed = new java.util.concurrent.atomic.AtomicBoolean();
         Map<Integer, String> keys = new java.util.concurrent.ConcurrentHashMap<>(materialKeys);
         MenuContextParams menuContext = session.currentContext();
         long currentTick = currentTick();
@@ -147,7 +160,8 @@ public final class MenuRenderer {
         Map<Integer, CompletableFuture<ContentFetch>> fetches = new LinkedHashMap<>();
         for (RuntimeMenuSection section : menu.sections()) {
             if (section.hasContentSource() && section.isVisibleTo(permissionChecker)) {
-                fetches.put(section.id(), startContentFetch(section, menu, session, player, menuContext, rootScope, keys));
+                fetches.put(section.id(), startContentFetch(section, menu, session, player, menuContext, rootScope, keys,
+                        contentFailed));
             }
         }
 
@@ -156,10 +170,20 @@ public final class MenuRenderer {
 
         // Step 4 (main thread): compose.
         return allFetched.thenApplyAsync(ignored -> {
+            if (failOnContentError && contentFailed.get()) {
+                throw new ContentFetchFailedException(menu.key());
+            }
             Map<Integer, ContentFetch> fetched = new HashMap<>();
             fetches.forEach((sectionId, future) -> fetched.put(sectionId, future.join()));
             return compose(menu, session, player, menuContext, rootScope, keys, fetched, currentTick, menuService);
         }, mainThread);
+    }
+
+    /** KNG-231: a content source of {@code menuKey} failed during a render that asked to fail on it. */
+    public static final class ContentFetchFailedException extends RuntimeException {
+        public ContentFetchFailedException(String menuKey) {
+            super("A content source of menu '" + menuKey + "' failed to fetch");
+        }
     }
 
     /** One content-source section's fetched page (already wrapped to a valid page) plus its slot pool. */
@@ -182,7 +206,8 @@ public final class MenuRenderer {
     private CompletableFuture<ContentFetch> startContentFetch(RuntimeMenuSection section, RuntimeMenu menu,
                                                              MenuSession session, Player player,
                                                              MenuContextParams menuContext, MenuVariableScope rootScope,
-                                                             Map<Integer, String> keys) {
+                                                             Map<Integer, String> keys,
+                                                             java.util.concurrent.atomic.AtomicBoolean failed) {
         RuntimeMenuSection.SlotPool pool = section.computeSlotPool(menu.totalSlots());
         int pageSize = pool.availablePool().size();
         if (pageSize == 0) {
@@ -197,7 +222,7 @@ public final class MenuRenderer {
         Map<String, String> params = MenuParams.interpolate(section.contentSourceParams(), paramsScope);
 
         int firstFetchPage = Math.max(requestedPage, 0);
-        return fetchContentPage(section, context, params, firstFetchPage, pageSize, contentQuery)
+        return fetchContentPage(section, context, params, firstFetchPage, pageSize, contentQuery, failed)
                 .thenComposeAsync(first -> {
                     int totalPages = (int) Math.ceil(first.page().totalCount() / (double) pageSize);
                     int wrapped = totalPages > 0 ? Math.floorMod(requestedPage, totalPages) : 0;
@@ -205,7 +230,7 @@ public final class MenuRenderer {
                         return CompletableFuture.completedFuture(new ContentFetch(pool, first, wrapped, totalPages));
                     }
                     session.setPage(section.id(), wrapped);
-                    return fetchContentPage(section, context, params, wrapped, pageSize, contentQuery)
+                    return fetchContentPage(section, context, params, wrapped, pageSize, contentQuery, failed)
                             .thenApply(second -> new ContentFetch(pool, second, wrapped, totalPages));
                 }, mainThread)
                 .thenCompose(fetch -> {
@@ -228,7 +253,8 @@ public final class MenuRenderer {
     /** @param page0 0-based (MenuSession convention) - converted to the 1-based PagedQuery/web-api convention here. */
     private CompletableFuture<MenuContentPage> fetchContentPage(RuntimeMenuSection section, MenuContentSourceContext context,
                                                                 Map<String, String> params, int page0, int pageSize,
-                                                                MenuContentQuery contentQuery) {
+                                                                MenuContentQuery contentQuery,
+                                                                java.util.concurrent.atomic.AtomicBoolean failed) {
         PagedQuery query = new PagedQuery(page0 + 1, pageSize, contentQuery.searchText(), null, false, contentQuery.filterValues());
         CompletableFuture<MenuContentPage> future;
         try {
@@ -237,6 +263,7 @@ public final class MenuRenderer {
             future = CompletableFuture.failedFuture(e);
         }
         return future.exceptionally(e -> {
+            failed.set(true);
             LOGGER.log(Level.WARNING, "MenuContentSource '" + section.contentSourceId() + "' for section '"
                     + section.name() + "' failed to fetch page " + page0 + " - rendering it empty this pass", e);
             return new MenuContentPage(new Page<>(List.of(), 0, page0 + 1, pageSize), false);
