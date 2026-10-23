@@ -482,7 +482,9 @@ public class LocationTaskHandler implements IWorldTaskHandler {
             
             // Check if location is inside parent region
             BlockVector3 blockLoc = BlockVector3.at(location.getX(), location.getY(), location.getZ());
-            boolean isInside = parentRegion.contains(blockLoc);
+            // KNG-257: inside any of the parent domain's regions (its main region or a sub-region)
+            boolean isInside = net.knightsandkings.knk.paper.regions.DomainRegionUnion.contains(
+                net.knightsandkings.knk.paper.regions.DomainRegionUnion.of(regionManager, parentRegion), blockLoc);
             
             // Plugin-computed placeholders override the pre-resolved ones from the frontend
             JsonObject coordinates = coordinatePlaceholders(location.getX(), location.getY(), location.getZ());
@@ -645,28 +647,28 @@ public class LocationTaskHandler implements IWorldTaskHandler {
                     continue;
                 }
 
-                var minPoint = region.getMinimumPoint();
-                var probe = BlockVector3.at(x, minPoint.getY(), z);
-
-                boolean contains = region.contains(probe);
+                // KNG-257: inside any of the domain's regions (its main region or a sub-region), each at its own floor
+                boolean contains = false;
+                boolean strictlyInside = false;
+                for (ProtectedRegion part : net.knightsandkings.knk.paper.regions.DomainRegionUnion.of(regionManager, region)) {
+                    int floor = part.getMinimumPoint().getY();
+                    if (!part.contains(BlockVector3.at(x, floor, z))) {
+                        continue;
+                    }
+                    contains = true;
+                    var epsilon = 0.001d;
+                    if (part.contains(BlockVector3.at(x - epsilon, floor, z)) && part.contains(BlockVector3.at(x + epsilon, floor, z))
+                        && part.contains(BlockVector3.at(x, floor, z - epsilon)) && part.contains(BlockVector3.at(x, floor, z + epsilon))) {
+                        strictlyInside = true;
+                        break;
+                    }
+                }
                 if (!contains) {
                     LOGGER.info("Location containment check: region=" + regionId + ", x=" + x + ", z=" + z + " -> false");
                     return false;
                 }
 
                 if (!allowBoundary) {
-                    var epsilon = 0.001d;
-                    var probeLeft = BlockVector3.at(x - epsilon, minPoint.getY(), z);
-                    var probeRight = BlockVector3.at(x + epsilon, minPoint.getY(), z);
-                    var probeNorth = BlockVector3.at(x, minPoint.getY(), z - epsilon);
-                    var probeSouth = BlockVector3.at(x, minPoint.getY(), z + epsilon);
-
-                    boolean strictlyInside =
-                        region.contains(probeLeft) &&
-                        region.contains(probeRight) &&
-                        region.contains(probeNorth) &&
-                        region.contains(probeSouth);
-
                     LOGGER.info("Location containment check (strict): region=" + regionId + ", x=" + x + ", z=" + z + " -> " + strictlyInside);
                     return strictlyInside;
                 }

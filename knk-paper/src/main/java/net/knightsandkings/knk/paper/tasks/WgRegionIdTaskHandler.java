@@ -22,6 +22,7 @@ import com.sk89q.worldguard.protection.regions.ProtectedPolygonalRegion;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import net.knightsandkings.knk.core.domain.validation.ValidationResult;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
+import net.knightsandkings.knk.paper.regions.DomainRegionUnion;
 import net.knightsandkings.knk.paper.regions.WorldGuardRegionRenamer;
 import net.knightsandkings.knk.paper.regions.WorldGuardSubRegionMirrorStore;
 import net.knightsandkings.knk.paper.tasks.validation.ParentRegionFeedback;
@@ -251,6 +252,8 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 // Validate region against validation rules from InputJson (KNG-173: a warning saves, a block refuses)
                 player.sendMessage("§7Validating region selection...");
                 ValidationResult validation = validateRegion(player, world, selectionPoints(selection),
+                    net.knightsandkings.knk.paper.integration.WorldGuardIntegration.createRegionFromSelection(
+                        selection, "knk_selection_check", 0),
                     "Your selection", context);
                 if (!reportValidation(player, validation)) {
                     return; // Block save
@@ -281,6 +284,10 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 String tempRegionId = TEMP_REGION_PREFIX + context.taskId;
                 ProtectedRegion region = net.knightsandkings.knk.paper.integration.WorldGuardIntegration.createRegionFromSelection(
                     selection, tempRegionId, context.priority);
+                // KNG-257: say what a round selection became
+                net.knightsandkings.knk.paper.integration.SelectionShapes.outlineOf(selection)
+                    .map(net.knightsandkings.knk.paper.integration.SelectionShapes.Outline::note)
+                    .ifPresent(note -> player.sendMessage("§7[WorldTask] " + note + "."));
                 
                 // Store creation timestamp for retention policy
                 region.setFlag(CREATION_TIMESTAMP, String.valueOf(System.currentTimeMillis()));
@@ -355,7 +362,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
 
                 // KNG-173: the task's validation rules apply to a selected region the same as to a drawn one
                 player.sendMessage("§7Validating region " + regionName + "...");
-                ValidationResult validation = validateRegion(player, world, regionPoints(region),
+                ValidationResult validation = validateRegion(player, world, regionPoints(region), region,
                     "Region " + regionName, context);
                 if (!reportValidation(player, validation)) {
                     return;
@@ -814,8 +821,11 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 return true;
             }
 
-            // Use shape-aware containment check logic
-            boolean isContained = isRegionInsideRegion(parentRegion, childRegion);
+            // Use shape-aware containment check logic; KNG-257: against the parent domain's every region
+            List<ProtectedRegion> parentUnion = DomainRegionUnion.of(regionManager, parentRegion);
+            boolean isContained = parentUnion.size() > 1
+                ? DomainRegionUnion.outside(parentUnion, childRegion, regionPoints(childRegion), 1).isEmpty()
+                : isRegionInsideRegion(parentRegion, childRegion);
             
             LOGGER.info("Region containment check: " + childRegionId + " inside " + parentRegionId + " = " + isContained);
             return isContained;
@@ -908,8 +918,8 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      * @param context      task context containing InputJson with validation rules
      * @return ValidationResult indicating success or failure
      */
-    private ValidationResult validateRegion(Player player, World subjectWorld, List<BlockVector3> points, String what,
-                                            TaskContext context) {
+    private ValidationResult validateRegion(Player player, World subjectWorld, List<BlockVector3> points,
+                                            ProtectedRegion subject, String what, TaskContext context) {
         try {
             // Parse validation context from InputJson
             LOGGER.info("validateRegion called for task " + context.taskId);
@@ -942,7 +952,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 LOGGER.info("Processing validation rule: " + validationType);
 
                 if ("RegionContainment".equals(validationType)) {
-                    ValidationResult result = validateRegionContainment(player, subjectWorld, points, what, rule);
+                    ValidationResult result = validateRegionContainment(player, subjectWorld, points, subject, what, rule);
                     if (!result.isValid()) {
                         LOGGER.info("Validation failed (blocking: " + result.isBlocking() + "): " + result.getMessage());
                     }
@@ -972,7 +982,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      * @return ValidationResult
      */
     private ValidationResult validateRegionContainment(Player player, World subjectWorld, List<BlockVector3> points,
-                                                       String what, JsonObject rule) {
+                                                       ProtectedRegion subject, String what, JsonObject rule) {
         try {
             // Parse config
             JsonObject config = rule.has("configJson") && !rule.get("configJson").isJsonNull()
@@ -1037,21 +1047,19 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 return parent.wrongWorld(what, subjectWorld.getName(), parentWorld.getName());
             }
 
-            // Check every corner point of the region against the parent region
+            // Check the region's corner points against the parent domain's regions (KNG-257: its main region and its
+            // sub-regions; with several, its columns are sampled too)
             StringBuilder violations = new StringBuilder();
-            int violationCount = 0;
             final int maxViolations = 5; // Limit violation output
 
             player.sendMessage("§7Checking against " + parent.describe() + "...");
-            for (BlockVector3 point : points) {
-                if (!parentRegion.contains(point)) {
-                    violationCount++;
-                    if (violationCount <= maxViolations) {
-                        if (violations.length() > 0) violations.append(", ");
-                        violations.append("(").append(point.x()).append(", ").append(point.y()).append(", ")
-                            .append(point.z()).append(")");
-                    }
-                }
+            List<ProtectedRegion> parentUnion = DomainRegionUnion.of(regionManager, parentRegion);
+            List<BlockVector3> outside = DomainRegionUnion.outside(parentUnion, subject, points, 1000);
+            int violationCount = outside.size();
+            for (BlockVector3 point : outside.subList(0, Math.min(maxViolations, outside.size()))) {
+                if (violations.length() > 0) violations.append(", ");
+                violations.append("(").append(point.x()).append(", ").append(point.y()).append(", ")
+                    .append(point.z()).append(")");
             }
 
             LOGGER.info("Containment check complete. Points checked: " + points.size() + ", outside: " + violationCount);
@@ -1112,8 +1120,10 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      * highest Y, a cuboid's eight corners, else the minimum and maximum point.
      */
     static List<BlockVector3> selectionPoints(Region selection) {
-        if (selection instanceof Polygonal2DRegion poly) {
-            return polygonPoints(poly.getPoints(), poly.getMinimumY(), poly.getMaximumY());
+        // KNG-257: a cylinder, ellipsoid or convex selection is checked as the polygon it is stored as.
+        var outline = net.knightsandkings.knk.paper.integration.SelectionShapes.outlineOf(selection);
+        if (outline.isPresent()) {
+            return polygonPoints(outline.get().points(), outline.get().minY(), outline.get().maxY());
         }
         if (selection instanceof CuboidRegion) {
             return cuboidCorners(selection.getMinimumPoint(), selection.getMaximumPoint());
