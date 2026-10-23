@@ -259,6 +259,7 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.navigation.NavigationService navigationService;
     private net.knightsandkings.knk.paper.roads.LiveEdgeTags liveEdgeTags;
     private net.knightsandkings.knk.paper.navigation.NavigationDestinations navigationDestinations;
+    private net.knightsandkings.knk.paper.navigation.NavigationCompassService navigationCompass;
     private java.util.concurrent.ExecutorService navigationRouting;
     // KNG-51 walkable last-mile paths; null while navigation.walk.enabled is false.
     private net.knightsandkings.knk.paper.navigation.walk.WalkSnapshotService walkSnapshots;
@@ -1600,7 +1601,8 @@ public class KnKPlugin extends JavaPlugin {
         var eligibility = new net.knightsandkings.knk.paper.navigation.NavigationEligibility(
             uuid -> joinLoadingGuard != null && joinLoadingGuard.isLoading(uuid),
             uuid -> adminFreezeManager != null && adminFreezeManager.isFrozen(uuid),
-            net.knightsandkings.knk.paper.navigation.NavigationEligibility.siegeMembers(() -> siegeService));
+            // KNG-234: members of a running match navigate (the navigation compass); lobby and hub members don't
+            net.knightsandkings.knk.paper.navigation.NavigationEligibility.siegeMembersOutsideMatch(() -> siegeService));
         this.navigationRouting = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "knk-navigation-routing");
             t.setDaemon(true);
@@ -1638,6 +1640,23 @@ public class KnKPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(
             new net.knightsandkings.knk.paper.navigation.NavigationListener(navigationService), this);
         navigationService.start();
+
+        // KNG-234: the navigation compass - any item matching the web app's material + display name rule.
+        var compassSettings = new net.knightsandkings.knk.paper.navigation.CompassSettingsStore(
+            apiClient.getNavigationCompassSettingsApi(), System::currentTimeMillis);
+        compassSettings.refresh();
+        cacheManager.registerRefreshHook("navigation compass settings", compassSettings::refresh);
+        this.navigationCompass = new net.knightsandkings.knk.paper.navigation.NavigationCompassService(
+            compassSettings::get, () -> navigationService, () -> navigationDestinations, () -> siegeService,
+            (player, node) -> knkPermissible != null && knkPermissible.hasPermission(player, node),
+            mainThread, System::currentTimeMillis, new net.knightsandkings.knk.paper.navigation.BukkitCompassItems());
+        getServer().getPluginManager().registerEvents(
+            new net.knightsandkings.knk.paper.navigation.NavigationCompassListener(navigationCompass), this);
+        if (siegeService != null) {
+            // KNG-234: sieges that want it give the compass at the hub
+            siegeService.addObserver(navigationCompass);
+        }
+        navigationService.setMatchScope(navigationCompass);
         getLogger().info("Road navigation (/navigate) initialized");
     }
 
@@ -2073,10 +2092,13 @@ public class KnKPlugin extends JavaPlugin {
                 java.util.List.of(net.knightsandkings.knk.paper.roads.RoadAdminCommand.NODE)); // KNG-107
             // Road navigation Phase 4: /navigate (/nav), DESIGN §6.1. The services are read lazily - they
             // exist only when navigation.enabled and the road cache started (initializeNavigation).
-            registerTabCommand("navigate", new net.knightsandkings.knk.paper.navigation.NavigateCommand(
+            var navigateCommand = new net.knightsandkings.knk.paper.navigation.NavigateCommand(
                 () -> navigationService, () -> navigationDestinations,
                 (player, node) -> knkPermissible != null && knkPermissible.hasPermission(player, node),
-                MenuService.mainThreadExecutor(this)));
+                MenuService.mainThreadExecutor(this));
+            // KNG-234: in a minigame match only the match's destinations are accepted and offered
+            navigateCommand.setMatchScope(() -> navigationCompass);
+            registerTabCommand("navigate", navigateCommand);
             // Location retention (KNG-80): /knk location here|tp|orphans replaces the built-in /knk location here;
             // each action checks its own knk.admin.location* node. tp goes through the KNG-17 teleport engine.
             if (apiClient != null) {

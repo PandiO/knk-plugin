@@ -225,6 +225,8 @@ public final class NavigationService implements SiegeMatchObserver {
         net.kyori.adventure.key.Key.key("entity.player.levelup"), net.kyori.adventure.sound.Sound.Source.PLAYER, 0.7f, 1.4f);
 
     private final Deps deps;
+    /** KNG-234: in a minigame match only the match's own destinations may be navigated to; null: no such rule. */
+    private volatile MatchNavigationScope matchScope;
     private final RouterParameters routerParameters;
     /** Snapping a destination: no height weight by default, its last leg is a walk path (finding N15). */
     private final RouterParameters destinationParameters;
@@ -414,8 +416,18 @@ public final class NavigationService implements SiegeMatchObserver {
         endAll(EndReason.STOPPED);
     }
 
+    public void setMatchScope(MatchNavigationScope matchScope) {
+        this.matchScope = matchScope;
+    }
+
     public boolean isNavigating(UUID playerId) {
         return active.containsKey(playerId);
+    }
+
+    /** The display name of the player's current destination, or null without a session. */
+    public String destinationName(UUID playerId) {
+        Active a = active.get(playerId);
+        return a == null ? null : a.destination.name();
     }
 
     public int activeCount() {
@@ -513,6 +525,16 @@ public final class NavigationService implements SiegeMatchObserver {
                 case NONE -> NavigationMessages.disabled();
             });
             return;
+        }
+        MatchNavigationScope scope = matchScope;
+        if (scope != null) {
+            var inMatch = scope.destinationsOf(player);
+            if (inMatch.isPresent() && inMatch.get().stream().noneMatch(d -> d.destination().sameAs(destination))) {
+                List<String> labels = inMatch.get().stream().map(MatchNavigationScope.MatchDestination::label).toList();
+                player.sendMessage(labels.isEmpty() ? CompassMessages.noMatchDestinations()
+                    : CompassMessages.matchOnly(destination.name(), labels));
+                return;
+            }
         }
         String world = player.getWorld().getName();
         if (!destination.world().equalsIgnoreCase(world)) {
@@ -1812,6 +1834,11 @@ public final class NavigationService implements SiegeMatchObserver {
 
     @Override
     public void lobbyChanged(SiegeLobbyRuntime lobby) {
+        // KNG-234: a member of a running match navigates with the compass; every lobby change in the middle of a
+        // match (a vote, someone leaving) must not end their route. The eligibility re-check ends it once the match is over.
+        if (lobby.phase() == net.knightsandkings.knk.core.siege.SiegePhase.IN_PROGRESS) {
+            return;
+        }
         for (Active a : new ArrayList<>(active.values())) {
             if (lobby.isMember(a.player.getUniqueId())) {
                 end(a, EndReason.SIEGE);

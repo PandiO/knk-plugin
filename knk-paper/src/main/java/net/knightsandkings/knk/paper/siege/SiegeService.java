@@ -484,6 +484,7 @@ public final class SiegeService {
                 continue;
             }
             prepareForMatch(player);
+            observers.forEach(o -> safely("memberReadiedAtHub", () -> o.memberReadiedAtHub(rt, scenario, player)));
             hub.ifPresent(location -> SiegeBukkit.teleport(player, location));
             player.sendMessage(SiegeMessages.info("You are at the hub of " + scenarioName(scenario)
                     + ". Your inventory and position are saved and will be restored after the siege."));
