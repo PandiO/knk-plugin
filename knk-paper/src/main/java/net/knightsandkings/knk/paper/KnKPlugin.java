@@ -633,10 +633,9 @@ public class KnKPlugin extends JavaPlugin {
                 config.cache().ttl(),
                 enchantmentDefinitionsQueryApi
             );
-            this.itemBlueprintsDataAccess = dataAccessFactory.createItemBlueprintsDataAccess(
-                config.cache().ttl(),
-                itemBlueprintsQueryApi
-            );
+            // KNG-262: its own entities.itemBlueprints TTL; /knk cache refresh drops it after a web-app edit.
+            this.itemBlueprintsDataAccess = dataAccessFactory.createItemBlueprintsDataAccess(itemBlueprintsQueryApi);
+            cacheManager.registerRefreshHook("item blueprints", itemBlueprintsDataAccess::invalidateAll);
             this.kitsDataAccess = dataAccessFactory.createKitsDataAccess(
                 config.cache().ttl(),
                 kitsQueryApi
@@ -3047,6 +3046,8 @@ public class KnKPlugin extends JavaPlugin {
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxInteractListener(
                 runtime, new net.knightsandkings.knk.core.lootbox.ClaimGuard(), commandApi, tokenDelivery, announcer,
                 permission, freshPermission, modeService::getActiveMode, inSiege, userIdOf, mainThread), this);
+            // KNG-266: a box inside a protected region stays clickable for non-members (lootbox entities only).
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.lootbox.LootboxWorldGuardListener(), this);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxChunkListener(runtime), this);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxJoinListener(
                 this, queryApi, delivery, userIdOf, mainThread), this);

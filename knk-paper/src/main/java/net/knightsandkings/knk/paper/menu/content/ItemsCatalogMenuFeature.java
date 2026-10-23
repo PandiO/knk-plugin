@@ -16,6 +16,7 @@ import net.knightsandkings.knk.paper.menu.MenuFeatureRegistries;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -31,7 +32,10 @@ import java.util.stream.Collectors;
  *   <li>Row source {@code items.catalog} → {@link CatalogItemRow}: one page of
  *       {@code ItemBlueprintsDataAccess.searchAsync} (search text and the {@code Category} filter
  *       are the section's query), each blueprint then read in full by id (cache-first) and shown
- *       as the ItemStack a player would receive ({@link CatalogItemRow}).</li>
+ *       as the ItemStack a player would receive ({@link CatalogItemRow}). KNG-231: a built page
+ *       is kept for {@link #PAGE_TTL_MILLIS} (shared by every player), the pages before and after
+ *       it are built in the background as soon as it is shown, and a page past the end is answered
+ *       from the known total - so paging usually needs no API call at all.</li>
  *   <li>Root {@code itemsCatalog} → {@link ItemsCatalogView}: the catalogue size (background
  *       count, never I/O on the main thread) and {@code getCategoryValues} - the comma list the
  *       template's {@code menu.filter.cycle} button cycles through (live, from
@@ -45,6 +49,10 @@ public final class ItemsCatalogMenuFeature implements MenuFeature {
     public static final String ROWS_SOURCE = "items.catalog";
     public static final String CATEGORY_FACET = "Category";
     static final long REFRESH_MILLIS = 60_000L;
+    /** KNG-231: how long a built page is reused; the blueprint and material caches use 60 s too. */
+    static final long PAGE_TTL_MILLIS = 60_000L;
+    /** KNG-231: built pages kept at most (every search/filter/page combination counts). */
+    static final int MAX_CACHED_PAGES = 64;
 
     private static final Logger LOGGER = Logger.getLogger(ItemsCatalogMenuFeature.class.getName());
 
@@ -55,6 +63,11 @@ public final class ItemsCatalogMenuFeature implements MenuFeature {
     private final AtomicBoolean refreshing = new AtomicBoolean();
     private volatile Integer totalCount;
     private volatile long countedAtMillis;
+    /** KNG-231: built (or still building) pages by query, oldest first. Guarded by itself. */
+    private final Map<PagedQuery, CachedPage> pages = new LinkedHashMap<>(16, 0.75f, true);
+
+    private record CachedPage(CompletableFuture<Page<CatalogItemRow>> page, long builtAtMillis) {
+    }
 
     public ItemsCatalogMenuFeature(ItemBlueprintsDataAccess itemBlueprints, MinecraftMaterialRefsDataAccess materialRefs,
                                    CategoriesQueryApi categoriesQueryApi, Clock clock) {
@@ -77,7 +90,108 @@ public final class ItemsCatalogMenuFeature implements MenuFeature {
 
     // ===== rows =====
 
+    /** A page for the menu: cached or built, and its neighbours prefetched once it is there. */
     CompletableFuture<Page<CatalogItemRow>> fetchRows(PagedQuery query) {
+        CompletableFuture<Page<CatalogItemRow>> page = cachedOrBuild(query);
+        page.thenAccept(built -> prefetchAround(query, built.totalCount()));
+        return page;
+    }
+
+    private CompletableFuture<Page<CatalogItemRow>> cachedOrBuild(PagedQuery query) {
+        long now = clock.millis();
+        CompletableFuture<Page<CatalogItemRow>> built;
+        synchronized (pages) {
+            CachedPage cached = pages.get(query);
+            if (cached != null && now - cached.builtAtMillis() < PAGE_TTL_MILLIS
+                    && !cached.page().isCompletedExceptionally()) {
+                return cached.page();
+            }
+            Integer knownTotal = knownTotal(query, now);
+            if (knownTotal != null && query.pageNumber() > pageCount(knownTotal, query.pageSize())) {
+                // Past the end (the menu steps unclamped and wraps once it sees the total): no fetch.
+                return CompletableFuture.completedFuture(new Page<>(List.of(), knownTotal, query.pageNumber(), query.pageSize()));
+            }
+            built = new CompletableFuture<>();
+            pages.put(query, new CachedPage(built, now));
+            while (pages.size() > MAX_CACHED_PAGES) {
+                pages.remove(pages.keySet().iterator().next());
+            }
+        }
+        CompletableFuture<Page<CatalogItemRow>> request;
+        try {
+            request = buildRows(query);
+        } catch (RuntimeException e) {
+            request = CompletableFuture.failedFuture(e);
+        }
+        request.whenComplete((page, ex) -> {
+            if (ex != null) {
+                synchronized (pages) {
+                    CachedPage entry = pages.get(query);
+                    if (entry != null && entry.page() == built) {
+                        pages.remove(query);
+                    }
+                }
+                built.completeExceptionally(ex);
+            } else {
+                built.complete(page);
+            }
+        });
+        return built;
+    }
+
+    /** The total of a fresh cached page with the same search, filters and page size, if any. Holds {@link #pages}. */
+    private Integer knownTotal(PagedQuery query, long now) {
+        for (Map.Entry<PagedQuery, CachedPage> entry : pages.entrySet()) {
+            PagedQuery other = entry.getKey();
+            CompletableFuture<Page<CatalogItemRow>> page = entry.getValue().page();
+            if (other.pageSize() == query.pageSize() && sameFamily(other, query)
+                    && now - entry.getValue().builtAtMillis() < PAGE_TTL_MILLIS
+                    && page.isDone() && !page.isCompletedExceptionally()) {
+                return page.join().totalCount();
+            }
+        }
+        return null;
+    }
+
+    private static boolean sameFamily(PagedQuery a, PagedQuery b) {
+        return java.util.Objects.equals(a.searchTerm(), b.searchTerm())
+                && java.util.Objects.equals(a.sortBy(), b.sortBy())
+                && a.sortDescending() == b.sortDescending()
+                && java.util.Objects.equals(a.filters(), b.filters());
+    }
+
+    private static int pageCount(int total, int pageSize) {
+        return pageSize > 0 ? (int) Math.ceil(total / (double) pageSize) : 0;
+    }
+
+    /**
+     * KNG-231: builds the next page (wrapping to page 1 after the last, like the pager) and the
+     * previous one in the background. Not the last page from page 1: opening the catalogue would
+     * then cost two pages of API calls for one rarely wanted.
+     */
+    private void prefetchAround(PagedQuery query, int total) {
+        int pageCount = pageCount(total, query.pageSize());
+        int current = query.pageNumber();
+        if (pageCount <= 1 || current < 1 || current > pageCount) {
+            return;
+        }
+        int next = current % pageCount + 1;
+        List<Integer> targets = current > 1 && current - 1 != next ? List.of(next, current - 1) : List.of(next);
+        for (int target : targets) {
+            cachedOrBuild(withPage(query, target)).exceptionally(ex -> {
+                LOGGER.log(Level.FINE, "items.catalog: couldn't prefetch page " + target, ex);
+                return null;
+            });
+        }
+    }
+
+    private static PagedQuery withPage(PagedQuery query, int pageNumber) {
+        return new PagedQuery(pageNumber, query.pageSize(), query.searchTerm(), query.sortBy(), query.sortDescending(),
+                query.filters());
+    }
+
+    /** One page from the API: the search, then every row's full blueprint and icon material. */
+    private CompletableFuture<Page<CatalogItemRow>> buildRows(PagedQuery query) {
         return itemBlueprints.searchAsync(query).thenCompose(page -> {
             List<KnkItemBlueprint> summaries = page != null && page.items() != null ? page.items() : List.of();
             List<CompletableFuture<CatalogItemRow>> rows = new ArrayList<>(summaries.size());

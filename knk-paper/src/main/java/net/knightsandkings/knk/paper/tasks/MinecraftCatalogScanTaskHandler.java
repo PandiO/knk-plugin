@@ -5,12 +5,13 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.knightsandkings.knk.api.dto.MinecraftCatalogSnapshotDto;
 import net.knightsandkings.knk.api.dto.WorldTaskDto;
+import net.knightsandkings.knk.core.catalog.CatalogEnchantment;
 import net.knightsandkings.knk.core.catalog.CatalogEntry;
 import net.knightsandkings.knk.core.catalog.CatalogSnapshot;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.MinecraftCatalogApi;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
-import net.knightsandkings.knk.paper.catalog.BukkitMaterialCatalogSource;
+import net.knightsandkings.knk.paper.catalog.BukkitCatalogSource;
 import net.knightsandkings.knk.paper.catalog.CatalogSource;
 import org.bukkit.plugin.Plugin;
 
@@ -23,10 +24,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Logger;
 
 /**
- * Headless WorldTask handler for the Minecraft catalogue scan (KNG-200, knk-workspace
- * docs/specs/minecraft-catalog/IMPLEMENTATION_PLAN.md §5.2a). Reads the server's materials on the main
- * thread, hashes and sends the snapshot to {@code PUT api/MinecraftCatalog/scans/{scanId}/snapshot}
- * off it, then completes the task with {@code {"scanId":N,"entryCount":M}} or fails it with the reason.
+ * Headless WorldTask handler for the Minecraft catalogue scan (KNG-200/KNG-250, knk-workspace
+ * docs/specs/minecraft-catalog/IMPLEMENTATION_PLAN.md §5.2a and §12). Reads the server's materials and
+ * enchantments on the main thread, hashes and sends the schema-2 snapshot to
+ * {@code PUT api/MinecraftCatalog/scans/{scanId}/snapshot} off it, then completes the task with
+ * {@code {"scanId":N,"entryCount":M,"enchantmentCount":E}} or fails it with the reason.
  */
 public class MinecraftCatalogScanTaskHandler implements IHeadlessWorldTaskHandler {
     private static final Logger LOGGER = Logger.getLogger(MinecraftCatalogScanTaskHandler.class.getName());
@@ -40,7 +42,7 @@ public class MinecraftCatalogScanTaskHandler implements IHeadlessWorldTaskHandle
     private final Executor offMainThread;
 
     public MinecraftCatalogScanTaskHandler(MinecraftCatalogApi catalogApi, WorldTasksApi worldTasksApi, Plugin plugin) {
-        this(catalogApi, worldTasksApi, new BukkitMaterialCatalogSource(),
+        this(catalogApi, worldTasksApi, new BukkitCatalogSource(),
             task -> plugin.getServer().getScheduler().runTask(plugin, task),
             task -> plugin.getServer().getScheduler().runTaskAsynchronously(plugin, task));
     }
@@ -77,10 +79,12 @@ public class MinecraftCatalogScanTaskHandler implements IHeadlessWorldTaskHandle
 
     private void readCatalogue(int taskId, int scanId, Runnable finished) {
         List<CatalogEntry> entries;
+        List<CatalogEnchantment> enchantments;
         String minecraftVersion;
         String serverVersion;
         try {
             entries = source.entries();
+            enchantments = source.enchantments();
             minecraftVersion = source.minecraftVersion();
             serverVersion = source.serverVersion();
         } catch (RuntimeException e) {
@@ -92,19 +96,20 @@ public class MinecraftCatalogScanTaskHandler implements IHeadlessWorldTaskHandle
             return;
         }
         try {
-            offMainThread.execute(() -> sendSnapshot(taskId, scanId, minecraftVersion, serverVersion, entries, finished));
+            offMainThread.execute(() -> sendSnapshot(taskId, scanId, minecraftVersion, serverVersion, entries, enchantments, finished));
         } catch (RuntimeException e) {
             fail(taskId, "Could not schedule the snapshot upload for scan " + scanId + ": " + describe(e), finished);
         }
     }
 
     private void sendSnapshot(int taskId, int scanId, String minecraftVersion, String serverVersion,
-                              List<CatalogEntry> entries, Runnable finished) {
+                              List<CatalogEntry> entries, List<CatalogEnchantment> enchantments, Runnable finished) {
         CompletableFuture<Void> upload;
         int entryCount = entries.size();
+        int enchantmentCount = enchantments.size();
         try {
-            MinecraftCatalogSnapshotDto snapshot =
-                MinecraftCatalogSnapshotDto.from(CatalogSnapshot.of(minecraftVersion, serverVersion, entries));
+            MinecraftCatalogSnapshotDto snapshot = MinecraftCatalogSnapshotDto.from(
+                CatalogSnapshot.of(minecraftVersion, serverVersion, entries, enchantments));
             upload = catalogApi.putSnapshot(scanId, snapshot);
         } catch (RuntimeException e) {
             upload = CompletableFuture.failedFuture(e);
@@ -114,9 +119,10 @@ public class MinecraftCatalogScanTaskHandler implements IHeadlessWorldTaskHandle
                 fail(taskId, "Catalogue snapshot for scan " + scanId + " was not accepted: " + describe(error), finished);
                 return;
             }
-            LOGGER.info("[MinecraftCatalogScan] Scan " + scanId + ": sent " + entryCount + " entries ("
-                + minecraftVersion + ")");
-            complete(taskId, "{\"scanId\":" + scanId + ",\"entryCount\":" + entryCount + "}", finished);
+            LOGGER.info("[MinecraftCatalogScan] Scan " + scanId + ": sent " + entryCount + " entries and "
+                + enchantmentCount + " enchantments (" + minecraftVersion + ")");
+            complete(taskId, "{\"scanId\":" + scanId + ",\"entryCount\":" + entryCount
+                + ",\"enchantmentCount\":" + enchantmentCount + "}", finished);
         });
     }
 

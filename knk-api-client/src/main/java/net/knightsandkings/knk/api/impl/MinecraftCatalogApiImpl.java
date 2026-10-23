@@ -14,7 +14,7 @@ import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.MinecraftCatalogApi;
 import okhttp3.OkHttpClient;
 
-/** knk-web-api's MinecraftCatalogController (KNG-200 catalogue scan). */
+/** knk-web-api's MinecraftCatalogController (KNG-200/KNG-250 catalogue scan). */
 public class MinecraftCatalogApiImpl extends BaseApiImpl implements MinecraftCatalogApi {
     // baseUrl is expected to already include /api
     public static final String ENDPOINT = "/MinecraftCatalog";
@@ -40,7 +40,7 @@ public class MinecraftCatalogApiImpl extends BaseApiImpl implements MinecraftCat
             String url = baseUrl + ENDPOINT + "/scans/" + scanId + "/snapshot";
             try {
                 String body = objectMapper.writeValueAsString(snapshot);
-                // About 1.5k entries (~0.5 MB): keep the body out of the debug log.
+                // About 1.5k entries plus the enchantments (~0.5 MB): keep the body out of the debug log.
                 putJson(url, body, false);
                 return null;
             } catch (ApiException | IOException e) {

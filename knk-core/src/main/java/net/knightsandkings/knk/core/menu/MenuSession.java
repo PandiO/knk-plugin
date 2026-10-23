@@ -218,11 +218,23 @@ public final class MenuSession {
         return sectionPages.getOrDefault(sectionTemplateId, 0);
     }
 
+    /**
+     * KNG-230: a page change marks the session dirty, like {@link #setContentQuery} - pager lore
+     * such as {@code Page $section.getPage$/$section.getPageCount$} is bound {@code OnDirty} and
+     * otherwise kept the value of the first render. Setting the page it already has changes nothing.
+     */
     public void setPage(Integer sectionTemplateId, int page) {
         if (sectionTemplateId == null) {
             return;
         }
-        sectionPages.put(sectionTemplateId, Math.max(0, page));
+        putPage(sectionTemplateId, Math.max(0, page));
+    }
+
+    private void putPage(Integer sectionTemplateId, int page) {
+        Integer previous = sectionPages.put(sectionTemplateId, page);
+        if (previous == null ? page != 0 : previous != page) {
+            markDirty();
+        }
     }
 
     /**
@@ -244,7 +256,7 @@ public final class MenuSession {
         if (sectionTemplateId == null) {
             return;
         }
-        sectionPages.put(sectionTemplateId, getPage(sectionTemplateId) + delta);
+        putPage(sectionTemplateId, getPage(sectionTemplateId) + delta);
     }
 
     /**

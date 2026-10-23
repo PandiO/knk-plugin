@@ -872,6 +872,9 @@ cache:
       retry-attempts: 3
       retry-backoff-ms: 100
 
+    # KNG-262: this TTL applies (for most other entities ttl-minutes is still ignored and the global
+    # ttl-seconds is used). A web-app edit of a blueprint shows in game after at most this long,
+    # or at once after /knk cache refresh.
     itemBlueprints:
       ttl-minutes: 20
       max-ttl-minutes: 120
