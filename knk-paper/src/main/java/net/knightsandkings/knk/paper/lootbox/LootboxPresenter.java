@@ -75,6 +75,11 @@ public final class LootboxPresenter {
         this.settings = settings;
     }
 
+    /** One of a world box's entities, active or an orphan left to purge (KNG-266: WorldGuard lets players click these). */
+    public static boolean isBoxEntity(Entity entity) {
+        return tokenOf(entity).isPresent();
+    }
+
     /** The box token on one of its entities, or empty for any other entity. */
     public static Optional<UUID> tokenOf(Entity entity) {
         if (entity == null) {
