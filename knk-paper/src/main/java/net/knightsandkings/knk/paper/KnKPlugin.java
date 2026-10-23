@@ -3037,6 +3037,8 @@ public class KnKPlugin extends JavaPlugin {
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxInteractListener(
                 runtime, new net.knightsandkings.knk.core.lootbox.ClaimGuard(), commandApi, tokenDelivery, announcer,
                 permission, freshPermission, modeService::getActiveMode, inSiege, userIdOf, mainThread), this);
+            // KNG-266: a box inside a protected region stays clickable for non-members (lootbox entities only).
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.lootbox.LootboxWorldGuardListener(), this);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxChunkListener(runtime), this);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.LootboxJoinListener(
                 this, queryApi, delivery, userIdOf, mainThread), this);
