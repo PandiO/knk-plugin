@@ -191,11 +191,11 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
         Vector wingOrigin = anchor;
         String worldName = CoordinateParser.parseWorldName(gate.getAnchorPoint());
         if (useOpenAnchor) {
-            wingOrigin = CoordinateParser.parseCoordinate(gate.getOpenAnchorPoint());
+            wingOrigin = CoordinateParser.parseCoordinate(openScanOrigin(gate));
             if (wingOrigin == null) {
                 return wings;
             }
-            worldName = CoordinateParser.parseWorldName(gate.getOpenAnchorPoint());
+            worldName = CoordinateParser.parseWorldName(openScanOrigin(gate));
         }
 
         if (worldName.isBlank()) {
@@ -232,6 +232,16 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
         }
 
         return wings;
+    }
+
+    /**
+     * KNG-270: where an open-door scan starts - the open-door anchor, or the anchor itself when
+     * that is empty (the opened door stays inside the door box). GateLoaderAdapter reads the
+     * scan back from the same point.
+     */
+    static String openScanOrigin(GateDoorDto gate) {
+        String openAnchor = gate.getOpenAnchorPoint();
+        return openAnchor != null && !openAnchor.isBlank() ? openAnchor : gate.getAnchorPoint();
     }
 
     private void startFloodFillScan(int taskId, GateDoorDto gate, Runnable onFinished) {
@@ -289,10 +299,10 @@ public class GateBlockScanTaskHandler implements IHeadlessWorldTaskHandler {
         }
 
         Vector anchor = useOpenAnchor
-            ? CoordinateParser.parseCoordinate(gate.getOpenAnchorPoint())
+            ? CoordinateParser.parseCoordinate(openScanOrigin(gate))
             : CoordinateParser.parseCoordinate(gate.getAnchorPoint());
         String worldName = useOpenAnchor
-            ? CoordinateParser.parseWorldName(gate.getOpenAnchorPoint())
+            ? CoordinateParser.parseWorldName(openScanOrigin(gate))
             : CoordinateParser.parseWorldName(gate.getAnchorPoint());
 
         if (anchor == null || worldName.isBlank()) {
