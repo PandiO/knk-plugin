@@ -67,6 +67,11 @@ public final class WorldGuardRegionAccessLookup implements DomainAccessService.R
         }
 
         @Override
+        public String domainId() {
+            return DomainAccessFlags.domainId() != null ? region.getFlag(DomainAccessFlags.domainId()) : null;
+        }
+
+        @Override
         public boolean isMember() {
             // Owners and members, including those of parent regions (WorldGuard's own rule).
             return player != null && region.isMember(player);

@@ -47,9 +47,7 @@ public final class WorldGuardAccessFlagStore implements AccessFlagSync.Store {
             if (region == null) {
                 continue;
             }
-            region.setFlag(DomainAccessFlags.entry(), toState(flags.entry()));
-            region.setFlag(DomainAccessFlags.exit(), toState(flags.exit()));
-            region.setFlag(DomainAccessFlags.name(), flags.name());
+            apply(region, flags);
             dirty.add(manager);
         }
     }
@@ -77,9 +75,7 @@ public final class WorldGuardAccessFlagStore implements AccessFlagSync.Store {
         if (region == null) {
             return;
         }
-        region.setFlag(DomainAccessFlags.entry(), toState(flags.entry()));
-        region.setFlag(DomainAccessFlags.exit(), toState(flags.exit()));
-        region.setFlag(DomainAccessFlags.name(), flags.name());
+        apply(region, flags);
         dirty.add(manager);
     }
 
@@ -119,6 +115,11 @@ public final class WorldGuardAccessFlagStore implements AccessFlagSync.Store {
     }
 
     @Override
+    public boolean supportsDomainId() {
+        return DomainAccessFlags.domainId() != null;
+    }
+
+    @Override
     public void persist() {
         String firstFailure = null;
         for (RegionManager manager : Set.copyOf(dirty)) {
@@ -136,10 +137,20 @@ public final class WorldGuardAccessFlagStore implements AccessFlagSync.Store {
         }
     }
 
+    private static void apply(ProtectedRegion region, AccessFlags flags) {
+        region.setFlag(DomainAccessFlags.entry(), toState(flags.entry()));
+        region.setFlag(DomainAccessFlags.exit(), toState(flags.exit()));
+        region.setFlag(DomainAccessFlags.name(), flags.name());
+        if (DomainAccessFlags.domainId() != null) {
+            region.setFlag(DomainAccessFlags.domainId(), flags.domainId());
+        }
+    }
+
     private static AccessFlags flagsOf(ProtectedRegion region) {
         return new AccessFlags(fromState(region.getFlag(DomainAccessFlags.entry())),
             fromState(region.getFlag(DomainAccessFlags.exit())),
-            region.getFlag(DomainAccessFlags.name()));
+            region.getFlag(DomainAccessFlags.name()),
+            DomainAccessFlags.domainId() != null ? region.getFlag(DomainAccessFlags.domainId()) : null);
     }
 
     private static AccessState fromState(StateFlag.State state) {

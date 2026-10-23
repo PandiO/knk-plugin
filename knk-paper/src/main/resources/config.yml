@@ -733,6 +733,11 @@ worlds:
 # every other flag (greetings, custom ones) stay as they are, and no region is created or deleted.
 
 regions:
+  # Leftover regions the daily cleanup deletes (KNG-103, KNG-258): a tempregion_worldtask_* region no domain uses, this
+  # many days after it was drawn, and a domain sub-region (domain_<id>_sub_<n>) no domain lists any more, this many days
+  # after it was orphaned. Never one a domain uses, and nothing while the API can't be asked.
+  temp-retention:
+    days: 14
   managed:
     startup-repair:
       enabled: true

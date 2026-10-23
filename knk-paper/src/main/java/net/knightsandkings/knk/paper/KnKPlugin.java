@@ -326,6 +326,8 @@ public class KnKPlugin extends JavaPlugin {
     @Override
     public void onLoad() {
         net.knightsandkings.knk.paper.regions.access.DomainAccessFlags.register(getLogger());
+        // KNG-258: the creation timestamp and orphan mark must survive a restart (read back by name either way)
+        net.knightsandkings.knk.paper.regions.RegionBookkeepingFlags.register(getLogger());
     }
 
     @Override
@@ -545,6 +547,11 @@ public class KnKPlugin extends JavaPlugin {
                 managedRegions.finalizeNewRegion(regionId, domainType, parentRegionId, world);
                 domainAccessSync.syncNow().exceptionally(error -> null);
             });
+            // KNG-255: a new sub-region is already a copy of its main region; the access sync adds knk-domain-id. It
+            // waits a few seconds: the API stores the sub-region's final name only after this rename answered, and a sync
+            // before that would see a region with access flags that no domain lists yet and clear them.
+            wgRegionIdHandler.setSubRegionFinalizer((subRegionId, mainRegionId, world) ->
+                getServer().getScheduler().runTaskLater(this, () -> domainAccessSync.syncNow().exceptionally(error -> null), 100L));
             managedRegions.scheduleStartupRepair();
             domainAccessSync.schedule();
             // KNG-112: domains from before the API stored worlds get theirs from where their regions are.
@@ -587,9 +594,11 @@ public class KnKPlugin extends JavaPlugin {
                 config.regionHttp().bindAddress(), config.regionHttp().port(), config.api().auth().apiKey());
             regionHttpServer.start();
 
-            // Start temp region retention task (14 day retention policy; never deletes a region a domain uses)
-            tempRegionRetentionTask = new TempRegionRetentionTask(this, 14, managedRegions::protectsFromCleanup,
-                    TempRegionRetentionTask.domainUsageVia(domainsQueryApi));
+            // Start temp region retention task (regions.temp-retention.days, default 14; never deletes a region a domain
+            // uses). KNG-258: also orphaned domain sub-regions, counted from when they were orphaned.
+            tempRegionRetentionTask = new TempRegionRetentionTask(this,
+                    Math.max(1, getConfig().getLong("regions.temp-retention.days", 14)), managedRegions::protectsFromCleanup,
+                    TempRegionRetentionTask.domainUsageVia(domainsQueryApi), domainAccessSync::listsSubRegion);
             tempRegionRetentionTask.start();
 
             // Start headless WorldTask poller (webapp-initiated tasks that need no player)

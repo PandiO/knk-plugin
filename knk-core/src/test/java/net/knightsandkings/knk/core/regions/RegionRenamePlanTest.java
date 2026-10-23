@@ -104,7 +104,21 @@ class RegionRenamePlanTest {
         assertTrue(RegionRenamePlan.isFinalName("DOMAIN_1000006"));
         assertFalse(RegionRenamePlan.isFinalName("domain_"));
         assertFalse(RegionRenamePlan.isFinalName("domain_17_old"));
+        // KNG-255: a sub-region's final name
+        assertTrue(RegionRenamePlan.isFinalName("domain_17_sub_4"));
+        assertFalse(RegionRenamePlan.isFinalName("domain_17_sub_"));
+        assertFalse(RegionRenamePlan.isFinalName("domain_17_sub_4_x"));
         assertFalse(RegionRenamePlan.isFinalName(TEMP));
         assertFalse(RegionRenamePlan.isFinalName(null));
+    }
+
+    @Test
+    void aSubRegionReRunReplacesItsOwnFinalNameInPlace() {
+        // KNG-255: the API names the sub-region's final name as replaced, like a main region's (KNG-103).
+        RegionRenamePlan.Plan plan = RegionRenamePlan.decide("tempregion_worldtask_9", "domain_11_sub_4", "domain_11_sub_4",
+            true, true, true);
+
+        assertEquals(RegionRenamePlan.Action.REPLACE_TARGET, plan.action());
+        assertEquals("domain_11_sub_4", plan.regionToRemove());
     }
 }

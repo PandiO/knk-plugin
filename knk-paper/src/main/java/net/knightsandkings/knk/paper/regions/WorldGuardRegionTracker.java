@@ -28,6 +28,8 @@ import com.sk89q.worldguard.WorldGuard;
 import net.knightsandkings.knk.core.regions.RegionTransitionDecision;
 import net.knightsandkings.knk.core.regions.RegionDomainResolver;
 import net.knightsandkings.knk.core.regions.RegionTransitionService;
+import net.knightsandkings.knk.paper.events.OnDomainEnterEvent;
+import net.knightsandkings.knk.paper.events.OnDomainLeaveEvent;
 import net.knightsandkings.knk.paper.events.OnRegionEnterEvent;
 import net.knightsandkings.knk.paper.events.OnRegionLeaveEvent;
 import net.knightsandkings.knk.paper.utils.ColorOptions;
@@ -441,6 +443,33 @@ public class WorldGuardRegionTracker {
         regionsByPlayer.put(playerId, newRegions);
         trackWorld(playerId, newWorld);
         fireRegionEvents(player, sameWorld(oldWorld, newWorld), oldRegions, newRegions);
+        fireDomainEvents(player, oldWorld, oldRegions, newWorld, newRegions);
+    }
+
+    /**
+     * KNG-256: domain enter/leave events for the domains (by id) the move entered or left. A domain's main region and
+     * its sub-regions resolve to the same domain, so moving between them fires nothing. Cached domains only.
+     */
+    private void fireDomainEvents(Player player, String oldWorld, Set<String> oldRegions, String newWorld,
+                                  Set<String> newRegions) {
+        if (regionResolver == null) {
+            return;
+        }
+        Set<RegionDomainResolver.DomainSnapshot> before = oldRegions.isEmpty() ? Set.of()
+            : regionResolver.resolveRegions(oldWorld, oldRegions).domains();
+        Set<RegionDomainResolver.DomainSnapshot> after = newRegions.isEmpty() ? Set.of()
+            : regionResolver.resolveRegions(newWorld, newRegions).domains();
+        boolean sameWorld = sameWorld(oldWorld, newWorld);
+        for (RegionDomainResolver.DomainSnapshot domain : after) {
+            if (!sameWorld || !before.contains(domain)) {
+                eventDispatcher.accept(new OnDomainEnterEvent(player, domain));
+            }
+        }
+        for (RegionDomainResolver.DomainSnapshot domain : before) {
+            if (!sameWorld || !after.contains(domain)) {
+                eventDispatcher.accept(new OnDomainLeaveEvent(player, domain));
+            }
+        }
     }
 
     /**
