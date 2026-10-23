@@ -85,7 +85,7 @@ class NavigationCompassServiceTest {
         return new KnkSiegeObjective(id, id, name, at(id), null, 100, 3.0, id == 1, holder, true, SiegeGateState.OPEN);
     }
 
-    /** A running match: defenders hold Keep and Gate; this player is on {@code team}. */
+    /** A running match: defenders hold Keep (the main objective) and Gate; this player is on {@code team}. The list is Gate, Keep: the main objective is last. */
     private SiegeMatch match(int team) {
         KnkSiegeScenario scenario = new KnkSiegeScenario(1, "Kardenna", null, 5, "Kardenna", null, List.of(), null, 2, 20,
             null, null, KnkSiegeMatchLength.DEFAULT, null, true, false, true,
@@ -151,16 +151,16 @@ class NavigationCompassServiceTest {
         inMatch(DEF);
 
         assertTrue(compass.use(player, false));
-        assertEquals("Keep", navigatedTo(1).name());
-        assertTrue(lastMessage().contains("Compass 1/2: Keep (defend)"), lastMessage());
+        assertEquals("Gate", navigatedTo(1).name());
+        assertTrue(lastMessage().contains("Compass 1/2: Gate (defend)"), lastMessage());
 
         tick();
         compass.use(player, false);
-        assertEquals("Gate", navigatedTo(2).name());
+        assertEquals("Keep", navigatedTo(2).name());
 
         tick();
         compass.use(player, false);
-        assertEquals("Keep", navigatedTo(3).name());
+        assertEquals("Gate", navigatedTo(3).name());
     }
 
     @Test
@@ -172,7 +172,7 @@ class NavigationCompassServiceTest {
         Destination destination = navigatedTo(1);
         assertEquals(Destination.Kind.POINT, destination.kind());
         assertEquals("siege_world", destination.world());
-        assertEquals(10.0, destination.point()[0]);
+        assertEquals(20.0, destination.point()[0]);   // Gate, the first of the list
         assertEquals(64.0, destination.point()[1]);
     }
 
@@ -190,7 +190,7 @@ class NavigationCompassServiceTest {
         when(navigation.isNavigating(id)).thenReturn(false);
         tick();
         compass.use(player, true);
-        assertEquals("Keep", navigatedTo(2).name());
+        assertEquals("Gate", navigatedTo(2).name());
     }
 
     @Test
@@ -199,7 +199,7 @@ class NavigationCompassServiceTest {
 
         compass.use(player, true);
 
-        assertEquals("Keep", navigatedTo(1).name());
+        assertEquals("Gate", navigatedTo(1).name());
     }
 
     @Test
@@ -218,7 +218,7 @@ class NavigationCompassServiceTest {
         compass.use(player, false);
         tick();
         compass.use(player, false);
-        assertEquals("Gate", navigatedTo(2).name());
+        assertEquals("Keep", navigatedTo(2).name());
 
         SiegeMatch next = match(DEF);
         when(next.matchToken()).thenReturn("m2");
@@ -226,7 +226,7 @@ class NavigationCompassServiceTest {
         tick();
         compass.use(player, false);
 
-        assertEquals("Keep", navigatedTo(3).name());
+        assertEquals("Gate", navigatedTo(3).name());
     }
 
     @Test
@@ -259,7 +259,7 @@ class NavigationCompassServiceTest {
 
         var scope = compass.destinationsOf(player).orElseThrow();
 
-        assertEquals(List.of("Keep", "Gate"), scope.stream().map(MatchNavigationScope.MatchDestination::label).toList());
+        assertEquals(List.of("Gate", "Keep"), scope.stream().map(MatchNavigationScope.MatchDestination::label).toList());
         assertTrue(compass.allows(player, scope.get(0).destination()));
         assertFalse(compass.allows(player, Destination.point("Kardenna Castle", "siege_world", 1, 64, 1)));
     }

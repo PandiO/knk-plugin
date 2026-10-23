@@ -71,7 +71,8 @@ class SiegeCompassTargetsTest {
     @Test
     void defendersGetTheirObjectivesFirstThenTheSpawn() {
         List<Target> out = targets(board(false), false, DEF);
-        assertEquals(List.of("Keep", "Gate", "Wall", "Outpost", "Defenders camp"), labels(out));
+        // front line first: nearest to the attackers' camp (x=90) first, the main objective (Keep) last
+        assertEquals(List.of("Outpost", "Wall", "Gate", "Keep", "Defenders camp"), labels(out));
         assertTrue(out.subList(0, 4).stream().allMatch(t -> t.kind() == Kind.DEFEND));
         assertEquals(Kind.SPAWN, out.get(4).kind());
     }
@@ -79,18 +80,18 @@ class SiegeCompassTargetsTest {
     @Test
     void attackersGetTheObjectivesToCaptureFirst() {
         List<Target> out = targets(board(false), false, ATT);
-        assertEquals(List.of("Keep", "Gate", "Wall", "Outpost", "Attackers camp"), labels(out));
+        assertEquals(List.of("Outpost", "Wall", "Gate", "Keep", "Attackers camp"), labels(out));
         assertTrue(out.subList(0, 4).stream().allMatch(t -> t.kind() == Kind.CAPTURE));
     }
 
     @Test
     void anObjectiveHeldByTheAttackersIsOneTheyDefendAndTheyListItAfterTheCaptures() {
         List<Target> out = targets(board(true), true, ATT);
-        assertEquals(List.of("Keep", "Gate", "Wall", "Outpost", "Attackers camp"), labels(out));
+        assertEquals(List.of("Wall", "Gate", "Keep", "Outpost", "Attackers camp"), labels(out));
         assertEquals(Kind.DEFEND, out.get(3).kind());
         // and the defenders are told to take it back
         List<Target> defenders = targets(board(true), true, DEF);
-        assertEquals(List.of("Keep", "Gate", "Wall", "Outpost", "Defenders camp"), labels(defenders));
+        assertEquals(List.of("Wall", "Gate", "Keep", "Outpost", "Defenders camp"), labels(defenders));
         assertEquals(Kind.CAPTURE, defenders.get(3).kind());
     }
 
@@ -113,9 +114,9 @@ class SiegeCompassTargetsTest {
         board.step(Map.of(GATE, List.of(at(1, ATT, 1.0)), OUTPOST, List.of(at(2, DEF, 1.0))));
 
         // the attackers' own capture (Gate) before the outpost they hold and the defenders are attacking
-        assertEquals(List.of("Gate", "Outpost", "Keep", "Wall", "Attackers camp"), labels(targets(board, true, ATT)));
+        assertEquals(List.of("Gate", "Outpost", "Wall", "Keep", "Attackers camp"), labels(targets(board, true, ATT)));
         // the defenders' own (Gate) before the outpost they are retaking
-        assertEquals(List.of("Gate", "Outpost", "Keep", "Wall", "Defenders camp"), labels(targets(board, true, DEF)));
+        assertEquals(List.of("Gate", "Outpost", "Wall", "Keep", "Defenders camp"), labels(targets(board, true, DEF)));
     }
 
     @Test
@@ -149,5 +150,44 @@ class SiegeCompassTargetsTest {
         assertEquals(before, targets(board, false, DEF).stream().map(Target::key).sorted().toList());
         assertTrue(before.contains("objective:" + WALL));
         assertTrue(before.contains("spawn:" + (DEF * 10)));
+    }
+
+    @Test
+    void theMainObjectiveComesAfterTheFrontLineEvenWhenTheScenarioListsItFirst() {
+        // Keep (main, instant victory) is the first objective of the scenario, yet both teams are sent to the objectives
+        // between the attackers and the keep first
+        for (int teamId : new int[] {DEF, ATT}) {
+            List<Target> out = targets(board(false), false, teamId);
+            assertEquals("Keep", out.get(3).label(), "main objective last of the objectives for team " + teamId);
+            assertTrue(out.indexOf(out.stream().filter(t -> t.label().equals("Gate")).findFirst().orElseThrow()) < 3);
+        }
+    }
+
+    @Test
+    void theFrontLineIsTheNearestToWhereTheAttackersSpawn() {
+        // attackers spawn at x=90: Outpost (x=40) is nearest, then Wall (30), Gate (20)
+        List<String> order = labels(targets(board(false), false, ATT)).subList(0, 3);
+
+        assertEquals(List.of("Outpost", "Wall", "Gate"), order);
+    }
+
+    @Test
+    void withoutAttackerSpawnPositionsTheScenarioOrderHoldsApartFromTheMainObjectiveLast() {
+        KnkSiegeScenario noSpawns = SiegeTestData.scenario(1, 5, 2,
+            List.of(team(DEF, SiegeTeamRole.DEFENDER, 1, "Defenders", null), team(ATT, SiegeTeamRole.ATTACKER, 2, "Attackers", null)),
+            List.of(objective(KEEP, "Keep", DEF, true, where(1)), objective(GATE, "Gate", DEF, false, where(2)),
+                objective(WALL, "Wall", DEF, false, where(3))), true, List.of());
+        SiegeObjectiveBoard board = new SiegeObjectiveBoard(noSpawns, new CaptureCalculator(CONFIG), AllianceResolver.of(noSpawns));
+
+        assertEquals(List.of("Gate", "Wall", "Keep"), labels(SiegeCompassTargets.forTeam(noSpawns, board, AllianceResolver.of(noSpawns), ATT)));
+    }
+
+    @Test
+    void anObjectiveUnderAttackStillBeatsTheFrontLine() {
+        SiegeObjectiveBoard board = board(false);
+        board.step(Map.of(KEEP, List.of(at(1, ATT, 1.0))));
+
+        assertEquals("Keep", targets(board, false, DEF).get(0).label());
+        assertEquals("Keep", targets(board, false, ATT).get(0).label());
     }
 }

@@ -24,7 +24,9 @@ import java.util.Optional;
  *   <li>the other kind;</li>
  *   <li>the team's spawnpoint, last (new players lose their way back too).</li>
  * </ol>
- * Inside one group the scenario's objective order holds. Objectives captured for good (nothing left to
+ * Inside one group the <b>front line</b> comes first (developer request 2026-10-23: the objectives that are attacked
+ * first are the ones to head for, for both teams): regular objectives before an instant-victory ("main") one, nearest
+ * to where the attackers spawn first, then the scenario's own order. Objectives captured for good (nothing left to
  * defend or take) and objectives without a location are left out.
  */
 public final class SiegeCompassTargets {
@@ -58,7 +60,10 @@ public final class SiegeCompassTargets {
         int alliance = alliances.allianceOf(teamId);
         Kind primary = team.get().isDefender() ? Kind.DEFEND : Kind.CAPTURE;
 
-        List<Target> objectives = new ArrayList<>();
+        List<double[]> attackerSpawns = attackerSpawnPoints(scenario);
+        // an objective with how far the attackers have to come to reach it, and whether taking it ends the match
+        record Ranked(Target target, boolean instantVictory, double frontLine) { }
+        List<Ranked> ranked = new ArrayList<>();
         for (ObjectiveState state : board.objectives()) {
             KnkSiegeObjective objective = state.objective();
             if (state.isCapturedFinal() || !hasPosition(objective.captureLocation())) {
@@ -66,18 +71,47 @@ public final class SiegeCompassTargets {
             }
             Kind kind = alliances.allianceOf(state.holderTeamId()) == alliance ? Kind.DEFEND : Kind.CAPTURE;
             int percent = objective.capturePoints() <= 0 ? 0 : Math.round(100f * state.points() / objective.capturePoints());
-            objectives.add(new Target("objective:" + objective.id(), objective.name(), kind, state.isContested(),
-                    objective.captureLocation(), percent));
+            Target target = new Target("objective:" + objective.id(), objective.name(), kind, state.isContested(),
+                    objective.captureLocation(), percent);
+            ranked.add(new Ranked(target, objective.instantVictory(), distanceToNearest(attackerSpawns, objective.captureLocation())));
         }
-        // List.sort is stable: the scenario's order survives inside each group.
-        objectives.sort(Comparator.comparingInt((Target t) -> t.underAttack() ? 0 : 1)
-                .thenComparingInt(t -> t.kind() == primary ? 0 : 1));
+        // List.sort is stable: the scenario's own order is the last tie-break.
+        ranked.sort(Comparator.comparingInt((Ranked r) -> r.target().underAttack() ? 0 : 1)
+                .thenComparingInt(r -> r.target().kind() == primary ? 0 : 1)
+                .thenComparing(Ranked::instantVictory)
+                .thenComparingDouble(Ranked::frontLine));
+        List<Target> objectives = ranked.stream().map(Ranked::target).toList();
 
         List<Target> out = new ArrayList<>(objectives);
         team.get().defaultSpawnpoint()
                 .filter(spawn -> hasPosition(spawn.location()))
                 .ifPresent(spawn -> out.add(spawnTarget(spawn)));
         return List.copyOf(out);
+    }
+
+    /** Where the attacking side starts: the spawnpoints of every attacker-role team that have a position. */
+    private static List<double[]> attackerSpawnPoints(KnkSiegeScenario scenario) {
+        List<double[]> out = new ArrayList<>();
+        for (KnkSiegeTeam team : scenario.teams()) {
+            if (team.isDefender()) {
+                continue;
+            }
+            for (KnkSiegeSpawnpoint spawn : team.spawnpoints()) {
+                if (hasPosition(spawn.location())) {
+                    out.add(new double[] {spawn.location().x(), spawn.location().z()});
+                }
+            }
+        }
+        return out;
+    }
+
+    /** Horizontal distance to the nearest of the points; 0 without any, which leaves the scenario's order alone. */
+    private static double distanceToNearest(List<double[]> points, KnkLocation to) {
+        double best = Double.MAX_VALUE;
+        for (double[] p : points) {
+            best = Math.min(best, Math.hypot(p[0] - to.x(), p[1] - to.z()));
+        }
+        return points.isEmpty() ? 0 : best;
     }
 
     private static Target spawnTarget(KnkSiegeSpawnpoint spawn) {
