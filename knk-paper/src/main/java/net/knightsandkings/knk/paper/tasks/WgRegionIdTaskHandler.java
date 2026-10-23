@@ -23,6 +23,7 @@ import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import net.knightsandkings.knk.core.domain.validation.ValidationResult;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
 import net.knightsandkings.knk.paper.regions.WorldGuardRegionRenamer;
+import net.knightsandkings.knk.paper.regions.WorldGuardSubRegionMirrorStore;
 import net.knightsandkings.knk.paper.tasks.validation.ParentRegionFeedback;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
@@ -70,6 +71,18 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
 
     public void setRegionFinalizer(RegionFinalizer regionFinalizer) {
         this.regionFinalizer = regionFinalizer;
+    }
+
+    /** KNG-255: told when a domain sub-region got its final name and was made a copy of its main region. */
+    @FunctionalInterface
+    public interface SubRegionFinalizer {
+        void finalized(String subRegionId, String mainRegionId, String world);
+    }
+
+    private volatile SubRegionFinalizer subRegionFinalizer;
+
+    public void setSubRegionFinalizer(SubRegionFinalizer subRegionFinalizer) {
+        this.subRegionFinalizer = subRegionFinalizer;
     }
 
     /**
@@ -638,7 +651,22 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      */
     public boolean renameRegion(String oldRegionId, String newRegionId, String domainType, String parentRegionId,
                                 String world, String replaceRegionId) {
+        return renameRegion(oldRegionId, newRegionId, domainType, parentRegionId, world, replaceRegionId, null);
+    }
+
+    /**
+     * KNG-255: as above; with {@code subRegionOf} (the domain's main region) the renamed region is one of the domain's
+     * sub-regions: instead of the category policy it becomes a copy of the main region at once (priority, parent = the
+     * main region, flags, owners, members, {@link net.knightsandkings.knk.core.regions.SubRegionMirror}), and the
+     * {@link SubRegionFinalizer} is told. The rename itself follows the same plan as a main region's (KNG-103 replace).
+     */
+    public boolean renameRegion(String oldRegionId, String newRegionId, String domainType, String parentRegionId,
+                                String world, String replaceRegionId, String subRegionOf) {
         boolean renamed = renameRegionInternal(oldRegionId, newRegionId, world, replaceRegionId);
+        if (renamed && subRegionOf != null && !subRegionOf.isBlank()) {
+            finalizeSubRegion(newRegionId, subRegionOf.trim(), world);
+            return true;
+        }
         RegionFinalizer finalizer = regionFinalizer;
         if (renamed && finalizer != null && domainType != null && !domainType.isBlank()) {
             try {
@@ -654,6 +682,34 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
             }
         }
         return renamed;
+    }
+
+    private void finalizeSubRegion(String subRegionId, String mainRegionId, String worldName) {
+        try {
+            World world = findWorldByRegion(subRegionId, worldName);
+            RegionManager manager = world == null ? null
+                : WorldGuard.getInstance().getPlatform().getRegionContainer().get(BukkitAdapter.adapt(world));
+            ProtectedRegion sub = manager == null ? null : manager.getRegion(subRegionId);
+            ProtectedRegion main = manager == null ? null : manager.getRegion(mainRegionId);
+            if (sub == null || main == null) {
+                // The rename succeeded; the next access sync sets the sub-region up once the API lists it.
+                LOGGER.warning("Sub-region " + subRegionId + " renamed, but " + (sub == null ? "it" : "its main region " + mainRegionId)
+                    + " is not in the same world; it is set up by the next region access sync");
+                return;
+            }
+            WorldGuardSubRegionMirrorStore.apply(sub, main,
+                net.knightsandkings.knk.core.regions.SubRegionMirror.desiredFor(main.getId(), WorldGuardSubRegionMirrorStore.stateOf(main)),
+                WorldGuard.getInstance().getFlagRegistry());
+            manager.saveChanges();
+            LOGGER.info("Sub-region " + subRegionId + " set up as a copy of " + mainRegionId + " in " + world.getName());
+            SubRegionFinalizer finalizer = subRegionFinalizer;
+            if (finalizer != null) {
+                finalizer.finalized(subRegionId, mainRegionId, world.getName());
+            }
+        } catch (Exception e) {
+            // The rename itself succeeded; the next access sync makes it a copy of the main region.
+            LOGGER.warning("Setting up sub-region " + subRegionId + " as a copy of " + mainRegionId + " failed: " + e.getMessage());
+        }
     }
 
     private boolean renameRegionInternal(String oldRegionId, String newRegionId, String worldName, String replaceRegionId) {

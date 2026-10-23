@@ -12,7 +12,9 @@ import com.sk89q.worldguard.WorldGuard;
 import com.sk89q.worldguard.protection.managers.RegionManager;
 
 import net.knightsandkings.knk.core.ports.api.DomainAccessRulesApi;
+import net.knightsandkings.knk.core.regions.SubRegionMirror;
 import net.knightsandkings.knk.core.regions.access.AccessFlagSync;
+import net.knightsandkings.knk.paper.regions.WorldGuardSubRegionMirrorStore;
 
 /**
  * Keeps the KnK access flags on the WorldGuard regions in step with the API (KNG-56): at startup
@@ -22,6 +24,9 @@ import net.knightsandkings.knk.core.regions.access.AccessFlagSync;
  *
  * <p>When the API is unreachable nothing is touched: the flags WorldGuard saved last time stay in
  * force, so enforcement never depends on the API being up.
+ *
+ * <p>KNG-255: each run then makes every domain's sub-regions copies of its main region ({@link SubRegionMirror}), so an
+ * admin's flag on the main region reaches them within {@code interval-minutes}.
  */
 public final class DomainAccessFlagSync {
     private static final Logger LOGGER = Logger.getLogger(DomainAccessFlagSync.class.getName());
@@ -45,6 +50,9 @@ public final class DomainAccessFlagSync {
     private final AccessFlagSync sync = new AccessFlagSync();
     private final WorldGuardAccessFlagStore store = new WorldGuardAccessFlagStore(DomainAccessFlagSync::loadedManagers);
     private final AtomicBoolean running = new AtomicBoolean();
+    private final SubRegionMirror mirror = new SubRegionMirror();
+    private final WorldGuardSubRegionMirrorStore mirrorStore = new WorldGuardSubRegionMirrorStore(DomainAccessFlagSync::loadedManagers);
+    private volatile SubRegionMirror.Report lastSubRegionReport;
 
     public DomainAccessFlagSync(JavaPlugin plugin, DomainAccessRulesApi api, Settings settings) {
         this.plugin = plugin;
@@ -92,6 +100,14 @@ public final class DomainAccessFlagSync {
                 try {
                     AccessFlagSync.Report report = sync.run(rules, store);
                     log(report);
+                    try {
+                        SubRegionMirror.Report subRegions = mirror.run(SubRegionMirror.DomainRegions.of(rules), mirrorStore);
+                        lastSubRegionReport = subRegions;
+                        log(subRegions);
+                    } catch (RuntimeException e) {
+                        lastSubRegionReport = null;
+                        LOGGER.warning("[KnK Regions] Sub-region sync failed: " + e.getMessage());
+                    }
                     result.complete(report);
                 } catch (RuntimeException e) {
                     result.completeExceptionally(e);
@@ -101,6 +117,11 @@ public final class DomainAccessFlagSync {
             });
         });
         return result;
+    }
+
+    /** KNG-255: what the sub-region mirror did in the last completed sync (null before the first, or when it failed). */
+    public SubRegionMirror.Report lastSubRegionReport() {
+        return lastSubRegionReport;
     }
 
     private void attempt(int attempt) {
@@ -133,6 +154,21 @@ public final class DomainAccessFlagSync {
             LOGGER.fine("[KnK Access] Domain regions not loaded: " + report.missingRegions());
         }
         report.failures().stream().limit(10).forEach(failure -> LOGGER.warning("[KnK Access] " + failure));
+    }
+
+    private static void log(SubRegionMirror.Report report) {
+        if (report.domains() == 0) {
+            return;
+        }
+        if (report.updated() > 0 || !report.failures().isEmpty() || !report.missingSubRegions().isEmpty()) {
+            LOGGER.info("[KnK Regions] Sub-region sync: " + report.summary());
+        } else {
+            LOGGER.fine("[KnK Regions] Sub-region sync: " + report.summary());
+        }
+        if (!report.missingSubRegions().isEmpty()) {
+            LOGGER.info("[KnK Regions] Sub-regions not in WorldGuard: " + report.missingSubRegions());
+        }
+        report.failures().stream().limit(10).forEach(failure -> LOGGER.warning("[KnK Regions] " + failure));
     }
 
     private static List<RegionManager> loadedManagers() {
