@@ -77,6 +77,9 @@ public final class NavigationCompassService implements SiegeMatchObserver, Match
     private final java.util.function.LongSupplier clock;
     private final CompassItems items;
 
+    private static final java.util.logging.Logger LOGGER = java.util.logging.Logger.getLogger(NavigationCompassService.class.getName());
+    private final java.util.Set<String> loggedRounds = new java.util.HashSet<>();
+
     private final Map<UUID, Last> last = new HashMap<>();
     private final Map<UUID, Long> lastClick = new HashMap<>();
 
@@ -294,8 +297,9 @@ public final class NavigationCompassService implements SiegeMatchObserver, Match
         if (!config.item().enabled() || !config.siegeEnabled()) {
             return;
         }
-        boolean give = SiegeNavigationItem.resolve(lobby.lobby().navigationItem(), scenario.navigationItem(),
-            lobby.machine().configuration().giveNavigationItem());
+        boolean global = lobby.machine().configuration().giveNavigationItem();
+        boolean give = SiegeNavigationItem.resolve(lobby.lobby().navigationItem(), scenario.navigationItem(), global);
+        logGrantDecision(lobby, scenario, global, give);
         if (!give || items.holds(player, config.item())) {
             return;
         }
@@ -305,6 +309,25 @@ public final class NavigationCompassService implements SiegeMatchObserver, Match
         }
         String name = items.nameOf(config.item());
         player.sendMessage(items.give(player, item) ? CompassMessages.given(name) : CompassMessages.noRoom(name));
+    }
+
+    /**
+     * One line per match (not per member) saying why the compass is or is not given at the hub, so "nobody got one" can be
+     * traced from the console: the three levels, and the fact that the plugin holds the siege configuration of the round
+     * (a web-app change reaches a lobby at its next cooldown or {@code /siege admin reload}, never mid-round).
+     */
+    private void logGrantDecision(SiegeLobbyRuntime lobby, KnkSiegeScenario scenario, boolean global, boolean give) {
+        String round = lobby.key() + "#" + lobby.matchToken().orElse("?");
+        if (!loggedRounds.add(round)) {
+            return;
+        }
+        if (loggedRounds.size() > 64) {
+            loggedRounds.clear();
+            loggedRounds.add(round);
+        }
+        LOGGER.info("[Navigation] Siege lobby '" + lobby.key() + "', scenario '" + scenario.name() + "': navigation compass at the hub = "
+            + (give ? "GIVE" : "no") + " (lobby=" + lobby.lobby().navigationItem() + ", scenario=" + scenario.navigationItem()
+            + ", global=" + global + " as loaded for this round)");
     }
 
     // ==================== housekeeping ====================

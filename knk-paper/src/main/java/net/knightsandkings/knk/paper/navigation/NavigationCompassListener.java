@@ -14,7 +14,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.EquipmentSlot;
 
 /**
- * Clicks with the navigation compass (KNG-234): a right-click in the air or on a block that does nothing
+ * Clicks with the navigation compass (KNG-234): a right-click in the air (the sky included) or on a block that does nothing
  * on its own cycles the destination, a shift-click switches navigation off and on. A click on a door,
  * chest, button or the like is left to that block (unless the player sneaks, which skips the block anyway).
  */
@@ -26,13 +26,23 @@ public final class NavigationCompassListener implements Listener {
         this.compass = Objects.requireNonNull(compass, "compass");
     }
 
-    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    /**
+     * Not {@code ignoreCancelled}: Bukkit reports a click in the air as <i>cancelled</i> (there is no block to interact
+     * with: {@code isCancelled()} is {@code useInteractedBlock() == DENY}), so ignoring cancelled events silently drops
+     * every right-click on the sky - the compass would only work against a block. What matters is whether somebody
+     * denied the use of the <b>item</b> ({@code useItemInHand()}), which is what a protection plugin or the gate
+     * listener sets when it cancels a click on purpose.
+     */
+    @EventHandler(priority = EventPriority.HIGH)
     public void onInteract(PlayerInteractEvent event) {
         if (event.getHand() != EquipmentSlot.HAND) {
             return;
         }
         Action action = event.getAction();
         if (action != Action.RIGHT_CLICK_AIR && action != Action.RIGHT_CLICK_BLOCK) {
+            return;
+        }
+        if (event.useItemInHand() == Event.Result.DENY) {
             return;
         }
         Player player = event.getPlayer();
