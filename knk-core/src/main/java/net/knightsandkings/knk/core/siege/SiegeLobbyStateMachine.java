@@ -58,23 +58,29 @@ public final class SiegeLobbyStateMachine {
     public static final int START_MESSAGE_DELAY_SECONDS = 2;
 
     /**
-     * A player's {@code /siege skip} during matchmaking leaves this many seconds (never less than
-     * {@code voteClose + 1}, so voting still gets its last second). Developer request 2026-09-26.
+     * A player's {@code /siege skip} during matchmaking left this many seconds before the value became a
+     * setting ({@link KnkSiegeConfiguration#playerSkipMatchmakingSeconds()}, playtest 2026-10-24).
      */
-    public static final int PLAYER_SKIP_MATCHMAKING_SECONDS = 60;
+    public static final int PLAYER_SKIP_MATCHMAKING_SECONDS = KnkSiegeConfiguration.DEFAULT_PLAYER_SKIP_MATCHMAKING_SECONDS;
 
     public enum SkipRequester {
-        /** {@code /siege skip} ({@code knk.siege.skip}): cooldown → matchmaking; matchmaking → 1 minute left. */
+        /**
+         * {@code /siege skip} ({@code knk.siege.skip}): cooldown → matchmaking; matchmaking →
+         * {@code playerSkipMatchmakingSeconds} left (default 1 minute).
+         */
         PLAYER,
-        /** {@code /siege admin skip}: cooldown → matchmaking; matchmaking → T-(voteClose+1). */
+        /**
+         * {@code /siege admin skip}: cooldown → matchmaking; matchmaking → {@code adminSkipMatchmakingSeconds}
+         * left (default T-31). Both are floored at {@code voteClose + 1} so voting still gets its last second.
+         */
         ADMIN
     }
 
     public enum SkipResult {
         COOLDOWN_SKIPPED,
         /**
-         * Matchmaking was shortened: an admin to one second before voting closes (legacy T-31), a player
-         * to {@link #PLAYER_SKIP_MATCHMAKING_SECONDS}; {@link #secondsRemaining()} tells how long is left.
+         * Matchmaking was shortened to the requester's configured seconds (defaults: admin T-31, player one
+         * minute); {@link #secondsRemaining()} tells how long is left.
          */
         MATCHMAKING_SHORTENED,
         /** Matchmaking is already at or past that point; nothing changed. */
@@ -229,9 +235,7 @@ public final class SiegeLobbyStateMachine {
                 return new SkipOutcome(SkipResult.COOLDOWN_SKIPPED, List.copyOf(effects));
             }
             case MATCHMAKING -> {
-                int target = requester == SkipRequester.ADMIN
-                        ? timeline.voteClose() + 1
-                        : Math.max(PLAYER_SKIP_MATCHMAKING_SECONDS, timeline.voteClose() + 1);
+                int target = skipTarget(requester);
                 if (secondsRemaining <= target) return new SkipOutcome(SkipResult.TOO_LATE, List.of());
                 secondsRemaining = target;
                 return new SkipOutcome(SkipResult.MATCHMAKING_SHORTENED, List.of());
@@ -243,6 +247,17 @@ public final class SiegeLobbyStateMachine {
                 return new SkipOutcome(SkipResult.NOT_SKIPPABLE, List.of());
             }
         }
+    }
+
+    /**
+     * Seconds of matchmaking a skip by {@code requester} leaves (the configured value, never less than one
+     * second before voting closes).
+     */
+    public int skipTarget(SkipRequester requester) {
+        int configured = requester == SkipRequester.ADMIN
+                ? configuration.adminSkipMatchmakingSeconds()
+                : configuration.playerSkipMatchmakingSeconds();
+        return Math.max(configured, timeline.voteClose() + 1);
     }
 
     /**

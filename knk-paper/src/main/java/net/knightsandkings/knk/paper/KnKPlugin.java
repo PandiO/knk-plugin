@@ -1005,10 +1005,20 @@ public class KnKPlugin extends JavaPlugin {
             net.knightsandkings.knk.paper.gates.GateFreezeExtinguisher freezeExtinguisher = enchantmentRuntime == null ? null
                 : new net.knightsandkings.knk.paper.gates.GateFreezeExtinguisher(gateFireSystem, enchantmentRuntime.enchantmentRepository(),
                     (player, door) -> siegeGates != null && siegeGates.isDefender(player, door.getGateStructureId()));
+            // Siege playtest 2026-10-24: a Fire Aspect weapon's hits may set the door alight; the Cleaving custom
+            // enchantment boosts melee hits on doors and adds the charged right-click strike (per-player cooldown).
+            net.knightsandkings.knk.paper.gates.GateFireAspect gateFireAspect = new net.knightsandkings.knk.paper.gates.GateFireAspect(
+                getConfig().getDouble("gates.fire-aspect.ignite-chance-per-level", 0.15));
+            net.knightsandkings.knk.paper.gates.GateCleaving gateCleaving = enchantmentRuntime == null ? null
+                : new net.knightsandkings.knk.paper.gates.GateCleaving(enchantmentRuntime.enchantmentRepository(),
+                    enchantmentRuntime.cooldownManager(), gateDoorHitService,
+                    getConfig().getDouble("gates.cleaving.damage-bonus-per-level", 0.25),
+                    getConfig().getDoubleList("gates.cleaving.charged-hit-multiplier"),
+                    getConfig().getIntegerList("gates.cleaving.charged-cooldown-seconds"));
             getServer().getPluginManager().registerEvents(new GateEventListener(gateDoorHitService, freezeExtinguisher,
                 getConfig().getBoolean("gates.melee-damage.from-held-item", true)
                     ? new net.knightsandkings.knk.paper.gates.GateMeleeDamage(getConfig().getDouble("gates.melee-damage.multiplier", 1.0))
-                    : null), this);
+                    : null, gateFireAspect, gateCleaving), this);
             getServer().getPluginManager().registerEvents(new GateDamageConsequenceListener(healthSystem, gateFireSystem, gateDamageSink), this);
 
             int passThroughInstantOpenRadius = getConfig().getInt("gates.passthrough-instant-open-radius-blocks", 1);

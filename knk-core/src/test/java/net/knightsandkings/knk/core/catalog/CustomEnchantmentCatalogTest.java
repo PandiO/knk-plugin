@@ -20,8 +20,8 @@ class CustomEnchantmentCatalogTest {
     void everyRegistryEnchantmentIsACustomEntry() {
         List<CatalogEnchantment> entries = CustomEnchantmentCatalog.entries();
 
-        assertEquals(12, entries.size());
-        assertEquals(12, entries.stream().map(CatalogEnchantment::key).distinct().count());
+        assertEquals(13, entries.size());
+        assertEquals(13, entries.stream().map(CatalogEnchantment::key).distinct().count());
         assertEquals(new CatalogEnchantment("knk:flash_chaos", true, 1, null, "Flash Chaos", "SUPPORT"),
             entries.stream().filter(e -> e.key().equals("knk:flash_chaos")).findFirst().orElseThrow());
         assertEquals(new CatalogEnchantment("knk:poison", true, 3, null, "Poison", "ATTACK"),
@@ -33,7 +33,7 @@ class CustomEnchantmentCatalogTest {
             assertTrue(entry.maxLevel() != null && entry.maxLevel() >= 1, entry.key());
         }
         assertEquals(Set.of("ATTACK", "SUPPORT"), entries.stream().map(CatalogEnchantment::category).collect(Collectors.toSet()));
-        assertEquals(6, entries.stream().filter(e -> "ATTACK".equals(e.category())).count());
+        assertEquals(7, entries.stream().filter(e -> "ATTACK".equals(e.category())).count());
     }
 
     @Test

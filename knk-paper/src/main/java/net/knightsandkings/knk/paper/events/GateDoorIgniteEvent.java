@@ -21,7 +21,9 @@ public class GateDoorIgniteEvent extends Event implements Cancellable {
     public enum Cause {
         FLAMING_PROJECTILE,
         FIRE_CHARGE,
-        FLINT_AND_STEEL
+        FLINT_AND_STEEL,
+        /** A melee hit with a Fire Aspect weapon that rolled its ignition chance (GateFireAspect). */
+        FIRE_ASPECT
     }
 
     private final CachedGateDoor gate;

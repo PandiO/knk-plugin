@@ -83,7 +83,9 @@ public final class SiegeMapper {
                 or(dto.enchantLevelMax(), d.enchantLevelMax()),
                 or(dto.maxBooksAlive(), d.maxBooksAlive()),
                 SiegeNonMemberGateView.fromApi(dto.nonMemberGateView()),
-                or(dto.giveNavigationItem(), d.giveNavigationItem())
+                or(dto.giveNavigationItem(), d.giveNavigationItem()),
+                or(dto.playerSkipMatchmakingSeconds(), d.playerSkipMatchmakingSeconds()),
+                or(dto.adminSkipMatchmakingSeconds(), d.adminSkipMatchmakingSeconds())
         );
     }
 

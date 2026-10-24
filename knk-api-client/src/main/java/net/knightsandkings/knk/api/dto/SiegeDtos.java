@@ -49,7 +49,9 @@ public final class SiegeDtos {
             @JsonProperty("enchantLevelMax") Integer enchantLevelMax,
             @JsonProperty("maxBooksAlive") Integer maxBooksAlive,
             @JsonProperty("nonMemberGateView") String nonMemberGateView,
-            @JsonProperty("giveNavigationItem") Boolean giveNavigationItem
+            @JsonProperty("giveNavigationItem") Boolean giveNavigationItem,
+            @JsonProperty("playerSkipMatchmakingSeconds") Integer playerSkipMatchmakingSeconds,
+            @JsonProperty("adminSkipMatchmakingSeconds") Integer adminSkipMatchmakingSeconds
     ) {}
 
     public record RuntimeLobbyDto(

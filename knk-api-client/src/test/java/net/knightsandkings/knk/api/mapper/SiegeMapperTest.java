@@ -168,6 +168,8 @@ class SiegeMapperTest {
         assertEquals(1.5, c.headshotMultiplier());
         assertEquals(List.of("/siege", "/msg", "/r", "/staffchat", "/menu"), c.allowedCommands());
         assertEquals(20, c.spawnPickerDelayTicks());
+        assertEquals(60, c.playerSkipMatchmakingSeconds());
+        assertEquals(31, c.adminSkipMatchmakingSeconds());
         assertEquals(30, c.enchantDropChancePerMille());
         assertEquals(17, c.allowedEnchantmentKeys().size());
         assertTrue(c.allowedEnchantmentKeys().contains("minecraft:sharpness"));
