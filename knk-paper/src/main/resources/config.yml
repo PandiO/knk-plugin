@@ -404,6 +404,15 @@ world-analytics:
   excluded-game-modes: [CREATIVE, SPECTATOR]
   max-pending-batches: 12
 
+# InventoryMenu engine (docs/specs/inventory-menu/ in knk-workspace).
+menus:
+  # Bedrock players (Geyser + Floodgate, alpha cross-play finding 2026-10-24): when a menu click opens
+  # another menu (sub-menu, Back, a resize), the current menu closes first and the next one opens this
+  # many ticks later, so Geyser's late close of the previous form doesn't close the new menu. A close
+  # the client sends in that window (or as many ticks after the open) is ignored as stale.
+  # 0 = off (switch in the same tick, as for Java players). Needs Floodgate; Java players are never delayed.
+  bedrock-transition-delay-ticks: 3
+
 # Road navigation (KNG-27, docs/specs/navigation/DESIGN.md §4). Road materials live in the API's road
 # profiles (learned by /knk road survey, edited in the web app), not here. Every key has a default.
 navigation:

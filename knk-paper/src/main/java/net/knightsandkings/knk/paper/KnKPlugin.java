@@ -865,6 +865,12 @@ public class KnKPlugin extends JavaPlugin {
                 this, menuTemplatesDataAccess, menuSessionRegistry, openMenuContextRegistry, menuRenderer,
                 anvilCaptureManager, new MenuRefreshSchedule()
             );
+            // Alpha cross-play finding 2026-10-24: delayed menu switches for Bedrock (Floodgate) players.
+            menuService.configureBedrockTransitions(
+                net.knightsandkings.knk.paper.menu.FloodgatePlayers.detect(
+                    getServer().getPluginManager().getPlugin("floodgate"), getLogger()),
+                Math.min(20, getConfig().getInt("menus.bedrock-transition-delay-ticks", 3))
+            );
             getLogger().info("InventoryMenu rendering engine initialized (Phase 2 + 9)");
             if (telemetryHooks != null) {
                 menuService.addObserver(telemetryHooks); // menu.opened / menu.action / menu.click (KNG-34 link 6)

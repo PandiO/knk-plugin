@@ -9,6 +9,7 @@ import net.knightsandkings.knk.core.menu.MenuRefreshSchedule;
 import net.knightsandkings.knk.core.menu.MenuSession;
 import net.knightsandkings.knk.core.menu.MenuSessionRegistry;
 import net.knightsandkings.knk.core.menu.MenuTemplateAssembler;
+import net.knightsandkings.knk.core.menu.MenuTransitionTracker;
 import net.knightsandkings.knk.core.menu.RuntimeMenu;
 import net.knightsandkings.knk.core.menu.RuntimeMenuSection;
 import net.knightsandkings.knk.paper.utils.DisplayTextFormatter;
@@ -16,6 +17,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
+import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -83,6 +85,13 @@ public final class MenuService {
     private final MenuPageLoads pageLoads = new MenuPageLoads();
     /** KNG-231: a page load still running after this many ticks also says so in the action bar. */
     static final long LOADING_ACTION_BAR_DELAY_TICKS = 10L;
+    /**
+     * Alpha cross-play finding 2026-10-24: Bedrock (Floodgate) players switch menus with a delay -
+     * see {@link #configureBedrockTransitions}. Off (no player is Bedrock, 0 ticks) until configured.
+     */
+    private final MenuTransitionTracker transitions = new MenuTransitionTracker();
+    private volatile Predicate<UUID> bedrockPlayers = uuid -> false;
+    private volatile int bedrockTransitionDelayTicks;
 
     public MenuService(
             Plugin plugin,
@@ -121,6 +130,20 @@ public final class MenuService {
 
     public void openMenu(Player player, String templateKey) {
         openMenu(player, templateKey, MenuContextParams.EMPTY);
+    }
+
+    /**
+     * Alpha cross-play finding 2026-10-24 ({@code menus.bedrock-transition-delay-ticks}): when a
+     * player {@code isBedrock} says is a Bedrock client moves from one inventory to a KnK menu,
+     * the current inventory is closed first and the menu opens {@code delayTicks} later, so
+     * Geyser's close of the previous container form cannot close the new menu. A client close
+     * in that window, or up to {@code delayTicks} after the open, is the stale close of the
+     * previous form ({@link MenuTransitionTracker}). {@code delayTicks <= 0} turns it off; Java
+     * players are never delayed.
+     */
+    public void configureBedrockTransitions(Predicate<UUID> isBedrock, int delayTicks) {
+        this.bedrockPlayers = isBedrock != null ? isBedrock : uuid -> false;
+        this.bedrockTransitionDelayTicks = Math.max(0, delayTicks);
     }
 
     /** Registers a {@link MenuObserver} (main thread, at enable). */
@@ -603,11 +626,62 @@ public final class MenuService {
             return;
         }
 
+        int delayTicks = bedrockTransitionDelayTicks;
+        if (delayTicks > 0 && hasContainerOpen(player) && bedrockPlayers.test(player.getUniqueId())) {
+            // Alpha cross-play finding 2026-10-24: close now (the close handler treats it like any
+            // other close of the previous menu), open the next menu a few ticks later.
+            UUID playerId = player.getUniqueId();
+            player.closeInventory();
+            long token = transitions.begin(playerId);
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                if (player.isOnline() && transitions.opened(playerId, token, MenuRenderer.currentTick(), delayTicks)) {
+                    openNewInventory(player, menu, result);
+                }
+            }, delayTicks);
+            return;
+        }
+        openNewInventory(player, menu, result);
+    }
+
+    /** Main thread. Opens {@code result} in a fresh Inventory and makes it the player's open menu. */
+    private void openNewInventory(Player player, RuntimeMenu menu, MenuRenderResult result) {
         Inventory inventory = Bukkit.createInventory(null, result.totalSlots(), DisplayTextFormatter.toComponent(menu.title()));
-        renderer.applyToInventory(inventory, result, revealControls);
+        renderer.applyToInventory(inventory, result, player.isSneaking());
         player.openInventory(inventory);
         openMenuContextRegistry.register(player.getUniqueId(), new OpenMenuContext(player, inventory, menu, result));
         refreshSchedule.track(player.getUniqueId(), menu.autoRefreshTicks(), MenuRenderer.currentTick());
+    }
+
+    /** Whether the player has a container screen open (a menu, an anvil prompt...), not just their own inventory. */
+    private static boolean hasContainerOpen(Player player) {
+        InventoryType type = player.getOpenInventory().getType();
+        return type != InventoryType.CRAFTING && type != InventoryType.CREATIVE;
+    }
+
+    /**
+     * Alpha cross-play finding 2026-10-24: a close the client sent ({@code Reason.PLAYER}) for
+     * {@code playerId}; {@link MenuLifecycleListener} ignores it or reopens the menu when it is
+     * the stale close of a Bedrock menu switch. Always {@code NORMAL} for Java players.
+     */
+    public MenuTransitionTracker.CloseVerdict onClientClose(UUID playerId) {
+        return transitions.onClientClose(playerId, MenuRenderer.currentTick());
+    }
+
+    /**
+     * Alpha cross-play finding 2026-10-24: the stale close of the previous Bedrock form closed
+     * {@code context}'s menu right after it opened - show the same Inventory again next tick,
+     * unless the player has moved on to something else by then.
+     */
+    public void reopenAfterStaleClose(Player player, OpenMenuContext context) {
+        UUID playerId = player.getUniqueId();
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            Optional<OpenMenuContext> current = openMenuContextRegistry.get(playerId);
+            if (!player.isOnline() || current.isEmpty() || current.get() != context || hasContainerOpen(player)) {
+                return;
+            }
+            player.openInventory(context.inventory());
+            refreshSchedule.track(playerId, context.menu().autoRefreshTicks(), MenuRenderer.currentTick());
+        });
     }
 
     /** Whether the player is looking at a KnK menu right now (main thread: checks the actual top inventory). */
@@ -653,6 +727,7 @@ public final class MenuService {
     /** Called from {@code PlayerQuitEvent} - closes gap #4 (v1's static per-player maps never cleared). */
     public void closeSession(UUID playerId) {
         pageLoads.cancel(playerId);
+        transitions.cancel(playerId);
         openMenuContextRegistry.close(playerId);
         sessionRegistry.close(playerId);
         refreshSchedule.untrack(playerId);
