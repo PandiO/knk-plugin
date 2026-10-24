@@ -30,6 +30,7 @@ import net.knightsandkings.knk.core.domain.siege.KnkSiegeSpawnpoint;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeTeam;
 import net.knightsandkings.knk.core.domain.siege.SiegeGateState;
 import net.knightsandkings.knk.core.domain.siege.SiegeLobbyMode;
+import net.knightsandkings.knk.core.domain.siege.SiegeNavigationItemMode;
 import net.knightsandkings.knk.core.domain.siege.SiegeNonMemberGateView;
 import net.knightsandkings.knk.core.domain.siege.SiegeTeamRole;
 
@@ -81,7 +82,8 @@ public final class SiegeMapper {
                 or(dto.enchantLevelMin(), d.enchantLevelMin()),
                 or(dto.enchantLevelMax(), d.enchantLevelMax()),
                 or(dto.maxBooksAlive(), d.maxBooksAlive()),
-                SiegeNonMemberGateView.fromApi(dto.nonMemberGateView())
+                SiegeNonMemberGateView.fromApi(dto.nonMemberGateView()),
+                or(dto.giveNavigationItem(), d.giveNavigationItem())
         );
     }
 
@@ -96,7 +98,8 @@ public final class SiegeMapper {
                 or(dto.voteCandidateCount(), 2),
                 or(dto.allowRandomVote(), true),
                 mapList(dto.rotation(), SiegeMapper::toCore),
-                mapList(dto.skippedScenarios(), SiegeMapper::toCore)
+                mapList(dto.skippedScenarios(), SiegeMapper::toCore),
+                SiegeNavigationItemMode.fromApi(dto.navigationItem())
         );
     }
 
@@ -144,7 +147,8 @@ public final class SiegeMapper {
                 mapList(dto.teams(), SiegeMapper::toCore),
                 mapList(dto.objectives(), SiegeMapper::toCore),
                 mapList(dto.gates(), SiegeMapper::toCore),
-                dto.areaGateStructureIds()
+                dto.areaGateStructureIds(),
+                SiegeNavigationItemMode.fromApi(dto.navigationItem())
         );
     }
 

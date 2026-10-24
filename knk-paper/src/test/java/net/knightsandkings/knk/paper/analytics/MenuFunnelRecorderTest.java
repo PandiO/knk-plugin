@@ -27,8 +27,9 @@ import net.knightsandkings.knk.core.domain.analytics.WorldAnalyticsBatch.MenuSte
 import net.knightsandkings.knk.core.domain.analytics.WorldAnalyticsBatch.MovementCell;
 import net.knightsandkings.knk.core.domain.discovery.DiscoveryGrant;
 import net.knightsandkings.knk.core.domain.discovery.DiscoveryGrantResult;
-import net.knightsandkings.knk.paper.events.OnRegionEnterEvent;
-import net.knightsandkings.knk.paper.events.OnRegionLeaveEvent;
+import net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot;
+import net.knightsandkings.knk.paper.events.OnDomainEnterEvent;
+import net.knightsandkings.knk.paper.events.OnDomainLeaveEvent;
 import net.knightsandkings.knk.paper.menu.MenuObserver;
 import net.knightsandkings.knk.paper.menu.MenuObservers;
 
@@ -123,9 +124,12 @@ class MenuFunnelRecorderTest {
         Player alice = mock(Player.class);
         when(alice.getUniqueId()).thenReturn(aliceId);
 
-        recorder.onRegionEnter(new OnRegionEnterEvent(alice, "aldmoor"));
-        recorder.onRegionEnter(new OnRegionEnterEvent(alice, "aldmoor"));
-        recorder.onRegionLeave(new OnRegionLeaveEvent(alice, "aldmoor"));
+        // KNG-256: per domain, by its main region id.
+        DomainSnapshot aldmoor = new DomainSnapshot(7, "Aldmoor", "", "aldmoor", true, true, "Town",
+            Set.of(), Set.of(), Set.of(), Set.of());
+        recorder.onDomainEnter(new OnDomainEnterEvent(alice, aldmoor));
+        recorder.onDomainEnter(new OnDomainEnterEvent(alice, aldmoor));
+        recorder.onDomainLeave(new OnDomainLeaveEvent(alice, aldmoor));
         DiscoveryGrant grant = new DiscoveryGrant(7, "aldmoor", "Aldmoor", "Town", null, "Walk", 1, 0, 1, 1, 0, 1);
         recorder.discoveriesGranted(alice, new DiscoveryGrantResult(List.of(grant), List.of(), List.of(),
             1, 0, 1, 1, 0, 1, List.of(), List.of(), List.of(), null, 1, 0, 1, null));

@@ -2,7 +2,6 @@ package net.knightsandkings.knk.paper.integration;
 
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldedit.math.BlockVector3;
-import com.sk89q.worldedit.regions.Polygonal2DRegion;
 import com.sk89q.worldedit.regions.Region;
 import com.sk89q.worldguard.WorldGuard;
 import com.sk89q.worldguard.protection.managers.RegionManager;
@@ -96,16 +95,18 @@ public class WorldGuardIntegration {
     }
 
     /**
-     * A {@link ProtectedRegion} from a WorldEdit selection: a polygonal region for a poly2d selection, else a cuboid
-     * over the selection's bounds. Not added to any region manager.
+     * A {@link ProtectedRegion} from a WorldEdit selection: a polygonal region for a poly2d selection and (KNG-257) for a
+     * cylinder, ellipsoid or convex selection ({@link SelectionShapes}), else a cuboid over the selection's bounds. Not
+     * added to any region manager.
      */
     public static ProtectedRegion createRegionFromSelection(Region selection, String id, int priority) {
-        if (selection instanceof Polygonal2DRegion poly) {
+        var outline = SelectionShapes.outlineOf(selection);
+        if (outline.isPresent()) {
             ProtectedPolygonalRegion region = new ProtectedPolygonalRegion(
                 id,
-                poly.getPoints(),
-                poly.getMinimumY(),
-                poly.getMaximumY()
+                outline.get().points(),
+                outline.get().minY(),
+                outline.get().maxY()
             );
             region.setPriority(priority);
             return region;
@@ -125,8 +126,9 @@ public class WorldGuardIntegration {
      * spawn areas hold boxes on the surface, so a flat selection would reject most points (DESIGN.md §3.4).
      */
     public static ProtectedRegion createFullHeightRegion(Region selection, String id, int priority, int minY, int maxY) {
-        if (selection instanceof Polygonal2DRegion poly) {
-            ProtectedPolygonalRegion region = new ProtectedPolygonalRegion(id, poly.getPoints(), minY, maxY);
+        var outline = SelectionShapes.outlineOf(selection);
+        if (outline.isPresent()) {
+            ProtectedPolygonalRegion region = new ProtectedPolygonalRegion(id, outline.get().points(), minY, maxY);
             region.setPriority(priority);
             return region;
         }

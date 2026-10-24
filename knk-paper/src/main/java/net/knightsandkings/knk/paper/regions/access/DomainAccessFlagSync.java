@@ -1,6 +1,8 @@
 package net.knightsandkings.knk.paper.regions.access;
 
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Logger;
@@ -12,7 +14,11 @@ import com.sk89q.worldguard.WorldGuard;
 import com.sk89q.worldguard.protection.managers.RegionManager;
 
 import net.knightsandkings.knk.core.ports.api.DomainAccessRulesApi;
+import net.knightsandkings.knk.core.regions.OrphanedSubRegions;
+import net.knightsandkings.knk.core.regions.SubRegionMirror;
 import net.knightsandkings.knk.core.regions.access.AccessFlagSync;
+import net.knightsandkings.knk.paper.regions.WorldGuardOrphanedSubRegionStore;
+import net.knightsandkings.knk.paper.regions.WorldGuardSubRegionMirrorStore;
 
 /**
  * Keeps the KnK access flags on the WorldGuard regions in step with the API (KNG-56): at startup
@@ -22,6 +28,11 @@ import net.knightsandkings.knk.core.regions.access.AccessFlagSync;
  *
  * <p>When the API is unreachable nothing is touched: the flags WorldGuard saved last time stay in
  * force, so enforcement never depends on the API being up.
+ *
+ * <p>KNG-255: each run then makes every domain's sub-regions copies of its main region ({@link SubRegionMirror}), so an
+ * admin's flag on the main region reaches them within {@code interval-minutes}. KNG-258: then it marks the
+ * {@code domain_<d>_sub_<s>} regions no domain lists any more as orphans ({@link OrphanedSubRegions}), which the daily
+ * temp-region cleanup deletes after the retention period.
  */
 public final class DomainAccessFlagSync {
     private static final Logger LOGGER = Logger.getLogger(DomainAccessFlagSync.class.getName());
@@ -45,6 +56,13 @@ public final class DomainAccessFlagSync {
     private final AccessFlagSync sync = new AccessFlagSync();
     private final WorldGuardAccessFlagStore store = new WorldGuardAccessFlagStore(DomainAccessFlagSync::loadedManagers);
     private final AtomicBoolean running = new AtomicBoolean();
+    private final SubRegionMirror mirror = new SubRegionMirror();
+    private final WorldGuardSubRegionMirrorStore mirrorStore = new WorldGuardSubRegionMirrorStore(DomainAccessFlagSync::loadedManagers);
+    private volatile SubRegionMirror.Report lastSubRegionReport;
+    private final OrphanedSubRegions orphans = new OrphanedSubRegions();
+    private final WorldGuardOrphanedSubRegionStore orphanStore = new WorldGuardOrphanedSubRegionStore(DomainAccessFlagSync::loadedManagers);
+    /** KNG-258: the sub-region ids the last completed sync listed (lower-case); null before the first. */
+    private volatile Set<String> listedSubRegions;
 
     public DomainAccessFlagSync(JavaPlugin plugin, DomainAccessRulesApi api, Settings settings) {
         this.plugin = plugin;
@@ -92,6 +110,26 @@ public final class DomainAccessFlagSync {
                 try {
                     AccessFlagSync.Report report = sync.run(rules, store);
                     log(report);
+                    try {
+                        SubRegionMirror.Report subRegions = mirror.run(SubRegionMirror.DomainRegions.of(rules), mirrorStore);
+                        lastSubRegionReport = subRegions;
+                        log(subRegions);
+                    } catch (RuntimeException e) {
+                        lastSubRegionReport = null;
+                        LOGGER.warning("[KnK Regions] Sub-region sync failed: " + e.getMessage());
+                    }
+                    listedSubRegions = rules.stream().flatMap(rule -> rule.subRegionIds().stream())
+                        .map(id -> id.toLowerCase(Locale.ROOT)).collect(java.util.stream.Collectors.toUnmodifiableSet());
+                    try {
+                        OrphanedSubRegions.Report orphaned = orphans.run(rules, orphanStore, System.currentTimeMillis());
+                        if (orphaned.changed() || !orphaned.failures().isEmpty()) {
+                            LOGGER.info("[KnK Regions] Orphaned sub-regions: " + orphaned.summary()
+                                + (orphaned.marked().isEmpty() ? "" : " - newly orphaned: " + orphaned.marked()));
+                        }
+                        orphaned.failures().stream().limit(10).forEach(failure -> LOGGER.warning("[KnK Regions] " + failure));
+                    } catch (RuntimeException e) {
+                        LOGGER.warning("[KnK Regions] Orphaned sub-region check failed: " + e.getMessage());
+                    }
                     result.complete(report);
                 } catch (RuntimeException e) {
                     result.completeExceptionally(e);
@@ -101,6 +139,20 @@ public final class DomainAccessFlagSync {
             });
         });
         return result;
+    }
+
+    /**
+     * KNG-258: whether the last completed sync listed {@code regionId} as a domain's sub-region; true for every region
+     * until a sync has completed, so the temp-region cleanup deletes nothing it can't rule out.
+     */
+    public boolean listsSubRegion(String regionId) {
+        Set<String> listed = listedSubRegions;
+        return listed == null || (regionId != null && listed.contains(regionId.toLowerCase(Locale.ROOT)));
+    }
+
+    /** KNG-255: what the sub-region mirror did in the last completed sync (null before the first, or when it failed). */
+    public SubRegionMirror.Report lastSubRegionReport() {
+        return lastSubRegionReport;
     }
 
     private void attempt(int attempt) {
@@ -133,6 +185,21 @@ public final class DomainAccessFlagSync {
             LOGGER.fine("[KnK Access] Domain regions not loaded: " + report.missingRegions());
         }
         report.failures().stream().limit(10).forEach(failure -> LOGGER.warning("[KnK Access] " + failure));
+    }
+
+    private static void log(SubRegionMirror.Report report) {
+        if (report.domains() == 0) {
+            return;
+        }
+        if (report.updated() > 0 || !report.failures().isEmpty() || !report.missingSubRegions().isEmpty()) {
+            LOGGER.info("[KnK Regions] Sub-region sync: " + report.summary());
+        } else {
+            LOGGER.fine("[KnK Regions] Sub-region sync: " + report.summary());
+        }
+        if (!report.missingSubRegions().isEmpty()) {
+            LOGGER.info("[KnK Regions] Sub-regions not in WorldGuard: " + report.missingSubRegions());
+        }
+        report.failures().stream().limit(10).forEach(failure -> LOGGER.warning("[KnK Regions] " + failure));
     }
 
     private static List<RegionManager> loadedManagers() {

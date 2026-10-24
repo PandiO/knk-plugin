@@ -104,6 +104,8 @@ public class RegionHttpServer {
             String world = query.get("world");
             // KNG-103: the domain's previous region, which the renamed one replaces (optional).
             String replaceRegionId = query.get("replaceRegionId");
+            // KNG-255: the domain's main region when the renamed region is one of its sub-regions (optional).
+            String subRegionOf = query.get("subRegionOf");
 
             if (oldRegionId == null || newRegionId == null || oldRegionId.isBlank() || newRegionId.isBlank()) {
                 send(exchange, 400, "oldRegionId and newRegionId are required");
@@ -113,7 +115,7 @@ public class RegionHttpServer {
             // Run rename on main thread to keep WorldGuard safe
             plugin.getServer().getScheduler().callSyncMethod(plugin, () -> {
                 boolean result = handler.renameRegion(oldRegionId, newRegionId, domainType, parentRegionId, world,
-                    replaceRegionId);
+                    replaceRegionId, subRegionOf);
                 try {
                     send(exchange, 200, Boolean.toString(result));
                 } catch (IOException e) {

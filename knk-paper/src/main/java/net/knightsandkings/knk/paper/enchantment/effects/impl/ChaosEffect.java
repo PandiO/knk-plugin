@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.enchantment.effects.impl;
 
+import net.knightsandkings.knk.paper.enchantment.GateAreaDamage;
 import net.knightsandkings.knk.paper.enchantment.effects.SupportEnchantmentEffect;
 import net.knightsandkings.knk.paper.regions.CombatSafezoneCheck;
 import org.bukkit.Effect;
@@ -16,6 +17,7 @@ import org.bukkit.util.Vector;
 
 import java.util.HashSet;
 import java.util.Set;
+import java.util.function.Supplier;
 
 public class ChaosEffect extends SupportEnchantmentEffect {
     private static final double DAMAGE_RADIUS = 3.0d;
@@ -23,6 +25,7 @@ public class ChaosEffect extends SupportEnchantmentEffect {
     private static final double DAMAGE_AMOUNT = 40.0d;
 
     private final CombatSafezoneCheck safezones;
+    private final Supplier<GateAreaDamage> gateAreaDamage;
 
     public ChaosEffect(Plugin plugin) {
         this(plugin, CombatSafezoneCheck.NONE);
@@ -30,8 +33,17 @@ public class ChaosEffect extends SupportEnchantmentEffect {
 
     /** @param safezones players in a combat safezone are neither damaged nor knocked back (KNG-11) */
     public ChaosEffect(Plugin plugin, CombatSafezoneCheck safezones) {
+        this(plugin, safezones, () -> GateAreaDamage.NONE);
+    }
+
+    /**
+     * @param gateAreaDamage how the blast reaches gate doors in range, with this enchantment's damage; read per
+     *                       activation because the gates start after the enchantments
+     */
+    public ChaosEffect(Plugin plugin, CombatSafezoneCheck safezones, Supplier<GateAreaDamage> gateAreaDamage) {
         super("chaos", plugin);
         this.safezones = safezones != null ? safezones : CombatSafezoneCheck.NONE;
+        this.gateAreaDamage = gateAreaDamage != null ? gateAreaDamage : () -> GateAreaDamage.NONE;
     }
 
     @Override
@@ -70,6 +82,8 @@ public class ChaosEffect extends SupportEnchantmentEffect {
 
             applyKnockback(player, livingEntity);
         }
+
+        gateAreaDamage.get().damageGatesAround(player, playerLocation, DAMAGE_AMOUNT);
     }
 
     protected boolean callDamageEventAndApply(Player attacker, LivingEntity target, double damage) {

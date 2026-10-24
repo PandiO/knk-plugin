@@ -252,7 +252,7 @@ public final class SiegeService {
                     if (shuttingDown) return;
                     onRuntimeConfig(result, error, true);
                 }));
-        ticker = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 20L, 20L);
+        ticker = Bukkit.getScheduler().runTaskTimer(plugin, net.knightsandkings.knk.core.metrics.PluginMetrics.timed("siege.tick", this::tick), 20L, 20L);
         logger.info("[Siege] Runtime started (1 s ticker); fetching runtime config");
     }
 
@@ -484,6 +484,7 @@ public final class SiegeService {
                 continue;
             }
             prepareForMatch(player);
+            observers.forEach(o -> safely("memberReadiedAtHub", () -> o.memberReadiedAtHub(rt, scenario, player)));
             hub.ifPresent(location -> SiegeBukkit.teleport(player, location));
             player.sendMessage(SiegeMessages.info("You are at the hub of " + scenarioName(scenario)
                     + ". Your inventory and position are saved and will be restored after the siege."));

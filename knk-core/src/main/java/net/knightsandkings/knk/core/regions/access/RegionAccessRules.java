@@ -3,7 +3,11 @@ package net.knightsandkings.knk.core.regions.access;
 import net.knightsandkings.knk.core.regions.RegionTransitionType;
 
 import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * The domain AllowEntry/AllowExit rule, on WorldGuard regions (KNG-56).
@@ -13,6 +17,10 @@ import java.util.Optional;
  * {@code entry}/{@code exit} flags differ). A player who is a member or owner of the region (the
  * domain's owner or residents) passes that region. Bypass ({@code knk.region.bypass}) is the
  * caller's concern. Entry is checked before exit, as the border check always did.
+ *
+ * <p>A domain can have several regions (its main region and sub-regions, KNG-255): moving between two regions of the
+ * same domain is neither leaving nor entering it. Regions are matched to a domain by {@link RegionView#domainId()}
+ * (the {@code knk-domain-id} flag); a region without one counts as its own domain, as before.
  *
  * <p>Pure and Bukkit/WorldGuard-free; the regions come in as {@link RegionView}s.
  */
@@ -34,10 +42,52 @@ public final class RegionAccessRules {
 
         /** Is the player an owner or member (resident) of this region? */
         boolean isMember();
+
+        /** KNG-255: the id of the domain the region belongs to, or null when unknown (synced before KNG-255). */
+        default String domainId() {
+            return null;
+        }
     }
 
     /** Why a move is refused, with the player-facing message. */
     public record Refusal(RegionTransitionType type, String regionId, String message) {
+    }
+
+    /**
+     * As {@link #evaluate(Collection, Collection)}, without the crossings between regions of one domain: a region entered
+     * while still in another region of its domain doesn't count, nor one left for another region of its domain.
+     *
+     * @param destination every region at the position the move goes to (WorldGuard's "to" set); the origin is derived
+     *                    from it ({@code destination - entered + exited}). Null: no domain grouping.
+     */
+    public Optional<Refusal> evaluate(Collection<? extends RegionView> entered, Collection<? extends RegionView> exited,
+                                      Collection<? extends RegionView> destination) {
+        if (destination == null) {
+            return evaluate(entered, exited);
+        }
+        Set<String> enteredIds = ids(entered);
+        Set<String> destinationDomains = new HashSet<>();
+        Set<String> originDomains = new HashSet<>();
+        for (RegionView region : destination) {
+            String domain = domainKey(region);
+            if (domain != null) {
+                destinationDomains.add(domain);
+                if (!enteredIds.contains(regionKey(region))) {
+                    originDomains.add(domain);
+                }
+            }
+        }
+        for (RegionView region : nullSafe(exited)) {
+            String domain = domainKey(region);
+            if (domain != null) {
+                originDomains.add(domain);
+            }
+        }
+        List<? extends RegionView> reallyEntered = nullSafe(entered).stream()
+            .filter(region -> domainKey(region) == null || !originDomains.contains(domainKey(region))).toList();
+        List<? extends RegionView> reallyExited = nullSafe(exited).stream()
+            .filter(region -> domainKey(region) == null || !destinationDomains.contains(domainKey(region))).toList();
+        return evaluate(reallyEntered, reallyExited);
     }
 
     public Optional<Refusal> evaluate(Collection<? extends RegionView> entered, Collection<? extends RegionView> exited) {
@@ -71,5 +121,26 @@ public final class RegionAccessRules {
     private static String name(RegionView region) {
         String name = region.displayName();
         return name != null && !name.isBlank() ? name : region.regionId();
+    }
+
+    private static <T> Collection<T> nullSafe(Collection<T> regions) {
+        return regions != null ? regions : List.of();
+    }
+
+    private static Set<String> ids(Collection<? extends RegionView> regions) {
+        Set<String> ids = new HashSet<>();
+        for (RegionView region : nullSafe(regions)) {
+            ids.add(regionKey(region));
+        }
+        return ids;
+    }
+
+    private static String regionKey(RegionView region) {
+        return region.regionId() == null ? "" : region.regionId().toLowerCase(Locale.ROOT);
+    }
+
+    private static String domainKey(RegionView region) {
+        String id = region.domainId();
+        return id == null || id.isBlank() ? null : id.trim();
     }
 }

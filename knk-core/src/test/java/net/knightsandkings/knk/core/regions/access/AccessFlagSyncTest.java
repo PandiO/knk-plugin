@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AccessFlagSyncTest {
 
     /** In-memory WorldGuard: region id (lower-case) -> flags. */
-    private static final class FakeStore implements AccessFlagSync.Store {
+    private static class FakeStore implements AccessFlagSync.Store {
         final Map<String, AccessFlags> regions = new LinkedHashMap<>();
         final List<String> writes = new ArrayList<>();
         int saves;
@@ -73,8 +73,8 @@ class AccessFlagSyncTest {
 
         Report report = sync.run(List.of(rule(7, "domain_7", false, true), rule(8, "domain_8", true, false)), store);
 
-        assertEquals(new AccessFlags(AccessState.DENY, AccessState.ALLOW, "Domain 7"), store.regions.get("domain_7"));
-        assertEquals(new AccessFlags(AccessState.ALLOW, AccessState.DENY, "Domain 8"), store.regions.get("domain_8"));
+        assertEquals(new AccessFlags(AccessState.DENY, AccessState.ALLOW, "Domain 7", "7"), store.regions.get("domain_7"));
+        assertEquals(new AccessFlags(AccessState.ALLOW, AccessState.DENY, "Domain 8", "8"), store.regions.get("domain_8"));
         assertEquals(2, report.updated());
         assertEquals(1, store.saves);
     }
@@ -115,7 +115,7 @@ class AccessFlagSyncTest {
 
     @Test
     void regionIdsMatchCaseInsensitivelyLikeWorldGuard() {
-        FakeStore store = new FakeStore().region("Domain_7", new AccessFlags(AccessState.DENY, AccessState.ALLOW, "Domain 7"));
+        FakeStore store = new FakeStore().region("Domain_7", new AccessFlags(AccessState.DENY, AccessState.ALLOW, "Domain 7", "7"));
 
         Report report = sync.run(List.of(rule(7, "domain_7", false, true)), store);
 
@@ -162,5 +162,41 @@ class AccessFlagSyncTest {
 
         assertTrue(report.missingRegions().isEmpty());
         assertEquals(0, report.updated());
+    }
+
+    @Test
+    void aDomainsSubRegionsGetTheSameRulesAndDomainId_AndAreNotCleared() {
+        // KNG-255: a garrison gate with a tower sub-region; the sub-region carries the rule too.
+        FakeStore store = new FakeStore().region("domain_9", AccessFlags.NONE)
+            .region("domain_9_sub_1", new AccessFlags(AccessState.ALLOW, AccessState.ALLOW, "Old"))
+            .region("domain_9_sub_2", AccessFlags.NONE);
+        DomainAccessRule garrison = new DomainAccessRule(9, "Garrison", "domain_9", true, false, "GateStructure", null,
+            List.of("domain_9_sub_1", "domain_9_sub_2", "domain_9_sub_3"));
+
+        Report report = sync.run(List.of(garrison), store);
+
+        AccessFlags expected = new AccessFlags(AccessState.ALLOW, AccessState.DENY, "Garrison", "9");
+        assertEquals(expected, store.regions.get("domain_9"));
+        assertEquals(expected, store.regions.get("domain_9_sub_1"));
+        assertEquals(expected, store.regions.get("domain_9_sub_2"));
+        assertEquals(0, report.cleared());
+        assertEquals(List.of("domain_9_sub_3"), report.missingRegions());
+        assertEquals(0, sync.run(List.of(garrison), store).updated());
+    }
+
+    @Test
+    void aStoreWithoutTheDomainIdFlagStaysIdempotent() {
+        FakeStore store = new FakeStore() {
+            @Override
+            public boolean supportsDomainId() {
+                return false;
+            }
+        }.region("domain_7", AccessFlags.NONE);
+
+        sync.run(List.of(rule(7, "domain_7", false, true)), store);
+        Report second = sync.run(List.of(rule(7, "domain_7", false, true)), store);
+
+        assertEquals(new AccessFlags(AccessState.DENY, AccessState.ALLOW, "Domain 7"), store.regions.get("domain_7"));
+        assertEquals(0, second.updated());
     }
 }

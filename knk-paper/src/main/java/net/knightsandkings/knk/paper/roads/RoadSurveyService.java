@@ -114,7 +114,7 @@ public final class RoadSurveyService implements Listener {
     public void start() {
         Bukkit.getPluginManager().registerEvents(this, plugin);
         long period = config.survey().samplePeriodTicks();
-        ticker = Bukkit.getScheduler().runTaskTimer(plugin, this::tickAll, period, period);
+        ticker = Bukkit.getScheduler().runTaskTimer(plugin, net.knightsandkings.knk.core.metrics.PluginMetrics.timed("roads.survey", this::tickAll), period, period);
     }
 
     /** Shutdown: every walk is discarded (nothing to spool), reviews and recordings dropped. */

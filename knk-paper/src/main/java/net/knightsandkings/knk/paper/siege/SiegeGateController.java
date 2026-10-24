@@ -224,6 +224,27 @@ public final class SiegeGateController implements SiegeMatchObserver {
     }
 
     /**
+     * Whether the player is a member of the lobby whose lockdown holds this gate (KNG-234): navigation reads a
+     * locked gate differently for members (they are never "carried through"; their own team's gates they can open).
+     * False for unlocked gates.
+     */
+    public boolean isLockdownMember(Player player, int gateStructureId) {
+        Lockdown lockdown = byGate.get(gateStructureId);
+        return lockdown != null && player != null && lockdown.runtime.isMember(player.getUniqueId());
+    }
+
+    /**
+     * Whether this match member may open and close the locked gate - their alliance owns it (an objective
+     * gate changes owner when it is captured). Read-only, for navigation (KNG-234). False for non-members and
+     * unlocked gates.
+     */
+    public boolean mayControl(Player player, int gateStructureId) {
+        Lockdown lockdown = byGate.get(gateStructureId);
+        if (lockdown == null) return false;
+        return lockdown.plan.canControl(gateStructureId, teamOf(lockdown, player), lockdown.alliances) == Control.ALLOWED;
+    }
+
+    /**
      * A player tries to open ({@code open}) or close a locked gate. Opens/closes it when their team's
      * alliance owns it and returns null; otherwise returns the reason it was refused. Callers cancel
      * the original interaction either way.
@@ -244,6 +265,16 @@ public final class SiegeGateController implements SiegeMatchObserver {
         if (lockdown == null) return true;
         Integer team = attacker == null ? null : teamOf(lockdown, attacker);
         return lockdown.plan.canDamage(gateStructureId, team, lockdown.alliances);
+    }
+
+    /**
+     * Is this player a defender of the locked gate - a member whose team is in the alliance of the gate's
+     * current owner? False for attackers, non-members, area gates (no owner) and gates no lockdown holds.
+     */
+    public boolean isDefender(Player player, int gateStructureId) {
+        Lockdown lockdown = byGate.get(gateStructureId);
+        if (lockdown == null) return false;
+        return lockdown.plan.isDefender(gateStructureId, teamOf(lockdown, player), lockdown.alliances);
     }
 
     /** Phase 7b: every door of every applied lockdown (main thread). */

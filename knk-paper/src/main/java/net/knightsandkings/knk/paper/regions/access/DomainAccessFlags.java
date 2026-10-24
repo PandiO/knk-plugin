@@ -25,10 +25,13 @@ public final class DomainAccessFlags {
     public static final String ENTRY_NAME = "knk-allow-entry";
     public static final String EXIT_NAME = "knk-allow-exit";
     public static final String NAME_NAME = "knk-domain-name";
+    /** KNG-255: the domain a region belongs to, so its main region and sub-regions count as one domain at a border. */
+    public static final String DOMAIN_ID_NAME = "knk-domain-id";
 
     private static StateFlag entry;
     private static StateFlag exit;
     private static StringFlag name;
+    private static StringFlag domainId;
 
     private DomainAccessFlags() {
     }
@@ -39,6 +42,7 @@ public final class DomainAccessFlags {
         entry = registerOrAdopt(registry, new StateFlag(ENTRY_NAME, false), StateFlag.class, logger);
         exit = registerOrAdopt(registry, new StateFlag(EXIT_NAME, false), StateFlag.class, logger);
         name = registerOrAdopt(registry, new StringFlag(NAME_NAME), StringFlag.class, logger);
+        domainId = registerOrAdopt(registry, new StringFlag(DOMAIN_ID_NAME), StringFlag.class, logger);
     }
 
     public static boolean registered() {
@@ -55,6 +59,11 @@ public final class DomainAccessFlags {
 
     public static StringFlag name() {
         return name;
+    }
+
+    /** KNG-255; null when it could not be registered (each region then counts as its own domain, as before). */
+    public static StringFlag domainId() {
+        return domainId;
     }
 
     private static <T extends Flag<?>> T registerOrAdopt(FlagRegistry registry, T flag, Class<T> type, Logger logger) {

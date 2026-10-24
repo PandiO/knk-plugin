@@ -22,6 +22,7 @@ import java.util.List;
  * @param killStreakAnnounceAbove             streaks strictly above this are announced
  * @param spawnPickerDelayTicks               delay before the spawn picker opens after a respawn
  * @param enchantDropChancePerMille           chance per second of an enchant-book drop, in per mille
+ * @param giveNavigationItem                  the global default for giving players the navigation compass at the hub (KNG-234)
  */
 public record KnkSiegeConfiguration(
         int captureAttackBase,
@@ -46,7 +47,8 @@ public record KnkSiegeConfiguration(
         int enchantLevelMin,
         int enchantLevelMax,
         int maxBooksAlive,
-        SiegeNonMemberGateView nonMemberGateView
+        SiegeNonMemberGateView nonMemberGateView,
+        boolean giveNavigationItem
 ) {
     public KnkSiegeConfiguration {
         matchmakingAnnouncementMarks = copy(matchmakingAnnouncementMarks);
@@ -54,6 +56,24 @@ public record KnkSiegeConfiguration(
         allowedCommands = copy(allowedCommands);
         allowedEnchantmentKeys = copy(allowedEnchantmentKeys);
         if (nonMemberGateView == null) nonMemberGateView = SiegeNonMemberGateView.PRE_LOCKDOWN_VIEW;
+    }
+
+    /** The tunables without the navigation compass switch (everything before KNG-234): it is off. */
+    public KnkSiegeConfiguration(int captureAttackBase, int captureAttackPerExtra, int captureAttackPerExtraInstantVictory,
+                                 int captureDefendBase, int captureDefendPerExtra, int captureDefendPerExtraInstantVictory,
+                                 double sideCaptureReduction, int voteCloseSecondsBeforeStart, int drawSecondsBeforeStart,
+                                 int hubSecondsBeforeStart, int teamSplitSecondsBeforeStart,
+                                 List<Integer> matchmakingAnnouncementMarks, List<Integer> killAnnouncementThresholds,
+                                 int killStreakAnnounceAbove, double headshotMultiplier, List<String> allowedCommands,
+                                 int spawnPickerDelayTicks, int enchantDropChancePerMille, List<String> allowedEnchantmentKeys,
+                                 int enchantLevelMin, int enchantLevelMax, int maxBooksAlive,
+                                 SiegeNonMemberGateView nonMemberGateView) {
+        this(captureAttackBase, captureAttackPerExtra, captureAttackPerExtraInstantVictory, captureDefendBase,
+                captureDefendPerExtra, captureDefendPerExtraInstantVictory, sideCaptureReduction, voteCloseSecondsBeforeStart,
+                drawSecondsBeforeStart, hubSecondsBeforeStart, teamSplitSecondsBeforeStart, matchmakingAnnouncementMarks,
+                killAnnouncementThresholds, killStreakAnnounceAbove, headshotMultiplier, allowedCommands, spawnPickerDelayTicks,
+                enchantDropChancePerMille, allowedEnchantmentKeys, enchantLevelMin, enchantLevelMax, maxBooksAlive,
+                nonMemberGateView, false);
     }
 
     /**

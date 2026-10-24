@@ -24,13 +24,17 @@ import java.util.concurrent.CompletableFuture;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/** CP4 + menu follow-up 2026-09-26: catalogue rows (full blueprints), category values, total count, seed. */
+/** CP4 + menu follow-up 2026-09-26: catalogue rows (full blueprints), category values, total count, seed; KNG-231 page cache. */
 class ItemsCatalogMenuFeatureTest {
 
     private static final class MutableClock extends Clock {
@@ -102,6 +106,86 @@ class ItemsCatalogMenuFeatureTest {
         assertEquals(7, row.getBlueprintId());
         assertEquals(List.of(full, "minecraft:iron_sword"), row.menuRowKey());
         verify(blueprints).searchAsync(query);
+    }
+
+    private static PagedQuery page(int number) {
+        return new PagedQuery(number, 36, null, null, false, Map.of());
+    }
+
+    /** Search answers with one summary row per page, 100 blueprints in all (3 pages of 36). */
+    private void hundredBlueprints() {
+        when(blueprints.searchAsync(any())).thenAnswer(call -> {
+            PagedQuery query = call.getArgument(0);
+            return CompletableFuture.completedFuture(new Page<>(
+                    List.of(blueprint(query.pageNumber(), "Item " + query.pageNumber(), null, null)),
+                    100, query.pageNumber(), query.pageSize()));
+        });
+        when(blueprints.getByIdAsync(anyInt())).thenAnswer(call -> CompletableFuture.completedFuture(
+                FetchResult.hit(blueprint(call.getArgument(0), "Full", null, "Lore"))));
+    }
+
+    @Test
+    void kng231_aShownPageAndItsNeighboursAreReusedWithoutAnApiCall() {
+        hundredBlueprints();
+        MutableClock clock = new MutableClock();
+        ItemsCatalogMenuFeature feature = new ItemsCatalogMenuFeature(blueprints, refs, categories, clock);
+
+        feature.fetchRows(page(2)).join();
+        verify(blueprints).searchAsync(page(2));
+        verify(blueprints).searchAsync(page(3));
+        verify(blueprints).searchAsync(page(1));
+
+        Page<CatalogItemRow> next = feature.fetchRows(page(3)).join();
+        feature.fetchRows(page(2)).join();
+        assertEquals(3, next.items().get(0).getBlueprintId());
+        verify(blueprints, times(3)).searchAsync(any());
+        verify(blueprints, times(3)).getByIdAsync(anyInt());
+    }
+
+    @Test
+    void kng231_prefetchWrapsForwardLikeThePagerButNotBackFromPageOne() {
+        hundredBlueprints();
+        ItemsCatalogMenuFeature feature = new ItemsCatalogMenuFeature(blueprints, refs, categories, new MutableClock());
+
+        feature.fetchRows(page(1)).join();
+        verify(blueprints).searchAsync(page(2));
+        verify(blueprints, never()).searchAsync(page(3));
+
+        ItemsCatalogMenuFeature other = new ItemsCatalogMenuFeature(blueprints, refs, categories, new MutableClock());
+        other.fetchRows(page(3)).join();
+        verify(blueprints, times(2)).searchAsync(page(2));
+        verify(blueprints, times(2)).searchAsync(page(1));
+    }
+
+    @Test
+    void kng231_aPagePastTheEndIsAnsweredFromTheKnownTotal() {
+        hundredBlueprints();
+        ItemsCatalogMenuFeature feature = new ItemsCatalogMenuFeature(blueprints, refs, categories, new MutableClock());
+        feature.fetchRows(page(3)).join();
+
+        Page<CatalogItemRow> past = feature.fetchRows(page(4)).join();
+
+        assertEquals(100, past.totalCount());
+        assertTrue(past.items().isEmpty());
+        verify(blueprints, never()).searchAsync(page(4));
+    }
+
+    @Test
+    void kng231_pagesExpireAndFailuresAreNotKept() {
+        CompletableFuture<Page<KnkItemBlueprint>> failed = CompletableFuture.failedFuture(new RuntimeException("API down"));
+        when(blueprints.searchAsync(page(1))).thenReturn(failed, CompletableFuture.completedFuture(
+                new Page<>(List.of(), 10, 1, 36)));
+        MutableClock clock = new MutableClock();
+        ItemsCatalogMenuFeature feature = new ItemsCatalogMenuFeature(blueprints, refs, categories, clock);
+
+        assertThrows(java.util.concurrent.CompletionException.class, () -> feature.fetchRows(page(1)).join());
+        assertEquals(10, feature.fetchRows(page(1)).join().totalCount(), "a failure is retried, not served again");
+        feature.fetchRows(page(1)).join();
+        verify(blueprints, times(2)).searchAsync(page(1));
+
+        clock.now = clock.now.plusMillis(ItemsCatalogMenuFeature.PAGE_TTL_MILLIS);
+        feature.fetchRows(page(1)).join();
+        verify(blueprints, times(3)).searchAsync(page(1));
     }
 
     @Test

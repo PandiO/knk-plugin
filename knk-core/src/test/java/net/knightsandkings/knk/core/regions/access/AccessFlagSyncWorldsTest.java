@@ -90,7 +90,8 @@ class AccessFlagSyncWorldsTest {
         }
     }
 
-    private static final AccessFlags OPEN = new AccessFlags(AccessState.ALLOW, AccessState.ALLOW, "Hubtown");
+    // KNG-255: the domain id goes along, so its sub-regions are known as the same domain.
+    private static final AccessFlags OPEN = new AccessFlags(AccessState.ALLOW, AccessState.ALLOW, "Hubtown", "1");
 
     @Test
     void eachWorldsRuleLandsOnItsOwnRegionOnly() {
@@ -103,7 +104,7 @@ class AccessFlagSyncWorldsTest {
             new DomainAccessRule(2, "Oakhaven", "town_1", false, true, "Town", "gameplay")), store);
 
         assertEquals(OPEN, store.flags("hub", "town_1"));
-        assertEquals(new AccessFlags(AccessState.DENY, AccessState.ALLOW, "Oakhaven"), store.flags("gameplay", "town_1"));
+        assertEquals(new AccessFlags(AccessState.DENY, AccessState.ALLOW, "Oakhaven", "2"), store.flags("gameplay", "town_1"));
     }
 
     @Test

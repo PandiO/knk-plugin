@@ -92,8 +92,38 @@ class GateDamageConsequenceListenerTest {
 
             listener.onGateDoorIgnite(event);
 
-            verify(fireSystem, atLeastOnce()).igniteBlock(gate, hitBlock, null);
+            verify(fireSystem, atLeastOnce()).igniteBlock(gate, hitBlock, null, null);
         }
+    }
+
+    @Test
+    void ignitePassesTheStruckFaceOnToTheFire() {
+        Block hitBlock = mock(Block.class);
+        org.bukkit.entity.Player shooter = mock(org.bukkit.entity.Player.class);
+
+        listener.onGateDoorIgnite(new GateDoorIgniteEvent(gate, GateDoorIgniteEvent.Cause.FLAMING_PROJECTILE, shooter, hitBlock,
+            org.bukkit.block.BlockFace.NORTH));
+
+        verify(fireSystem).igniteBlock(gate, hitBlock, shooter, org.bukkit.block.BlockFace.NORTH);
+    }
+
+    @Test
+    void anEnchantmentBringsItsOwnDamage() {
+        // chaos / flash_chaos deal 40 / 60 to an entity in range; the gate takes the same, not the 10 of a punch
+        org.bukkit.entity.Player caster = mock(org.bukkit.entity.Player.class);
+        when(healthSystem.applyDamage(gate, 60.0)).thenReturn(60.0);
+
+        listener.onGateDoorDamage(new GateDoorDamageEvent(gate, GateDoorDamageEvent.Cause.ENCHANTMENT, caster, null, 60.0));
+
+        verify(healthSystem).applyDamage(gate, 60.0);
+        verify(healthSystem, never()).applyDamage(eq(gate), eq(10.0));
+    }
+
+    @Test
+    void anEnchantmentEventWithoutADamageFallsBackToTheDefaultAmount() {
+        listener.onGateDoorDamage(new GateDoorDamageEvent(gate, GateDoorDamageEvent.Cause.ENCHANTMENT, null, null));
+
+        verify(healthSystem).applyDamage(gate, 10.0);
     }
 
     @Test

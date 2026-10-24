@@ -52,6 +52,69 @@ public final class GateBlockPairing {
     }
 
     /**
+     * KNG-271: pairing for a door that slides (VERTICAL/LATERAL). Each closed block first takes the
+     * open block exactly where the slide puts it ({@code closed + translation}, block-rounded), so
+     * a door that rises and changes shape keeps every column in its own column. Only the blocks
+     * left over on both sides are then paired by {@link #pairNearestNeighbor}. The old pairing by
+     * list position drifted across columns as soon as the two scans had air in different cells.
+     *
+     * @param translation The door's full motion vector (closed rest to open rest)
+     * @return closed-list-index -> open-list-index; unpaired closed blocks have no entry
+     */
+    public static Map<Integer, Integer> pairAlongTranslation(List<Vector> closedWorldPositions, List<Vector> openWorldPositions,
+                                                             Vector translation) {
+        Map<Integer, Integer> pairing = new HashMap<>();
+        if (closedWorldPositions == null || openWorldPositions == null) {
+            return pairing;
+        }
+        Vector shift = translation != null ? translation : new Vector(0, 0, 0);
+
+        Map<String, Integer> openByCell = new HashMap<>();
+        for (int j = 0; j < openWorldPositions.size(); j++) {
+            Vector open = openWorldPositions.get(j);
+            if (open != null) {
+                openByCell.putIfAbsent(cellKey(open), j);
+            }
+        }
+
+        List<Integer> leftoverClosed = new ArrayList<>();
+        for (int i = 0; i < closedWorldPositions.size(); i++) {
+            Vector closed = closedWorldPositions.get(i);
+            if (closed == null) {
+                continue;
+            }
+            Integer open = openByCell.remove(cellKey(closed.clone().add(shift)));
+            if (open != null) {
+                pairing.put(i, open);
+            } else {
+                leftoverClosed.add(i);
+            }
+        }
+
+        List<Integer> leftoverOpen = new ArrayList<>(openByCell.values());
+        leftoverOpen.sort(null);
+        if (leftoverClosed.isEmpty() || leftoverOpen.isEmpty()) {
+            return pairing;
+        }
+        List<Vector> closedRest = new ArrayList<>();
+        for (int i : leftoverClosed) {
+            closedRest.add(closedWorldPositions.get(i));
+        }
+        List<Vector> openRest = new ArrayList<>();
+        for (int j : leftoverOpen) {
+            openRest.add(openWorldPositions.get(j));
+        }
+        for (Map.Entry<Integer, Integer> entry : pairNearestNeighbor(closedRest, openRest).entrySet()) {
+            pairing.put(leftoverClosed.get(entry.getKey()), leftoverOpen.get(entry.getValue()));
+        }
+        return pairing;
+    }
+
+    private static String cellKey(Vector position) {
+        return Math.round(position.getX()) + "," + Math.round(position.getY()) + "," + Math.round(position.getZ());
+    }
+
+    /**
      * @param closedWorldPositions Each closed block's absolute world position at rest (index-aligned with the caller's block list)
      * @param openWorldPositions Each open-scan block's absolute world position (index-aligned with the caller's open-block list)
      * @return closed-list-index -> open-list-index for every successfully paired closed block; unpaired closed blocks have no entry

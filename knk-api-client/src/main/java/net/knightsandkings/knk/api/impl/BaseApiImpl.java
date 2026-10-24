@@ -295,6 +295,11 @@ public class BaseApiImpl {
     }
 
     protected String putJson(String url, String json) throws ApiException, IOException {
+        return putJson(url, json, true);
+    }
+
+    /** @param logBody false for large bodies (e.g. the catalogue snapshot) that would flood the debug log */
+    protected String putJson(String url, String json, boolean logBody) throws ApiException, IOException {
         Request request = newRequest(url)
             .addHeader("Content-Type", "application/json")
             .addHeader("Accept", "application/json")
@@ -302,7 +307,7 @@ public class BaseApiImpl {
             .build();
         if (debugLogging) {
             LOGGER.info("API Request: PUT " + loggableUrl(url));
-            LOGGER.info("  Body: " + loggableBody(url, json));
+            LOGGER.info("  Body: " + (logBody ? loggableBody(url, json) : "<" + json.length() + " chars, not logged>"));
         }
         return execute(request, url);
     }
