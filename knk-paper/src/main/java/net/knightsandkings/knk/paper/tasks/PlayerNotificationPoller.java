@@ -25,7 +25,8 @@ import net.knightsandkings.knk.paper.commands.support.PromotionEffects;
  * a promotion/demotion from an XP change made through the web admin's player profile page, and a
  * rank change made outside the plugin (web app, or a temporary rank expiring), which re-reads the
  * player so chat and the tab list show the new rank within one poll, and a domain discovery reset,
- * which re-syncs the player's discovery tracking so the reset place counts again right away.
+ * which re-syncs the player's discovery tracking so the reset place counts again right away, and a new
+ * Minecraft-to-web account link (invitations, KNG-214), which tells the player the masked address.
  * Without this, that path only ever showed a banner in the browser: the API returned the
  * TitleChangeResult to the web app and the server never heard about it, so the online player got
  * the rewards but none of PromotionEffects' sound/particles/message. (/knk user ... xp worked
@@ -64,6 +65,8 @@ public class PlayerNotificationPoller {
     private final java.util.Map<String, Consumer<PlayerNotification>> serverHandlers = new ConcurrentHashMap<>();
     // A discovery reset made outside the plugin's own command (domain discovery, KNG-20).
     private volatile Consumer<Player> discoveryResetHandler;
+    // A new Minecraft-to-web link (invitations, KNG-214): which web account now holds this player.
+    private volatile BiConsumer<Player, PlayerNotification> accountLinkedHandler;
 
     public PlayerNotificationPoller(PlayerNotificationsApi notificationsApi, Plugin plugin) {
         this(notificationsApi, plugin,
@@ -98,6 +101,14 @@ public class PlayerNotificationPoller {
      */
     public void setDiscoveryResetHandler(Consumer<Player> handler) {
         this.discoveryResetHandler = handler;
+    }
+
+    /**
+     * What to do for a {@link PlayerNotification#TYPE_ACCOUNT_LINKED} whose player is online. An offline player's stays
+     * queued and shows on their next join (the API keeps it 24h).
+     */
+    public void setAccountLinkedHandler(BiConsumer<Player, PlayerNotification> handler) {
+        this.accountLinkedHandler = handler;
     }
 
     /**
@@ -210,6 +221,8 @@ public class PlayerNotificationPoller {
                     paymentReceivedHandler.accept(player, notification);
                 } else if (PlayerNotification.TYPE_DISCOVERY_RESET.equals(notification.type()) && discoveryResetHandler != null) {
                     discoveryResetHandler.accept(player);
+                } else if (PlayerNotification.TYPE_ACCOUNT_LINKED.equals(notification.type()) && accountLinkedHandler != null) {
+                    accountLinkedHandler.accept(player, notification);
                 }
             } catch (RuntimeException e) {
                 // Acknowledged anyway: retrying a notification that throws would only repeat

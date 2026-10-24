@@ -984,6 +984,7 @@ public class KnKPlugin extends JavaPlugin {
             registerEvents(regionTracker);
             wireDomainAccess();
             initializeHub();
+            initializeAdmission();
 
             HealthSystem healthSystem = new HealthSystem(gateDoorsApi, this, gateDisplayManager, gateManager);
             this.gateHealthSystem = healthSystem;
@@ -2617,6 +2618,28 @@ public class KnKPlugin extends JavaPlugin {
      * spawn before they appear, joins are refused while it is unusable, and its rules and Peaceful healing apply inside
      * its region. Without a hub selected nothing changes.
      */
+    /**
+     * Invitations (KNG-214, plan §6.2): the admission gate at pre-login ({@code admission.mode}, default whitelist =
+     * off) and the in-game notice after a Minecraft-to-web account link.
+     */
+    private void initializeAdmission() {
+        var admission = net.knightsandkings.knk.paper.admission.AdmissionSettings.fromConfig(
+            getConfig().getConfigurationSection("admission"), config.web().publicUrl());
+        var offline = offlineSecurity;
+        getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.admission.AdmissionListener(
+            admission, apiClient.getAdmissionApi(), uuid -> org.bukkit.Bukkit.getOfflinePlayer(uuid).isOp(),
+            uuid -> offline != null && offline.identity(uuid).isPresent(), java.time.Clock.systemUTC()), this);
+        if (playerNotificationPoller != null) {
+            playerNotificationPoller.setAccountLinkedHandler(
+                new net.knightsandkings.knk.paper.admission.AccountLinkedNotifier(admission.accountLinkedMessage()));
+        }
+        getLogger().info("[KnK Admission] admission.mode=" + admission.mode().name().toLowerCase(java.util.Locale.ROOT));
+        if (admission.mode() == net.knightsandkings.knk.core.admission.AdmissionPolicy.Mode.INVITE && admission.linkUrl().isEmpty()) {
+            getLogger().warning("[KnK Admission] Invite mode without admission.link-url or web.public-url: the disconnect"
+                + " screen can't say where to enter the code.");
+        }
+    }
+
     private void initializeHub() {
         var regionIds = regionTracker.regionIds();
         this.hubService = new net.knightsandkings.knk.paper.hub.HubService(

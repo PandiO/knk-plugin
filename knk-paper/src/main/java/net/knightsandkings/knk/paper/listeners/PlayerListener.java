@@ -114,6 +114,11 @@ public class PlayerListener implements Listener {
 
 	@EventHandler
 	public void onValidateLogin(AsyncPlayerPreLoginEvent e) {
+		// Invitations (KNG-214): the admission gate (LOWEST) may already have turned this player away; a denied
+		// connection must not create an account, or every stranger would fill the users table.
+		if (e.getLoginResult() != AsyncPlayerPreLoginEvent.Result.ALLOWED) {
+			return;
+		}
 		UUID uuid = e.getUniqueId();
 		String username = e.getName();
 
@@ -147,6 +152,8 @@ public class PlayerListener implements Listener {
 					LOGGER.info("Created and cached new user " + username + " (UUID: " + uuid + ")");
 					preloadPermissions(uuid);
 				} else if (created.status() == FetchStatus.ERROR) {
+					// Under the API's Registration:Mode=Invite this is a 403 NotAdmitted for a UUID without an admitted
+					// account - an operator who bypassed the admission gate. The join goes on without an account.
 					LOGGER.warning("Failed to create user " + uuid + ": " + created.error().map(Throwable::getMessage).orElse("unknown error"));
 				}
 				return;
@@ -250,11 +257,17 @@ public class PlayerListener implements Listener {
 			// system - a brand-new account, not a real "if (user.isNewUser())" branch that
 			// predates this (none existed here; UserAccountListener's welcome message doesn't
 			// distinguish new/returning either - verified by reading both listeners directly).
-			if (user.isNewUser()) {
+			// KNG-214: an account made on the website (web-first invite, or game-first through /link)
+			// exists before its first join, so isNewUser is false; the server not having seen the player
+			// is the other first-join signal. Both get the same first join: welcome, starter kits (the API
+			// grants them once per account) and the quiet discovery minutes (NewPlayerWindow).
+			if (NewPlayerWindow.isFirstJoin(user.isNewUser(), player.hasPlayedBefore())) {
 				if (newPlayers != null) {
 					newPlayers.markFirstJoin(player.getUniqueId());
 				}
-				LOGGER.info("First-join kits: " + player.getName() + " (user " + user.id() + ") is a new account, asking the API to grant them");
+				LOGGER.info("First-join kits: " + player.getName() + " (user " + user.id() + ") "
+					+ (user.isNewUser() ? "is a new account" : "joins for the first time with an existing account")
+					+ ", asking the API to grant them");
 				triggerBackgroundFirstJoinKits(player, user.id());
 			}
 		} else {
