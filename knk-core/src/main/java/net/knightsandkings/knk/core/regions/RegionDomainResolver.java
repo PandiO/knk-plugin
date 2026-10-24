@@ -4,7 +4,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -870,6 +872,43 @@ public class RegionDomainResolver {
         Set<Integer> childDomainIds,
         Set<String> childDomainNames
     ) {
+        /**
+         * Domain names come from the API as stored, and a name has been seen with a trailing newline
+         * ("Residential District\n"), which Minecraft draws as a missing-glyph box in the action bar
+         * ("You are now entering Residential District [] * Cinix *"). Strip leading and trailing whitespace
+         * from every name once here so no message built from a snapshot carries it.
+         */
+        public DomainSnapshot {
+            name = stripName(name);
+            parentDomainNames = stripNames(parentDomainNames);
+            childDomainNames = stripNames(childDomainNames);
+        }
+
+        private static String stripName(String name) {
+            return name == null ? null : name.strip();
+        }
+
+        private static Set<String> stripNames(Set<String> names) {
+            if (names == null || names.isEmpty()) {
+                return names;
+            }
+            boolean clean = true;
+            for (String name : names) {
+                if (name != null && !name.equals(name.strip())) {
+                    clean = false;
+                    break;
+                }
+            }
+            if (clean) {
+                return names;
+            }
+            Set<String> stripped = new LinkedHashSet<>();
+            for (String name : names) {
+                stripped.add(stripName(name));
+            }
+            return Collections.unmodifiableSet(stripped);
+        }
+
         @Override
         public boolean equals(Object other) {
             if (this == other) {
