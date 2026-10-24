@@ -60,12 +60,18 @@ public final class MenuDefinitionValidationRunner {
             summaries = menuTemplatesDataAccess.listAllAsync().join();
         } catch (Exception e) {
             logger.log(Level.SEVERE,
-                    "InventoryMenu startup validation: failed to list menu templates, skipping validation entirely", e);
+                    "InventoryMenu startup validation: failed to list menu templates, skipping validation entirely"
+                            + " - menus are validated on their first open instead", e);
+            menuService.setLateValidator(key -> validateOne(key, menuTemplatesDataAccess, menuService, logger,
+                    registeredActionTypeIds, registeredConditionTypeIds, registeredContentSourceIds, declaredTypes, rowTypes));
             return;
         }
 
         int checked = 0;
         int blocked = 0;
+        // Menus not listed now (API hiccup, created later) can still be validated on demand, the same way.
+        menuService.setLateValidator(key -> validateOne(key, menuTemplatesDataAccess, menuService, logger,
+                registeredActionTypeIds, registeredConditionTypeIds, registeredContentSourceIds, declaredTypes, rowTypes));
         for (KnkMenuTemplateSummary summary : summaries) {
             if (summary.key() == null || summary.key().isBlank()) {
                 continue;

@@ -75,6 +75,10 @@ public final class MenuService {
     private final Map<String, String> blockedMenus = new ConcurrentHashMap<>();
     /** Keys that passed {@link MenuDefinitionValidationRunner} at startup (content port CP1, {@code menu-available}). */
     private final Set<String> validatedMenus = ConcurrentHashMap.newKeySet();
+    /** Menus a late validation is running for right now (see {@link #requestValidation}). */
+    private final Set<String> validatingMenus = ConcurrentHashMap.newKeySet();
+    /** Set by {@code MenuDefinitionValidationRunner}: validates one menu key the way the startup pass does (blocking). */
+    private volatile java.util.function.Consumer<String> lateValidator;
     /** Diagnostic telemetry / funnel hooks (KNG-34 link 6); empty unless a feature registers one. */
     private final MenuObservers observers = new MenuObservers();
     /** KNG-125: toggles BLINK items each tick ({@link #processBlinks}). */
@@ -695,6 +699,54 @@ public final class MenuService {
      */
     public boolean isMenuAvailable(String templateKey) {
         return templateKey != null && validatedMenus.contains(templateKey) && !blockedMenus.containsKey(templateKey);
+    }
+
+    /**
+     * Why {@link #isMenuAvailable} says no, for a caller's log line: the startup validation's reason when the
+     * menu is blocked, else that the menu was never validated (the API was unreachable when the plugin
+     * started, that template was created since, or its fetch failed at startup). Empty when it is available.
+     */
+    public Optional<String> unavailableReason(String templateKey) {
+        if (isMenuAvailable(templateKey)) return Optional.empty();
+        String blocked = templateKey == null ? null : blockedMenus.get(templateKey);
+        if (blocked != null) return Optional.of("blocked at startup validation: " + blocked);
+        return Optional.of("not validated at startup (the API was unreachable then, or the template didn't exist yet)");
+    }
+
+    /** {@code MenuDefinitionValidationRunner} hands over its per-key validation so menus it never saw can be validated later. */
+    public void setLateValidator(java.util.function.Consumer<String> lateValidator) {
+        this.lateValidator = lateValidator;
+    }
+
+    /**
+     * Siege playtest 2026-10-24: a menu the startup validation never saw stays unavailable for the whole
+     * uptime, and the only trace is a chat fallback. This runs the same validation for that one key off the
+     * main thread; the menu becomes available (or blocked, with its reason) once it finishes, so the next
+     * open works without a restart. Blocked menus are not retried.
+     *
+     * @return true when a validation was started by this call
+     */
+    public boolean requestValidation(String templateKey) {
+        java.util.function.Consumer<String> validator = lateValidator;
+        if (templateKey == null || validator == null || isMenuAvailable(templateKey) || blockedMenus.containsKey(templateKey)) {
+            return false;
+        }
+        if (!validatingMenus.add(templateKey)) {
+            return false;
+        }
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            try {
+                validator.accept(templateKey);
+                if (isMenuAvailable(templateKey)) {
+                    logger.info("Menu '" + templateKey + "' validated late and is available now.");
+                }
+            } catch (RuntimeException e) {
+                logger.log(Level.WARNING, "Late validation of menu '" + templateKey + "' failed", e);
+            } finally {
+                validatingMenus.remove(templateKey);
+            }
+        });
+        return true;
     }
 
     /** Currently-blocked menu keys and why, for admin visibility (e.g. {@code /knk menu broken}). */
