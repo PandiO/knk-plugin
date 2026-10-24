@@ -40,6 +40,12 @@ public final class SiegeMatch {
 
     SiegeMatch(KnkSiegeScenario scenario, KnkSiegeConfiguration configuration, String matchToken,
                Map<Integer, List<UUID>> teams) {
+        this(scenario, configuration, matchToken, teams, Map.of());
+    }
+
+    /** @param spawnChoices the members' spawn choices made at the hub (playtest 2026-10-24), carried into the roster */
+    SiegeMatch(KnkSiegeScenario scenario, KnkSiegeConfiguration configuration, String matchToken,
+               Map<Integer, List<UUID>> teams, Map<UUID, SiegeMatchRoster.SpawnChoice> spawnChoices) {
         this.scenario = scenario;
         this.configuration = configuration;
         this.matchToken = matchToken;
@@ -47,6 +53,7 @@ public final class SiegeMatch {
         this.board = new SiegeObjectiveBoard(scenario, new CaptureCalculator(configuration), alliances);
         this.winResolver = new WinResolver(alliances);
         this.roster = new SiegeMatchRoster(teams);
+        spawnChoices.forEach(roster::setSpawnChoice);
         this.startedAt = Instant.now();
     }
 

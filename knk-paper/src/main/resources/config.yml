@@ -565,6 +565,20 @@ gates:
   melee-damage:
     from-held-item: true
     multiplier: 1.0
+  # Siege playtest 2026-10-24. Fire Aspect on the weapon: every melee hit on a door block has
+  # ignite-chance-per-level x level (I 15 %, II 30 %) to set that block alight - the same burn a flaming arrow
+  # starts, for fire-duration-seconds. 0 turns it off. A defender's hits never burn their own gate.
+  fire-aspect:
+    ignite-chance-per-level: 0.15
+  # Cleaving (custom enchantment, levels I-IV, lore line "Cleaving II"): melee hits on a door block do
+  # (1 + damage-bonus-per-level x level) times the weapon's gate damage (netherite sword 8 -> 10/12/14/16), and a
+  # right-click on a door block with the strike ready is a charged strike of charged-hit-multiplier[level] times
+  # that boosted hit (50/72/98/128 of a default 500 HP gate), then cools down charged-cooldown-seconds[level]
+  # (per player). A missing level in either list uses the last entry.
+  cleaving:
+    damage-bonus-per-level: 0.25
+    charged-hit-multiplier: [5, 6, 7, 8]
+    charged-cooldown-seconds: [60, 50, 40, 30]
   # chaos / flash_chaos hurt every gate with a door block within this many blocks (measured to the nearest
   # edge of the block) of whoever used them, with the enchantment's own damage. Entities are still only
   # hurt within 3 blocks.
