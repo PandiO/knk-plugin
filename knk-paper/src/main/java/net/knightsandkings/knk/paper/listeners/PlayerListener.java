@@ -257,11 +257,17 @@ public class PlayerListener implements Listener {
 			// system - a brand-new account, not a real "if (user.isNewUser())" branch that
 			// predates this (none existed here; UserAccountListener's welcome message doesn't
 			// distinguish new/returning either - verified by reading both listeners directly).
-			if (user.isNewUser()) {
+			// KNG-214: an account made on the website (web-first invite, or game-first through /link)
+			// exists before its first join, so isNewUser is false; the server not having seen the player
+			// is the other first-join signal. Both get the same first join: welcome, starter kits (the API
+			// grants them once per account) and the quiet discovery minutes (NewPlayerWindow).
+			if (NewPlayerWindow.isFirstJoin(user.isNewUser(), player.hasPlayedBefore())) {
 				if (newPlayers != null) {
 					newPlayers.markFirstJoin(player.getUniqueId());
 				}
-				LOGGER.info("First-join kits: " + player.getName() + " (user " + user.id() + ") is a new account, asking the API to grant them");
+				LOGGER.info("First-join kits: " + player.getName() + " (user " + user.id() + ") "
+					+ (user.isNewUser() ? "is a new account" : "joins for the first time with an existing account")
+					+ ", asking the API to grant them");
 				triggerBackgroundFirstJoinKits(player, user.id());
 			}
 		} else {

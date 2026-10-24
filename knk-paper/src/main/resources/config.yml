@@ -97,7 +97,8 @@ admission:
 
 # A new player's first minutes and the web-account reminder (KNG-128/129). & colour codes.
 onboarding:
-  # Sent instead of "Welcome back" when the account was created at this join. {player}
+  # Sent instead of "Welcome back" on a player's first join: the account was created at this join, or it
+  # was made on the website first (invite / link code) and the server has never seen the player. {player}
   first-join-welcome:
     - "&6Welcome to Knights & Kings, &e{player}&6!"
     - "&7Explore the kingdom: every town, district and structure you find for the first time earns you coins and XP."

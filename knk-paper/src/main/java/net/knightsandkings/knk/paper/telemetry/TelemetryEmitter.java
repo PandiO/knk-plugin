@@ -71,8 +71,9 @@ public final class TelemetryEmitter {
      * cache alone isn't enough: its entries expire while the player is online, and events then lost
      * their user id (smoke test finding 5).
      */
-    public void rememberUser(UUID playerId, int userId) {
-        if (playerId != null) {
+    public void rememberUser(UUID playerId, Integer userId) {
+        // KNG-214: an operator without an account (or a player whose row couldn't be created) has no user id.
+        if (playerId != null && userId != null) {
             onlineUserIds.put(playerId, userId);
         }
     }

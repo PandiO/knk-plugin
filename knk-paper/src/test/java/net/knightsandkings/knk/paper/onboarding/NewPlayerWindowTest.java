@@ -41,6 +41,15 @@ class NewPlayerWindowTest {
     }
 
     @Test
+    void aFirstJoinIsANewAccountOrAnExistingAccountTheServerHasNotSeen() {
+        assertTrue(NewPlayerWindow.isFirstJoin(true, false), "game-first: the API created the account at this join");
+        assertTrue(NewPlayerWindow.isFirstJoin(false, false),
+            "web-first or /link: the account exists, the player has no data on this server yet");
+        assertFalse(NewPlayerWindow.isFirstJoin(false, true), "a returning player");
+        assertTrue(NewPlayerWindow.isFirstJoin(true, true), "a new account always counts, whatever the player data says");
+    }
+
+    @Test
     void theFirstJoinWelcomeIsTakenOnceAndOnlyForAMarkedPlayer() {
         NewPlayerWindow window = new NewPlayerWindow(new MovableClock(), Duration.ofMinutes(10));
         window.markFirstJoin(alice);
