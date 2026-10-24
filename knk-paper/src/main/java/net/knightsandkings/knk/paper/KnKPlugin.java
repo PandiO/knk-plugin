@@ -3455,6 +3455,10 @@ public class KnKPlugin extends JavaPlugin {
             cacheManager.getUserCache(),
             siegeRandom
         );
+        // Playtest 2026-10-24: siege teleports (scenario hub, start, spawn picks, vault restore) cross domain
+        // borders the way the hub's portal does - a member waiting in the server hub (AllowExit off) was never
+        // moved otherwise. Same scoped exemption and WorldGuard resync as hubTransfer.
+        net.knightsandkings.knk.paper.siege.SiegeBukkit.setTeleporter(this::hubTransfer);
         // KNG-34 leaver fix: members who left early are reported with their stats (no reward).
         siegeService.setReportDepartedMembers(config.statistics().enabled() && config.statistics().siege().reportDepartedMembers());
 

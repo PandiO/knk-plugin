@@ -51,27 +51,50 @@ public final class MenuDefinitionValidationRunner {
                 registries.contentSources().rowTypes());
     }
 
+    /** Seconds between retries of the template list while the API is down: 10, 20, 40, then every minute. */
+    static final int[] RETRY_DELAYS_SECONDS = {10, 20, 40, 60};
+
     private static void runAtStartup(MenuTemplatesDataAccess menuTemplatesDataAccess, MenuService menuService, Logger logger,
                                      Set<String> registeredActionTypeIds, Set<String> registeredConditionTypeIds,
                                      Set<String> registeredContentSourceIds, Map<String, Class<?>> declaredTypes,
                                      Map<String, Class<?>> rowTypes) {
+        // Menus not listed now (API hiccup, created later) can still be validated on demand, the same way.
+        menuService.setLateValidator(key -> validateOne(key, menuTemplatesDataAccess, menuService, logger,
+                registeredActionTypeIds, registeredConditionTypeIds, registeredContentSourceIds, declaredTypes, rowTypes));
+        validateAll(menuTemplatesDataAccess, menuService, logger, registeredActionTypeIds, registeredConditionTypeIds,
+                registeredContentSourceIds, declaredTypes, rowTypes, 0);
+    }
+
+    /**
+     * Lists and validates every menu. Playtest 2026-10-24: with the API down at plugin start (the usual dev
+     * order: server first, API a moment later) the list fails and every menu stayed unavailable until a
+     * restart. Now the list is retried off the main thread (10 s, 20 s, 40 s, then every minute) until it
+     * succeeds; the retry's validation is the same startup pass, so nothing opens before it was checked.
+     */
+    private static void validateAll(MenuTemplatesDataAccess menuTemplatesDataAccess, MenuService menuService, Logger logger,
+                                    Set<String> registeredActionTypeIds, Set<String> registeredConditionTypeIds,
+                                    Set<String> registeredContentSourceIds, Map<String, Class<?>> declaredTypes,
+                                    Map<String, Class<?>> rowTypes, int attempt) {
         List<KnkMenuTemplateSummary> summaries;
         try {
             summaries = menuTemplatesDataAccess.listAllAsync().join();
         } catch (Exception e) {
-            logger.log(Level.SEVERE,
-                    "InventoryMenu startup validation: failed to list menu templates, skipping validation entirely"
-                            + " - menus are validated on their first open instead", e);
-            menuService.setLateValidator(key -> validateOne(key, menuTemplatesDataAccess, menuService, logger,
-                    registeredActionTypeIds, registeredConditionTypeIds, registeredContentSourceIds, declaredTypes, rowTypes));
+            int delay = RETRY_DELAYS_SECONDS[Math.min(attempt, RETRY_DELAYS_SECONDS.length - 1)];
+            if (attempt == 0) {
+                logger.log(Level.SEVERE, "InventoryMenu startup validation: failed to list menu templates (API down?);"
+                        + " menus stay unavailable until a retry succeeds - next try in " + delay + " s", e);
+            } else if (attempt < 3 || attempt % 10 == 0) {
+                logger.warning("InventoryMenu startup validation: menu templates still can't be listed (try "
+                        + (attempt + 1) + "); next try in " + delay + " s");
+            }
+            menuService.runLaterAsync(delay * 20L, () -> validateAll(menuTemplatesDataAccess, menuService, logger,
+                    registeredActionTypeIds, registeredConditionTypeIds, registeredContentSourceIds, declaredTypes, rowTypes,
+                    attempt + 1));
             return;
         }
 
         int checked = 0;
         int blocked = 0;
-        // Menus not listed now (API hiccup, created later) can still be validated on demand, the same way.
-        menuService.setLateValidator(key -> validateOne(key, menuTemplatesDataAccess, menuService, logger,
-                registeredActionTypeIds, registeredConditionTypeIds, registeredContentSourceIds, declaredTypes, rowTypes));
         for (KnkMenuTemplateSummary summary : summaries) {
             if (summary.key() == null || summary.key().isBlank()) {
                 continue;
@@ -82,7 +105,8 @@ public final class MenuDefinitionValidationRunner {
                 blocked++;
             }
         }
-        logger.info("InventoryMenu startup validation: checked " + checked + " menu(s), " + blocked + " blocked.");
+        logger.info("InventoryMenu startup validation: checked " + checked + " menu(s), " + blocked + " blocked"
+                + (attempt > 0 ? " (after " + attempt + " retr" + (attempt == 1 ? "y" : "ies") + ")" : "") + ".");
     }
 
     /** @return true if the menu registered cleanly (or couldn't be re-fetched - not this validator's job to flag that). */

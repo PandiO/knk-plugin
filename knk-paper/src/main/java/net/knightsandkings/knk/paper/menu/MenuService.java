@@ -713,6 +713,11 @@ public final class MenuService {
         return Optional.of("not validated at startup (the API was unreachable then, or the template didn't exist yet)");
     }
 
+    /** Runs {@code task} off the main thread after {@code delayTicks} (the startup validation's retries while the API is down). */
+    public void runLaterAsync(long delayTicks, Runnable task) {
+        Bukkit.getScheduler().runTaskLaterAsynchronously(plugin, task, Math.max(1L, delayTicks));
+    }
+
     /** {@code MenuDefinitionValidationRunner} hands over its per-key validation so menus it never saw can be validated later. */
     public void setLateValidator(java.util.function.Consumer<String> lateValidator) {
         this.lateValidator = lateValidator;
