@@ -1970,6 +1970,15 @@ public class KnKPlugin extends JavaPlugin {
         // Event registration moved to onEnable after region transition service setup
 
         pluginManager.registerEvents(new WorldGuardRegionListener(regionTracker), this);
+        // QOL hotfix 2026-10-25: where only __global__ applies, default players neither build nor use decorations and
+        // crafting blocks, and explosions break nothing (regions.global.protection; doors and storage stay usable).
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.regions.GlobalRegionProtectionListener(
+            () -> getConfig().getBoolean(net.knightsandkings.knk.paper.regions.GlobalRegionProtectionListener.CONFIG_PATH, true),
+            net.knightsandkings.knk.paper.regions.GlobalRegionProtectionListener.craftingBlocks(
+                getConfig().getStringList(net.knightsandkings.knk.paper.regions.GlobalRegionProtectionListener.CRAFTING_BLOCKS_PATH),
+                getLogger()::warning),
+            regionTracker.regionIds()::at,
+            player -> hasRegionBypass(player) || hasWorldGuardRegionBypass(player)), this);
         if (gameSettingsManager != null) {
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.GameSettingsWorldListener(this, gameSettingsManager), this);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.GameSettingsMotdListener(gameSettingsManager), this);
@@ -2912,6 +2921,20 @@ public class KnKPlugin extends JavaPlugin {
         return player != null
             && ((knkPermissible != null && knkPermissible.hasPermission(player, bypassNode))
                 || (teleportService != null && teleportService.hasInFlightBypass(player.getUniqueId(), bypassNode)));
+    }
+
+    /**
+     * WorldGuard's own region bypass for the player's world ({@code worldguard.region.bypass.<world>}, which ops
+     * have, honouring {@code /rg bypass}): what WorldGuard's protection listener itself lets through.
+     */
+    private static boolean hasWorldGuardRegionBypass(org.bukkit.entity.Player player) {
+        try {
+            var local = com.sk89q.worldguard.bukkit.WorldGuardPlugin.inst().wrapPlayer(player);
+            return com.sk89q.worldguard.WorldGuard.getInstance().getPlatform().getSessionManager()
+                .hasBypass(local, com.sk89q.worldedit.bukkit.BukkitAdapter.adapt(player.getWorld()));
+        } catch (RuntimeException | NoClassDefFoundError e) {
+            return false;
+        }
     }
 
     private void wireDomainAccess() {

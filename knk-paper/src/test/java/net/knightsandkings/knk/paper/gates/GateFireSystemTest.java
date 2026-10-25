@@ -2,6 +2,7 @@ package net.knightsandkings.knk.paper.gates;
 
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
+import net.knightsandkings.knk.core.domain.gates.CachedGateStructure;
 import net.knightsandkings.knk.core.gates.GateManager;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -191,6 +192,30 @@ class GateFireSystemTest {
     void tickExtinguishesWhenGateIsDestroyed() {
         gate.getBurningBlocks().put(new Vector(100, 64, 100), System.currentTimeMillis() + 5000L);
         gate.setIsDestroyed(true);
+
+        fireSystem.tick();
+
+        assertFalse(gate.isOnFire());
+        verifyNoInteractions(healthSystem);
+    }
+
+    @Test
+    void tickExtinguishesWhenGateBecomesInvincible() {
+        gate.getBurningBlocks().put(new Vector(100, 64, 100), System.currentTimeMillis() + 5000L);
+        gate.setIsInvincible(true);
+
+        fireSystem.tick();
+
+        assertFalse(gate.isOnFire());
+        verifyNoInteractions(healthSystem);
+    }
+
+    @Test
+    void tickExtinguishesWhenAStructureOverrideMakesTheGateInvincibleMidBurn() {
+        gate.getBurningBlocks().put(new Vector(100, 64, 100), System.currentTimeMillis() + 5000L);
+        CachedGateStructure structure = new CachedGateStructure(1, "TestStructure");
+        structure.setIsInvincibleOverride(true);
+        gate.setStructure(structure);
 
         fireSystem.tick();
 
