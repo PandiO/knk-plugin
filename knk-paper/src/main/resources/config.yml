@@ -782,6 +782,18 @@ regions:
   # after it was orphaned. Never one a domain uses, and nothing while the API can't be asked.
   temp-retention:
     days: 14
+  # WorldGuard's global region (QOL hotfix 2026-10-25): where no region but __global__ applies - outside every domain,
+  # arena and other region - a default player can't break or place blocks (buckets included), can't place, break, use
+  # or hit item frames, paintings and armor stands, and can't use crafting blocks; explosions break no blocks and no
+  # such decorations there. Doors, trapdoors, gates, chests and other storage stay usable. knk.region.bypass and
+  # WorldGuard's region bypass (ops) are not restricted. Inside a region nothing changes. A plugin rule, not WorldGuard
+  # flags on __global__ (those would also bind region members). `protection` is read on every event (config reload);
+  # `crafting-blocks` (material names; empty = the built-in list below) needs a restart.
+  global:
+    protection: true
+    crafting-blocks: [CRAFTING_TABLE, CRAFTER, FURNACE, BLAST_FURNACE, SMOKER, BREWING_STAND, ANVIL, CHIPPED_ANVIL,
+                      DAMAGED_ANVIL, ENCHANTING_TABLE, SMITHING_TABLE, GRINDSTONE, STONECUTTER, LOOM, CARTOGRAPHY_TABLE,
+                      FLETCHING_TABLE]
   managed:
     startup-repair:
       enabled: true
