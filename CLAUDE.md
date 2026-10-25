@@ -55,8 +55,12 @@ installed (a JDK 25 Gradle doesn't detect can be passed with
   `MinigameTeleportRestriction` in `minigame/`; the `DomainAccessExemptions` port in
   `knk-core/.../core/regions/access/`
 - Arena duels: pure rules in `knk-core/.../core/duel/` (views in `core/duel/view/`), runtime in
-  `duel/`, negotiation UI in `duel/ui/`, menus in `menu/content/DuelMenuFeature` and `DuelMenus`;
-  see `docs/specs/arena-duels/` and `docs/guides/arena-duels.md` in `knk-workspace`
+  `duel/`, negotiation UI in `duel/ui/`, menus in `menu/content/DuelMenuFeature` and `DuelMenus`.
+  An arena's battlegrounds, spectator areas and lobby are its own areas (`KnkArenaArea` with regions,
+  not domains, DESIGN rev. 6): their access rule is `core/duel/ArenaAreaAccessRules`, enforced by the
+  WorldGuard session handler `duel/ArenaAreaAccessHandler` (not the domain-access exemptions); area
+  region names `arena_<a>_<kind>_<n>`, orphans in `regions/ArenaAreaRegionOrphans`; see
+  `docs/specs/arena-duels/` and `docs/guides/arena-duels.md` in `knk-workspace`
 - Performance metrics (KNG-232, `metrics.enabled`, default off): Prometheus `/metrics` on its own port
   (`metrics/MetricsHttpServer`, wired by `metrics/MetricsService`); collectors and instruments in
   `knk-core/.../core/metrics/` (`PluginMetrics.timed(name, runnable)` wraps a recurring task,

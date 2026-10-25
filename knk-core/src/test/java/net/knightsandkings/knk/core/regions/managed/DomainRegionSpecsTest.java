@@ -10,8 +10,8 @@ import org.junit.jupiter.api.Test;
 
 import net.knightsandkings.knk.core.domain.arenas.ArenaFixtures;
 import net.knightsandkings.knk.core.domain.arenas.KnkArena;
-import net.knightsandkings.knk.core.domain.arenas.KnkArenaBattleground;
-import net.knightsandkings.knk.core.domain.arenas.KnkArenaSpectatorArea;
+import net.knightsandkings.knk.core.domain.arenas.KnkArenaArea;
+import net.knightsandkings.knk.core.domain.arenas.KnkArenaAreaRegion;
 import net.knightsandkings.knk.core.domain.districts.DistrictSummary;
 import net.knightsandkings.knk.core.domain.structures.StructureSummary;
 import net.knightsandkings.knk.core.domain.towns.TownSummary;
@@ -56,13 +56,18 @@ class DomainRegionSpecsTest {
         assertEquals(2, result.warnings().size());
     }
 
-    /** KNG-210: District -> Arena -> its battlegrounds (BATTLEGROUND) and spectator areas (plain child). */
+    /**
+     * Rev. 6: District -> Arena -> one spec per area region: battleground regions BATTLEGROUND, spectator-area regions
+     * SPECTATOR_AREA, lobby regions LOBBY, all under the arena's region (a two-part battleground gives two specs).
+     */
     @Test
-    void arenaChildrenHangUnderTheArenaRegion() {
+    void areaRegionsHangUnderTheArenaRegionWithTheirKind() {
         KnkArena arena = ArenaFixtures.arena(5, "arena_2", List.of(
-                        new KnkArenaBattleground(6, 5, "bg1", "Pit", "arena_2,1-battleground", null, 0, true, false, null, null),
-                        new KnkArenaBattleground(7, 5, "bg2", "Pit 2", " ", null, 1, true, false, null, null)),
-                List.of(new KnkArenaSpectatorArea(8, 5, "Stands", "domain_8", "world", true, null)));
+                ArenaFixtures.battleground(6, 5, "bg1", 0, null, null, "arena_5_battleground_60", "arena_5_battleground_61"),
+                new KnkArenaArea(7, 5, KnkArenaArea.Kind.BATTLEGROUND, "bg2", null, 1, false, null, null, null, null, null,
+                        List.of(new KnkArenaAreaRegion(70, " ", null))),
+                ArenaFixtures.spectator(8, 5, "Stands", null, null, null, "arena_5_spectator_80"),
+                ArenaFixtures.lobby(9, 5, "arena_5_lobby_90", null)));
 
         DomainRegionSpecs.Result result = DomainRegionSpecs.build(
                 List.of(new TownSummary(1, "Rivia", "", "town_1")),
@@ -74,15 +79,14 @@ class DomainRegionSpecsTest {
         ManagedRegionSpec arenaSpec = result.specs().get(2);
         assertEquals(ManagedRegionKind.ARENA, arenaSpec.kind());
         assertEquals("district_2", arenaSpec.parentRegionId());
-        ManagedRegionSpec battleground = result.specs().get(3);
-        assertEquals(ManagedRegionKind.BATTLEGROUND, battleground.kind());
-        assertEquals("arena_2", battleground.parentRegionId());
-        assertEquals("world", battleground.worldName());   // takes the arena's world
-        ManagedRegionSpec stands = result.specs().get(4);
-        assertEquals(ManagedRegionKind.SPECTATOR_AREA, stands.kind());
-        assertEquals("arena_2", stands.parentRegionId());
-        assertEquals(5, result.specs().size());
-        assertEquals(1, result.skipped().size());   // the battleground without a region
+        List<ManagedRegionSpec> areas = result.specs().subList(3, result.specs().size());
+        assertEquals(List.of("arena_5_battleground_60", "arena_5_battleground_61", "arena_5_spectator_80", "arena_5_lobby_90"),
+                areas.stream().map(ManagedRegionSpec::regionId).toList());
+        assertEquals(List.of(ManagedRegionKind.BATTLEGROUND, ManagedRegionKind.BATTLEGROUND, ManagedRegionKind.SPECTATOR_AREA,
+                ManagedRegionKind.LOBBY), areas.stream().map(ManagedRegionSpec::kind).toList());
+        assertTrue(areas.stream().allMatch(spec -> "arena_2".equals(spec.parentRegionId())));
+        assertEquals("world", areas.getFirst().worldName());
+        assertEquals(1, result.skipped().size());   // the region without an id
     }
 
     @Test

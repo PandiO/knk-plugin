@@ -198,41 +198,92 @@ class DuelListenersTest {
 
     // ===== battleground access =====
 
+    // Rev. 6 (DESIGN §8.2): the areas' own access rule, over the union of each area's regions.
+    private static final Set<String> ARENA = Set.of("arena_2");
+    private static final Set<String> NORTH = Set.of("arena_2", DuelHarness.BATTLEGROUND_REGION);
+    private static final Set<String> SOUTH = Set.of("arena_2", DuelHarness.BATTLEGROUND_REGION_2);
+    private static final Set<String> HALL = Set.of("arena_2", DuelHarness.LOBBY_REGION);
+
+    private java.util.Optional<net.knightsandkings.knk.core.duel.ArenaAreaAccessRules.Refusal> cross(UUID who, Set<String> from, Set<String> to) {
+        return h.access.evaluate(who, from, to, "arena");
+    }
+
     @Test
-    void theAllocatedPairMayEnterAndIsConfinedInTheCountdownAndTheFight() {
+    void theAllocatedPairCrossesBothPartsAndIsConfined_AnOutsiderIsRefusedAtEitherPart() {
         harness();
         DuelMatch match = duel();
-        String region = "arena_2,a-battleground";
-        assertFalse(h.access.exemptFromEntry(h.alice.id(), region), "not before the countdown");
+        assertTrue(cross(h.alice.id(), ARENA, NORTH).isPresent(), "not before the countdown");
 
         h.seconds(1);
         assertEquals(DuelPhase.BATTLE_COUNTDOWN, match.phase());
-        assertTrue(h.access.exemptFromEntry(h.alice.id(), region));
-        assertFalse(h.access.exemptFromEntry(outsider.getUniqueId(), region));
-        assertEquals(DuelBattlegroundAccess.CONFINED, h.access.confinement(h.alice.id(), region).orElseThrow());
+        assertTrue(cross(h.alice.id(), ARENA, NORTH).isEmpty());
+        assertTrue(cross(h.alice.id(), NORTH, SOUTH).isEmpty(), "crossing between the two parts is no border");
+        assertEquals(net.knightsandkings.knk.core.duel.ArenaAreaAccessRules.CONFINED,
+            cross(h.alice.id(), SOUTH, ARENA).orElseThrow().message());
+        assertEquals(net.knightsandkings.knk.core.duel.ArenaAreaAccessRules.BATTLEGROUND_RESERVED,
+            cross(outsider.getUniqueId(), ARENA, NORTH).orElseThrow().message());
+        assertTrue(cross(outsider.getUniqueId(), ARENA, SOUTH).isPresent());
         h.seconds(1);
-        assertTrue(h.access.confinement(h.bob.id(), region).isPresent(), "the fight too");
+        assertTrue(cross(h.bob.id(), NORTH, ARENA).isPresent(), "the fight too");
 
         h.kill(h.bob);
         h.respawn(h.bob);
-        assertTrue(h.access.confinement(h.alice.id(), region).isEmpty(), "ENDING: free to go");
+        assertTrue(cross(h.alice.id(), NORTH, ARENA).isEmpty(), "ENDING: free to go");
         h.seconds(1);
         assertFalse(h.access.hasGrant(h.alice.id()), "revoked after the exit teleport");
         assertFalse(h.access.hasGrant(h.bob.id()));
+        assertTrue(cross(h.alice.id(), ARENA, NORTH).isPresent(), "a free battleground refuses everyone again");
+    }
+
+    @Test
+    void theLobbyIsDuelistsOnlyWhileAMatchWarmsUpThere() {
+        harness();
+        assertTrue(cross(outsider.getUniqueId(), ARENA, HALL).isEmpty(), "open without a match");
+        DuelMatch match = duel();
+        assertEquals(DuelPhase.WARMUP, match.phase());
+
+        assertEquals(net.knightsandkings.knk.core.duel.ArenaAreaAccessRules.LOBBY_RESERVED,
+            cross(outsider.getUniqueId(), ARENA, HALL).orElseThrow().message());
+        assertTrue(cross(h.alice.id(), ARENA, HALL).isEmpty(), "a duelist of the arena");
+        assertTrue(cross(outsider.getUniqueId(), HALL, ARENA).isEmpty(), "leaving is free");
+
+        h.seconds(1);
+        assertEquals(DuelPhase.BATTLE_COUNTDOWN, match.phase());
+        assertTrue(cross(outsider.getUniqueId(), ARENA, HALL).isEmpty(), "open again once no match warms up");
     }
 
     @Test
     void theExitPassLetsOneExitThroughWhileConfined() {
-        DuelBattlegroundAccess access = new DuelBattlegroundAccess();
+        harness();
+        ArenaAreaAccess access = new ArenaAreaAccess();
+        access.setArenas(() -> List.of(h.arena));
         UUID id = UUID.randomUUID();
-        access.grant(id, "bg", player -> true);
-        assertTrue(access.confinement(id, "BG").isPresent());
+        access.grant(id, DuelHarness.BATTLEGROUND_ID, player -> true);
+        assertTrue(access.evaluate(id, NORTH, ARENA, "arena").isPresent());
 
         access.passExit(id);
 
-        assertTrue(access.confinement(id, "bg").isEmpty());
+        assertTrue(access.evaluate(id, NORTH, ARENA, "arena").isEmpty());
         access.revoke(id);
-        assertFalse(access.exemptFromEntry(id, "bg"));
+        assertTrue(access.evaluate(id, ARENA, NORTH, "arena").isPresent());
+        assertFalse(access.hasGrant(id));
+    }
+
+    @Test
+    void theHandlerRefusesAndTellsThePlayer_StaffAndUncancellableMovesPass() {
+        harness();
+        List<String> told = new ArrayList<>();
+        Set<Player> staff = new java.util.HashSet<>();
+        var factory = new ArenaAreaAccessHandler.Factory(h.access, (player, to) -> staff.contains(player),
+            (player, refusal) -> told.add(refusal.message()));
+
+        assertFalse(factory.decide(outsider, ARENA, NORTH, "arena", null, true));
+        assertEquals(List.of(net.knightsandkings.knk.core.duel.ArenaAreaAccessRules.BATTLEGROUND_RESERVED), told);
+        assertTrue(factory.decide(outsider, ARENA, NORTH, "arena", null, false), "a respawn can't be refused");
+        staff.add(outsider);
+        assertTrue(factory.decide(outsider, ARENA, NORTH, "arena", null, true), "knk.region.bypass");
+        assertTrue(factory.decide(outsider, ARENA, Set.of("arena_2", "elsewhere"), "arena", null, true));
+        assertEquals(1, told.size());
     }
 
     // ===== freeze, commands, guards, death =====

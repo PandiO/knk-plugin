@@ -1,7 +1,7 @@
 package net.knightsandkings.knk.paper.duel;
 
 import net.knightsandkings.knk.core.domain.arenas.KnkArena;
-import net.knightsandkings.knk.core.domain.arenas.KnkArenaSpectatorArea;
+import net.knightsandkings.knk.core.domain.arenas.KnkArenaArea;
 import net.knightsandkings.knk.core.domain.duels.KnkDuelRecords.Settlement;
 import net.knightsandkings.knk.core.duel.DuelPhase;
 import net.knightsandkings.knk.core.duel.GearMode;
@@ -62,7 +62,9 @@ class DuelPresentationTest {
     private DuelHarness harness(boolean announceMatches, boolean announceFriendly, boolean warp) {
         h = new DuelHarness(dataFolder);
         h.arena = withArenaSettings(h.arena, announceMatches, announceFriendly,
-            List.of(new KnkArenaSpectatorArea(40, DuelHarness.ARENA_ID, "Stands", "arena_2_stands", "arena", warp, null)));
+            List.of(new KnkArenaArea(40, DuelHarness.ARENA_ID, KnkArenaArea.Kind.SPECTATOR, "stands", "Stands", 0, true,
+                null, null, warp ? DuelHarness.loc("stands", 5) : null, null, null,
+                List.of(new net.knightsandkings.knk.core.domain.arenas.KnkArenaAreaRegion(400, "arena_2_stands", "arena")))));
         stands = new Location(h.world, 5, 70, 5);
         spectatorAt = stands;
         spectator = mock(Player.class);
@@ -315,15 +317,19 @@ class DuelPresentationTest {
         c.children().forEach(child -> collect(child, out));
     }
 
+    /** The arena with these announce toggles and {@code spectatorAreas} instead of its own (its other areas stay). */
     static KnkArena withArenaSettings(KnkArena a, boolean announceMatches, boolean announceFriendly,
-                                      List<KnkArenaSpectatorArea> areas) {
+                                      List<KnkArenaArea> spectatorAreas) {
+        List<KnkArenaArea> areas = new ArrayList<>(a.areas().stream()
+            .filter(area -> area.kind() != KnkArenaArea.Kind.SPECTATOR).toList());
+        areas.addAll(spectatorAreas);
         return new KnkArena(a.id(), a.key(), a.name(), a.wgRegionId(), a.worldName(), a.districtId(), a.location(),
-            a.lobbyLocation(), a.exitLocation(), a.duelEnabled(), a.maxQueuedMatches(), a.maxOffers(), a.offerSeconds(),
+            a.exitLocation(), a.duelEnabled(), a.maxQueuedMatches(), a.maxOffers(), a.offerSeconds(),
             a.allowCoinStakes(), a.allowItemStakes(), a.maxCoinStake(), a.maxItemStacks(), a.minStakeRatioPercent(),
             a.feePercent(), a.stakeMinAccountAgeHours(), a.stakeMinTitleBracketId(), a.maxStakedDuelsPerPairPerDay(),
             a.pairCooldownMinutes(), a.dailyCoinWinCap(), a.allowOwnGearKeep(), a.allowOwnGearDrop(), a.allowFixedKit(),
             a.allowKitChoice(), a.defaultGearMode(), a.warmupSeconds(), a.countdownSeconds(), a.fightTimeLimitSeconds(),
             a.maxWaitSeconds(), a.winnerLingerSeconds(), announceMatches, announceFriendly, a.eligibleKits(),
-            a.battlegrounds(), areas);
+            areas, a.subRegionIds());
     }
 }

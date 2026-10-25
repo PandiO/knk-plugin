@@ -102,6 +102,16 @@ class RegionRenamePlanTest {
     void finalNamesAreRecognised() {
         assertTrue(RegionRenamePlan.isFinalName("domain_17"));
         assertTrue(RegionRenamePlan.isFinalName("DOMAIN_1000006"));
+        // Arena duels rev. 6: an arena area region's final name follows the same rules; v1's arena regions don't.
+        assertTrue(RegionRenamePlan.isFinalName("arena_5_battleground_12"));
+        assertTrue(RegionRenamePlan.isFinalName("ARENA_5_LOBBY_3"));
+        assertTrue(RegionRenamePlan.isFinalName("arena_5_spectator_9"));
+        assertFalse(RegionRenamePlan.isFinalName("arena_2,a-battleground"));
+        assertFalse(RegionRenamePlan.isFinalName("arena_2"));
+        assertFalse(RegionRenamePlan.isFinalName("arena_5_pit_3"));
+        assertTrue(ArenaAreaRegionNames.isAreaRegionName(" arena_5_battleground_12 "));
+        assertFalse(ArenaAreaRegionNames.isAreaRegionName("domain_5_sub_1"));
+        assertFalse(ArenaAreaRegionNames.isAreaRegionName(null));
         assertFalse(RegionRenamePlan.isFinalName("domain_"));
         assertFalse(RegionRenamePlan.isFinalName("domain_17_old"));
         // KNG-255: a sub-region's final name

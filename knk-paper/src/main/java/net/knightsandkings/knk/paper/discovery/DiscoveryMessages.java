@@ -35,7 +35,6 @@ public final class DiscoveryMessages {
             case "structure" -> "the structure";
             case "gatestructure" -> "the gate";
             case "arena" -> "the arena";
-            case "arenaspectatorarea" -> "the spectator area";
             default -> "the place";
         };
     }

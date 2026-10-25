@@ -1,15 +1,14 @@
 package net.knightsandkings.knk.paper.menu.content;
 
-import net.knightsandkings.knk.core.dataaccess.TeleportDestinationsDataAccess;
 import net.knightsandkings.knk.core.domain.arenas.KnkArena;
-import net.knightsandkings.knk.core.domain.arenas.KnkArenaBattleground;
+import net.knightsandkings.knk.core.domain.arenas.KnkArenaArea;
+import net.knightsandkings.knk.core.domain.arenas.KnkArenaAreaRegion;
 import net.knightsandkings.knk.core.domain.arenas.KnkArenaKit;
-import net.knightsandkings.knk.core.domain.arenas.KnkArenaSpectatorArea;
+import net.knightsandkings.knk.core.domain.location.KnkLocation;
+import net.knightsandkings.knk.paper.duel.DuelSpectateTeleports;
 import net.knightsandkings.knk.core.domain.statistics.PlayerStatistics;
-import net.knightsandkings.knk.core.domain.teleport.KnkTeleportDestination;
 import net.knightsandkings.knk.core.domain.teleport.TeleportChargeResult;
 import net.knightsandkings.knk.core.domain.teleport.TeleportRefundResult;
-import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.core.duel.DuelPhase;
 import net.knightsandkings.knk.core.duel.DuelSide;
 import net.knightsandkings.knk.core.duel.GearMode;
@@ -25,16 +24,10 @@ import net.knightsandkings.knk.core.ports.api.TeleportDestinationsCommandApi;
 import net.knightsandkings.knk.core.teleport.TeleportCharger;
 import net.knightsandkings.knk.core.teleport.TeleportSettings;
 import net.knightsandkings.knk.core.util.BlockProbe;
-import net.knightsandkings.knk.paper.commands.WarpCommand;
-import net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport;
-import net.knightsandkings.knk.paper.commands.support.TargetRankCheck;
 import net.knightsandkings.knk.paper.menu.MenuActionContext;
 import net.knightsandkings.knk.paper.menu.MenuFeatureRegistries;
 import net.knightsandkings.knk.paper.permissions.KnkPermissible;
-import net.knightsandkings.knk.paper.teleport.TeleportCharges;
-import net.knightsandkings.knk.paper.teleport.TeleportNodes;
 import net.knightsandkings.knk.paper.teleport.TeleportService;
-import net.knightsandkings.knk.paper.teleport.VisibleTargetResolver;
 import org.bukkit.Chunk;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -44,7 +37,6 @@ import org.bukkit.inventory.ItemStack;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -74,16 +66,16 @@ import static org.mockito.Mockito.when;
 
 /**
  * Arena duels P6 (DESIGN §9.2–§9.3, KNG-220): the duel menus against the exported seeds, their rows from the
- * runtime's snapshots, and the spectate action - which must go through the spectator area's real {@code /warp} path
- * (node, the destination's lock reasons, the warmup, then the server-side charge), so the warp's title, premium,
- * discovery and gem-price conditions apply exactly as for {@code /warp}.
+ * runtime's snapshots, and the spectate action - rev. 6 (developer 2026-10-24): an engine teleport of kind
+ * {@code ARENA} to the spectator area's arrival, after the area's own title and gem conditions (the teleport fee path,
+ * {@code DuelSpectateTeleports}), refunded when the teleport doesn't happen.
  */
 class DuelMenuFeatureTest {
 
     private static final int ARENA_ID = 7;
     private static final int STANDS_ID = 41;
 
-    // ===== the real /warp path (as TeleportMenuFeatureTest builds it) =====
+    // ===== the real teleport engine (as TeleportMenuFeatureTest builds it) =====
 
     private long now = 1_000_000;
     private final Set<String> granted = new HashSet<>();
@@ -105,20 +97,19 @@ class DuelMenuFeatureTest {
     private final Player steve = player("Steve", new Location(world, 50.5, 64, 50.5));
     private final Map<UUID, Integer> userIds = Map.of(alice.getUniqueId(), 7, bob.getUniqueId(), 8, steve.getUniqueId(), 9);
     private final KnkPermissible permissible = mock(KnkPermissible.class);
-    private final PlayerCommandSupport support = new PlayerCommandSupport(permissible, Runnable::run,
-        name -> null, () -> List.of(alice, bob, steve));
-    private final VisibleTargetResolver targets = new VisibleTargetResolver(name -> null, () -> List.of(alice, bob), p -> false);
 
-    /** The spectator area as /warp lists it: no requirement, a 10-gem price. */
-    private KnkTeleportDestination stands = new KnkTeleportDestination(STANDS_ID, "Stands", "ArenaSpectatorArea", "world",
-        30.5, 64, 30.5, 0f, 0f, 10, null, null, false, true, true, true, null, null);
-    private final List<Integer> chargedDomains = new ArrayList<>();
-    private final TeleportDestinationsDataAccess destinations = new TeleportDestinationsDataAccess(
-        userId -> CompletableFuture.completedFuture(List.of(stands)), Duration.ofSeconds(0));
+    // ===== the spectate fee path (rev. 6) =====
+
+    private final List<Integer> chargedAreas = new ArrayList<>();
+    private final List<String> refundedKeys = new ArrayList<>();
+    private TeleportChargeResult spectateAnswer = TeleportChargeResult.allowed("Gems", 10, 40, false, null);
     private final TeleportDestinationsCommandApi chargeApi = new TeleportDestinationsCommandApi() {
         @Override public CompletableFuture<TeleportChargeResult> chargeWarp(int d, int u, String k, boolean r, boolean c) {
-            chargedDomains.add(d);
-            return CompletableFuture.completedFuture(TeleportChargeResult.allowed("Gems", 10, 40, false, null));
+            throw new AssertionError("spectating is no warp any more");
+        }
+        @Override public CompletableFuture<TeleportChargeResult> chargeSpectateFee(int a, int u, String k, boolean r, boolean c) {
+            chargedAreas.add(a);
+            return CompletableFuture.completedFuture(spectateAnswer);
         }
         @Override public CompletableFuture<TeleportChargeResult> chargeRequestFee(int u, int a, String k, Integer o) {
             return CompletableFuture.completedFuture(TeleportChargeResult.allowed("Coins", 0, 0, false, null));
@@ -127,21 +118,21 @@ class DuelMenuFeatureTest {
             return CompletableFuture.completedFuture(TeleportChargeResult.allowed("Coins", 0, 0, false, null));
         }
         @Override public CompletableFuture<TeleportRefundResult> refund(int u, String k, String r) {
-            return CompletableFuture.completedFuture(new TeleportRefundResult(false, null, 0, null, false));
+            refundedKeys.add(k);
+            return CompletableFuture.completedFuture(new TeleportRefundResult(true, "Gems", 10, 50L, false));
         }
     };
-    private final TeleportCharges charges = new TeleportCharges(new TeleportCharger(chargeApi, 1, Runnable::run, Runnable::run),
-        uuid -> CompletableFuture.completedFuture(userIds.get(uuid)), name -> world, this::byId);
-    private final TargetRankCheck rankCheck = (sender, targetName, onAllowed) ->
-        onAllowed.accept(new UserSummary(8, targetName, UUID.nameUUIDFromBytes(targetName.getBytes()), 0));
-    private final WarpCommand warps = new WarpCommand(WarpCommand.Form.WARP, new WarpCommand.Deps(support, rankCheck, targets,
-        engine, destinations, charges, uuid -> CompletableFuture.completedFuture(userIds.get(uuid)), permissions,
-        name -> "world".equals(name) ? world : null, p -> false));
+    private DuelSpectateTeleports.Engine spectateEngine = engine::start;
+    private final DuelSpectateTeleports spectateTeleports = new DuelSpectateTeleports(plan -> spectateEngine.start(plan),
+        new TeleportCharger(chargeApi, 1, Runnable::run, Runnable::run), userIds::get,
+        loc -> Optional.of(new Location(world, loc.x(), loc.y(), loc.z())),
+        uuid -> this.matches.stream().anyMatch(m -> m.involves(uuid)),
+        p -> CompletableFuture.completedFuture(DuelSpectateTeleports.Bypass.NONE), Runnable::run);
 
     // ===== the duel side =====
 
-    private List<KnkArenaSpectatorArea> areas = List.of(new KnkArenaSpectatorArea(STANDS_ID, ARENA_ID, "Stands",
-        "arena_2_stands", "world", true, null));
+    /** The stands: an arrival, a 10-gem price, no title. */
+    private List<KnkArenaArea> areas = List.of(stands(10, null, true));
     private final List<DuelMatchSnapshot> matches = new ArrayList<>();
     private final Map<UUID, List<ItemStack>> stacks = new HashMap<>();
     private final Set<UUID> insideArena = new HashSet<>();
@@ -166,7 +157,7 @@ class DuelMenuFeatureTest {
         @Override public boolean isInside(Player player, KnkArena arena) { return insideArena.contains(player.getUniqueId()); }
     };
     private DuelMenuFeature.Parts parts = new DuelMenuFeature.Parts(data, () -> List.of(arena()), places,
-        () -> warps::warpTo, statistics, userIds::get, () -> List.of(alice, bob, steve));
+        () -> spectateTeleports::spectate, statistics, userIds::get, () -> List.of(alice, bob, steve));
     private final DuelMenuFeature feature = new DuelMenuFeature(() -> parts, new Clock() {
         @Override public ZoneOffset getZone() { return ZoneOffset.UTC; }
         @Override public Clock withZone(java.time.ZoneId zone) { return this; }
@@ -192,48 +183,75 @@ class DuelMenuFeatureTest {
         }
     }
 
-    // ===== spectating goes through the warp =====
+    // ===== spectating: an ARENA teleport after the area's own conditions (rev. 6) =====
+
+    private static KnkArenaArea stands(Integer priceGems, Integer titleId, boolean withArrival) {
+        return new KnkArenaArea(STANDS_ID, ARENA_ID, KnkArenaArea.Kind.SPECTATOR, "stands", "Stands", 0, true, null, null,
+            withArrival ? new KnkLocation(1, "stands", 30.5, 64.0, 30.5, 0f, 0f, "world") : null, titleId, priceGems,
+            List.of(new KnkArenaAreaRegion(410, "arena_7_spectator_410", "world")));
+    }
 
     @Test
-    void spectatingStartsTheSpectatorAreasWarp_WarmupThenChargeThenTeleport() {
-        granted.add(TeleportNodes.WARP);
-
+    void spectatingPaysTheAreasPrice_ThenStartsAnArenaTeleportWithAWarmupToTheArrival() {
         click(DuelMenuIds.ACTION_SPECTATE, alice, Map.of("arenaId", String.valueOf(ARENA_ID)));
 
         verify(alice).closeInventory();
-        assertTrue(engine.isWarmingUp(alice.getUniqueId()), "the engine's player warmup, as for /warp");
-        assertTrue(chargedDomains.isEmpty(), "charged only after the warmup");
+        assertEquals(List.of(STANDS_ID), chargedAreas, "the area's own price, through the teleport fee path");
+        assertTrue(engine.isWarmingUp(alice.getUniqueId()), "the engine's player warmup");
         advance(5_000);
-        assertEquals(List.of(STANDS_ID), chargedDomains, "the gem price is the warp's");
-        verify(alice).teleportAsync(any(Location.class), eq(TeleportCause.COMMAND));
+        verify(alice).teleportAsync(any(Location.class), any(TeleportCause.class));
+        assertTrue(refundedKeys.isEmpty());
     }
 
     @Test
-    void theWarpsConditionsApply_ALockedSpectatorAreaIsRefused() {
-        granted.add(TeleportNodes.WARP);
-        stands = new KnkTeleportDestination(STANDS_ID, "Stands", "ArenaSpectatorArea", "world", 30.5, 64, 30.5, 0f, 0f,
-            10, "Knight", null, false, false, false, true, "TitleTooLow", "Reach title Knight to unlock");
+    void aTitleRefusalIsTold_NothingIsChargedAndNoTeleportStarts() {
+        areas = List.of(stands(null, 3, true));
+        spectateAnswer = TeleportChargeResult.refused("TitleTooLow", "Reach title Knight to teleport to the spectator area.");
 
         click(DuelMenuIds.ACTION_SPECTATE, alice, Map.of("arenaId", String.valueOf(ARENA_ID)));
         advance(5_000);
 
-        verify(alice).sendMessage(contains("Reach title Knight to unlock"));
+        verify(alice).sendMessage(contains("Reach title Knight"));
         assertFalse(engine.isWarmingUp(alice.getUniqueId()));
-        assertTrue(chargedDomains.isEmpty());
         verify(alice, never()).teleportAsync(any(Location.class), any(TeleportCause.class));
     }
 
     @Test
-    void withoutTheWarpNodeNothingHappens() {
-        click(DuelMenuIds.ACTION_SPECTATE, alice, Map.of("arenaId", String.valueOf(ARENA_ID)));
-        advance(5_000);
+    void anAreaWithoutConditionsAsksTheApiNothing() {
+        areas = List.of(stands(null, null, true));
+
+        feature.spectate(alice, ARENA_ID);
+
+        assertTrue(chargedAreas.isEmpty());
+        assertTrue(engine.isWarmingUp(alice.getUniqueId()));
+    }
+
+    @Test
+    void aPaidTeleportThatDoesntHappenIsRefunded() {
+        spectateEngine = plan -> CompletableFuture.completedFuture(
+            net.knightsandkings.knk.core.teleport.TeleportOutcome.cancelled(net.knightsandkings.knk.core.teleport.WarmupCancelReason.MOVED));
+
+        feature.spectate(alice, ARENA_ID);
+
+        assertEquals(List.of(STANDS_ID), chargedAreas);
+        assertEquals(1, refundedKeys.size());
+        assertTrue(refundedKeys.getFirst().startsWith("spectate:"));
+    }
+
+    @Test
+    void aDuelistCantSpectateDuringTheirOwnDuel() {
+        matches.add(snapshot("own", DuelPhase.WARMUP));
+
+        feature.spectate(alice, ARENA_ID);
+
+        verify(alice).sendMessage(contains("own duel"));
+        assertTrue(chargedAreas.isEmpty());
         assertFalse(engine.isWarmingUp(alice.getUniqueId()));
-        verify(alice, never()).teleportAsync(any(Location.class), any(TeleportCause.class));
     }
 
     @Test
     void theDetailsSpectateButtonFindsTheArenaByTheMatchToken() {
-        granted.add(TeleportNodes.WARP);
+        areas = List.of(stands(null, null, true));
         DuelMatchSnapshot m = snapshot("detail", DuelPhase.FIGHT);
         matches.add(m);
 
@@ -244,9 +262,8 @@ class DuelMenuFeatureTest {
     }
 
     @Test
-    void anAreaWithoutAWarpIsReachedOnFoot_AndAnArenaWithoutOneSaysSo() {
-        granted.add(TeleportNodes.WARP);
-        areas = List.of(new KnkArenaSpectatorArea(STANDS_ID, ARENA_ID, "Stands", "arena_2_stands", "world", false, null));
+    void anAreaWithoutAnArrivalIsReachedOnFoot_AndAnArenaWithoutOneSaysSo() {
+        areas = List.of(stands(10, null, false));
         feature.spectate(alice, ARENA_ID);
         verify(alice).sendMessage(contains("Walk to Stands to watch"));
 
@@ -254,7 +271,7 @@ class DuelMenuFeatureTest {
         feature.spectate(bob, ARENA_ID);
         verify(bob).sendMessage(contains("has no spectator area"));
         assertFalse(engine.isWarmingUp(alice.getUniqueId()));
-        assertTrue(chargedDomains.isEmpty());
+        assertTrue(chargedAreas.isEmpty());
     }
 
     // ===== rows, roots, actions =====
@@ -390,12 +407,14 @@ class DuelMenuFeatureTest {
     // ===== helpers =====
 
     private KnkArena arena() {
-        KnkArenaBattleground bg = new KnkArenaBattleground(1, ARENA_ID, "bg1", "Pit", "arena_2,a-battleground", "world", 1,
-            true, false, null, null);
-        return new KnkArena(ARENA_ID, "arena_2", "The Arena", "arena_2", "world", 1, null, null, null, true, 3, 3, 60,
+        KnkArenaArea bg = new KnkArenaArea(1, ARENA_ID, KnkArenaArea.Kind.BATTLEGROUND, "bg1", "Pit", 1, true, null, null,
+            null, null, null, List.of(new KnkArenaAreaRegion(10, "arena_7_battleground_10", "world")));
+        List<KnkArenaArea> all = new ArrayList<>(areas);
+        all.add(bg);
+        return new KnkArena(ARENA_ID, "arena_2", "The Arena", "arena_2", "world", 1, null, null, true, 3, 3, 60,
             true, true, 10_000, 9, 50, 5, null, null, 3, 10, 25_000, true, false, false, false,
             KnkArena.DuelGearMode.OWN_GEAR_KEEP, 30, 10, 300, 180, 5, true, true,
-            List.of(new KnkArenaKit(11, "Knight", 1)), List.of(bg), areas);
+            List.of(new KnkArenaKit(11, "Knight", 1)), all, List.of());
     }
 
     private DuelMatchSnapshot snapshot(String token, DuelPhase phase) {

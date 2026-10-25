@@ -121,4 +121,39 @@ class OrphanedSubRegionsTest {
         assertEquals(Decision.NOT_TEMPORARY, TempRegionCleanupPolicy.decideOrphanedSubRegion("domain_11", "1", cutoff,
             id -> false, id -> Usage.UNUSED));
     }
+
+    /** Arena duels rev. 6: the same pass over the arena area regions every arena lists, and the cleanup's decision. */
+    @Test
+    void arenaAreaRegionsNoArenaListsAreMarkedOnTheSecondRun_AndDeletedAfterTheRetention() {
+        FakeStore store = new FakeStore().region("arena_5_battleground_60", null).region("arena_5_battleground_61", null);
+        OrphanedSubRegions orphans = new OrphanedSubRegions();
+        List<OrphanedSubRegions.Listed> listed = List.of(new OrphanedSubRegions.Listed("world", "ARENA_5_BATTLEGROUND_60"));
+
+        assertTrue(orphans.runListed(listed, store, 1_000L).marked().isEmpty());
+        Report second = orphans.runListed(listed, store, 2_000L);
+
+        assertEquals(List.of("world/arena_5_battleground_61"), second.marked());
+        assertEquals(List.of("arena_5_battleground_61"), store.marks);
+
+        long cutoff = 2_000L + 1;
+        assertEquals(Decision.DELETE, TempRegionCleanupPolicy.decideOrphanedArenaAreaRegion("arena_5_battleground_61",
+                "2000", cutoff, id -> false, id -> Usage.UNUSED));
+        assertEquals(Decision.KEEP_IN_USE, TempRegionCleanupPolicy.decideOrphanedArenaAreaRegion("arena_5_battleground_61",
+                "2000", cutoff, id -> false, id -> Usage.IN_USE));
+        assertEquals(Decision.KEEP_KNOWN_DOMAIN_REGION, TempRegionCleanupPolicy.decideOrphanedArenaAreaRegion("arena_5_battleground_60",
+                null, cutoff, id -> true, id -> Usage.UNUSED));
+        assertEquals(Decision.NOT_TEMPORARY, TempRegionCleanupPolicy.decideOrphanedArenaAreaRegion("domain_5_sub_1",
+                "2000", cutoff, id -> false, id -> Usage.UNUSED));
+    }
+
+    @Test
+    void eitherLookupInUseKeepsTheRegion_BothUnusedDeletes() {
+        var inUse = TempRegionCleanupPolicy.either(id -> Usage.UNUSED, id -> Usage.IN_USE);
+        var unused = TempRegionCleanupPolicy.either(id -> Usage.UNUSED, id -> Usage.UNUSED);
+        var unknown = TempRegionCleanupPolicy.either(id -> Usage.UNUSED, id -> Usage.UNKNOWN);
+
+        assertEquals(Usage.IN_USE, inUse.apply("r"));
+        assertEquals(Usage.UNUSED, unused.apply("r"));
+        assertEquals(Usage.UNKNOWN, unknown.apply("r"));
+    }
 }

@@ -62,15 +62,36 @@ public final class OrphanedSubRegions {
 
     private Set<String> unlistedLastRun = new HashSet<>();
 
+    /** A region some owner lists ({@code world} null: any world). */
+    public record Listed(String world, String regionId) {
+    }
+
     public Report run(Collection<DomainAccessRule> rules, Store store, long now) {
         Objects.requireNonNull(rules, "rules");
-        Set<String> listed = new HashSet<>();
-        Set<String> listedInSomeWorld = new HashSet<>();
+        List<Listed> listedRegions = new ArrayList<>();
         for (DomainAccessRule rule : rules) {
             for (String subRegionId : rule.subRegionIds()) {
-                listed.add(key(rule.worldName(), subRegionId));
-                listedInSomeWorld.add(key(null, subRegionId));
+                listedRegions.add(new Listed(rule.worldName(), subRegionId));
             }
+        }
+        return runListed(listedRegions, store, now);
+    }
+
+    /**
+     * The same pass over any listed regions (arena duels rev. 6: the arena area regions every arena lists, with a
+     * {@link Store} over the {@code arena_<a>_<kind>_<n>} regions). Use one instance per kind of region: it remembers
+     * the previous run.
+     */
+    public Report runListed(Collection<Listed> listedRegions, Store store, long now) {
+        Objects.requireNonNull(listedRegions, "listedRegions");
+        Set<String> listed = new HashSet<>();
+        Set<String> listedInSomeWorld = new HashSet<>();
+        for (Listed region : listedRegions) {
+            if (region == null || region.regionId() == null || region.regionId().isBlank()) {
+                continue;
+            }
+            listed.add(key(region.world(), region.regionId()));
+            listedInSomeWorld.add(key(null, region.regionId()));
         }
 
         List<String> marked = new ArrayList<>();

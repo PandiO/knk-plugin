@@ -1,7 +1,7 @@
 package net.knightsandkings.knk.core.duel.view;
 
 import net.knightsandkings.knk.core.domain.arenas.KnkArena;
-import net.knightsandkings.knk.core.domain.arenas.KnkArenaSpectatorArea;
+import net.knightsandkings.knk.core.domain.arenas.KnkArenaArea;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -37,10 +37,12 @@ public final class ArenaMenuView {
         return new ArenaMenuView(arena, queue, liveMatches, pendingClaims, viewerInside);
     }
 
-    /** The first spectator area with a warp, or null. */
-    public static KnkArenaSpectatorArea spectatorWarp(KnkArena arena) {
-        if (arena == null) return null;
-        return arena.spectatorAreas().stream().filter(KnkArenaSpectatorArea::teleportEnabled).findFirst().orElse(null);
+    /**
+     * Rev. 6: where [Spectate] teleports to: the first enabled spectator area with an arrival location
+     * ({@link KnkArena#spectateTarget()}), or null.
+     */
+    public static KnkArenaArea spectateTarget(KnkArena arena) {
+        return arena == null ? null : arena.spectateTarget().orElse(null);
     }
 
     public String getKnown() {
@@ -62,7 +64,7 @@ public final class ArenaMenuView {
         lines.add("&7Battlegrounds: &f" + arena.usableBattlegrounds().size());
         lines.add("&7Live duels: &f" + liveMatches);
         if (!arena.spectatorAreas().isEmpty()) {
-            lines.add("&7Spectator area: &f" + arena.spectatorAreas().getFirst().name());
+            lines.add("&7Spectator area: &f" + arena.spectatorAreas().getFirst().displayName());
         }
         lines.add("");
         lines.add("&7Challenge a player with &f/duel <player>");
@@ -82,21 +84,28 @@ public final class ArenaMenuView {
 
     public List<String> getSpectateLines() {
         if (arena == null) return List.of("&7There is no arena yet.");
-        KnkArenaSpectatorArea warp = spectatorWarp(arena);
-        if (warp != null) {
-            return List.of("&7Watch the duels from", "&f" + warp.name() + "&7.", "",
-                    "&7Uses the warp: its title, premium,", "&7discovery and gem price apply.", "",
-                    "&eClick to teleport");
+        KnkArenaArea target = spectateTarget(arena);
+        if (target != null) {
+            List<String> lines = new ArrayList<>(List.of("&7Watch the duels from", "&f" + target.displayName() + "&7."));
+            if (target.teleportPriceGems() != null && target.teleportPriceGems() > 0) {
+                lines.add("&7Teleport: &f" + target.teleportPriceGems() + " gems");
+            }
+            if (target.teleportMinTitleBracketId() != null) {
+                lines.add("&7Needs a minimum title.");
+            }
+            lines.add("");
+            lines.add("&eClick to teleport");
+            return lines;
         }
         if (!arena.spectatorAreas().isEmpty()) {
-            return List.of("&7Walk to &f" + arena.spectatorAreas().getFirst().name() + " &7to watch.",
-                    "&8It has no warp.");
+            return List.of("&7Walk to &f" + arena.spectatorAreas().getFirst().displayName() + " &7to watch.",
+                    "&8It has no teleport arrival.");
         }
         return List.of("&7This arena has no spectator area.");
     }
 
     public String getSpectateDisplayMode() {
-        return spectatorWarp(arena) != null ? "NORMAL" : "DISABLED";
+        return spectateTarget(arena) != null ? "NORMAL" : "DISABLED";
     }
 
     public List<String> getChallengeLines() {

@@ -184,15 +184,15 @@ public final class DuelAnnouncer implements DuelObserver {
         return arena != null && DuelAnnouncements.arenaAnnounces(arena.announceMatches(), arena.announceFriendly(), s.friendly());
     }
 
-    /** The warmup line with its buttons; [Spectate] only when the arena has a spectator warp. */
+    /** The warmup line with its buttons; [Spectate] only when the arena has a spectator area with an arrival (rev. 6). */
     static Component warmupLine(String text, KnkArena arena, UUID token) {
         Component line = LEGACY.deserialize(text);
-        var warp = ArenaMenuView.spectatorWarp(arena);
+        var warp = ArenaMenuView.spectateTarget(arena);
         if (warp != null) {
             line = line.append(Component.text("  "))
                     .append(Component.text("[Spectate]", NamedTextColor.GREEN)
                             .clickEvent(ClickEvent.runCommand(SPECTATE_COMMAND + arena.id()))
-                            .hoverEvent(HoverEvent.showText(Component.text("Teleport to " + warp.name(), NamedTextColor.GREEN))));
+                            .hoverEvent(HoverEvent.showText(Component.text("Teleport to " + warp.displayName(), NamedTextColor.GREEN))));
         }
         return line.append(Component.text(" "))
                 .append(Component.text("[Details]", NamedTextColor.AQUA)

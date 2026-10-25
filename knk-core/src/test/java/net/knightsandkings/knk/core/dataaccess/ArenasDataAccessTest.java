@@ -14,7 +14,6 @@ import org.junit.jupiter.api.Test;
 
 import net.knightsandkings.knk.core.domain.arenas.ArenaFixtures;
 import net.knightsandkings.knk.core.domain.arenas.KnkArena;
-import net.knightsandkings.knk.core.domain.arenas.KnkArenaBattleground;
 import net.knightsandkings.knk.core.ports.api.ArenasApi;
 
 /** Arena duels KNG-210: the arena gateway is cache-first, keeps the last copy when a refresh fails, and looks up offline. */
@@ -88,16 +87,20 @@ class ArenasDataAccessTest {
     }
 
     @Test
-    void lookupsByKeyIdAndBattlegroundRegionUseTheCache() {
+    void lookupsByKeyIdAndAreaRegionUseTheCache() {
         ArenasDataAccess access = new ArenasDataAccess(Duration.ofMinutes(15), api, NO_RETRY);
         assertTrue(access.getByKeyAsync("ARENA_2").join().isPresent());
         int calls = api.calls.get();
 
         assertEquals(7, access.cachedByKey("Arena_2").orElseThrow().id());
         assertEquals("arena_2", access.cachedById(7).orElseThrow().key());
-        assertEquals(70, access.cachedBattlegroundByRegion("world", "ARENA_2,1-battleground").orElseThrow().id());
-        assertEquals(70, access.cachedBattlegroundByRegion(null, "arena_2,1-battleground").orElseThrow().id());
-        assertTrue(access.cachedBattlegroundByRegion("world_nether", "arena_2,1-battleground").isEmpty());
+        // Rev. 6: any area by any of its regions; the arena by its own region, a sub-region or an area region.
+        assertEquals(70, access.cachedAreaByRegion("world", "ARENA_7_BATTLEGROUND_700").orElseThrow().id());
+        assertEquals(70, access.cachedAreaByRegion(null, "arena_7_battleground_701").orElseThrow().id());
+        assertTrue(access.cachedAreaByRegion("world_nether", "arena_7_battleground_700").isEmpty());
+        assertEquals(7, access.cachedArenaByRegion("world", "arena_7_battleground_701").orElseThrow().id());
+        assertEquals(7, access.cachedArenaByRegion("world", "Arena_2").orElseThrow().id());
+        assertTrue(access.cachedArenaByRegion("world", "town_1").isEmpty());
         assertTrue(access.cachedByKey("nope").isEmpty());
         assertEquals(calls, api.calls.get());
     }
@@ -121,9 +124,8 @@ class ArenasDataAccessTest {
             calls.incrementAndGet();
             if (failing) return CompletableFuture.failedFuture(new IllegalStateException("API down"));
             return CompletableFuture.completedFuture(List.of(ArenaFixtures.arena(7, "arena_2",
-                    List.of(new KnkArenaBattleground(70, 7, "bg1", "Pit", "arena_2,1-battleground", "world", 0, false, false,
-                            null, null)),
-                    List.of())));
+                    List.of(ArenaFixtures.battleground(70, 7, "bg1", 0, null, null,
+                            "arena_7_battleground_700", "arena_7_battleground_701")))));
         }
     }
 }

@@ -1,7 +1,7 @@
 package net.knightsandkings.knk.paper.menu.content;
 
 import net.knightsandkings.knk.core.domain.arenas.KnkArena;
-import net.knightsandkings.knk.core.domain.arenas.KnkArenaSpectatorArea;
+import net.knightsandkings.knk.core.domain.arenas.KnkArenaArea;
 import net.knightsandkings.knk.core.domain.common.Page;
 import net.knightsandkings.knk.core.domain.statistics.PlayerStatistics;
 import net.knightsandkings.knk.core.duel.DuelSide;
@@ -52,9 +52,9 @@ import java.util.logging.Logger;
  *   <li>row sources {@code duel.matches} (two heads per live match, {@code arenaId} narrows it), {@code duel.match-side}
  *       (a duelist's card with their statistics as the API shows them to the viewer), {@code duel.stakes} (the kit,
  *       coins and the real stake stacks) and {@code duel.challenge-candidates};</li>
- *   <li>actions {@code duel.spectate} - closes the menu and starts the spectator area's domain <b>warp</b>
- *       ({@code WarpCommand.warpTo}, the {@code /warp <name>} path), so the teleport engine and the warp's title,
- *       premium, discovery and gem-price conditions apply exactly as for {@code /warp}; {@code duel.challenge}
+ *   <li>actions {@code duel.spectate} - closes the menu and starts the <b>spectate teleport</b> (rev. 6: an engine
+ *       teleport of kind {@code ARENA} to the spectator area's arrival, after its own title and gem conditions,
+ *       {@code DuelSpectateTeleports}); {@code duel.challenge}
  *       ({@code /duel <name>}, P5's proposal editor) and {@code duel.claim} ({@code /duel claim});</li>
  *   <li>conditions {@code duel.matches-empty} and {@code duel.in-arena}.</li>
  * </ul>
@@ -90,10 +90,10 @@ public final class DuelMenuFeature implements MenuFeature {
         Optional<String> busy(UUID playerId);
     }
 
-    /** {@code WarpCommand.warpTo}: the player's own warp to a destination, with every condition and charge. */
+    /** Rev. 6: the spectate teleport ({@code DuelSpectateTeleports.spectate}) to an arena's spectator area. */
     @FunctionalInterface
-    public interface SpectatorWarp {
-        void warpTo(Player player, int domainId);
+    public interface SpectatorTeleport {
+        void spectate(Player player, KnkArena arena, KnkArenaArea area);
     }
 
     /** Where the viewer is: the arena they stand in (or watch from), and whether they are inside its region. */
@@ -108,7 +108,7 @@ public final class DuelMenuFeature implements MenuFeature {
             Data data,
             Supplier<List<KnkArena>> arenas,
             Places places,
-            Supplier<SpectatorWarp> warp,
+            Supplier<SpectatorTeleport> spectate,
             StatisticsApi statistics,
             java.util.function.Function<UUID, Integer> userIds,
             Supplier<Collection<? extends Player>> online
@@ -168,9 +168,9 @@ public final class DuelMenuFeature implements MenuFeature {
     // ===== spectating =====
 
     /**
-     * Starts {@code arenaId}'s spectator-area warp for {@code player} ({@code [Spectate]}, the menus' buttons and
-     * {@code /duels spectate}): the first spectator area with {@code TeleportEnabled}, through the {@code /warp} path.
-     * Main thread.
+     * Starts {@code arenaId}'s spectate teleport for {@code player} ({@code [Spectate]}, the menus' buttons and
+     * {@code /duels spectate}): to the first enabled spectator area with an arrival location, after its title and gem
+     * conditions (rev. 6). Main thread.
      */
     public void spectate(Player player, int arenaId) {
         Parts p = parts();
@@ -183,19 +183,19 @@ public final class DuelMenuFeature implements MenuFeature {
             player.sendMessage(ChatColor.RED + "That arena doesn't exist any more.");
             return;
         }
-        KnkArenaSpectatorArea area = ArenaMenuView.spectatorWarp(arena);
+        KnkArenaArea area = ArenaMenuView.spectateTarget(arena);
         if (area == null) {
             player.sendMessage(ChatColor.YELLOW + (arena.spectatorAreas().isEmpty()
                     ? ArenaMenuView.displayName(arena) + " has no spectator area."
-                    : "Walk to " + arena.spectatorAreas().getFirst().name() + " to watch; it has no warp."));
+                    : "Walk to " + arena.spectatorAreas().getFirst().displayName() + " to watch; it has no teleport arrival."));
             return;
         }
-        SpectatorWarp warp = p.warp() != null ? p.warp().get() : null;
-        if (warp == null) {
+        SpectatorTeleport teleport = p.spectate() != null ? p.spectate().get() : null;
+        if (teleport == null) {
             player.sendMessage(ChatColor.RED + "Teleports aren't available right now.");
             return;
         }
-        warp.warpTo(player, area.id());
+        teleport.spectate(player, arena, area);
     }
 
     private void spectateAction(MenuActionContext context, Map<String, String> params) {

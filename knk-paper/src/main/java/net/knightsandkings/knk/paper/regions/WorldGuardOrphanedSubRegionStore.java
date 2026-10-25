@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import com.sk89q.worldguard.protection.managers.RegionManager;
@@ -21,10 +22,20 @@ public final class WorldGuardOrphanedSubRegionStore implements OrphanedSubRegion
 
 
     private final Supplier<List<RegionManager>> managers;
+    private final Predicate<String> named;
     private final Set<RegionManager> dirty = new HashSet<>();
 
     public WorldGuardOrphanedSubRegionStore(Supplier<List<RegionManager>> managers) {
+        this(managers, SubRegionMirror::isSubRegionName);
+    }
+
+    /**
+     * @param named which region ids this store covers (arena duels rev. 6: the arena area regions,
+     *              {@code ArenaAreaRegionNames::isAreaRegionName})
+     */
+    public WorldGuardOrphanedSubRegionStore(Supplier<List<RegionManager>> managers, Predicate<String> named) {
         this.managers = managers;
+        this.named = named != null ? named : SubRegionMirror::isSubRegionName;
     }
 
     @Override
@@ -32,7 +43,7 @@ public final class WorldGuardOrphanedSubRegionStore implements OrphanedSubRegion
         List<OrphanedSubRegions.RegionRef> refs = new ArrayList<>();
         for (RegionManager manager : managers.get()) {
             for (ProtectedRegion region : manager.getRegions().values()) {
-                if (SubRegionMirror.isSubRegionName(region.getId())) {
+                if (named.test(region.getId())) {
                     refs.add(new OrphanedSubRegions.RegionRef(manager.getName(), region.getId(),
                         RegionBookkeepingFlags.get(region, RegionBookkeepingFlags.ORPHANED_SINCE)));
                 }

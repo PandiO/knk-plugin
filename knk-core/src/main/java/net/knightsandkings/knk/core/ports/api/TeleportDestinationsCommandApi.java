@@ -44,6 +44,15 @@ public interface TeleportDestinationsCommandApi {
                                                          String backKind);
 
     /** Charge a {@code /spawn} as the player's permission groups price it (Linear KNG-41); free when none does. */
+    /**
+     * Arena duels rev. 6 (DESIGN §9.3): the spectate teleport to an arena's spectator area: the server checks the area's
+     * minimum title and takes its gem price (free without one).
+     */
+    default CompletableFuture<TeleportChargeResult> chargeSpectateFee(int arenaAreaId, int userId, String idempotencyKey,
+                                                                     boolean bypassRequirements, boolean bypassCost) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("spectate fees aren't supported"));
+    }
+
     default CompletableFuture<TeleportChargeResult> chargeSpawnFee(int userId, String idempotencyKey) {
         return CompletableFuture.failedFuture(new UnsupportedOperationException("spawn fees aren't supported"));
     }

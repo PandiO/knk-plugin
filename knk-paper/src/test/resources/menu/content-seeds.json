@@ -9254,7 +9254,7 @@
                 "id": 817,
                 "targetProperty": "Lore",
                 "sortOrder": 1,
-                "expression": "&7spectator area by its warp:",
+                "expression": "&7spectator area: its minimum",
                 "refreshPolicy": "Static",
                 "ttlTicks": null
               },
@@ -9262,7 +9262,7 @@
                 "id": 818,
                 "targetProperty": "Lore",
                 "sortOrder": 2,
-                "expression": "&7its title, premium, discovery",
+                "expression": "&7title and gem price apply",
                 "refreshPolicy": "Static",
                 "ttlTicks": null
               },
@@ -9270,7 +9270,7 @@
                 "id": 819,
                 "targetProperty": "Lore",
                 "sortOrder": 3,
-                "expression": "&7and gem price apply.",
+                "expression": "&7(or walk in for free).",
                 "refreshPolicy": "Static",
                 "ttlTicks": null
               }

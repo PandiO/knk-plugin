@@ -21,8 +21,9 @@ import java.util.regex.Pattern;
  */
 public final class RegionRenamePlan {
 
-    // KNG-255: a domain sub-region's final name, domain_<domainId>_sub_<id>, follows the same rules.
-    private static final Pattern FINAL_NAME = Pattern.compile("domain_\\d+(_sub_\\d+)?");
+    // KNG-255: a domain sub-region's final name, domain_<domainId>_sub_<id>, follows the same rules; so does an arena
+    // area region's, arena_<arenaId>_<kind>_<id> (arena duels rev. 6).
+    private static final Pattern FINAL_NAME = Pattern.compile("domain_\\d+(_sub_\\d+)?|arena_\\d+_(battleground|spectator|lobby)_\\d+");
 
     public enum Action {
         /** The region already has the final name: nothing to do (success). */
@@ -52,7 +53,7 @@ public final class RegionRenamePlan {
     private RegionRenamePlan() {
     }
 
-    /** Whether a region id is the final name of some domain ({@code domain_<id>}) or domain sub-region. */
+    /** Whether a region id is the final name of some domain ({@code domain_<id>}), domain sub-region or arena area region. */
     public static boolean isFinalName(String regionId) {
         return regionId != null && FINAL_NAME.matcher(regionId.toLowerCase(Locale.ROOT)).matches();
     }

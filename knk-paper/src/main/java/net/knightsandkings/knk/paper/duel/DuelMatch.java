@@ -1,7 +1,7 @@
 package net.knightsandkings.knk.paper.duel;
 
 import net.knightsandkings.knk.core.domain.arenas.KnkArena;
-import net.knightsandkings.knk.core.domain.arenas.KnkArenaBattleground;
+import net.knightsandkings.knk.core.domain.arenas.KnkArenaArea;
 import net.knightsandkings.knk.core.domain.duels.KnkDuelRecords.Settlement;
 import net.knightsandkings.knk.core.duel.DuelArenaSettings;
 import net.knightsandkings.knk.core.duel.DuelPhase;
@@ -59,7 +59,7 @@ public final class DuelMatch {
     final Map<DuelSide, Location> spawnBlock = new EnumMap<>(DuelSide.class);
     final int offerCount;
     Integer matchId;
-    KnkArenaBattleground battleground;
+    KnkArenaArea battleground;
     long fightStartTick = -1;
     DuelSide spoilsFrom;
     Settlement settlement;
@@ -154,7 +154,7 @@ public final class DuelMatch {
     }
 
     /** The allocated battleground, or null before the countdown. */
-    public KnkArenaBattleground battleground() {
+    public KnkArenaArea battleground() {
         return battleground;
     }
 

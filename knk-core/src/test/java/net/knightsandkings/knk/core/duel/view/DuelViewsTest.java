@@ -158,7 +158,7 @@ class DuelViewsTest {
         var warped = ArenaMenuView.of(arena(true, List.of(area(40, "Stands", false), area(41, "Box", true))), null, 0, 0, true);
         assertEquals("NORMAL", warped.getSpectateDisplayMode());
         assertTrue(warped.getSpectateLines().contains("&f" + "Box" + "&7."), "the first area with a warp");
-        assertEquals(41, ArenaMenuView.spectatorWarp(arena(true, List.of(area(40, "Stands", false), area(41, "Box", true)))).id());
+        assertEquals(41, ArenaMenuView.spectateTarget(arena(true, List.of(area(40, "Stands", false), area(41, "Box", true)))).id());
 
         var onFoot = ArenaMenuView.of(arena(true, List.of(area(40, "Stands", false))), null, 0, 0, false);
         assertEquals("DISABLED", onFoot.getSpectateDisplayMode());

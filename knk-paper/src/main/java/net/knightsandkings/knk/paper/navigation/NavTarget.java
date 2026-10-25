@@ -61,8 +61,8 @@ public record NavTarget(Type type, String name, int id, String world, KnkLocatio
 
         /**
          * The catalogue's {@code domainType} → type: "Town", "District", "Structure", and the subtypes the
-         * API reports by their own entity name ("GateStructure", "Arena" and "ArenaSpectatorArea" are Structures);
-         * null for others ("ArenaBattleground": battlegrounds are not navigation targets).
+         * API reports by their own entity name ("GateStructure" and "Arena" are Structures; arena duels rev. 6: an
+         * arena's areas are not domains and never reach this); null for others.
          */
         public static Type ofDomainType(String domainType) {
             if (domainType == null) {
@@ -71,8 +71,8 @@ public record NavTarget(Type type, String name, int id, String world, KnkLocatio
             return switch (domainType.toLowerCase(Locale.ROOT)) {
                 case "town" -> TOWN;
                 case "district" -> DISTRICT;
-                // KNG-210: an Arena is a Structure, its spectator area a place in it; battlegrounds stay off /navigate
-                case "structure", "gatestructure", "arena", "arenaspectatorarea" -> STRUCTURE;
+                // KNG-210: an Arena is a Structure (rev. 6: its areas are not domains, so not navigation targets)
+                case "structure", "gatestructure", "arena" -> STRUCTURE;
                 default -> null;
             };
         }

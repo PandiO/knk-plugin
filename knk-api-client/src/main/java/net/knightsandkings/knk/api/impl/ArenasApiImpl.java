@@ -1,6 +1,8 @@
 package net.knightsandkings.knk.api.impl;
 
 import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -16,7 +18,7 @@ import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.ArenasApi;
 import okhttp3.OkHttpClient;
 
-/** Arena duels (KNG-210): {@code GET /api/Arenas}. */
+/** Arena duels (KNG-210): {@code GET /api/Arenas}; rev. 6: {@code GET /api/Arenas/areas/by-region/{id}}. */
 public class ArenasApiImpl extends BaseApiImpl implements ArenasApi {
 
     static final String ENDPOINT = "/Arenas";
@@ -40,6 +42,20 @@ public class ArenasApiImpl extends BaseApiImpl implements ArenasApi {
                 return ArenaMapper.toCore(parse(get(url), new TypeReference<List<ArenaDto>>() {}, url));
             } catch (IOException e) {
                 throw new ApiException(url, "IO error fetching arenas", e);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<Boolean> areaRegionExists(String regionId, String worldName) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + ENDPOINT + "/areas/by-region/" + URLEncoder.encode(regionId, StandardCharsets.UTF_8).replace("+", "%20")
+                + (worldName == null || worldName.isBlank() ? "" : "?world=" + URLEncoder.encode(worldName, StandardCharsets.UTF_8));
+            try {
+                get(url);
+                return true;
+            } catch (IOException e) {
+                throw new ApiException(url, "IO error looking up an arena area region", e);
             }
         }, executor);
     }

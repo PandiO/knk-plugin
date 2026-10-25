@@ -4,18 +4,19 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 
+import net.knightsandkings.knk.api.dto.ArenaDtos.AreaDto;
+import net.knightsandkings.knk.api.dto.ArenaDtos.AreaRegionDto;
 import net.knightsandkings.knk.api.dto.ArenaDtos.ArenaDto;
 import net.knightsandkings.knk.api.dto.ArenaDtos.ArenaKitDto;
-import net.knightsandkings.knk.api.dto.ArenaDtos.BattlegroundDto;
-import net.knightsandkings.knk.api.dto.ArenaDtos.SpectatorAreaDto;
+import net.knightsandkings.knk.api.dto.ArenaDtos.SubRegionDto;
 import net.knightsandkings.knk.core.domain.arenas.KnkArena;
-import net.knightsandkings.knk.core.domain.arenas.KnkArenaBattleground;
+import net.knightsandkings.knk.core.domain.arenas.KnkArenaArea;
+import net.knightsandkings.knk.core.domain.arenas.KnkArenaAreaRegion;
 import net.knightsandkings.knk.core.domain.arenas.KnkArenaKit;
-import net.knightsandkings.knk.core.domain.arenas.KnkArenaSpectatorArea;
 
 /**
- * {@code GET /api/Arenas} → core records (KNG-210). A missing setting takes the design default (DESIGN.md §4.2), the
- * same value the API stores for a new arena; rows without an id are dropped.
+ * {@code GET /api/Arenas} → core records (KNG-210; areas rev. 6). A missing setting takes the design default (DESIGN.md
+ * §4.2), the same value the API stores for a new arena; rows without an id, and areas of an unknown kind, are dropped.
  */
 public final class ArenaMapper {
     private ArenaMapper() {}
@@ -36,7 +37,6 @@ public final class ArenaMapper {
                 d.worldName(),
                 d.districtId(),
                 LocationMapper.toCore(d.location()),
-                LocationMapper.toCore(d.lobbyLocation()),
                 LocationMapper.toCore(d.exitLocation()),
                 or(d.isDuelEnabled(), true),
                 or(d.maxQueuedMatches(), 3),
@@ -66,8 +66,8 @@ public final class ArenaMapper {
                 or(d.announceMatches(), true),
                 or(d.announceFriendly(), true),
                 kits(d.eligibleKits()),
-                battlegrounds(d.id(), d.battlegrounds()),
-                spectatorAreas(d.id(), d.spectatorAreas()));
+                areas(d.id(), d.areas()),
+                subRegionIds(d.subRegions()));
     }
 
     private static List<KnkArenaKit> kits(List<ArenaKitDto> rows) {
@@ -80,26 +80,36 @@ public final class ArenaMapper {
                 .toList();
     }
 
-    private static List<KnkArenaBattleground> battlegrounds(int arenaId, List<BattlegroundDto> rows) {
-        if (rows == null) {
-            return List.of();
-        }
-        return rows.stream().filter(Objects::nonNull).filter(b -> b.id() != null)
-                .map(b -> new KnkArenaBattleground(b.id(), or(b.arenaId(), arenaId), b.key(), b.name(), b.wgRegionId(),
-                        b.worldName(), or(b.sortOrder(), 0), or(b.isEnabled(), true), or(b.allowEntry(), false),
-                        LocationMapper.toCore(b.spawnALocation()), LocationMapper.toCore(b.spawnBLocation())))
-                .sorted(Comparator.comparingInt(KnkArenaBattleground::sortOrder).thenComparingInt(KnkArenaBattleground::id))
-                .toList();
-    }
-
-    private static List<KnkArenaSpectatorArea> spectatorAreas(int arenaId, List<SpectatorAreaDto> rows) {
+    private static List<KnkArenaArea> areas(int arenaId, List<AreaDto> rows) {
         if (rows == null) {
             return List.of();
         }
         return rows.stream().filter(Objects::nonNull).filter(a -> a.id() != null)
-                .map(a -> new KnkArenaSpectatorArea(a.id(), or(a.arenaId(), arenaId), a.name(), a.wgRegionId(), a.worldName(),
-                        or(a.teleportEnabled(), false), LocationMapper.toCore(a.location())))
+                .filter(a -> KnkArenaArea.Kind.parse(a.kind()).isPresent())
+                .map(a -> new KnkArenaArea(a.id(), or(a.arenaId(), arenaId), KnkArenaArea.Kind.parse(a.kind()).orElseThrow(),
+                        a.key(), a.name(), or(a.sortOrder(), 0), or(a.isEnabled(), false),
+                        LocationMapper.toCore(a.spawnALocation()), LocationMapper.toCore(a.spawnBLocation()),
+                        LocationMapper.toCore(a.arrivalLocation()), a.teleportMinTitleBracketId(), a.teleportPriceGems(),
+                        regions(a.regions())))
+                .sorted(KnkArenaArea.ORDER)
                 .toList();
+    }
+
+    private static List<KnkArenaAreaRegion> regions(List<AreaRegionDto> rows) {
+        if (rows == null) {
+            return List.of();
+        }
+        return rows.stream().filter(Objects::nonNull).filter(r -> r.id() != null && r.wgRegionId() != null && !r.wgRegionId().isBlank())
+                .map(r -> new KnkArenaAreaRegion(r.id(), r.wgRegionId(), r.worldName()))
+                .toList();
+    }
+
+    private static List<String> subRegionIds(List<SubRegionDto> rows) {
+        if (rows == null) {
+            return List.of();
+        }
+        return rows.stream().filter(Objects::nonNull).map(SubRegionDto::wgRegionId)
+                .filter(id -> id != null && !id.isBlank()).toList();
     }
 
     private static int or(Integer value, int fallback) {

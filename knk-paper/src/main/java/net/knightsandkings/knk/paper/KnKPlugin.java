@@ -332,6 +332,10 @@ public class KnKPlugin extends JavaPlugin {
      * Per-player domain entry exemptions and confinements (arena duels DESIGN §8.2), asked by the domain-access
      * handler. Empty until a minigame runtime registers its provider.
      */
+    /** Arena duels rev. 6: the duel runtime's area access rule (null while duels are off). */
+    private net.knightsandkings.knk.paper.duel.ArenaAreaAccess arenaAreaAccess;
+    /** Arena duels rev. 6: the spectate teleport (null while duels are off). */
+    private net.knightsandkings.knk.paper.duel.DuelSpectateTeleports spectateTeleports;
     private final net.knightsandkings.knk.core.regions.access.DomainAccessExemptions.Registry domainAccessExemptions =
         new net.knightsandkings.knk.core.regions.access.DomainAccessExemptions.Registry();
     /** The siege gate lockdowns (Phase 7a); read-only for road navigation (KNG-27 plan R24). Null without the gate system. */
@@ -627,7 +631,11 @@ public class KnKPlugin extends JavaPlugin {
             // uses). KNG-258: also orphaned domain sub-regions, counted from when they were orphaned.
             tempRegionRetentionTask = new TempRegionRetentionTask(this,
                     Math.max(1, getConfig().getLong("regions.temp-retention.days", 14)), managedRegions::protectsFromCleanup,
-                    TempRegionRetentionTask.domainUsageVia(domainsQueryApi), domainAccessSync::listsSubRegion);
+                    // Arena duels rev. 6: a temp region an arena area uses is in use too.
+                    net.knightsandkings.knk.core.regions.TempRegionCleanupPolicy.either(
+                        TempRegionRetentionTask.domainUsageVia(domainsQueryApi),
+                        TempRegionRetentionTask.arenaAreaUsageVia(apiClient.getArenasApi())),
+                    domainAccessSync::listsSubRegion);
             tempRegionRetentionTask.start();
 
             // Start headless WorldTask poller (webapp-initiated tasks that need no player)
@@ -670,6 +678,7 @@ public class KnKPlugin extends JavaPlugin {
                 kitsQueryApi
             );
             this.arenasDataAccess = dataAccessFactory.createArenasDataAccess(apiClient.getArenasApi());
+            scheduleArenaAreaRegionOrphans();
             this.menuTemplatesDataAccess = dataAccessFactory.createMenuTemplatesDataAccess(
                 config.cache().ttl(),
                 menuTemplatesQueryApi
@@ -3672,7 +3681,10 @@ public class KnKPlugin extends JavaPlugin {
             var items = net.knightsandkings.knk.paper.duel.DuelItems.paper(config.itemBlocklist(), config.refuseFilledContainers());
             var kits = new net.knightsandkings.knk.paper.duel.DuelKitLoans.Paper(kitsQueryApi, itemBlueprintsDataAccess,
                 minecraftMaterialRefsDataAccess, items, scheduler.mainThread());
-            var access = new net.knightsandkings.knk.paper.duel.DuelBattlegroundAccess();
+            // Arena duels rev. 6 (DESIGN §8.2): the areas are not domains; the runtime's own WorldGuard session rule.
+            var access = new net.knightsandkings.knk.paper.duel.ArenaAreaAccess();
+            access.setArenas(() -> arenasDataAccess.cachedArenas().orElse(java.util.List.of()));
+            this.arenaAreaAccess = access;
             net.knightsandkings.knk.paper.duel.DuelService[] self = new net.knightsandkings.knk.paper.duel.DuelService[1];
             // The kit vault teleports only when it restores on join (crash, quit): back to where the duelist was
             // before the lobby teleport, outside the engine like the siege vault. The runtime's own restores happen
@@ -3711,7 +3723,7 @@ public class KnKPlugin extends JavaPlugin {
             this.duelService = duels;
 
             minigames.register(new net.knightsandkings.knk.paper.duel.DuelParticipation(duels));
-            domainAccessExemptions.register(access);
+            registerArenaAreaAccess(access);
             if (siegeService != null) siegeService.setOtherMinigameRefusal(duels::siegeJoinRefusal);
 
             var pluginManager = getServer().getPluginManager();
@@ -3736,6 +3748,70 @@ public class KnKPlugin extends JavaPlugin {
         } catch (Exception e) {
             this.duelService = null;
             getLogger().log(java.util.logging.Level.SEVERE, "Arena duels failed to initialize; they stay off", e);
+        }
+    }
+
+    /**
+     * Arena duels rev. 6 (DESIGN §4.1): every access-sync interval ({@code regions.access.sync.interval-minutes}, 5),
+     * refresh the arenas from the API and, with a fresh list only, mark the arena area regions no arena lists any more
+     * as orphans; the daily temp-region cleanup deletes them after the retention period.
+     */
+    private void scheduleArenaAreaRegionOrphans() {
+        if (arenasDataAccess == null) return;
+        var orphans = new net.knightsandkings.knk.paper.regions.ArenaAreaRegionOrphans(
+            net.knightsandkings.knk.paper.regions.access.DomainAccessFlagSync::loadedManagers);
+        if (tempRegionRetentionTask != null) {
+            tempRegionRetentionTask.setArenaAreaRegions(orphans::listsAreaRegion,
+                TempRegionRetentionTask.arenaAreaUsageVia(apiClient.getArenasApi()));
+        }
+        long minutes = Math.max(1, getConfig().getLong("regions.access.sync.interval-minutes", 5));
+        getServer().getScheduler().runTaskTimer(this, () -> arenasDataAccess.refreshAsync().thenAccept(result -> {
+            if (result == null || !result.isSuccess() || result.isStale() || !result.isFromApi()) return;
+            var arenas = result.value().orElse(java.util.List.of());
+            getServer().getScheduler().runTask(this, () -> {
+                try {
+                    orphans.run(arenas, System.currentTimeMillis());
+                } catch (RuntimeException e) {
+                    getLogger().warning("[KnK Regions] Orphaned arena area region check failed: " + e.getMessage());
+                }
+            });
+        }), 20L * 60L, minutes * 60L * 20L);
+    }
+
+    /**
+     * Arena duels rev. 6 (DESIGN §8.2): the areas' access rule as a WorldGuard session handler next to the domain-access
+     * one (walk, ride, glide, pearl, teleport), with the domain-access refusal pacing and bypass ({@code knk.region.bypass},
+     * WorldGuard's region bypass, the plugin's own corrective moves); and the same rule as a teleport-engine preview, so
+     * a refused teleport is refused before its warmup and charge.
+     */
+    private void registerArenaAreaAccess(net.knightsandkings.knk.paper.duel.ArenaAreaAccess access) {
+        java.util.function.BiPredicate<org.bukkit.entity.Player, org.bukkit.Location> bypass = (player, to) ->
+            domainAccess != null ? domainAccess.bypasses(player, to) : hasRegionBypass(player);
+        java.util.function.BiConsumer<org.bukkit.entity.Player, net.knightsandkings.knk.core.duel.ArenaAreaAccessRules.Refusal> refused =
+            (player, refusal) -> {
+                if (domainAccess != null) {
+                    String region = refusal.area().regionIds().isEmpty() ? refusal.area().key() : refusal.area().regionIds().getFirst();
+                    domainAccess.refused(player, new net.knightsandkings.knk.core.regions.access.RegionAccessRules.Refusal(
+                        refusal.entry() ? net.knightsandkings.knk.core.regions.RegionTransitionType.ENTER
+                            : net.knightsandkings.knk.core.regions.RegionTransitionType.EXIT, region, refusal.message()));
+                } else {
+                    player.sendMessage(org.bukkit.ChatColor.RED + refusal.message());
+                }
+            };
+        com.sk89q.worldguard.WorldGuard.getInstance().getPlatform().getSessionManager().registerHandler(
+            new net.knightsandkings.knk.paper.duel.ArenaAreaAccessHandler.Factory(access, bypass, refused), null);
+        if (teleportService != null && regionTracker != null) {
+            var regionIds = regionTracker.regionIds();
+            teleportService.registerRestriction(new net.knightsandkings.knk.paper.teleport.RegionTeleportRestriction(
+                (player, to) -> {
+                    if (to == null || to.getWorld() == null || bypass.test(player, to)) return null;
+                    return access.evaluate(player.getUniqueId(), regionIds.at(player.getLocation()), regionIds.at(to),
+                            to.getWorld().getName())
+                        .map(refusal -> net.knightsandkings.knk.core.regions.RegionTransitionDecision.deny(
+                            refusal.entry() ? net.knightsandkings.knk.core.regions.RegionTransitionType.ENTER
+                                : net.knightsandkings.knk.core.regions.RegionTransitionType.EXIT, refusal.message()))
+                        .orElse(null);
+                }));
         }
     }
 
@@ -3767,6 +3843,21 @@ public class KnKPlugin extends JavaPlugin {
             duels.addObserver(hud);
             getServer().getScheduler().runTaskTimer(this, hud::tick, 20L, 20L);
 
+            this.spectateTeleports = new net.knightsandkings.knk.paper.duel.DuelSpectateTeleports(
+                teleportService::start,
+                apiClient == null ? null
+                    : new net.knightsandkings.knk.core.teleport.TeleportCharger(apiClient.getTeleportDestinationsCommandApi()),
+                uuid -> cacheManager.getUserCache().getStale(uuid)
+                    .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null),
+                net.knightsandkings.knk.paper.utils.KnkLocations::toLocation,
+                duels::isParticipating,
+                player -> java.util.concurrent.CompletableFuture.completedFuture(
+                    new net.knightsandkings.knk.paper.duel.DuelSpectateTeleports.Bypass(
+                        knkPermissible != null && knkPermissible.hasPermission(player,
+                            net.knightsandkings.knk.paper.teleport.TeleportNodes.BYPASS_REQUIREMENTS),
+                        knkPermissible != null && knkPermissible.hasPermission(player,
+                            net.knightsandkings.knk.paper.teleport.TeleportNodes.BYPASS_COST))),
+                MenuService.mainThreadExecutor(this));
             var statistics = apiClient.getStatisticsApi();
             this.duelMenuParts = new net.knightsandkings.knk.paper.menu.content.DuelMenuFeature.Parts(
                 new net.knightsandkings.knk.paper.duel.DuelMenuData(duels),
@@ -3782,11 +3873,9 @@ public class KnKPlugin extends JavaPlugin {
                         return spectators.isInside(player, arena);
                     }
                 },
-                // The /warp <name> path: node, lock reasons, warmup, engine guards, then the server-side charge.
-                () -> {
-                    var teleports = teleportMenuParts;
-                    return teleports != null && teleports.warps() != null ? teleports.warps()::warpTo : null;
-                },
+                // Rev. 6 (DESIGN §9.3): an ARENA engine teleport to the spectator area's arrival, after its own title and
+                // gem conditions (teleport fee path); a /warp listing is a future improvement (KNG-240).
+                () -> spectateTeleports == null ? null : spectateTeleports::spectate,
                 statistics,
                 uuid -> cacheManager.getUserCache().getStale(uuid)
                     .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null),
@@ -3820,9 +3909,9 @@ public class KnKPlugin extends JavaPlugin {
                 if (arenasDataAccess == null || regionTracker == null) return java.util.Optional.empty();
                 java.util.Set<String> here = regionTracker.regionIds().at(player.getLocation());
                 String world = player.getWorld().getName();
+                // Rev. 6: inside = the arena's region, its KNG-253 sub-regions or one of its areas' regions.
                 return arenasDataAccess.cachedArenas().orElse(java.util.List.of()).stream()
-                    .filter(a -> a.wgRegionId() != null && here.contains(a.wgRegionId())
-                        && (a.worldName() == null || a.worldName().equalsIgnoreCase(world)))
+                    .filter(a -> net.knightsandkings.knk.paper.duel.DuelSpectators.isInside(a, world, here))
                     .findFirst();
             };
         this.arenaCommand = new net.knightsandkings.knk.paper.commands.ArenaCommand(() -> duelService,

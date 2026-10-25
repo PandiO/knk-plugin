@@ -1,9 +1,10 @@
 package net.knightsandkings.knk.core.duel.view;
 
 import net.knightsandkings.knk.core.domain.arenas.KnkArena;
-import net.knightsandkings.knk.core.domain.arenas.KnkArenaBattleground;
+import net.knightsandkings.knk.core.domain.arenas.KnkArenaArea;
 import net.knightsandkings.knk.core.domain.arenas.KnkArenaKit;
-import net.knightsandkings.knk.core.domain.arenas.KnkArenaSpectatorArea;
+import net.knightsandkings.knk.core.domain.arenas.KnkArenaAreaRegion;
+import net.knightsandkings.knk.core.domain.location.KnkLocation;
 import net.knightsandkings.knk.core.duel.DuelEndReason;
 import net.knightsandkings.knk.core.duel.DuelPhase;
 import net.knightsandkings.knk.core.duel.DuelSide;
@@ -130,16 +131,21 @@ final class DuelViewFixtures {
         }
     }
 
-    static KnkArena arena(boolean duels, List<KnkArenaSpectatorArea> areas) {
-        KnkArenaBattleground bg = new KnkArenaBattleground(1, 7, "bg1", "Pit", "arena_2,a-battleground", "arena", 1,
-                true, false, null, null);
-        return new KnkArena(7, "arena_2", "The Arena", "arena_2", "arena", 1, null, null, null, duels, 3, 3, 60,
+    static KnkArena arena(boolean duels, List<KnkArenaArea> areas) {
+        KnkArenaArea bg = new KnkArenaArea(1, 7, KnkArenaArea.Kind.BATTLEGROUND, "bg1", "Pit", 1, true, null, null, null,
+                null, null, List.of(new KnkArenaAreaRegion(10, "arena_7_battleground_10", "arena")));
+        List<KnkArenaArea> all = new java.util.ArrayList<>(areas);
+        all.add(bg);
+        return new KnkArena(7, "arena_2", "The Arena", "arena_2", "arena", 1, null, null, duels, 3, 3, 60,
                 true, true, 10_000, 9, 50, 5, null, null, 3, 10, 25_000, true, false, true, false,
                 KnkArena.DuelGearMode.OWN_GEAR_KEEP, 30, 10, 300, 180, 5, true, true,
-                List.of(new KnkArenaKit(11, "Knight", 1)), List.of(bg), areas);
+                List.of(new KnkArenaKit(11, "Knight", 1)), all, List.of());
     }
 
-    static KnkArenaSpectatorArea area(int id, String name, boolean warp) {
-        return new KnkArenaSpectatorArea(id, 7, name, "arena_2_stands", "arena", warp, null);
+    /** Rev. 6: a spectator area; {@code warp} = it has an arrival location (the spectate teleport's target). */
+    static KnkArenaArea area(int id, String name, boolean warp) {
+        return new KnkArenaArea(id, 7, KnkArenaArea.Kind.SPECTATOR, "stands_" + id, name, id, true, null, null,
+                warp ? new KnkLocation(1, "stands", 0.0, 64.0, 0.0, 0f, 0f, "arena") : null, null, null,
+                List.of(new KnkArenaAreaRegion(id * 10, "arena_7_spectator_" + id, "arena")));
     }
 }

@@ -51,6 +51,9 @@ public class TempRegionRetentionTask {
     private final Predicate<String> knownDomainRegion;
     private final Function<String, Usage> domainUsage;
     private final Predicate<String> listedSubRegion;
+    /** Arena duels rev. 6: area regions the last arena refresh listed, and the arenas' fresh lookup. */
+    private volatile Predicate<String> listedAreaRegion = regionId -> true;
+    private volatile Function<String, Usage> areaUsage = regionId -> Usage.UNKNOWN;
     private BukkitTask task;
 
     /**
@@ -75,6 +78,44 @@ public class TempRegionRetentionTask {
         this.retentionMillis = retentionDays * 24 * 60 * 60 * 1000;
         this.knownDomainRegion = knownDomainRegion != null ? knownDomainRegion : regionId -> false;
         this.domainUsage = domainUsage != null ? domainUsage : regionId -> Usage.UNKNOWN;
+    }
+
+    /**
+     * Arena duels rev. 6: also delete orphaned arena area regions ({@code arena_<a>_<kind>_<n>} no arena lists,
+     * marked {@code knk-orphaned-since} by {@code ArenaAreaRegionOrphans}), with the arenas' fresh lookup.
+     *
+     * @param listedAreaRegion area regions the last arena refresh listed (true for everything until it has run)
+     * @param areaUsage        {@link #arenaAreaUsageVia}
+     */
+    public void setArenaAreaRegions(Predicate<String> listedAreaRegion, Function<String, Usage> areaUsage) {
+        this.listedAreaRegion = listedAreaRegion != null ? listedAreaRegion : regionId -> true;
+        this.areaUsage = areaUsage != null ? areaUsage : regionId -> Usage.UNKNOWN;
+    }
+
+    /**
+     * Arena duels rev. 6: fresh lookup of an arena area region ({@code GET /Arenas/areas/by-region/{id}}): found = in
+     * use, 404 = unused, anything else = unknown, which keeps the region. Blocks; call off the main thread.
+     */
+    public static Function<String, Usage> arenaAreaUsageVia(net.knightsandkings.knk.core.ports.api.ArenasApi arenasApi) {
+        return regionId -> {
+            if (arenasApi == null) {
+                return Usage.UNKNOWN;
+            }
+            try {
+                return Boolean.TRUE.equals(arenasApi.areaRegionExists(regionId, null).get(LOOKUP_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+                        ? Usage.IN_USE : Usage.UNKNOWN;
+            } catch (ExecutionException e) {
+                if (e.getCause() instanceof ApiException apiException && apiException.getStatusCode() == 404) {
+                    return Usage.UNUSED;
+                }
+                return Usage.UNKNOWN;
+            } catch (TimeoutException e) {
+                return Usage.UNKNOWN;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return Usage.UNKNOWN;
+            }
+        };
     }
 
     /**
@@ -196,6 +237,17 @@ public class TempRegionRetentionTask {
 
             for (ProtectedRegion region : new ArrayList<>(regionManager.getRegions().values())) {
                 String name = world.getName() + "/" + region.getId();
+                if (net.knightsandkings.knk.core.regions.ArenaAreaRegionNames.isAreaRegionName(region.getId())) {
+                    // Arena duels rev. 6: an orphaned arena area region, the same rules as a sub-region
+                    Decision orphan = TempRegionCleanupPolicy.decideOrphanedArenaAreaRegion(region.getId(),
+                            flag(region, ORPHANED_SINCE), cutoffMillis, listedAreaRegion, areaUsage);
+                    if (orphan == Decision.DELETE) {
+                        orphanedSubRegionsToDelete.add(region.getId());
+                    } else if (orphan != Decision.KEEP_KNOWN_DOMAIN_REGION && orphan != Decision.KEEP_IN_USE) {
+                        sweep.orphanedSubRegionsWaiting().add(name);
+                    }
+                    continue;
+                }
                 if (SubRegionMirror.isSubRegionName(region.getId())) {
                     // KNG-258: an orphaned domain sub-region, counted from when it was orphaned
                     Decision orphan = TempRegionCleanupPolicy.decideOrphanedSubRegion(region.getId(),

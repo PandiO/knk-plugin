@@ -5,7 +5,7 @@ import java.util.List;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
- * Wire DTOs for knk-web-api's {@code GET /api/Arenas} (arena duels KNG-210). Mirrors {@code Dtos/ArenaDtos.cs}. Boxed
+ * Wire DTOs for knk-web-api's {@code GET /api/Arenas} (arena duels KNG-210; areas rev. 6). Mirrors {@code Dtos/ArenaDtos.cs}. Boxed
  * types throughout, so a missing field maps to {@link net.knightsandkings.knk.api.mapper.ArenaMapper}'s default (the
  * design default) instead of failing the whole payload; the gear mode arrives as a string.
  */
@@ -20,7 +20,6 @@ public final class ArenaDtos {
             @JsonProperty("worldName") String worldName,
             @JsonProperty("districtId") Integer districtId,
             @JsonProperty("location") LocationDto location,
-            @JsonProperty("lobbyLocation") LocationDto lobbyLocation,
             @JsonProperty("exitLocation") LocationDto exitLocation,
             @JsonProperty("isDuelEnabled") Boolean isDuelEnabled,
             @JsonProperty("maxQueuedMatches") Integer maxQueuedMatches,
@@ -50,8 +49,8 @@ public final class ArenaDtos {
             @JsonProperty("announceMatches") Boolean announceMatches,
             @JsonProperty("announceFriendly") Boolean announceFriendly,
             @JsonProperty("eligibleKits") List<ArenaKitDto> eligibleKits,
-            @JsonProperty("battlegrounds") List<BattlegroundDto> battlegrounds,
-            @JsonProperty("spectatorAreas") List<SpectatorAreaDto> spectatorAreas
+            @JsonProperty("areas") List<AreaDto> areas,
+            @JsonProperty("subRegions") List<SubRegionDto> subRegions
     ) {}
 
     public record ArenaKitDto(
@@ -60,27 +59,32 @@ public final class ArenaDtos {
             @JsonProperty("sequenceNumber") Integer sequenceNumber
     ) {}
 
-    public record BattlegroundDto(
+    /** A battleground, spectator area or lobby (rev. 6), with its regions. */
+    public record AreaDto(
             @JsonProperty("id") Integer id,
             @JsonProperty("arenaId") Integer arenaId,
+            @JsonProperty("kind") String kind,
             @JsonProperty("key") String key,
             @JsonProperty("name") String name,
-            @JsonProperty("wgRegionId") String wgRegionId,
-            @JsonProperty("worldName") String worldName,
             @JsonProperty("sortOrder") Integer sortOrder,
             @JsonProperty("isEnabled") Boolean isEnabled,
-            @JsonProperty("allowEntry") Boolean allowEntry,
             @JsonProperty("spawnALocation") LocationDto spawnALocation,
-            @JsonProperty("spawnBLocation") LocationDto spawnBLocation
+            @JsonProperty("spawnBLocation") LocationDto spawnBLocation,
+            @JsonProperty("arrivalLocation") LocationDto arrivalLocation,
+            @JsonProperty("teleportMinTitleBracketId") Integer teleportMinTitleBracketId,
+            @JsonProperty("teleportPriceGems") Integer teleportPriceGems,
+            @JsonProperty("regions") List<AreaRegionDto> regions
     ) {}
 
-    public record SpectatorAreaDto(
+    public record AreaRegionDto(
             @JsonProperty("id") Integer id,
-            @JsonProperty("arenaId") Integer arenaId,
-            @JsonProperty("name") String name,
             @JsonProperty("wgRegionId") String wgRegionId,
-            @JsonProperty("worldName") String worldName,
-            @JsonProperty("teleportEnabled") Boolean teleportEnabled,
-            @JsonProperty("location") LocationDto location
+            @JsonProperty("worldName") String worldName
+    ) {}
+
+    /** KNG-254: one of the arena domain's own sub-regions. */
+    public record SubRegionDto(
+            @JsonProperty("id") Integer id,
+            @JsonProperty("wgRegionId") String wgRegionId
     ) {}
 }

@@ -1,7 +1,7 @@
 package net.knightsandkings.knk.paper.duel;
 
 import net.knightsandkings.knk.core.domain.arenas.KnkArena;
-import net.knightsandkings.knk.core.domain.arenas.KnkArenaSpectatorArea;
+import net.knightsandkings.knk.core.domain.arenas.KnkArenaArea;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 
@@ -16,8 +16,9 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
- * Who stands in an arena's spectator area, or in the arena itself (arena duels DESIGN §9.3): a WorldGuard region
- * test on the player's position against the area's (or arena's) {@code wgRegionId}, in its world. Main thread.
+ * Who stands in an arena's spectator area, or in the arena itself (arena duels DESIGN §9.3, rev. 6): a WorldGuard
+ * region test on the player's position against the union of the area's regions (a spectator area), or of the arena's
+ * own region, its KNG-253 sub-regions and every area's regions (the arena), in its world. Main thread.
  */
 public final class DuelSpectators {
 
@@ -48,21 +49,41 @@ public final class DuelSpectators {
         Location at = player.getLocation();
         if (at == null || at.getWorld() == null) return false;
         Set<String> here = lower(regionsAt.apply(at));
-        for (KnkArenaSpectatorArea area : arena.spectatorAreas()) {
-            if (inWorld(at, area.worldName()) && area.wgRegionId() != null
-                    && here.contains(area.wgRegionId().toLowerCase(Locale.ROOT))) {
-                return true;
+        String world = at.getWorld().getName();
+        for (KnkArenaArea area : arena.spectatorAreas()) {
+            for (String id : here) {
+                if (area.hasRegion(world, id)) return true;
             }
         }
         return false;
     }
 
-    /** Whether {@code player} stands inside {@code arena}'s own region (challenging is offered there, §9.3). */
+    /**
+     * Whether {@code player} stands inside {@code arena} (challenging is offered there, §6.1, §9.3): its main region, one
+     * of its KNG-253 sub-regions or one of its areas' regions.
+     */
     public boolean isInside(Player player, KnkArena arena) {
-        if (player == null || arena == null || arena.wgRegionId() == null) return false;
+        if (player == null || arena == null) return false;
         Location at = player.getLocation();
-        if (at == null || at.getWorld() == null || !inWorld(at, arena.worldName())) return false;
-        return lower(regionsAt.apply(at)).contains(arena.wgRegionId().toLowerCase(Locale.ROOT));
+        if (at == null || at.getWorld() == null) return false;
+        return isInside(arena, at.getWorld().getName(), regionsAt.apply(at));
+    }
+
+    /** {@link #isInside(Player, KnkArena)} for given region ids at a spot in {@code world}. */
+    public static boolean isInside(KnkArena arena, String world, Set<String> regionIdsHere) {
+        if (arena == null || regionIdsHere == null || regionIdsHere.isEmpty()) return false;
+        Set<String> here = lower(regionIdsHere);
+        if (inWorld(world, arena.worldName())) {
+            for (String own : arena.ownRegionIds()) {
+                if (here.contains(own.toLowerCase(Locale.ROOT))) return true;
+            }
+        }
+        for (KnkArenaArea area : arena.areas()) {
+            for (String id : here) {
+                if (area.hasRegion(world, id)) return true;
+            }
+        }
+        return false;
     }
 
     /** The arena whose spectator area {@code player} stands in, if any. */
@@ -95,8 +116,8 @@ public final class DuelSpectators {
         return online.get();
     }
 
-    private static boolean inWorld(Location at, String worldName) {
-        return worldName == null || worldName.isBlank() || at.getWorld().getName().equalsIgnoreCase(worldName);
+    private static boolean inWorld(String world, String worldName) {
+        return worldName == null || worldName.isBlank() || world == null || world.equalsIgnoreCase(worldName);
     }
 
     private static Set<String> lower(Set<String> ids) {

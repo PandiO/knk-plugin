@@ -202,7 +202,8 @@ public final class DomainAccessFlagSync {
         report.failures().stream().limit(10).forEach(failure -> LOGGER.warning("[KnK Regions] " + failure));
     }
 
-    private static List<RegionManager> loadedManagers() {
+    /** Every loaded world's WorldGuard region manager (main thread). */
+    public static List<RegionManager> loadedManagers() {
         return WorldGuard.getInstance().getPlatform().getRegionContainer().getLoaded();
     }
 }

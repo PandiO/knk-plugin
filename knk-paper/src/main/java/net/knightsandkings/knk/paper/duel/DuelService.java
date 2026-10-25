@@ -1,7 +1,7 @@
 package net.knightsandkings.knk.paper.duel;
 
 import net.knightsandkings.knk.core.domain.arenas.KnkArena;
-import net.knightsandkings.knk.core.domain.arenas.KnkArenaBattleground;
+import net.knightsandkings.knk.core.domain.arenas.KnkArenaArea;
 import net.knightsandkings.knk.core.domain.duels.DuelRefusedException;
 import net.knightsandkings.knk.core.domain.duels.KnkDuelRecords.FightStart;
 import net.knightsandkings.knk.core.domain.duels.KnkDuelRecords.ItemSummary;
@@ -96,7 +96,7 @@ public final class DuelService {
             DuelEscrowSpool spool,
             DuelPendingResults results,
             DuelRecovery recovery,
-            DuelBattlegroundAccess access,
+            ArenaAreaAccess access,
             DuelScheduler scheduler,
             Function<UUID, Player> players,
             Function<UUID, Integer> userIds,
@@ -169,6 +169,7 @@ public final class DuelService {
         this.offers = new DuelOfferBook(config.maxIncoming(), config.sendCooldownSeconds(),
                 item -> config.itemBlocklist().contains(item.material()), stakeItems::valueOf);
         ports.recovery().setLive(matches::containsKey);
+        ports.access().bindRuntime(this::lobbyReserved, this::isDuelistOf);
     }
 
     // ==================== Wiring ====================
@@ -436,6 +437,22 @@ public final class DuelService {
     public Optional<Location> frozenAt(UUID playerId) {
         return matchOf(playerId).filter(m -> m.phase() == DuelPhase.BATTLE_COUNTDOWN)
                 .flatMap(m -> m.sideOf(playerId).map(m.spawnBlock::get));
+    }
+
+    /**
+     * Rev. 6 lobby rule (DESIGN §8.2): a match of {@code arenaId} is in its warmup, so only duelists may enter its lobby
+     * regions.
+     */
+    public boolean lobbyReserved(int arenaId) {
+        for (DuelMatch match : matches.values()) {
+            if (match.arena().id() == arenaId && match.phase() == DuelPhase.WARMUP) return true;
+        }
+        return false;
+    }
+
+    /** Whether {@code playerId} is a duelist of a running match of {@code arenaId} (the lobby rule's exception). */
+    public boolean isDuelistOf(UUID playerId, int arenaId) {
+        return matchOf(playerId).map(m -> m.arena().id() == arenaId).orElse(false);
     }
 
     /** The countdown and the fight: the command allow-list and the confinement apply. */
@@ -924,7 +941,7 @@ public final class DuelService {
     }
 
     private void enterBattleground(DuelMatch match, int battlegroundId, int countdownSeconds) {
-        KnkArenaBattleground battleground = match.arena().battlegrounds().stream()
+        KnkArenaArea battleground = match.arena().battlegrounds().stream()
                 .filter(bg -> bg.id() == battlegroundId).findFirst().orElse(null);
         Map<DuelSide, Location> spawns = new EnumMap<>(DuelSide.class);
         if (battleground != null) {
@@ -944,7 +961,7 @@ public final class DuelService {
                 moves.put(side, CompletableFuture.completedFuture(TeleportOutcome.failed("offline")));
                 continue;
             }
-            ports.access().grant(p.getUniqueId(), battleground.wgRegionId(), this::isOnBattleground);
+            ports.access().grant(p.getUniqueId(), battleground.id(), this::isOnBattleground);
             match.spawnBlock.put(side, spawns.get(side));
             moves.put(side, ports.teleporter().system(p, spawns.get(side), "duel spawn"));
         }
@@ -1164,7 +1181,7 @@ public final class DuelService {
     }
 
     private ArenaQueue queueFor(KnkArena arena, DuelArenaSettings settings) {
-        List<Integer> battlegrounds = arena.usableBattlegrounds().stream().map(KnkArenaBattleground::id).toList();
+        List<Integer> battlegrounds = arena.usableBattlegrounds().stream().map(KnkArenaArea::id).toList();
         ArenaQueue queue = queues.computeIfAbsent(arena.id(),
                 id -> new ArenaQueue(new BattlegroundAllocator(battlegrounds), settings.maxQueuedMatches(), settings.maxWaitSeconds()));
         queue.configure(settings.maxQueuedMatches(), settings.maxWaitSeconds());

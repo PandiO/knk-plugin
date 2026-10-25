@@ -84,21 +84,30 @@ class ManagedRegionPolicyTest {
     }
 
     /**
-     * Arena duels D16 (KNG-210): no WorldGuard {@code entry deny} on battlegrounds any more - the domain-access handler
-     * enforces the battleground's AllowEntry=false and lets the duelists in. The v1 {@code entry deny} is corrected.
+     * Arena duels D16 (KNG-210; rev. 6): no WorldGuard {@code entry deny} on battlegrounds - the duel runtime's own
+     * area rule lets only the duelists in. The v1 {@code entry deny} is corrected.
      */
     @Test
-    void battlegroundEntryIsLeftToTheDomainAccessHandler() {
+    void battlegroundEntryIsLeftToTheDuelRuntime() {
         assertEquals(FlagState.ALLOW, rule(ManagedRegionKind.BATTLEGROUND, "entry").value());
         assertEquals(FlagMode.ENFORCE, rule(ManagedRegionKind.BATTLEGROUND, "entry").mode());
         assertFalse(policy.flagRules(ManagedRegionKind.BATTLEGROUND).stream()
                 .anyMatch(r -> r.flag().equals("entry") && r.value() == FlagState.DENY));
     }
 
+    /** Rev. 6: spectator-area and lobby regions only get {@code entry allow}; the duel runtime decides who may cross. */
     @Test
-    void spectatorAreaIsAPlainChildOfItsArena() {
-        assertTrue(policy.flagRules(ManagedRegionKind.SPECTATOR_AREA).isEmpty());
-        assertEquals(50, policy.priorityFor(ManagedRegionKind.SPECTATOR_AREA, 40));
+    void spectatorAndLobbyRegionsAreChildrenOfTheirArenaWithEntryAllowed() {
+        for (ManagedRegionKind kind : List.of(ManagedRegionKind.SPECTATOR_AREA, ManagedRegionKind.LOBBY)) {
+            assertEquals(1, policy.flagRules(kind).size());
+            assertEquals(FlagState.ALLOW, rule(kind, "entry").value());
+            assertEquals(FlagMode.ENFORCE, rule(kind, "entry").mode());
+            assertEquals(50, policy.priorityFor(kind, 40));
+        }
+        assertEquals(50, ManagedRegionKind.LOBBY.floorPriority());
+        assertEquals(java.util.Optional.of(ManagedRegionKind.LOBBY), ManagedRegionKind.fromDomainType("ArenaLobby"));
+        assertEquals(java.util.Optional.of(ManagedRegionKind.SPECTATOR_AREA), ManagedRegionKind.fromDomainType("ArenaSpectatorArea"));
+        assertEquals(java.util.Optional.of(ManagedRegionKind.BATTLEGROUND), ManagedRegionKind.fromDomainType("ArenaBattleground"));
     }
 
     @Test

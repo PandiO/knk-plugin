@@ -70,6 +70,37 @@ public final class TempRegionCleanupPolicy {
         return decideByAge(regionId, orphanedSince, cutoffMillis, freshUsage);
     }
 
+    /**
+     * Arena duels rev. 6: the same checks as {@link #decideOrphanedSubRegion} for an arena area region
+     * ({@code arena_<a>_<kind>_<n>}, {@link ArenaAreaRegionNames}) that no arena lists any more; the fresh lookup asks the
+     * arenas ({@code GET /Arenas/areas/by-region}).
+     */
+    public static Decision decideOrphanedArenaAreaRegion(String regionId, String orphanedSince, long cutoffMillis,
+                                                         Predicate<String> listedAreaRegion, Function<String, Usage> freshUsage) {
+        if (!ArenaAreaRegionNames.isAreaRegionName(regionId)) {
+            return Decision.NOT_TEMPORARY;
+        }
+        if (listedAreaRegion.test(regionId)) {
+            return Decision.KEEP_KNOWN_DOMAIN_REGION;
+        }
+        return decideByAge(regionId, orphanedSince, cutoffMillis, freshUsage);
+    }
+
+    /** Usage by either lookup: in use when one says so, unused only when both say so, otherwise unknown. */
+    public static Function<String, Usage> either(Function<String, Usage> first, Function<String, Usage> second) {
+        return regionId -> {
+            Usage a = first.apply(regionId);
+            if (a == Usage.IN_USE) {
+                return Usage.IN_USE;
+            }
+            Usage b = second.apply(regionId);
+            if (b == Usage.IN_USE) {
+                return Usage.IN_USE;
+            }
+            return a == Usage.UNUSED && b == Usage.UNUSED ? Usage.UNUSED : Usage.UNKNOWN;
+        };
+    }
+
     public static boolean isTemporary(String regionId) {
         return regionId != null && regionId.toLowerCase(Locale.ROOT).startsWith(TEMP_REGION_PREFIX);
     }

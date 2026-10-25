@@ -30,7 +30,7 @@ public final class DuelSnapshots {
                 match.token(),
                 match.arena().id(),
                 ArenaMenuView.displayName(match.arena()),
-                match.battleground() != null ? match.battleground().name() : null,
+                match.battleground() != null ? match.battleground().displayName() : null,
                 match.phase(),
                 match.gearMode(),
                 side(match, DuelSide.CHALLENGER),

@@ -163,9 +163,9 @@ class NavigationDestinationsTest {
         assertEquals(NavTarget.Type.STRUCTURE, NavTarget.Type.ofDomainType("structure"));
         assertEquals(NavTarget.Type.TOWN, NavTarget.Type.ofDomainType("Town"));
         assertEquals(null, NavTarget.Type.ofDomainType("Kingdom"));
-        // KNG-210: arenas and spectator areas are navigable as structures, battlegrounds are not
+        // KNG-210: arenas are navigable as structures; rev. 6: their areas are no domains and no targets
         assertEquals(NavTarget.Type.STRUCTURE, NavTarget.Type.ofDomainType("Arena"));
-        assertEquals(NavTarget.Type.STRUCTURE, NavTarget.Type.ofDomainType("ArenaSpectatorArea"));
+        assertEquals(null, NavTarget.Type.ofDomainType("ArenaSpectatorArea"));
         assertEquals(null, NavTarget.Type.ofDomainType("ArenaBattleground"));
         assertEquals(List.of(), NavTarget.domain(NavTarget.Type.STRUCTURE, 9, "Mill House", "Structure").aliases());
     }

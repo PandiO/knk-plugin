@@ -10,7 +10,7 @@ import java.util.logging.Logger;
 
 import net.knightsandkings.knk.core.cache.BaseCache;
 import net.knightsandkings.knk.core.domain.arenas.KnkArena;
-import net.knightsandkings.knk.core.domain.arenas.KnkArenaBattleground;
+import net.knightsandkings.knk.core.domain.arenas.KnkArenaArea;
 import net.knightsandkings.knk.core.ports.api.ArenasApi;
 
 /**
@@ -20,7 +20,8 @@ import net.knightsandkings.knk.core.ports.api.ArenasApi;
  * <b>Refresh rule:</b> the runtime calls {@link #refreshAsync()} when the settings may have changed (an admin reload,
  * before a new negotiation reads its arena); a match keeps the arena it locked in with. A failed refresh serves the
  * last copy (stale when expired and stale reads are allowed), so duels keep running on the previous settings while the
- * API is down. The lookups ({@link #cachedByKey}, {@link #cachedBattlegroundByRegion}) never call the API.
+ * API is down. The lookups ({@link #cachedByKey}, {@link #cachedAreaByRegion}, {@link #cachedArenaByRegion}) never call the
+ * API.
  */
 public class ArenasDataAccess {
 
@@ -95,19 +96,48 @@ public class ArenasDataAccess {
     }
 
     /**
-     * The cached battleground whose region is {@code regionId} (any case) in {@code worldName} (null or blank matches
-     * any world; region ids are only unique per world); no API call.
+     * The cached arena area (any kind, enabled or not; arena duels rev. 6) one of whose regions is {@code regionId} (any
+     * case) in {@code worldName} (null or blank matches any world; region ids are only unique per world); no API call.
      */
-    public Optional<KnkArenaBattleground> cachedBattlegroundByRegion(String worldName, String regionId) {
-        if (regionId == null || regionId.isBlank()) {
+    public Optional<KnkArenaArea> cachedAreaByRegion(String worldName, String regionId) {
+        return cachedArenas().flatMap(arenas -> areaByRegion(arenas, worldName, regionId));
+    }
+
+    /**
+     * The cached arena {@code regionId} belongs to: its main region, one of its KNG-253 sub-regions, or one of its
+     * areas' regions; no API call.
+     */
+    public Optional<KnkArena> cachedArenaByRegion(String worldName, String regionId) {
+        return cachedArenas().flatMap(arenas -> arenaByRegion(arenas, worldName, regionId));
+    }
+
+    /** {@link #cachedAreaByRegion} over a given list. */
+    public static Optional<KnkArenaArea> areaByRegion(List<KnkArena> arenas, String worldName, String regionId) {
+        if (arenas == null || regionId == null || regionId.isBlank()) {
             return Optional.empty();
         }
-        return cachedArenas().flatMap(arenas -> arenas.stream()
-                .flatMap(arena -> arena.battlegrounds().stream())
-                .filter(bg -> regionId.equalsIgnoreCase(bg.wgRegionId()))
-                .filter(bg -> worldName == null || worldName.isBlank() || bg.worldName() == null
-                        || worldName.equalsIgnoreCase(bg.worldName()))
-                .findFirst());
+        return arenas.stream()
+                .flatMap(arena -> arena.areas().stream())
+                .filter(area -> area.hasRegion(worldName, regionId))
+                .findFirst();
+    }
+
+    /** {@link #cachedArenaByRegion} over a given list. */
+    public static Optional<KnkArena> arenaByRegion(List<KnkArena> arenas, String worldName, String regionId) {
+        if (arenas == null || regionId == null || regionId.isBlank()) {
+            return Optional.empty();
+        }
+        for (KnkArena arena : arenas) {
+            boolean sameWorld = worldName == null || worldName.isBlank() || arena.worldName() == null
+                    || arena.worldName().isBlank() || arena.worldName().equalsIgnoreCase(worldName);
+            if (sameWorld && arena.isOwnRegion(regionId)) {
+                return Optional.of(arena);
+            }
+            if (arena.areas().stream().anyMatch(area -> area.hasRegion(worldName, regionId))) {
+                return Optional.of(arena);
+            }
+        }
+        return Optional.empty();
     }
 
     public void invalidateAll() {

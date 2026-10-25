@@ -81,12 +81,13 @@ public final class ManagedRegionPolicy {
                     : List.of(FlagRule.seed("entry", FlagState.ALLOW), NO_ENTRY_MESSAGE);
             case ARENA -> List.of(FlagRule.seed("entry", FlagState.ALLOW), NO_ENTRY_MESSAGE);
             // The exception that defines the category: fighting is allowed here whatever the town says. Entry is no
-            // longer a WorldGuard flag here (arena duels D16, KNG-210): the battleground domain's AllowEntry=false is
-            // enforced as knk-allow-entry by the domain-access handler, which lets the two duelists of a match in
-            // through an exemption. WorldGuard's own `entry deny` would keep them out too (only owners/members pass),
-            // so the v1 `entry deny` is corrected to allow.
+            // WorldGuard flag here (arena duels D16; rev. 6): battlegrounds are arena areas, and the duel runtime's own
+            // session rule lets only the two duelists of a match in. WorldGuard's own `entry deny` would keep them out
+            // too (only owners/members pass), so the v1 `entry deny` is corrected to allow.
             case BATTLEGROUND -> List.of(FlagRule.enforce("entry", FlagState.ALLOW), FlagRule.enforce("pvp", FlagState.ALLOW));
-            case DISTRICT, STRUCTURE, GATE, SPECTATOR_AREA -> List.of();
+            // Rev. 6: the stands and the lobby are arena areas too; WorldGuard never refuses entry, the runtime decides.
+            case SPECTATOR_AREA, LOBBY -> List.of(FlagRule.enforce("entry", FlagState.ALLOW));
+            case DISTRICT, STRUCTURE, GATE -> List.of();
         };
     }
 }

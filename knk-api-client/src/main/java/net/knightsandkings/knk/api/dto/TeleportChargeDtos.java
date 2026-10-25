@@ -16,6 +16,15 @@ public final class TeleportChargeDtos {
     private TeleportChargeDtos() {
     }
 
+    /** Arena duels rev. 6: {@code POST /api/teleport-destinations/spectate-fee}. */
+    public record SpectateFee(
+        @JsonProperty("userId") int userId,
+        @JsonProperty("arenaAreaId") int arenaAreaId,
+        @JsonProperty("idempotencyKey") String idempotencyKey,
+        @JsonProperty("bypassRequirements") boolean bypassRequirements,
+        @JsonProperty("bypassCost") boolean bypassCost
+    ) {}
+
     public record ChargeRequest(
         @JsonProperty("userId") int userId,
         @JsonProperty("idempotencyKey") String idempotencyKey,

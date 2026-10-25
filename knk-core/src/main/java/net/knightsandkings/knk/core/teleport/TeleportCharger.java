@@ -80,6 +80,12 @@ public class TeleportCharger {
         return charge(userId, key, () -> api.chargeSpawnFee(userId, key));
     }
 
+    /** Arena duels rev. 6: the spectate teleport's title check and gem price. */
+    public CompletableFuture<TeleportChargeResult> chargeSpectateFee(int arenaAreaId, int userId, String key,
+                                                                    boolean bypassRequirements, boolean bypassCost) {
+        return charge(userId, key, () -> api.chargeSpectateFee(arenaAreaId, userId, key, bypassRequirements, bypassCost));
+    }
+
     public CompletableFuture<TeleportChargeResult> chargeBackFee(int userId, int amountCoins, String key, String backKind) {
         return charge(userId, key, () -> api.chargeBackFee(userId, amountCoins, key, backKind));
     }

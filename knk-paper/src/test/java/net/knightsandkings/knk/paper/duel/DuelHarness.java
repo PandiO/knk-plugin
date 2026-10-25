@@ -1,7 +1,8 @@
 package net.knightsandkings.knk.paper.duel;
 
 import net.knightsandkings.knk.core.domain.arenas.KnkArena;
-import net.knightsandkings.knk.core.domain.arenas.KnkArenaBattleground;
+import net.knightsandkings.knk.core.domain.arenas.KnkArenaArea;
+import net.knightsandkings.knk.core.domain.arenas.KnkArenaAreaRegion;
 import net.knightsandkings.knk.core.domain.arenas.KnkArenaKit;
 import net.knightsandkings.knk.core.domain.duels.KnkDuelRecords;
 import net.knightsandkings.knk.core.domain.duels.KnkDuelRecords.ItemSummary;
@@ -60,6 +61,10 @@ final class DuelHarness {
 
     static final int ARENA_ID = 7;
     static final int BATTLEGROUND_ID = 70;
+    static final int LOBBY_AREA_ID = 80;
+    static final String BATTLEGROUND_REGION = "arena_7_battleground_700";
+    static final String BATTLEGROUND_REGION_2 = "arena_7_battleground_701";
+    static final String LOBBY_REGION = "arena_7_lobby_800";
     static final int KIT_A = 11;
     static final int KIT_B = 12;
 
@@ -98,7 +103,7 @@ final class DuelHarness {
     final DuelPendingResults results;
     final DuelRecovery recovery;
     final MinigamePlayerVault vault;
-    final DuelBattlegroundAccess access = new DuelBattlegroundAccess();
+    final ArenaAreaAccess access = new ArenaAreaAccess();
     final DuelService service;
     KnkArena arena;
 
@@ -226,6 +231,7 @@ final class DuelHarness {
             location -> Optional.ofNullable(locations.get(location)),
             id -> false, id -> false, restored::add, logger);
         service = new DuelService(ports, DuelConfig.defaults());
+        access.setArenas(() -> arena == null ? List.of() : List.of(arena));
         self[0] = service;
         registry.register(new DuelParticipation(service));
         stubApi();
@@ -287,13 +293,17 @@ final class DuelHarness {
     }
 
     static KnkArena arena(boolean keep, boolean drop, boolean fixed, boolean choice) {
-        KnkArenaBattleground bg = new KnkArenaBattleground(BATTLEGROUND_ID, ARENA_ID, "bg1", "Battleground 1",
-            "arena_2,a-battleground", "arena", 1, true, false, loc("spawnA", 10), loc("spawnB", 20));
-        return new KnkArena(ARENA_ID, "arena_2", "Arena", "arena_2", "arena", 1, loc("domain", 1), loc("lobby", 0),
+        // Rev. 6: the battleground (two parts) and the lobby are arena areas with their regions.
+        KnkArenaArea bg = new KnkArenaArea(BATTLEGROUND_ID, ARENA_ID, KnkArenaArea.Kind.BATTLEGROUND, "bg1", "Battleground 1",
+            1, true, loc("spawnA", 10), loc("spawnB", 20), null, null, null,
+            List.of(new KnkArenaAreaRegion(700, BATTLEGROUND_REGION, "arena"), new KnkArenaAreaRegion(701, BATTLEGROUND_REGION_2, "arena")));
+        KnkArenaArea lobby = new KnkArenaArea(LOBBY_AREA_ID, ARENA_ID, KnkArenaArea.Kind.LOBBY, "lobby", "Lobby", 0, true,
+            null, null, loc("lobby", 0), null, null, List.of(new KnkArenaAreaRegion(800, LOBBY_REGION, "arena")));
+        return new KnkArena(ARENA_ID, "arena_2", "Arena", "arena_2", "arena", 1, loc("domain", 1),
             loc("exit", 50), true, 3, 3, 60, true, true, 10_000, 9, 0, 5, null, null, 10, 0, 100_000,
             keep, drop, fixed, choice, KnkArena.DuelGearMode.OWN_GEAR_KEEP,
             1, 1, 0, 60, 1, true, true,
-            List.of(new KnkArenaKit(KIT_A, "Knight", 1), new KnkArenaKit(KIT_B, "Archer", 2)), List.of(bg), List.of());
+            List.of(new KnkArenaKit(KIT_A, "Knight", 1), new KnkArenaKit(KIT_B, "Archer", 2)), List.of(bg, lobby), List.of());
     }
 
     DuelArenaSettings settings() {

@@ -96,6 +96,14 @@ public class TeleportDestinationsApiImpl extends BaseApiImpl implements Teleport
     }
 
     @Override
+    public CompletableFuture<TeleportChargeResult> chargeSpectateFee(int arenaAreaId, int userId, String idempotencyKey,
+                                                                    boolean bypassRequirements, boolean bypassCost) {
+        return charge(baseUrl + ENDPOINT + "/spectate-fee",
+            new TeleportChargeDtos.SpectateFee(userId, arenaAreaId, idempotencyKey, bypassRequirements, bypassCost),
+            "the spectate teleport to arena area " + arenaAreaId + " for user " + userId);
+    }
+
+    @Override
     public CompletableFuture<TeleportChargeResult> chargeBackFee(int userId, int amountCoins, String idempotencyKey,
                                                                 String backKind) {
         return charge(baseUrl + ENDPOINT + "/back-fee",

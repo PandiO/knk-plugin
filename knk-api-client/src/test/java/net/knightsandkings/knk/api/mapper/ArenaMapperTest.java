@@ -16,7 +16,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import net.knightsandkings.knk.api.dto.ArenaDtos.ArenaDto;
 import net.knightsandkings.knk.core.domain.arenas.KnkArena;
 
-/** Arena duels KNG-210: GET api/Arenas (knk-web-api Dtos/ArenaDtos.cs) to the core records. */
+/** Arena duels KNG-210 (areas rev. 6): GET api/Arenas (knk-web-api Dtos/ArenaDtos.cs) to the core records. */
 class ArenaMapperTest {
 
     private final ObjectMapper json = new ObjectMapper()
@@ -31,7 +31,6 @@ class ArenaMapperTest {
         List<KnkArena> arenas = read("""
             [{"id":5,"name":"Arena","key":"arena_2","description":"d","wgRegionId":"arena_2","worldName":"world",
               "districtId":10,"streetId":3,"houseNumber":0,"locationId":null,
-              "lobbyLocationId":100,"lobbyLocation":{"id":100,"name":"lobby","x":1.5,"y":64,"z":2.5,"yaw":90,"pitch":0,"world":"world"},
               "exitLocationId":null,"exitLocation":null,
               "isDuelEnabled":true,"maxQueuedMatches":2,"maxOffers":4,"offerSeconds":45,
               "allowCoinStakes":true,"allowItemStakes":false,"maxCoinStake":5000,"maxItemStacks":3,
@@ -42,13 +41,19 @@ class ArenaMapperTest {
               "maxWaitSeconds":60,"winnerLingerSeconds":3,"announceMatches":false,"announceFriendly":false,
               "eligibleKits":[{"arenaId":5,"kitId":8,"sequenceNumber":1,"kitName":"Archer"},
                               {"arenaId":5,"kitId":7,"sequenceNumber":0,"kitName":"Knight"}],
-              "battlegrounds":[{"id":21,"arenaId":5,"key":"bg2","name":"Pit 2","wgRegionId":"arena_2,2-battleground",
-                                "worldName":"world","sortOrder":1,"isEnabled":true,"allowEntry":false,
-                                "spawnALocation":{"id":1,"world":"world"},"spawnBLocation":{"id":2,"world":"world"}},
-                               {"id":20,"arenaId":5,"key":"bg1","name":"Pit 1","wgRegionId":"arena_2,1-battleground",
-                                "worldName":"world","sortOrder":0,"isEnabled":false,"allowEntry":false}],
-              "spectatorAreas":[{"id":30,"arenaId":5,"name":"Stands","wgRegionId":"domain_30","worldName":"world",
-                                 "teleportEnabled":true,"location":{"id":3,"world":"world"}}]}]
+              "areas":[{"id":21,"arenaId":5,"kind":"BATTLEGROUND","key":"bg2","name":"Pit 2","sortOrder":1,"isEnabled":true,
+                        "spawnALocation":{"id":1,"world":"world"},"spawnBLocation":{"id":2,"world":"world"},
+                        "regions":[{"id":210,"wgRegionId":"arena_5_battleground_210","worldName":"world"},
+                                   {"id":211,"wgRegionId":"arena_5_battleground_211","worldName":"world"}]},
+                       {"id":20,"arenaId":5,"kind":"battleground","key":"bg1","sortOrder":0,"isEnabled":false,"regions":[]},
+                       {"id":30,"arenaId":5,"kind":"SPECTATOR","key":"stands","name":"Stands","sortOrder":0,"isEnabled":true,
+                        "arrivalLocation":{"id":3,"world":"world"},"teleportMinTitleBracketId":4,"teleportPriceGems":10,
+                        "regions":[{"id":300,"wgRegionId":"arena_5_spectator_300","worldName":"world"}]},
+                       {"id":40,"arenaId":5,"kind":"LOBBY","key":"lobby","isEnabled":true,
+                        "arrivalLocation":{"id":100,"name":"lobby","x":1.5,"y":64,"z":2.5,"yaw":90,"pitch":0,"world":"world"},
+                        "regions":[{"id":400,"wgRegionId":"arena_5_lobby_400","worldName":"world"}]},
+                       {"id":50,"arenaId":5,"kind":"SWORDS","key":"x"}],
+              "subRegions":[{"id":9,"wgRegionId":"domain_5_sub_9"}]}]
             """);
 
         KnkArena arena = arenas.get(0);
@@ -68,8 +73,15 @@ class ArenaMapperTest {
         assertEquals("Knight", arena.defaultKit().orElseThrow().kitName());
         assertEquals(List.of(20, 21), arena.battlegrounds().stream().map(b -> b.id()).toList());
         assertEquals(List.of(21), arena.usableBattlegrounds().stream().map(b -> b.id()).toList());
-        assertTrue(arena.spectatorAreas().get(0).teleportEnabled());
-        assertEquals(3, arena.spectatorAreas().get(0).location().id());
+        assertEquals(List.of("arena_5_battleground_210", "arena_5_battleground_211"), arena.usableBattlegrounds().get(0).regionIds());
+        assertEquals("bg1", arena.battlegrounds().get(0).displayName());
+        var stands = arena.spectateTarget().orElseThrow();
+        assertEquals((Integer) 4, stands.teleportMinTitleBracketId());
+        assertEquals((Integer) 10, stands.teleportPriceGems());
+        assertEquals(3, stands.arrival().id());
+        // an unknown kind is dropped
+        assertEquals(4, arena.areas().size());
+        assertEquals(List.of("arena_2", "domain_5_sub_9"), arena.ownRegionIds());
     }
 
     @Test

@@ -33,13 +33,18 @@ public enum ManagedRegionKind {
     ROOM(40),
     /** v1 {@code arena_N} base region -> v3 {@code Arena} (a Structure subtype, KNG-210; or config-declared). */
     ARENA(40),
-    /** v3 {@code ArenaSpectatorArea} (KNG-210): a plain child of its Arena, no category flags. */
+    /**
+     * A region of an arena's SPECTATOR area (arena duels rev. 6: an arena area, not a domain): a child of its Arena,
+     * {@code entry allow} (spectators walk in freely).
+     */
     SPECTATOR_AREA(40),
     /**
-     * v1 {@code arena_N-battleground...} -> v3 {@code ArenaBattleground} (KNG-210): the PvP-allowed part of an arena;
-     * must beat the town's {@code pvp deny}.
+     * v1 {@code arena_N-battleground...} -> a region of an arena's BATTLEGROUND area (rev. 6): the PvP-allowed part of an
+     * arena; must beat the town's {@code pvp deny}. The duel runtime decides who may cross (DESIGN §8.2).
      */
-    BATTLEGROUND(50);
+    BATTLEGROUND(50),
+    /** A region of an arena's LOBBY area (rev. 6): where duelists warm up; {@code entry allow}, the duel runtime decides. */
+    LOBBY(50);
 
     private final int floorPriority;
 
@@ -60,8 +65,9 @@ public enum ManagedRegionKind {
     /**
      * The kind for a concrete v3 {@code Domain} subtype name (as the API reports it in {@code domainType}, any case).
      * Unknown Structure subtypes are plain {@link #STRUCTURE}s, never dropped: they still need their parent and priority.
-     * The arena types (KNG-210): {@code Arena} -> {@link #ARENA}, {@code ArenaBattleground} -> {@link #BATTLEGROUND},
-     * {@code ArenaSpectatorArea} -> {@link #SPECTATOR_AREA}.
+     * The arena types (KNG-210): {@code Arena} -> {@link #ARENA}; the API's names for its area regions (rev. 6)
+     * {@code ArenaBattleground} -> {@link #BATTLEGROUND}, {@code ArenaSpectatorArea} -> {@link #SPECTATOR_AREA},
+     * {@code ArenaLobby} -> {@link #LOBBY}.
      * Empty only for a null/blank name.
      */
     public static Optional<ManagedRegionKind> fromDomainType(String domainType) {
@@ -76,7 +82,8 @@ public enum ManagedRegionKind {
             case "PROPERTY", "RESOURCEPROPERTY" -> PROPERTY;
             case "ARENA" -> ARENA;
             case "ARENABATTLEGROUND", "BATTLEGROUND" -> BATTLEGROUND;
-            case "ARENASPECTATORAREA", "SPECTATORAREA" -> SPECTATOR_AREA;
+            case "ARENASPECTATORAREA", "SPECTATORAREA", "ARENASPECTATOR" -> SPECTATOR_AREA;
+            case "ARENALOBBY", "LOBBY" -> LOBBY;
             default -> STRUCTURE;
         });
     }

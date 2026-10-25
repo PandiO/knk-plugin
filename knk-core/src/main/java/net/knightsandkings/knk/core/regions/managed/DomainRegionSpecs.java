@@ -6,8 +6,8 @@ import java.util.List;
 import java.util.Map;
 
 import net.knightsandkings.knk.core.domain.arenas.KnkArena;
-import net.knightsandkings.knk.core.domain.arenas.KnkArenaBattleground;
-import net.knightsandkings.knk.core.domain.arenas.KnkArenaSpectatorArea;
+import net.knightsandkings.knk.core.domain.arenas.KnkArenaArea;
+import net.knightsandkings.knk.core.domain.arenas.KnkArenaAreaRegion;
 import net.knightsandkings.knk.core.domain.districts.DistrictSummary;
 import net.knightsandkings.knk.core.domain.structures.StructureSummary;
 import net.knightsandkings.knk.core.domain.towns.TownSummary;
@@ -15,8 +15,8 @@ import net.knightsandkings.knk.core.domain.towns.TownSummary;
 /**
  * Builds the {@link ManagedRegionSpec}s implied by the v3 domain data: Town -> District -> Structure, each backed by the
  * WorldGuard region in its {@code wgRegionId}. A Structure's subtype (Gate, Arena, ...) comes from {@code domainTypes},
- * the {@code domainType} the API reports per domain id. An Arena's battlegrounds and spectator areas (KNG-210) come from
- * the arenas list and hang under their Arena's region.
+ * the {@code domainType} the API reports per domain id. An Arena's areas (arena duels rev. 6: battlegrounds, spectator
+ * areas, the lobby; not domains) come from the arenas list: one spec per area region, under the Arena's region.
  */
 public final class DomainRegionSpecs {
 
@@ -93,30 +93,33 @@ public final class DomainRegionSpecs {
         }
         for (KnkArena arena : nullSafe(arenas)) {
             String arenaLabel = "Arena#" + arena.id() + " '" + arena.name() + "'";
-            if (isBlank(arena.wgRegionId())) {
-                warnings.add(arenaLabel + ": no region; its battlegrounds and spectator areas get no parent");
+            if (isBlank(arena.wgRegionId()) && !arena.areas().isEmpty()) {
+                warnings.add(arenaLabel + ": no region; its areas' regions get no parent");
             }
             String parent = isBlank(arena.wgRegionId()) ? null : arena.wgRegionId();
-            for (KnkArenaBattleground battleground : arena.battlegrounds()) {
-                String label = "ArenaBattleground#" + battleground.id() + " '" + battleground.name() + "'";
-                if (isBlank(battleground.wgRegionId())) {
-                    skipped.add(new Skipped(label, "no wgRegionId"));
-                    continue;
+            for (KnkArenaArea area : arena.areas()) {
+                ManagedRegionKind kind = kindOf(area.kind());
+                for (KnkArenaAreaRegion region : area.regions()) {
+                    String label = "ArenaArea#" + area.id() + " " + area.kind() + " '" + area.displayName() + "' region#" + region.id();
+                    if (isBlank(region.wgRegionId())) {
+                        skipped.add(new Skipped(label, "no wgRegionId"));
+                        continue;
+                    }
+                    specs.add(new ManagedRegionSpec(region.wgRegionId(), kind, parent, label,
+                            firstNonBlank(region.worldName(), arena.worldName())));
                 }
-                specs.add(new ManagedRegionSpec(battleground.wgRegionId(), ManagedRegionKind.BATTLEGROUND, parent, label,
-                        firstNonBlank(battleground.worldName(), arena.worldName())));
-            }
-            for (KnkArenaSpectatorArea area : arena.spectatorAreas()) {
-                String label = "ArenaSpectatorArea#" + area.id() + " '" + area.name() + "'";
-                if (isBlank(area.wgRegionId())) {
-                    skipped.add(new Skipped(label, "no wgRegionId"));
-                    continue;
-                }
-                specs.add(new ManagedRegionSpec(area.wgRegionId(), ManagedRegionKind.SPECTATOR_AREA, parent, label,
-                        firstNonBlank(area.worldName(), arena.worldName())));
             }
         }
         return new Result(specs, skipped, warnings);
+    }
+
+    /** The managed kind of an arena area's regions (rev. 6). */
+    public static ManagedRegionKind kindOf(KnkArenaArea.Kind kind) {
+        return switch (kind) {
+            case BATTLEGROUND -> ManagedRegionKind.BATTLEGROUND;
+            case SPECTATOR -> ManagedRegionKind.SPECTATOR_AREA;
+            case LOBBY -> ManagedRegionKind.LOBBY;
+        };
     }
 
     private static <T> List<T> nullSafe(List<T> list) {
