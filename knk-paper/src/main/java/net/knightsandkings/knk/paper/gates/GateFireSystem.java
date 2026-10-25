@@ -138,8 +138,9 @@ public class GateFireSystem {
 
     /**
      * Sweep every cached gate: prune expired burns, apply this tick's damage for whatever is
-     * still burning, and extinguish any gate that stopped qualifying (destroyed, inactive, or no
-     * longer CLOSED - an animating/open gate's door blocks aren't at a stable position anymore).
+     * still burning, and extinguish any gate that stopped qualifying (destroyed, inactive, made
+     * invincible - a structure override mid-burn, say - or no longer CLOSED - an animating/open
+     * gate's door blocks aren't at a stable position anymore).
      * Intended to be called once per fire-tick interval by GateFireDamageTask.
      */
     public void tick() {
@@ -155,7 +156,8 @@ public class GateFireSystem {
     private void processGateFire(CachedGateDoor gate, long now) {
         var burning = gate.getBurningBlocks();
 
-        if (gate.isEffectivelyDestroyed() || !gate.isEffectivelyActive() || gate.getCurrentState() != AnimationState.CLOSED) {
+        if (gate.isEffectivelyDestroyed() || !gate.isEffectivelyActive() || gate.isEffectivelyInvincible()
+            || gate.getCurrentState() != AnimationState.CLOSED) {
             burning.clear();
             attribution.clear(gate.getId());
             visuals.clear(gate);
