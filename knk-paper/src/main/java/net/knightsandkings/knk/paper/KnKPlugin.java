@@ -903,6 +903,8 @@ public class KnKPlugin extends JavaPlugin {
             // literal-text tooltip or a click-time failure the first time someone
             // happens to open it or click it.
             MenuDefinitionValidationRunner.runAtStartup(menuTemplatesDataAccess, menuService, getLogger(), menuRegistries);
+            // Playtest 2026-10-24: menus skipped while the API was down are validated as soon as it is back.
+            getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.menu.MenuValidationRecoveryListener(menuService), this);
             getLogger().info("InventoryMenu variable resolution + load-time validation initialized (Phase 3 + 6 + 8 + 9)");
 
             // Create domain resolver for mapping WG region IDs to domain entities. Built before the

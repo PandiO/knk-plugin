@@ -788,6 +788,46 @@ public final class MenuService {
         return Optional.of("not validated at startup (the API was unreachable then, or the template didn't exist yet)");
     }
 
+    /** True while a validation pass runs (or has a retry pending), so recovery and timer never run two at once. */
+    private final AtomicBoolean validationPassActive = new AtomicBoolean(false);
+    /** Set by {@code MenuDefinitionValidationRunner}: the whole validation pass, for {@link #revalidateAfterRecovery}. */
+    private volatile Runnable revalidation;
+
+    /** The runner hands over its full pass so the API-recovery event can start it. */
+    public void setRevalidation(Runnable revalidation) {
+        this.revalidation = revalidation;
+    }
+
+    /** Claims the single validation slot; false when a pass is running or a retry of one is pending. */
+    public boolean beginValidationPass() {
+        return validationPassActive.compareAndSet(false, true);
+    }
+
+    /** @param retryPending the pass scheduled a retry, which keeps the slot until it runs */
+    public void endValidationPass(boolean retryPending) {
+        if (!retryPending) {
+            validationPassActive.set(false);
+        }
+    }
+
+    /** A scheduled retry is about to run: it takes the slot over from the pass that scheduled it. */
+    public void retryDue() {
+        validationPassActive.set(false);
+    }
+
+    /**
+     * Playtest 2026-10-24: the API came back ({@code ApiConnectivityChangedEvent} recovery). Runs the validation pass
+     * off the main thread for every menu still unvalidated, unless a pass or its retry is already pending (that one
+     * will see the API up).
+     */
+    public void revalidateAfterRecovery() {
+        Runnable pass = revalidation;
+        if (pass == null || validationPassActive.get()) {
+            return;
+        }
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, pass);
+    }
+
     /** Runs {@code task} off the main thread after {@code delayTicks} (the startup validation's retries while the API is down). */
     public void runLaterAsync(long delayTicks, Runnable task) {
         Bukkit.getScheduler().runTaskLaterAsynchronously(plugin, task, Math.max(1L, delayTicks));
