@@ -67,12 +67,29 @@ public final class SiegeScoreboardPresenter implements SiegeMatchObserver {
         for (MemberView member : match.roster().members()) {
             Player p = Bukkit.getPlayer(member.playerId());
             if (p == null) continue;
-            boards.values().forEach(b -> b.getTeam("siege_" + member.teamId()).addEntry(p.getName()));
-            previousBoards.putIfAbsent(p.getUniqueId(), p.getScoreboard());
-            Scoreboard own = boards.get(member.teamId());
-            if (own != null) p.setScoreboard(own);
+            show(boards, p, member.teamId());
         }
         refresh(lobby, match);
+    }
+
+    /** A rejoin or admin join (PandiO/knk-workspace#150, #152): the late member gets their team's board too. */
+    @Override
+    public void memberJoinedMatch(SiegeLobbyRuntime lobby, SiegeMatch match, Player player) {
+        Map<Integer, Scoreboard> boards = boardsByMatch.get(match.matchToken());
+        if (boards == null) return;
+        match.roster().teamOf(player.getUniqueId()).ifPresent(teamId -> show(boards, player, teamId));
+        lastTabName.remove(player.getUniqueId());
+        refresh(lobby, match);
+    }
+
+    private void show(Map<Integer, Scoreboard> boards, Player p, int teamId) {
+        boards.values().forEach(b -> {
+            Team team = b.getTeam("siege_" + teamId);
+            if (team != null) team.addEntry(p.getName());
+        });
+        previousBoards.putIfAbsent(p.getUniqueId(), p.getScoreboard());
+        Scoreboard own = boards.get(teamId);
+        if (own != null) p.setScoreboard(own);
     }
 
     @Override

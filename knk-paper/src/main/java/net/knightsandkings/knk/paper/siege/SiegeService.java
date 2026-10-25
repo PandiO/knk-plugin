@@ -51,6 +51,8 @@ import net.knightsandkings.knk.core.siege.SiegeMatchRoster.SpawnChoice;
 import net.knightsandkings.knk.core.siege.SiegeMatchRoster.SpawnKind;
 import net.knightsandkings.knk.core.siege.SiegeObjectiveBoard.BoardStep;
 import net.knightsandkings.knk.core.siege.SiegePhase;
+import net.knightsandkings.knk.core.siege.SiegeRejoinSlots;
+import net.knightsandkings.knk.core.siege.SiegeRejoinSlots.Slot;
 import net.knightsandkings.knk.core.siege.SiegeRuntimeLocks;
 import net.knightsandkings.knk.core.siege.AllianceResolver;
 import net.knightsandkings.knk.core.siege.CaptureCalculator;
@@ -143,10 +145,14 @@ public final class SiegeService {
     public static final String PERMISSION_ADMIN_CONTROL = "knk.siege.admin.control";
     public static final String PERMISSION_ADMIN_RELOAD = "knk.siege.admin.reload";
     public static final String PERMISSION_ADMIN_MANAGE = "knk.siege.admin.manage";
+    /** {@code /siege join <player>}: add a player to a round, also a running match (PandiO/knk-workspace#152). */
+    public static final String PERMISSION_ADMIN_JOIN = "knk.siege.admin.join";
     public static final String PERMISSION_BYPASS_COMMANDS = "knk.siege.bypass.commands";
 
     /** DESIGN §6.1: lobbies start matchmaking about two seconds after enable (v1/v2 used 2 s). */
     private static final long BOOTSTRAP_START_DELAY_TICKS = 40L;
+    /** How long a disconnected member's place is kept when {@code siege.rejoin-window-seconds} isn't set (#150). */
+    public static final Duration DEFAULT_REJOIN_WINDOW = Duration.ofSeconds(300);
     /** How long after match start / a respawn a spawn pick still teleports (then it only sets the choice). */
     private static final Duration SPAWN_PICK_WINDOW = Duration.ofSeconds(20);
 
@@ -282,6 +288,7 @@ public final class SiegeService {
     // ==================== Ticker ====================
 
     private void tick() {
+        expireRejoinSlots();
         for (SiegeLobbyRuntime rt : new ArrayList<>(lobbies.values())) {
             try {
                 apply(rt, rt.machine().tick(rt.memberCount()));
@@ -807,6 +814,9 @@ public final class SiegeService {
         }
         locks.releasePlayers(rt.id());
         rt.userIds().clear();
+        // #150: places kept for disconnected members end with the round; the completion (departed members) or
+        // the API's own close of unreported rows records them as left, so no participantLeft is sent now.
+        rejoinSlots.dropLobby(rt.id());
         // Phase 7a: gates and area entry are restored while the round (match id, scenario) is still known.
         observers.forEach(o -> safely("roundReleased", () -> o.roundReleased(rt)));
         rt.match().ifPresent(departedMembers::remove);
@@ -835,7 +845,11 @@ public final class SiegeService {
      * whether the match must end (DESIGN §6.8).
      */
     private void removeMember(SiegeLobbyRuntime rt, UUID id, LeaveCause cause, boolean checkMembership) {
-        if (!rt.mutableMembers().remove(id)) return;
+        if (!rt.mutableMembers().contains(id)) return;
+        Instant leftAt = Instant.now();
+        // #150: read before the split/roster forget them.
+        Optional<Slot> slot = cause == LeaveCause.QUIT ? rejoinSlotFor(rt, id, leftAt) : Optional.empty();
+        rt.mutableMembers().remove(id);
         Integer userId = rt.userIds().remove(id);
         locks.releasePlayer(id);
         rt.machine().removeMember(id);
@@ -855,10 +869,12 @@ public final class SiegeService {
             if (cause != LeaveCause.ROUND_OVER && cause != LeaveCause.SHUTDOWN) {
                 Optional<MemberView> removed = match.roster().remove(id);
                 if (userId != null) {
-                    Instant leftAt = Instant.now();
                     if (reportDepartedMembers) removed.ifPresent(view -> departedMembers
                             .computeIfAbsent(match, m -> new SiegeDepartedMembers()).departed(userId, view, leftAt));
-                    withMatchId(rt, matchId -> guarded("participantLeft", matchApi.participantLeft(matchId, userId, leftAt)));
+                    // #150: a kept place reports the leave only when it expires (expireRejoinSlots).
+                    if (slot.isEmpty()) {
+                        withMatchId(rt, matchId -> guarded("participantLeft", matchApi.participantLeft(matchId, userId, leftAt)));
+                    }
                 }
             }
             match.closeSpawnPick(id);
@@ -870,11 +886,286 @@ public final class SiegeService {
             else vault.restore(player);
         }
 
+        slot.ifPresent(rejoinSlots::hold);
+
         if (checkMembership && match != null && rt.phase() == SiegePhase.IN_PROGRESS) {
             match.winResolver().membershipEnd(match.roster().membersPerTeam(), match.scenario().playersMin())
                     .ifPresent(reason -> apply(rt, rt.machine().endMatch(reason)));
         }
         notifyChanged(rt);
+    }
+
+    // ==================== Rejoin (alpha run 1, PandiO/knk-workspace#150) and admin join (#152) ====================
+
+    /**
+     * Places kept for members who disconnected at the hub or in a running match (DESIGN §13 Q5). Set from
+     * {@code siege.rejoin-window-seconds}; zero is the MVP rule (a disconnect is a leave).
+     */
+    private SiegeRejoinSlots rejoinSlots = new SiegeRejoinSlots(DEFAULT_REJOIN_WINDOW);
+
+    /** {@code siege.rejoin-window-seconds}: how long a disconnected member's place is kept (zero: not at all). */
+    public void setRejoinWindow(Duration window) {
+        this.rejoinSlots = new SiegeRejoinSlots(window);
+    }
+
+    /** How a member came (back) into a round, for messages and the {@code teamAssigned} telemetry cause. */
+    private enum JoinKind {
+        REJOIN("rejoin"), ADMIN("admin_join");
+
+        final String cause;
+
+        JoinKind(String cause) {
+            this.cause = cause;
+        }
+    }
+
+    /** The round is at the hub or in a running match: the phases a disconnected member can come back to. */
+    private static boolean isRoundOn(SiegeLobbyRuntime rt) {
+        return rt.matchToken().isPresent() && (rt.phase() == SiegePhase.HUB
+                || (rt.phase() == SiegePhase.IN_PROGRESS && rt.match().isPresent()));
+    }
+
+    /** The place a quitting member keeps, when rejoining is on and their round is at the hub or in the match. */
+    private Optional<Slot> rejoinSlotFor(SiegeLobbyRuntime rt, UUID id, Instant leftAt) {
+        if (!rejoinSlots.isEnabled() || !isRoundOn(rt)) return Optional.empty();
+        SiegeMatch match = rt.match().orElse(null);
+        boolean duringMatch = match != null && match.roster().contains(id);
+        Integer teamId = duringMatch
+                ? Integer.valueOf(match.roster().teamOf(id).getAsInt())
+                : rt.splitTeamOf(id).map(KnkSiegeTeam::id).orElse(null);
+        if (match != null && !duringMatch) return Optional.empty(); // a member outside the roster: nothing to keep
+        return Optional.of(new Slot(id, rt.id(), rt.matchToken().get(), teamId, rt.userIds().get(id), leftAt, duringMatch));
+    }
+
+    /** Places whose window passed: their leave is reported now (only a match participant has a row to close). */
+    private void expireRejoinSlots() {
+        if (rejoinSlots.size() == 0) return;
+        for (Slot slot : rejoinSlots.expire(Instant.now())) {
+            SiegeLobbyRuntime rt = lobbies.get(slot.lobbyId());
+            if (rt != null) reportSlotLeft(rt, slot);
+        }
+    }
+
+    private void reportSlotLeft(SiegeLobbyRuntime rt, Slot slot) {
+        if (!slot.duringMatch() || slot.userId() == null) return;
+        if (!rt.matchToken().map(slot.matchToken()::equals).orElse(false)) return; // that round is over
+        int userId = slot.userId();
+        withMatchId(rt, matchId -> guarded("participantLeft", matchApi.participantLeft(matchId, userId, slot.leftAt())));
+    }
+
+    /** {@code PlayerJoinEvent}: a member who disconnected comes back within the window - back on their team. */
+    private boolean tryRejoin(Player player) {
+        UUID id = player.getUniqueId();
+        Optional<Slot> held = rejoinSlots.slotOf(id);
+        if (held.isEmpty()) return false;
+        SiegeLobbyRuntime rt = lobbies.get(held.get().lobbyId());
+        if (rt == null || !isRoundOn(rt)) return false;
+        Optional<Slot> slot = rejoinSlots.claim(id, rt.id(), rt.matchToken().get(), Instant.now());
+        if (slot.isEmpty()) return false;
+        Reply reply = addToRound(rt, player, slot.get().teamId(), slot.get().userId(), JoinKind.REJOIN);
+        player.sendMessage(reply.message());
+        if (!reply.ok()) {
+            reportSlotLeft(rt, slot.get());
+            return false;
+        }
+        logger.info("[Siege] " + player.getName() + " rejoined " + rt.key() + " after a disconnect");
+        return true;
+    }
+
+    /**
+     * Puts a player into the lobby's round at the hub or in the running match: vault snapshot, prepared like
+     * the others, their team (or the smallest), the hub or their team's spawn, scoreboard and labels
+     * ({@link SiegeMatchObserver#memberJoinedMatch}). A player whose inventory was given back on quit keeps
+     * their pre-siege return location. The player must not be a member of any lobby.
+     *
+     * @param teamId the team to put them on; null: their split team at the hub, else the smallest team
+     *               (before the team split at the hub: none, the split places them)
+     */
+    private Reply addToRound(SiegeLobbyRuntime rt, Player player, Integer teamId, Integer userId, JoinKind kind) {
+        UUID id = player.getUniqueId();
+        String name = player.getName();
+        SiegeMatch match = rt.match().orElse(null);
+        KnkSiegeScenario scenario = match != null ? match.scenario() : rt.drawnScenario().orElse(null);
+        if (!isRoundOn(rt) || scenario == null) {
+            return Reply.fail(SiegeMessages.bad(rt.displayName() + " has no round at the hub or in a match right now."));
+        }
+        if (userId == null) {
+            return Reply.fail(SiegeMessages.bad(name + "'s profile is still loading; try again in a moment."));
+        }
+        if (lobbyOf(id).isPresent()) {
+            return Reply.fail(SiegeMessages.bad(name + " is already in " + lobbyOf(id).get().displayName() + "."));
+        }
+        KnkSiegeTeam team = teamId == null ? null : scenario.team(teamId).orElse(null);
+        if (team == null && match != null) {
+            team = match.roster().smallestTeam().stream().boxed().findFirst().flatMap(scenario::team).orElse(null);
+            if (team == null) return Reply.fail(SiegeMessages.bad(scenarioName(scenario) + " has no teams."));
+        }
+        if (team == null && rt.split().isPresent()) {
+            team = smallestSplitTeam(rt, scenario).orElse(null);
+        }
+
+        Location returnLocation = null;
+        if (vault.hasFile(id)) {
+            Optional<Location> kept = vault.restoredReturnLocation(id);
+            if (kept.isEmpty()) {
+                vault.restoreOnJoin(player);
+                return Reply.fail(SiegeMessages.bad(name + "'s items from an earlier siege were still being restored; "
+                        + "that is done now. Try again."));
+            }
+            returnLocation = kept.get();
+        }
+        if (!locks.tryClaimPlayer(id, rt.id())) {
+            return Reply.fail(SiegeMessages.bad(name + " is already in another siege."));
+        }
+        if (player.isDead()) player.spigot().respawn();
+        player.closeInventory();
+        if (!vault.snapshot(player, rt.id(), rt.matchToken().get(), returnLocation)) {
+            locks.releasePlayer(id);
+            return Reply.fail(SiegeMessages.bad(name + "'s inventory couldn't be saved safely, so they can't take part "
+                    + "in this siege. Please tell an admin."));
+        }
+        prepareForMatch(player);
+        rt.mutableMembers().add(id);
+        rt.userIds().put(id, userId);
+        observers.forEach(o -> safely("memberReadiedAtHub", () -> o.memberReadiedAtHub(rt, scenario, player)));
+
+        KnkSiegeTeam placed = team;
+        if (match == null) {
+            if (placed != null && rt.split().isPresent()) {
+                Map<Integer, List<UUID>> copy = new LinkedHashMap<>();
+                rt.split().get().forEach((t, players) -> copy.put(t, new ArrayList<>(players)));
+                copy.computeIfAbsent(placed.id(), k -> new ArrayList<>()).add(id);
+                rt.setSplit(copy);
+                observers.forEach(o -> safely("teamAssigned", () -> o.teamAssigned(rt, id, placed.id(), kind.cause)));
+                spawnScopeOf(id).ifPresent(scope -> {
+                    if (SiegeSpawnOptions.pickerWorthOpening(scope.team(), scope.board())) {
+                        offerSpawnPicker(player, scope);
+                    } else {
+                        SiegeSpawnOptions.defaultChoice(scope.team()).ifPresent(c -> scope.setChoice(id, c));
+                    }
+                });
+            }
+            SiegeBukkit.toLocation(scenario.hubLocation()).ifPresent(location -> SiegeBukkit.teleport(player, location));
+        } else {
+            match.roster().add(id, placed.id());
+            SiegeSpawnOptions.defaultChoice(placed).ifPresent(c -> match.roster().setSpawnChoice(id, c));
+            SiegeSpawnOptions.resolveRespawn(placed, match.board(), match.roster().spawnChoice(id).orElse(null))
+                    .flatMap(o -> SiegeBukkit.toLocation(o.location()))
+                    .ifPresent(location -> SiegeBukkit.teleport(player, location));
+            player.showTitle(Title.title(Component.text(kind == JoinKind.REJOIN ? "Back in the siege!" : "The siege is on!",
+                    NamedTextColor.GOLD), Component.text("You fight for ", SiegeMessages.INFO).append(SiegeBukkit.teamComponent(placed))));
+            observers.forEach(o -> safely("teamAssigned", () -> o.teamAssigned(rt, id, placed.id(), kind.cause)));
+            observers.forEach(o -> safely("memberJoinedMatch", () -> o.memberJoinedMatch(rt, match, player)));
+        }
+        notifyChanged(rt);
+
+        Component msg = Component.text(kind == JoinKind.REJOIN ? "Welcome back: you are in " : "An admin added you to ",
+                        SiegeMessages.GOOD)
+                .append(Component.text(rt.displayName(), SiegeMessages.HIGHLIGHT));
+        if (placed != null) {
+            msg = msg.append(Component.text(" on team ", SiegeMessages.GOOD)).append(SiegeBukkit.teamComponent(placed));
+        }
+        msg = msg.append(Component.text(". Your inventory and position are saved and will be restored after the siege.",
+                SiegeMessages.GOOD));
+        return Reply.ok(SiegeMessages.prefixed(msg));
+    }
+
+    /** The split team with the fewest members (scenario order on a tie). */
+    private static Optional<KnkSiegeTeam> smallestSplitTeam(SiegeLobbyRuntime rt, KnkSiegeScenario scenario) {
+        Map<Integer, List<UUID>> split = rt.split().orElse(Map.of());
+        return scenario.teams().stream()
+                .min(Comparator.comparingInt(t -> split.getOrDefault(t.id(), List.of()).size()));
+    }
+
+    /**
+     * {@code /siege join <player> [lobby] [team]} (PandiO/knk-workspace#152): an admin puts a player into a
+     * round. In matchmaking that is an ordinary join for them; at the hub or in a running match they are
+     * added like a rejoin ({@link #addToRound}), on the given team, their kept place's team (#150) or the
+     * smallest. Lobby capacity, the title requirement and {@code knk.siege.play} are not checked: the admin
+     * decides. With no lobby: the lobby of their kept place, else the only lobby with a round on.
+     */
+    public Reply adminJoin(CommandSender sender, Player target, String lobbyKey, String teamText) {
+        UUID id = target.getUniqueId();
+        String name = target.getName();
+        Optional<SiegeLobbyRuntime> current = lobbyOf(id);
+        if (current.isPresent()) {
+            return Reply.fail(SiegeMessages.bad(name + " is already in " + current.get().displayName() + "."));
+        }
+        Optional<Slot> slot = rejoinSlots.slotOf(id);
+        SiegeLobbyRuntime rt;
+        if (lobbyKey != null && !lobbyKey.isBlank()) {
+            Optional<SiegeLobbyRuntime> byKey = lobbyByKey(lobbyKey);
+            if (byKey.isEmpty()) return Reply.fail(unknownLobby(lobbyKey));
+            rt = byKey.get();
+        } else if (slot.isPresent() && lobbies.get(slot.get().lobbyId()) != null && isRoundOn(lobbies.get(slot.get().lobbyId()))) {
+            rt = lobbies.get(slot.get().lobbyId());
+        } else {
+            List<SiegeLobbyRuntime> on = lobbies.values().stream()
+                    .filter(l -> l.phase() == SiegePhase.MATCHMAKING || isRoundOn(l)).toList();
+            if (on.isEmpty()) return Reply.fail(SiegeMessages.bad("No siege round is on right now."));
+            if (on.size() > 1) {
+                return Reply.fail(SiegeMessages.bad("Say which lobby: /siege join " + name + " <lobby>. Lobbies: " + lobbyKeys() + "."));
+            }
+            rt = on.get(0);
+        }
+
+        if (rt.phase() == SiegePhase.MATCHMAKING) {
+            Reply joined = join(target, rt.key());
+            if (!joined.ok()) {
+                return Reply.fail(SiegeMessages.bad(name + " couldn't join " + rt.displayName() + ":").append(Component.space())
+                        .append(joined.message()));
+            }
+            target.sendMessage(joined.message());
+            logger.info("[Siege] " + sender.getName() + " added " + name + " to " + rt.key() + " (matchmaking)");
+            return Reply.ok(SiegeMessages.good("Added " + name + " to " + rt.displayName() + " (matchmaking"
+                    + (teamText != null ? "; teams are split at the hub, so the team was not used" : "") + ")."));
+        }
+        if (!isRoundOn(rt)) {
+            return Reply.fail(SiegeMessages.bad(rt.displayName() + " is " + SiegeMessages.phaseLabel(rt.phase()).toLowerCase(Locale.ROOT)
+                    + "; players can be added during matchmaking, at the hub or in a match."));
+        }
+        KnkSiegeScenario scenario = rt.match().map(SiegeMatch::scenario).or(rt::drawnScenario).orElseThrow();
+        boolean sameRound = slot.isPresent() && slot.get().lobbyId() == rt.id()
+                && slot.get().matchToken().equals(rt.matchToken().get());
+        Integer teamId = null;
+        if (teamText != null && !teamText.isBlank()) {
+            Optional<KnkSiegeTeam> team = resolveTeam(scenario, teamText);
+            if (team.isEmpty()) {
+                return Reply.fail(SiegeMessages.bad("No team '" + teamText + "' in " + scenarioName(scenario) + ". Teams: "
+                        + scenario.teams().stream().map(t -> SiegeBukkit.teamName(t) + " (" + t.id() + ")")
+                                .reduce((a, b) -> a + ", " + b).orElse("none") + "."));
+            }
+            teamId = team.get().id();
+        } else if (sameRound) {
+            teamId = slot.get().teamId();
+        }
+        Integer userId = sameRound && slot.get().userId() != null ? slot.get().userId()
+                : userCache.getStale(id).map(UserSummary::id).orElse(null);
+
+        Reply added = addToRound(rt, target, teamId, userId, JoinKind.ADMIN);
+        if (!added.ok()) return added;
+        if (sameRound) rejoinSlots.forget(id);
+        target.sendMessage(added.message());
+        String teamName = rt.match().flatMap(m -> m.teamOf(id)).or(() -> rt.splitTeamOf(id))
+                .map(SiegeBukkit::teamName).orElse(null);
+        logger.info("[Siege] " + sender.getName() + " added " + name + " to " + rt.key() + " (" + rt.phase()
+                + (teamName != null ? ", team " + teamName : "") + ")");
+        return Reply.ok(SiegeMessages.good("Added " + name + " to " + rt.displayName()
+                + (teamName != null ? " on team " + teamName : "") + "."));
+    }
+
+    /** A scenario team by id or by (the start of) its name. */
+    private static Optional<KnkSiegeTeam> resolveTeam(KnkSiegeScenario scenario, String text) {
+        String t = text.trim();
+        try {
+            int teamId = Integer.parseInt(t);
+            Optional<KnkSiegeTeam> byId = scenario.team(teamId);
+            if (byId.isPresent()) return byId;
+        } catch (NumberFormatException ignored) { }
+        String lower = t.toLowerCase(Locale.ROOT);
+        return scenario.teams().stream()
+                .filter(team -> SiegeBukkit.teamName(team).toLowerCase(Locale.ROOT).startsWith(lower))
+                .findFirst();
     }
 
     // ==================== Player operations ====================
@@ -974,7 +1265,10 @@ public final class SiegeService {
                 + (active ? " Your inventory and position were restored; you get no rewards for this match." : "")));
     }
 
-    /** {@code PlayerQuitEvent}: leave, restoring the inventory now and the location on the next join. */
+    /**
+     * {@code PlayerQuitEvent}: leave, restoring the inventory now and the location on the next join. At the hub
+     * or in a running match the member's place is kept for the rejoin window (#150; {@link #handleJoin}).
+     */
     public void handleQuit(Player player) {
         lobbyOf(player.getUniqueId()).ifPresent(rt -> removeMember(rt, player.getUniqueId(), LeaveCause.QUIT, true));
     }
@@ -982,7 +1276,9 @@ public final class SiegeService {
     /** {@code PlayerJoinEvent} (one tick later): finish a quit restore or restore a crash leftover. */
     public void handleJoin(Player player) {
         UUID id = player.getUniqueId();
-        if (lobbyOf(id).isPresent() || !vault.hasFile(id)) return;
+        if (lobbyOf(id).isPresent()) return;
+        if (tryRejoin(player)) return; // #150: back into the round they disconnected from
+        if (!vault.hasFile(id)) return;
         if (vault.restoreOnJoin(player)) {
             player.sendMessage(SiegeMessages.info("You were returned to where you were before your last siege, "
                     + "with your pre-siege inventory."));

@@ -3492,6 +3492,9 @@ public class KnKPlugin extends JavaPlugin {
         net.knightsandkings.knk.paper.siege.SiegeBukkit.setTeleporter(this::hubTransfer);
         // KNG-34 leaver fix: members who left early are reported with their stats (no reward).
         siegeService.setReportDepartedMembers(config.statistics().enabled() && config.statistics().siege().reportDepartedMembers());
+        // Alpha run 1 (PandiO/knk-workspace#150): a disconnected member keeps their place for this long.
+        siegeService.setRejoinWindow(java.time.Duration.ofSeconds(Math.max(0, getConfig().getInt("siege.rejoin-window-seconds",
+            (int) SiegeService.DEFAULT_REJOIN_WINDOW.toSeconds()))));
 
         PluginCommand siegeCommand = getCommand("siege");
         if (siegeCommand != null) {
@@ -3552,6 +3555,9 @@ public class KnKPlugin extends JavaPlugin {
                 this, gateManager, gateHealthSystem, apiClient.getSiegeGatesCommandApi());
             this.siegeGates = siegeGates;
             siegeService.addObserver(siegeGates);
+            // Alpha run 1 (PandiO/knk-workspace#154): defenders pass through instead of toggling.
+            siegeGates.setDefenderPassThrough(getConfig().getBoolean("gates.siege.defender-pass-through", true),
+                getConfig().getInt("gates.siege.defender-pass-through-seconds", 0));
             if (statisticsGateSink != null) statisticsGateSink.setLockedByMatch(siegeGates::isLocked);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeGateListener(siegeGates, gateManager), this);
             siegeGates.recoverOnStartup();
