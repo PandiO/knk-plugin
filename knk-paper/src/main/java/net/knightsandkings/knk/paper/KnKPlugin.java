@@ -1907,9 +1907,13 @@ public class KnKPlugin extends JavaPlugin {
         // Event registration moved to onEnable after region transition service setup
 
         pluginManager.registerEvents(new WorldGuardRegionListener(regionTracker), this);
-        // QOL hotfix 2026-10-25: no block breaking where only __global__ applies, unless bypassed (regions.global.deny-block-break).
-        pluginManager.registerEvents(new net.knightsandkings.knk.paper.regions.GlobalRegionBlockBreakListener(
-            () -> getConfig().getBoolean(net.knightsandkings.knk.paper.regions.GlobalRegionBlockBreakListener.CONFIG_PATH, true),
+        // QOL hotfix 2026-10-25: where only __global__ applies, default players neither build nor use decorations and
+        // crafting blocks, and explosions break nothing (regions.global.protection; doors and storage stay usable).
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.regions.GlobalRegionProtectionListener(
+            () -> getConfig().getBoolean(net.knightsandkings.knk.paper.regions.GlobalRegionProtectionListener.CONFIG_PATH, true),
+            net.knightsandkings.knk.paper.regions.GlobalRegionProtectionListener.craftingBlocks(
+                getConfig().getStringList(net.knightsandkings.knk.paper.regions.GlobalRegionProtectionListener.CRAFTING_BLOCKS_PATH),
+                getLogger()::warning),
             regionTracker.regionIds()::at,
             player -> hasRegionBypass(player) || hasWorldGuardRegionBypass(player)), this);
         if (gameSettingsManager != null) {
