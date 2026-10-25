@@ -3,6 +3,7 @@ package net.knightsandkings.knk.paper.gates;
 import net.knightsandkings.knk.core.domain.gates.AnimationState;
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
+import net.knightsandkings.knk.core.domain.gates.CachedGateStructure;
 import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.paper.events.GateDoorDamageEvent;
 import net.knightsandkings.knk.paper.events.GateDoorIgniteEvent;
@@ -188,6 +189,43 @@ class GateDoorHitServiceTest {
 
         assertNull(event);
         verify(pluginManager, never()).callEvent(any());
+    }
+
+    @Test
+    void handleIgniteDoesNothingWhenGateIsInvincible() {
+        // Unlike damage, ignition is refused for an invincible gate: the burn would deal nothing yet
+        // show fire and smoke for its whole duration.
+        gate.setIsInvincible(true);
+
+        GateDoorIgniteEvent event = hitService.handleIgnite(gate, null, blockAt(100, 64, 100), GateDoorIgniteEvent.Cause.FLAMING_PROJECTILE);
+
+        assertNull(event);
+        verify(pluginManager, never()).callEvent(any());
+    }
+
+    @Test
+    void handleIgniteDoesNothingWhenTheStructureOverrideMakesTheGateInvincible() {
+        CachedGateStructure structure = new CachedGateStructure(1, "TestStructure");
+        structure.setIsInvincibleOverride(true);
+        gate.setStructure(structure);
+
+        GateDoorIgniteEvent event = hitService.handleIgnite(gate, null, blockAt(100, 64, 100), GateDoorIgniteEvent.Cause.FIRE_CHARGE);
+
+        assertNull(event);
+        verify(pluginManager, never()).callEvent(any());
+    }
+
+    @Test
+    void handleIgniteFiresEventWhenTheStructureOverrideClearsTheGatesOwnInvincibility() {
+        gate.setIsInvincible(true);
+        CachedGateStructure structure = new CachedGateStructure(1, "TestStructure");
+        structure.setIsInvincibleOverride(false);
+        gate.setStructure(structure);
+
+        GateDoorIgniteEvent event = hitService.handleIgnite(gate, null, blockAt(100, 64, 100), GateDoorIgniteEvent.Cause.FIRE_CHARGE);
+
+        assertNotNull(event);
+        verify(pluginManager).callEvent(event);
     }
 
     @Test
