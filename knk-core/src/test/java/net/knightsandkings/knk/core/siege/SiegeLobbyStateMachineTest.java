@@ -274,6 +274,29 @@ class SiegeLobbyStateMachineTest {
         assertEquals(SkipResult.TOO_LATE, m.skip(SkipRequester.PLAYER).result());
     }
 
+    /** Playtest 2026-10-24: the seconds a skip leaves come from the configuration, floored at voteClose + 1. */
+    @Test
+    void skipSecondsComeFromTheConfigurationAndNeverCutIntoVotingsLastSecond() {
+        KnkSiegeConfiguration base = CONFIG;
+        KnkSiegeConfiguration tuned = new KnkSiegeConfiguration(base.captureAttackBase(), base.captureAttackPerExtra(),
+                base.captureAttackPerExtraInstantVictory(), base.captureDefendBase(), base.captureDefendPerExtra(),
+                base.captureDefendPerExtraInstantVictory(), base.sideCaptureReduction(), base.voteCloseSecondsBeforeStart(),
+                base.drawSecondsBeforeStart(), base.hubSecondsBeforeStart(), base.teamSplitSecondsBeforeStart(),
+                base.matchmakingAnnouncementMarks(), base.killAnnouncementThresholds(), base.killStreakAnnounceAbove(),
+                base.headshotMultiplier(), base.allowedCommands(), base.spawnPickerDelayTicks(), base.enchantDropChancePerMille(),
+                base.allowedEnchantmentKeys(), base.enchantLevelMin(), base.enchantLevelMax(), base.maxBooksAlive(),
+                base.nonMemberGateView(), base.giveNavigationItem(), 90, 5);
+        SiegeLobbyStateMachine m = machine(lobby(1, 300, 900, 2, true, cinix, harbor), tuned);
+        m.start();
+
+        assertEquals(90, m.skipTarget(SkipRequester.PLAYER));
+        assertEquals(31, m.skipTarget(SkipRequester.ADMIN), "5 s would close voting early: floored at voteClose + 1");
+        assertEquals(SkipResult.MATCHMAKING_SHORTENED, m.skip(SkipRequester.PLAYER).result());
+        assertEquals(90, m.secondsRemaining());
+        assertEquals(SkipResult.MATCHMAKING_SHORTENED, m.skip(SkipRequester.ADMIN).result());
+        assertEquals(31, m.secondsRemaining());
+    }
+
     @Test
     void n9SkipNeverThrowsAndSaysWhy() {
         SiegeLobbyStateMachine m = defaultMachine();

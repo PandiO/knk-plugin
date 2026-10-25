@@ -47,10 +47,14 @@ import net.knightsandkings.knk.core.siege.SiegeLobbyStateMachine.SkipRequester;
 import net.knightsandkings.knk.core.siege.SiegeLobbyStateMachine.SkipResult;
 import net.knightsandkings.knk.core.siege.SiegeMatchRoster.MemberView;
 import net.knightsandkings.knk.core.siege.SiegeDepartedMembers;
+import net.knightsandkings.knk.core.siege.SiegeMatchRoster.SpawnChoice;
 import net.knightsandkings.knk.core.siege.SiegeMatchRoster.SpawnKind;
 import net.knightsandkings.knk.core.siege.SiegeObjectiveBoard.BoardStep;
 import net.knightsandkings.knk.core.siege.SiegePhase;
 import net.knightsandkings.knk.core.siege.SiegeRuntimeLocks;
+import net.knightsandkings.knk.core.siege.AllianceResolver;
+import net.knightsandkings.knk.core.siege.CaptureCalculator;
+import net.knightsandkings.knk.core.siege.SiegeObjectiveBoard;
 import net.knightsandkings.knk.core.siege.SiegeSpawnOptions;
 import net.knightsandkings.knk.core.siege.SiegeSpawnOptions.SpawnOption;
 import net.knightsandkings.knk.core.siege.SiegeTitleRanks;
@@ -254,7 +258,7 @@ public final class SiegeService {
                     if (shuttingDown) return;
                     onRuntimeConfig(result, error, true);
                 }));
-        ticker = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 20L, 20L);
+        ticker = Bukkit.getScheduler().runTaskTimer(plugin, net.knightsandkings.knk.core.metrics.PluginMetrics.timed("siege.tick", this::tick), 20L, 20L);
         logger.info("[Siege] Runtime started (1 s ticker); fetching runtime config");
     }
 
@@ -486,6 +490,7 @@ public final class SiegeService {
                 continue;
             }
             prepareForMatch(player);
+            observers.forEach(o -> safely("memberReadiedAtHub", () -> o.memberReadiedAtHub(rt, scenario, player)));
             hub.ifPresent(location -> SiegeBukkit.teleport(player, location));
             player.sendMessage(SiegeMessages.info("You are at the hub of " + scenarioName(scenario)
                     + ". Your inventory and position are saved and will be restored after the siege."));
@@ -513,6 +518,9 @@ public final class SiegeService {
 
     private void onSplit(SiegeLobbyRuntime rt, KnkSiegeScenario scenario) {
         rt.setSplit(partition(rt, scenario, rt.mutableMembers()));
+        // Playtest 2026-10-24: spawn options are known from here on (the scenario's initial holdings).
+        rt.setPreMatchBoard(new SiegeObjectiveBoard(scenario, new CaptureCalculator(rt.machine().configuration()),
+                AllianceResolver.of(scenario)));
         rt.split().ifPresent(split -> split.forEach((teamId, players) -> {
             KnkSiegeTeam team = scenario.team(teamId).orElse(null);
             Component msg = SiegeMessages.prefixed(Component.text("You are on team ", SiegeMessages.INFO)
@@ -521,6 +529,18 @@ public final class SiegeService {
             players.forEach(p -> tell(p, msg));
             players.forEach(p -> observers.forEach(o -> safely("teamAssigned", () -> o.teamAssigned(rt, p, teamId, "split"))));
         }));
+        // The spawn picker opens once, here in the pre-game lobby, so everyone picks where they start; later
+        // changes go through the siege menu (or /siege spawn). No picker at the start any more.
+        for (UUID id : new ArrayList<>(rt.mutableMembers())) {
+            Player player = Bukkit.getPlayer(id);
+            SpawnScope scope = spawnScopeOf(id).orElse(null);
+            if (player == null || scope == null) continue;
+            if (SiegeSpawnOptions.pickerWorthOpening(scope.team(), scope.board())) {
+                offerSpawnPicker(player, scope);
+            } else {
+                SiegeSpawnOptions.defaultChoice(scope.team()).ifPresent(c -> scope.setChoice(id, c));
+            }
+        }
         notifyChanged(rt);
     }
 
@@ -541,7 +561,9 @@ public final class SiegeService {
         KnkSiegeScenario scenario = e.scenario();
         Map<Integer, List<UUID>> teams = currentTeams(rt, scenario);
         String token = rt.matchToken().orElseGet(() -> UUID.randomUUID().toString());
-        SiegeMatch match = new SiegeMatch(scenario, rt.machine().configuration(), token, teams);
+        // Playtest 2026-10-24: the spawn choices made at the hub (the picker opened at the team split) travel into
+        // the roster, and everyone starts at their choice - no picker at the start any more.
+        SiegeMatch match = new SiegeMatch(scenario, rt.machine().configuration(), token, teams, Map.copyOf(rt.preMatchSpawnChoices()));
         rt.setMatch(match);
 
         for (MemberView member : match.roster().members()) {
@@ -549,16 +571,14 @@ public final class SiegeService {
             if (player == null) continue;
             KnkSiegeTeam team = scenario.team(member.teamId()).orElse(null);
             if (team == null) continue;
-            SiegeSpawnOptions.resolveRespawn(team, match.board(), null)
+            player.closeInventory();
+            SiegeSpawnOptions.resolveRespawn(team, match.board(), match.roster().spawnChoice(member.playerId()).orElse(null))
                     .flatMap(o -> SiegeBukkit.toLocation(o.location()))
                     .ifPresent(location -> SiegeBukkit.teleport(player, location));
             player.showTitle(Title.title(Component.text("The siege begins!", NamedTextColor.GOLD),
                     Component.text("You fight for ", SiegeMessages.INFO).append(SiegeBukkit.teamComponent(team))));
             player.sendMessage(SiegeMessages.info("The match lasts " + SiegeMessages.duration(e.durationSeconds())
                     + ". Objectives: " + objectiveSummary(scenario) + ". Use /siege info for the state of the match."));
-            if (SiegeSpawnOptions.pickerWorthOpening(team, match.board())) {
-                offerSpawnPicker(player, match, team);
-            }
         }
 
         observers.forEach(o -> safely("matchStarted", () -> o.matchStarted(rt, match)));
@@ -821,6 +841,7 @@ public final class SiegeService {
         Integer userId = rt.userIds().remove(id);
         locks.releasePlayer(id);
         rt.machine().removeMember(id);
+        rt.preMatchSpawnChoices().remove(id);
         rt.split().ifPresent(split -> {
             Map<Integer, List<UUID>> copy = new LinkedHashMap<>();
             split.forEach((team, players) -> copy.put(team, players.stream().filter(p -> !p.equals(id)).toList()));
@@ -1130,20 +1151,58 @@ public final class SiegeService {
                 .findFirst();
     }
 
-    /** {@code /siege spawn}: the member's spawn options, clickable (chat fallback of {@code siege.spawnpoint}). */
-    public Reply spawnOptions(Player player) {
-        Optional<SiegeMatch> found = runningMatchOf(player.getUniqueId());
-        if (found.isEmpty()) return Reply.fail(SiegeMessages.bad("You are not in a running siege."));
-        SiegeMatch match = found.get();
-        KnkSiegeTeam team = match.teamOf(player.getUniqueId()).orElse(null);
-        if (team == null) return Reply.fail(SiegeMessages.bad("You have no team in this siege."));
-        return Reply.ok(spawnPickerMessage(match, team, player.getUniqueId()));
+    /**
+     * Where a member's spawn choice lives (playtest 2026-10-24): the running match's roster, or - from the team
+     * split until the start - the lobby's pre-match choices, against the scenario's initial holdings. The chat
+     * picker, {@code /siege spawn}, the respawn and the {@code siege.spawnpoint} menu all read it from here.
+     */
+    public record SpawnScope(SiegeLobbyRuntime lobby, SiegeMatch match, KnkSiegeTeam team, SiegeObjectiveBoard board) {
+        /** Before the start: a pick only sets where the member starts. */
+        public boolean preMatch() {
+            return match == null;
+        }
+
+        public Optional<SpawnChoice> choice(UUID playerId) {
+            return match != null ? match.roster().spawnChoice(playerId) : lobby.preMatchSpawnChoice(playerId);
+        }
+
+        void setChoice(UUID playerId, SpawnChoice choice) {
+            if (match != null) match.roster().setSpawnChoice(playerId, choice);
+            else lobby.preMatchSpawnChoices().put(playerId, choice);
+        }
+
+        /** The member's options, their current choice marked. */
+        public List<SpawnOption> options(UUID playerId) {
+            return SiegeSpawnOptions.forTeam(team, board, choice(playerId).orElse(null));
+        }
     }
 
-    private Component spawnPickerMessage(SiegeMatch match, KnkSiegeTeam team, UUID playerId) {
-        List<SpawnOption> options = SiegeSpawnOptions.forTeam(team, match.board(),
-                match.roster().spawnChoice(playerId).orElse(null));
-        Component msg = SiegeMessages.info("Choose where you spawn:");
+    /** The member's spawn scope: their running match, else their lobby at the hub once teams are split. Empty otherwise. */
+    public Optional<SpawnScope> spawnScopeOf(UUID playerId) {
+        Optional<SiegeMatch> running = runningMatchOf(playerId);
+        if (running.isPresent()) {
+            SiegeMatch match = running.get();
+            return match.teamOf(playerId).map(team -> new SpawnScope(lobbyOf(playerId).orElse(null), match, team, match.board()));
+        }
+        Optional<SiegeLobbyRuntime> hub = lobbyOf(playerId).filter(rt -> rt.phase() == SiegePhase.HUB);
+        if (hub.isEmpty()) return Optional.empty();
+        SiegeLobbyRuntime rt = hub.get();
+        Optional<KnkSiegeTeam> team = rt.splitTeamOf(playerId);
+        Optional<SiegeObjectiveBoard> board = rt.preMatchBoard();
+        if (team.isEmpty() || board.isEmpty()) return Optional.empty();
+        return Optional.of(new SpawnScope(rt, null, team.get(), board.get()));
+    }
+
+    /** {@code /siege spawn}: the member's spawn options, clickable (chat fallback of {@code siege.spawnpoint}). */
+    public Reply spawnOptions(Player player) {
+        Optional<SpawnScope> found = spawnScopeOf(player.getUniqueId());
+        if (found.isEmpty()) return Reply.fail(SiegeMessages.bad("You are not in a siege with a team yet."));
+        return Reply.ok(spawnPickerMessage(found.get(), player.getUniqueId()));
+    }
+
+    private Component spawnPickerMessage(SpawnScope scope, UUID playerId) {
+        List<SpawnOption> options = scope.options(playerId);
+        Component msg = SiegeMessages.info(scope.preMatch() ? "Choose where you start the siege:" : "Choose where you spawn:");
         for (SpawnOption option : options) {
             String arg = (option.kind() == SpawnKind.OBJECTIVE ? "objective:" : "spawnpoint:") + option.id();
             String label = (option.kind() == SpawnKind.OBJECTIVE ? "Objective " : "Spawnpoint ")
@@ -1160,32 +1219,32 @@ public final class SiegeService {
         return msg;
     }
 
-    private void offerSpawnPicker(Player player, SiegeMatch match, KnkSiegeTeam team) {
+    private void offerSpawnPicker(Player player, SpawnScope scope) {
         // Playtest 2026-09-26: the choice is remembered; ignoring the picker keeps the team default, so
         // afterRespawn doesn't ask again.
-        if (match.roster().spawnChoice(player.getUniqueId()).isEmpty()) {
-            SiegeSpawnOptions.defaultChoice(team).ifPresent(c -> match.roster().setSpawnChoice(player.getUniqueId(), c));
+        UUID id = player.getUniqueId();
+        if (scope.choice(id).isEmpty()) {
+            SiegeSpawnOptions.defaultChoice(scope.team()).ifPresent(c -> scope.setChoice(id, c));
         }
-        match.openSpawnPick(player.getUniqueId(), SPAWN_PICK_WINDOW.toNanos());
+        if (scope.match() != null) scope.match().openSpawnPick(id, SPAWN_PICK_WINDOW.toNanos());
         // Phase 8b: the siege.spawnpoint menu when it's available, else the clickable chat list.
         if (menuHooks != null && menuHooks.openSpawnPicker(player)) return;
-        player.sendMessage(spawnPickerMessage(match, team, player.getUniqueId()));
+        player.sendMessage(spawnPickerMessage(scope, id));
     }
 
     /**
-     * {@code /siege spawn <option>}: sets the member's respawn choice (DESIGN §6.6). Right after match
-     * start or a respawn it also teleports there; otherwise it only changes where they respawn next.
-     * Option: {@code spawnpoint:<id>}, {@code objective:<id>}, a 1-based number from the list, or a name.
+     * {@code /siege spawn <option>}: sets the member's respawn choice (DESIGN §6.6). Before the start (from the
+     * team split) it is where they start; right after a respawn it also teleports there; otherwise it only
+     * changes where they respawn next. Option: {@code spawnpoint:<id>}, {@code objective:<id>}, a 1-based
+     * number from the list, or a name.
      */
     public Reply spawn(Player player, String optionText) {
         if (optionText == null || optionText.isBlank()) return spawnOptions(player);
-        Optional<SiegeMatch> found = runningMatchOf(player.getUniqueId());
-        if (found.isEmpty()) return Reply.fail(SiegeMessages.bad("You are not in a running siege."));
-        SiegeMatch match = found.get();
-        KnkSiegeTeam team = match.teamOf(player.getUniqueId()).orElse(null);
-        if (team == null) return Reply.fail(SiegeMessages.bad("You have no team in this siege."));
+        Optional<SpawnScope> found = spawnScopeOf(player.getUniqueId());
+        if (found.isEmpty()) return Reply.fail(SiegeMessages.bad("You are not in a siege with a team yet."));
+        SpawnScope scope = found.get();
 
-        List<SpawnOption> options = SiegeSpawnOptions.forTeam(team, match.board(), null);
+        List<SpawnOption> options = SiegeSpawnOptions.forTeam(scope.team(), scope.board(), null);
         Optional<SpawnOption> option = resolveSpawnOption(options, optionText.trim());
         if (option.isEmpty()) {
             if (optionText.toLowerCase(Locale.ROOT).startsWith("objective:")) {
@@ -1196,8 +1255,12 @@ public final class SiegeService {
         if (!option.get().available()) {
             return Reply.fail(SiegeMessages.bad("This objective is being captured! Pick another spawn."));
         }
-        match.roster().setSpawnChoice(player.getUniqueId(), option.get().choice());
+        scope.setChoice(player.getUniqueId(), option.get().choice());
         String name = SiegeDisplayText.clean(option.get().name(), "#" + option.get().id());
+        if (scope.preMatch()) {
+            return Reply.ok(SiegeMessages.good("You will start the siege at " + name + " and respawn there too."));
+        }
+        SiegeMatch match = scope.match();
         if (match.consumeSpawnPick(player.getUniqueId()) && !player.isDead()) {
             Optional<Location> target = SiegeBukkit.toLocation(option.get().location());
             if (target.isPresent()) {
@@ -1378,12 +1441,12 @@ public final class SiegeService {
         long delay = Math.max(1, found.get().configuration().spawnPickerDelayTicks());
         later(delay, () -> {
             if (!player.isOnline() || player.isDead()) return;
-            runningMatchOf(player.getUniqueId()).ifPresent(match -> match.teamOf(player.getUniqueId()).ifPresent(team -> {
-                if (match.roster().spawnChoice(player.getUniqueId()).isEmpty()
-                        && SiegeSpawnOptions.pickerWorthOpening(team, match.board())) {
-                    offerSpawnPicker(player, match, team);
+            spawnScopeOf(player.getUniqueId()).filter(scope -> !scope.preMatch()).ifPresent(scope -> {
+                if (scope.choice(player.getUniqueId()).isEmpty()
+                        && SiegeSpawnOptions.pickerWorthOpening(scope.team(), scope.board())) {
+                    offerSpawnPicker(player, scope);
                 }
-            }));
+            });
         });
     }
 

@@ -4,7 +4,11 @@ import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.paper.events.GateDoorDamageEvent;
 import net.knightsandkings.knk.paper.events.GateDoorIgniteEvent;
 import net.knightsandkings.knk.paper.events.GateDoorInteractEvent;
+import net.knightsandkings.knk.paper.gates.GateCleaving;
 import net.knightsandkings.knk.paper.gates.GateDoorHitService;
+import net.knightsandkings.knk.paper.gates.GateFireAspect;
+import net.knightsandkings.knk.paper.gates.GateFreezeExtinguisher;
+import net.knightsandkings.knk.paper.gates.GateMeleeDamage;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Entity;
@@ -23,6 +27,7 @@ import org.bukkit.event.block.BlockIgniteEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.entity.ProjectileHitEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.inventory.EquipmentSlot;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -43,9 +48,68 @@ public class GateEventListener implements Listener {
     };
 
     private final GateDoorHitService hitService;
+    private final GateFreezeExtinguisher freezeExtinguisher;
+    private final GateMeleeDamage meleeDamage;
+    private final GateFireAspect fireAspect;
+    private final GateCleaving cleaving;
 
     public GateEventListener(GateDoorHitService hitService) {
+        this(hitService, null);
+    }
+
+    /** @param freezeExtinguisher puts a burning block out when a defender hits it with a freeze weapon; null = never */
+    public GateEventListener(GateDoorHitService hitService, GateFreezeExtinguisher freezeExtinguisher) {
+        this(hitService, freezeExtinguisher, null);
+    }
+
+    /**
+     * @param meleeDamage the damage a player's held item does to a gate on a click or a break attempt; null =
+     *                    the flat amount for the cause (GateDamageConsequenceListener)
+     */
+    public GateEventListener(GateDoorHitService hitService, GateFreezeExtinguisher freezeExtinguisher, GateMeleeDamage meleeDamage) {
+        this(hitService, freezeExtinguisher, meleeDamage, null, null);
+    }
+
+    /**
+     * @param fireAspect a melee hit with a Fire Aspect weapon may set the door block alight; null = never
+     * @param cleaving   the Cleaving custom enchantment: boosted melee hits and the charged right-click strike;
+     *                   null = the enchantment does nothing to gates
+     */
+    public GateEventListener(GateDoorHitService hitService, GateFreezeExtinguisher freezeExtinguisher, GateMeleeDamage meleeDamage,
+                             GateFireAspect fireAspect, GateCleaving cleaving) {
         this.hitService = hitService;
+        this.freezeExtinguisher = freezeExtinguisher;
+        this.meleeDamage = meleeDamage;
+        this.fireAspect = fireAspect;
+        this.cleaving = cleaving;
+    }
+
+    /** What a player's melee hit does to a gate: their held item's damage, or null for the cause's default. */
+    private Double meleeDamageOf(Player player) {
+        return meleeDamage == null ? null : meleeDamage.damageOf(player);
+    }
+
+    /**
+     * {@link #meleeDamageOf} times the Cleaving multiplier of the held weapon (1 without it). With the flat
+     * per-cause default (no GateMeleeDamage) a cleaving weapon multiplies that default instead.
+     */
+    private Double boostedMeleeDamageOf(Player player) {
+        Double base = meleeDamageOf(player);
+        if (cleaving == null) {
+            return base;
+        }
+        double multiplier = cleaving.damageMultiplierOf(player);
+        if (multiplier == 1.0) {
+            return base;
+        }
+        return (base == null ? 10.0 : base) * multiplier;
+    }
+
+    /** A melee hit landed on a door block: a Fire Aspect weapon may set it alight (its own roll). */
+    private void maybeIgniteByFireAspect(CachedGateDoor gate, Player player, Block block, BlockFace face) {
+        if (fireAspect != null && fireAspect.ignites(player)) {
+            hitService.handleIgnite(gate, player, block, GateDoorIgniteEvent.Cause.FIRE_ASPECT, face);
+        }
     }
 
     /**
@@ -77,7 +141,8 @@ public class GateEventListener implements Listener {
                 .color(NamedTextColor.RED)
         );
 
-        hitService.handleDamage(gate, player, block, GateDoorDamageEvent.Cause.BLOCK_BREAK);
+        hitService.handleDamage(gate, player, block, GateDoorDamageEvent.Cause.BLOCK_BREAK, boostedMeleeDamageOf(player));
+        maybeIgniteByFireAspect(gate, player, block, null);
     }
 
     /**
@@ -149,7 +214,7 @@ public class GateEventListener implements Listener {
 
         GateDoorIgniteEvent.Cause igniteCause = resolveIgniteCause(event.getEntity());
         if (igniteCause != null) {
-            hitService.handleIgnite(gate, shooter, hitBlock, igniteCause);
+            hitService.handleIgnite(gate, shooter, hitBlock, igniteCause, event.getHitBlockFace());
         }
     }
 
@@ -157,13 +222,13 @@ public class GateEventListener implements Listener {
      * Determine whether a projectile that just hit a gate door block should set it on fire:
      * a fire charge (SmallFireball) always does, and any other projectile counts if it is
      * currently burning (Entity.getFireTicks() > 0 - true for an arrow shot with Flame, or one
-     * that flew through fire/lava en route).
+     * that flew through fire/lava en route) or shows the flames (isVisualFire).
      */
     private static GateDoorIgniteEvent.Cause resolveIgniteCause(Entity projectileEntity) {
         if (projectileEntity instanceof Fireball) {
             return GateDoorIgniteEvent.Cause.FIRE_CHARGE;
         }
-        if (projectileEntity != null && projectileEntity.getFireTicks() > 0) {
+        if (projectileEntity != null && (projectileEntity.getFireTicks() > 0 || projectileEntity.isVisualFire())) {
             return GateDoorIgniteEvent.Cause.FLAMING_PROJECTILE;
         }
         return null;
@@ -205,7 +270,8 @@ public class GateEventListener implements Listener {
             }
 
             event.setCancelled(true);
-            hitService.handleIgnite(gate, event.getPlayer(), neighbor, cause);
+            // The ignited block is the free cell next to the door block: that is the side to draw the fire on.
+            hitService.handleIgnite(gate, event.getPlayer(), neighbor, cause, face.getOppositeFace());
             return;
         }
     }
@@ -228,7 +294,11 @@ public class GateEventListener implements Listener {
      * (consumed by GatePassThroughConsequenceListener, which owns the pass-through permission
      * check - knk.gate.open and knk.gate.close are for the manual /knk gate open|close commands
      * and are unrelated to pass-through, so they no longer gate detection here), left-click punch
-     * as a melee damage source.
+     * as a melee damage source (boosted by a Cleaving weapon, and with a Fire Aspect weapon's chance of
+     * setting the block alight) - and, for a defender holding a freeze weapon, as the hit that puts out
+     * the block's fire (GateFreezeExtinguisher). A right-click with a Cleaving weapon whose charged strike is
+     * ready is that strike instead of a pass-through click (GateCleaving); on cooldown, or when the hit
+     * doesn't count, the click goes on as usual.
      */
     @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
     public void onPlayerInteract(PlayerInteractEvent event) {
@@ -245,12 +315,21 @@ public class GateEventListener implements Listener {
         Player player = event.getPlayer();
 
         if (event.getAction() == Action.RIGHT_CLICK_BLOCK) {
+            if (cleaving != null && event.getHand() != EquipmentSlot.OFF_HAND
+                && cleaving.tryStrike(player, gate, clickedBlock, meleeDamageOf(player)) == GateCleaving.Strike.STRUCK) {
+                event.setCancelled(true);
+                return;
+            }
             GateDoorInteractEvent interactEvent = hitService.handleInteract(gate, player, clickedBlock);
             if (interactEvent != null && interactEvent.isCancelled()) {
                 event.setCancelled(true);
             }
         } else if (event.getAction() == Action.LEFT_CLICK_BLOCK) {
-            hitService.handleDamage(gate, player, clickedBlock, GateDoorDamageEvent.Cause.LEFT_CLICK);
+            hitService.handleDamage(gate, player, clickedBlock, GateDoorDamageEvent.Cause.LEFT_CLICK, boostedMeleeDamageOf(player));
+            maybeIgniteByFireAspect(gate, player, clickedBlock, event.getBlockFace());
+            if (freezeExtinguisher != null) {
+                freezeExtinguisher.onHit(player, gate, clickedBlock);
+            }
         }
     }
 }

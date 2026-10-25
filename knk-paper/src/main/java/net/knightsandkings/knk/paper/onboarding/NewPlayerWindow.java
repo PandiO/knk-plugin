@@ -9,9 +9,10 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * A brand-new player's first minutes on the server (KNG-128). {@code PlayerListener} marks an account
- * the API created at this join (the same {@code isNewUser} signal as the first-join kits, KNG-81);
- * then:
+ * A brand-new player's first minutes on the server (KNG-128). {@code PlayerListener} marks a player's
+ * first join: an account the API created at this join (the same {@code isNewUser} signal as the
+ * first-join kits, KNG-81), or an account that already existed, made on the website, whose player the
+ * server has never seen (KNG-214, {@link #isFirstJoin}); then:
  * <ul>
  *   <li>{@code UserAccountListener} sends the first-join welcome instead of "Welcome back", once
  *   ({@link #takeFirstJoinWelcome});</li>
@@ -32,7 +33,19 @@ public final class NewPlayerWindow {
         this.quiet = quiet == null || quiet.isNegative() ? Duration.ZERO : quiet;
     }
 
-    /** The account was created at this join. A relog in the same server session keeps the first time. */
+    /**
+     * Whether this join is the player's first (KNG-214): the API created the account at this join
+     * (game-first sign-up), or the account was made on the website first (web-first invite, or
+     * game-first through {@code /link}) and the server has no player data for them yet. A stranger
+     * refused at pre-login leaves no player data, so their admitted join still counts as the first.
+     * An old account whose player data was deleted gets one more first join; the API grants the
+     * kits only once, so that costs a welcome and a quiet period, nothing else.
+     */
+    public static boolean isFirstJoin(boolean accountCreatedAtThisJoin, boolean hasPlayedBefore) {
+        return accountCreatedAtThisJoin || !hasPlayedBefore;
+    }
+
+    /** The player's first join (see {@link #isFirstJoin}). A relog in the same server session keeps the first time. */
     public void markFirstJoin(UUID playerId) {
         firstJoins.putIfAbsent(playerId, clock.instant());
     }

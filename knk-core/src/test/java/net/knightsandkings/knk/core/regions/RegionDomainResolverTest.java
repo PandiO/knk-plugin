@@ -311,4 +311,50 @@ class RegionDomainResolverTest {
 
         assertTrue(resolver.getDomainByRegionIdNoRefresh("domain_16").isEmpty());
     }
+
+    // ===== KNG-256: a domain's sub-regions resolve to the same domain =====
+
+    private static DomainRegionSummary garrison() {
+        return new DomainRegionSummary(11, "Garrison", "", "domain_11", true, false, "GateStructure", List.of(), null,
+            List.of("domain_11_sub_4", "domain_11_sub_5"));
+    }
+
+    @Test
+    void aSubRegionResolvesToItsDomain_AndTheDomainCountsOnce() {
+        FakeDomainsApi api = new FakeDomainsApi();
+        api.answer = q -> FakeDomainsApi.of(garrison());
+        RegionDomainResolver resolver = new RegionDomainResolver(null, null, null, api, null, null, null, Duration.ofMinutes(1));
+
+        RegionSnapshot fromTower = resolver.resolveRegionsFromApi(Set.of("domain_11_sub_4")).join();
+        RegionSnapshot houseAndTower = resolver.resolveRegions(Set.of("domain_11", "domain_11_sub_4", "domain_11_sub_5"));
+
+        assertEquals(11, fromTower.domains().iterator().next().id());
+        assertEquals(1, houseAndTower.domains().size());
+        assertEquals(1, api.queries.size());
+    }
+
+    @Test
+    void aSubRegionLookupIsNotForgottenAsUnanswered() {
+        FakeDomainsApi api = new FakeDomainsApi();
+        api.answer = q -> FakeDomainsApi.of(garrison());
+        RegionDomainResolver resolver = new RegionDomainResolver(null, null, null, api, null, null, null, Duration.ofSeconds(-1));
+        resolver.resolveRegionsFromApi(Set.of("domain_11_sub_5")).join();
+
+        resolver.refreshIfStale(List.of("domain_11_sub_5")).join();
+
+        assertTrue(resolver.getDomainByRegionIdNoRefresh("domain_11_sub_5").isPresent());
+    }
+
+    @Test
+    void snapshotsAreEqualByDomainId() {
+        DomainSnapshot main = districtSnapshot(7, "domain_7");
+        DomainSnapshot changed = new DomainSnapshot(7, "Renamed", "", "domain_7", false, true, "District",
+            Set.of(), Set.of(), Set.of(), Set.of());
+
+        assertEquals(main, changed);
+        assertEquals(main.hashCode(), changed.hashCode());
+        assertFalse(main.equals(districtSnapshot(8, "domain_7")));
+        assertEquals(new DomainSnapshot(null, "a", "", "Region", true, true, "Town", Set.of(), Set.of(), Set.of(), Set.of()),
+            new DomainSnapshot(null, "b", "", "region", true, true, "Town", Set.of(), Set.of(), Set.of(), Set.of()));
+    }
 }

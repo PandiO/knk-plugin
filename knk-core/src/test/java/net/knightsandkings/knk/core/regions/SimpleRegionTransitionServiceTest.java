@@ -75,6 +75,21 @@ class SimpleRegionTransitionServiceTest {
         assertEquals(Optional.of("You are now entering Docks * Cinix *"), decision.getMessage());
     }
 
+    @Test
+    void whitespaceAroundStoredDomainNamesDoesNotReachTheMessage() {
+        // A district name stored as "Residential District\n" drew a missing-glyph box between the name and
+        // the town in the action bar; the snapshot strips it so the message stays clean.
+        register(town(1, "Cinix ", "town_cinix", true, true));
+        register(district(2, "Residential District\n", "district_res", true, true, "Cinix "));
+        SimpleRegionTransitionService service = new SimpleRegionTransitionService(resolver);
+
+        RegionTransitionDecision decision = service.handleRegionTransition(
+            PLAYER, Set.of("town_cinix"), Set.of("town_cinix", "district_res"));
+
+        assertTrue(decision.isMovementAllowed());
+        assertEquals(Optional.of("You are now entering Residential District * Cinix *"), decision.getMessage());
+    }
+
     // === Exit denials ===
 
     @Test

@@ -28,7 +28,8 @@ public record KnkConfig(
     WorldAnalyticsConfig worldAnalytics,
     RegionHttpConfig regionHttp,
     WebConfig web,
-    OnboardingConfig onboarding
+    OnboardingConfig onboarding,
+    MetricsConfig metrics
 ) {
     public KnkConfig {
         // No teleport: block (e.g. an older config.yml) means the DESIGN §3.11 defaults.
@@ -45,6 +46,18 @@ public record KnkConfig(
         web = web != null ? web : WebConfig.defaults();
         // No onboarding: block (an older config.yml): the KNG-128/129 defaults.
         onboarding = onboarding != null ? onboarding : OnboardingConfig.defaults();
+        // No metrics: block (an older config.yml): the endpoint stays off (KNG-232).
+        metrics = metrics != null ? metrics : MetricsConfig.defaults();
+    }
+
+    /** Without a metrics section: its defaults (performance metrics endpoint off, KNG-232). */
+    public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
+                     PrivateMessagesConfig privateMessages, TeleportSettings teleport, DiscoveryConfig discovery,
+                     NavigationConfig navigation, StatisticsConfig statistics, TelemetryConfig telemetry,
+                     WorldAnalyticsConfig worldAnalytics, RegionHttpConfig regionHttp, WebConfig web,
+                     OnboardingConfig onboarding) {
+        this(api, cache, account, messages, privateMessages, teleport, discovery, navigation, statistics,
+            telemetry, worldAnalytics, regionHttp, web, onboarding, MetricsConfig.defaults());
     }
 
     /** Without an onboarding section: its defaults (new-player onboarding, KNG-128/129). */
@@ -120,6 +133,41 @@ public record KnkConfig(
     public KnkConfig(ApiConfig api, CacheConfig cache, AccountConfig account, MessagesConfig messages,
                      PrivateMessagesConfig privateMessages, TeleportSettings teleport, DiscoveryConfig discovery) {
         this(api, cache, account, messages, privateMessages, teleport, discovery, NavigationConfig.defaults());
+    }
+
+    /**
+     * Performance metrics endpoint (KNG-232): a Prometheus {@code /metrics} on its own port with server, JVM,
+     * container, API-call and task figures ({@code paper/metrics/MetricsHttpServer}). Off by default. A
+     * non-loopback {@code bindAddress} requires a {@code token} (the scraper sends it as a bearer token).
+     */
+    public record MetricsConfig(boolean enabled, String bindAddress, int port, String token, int sampleSeconds) {
+        public static final String DEFAULT_BIND_ADDRESS = "127.0.0.1";
+        public static final int DEFAULT_PORT = 9225;
+        public static final int DEFAULT_SAMPLE_SECONDS = 5;
+
+        public MetricsConfig {
+            bindAddress = bindAddress == null || bindAddress.isBlank() ? DEFAULT_BIND_ADDRESS : bindAddress.trim();
+            token = token == null ? "" : token.trim();
+        }
+
+        public static MetricsConfig defaults() {
+            return new MetricsConfig(false, DEFAULT_BIND_ADDRESS, DEFAULT_PORT, "", DEFAULT_SAMPLE_SECONDS);
+        }
+
+        public void validate() {
+            if (port < 1 || port > 65535) {
+                throw new IllegalArgumentException("metrics.port must be between 1 and 65535 (got: " + port + ")");
+            }
+            if (sampleSeconds < 1 || sampleSeconds > 60) {
+                throw new IllegalArgumentException("metrics.sample-seconds must be between 1 and 60 (got: " + sampleSeconds + ")");
+            }
+            if (enabled) {
+                String problem = net.knightsandkings.knk.core.metrics.MetricsHttpPolicy.problem(bindAddress, token);
+                if (problem != null) {
+                    throw new IllegalArgumentException(problem);
+                }
+            }
+        }
     }
 
     /**
@@ -327,6 +375,7 @@ public record KnkConfig(
         worldAnalytics.validate();
         regionHttp.validate();
         onboarding.validate();
+        metrics.validate();
     }
     
     public record CacheConfig(

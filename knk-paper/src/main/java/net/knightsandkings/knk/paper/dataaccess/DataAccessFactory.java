@@ -151,17 +151,19 @@ public class DataAccessFactory {
 
     /**
      * Create an ItemBlueprintsDataAccess gateway with configured settings.
+     * <p>
+     * KNG-262: like {@link #createPermissionsDataAccess}, the TTL comes from config.yml's own
+     * entities.itemBlueprints block (default 20 minutes) instead of the global cache TTL. Nothing
+     * invalidates a blueprint when it is edited in the web app, so an edit reaches the game after
+     * at most that TTL, or at once with {@code /knk cache refresh}.
      *
-     * @param ttl Cache TTL duration
      * @param itemBlueprintsQueryApi ItemBlueprints query API port
      * @return Configured ItemBlueprintsDataAccess instance
      */
-    public ItemBlueprintsDataAccess createItemBlueprintsDataAccess(
-        Duration ttl,
-        ItemBlueprintsQueryApi itemBlueprintsQueryApi
-    ) {
-        DataAccessSettings settings = buildSettings(entitySettings.itemBlueprints(), "ItemBlueprints");
-        return new ItemBlueprintsDataAccess(ttl, itemBlueprintsQueryApi, settings);
+    public ItemBlueprintsDataAccess createItemBlueprintsDataAccess(ItemBlueprintsQueryApi itemBlueprintsQueryApi) {
+        KnkConfig.EntitySettings entityConfig = entitySettings.itemBlueprints();
+        DataAccessSettings settings = buildSettings(entityConfig, "ItemBlueprints");
+        return new ItemBlueprintsDataAccess(entityConfig.ttl(), itemBlueprintsQueryApi, settings);
     }
 
     /**
@@ -275,10 +277,9 @@ public class DataAccessFactory {
      * Unlike every other create*DataAccess method here, the TTL is drawn directly from
      * config.yml's entities.permissions block (entitySettings.permissions().ttl()) rather than
      * being passed in by the caller as the global cache TTL - permission checks need their own
-     * short TTL (see config.yml's comment on the permissions block), and every other entity's
-     * ttl-minutes/-seconds value is actually unused dead config today (each caller in
-     * KnKPlugin.java passes config.cache().ttl(), the global default, instead) - a pre-existing
-     * gap worth a follow-up cleanup, not fixed here since it's out of this feature's scope.
+     * short TTL (see config.yml's comment on the permissions block). Siege and item blueprints
+     * (KNG-262) do the same; every other entity's ttl-minutes/-seconds value is still unused
+     * (its caller in KnKPlugin.java passes config.cache().ttl(), the global default) - KNG-262.
      *
      * @param permissionsApi Permissions API port
      * @return Configured PermissionsDataAccess instance

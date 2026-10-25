@@ -8,13 +8,14 @@ import org.bukkit.event.Listener;
 import net.knightsandkings.knk.core.analytics.WorldAnalyticsWindow;
 import net.knightsandkings.knk.core.domain.discovery.DiscoveryGrant;
 import net.knightsandkings.knk.core.domain.discovery.DiscoveryGrantResult;
-import net.knightsandkings.knk.paper.events.OnRegionEnterEvent;
-import net.knightsandkings.knk.paper.events.OnRegionLeaveEvent;
+import net.knightsandkings.knk.paper.events.OnDomainEnterEvent;
+import net.knightsandkings.knk.paper.events.OnDomainLeaveEvent;
 
 /**
- * Domain interactions (KNG-34 link 7, DESIGN.md D11): WorldGuard region entries/exits from
- * {@code WorldGuardRegionTracker}'s {@link OnRegionEnterEvent}/{@link OnRegionLeaveEvent} (by region id;
- * the API keeps the regions that are domains) and discovery grants (by domain id, via
+ * Domain interactions (KNG-34 link 7, DESIGN.md D11): domain entries/exits from
+ * {@code WorldGuardRegionTracker}'s {@link OnDomainEnterEvent}/{@link OnDomainLeaveEvent} (KNG-256: once per domain,
+ * so moving between a domain's main region and its sub-regions counts nothing; sent by the domain's main region id,
+ * which the API resolves) and discovery grants (by domain id, via
  * {@code DiscoveryEffects.addGrantObserver}). The window counts them and the day's distinct players
  * (in memory only). Main thread.
  */
@@ -27,15 +28,19 @@ public final class DomainInteractionRecorder implements Listener {
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
-    public void onRegionEnter(OnRegionEnterEvent event) {
+    public void onDomainEnter(OnDomainEnterEvent event) {
         Player player = event.getPlayer();
-        window.regionEntered(event.getRegionId(), player == null ? null : player.getUniqueId());
+        if (event.getDomain().wgRegionId() != null) {
+            window.regionEntered(event.getDomain().wgRegionId(), player == null ? null : player.getUniqueId());
+        }
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
-    public void onRegionLeave(OnRegionLeaveEvent event) {
+    public void onDomainLeave(OnDomainLeaveEvent event) {
         Player player = event.getPlayer();
-        window.regionLeft(event.getRegionId(), player == null ? null : player.getUniqueId());
+        if (event.getDomain().wgRegionId() != null) {
+            window.regionLeft(event.getDomain().wgRegionId(), player == null ? null : player.getUniqueId());
+        }
     }
 
     /** Every domain the player was just granted (late replays included: they are discoveries of today). */

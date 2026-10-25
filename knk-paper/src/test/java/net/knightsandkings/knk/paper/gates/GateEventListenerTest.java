@@ -253,6 +253,65 @@ class GateEventListenerTest {
     }
 
     @Test
+    void flamingArrowIgnitionRemembersTheStruckFace() {
+        Block block = doorBlock();
+        Projectile projectile = mock(Projectile.class);
+        when(projectile.getShooter()).thenReturn(mock(LivingEntity.class));
+        when(projectile.getFireTicks()).thenReturn(100);
+
+        ProjectileHitEvent event = mock(ProjectileHitEvent.class);
+        when(event.getHitBlock()).thenReturn(block);
+        when(event.getHitBlockFace()).thenReturn(BlockFace.SOUTH);
+        when(event.getEntity()).thenReturn(projectile);
+
+        listener.onProjectileHit(event);
+
+        ArgumentCaptor<org.bukkit.event.Event> captor = ArgumentCaptor.forClass(org.bukkit.event.Event.class);
+        verify(pluginManager, times(2)).callEvent(captor.capture());
+        GateDoorIgniteEvent igniteEvent = captor.getAllValues().stream()
+            .filter(GateDoorIgniteEvent.class::isInstance)
+            .map(GateDoorIgniteEvent.class::cast)
+            .findFirst()
+            .orElseThrow();
+        assertEquals(BlockFace.SOUTH, igniteEvent.getHitFace());
+    }
+
+    @Test
+    void anArrowShowingFlamesIgnitesEvenWhenItsFireTicksReadZero() {
+        Block block = doorBlock();
+        Projectile projectile = mock(Projectile.class);
+        when(projectile.getShooter()).thenReturn(mock(LivingEntity.class));
+        when(projectile.getFireTicks()).thenReturn(0);
+        when(projectile.isVisualFire()).thenReturn(true);
+
+        ProjectileHitEvent event = mock(ProjectileHitEvent.class);
+        when(event.getHitBlock()).thenReturn(block);
+        when(event.getEntity()).thenReturn(projectile);
+
+        listener.onProjectileHit(event);
+
+        ArgumentCaptor<org.bukkit.event.Event> captor = ArgumentCaptor.forClass(org.bukkit.event.Event.class);
+        verify(pluginManager, times(2)).callEvent(captor.capture());
+        assertTrue(captor.getAllValues().stream().anyMatch(GateDoorIgniteEvent.class::isInstance));
+    }
+
+    @Test
+    void anArrowWithoutFlamesOnlyDamages() {
+        Block block = doorBlock();
+        Projectile projectile = mock(Projectile.class);
+        when(projectile.getShooter()).thenReturn(mock(LivingEntity.class));
+
+        ProjectileHitEvent event = mock(ProjectileHitEvent.class);
+        when(event.getHitBlock()).thenReturn(block);
+        when(event.getEntity()).thenReturn(projectile);
+
+        listener.onProjectileHit(event);
+
+        verify(pluginManager, times(1)).callEvent(any(GateDoorDamageEvent.class));
+        verify(pluginManager, never()).callEvent(any(GateDoorIgniteEvent.class));
+    }
+
+    @Test
     void fireChargeHitIgnitesTheDoorBlock() {
         Block block = doorBlock();
         LivingEntity shooter = mock(LivingEntity.class);
@@ -302,6 +361,8 @@ class GateEventListenerTest {
         assertEquals(GateDoorIgniteEvent.Cause.FLINT_AND_STEEL, captor.getValue().getCause());
         assertSame(doorBlock, captor.getValue().getHitBlock());
         assertSame(player, captor.getValue().getCausingEntity());
+        // the door block lies WEST of the free cell that caught fire, so the fire belongs on the door's EAST side
+        assertEquals(BlockFace.EAST, captor.getValue().getHitFace());
     }
 
     @Test
@@ -431,5 +492,298 @@ class GateEventListenerTest {
         verify(pluginManager).callEvent(captor.capture());
         assertEquals(GateDoorDamageEvent.Cause.LEFT_CLICK, captor.getValue().getCause());
         assertSame(player, captor.getValue().getCausingEntity());
+    }
+
+    // ===== freeze weapon vs fire =====
+
+    @Test
+    void leftClickOnADoorBlockLetsTheFreezeExtinguisherHaveAGo() {
+        GateFreezeExtinguisher extinguisher = mock(GateFreezeExtinguisher.class);
+        GateEventListener withExtinguisher = new GateEventListener(new GateDoorHitService(gateManager), extinguisher);
+        Block block = doorBlock();
+        Player player = mock(Player.class);
+        when(player.getGameMode()).thenReturn(GameMode.SURVIVAL);
+
+        PlayerInteractEvent event = mock(PlayerInteractEvent.class);
+        when(event.getClickedBlock()).thenReturn(block);
+        when(event.getPlayer()).thenReturn(player);
+        when(event.getAction()).thenReturn(Action.LEFT_CLICK_BLOCK);
+
+        withExtinguisher.onPlayerInteract(event);
+
+        verify(extinguisher).onHit(player, gate, block);
+    }
+
+    @Test
+    void rightClickAndOtherBlocksNeverReachTheFreezeExtinguisher() {
+        GateFreezeExtinguisher extinguisher = mock(GateFreezeExtinguisher.class);
+        GateEventListener withExtinguisher = new GateEventListener(new GateDoorHitService(gateManager), extinguisher);
+        Player player = mock(Player.class);
+        Block door = doorBlock();
+        Block other = unrelatedBlock();
+
+        PlayerInteractEvent rightClick = mock(PlayerInteractEvent.class);
+        when(rightClick.getClickedBlock()).thenReturn(door);
+        when(rightClick.getPlayer()).thenReturn(player);
+        when(rightClick.getAction()).thenReturn(Action.RIGHT_CLICK_BLOCK);
+        withExtinguisher.onPlayerInteract(rightClick);
+
+        PlayerInteractEvent elsewhere = mock(PlayerInteractEvent.class);
+        when(elsewhere.getClickedBlock()).thenReturn(other);
+        when(elsewhere.getPlayer()).thenReturn(player);
+        when(elsewhere.getAction()).thenReturn(Action.LEFT_CLICK_BLOCK);
+        withExtinguisher.onPlayerInteract(elsewhere);
+
+        verifyNoInteractions(extinguisher);
+    }
+
+    // ===== the held item's damage =====
+
+    @Test
+    void leftClickUsesTheHeldItemsDamage() {
+        GateEventListener withMelee = new GateEventListener(new GateDoorHitService(gateManager), null,
+            new GateMeleeDamage(1.0, p -> 8.0, item -> 5));
+        Block block = doorBlock();
+        Player player = mock(Player.class);
+        when(player.getGameMode()).thenReturn(GameMode.SURVIVAL);
+        when(player.getInventory()).thenReturn(mock(org.bukkit.inventory.PlayerInventory.class));
+
+        PlayerInteractEvent event = mock(PlayerInteractEvent.class);
+        when(event.getClickedBlock()).thenReturn(block);
+        when(event.getPlayer()).thenReturn(player);
+        when(event.getAction()).thenReturn(Action.LEFT_CLICK_BLOCK);
+
+        withMelee.onPlayerInteract(event);
+
+        ArgumentCaptor<GateDoorDamageEvent> captor = ArgumentCaptor.forClass(GateDoorDamageEvent.class);
+        verify(pluginManager).callEvent(captor.capture());
+        assertEquals(11.0, captor.getValue().getDamage(), 1e-9);
+    }
+
+    @Test
+    void aBlockBreakAttemptUsesTheHeldItemsDamageToo() {
+        GateEventListener withMelee = new GateEventListener(new GateDoorHitService(gateManager), null,
+            new GateMeleeDamage(1.0, p -> 4.0, item -> 0));
+        Block block = doorBlock();
+        Player player = mock(Player.class);
+        when(player.hasPermission("knk.gate.admin")).thenReturn(false);
+        when(player.getGameMode()).thenReturn(GameMode.SURVIVAL);
+        when(player.getInventory()).thenReturn(mock(org.bukkit.inventory.PlayerInventory.class));
+        BlockBreakEvent event = mock(BlockBreakEvent.class);
+        when(event.getBlock()).thenReturn(block);
+        when(event.getPlayer()).thenReturn(player);
+
+        withMelee.onBlockBreak(event);
+
+        ArgumentCaptor<GateDoorDamageEvent> captor = ArgumentCaptor.forClass(GateDoorDamageEvent.class);
+        verify(pluginManager).callEvent(captor.capture());
+        assertEquals(4.0, captor.getValue().getDamage(), 1e-9);
+    }
+
+    @Test
+    void withoutItemDamageTheEventCarriesNoAmountSoTheFlatDefaultApplies() {
+        Block block = doorBlock();
+        Player player = mock(Player.class);
+        when(player.getGameMode()).thenReturn(GameMode.SURVIVAL);
+        PlayerInteractEvent event = mock(PlayerInteractEvent.class);
+        when(event.getClickedBlock()).thenReturn(block);
+        when(event.getPlayer()).thenReturn(player);
+        when(event.getAction()).thenReturn(Action.LEFT_CLICK_BLOCK);
+
+        listener.onPlayerInteract(event);
+
+        ArgumentCaptor<GateDoorDamageEvent> captor = ArgumentCaptor.forClass(GateDoorDamageEvent.class);
+        verify(pluginManager).callEvent(captor.capture());
+        assertNull(captor.getValue().getDamage());
+    }
+
+    @Test
+    void projectilesAndExplosionsKeepTheirFlatDamage() {
+        GateEventListener withMelee = new GateEventListener(new GateDoorHitService(gateManager), null,
+            new GateMeleeDamage(1.0, p -> 8.0, item -> 5));
+        Projectile projectile = mock(Projectile.class);
+        when(projectile.getShooter()).thenReturn(mock(LivingEntity.class));
+        ProjectileHitEvent hit = mock(ProjectileHitEvent.class);
+        Block block = doorBlock();
+        when(hit.getHitBlock()).thenReturn(block);
+        when(hit.getEntity()).thenReturn(projectile);
+
+        withMelee.onProjectileHit(hit);
+
+        ArgumentCaptor<GateDoorDamageEvent> captor = ArgumentCaptor.forClass(GateDoorDamageEvent.class);
+        verify(pluginManager).callEvent(captor.capture());
+        assertNull(captor.getValue().getDamage());
+    }
+
+    // ===== Fire Aspect and Cleaving (siege playtest 2026-10-24) =====
+
+    private Player survivalPlayerHolding(int cleavingLevel) {
+        Player player = mock(Player.class);
+        when(player.getUniqueId()).thenReturn(java.util.UUID.fromString("00000000-0000-0000-0000-000000000042"));
+        when(player.getGameMode()).thenReturn(GameMode.SURVIVAL);
+        org.bukkit.inventory.PlayerInventory inventory = mock(org.bukkit.inventory.PlayerInventory.class);
+        org.bukkit.inventory.ItemStack weapon = mock(org.bukkit.inventory.ItemStack.class);
+        org.bukkit.inventory.meta.ItemMeta meta = mock(org.bukkit.inventory.meta.ItemMeta.class);
+        when(weapon.getItemMeta()).thenReturn(meta);
+        when(meta.hasLore()).thenReturn(cleavingLevel > 0);
+        when(meta.getLore()).thenReturn(cleavingLevel > 0 ? List.of("§7Cleaving " + cleavingLevel) : List.of());
+        when(inventory.getItemInMainHand()).thenReturn(weapon);
+        when(player.getInventory()).thenReturn(inventory);
+        return player;
+    }
+
+    private GateCleaving cleaving(int level, long remainingCooldownMillis) {
+        net.knightsandkings.knk.core.ports.enchantment.EnchantmentRepository enchantments =
+            mock(net.knightsandkings.knk.core.ports.enchantment.EnchantmentRepository.class);
+        when(enchantments.getEnchantments(any())).thenReturn(java.util.concurrent.CompletableFuture.completedFuture(
+            level > 0 ? java.util.Map.of("cleaving", level) : java.util.Map.of()));
+        net.knightsandkings.knk.core.ports.enchantment.CooldownManager cooldowns =
+            mock(net.knightsandkings.knk.core.ports.enchantment.CooldownManager.class);
+        when(cooldowns.getRemainingCooldown(any(), anyString())).thenReturn(java.util.concurrent.CompletableFuture.completedFuture(remainingCooldownMillis));
+        when(cooldowns.applyCooldown(any(), anyString(), anyLong())).thenReturn(java.util.concurrent.CompletableFuture.completedFuture(null));
+        GateCleaving cleaving = new GateCleaving(enchantments, cooldowns, new GateDoorHitService(gateManager), 0.25,
+            List.of(5.0, 6.0, 7.0, 8.0), List.of(60, 50, 40, 30));
+        cleaving.setEffects(mock(GateCleaving.Effects.class));
+        return cleaving;
+    }
+
+    @Test
+    void aFireAspectHitThatRollsItsChanceAlsoIgnitesTheDoorBlock() {
+        GateEventListener withFireAspect = new GateEventListener(new GateDoorHitService(gateManager), null,
+            new GateMeleeDamage(1.0, p -> 8.0, item -> 0), new GateFireAspect(0.15, item -> 2, () -> 0.1), null);
+        Block block = doorBlock();
+        Player player = survivalPlayerHolding(0);
+        PlayerInteractEvent event = mock(PlayerInteractEvent.class);
+        when(event.getClickedBlock()).thenReturn(block);
+        when(event.getPlayer()).thenReturn(player);
+        when(event.getAction()).thenReturn(Action.LEFT_CLICK_BLOCK);
+        when(event.getBlockFace()).thenReturn(BlockFace.NORTH);
+
+        withFireAspect.onPlayerInteract(event);
+
+        ArgumentCaptor<org.bukkit.event.Event> captor = ArgumentCaptor.forClass(org.bukkit.event.Event.class);
+        verify(pluginManager, times(2)).callEvent(captor.capture());
+        assertInstanceOf(GateDoorDamageEvent.class, captor.getAllValues().get(0));
+        GateDoorIgniteEvent ignite = assertInstanceOf(GateDoorIgniteEvent.class, captor.getAllValues().get(1));
+        assertEquals(GateDoorIgniteEvent.Cause.FIRE_ASPECT, ignite.getCause());
+        assertEquals(BlockFace.NORTH, ignite.getHitFace());
+        assertSame(player, ignite.getCausingEntity());
+    }
+
+    @Test
+    void aFireAspectHitThatMissesItsRollOnlyDamages() {
+        GateEventListener withFireAspect = new GateEventListener(new GateDoorHitService(gateManager), null,
+            new GateMeleeDamage(1.0, p -> 8.0, item -> 0), new GateFireAspect(0.15, item -> 2, () -> 0.9), null);
+        Block block = doorBlock();
+        Player player = survivalPlayerHolding(0);
+        PlayerInteractEvent event = mock(PlayerInteractEvent.class);
+        when(event.getClickedBlock()).thenReturn(block);
+        when(event.getPlayer()).thenReturn(player);
+        when(event.getAction()).thenReturn(Action.LEFT_CLICK_BLOCK);
+
+        withFireAspect.onPlayerInteract(event);
+
+        verify(pluginManager, times(1)).callEvent(any(GateDoorDamageEvent.class));
+        verify(pluginManager, never()).callEvent(any(GateDoorIgniteEvent.class));
+    }
+
+    @Test
+    void aCleavingWeaponsLeftClickIsMultiplied() {
+        GateEventListener withCleaving = new GateEventListener(new GateDoorHitService(gateManager), null,
+            new GateMeleeDamage(1.0, p -> 8.0, item -> 0), null, cleaving(2, 0L));
+        Block block = doorBlock();
+        Player player = survivalPlayerHolding(2);
+        PlayerInteractEvent event = mock(PlayerInteractEvent.class);
+        when(event.getClickedBlock()).thenReturn(block);
+        when(event.getPlayer()).thenReturn(player);
+        when(event.getAction()).thenReturn(Action.LEFT_CLICK_BLOCK);
+
+        withCleaving.onPlayerInteract(event);
+
+        ArgumentCaptor<GateDoorDamageEvent> captor = ArgumentCaptor.forClass(GateDoorDamageEvent.class);
+        verify(pluginManager).callEvent(captor.capture());
+        assertEquals(12.0, captor.getValue().getDamage(), 1e-9, "8 x 1.5 at Cleaving II");
+    }
+
+    @Test
+    void aReadyCleavingRightClickIsAChargedStrikeInsteadOfAPassThroughClick() {
+        GateEventListener withCleaving = new GateEventListener(new GateDoorHitService(gateManager), null,
+            new GateMeleeDamage(1.0, p -> 8.0, item -> 0), null, cleaving(4, 0L));
+        Block block = doorBlock();
+        Player player = survivalPlayerHolding(4);
+        PlayerInteractEvent event = mock(PlayerInteractEvent.class);
+        when(event.getClickedBlock()).thenReturn(block);
+        when(event.getPlayer()).thenReturn(player);
+        when(event.getAction()).thenReturn(Action.RIGHT_CLICK_BLOCK);
+        when(event.getHand()).thenReturn(org.bukkit.inventory.EquipmentSlot.HAND);
+
+        withCleaving.onPlayerInteract(event);
+
+        ArgumentCaptor<GateDoorDamageEvent> captor = ArgumentCaptor.forClass(GateDoorDamageEvent.class);
+        verify(pluginManager).callEvent(captor.capture());
+        assertEquals(128.0, captor.getValue().getDamage(), 1e-9, "8 x 2 x 8 at Cleaving IV");
+        assertEquals(GateDoorDamageEvent.Cause.ENCHANTMENT, captor.getValue().getCause());
+        verify(pluginManager, never()).callEvent(any(GateDoorInteractEvent.class));
+        verify(event).setCancelled(true);
+    }
+
+    @Test
+    void aCoolingCleavingRightClickFallsThroughToTheUsualInteraction() {
+        GateEventListener withCleaving = new GateEventListener(new GateDoorHitService(gateManager), null,
+            new GateMeleeDamage(1.0, p -> 8.0, item -> 0), null, cleaving(4, 20_000L));
+        Block block = doorBlock();
+        Player player = survivalPlayerHolding(4);
+        PlayerInteractEvent event = mock(PlayerInteractEvent.class);
+        when(event.getClickedBlock()).thenReturn(block);
+        when(event.getPlayer()).thenReturn(player);
+        when(event.getAction()).thenReturn(Action.RIGHT_CLICK_BLOCK);
+        when(event.getHand()).thenReturn(org.bukkit.inventory.EquipmentSlot.HAND);
+
+        withCleaving.onPlayerInteract(event);
+
+        verify(pluginManager, never()).callEvent(any(GateDoorDamageEvent.class));
+        verify(pluginManager).callEvent(any(GateDoorInteractEvent.class));
+    }
+
+    @Test
+    void aVetoedCleavingStrikeFallsThroughToTheUsualInteraction() {
+        // the siege listener cancels a defender's hit on their own gate: no strike, the click opens the gate as before
+        GateEventListener withCleaving = new GateEventListener(new GateDoorHitService(gateManager), null,
+            new GateMeleeDamage(1.0, p -> 8.0, item -> 0), null, cleaving(1, 0L));
+        Block block = doorBlock();
+        Player player = survivalPlayerHolding(1);
+        PlayerInteractEvent event = mock(PlayerInteractEvent.class);
+        when(event.getClickedBlock()).thenReturn(block);
+        when(event.getPlayer()).thenReturn(player);
+        when(event.getAction()).thenReturn(Action.RIGHT_CLICK_BLOCK);
+        when(event.getHand()).thenReturn(org.bukkit.inventory.EquipmentSlot.HAND);
+        doAnswer(inv -> {
+            GateDoorDamageEvent fired = inv.getArgument(0);
+            fired.setCancelled(true);
+            return null;
+        }).when(pluginManager).callEvent(any(GateDoorDamageEvent.class));
+
+        withCleaving.onPlayerInteract(event);
+
+        verify(pluginManager).callEvent(any(GateDoorInteractEvent.class));
+        verify(event, never()).setCancelled(true);
+    }
+
+    @Test
+    void anOffHandRightClickNeverCleaves() {
+        GateEventListener withCleaving = new GateEventListener(new GateDoorHitService(gateManager), null,
+            new GateMeleeDamage(1.0, p -> 8.0, item -> 0), null, cleaving(4, 0L));
+        Block block = doorBlock();
+        Player player = survivalPlayerHolding(4);
+        PlayerInteractEvent event = mock(PlayerInteractEvent.class);
+        when(event.getClickedBlock()).thenReturn(block);
+        when(event.getPlayer()).thenReturn(player);
+        when(event.getAction()).thenReturn(Action.RIGHT_CLICK_BLOCK);
+        when(event.getHand()).thenReturn(org.bukkit.inventory.EquipmentSlot.OFF_HAND);
+
+        withCleaving.onPlayerInteract(event);
+
+        verify(pluginManager, never()).callEvent(any(GateDoorDamageEvent.class));
+        verify(pluginManager).callEvent(any(GateDoorInteractEvent.class));
     }
 }

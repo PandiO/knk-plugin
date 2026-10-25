@@ -9,21 +9,30 @@ import net.knightsandkings.knk.core.menu.MenuRefreshSchedule;
 import net.knightsandkings.knk.core.menu.MenuSession;
 import net.knightsandkings.knk.core.menu.MenuSessionRegistry;
 import net.knightsandkings.knk.core.menu.MenuTemplateAssembler;
+import net.knightsandkings.knk.core.menu.MenuTransitionTracker;
 import net.knightsandkings.knk.core.menu.RuntimeMenu;
 import net.knightsandkings.knk.core.menu.RuntimeMenuSection;
 import net.knightsandkings.knk.paper.utils.DisplayTextFormatter;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
+import org.bukkit.Material;
 import org.bukkit.entity.Player;
+import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.Plugin;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
 import java.util.function.UnaryOperator;
 import java.util.logging.Level;
@@ -68,10 +77,25 @@ public final class MenuService {
     private final Map<String, String> blockedMenus = new ConcurrentHashMap<>();
     /** Keys that passed {@link MenuDefinitionValidationRunner} at startup (content port CP1, {@code menu-available}). */
     private final Set<String> validatedMenus = ConcurrentHashMap.newKeySet();
+    /** Menus a late validation is running for right now (see {@link #requestValidation}). */
+    private final Set<String> validatingMenus = ConcurrentHashMap.newKeySet();
+    /** Set by {@code MenuDefinitionValidationRunner}: validates one menu key the way the startup pass does (blocking). */
+    private volatile java.util.function.Consumer<String> lateValidator;
     /** Diagnostic telemetry / funnel hooks (KNG-34 link 6); empty unless a feature registers one. */
     private final MenuObservers observers = new MenuObservers();
     /** KNG-125: toggles BLINK items each tick ({@link #processBlinks}). */
     private final MenuItemBlinker blinker = new MenuItemBlinker();
+    /** KNG-231: page loads in flight, one per player. */
+    private final MenuPageLoads pageLoads = new MenuPageLoads();
+    /** KNG-231: a page load still running after this many ticks also says so in the action bar. */
+    static final long LOADING_ACTION_BAR_DELAY_TICKS = 10L;
+    /**
+     * Alpha cross-play finding 2026-10-24: Bedrock (Floodgate) players switch menus with a delay -
+     * see {@link #configureBedrockTransitions}. Off (no player is Bedrock, 0 ticks) until configured.
+     */
+    private final MenuTransitionTracker transitions = new MenuTransitionTracker();
+    private volatile Predicate<UUID> bedrockPlayers = uuid -> false;
+    private volatile int bedrockTransitionDelayTicks;
 
     public MenuService(
             Plugin plugin,
@@ -110,6 +134,20 @@ public final class MenuService {
 
     public void openMenu(Player player, String templateKey) {
         openMenu(player, templateKey, MenuContextParams.EMPTY);
+    }
+
+    /**
+     * Alpha cross-play finding 2026-10-24 ({@code menus.bedrock-transition-delay-ticks}): when a
+     * player {@code isBedrock} says is a Bedrock client moves from one inventory to a KnK menu,
+     * the current inventory is closed first and the menu opens {@code delayTicks} later, so
+     * Geyser's close of the previous container form cannot close the new menu. A client close
+     * in that window, or up to {@code delayTicks} after the open, is the stale close of the
+     * previous form ({@link MenuTransitionTracker}). {@code delayTicks <= 0} turns it off; Java
+     * players are never delayed.
+     */
+    public void configureBedrockTransitions(Predicate<UUID> isBedrock, int delayTicks) {
+        this.bedrockPlayers = isBedrock != null ? isBedrock : uuid -> false;
+        this.bedrockTransitionDelayTicks = Math.max(0, delayTicks);
     }
 
     /** Registers a {@link MenuObserver} (main thread, at enable). */
@@ -329,7 +367,9 @@ public final class MenuService {
     /**
      * Shared plumbing for every section-page mutation: re-fetches the current
      * menu (see {@link #nextPage}), resolves the named section, applies
-     * {@code mutation} on the main thread, then re-renders.
+     * {@code mutation} on the main thread, then re-renders. When that menu is
+     * the one on screen, {@link #changePageInPlace} does it without the
+     * re-fetch (KNG-231).
      */
     private void mutateSectionPage(Player player, String sectionName, SectionPageMutation mutation) {
         Optional<MenuSession> sessionOpt = sessionRegistry.get(player.getUniqueId());
@@ -339,6 +379,12 @@ public final class MenuService {
             return;
         }
         MenuSession session = sessionOpt.get();
+
+        Optional<OpenMenuContext> open = openMenuShowing(player, currentMenuKey.get());
+        if (open.isPresent()) {
+            changePageInPlace(player, open.get(), session, sectionName, mutation);
+            return;
+        }
 
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             RuntimeMenu menu = loadAndAssemble(player, currentMenuKey.get());
@@ -361,6 +407,115 @@ public final class MenuService {
                 renderAndShow(player, menu, session, materialKeys);
             });
         });
+    }
+
+    /** Main thread: the player's open KnK menu when it is {@code menuKey} and still on screen. */
+    private Optional<OpenMenuContext> openMenuShowing(Player player, String menuKey) {
+        if (!Bukkit.isPrimaryThread()) {
+            return Optional.empty();
+        }
+        return openMenuContextRegistry.get(player.getUniqueId())
+                .filter(context -> context.menuKey().equals(menuKey))
+                .filter(context -> player.getOpenInventory().getTopInventory().equals(context.inventory()));
+    }
+
+    /**
+     * KNG-231: a page change (or search/filter change) in the menu the player is looking at, on the
+     * main thread. Re-renders from the open menu's assembled template and material keys, so only the
+     * content is fetched (the template used to be re-fetched and re-assembled on every click). While
+     * the content loads, the section's pager buttons show a clock "Loading page N…", and after
+     * {@link #LOADING_ACTION_BAR_DELAY_TICKS} the action bar says the same; further page clicks are
+     * ignored until it is done. A failed fetch puts the previous page back and tells the player.
+     * In-memory content renders within the click, with no loading item at all.
+     */
+    private void changePageInPlace(Player player, OpenMenuContext context, MenuSession session,
+                                   String sectionName, SectionPageMutation mutation) {
+        RuntimeMenu menu = context.menu();
+        Optional<RuntimeMenuSection> found = menu.findSection(sectionName);
+        if (found.isEmpty()) {
+            String available = menu.sections().stream().map(RuntimeMenuSection::name)
+                    .collect(Collectors.joining(", "));
+            player.sendMessage(ChatColor.YELLOW + "No section named '" + sectionName + "' in this menu. Available: " + available);
+            return;
+        }
+        RuntimeMenuSection section = found.get();
+        UUID playerId = player.getUniqueId();
+        OptionalLong started = pageLoads.tryBegin(playerId, System.currentTimeMillis());
+        if (started.isEmpty()) {
+            return;
+        }
+        long load = started.getAsLong();
+        int pageBefore = session.getPage(section.id());
+        MenuContentQuery queryBefore = session.getContentQuery(section.id());
+        long startedNanos = System.nanoTime();
+
+        CompletableFuture<MenuRenderResult> render;
+        try {
+            mutation.apply(menu, section, session);
+            render = renderer.render(menu, session, player, context.materialNamespaceKeys(), this, true);
+        } catch (RuntimeException e) {
+            render = CompletableFuture.failedFuture(e);
+        }
+
+        AtomicBoolean actionBarShown = new AtomicBoolean();
+        if (!render.isDone()) {
+            int page = MenuPageLoads.displayPage(session.getPage(section.id()), context.sectionView(section.id()));
+            showLoading(context, section, page);
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                if (pageLoads.isCurrent(playerId, load) && player.isOnline()) {
+                    player.sendActionBar(DisplayTextFormatter.toComponent(MenuPageLoads.loadingText(page)));
+                    actionBarShown.set(true);
+                }
+            }, LOADING_ACTION_BAR_DELAY_TICKS);
+        }
+
+        render.whenCompleteAsync((result, error) -> {
+            boolean wasCurrent = pageLoads.isCurrent(playerId, load);
+            pageLoads.finish(playerId, load);
+            if (actionBarShown.get() && player.isOnline()) {
+                player.sendActionBar(net.kyori.adventure.text.Component.empty());
+            }
+            Optional<OpenMenuContext> current = openMenuContextRegistry.get(playerId);
+            boolean stillShowing = wasCurrent && player.isOnline() && current.isPresent() && current.get() == context
+                    && player.getOpenInventory().getTopInventory().equals(context.inventory());
+            if (error != null) {
+                session.setPage(section.id(), pageBefore);
+                session.setContentQuery(section.id(), queryBefore);
+                Throwable cause = error instanceof CompletionException && error.getCause() != null ? error.getCause() : error;
+                if (!(cause instanceof MenuRenderer.ContentFetchFailedException)) {
+                    logger.log(Level.WARNING, "Changing page of menu '" + menu.key() + "' for " + player.getName() + " failed", cause);
+                }
+                if (stillShowing) {
+                    MenuRenderResult previous = context.lastRender();
+                    renderer.applyToInventory(context.inventory(), previous, player.isSneaking());
+                    context.update(context.menu(), previous);
+                    player.sendMessage(ChatColor.RED + "Couldn't load that page right now. Try again in a moment.");
+                }
+                return;
+            }
+            logger.fine(() -> "Menu '" + menu.key() + "' page change for " + player.getName() + " took "
+                    + (System.nanoTime() - startedNanos) / 1_000_000L + " ms");
+            if (stillShowing) {
+                show(player, menu, result);
+            }
+        }, mainThread);
+    }
+
+    /** KNG-231: puts the "Loading page N…" clock on {@code section}'s pager buttons in the open Inventory. */
+    private static void showLoading(OpenMenuContext context, RuntimeMenuSection section, int page) {
+        Set<Integer> slots = MenuPageLoads.pagerSlots(context.itemsBySlot(), context.sectionsBySlot(), section);
+        if (slots.isEmpty()) {
+            return;
+        }
+        ItemStack clock = new ItemStack(Material.CLOCK);
+        ItemMeta meta = clock.getItemMeta();
+        if (meta != null) {
+            meta.setDisplayName(DisplayTextFormatter.translateToLegacy(MenuPageLoads.loadingText(page)));
+            clock.setItemMeta(meta);
+        }
+        for (int slot : slots) {
+            context.inventory().setItem(slot, clock);
+        }
     }
 
     @FunctionalInterface
@@ -475,11 +630,62 @@ public final class MenuService {
             return;
         }
 
+        int delayTicks = bedrockTransitionDelayTicks;
+        if (delayTicks > 0 && hasContainerOpen(player) && bedrockPlayers.test(player.getUniqueId())) {
+            // Alpha cross-play finding 2026-10-24: close now (the close handler treats it like any
+            // other close of the previous menu), open the next menu a few ticks later.
+            UUID playerId = player.getUniqueId();
+            player.closeInventory();
+            long token = transitions.begin(playerId);
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                if (player.isOnline() && transitions.opened(playerId, token, MenuRenderer.currentTick(), delayTicks)) {
+                    openNewInventory(player, menu, result);
+                }
+            }, delayTicks);
+            return;
+        }
+        openNewInventory(player, menu, result);
+    }
+
+    /** Main thread. Opens {@code result} in a fresh Inventory and makes it the player's open menu. */
+    private void openNewInventory(Player player, RuntimeMenu menu, MenuRenderResult result) {
         Inventory inventory = Bukkit.createInventory(null, result.totalSlots(), DisplayTextFormatter.toComponent(menu.title()));
-        renderer.applyToInventory(inventory, result, revealControls);
+        renderer.applyToInventory(inventory, result, player.isSneaking());
         player.openInventory(inventory);
         openMenuContextRegistry.register(player.getUniqueId(), new OpenMenuContext(player, inventory, menu, result));
         refreshSchedule.track(player.getUniqueId(), menu.autoRefreshTicks(), MenuRenderer.currentTick());
+    }
+
+    /** Whether the player has a container screen open (a menu, an anvil prompt...), not just their own inventory. */
+    private static boolean hasContainerOpen(Player player) {
+        InventoryType type = player.getOpenInventory().getType();
+        return type != InventoryType.CRAFTING && type != InventoryType.CREATIVE;
+    }
+
+    /**
+     * Alpha cross-play finding 2026-10-24: a close the client sent ({@code Reason.PLAYER}) for
+     * {@code playerId}; {@link MenuLifecycleListener} ignores it or reopens the menu when it is
+     * the stale close of a Bedrock menu switch. Always {@code NORMAL} for Java players.
+     */
+    public MenuTransitionTracker.CloseVerdict onClientClose(UUID playerId) {
+        return transitions.onClientClose(playerId, MenuRenderer.currentTick());
+    }
+
+    /**
+     * Alpha cross-play finding 2026-10-24: the stale close of the previous Bedrock form closed
+     * {@code context}'s menu right after it opened - show the same Inventory again next tick,
+     * unless the player has moved on to something else by then.
+     */
+    public void reopenAfterStaleClose(Player player, OpenMenuContext context) {
+        UUID playerId = player.getUniqueId();
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            Optional<OpenMenuContext> current = openMenuContextRegistry.get(playerId);
+            if (!player.isOnline() || current.isEmpty() || current.get() != context || hasContainerOpen(player)) {
+                return;
+            }
+            player.openInventory(context.inventory());
+            refreshSchedule.track(playerId, context.menu().autoRefreshTicks(), MenuRenderer.currentTick());
+        });
     }
 
     /** Whether the player is looking at a KnK menu right now (main thread: checks the actual top inventory). */
@@ -524,6 +730,8 @@ public final class MenuService {
 
     /** Called from {@code PlayerQuitEvent} - closes gap #4 (v1's static per-player maps never cleared). */
     public void closeSession(UUID playerId) {
+        pageLoads.cancel(playerId);
+        transitions.cancel(playerId);
         openMenuContextRegistry.close(playerId);
         sessionRegistry.close(playerId);
         refreshSchedule.untrack(playerId);
@@ -538,6 +746,7 @@ public final class MenuService {
             observers.closed(playerId, openMenuContextRegistry.get(playerId).map(c -> c.menu().key()).orElse(null));
         }
         refreshSchedule.untrack(playerId);
+        pageLoads.cancel(playerId);
     }
 
     /**
@@ -565,6 +774,99 @@ public final class MenuService {
      */
     public boolean isMenuAvailable(String templateKey) {
         return templateKey != null && validatedMenus.contains(templateKey) && !blockedMenus.containsKey(templateKey);
+    }
+
+    /**
+     * Why {@link #isMenuAvailable} says no, for a caller's log line: the startup validation's reason when the
+     * menu is blocked, else that the menu was never validated (the API was unreachable when the plugin
+     * started, that template was created since, or its fetch failed at startup). Empty when it is available.
+     */
+    public Optional<String> unavailableReason(String templateKey) {
+        if (isMenuAvailable(templateKey)) return Optional.empty();
+        String blocked = templateKey == null ? null : blockedMenus.get(templateKey);
+        if (blocked != null) return Optional.of("blocked at startup validation: " + blocked);
+        return Optional.of("not validated at startup (the API was unreachable then, or the template didn't exist yet)");
+    }
+
+    /** True while a validation pass runs (or has a retry pending), so recovery and timer never run two at once. */
+    private final AtomicBoolean validationPassActive = new AtomicBoolean(false);
+    /** Set by {@code MenuDefinitionValidationRunner}: the whole validation pass, for {@link #revalidateAfterRecovery}. */
+    private volatile Runnable revalidation;
+
+    /** The runner hands over its full pass so the API-recovery event can start it. */
+    public void setRevalidation(Runnable revalidation) {
+        this.revalidation = revalidation;
+    }
+
+    /** Claims the single validation slot; false when a pass is running or a retry of one is pending. */
+    public boolean beginValidationPass() {
+        return validationPassActive.compareAndSet(false, true);
+    }
+
+    /** @param retryPending the pass scheduled a retry, which keeps the slot until it runs */
+    public void endValidationPass(boolean retryPending) {
+        if (!retryPending) {
+            validationPassActive.set(false);
+        }
+    }
+
+    /** A scheduled retry is about to run: it takes the slot over from the pass that scheduled it. */
+    public void retryDue() {
+        validationPassActive.set(false);
+    }
+
+    /**
+     * Playtest 2026-10-24: the API came back ({@code ApiConnectivityChangedEvent} recovery). Runs the validation pass
+     * off the main thread for every menu still unvalidated, unless a pass or its retry is already pending (that one
+     * will see the API up).
+     */
+    public void revalidateAfterRecovery() {
+        Runnable pass = revalidation;
+        if (pass == null || validationPassActive.get()) {
+            return;
+        }
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, pass);
+    }
+
+    /** Runs {@code task} off the main thread after {@code delayTicks} (the startup validation's retries while the API is down). */
+    public void runLaterAsync(long delayTicks, Runnable task) {
+        Bukkit.getScheduler().runTaskLaterAsynchronously(plugin, task, Math.max(1L, delayTicks));
+    }
+
+    /** {@code MenuDefinitionValidationRunner} hands over its per-key validation so menus it never saw can be validated later. */
+    public void setLateValidator(java.util.function.Consumer<String> lateValidator) {
+        this.lateValidator = lateValidator;
+    }
+
+    /**
+     * Siege playtest 2026-10-24: a menu the startup validation never saw stays unavailable for the whole
+     * uptime, and the only trace is a chat fallback. This runs the same validation for that one key off the
+     * main thread; the menu becomes available (or blocked, with its reason) once it finishes, so the next
+     * open works without a restart. Blocked menus are not retried.
+     *
+     * @return true when a validation was started by this call
+     */
+    public boolean requestValidation(String templateKey) {
+        java.util.function.Consumer<String> validator = lateValidator;
+        if (templateKey == null || validator == null || isMenuAvailable(templateKey) || blockedMenus.containsKey(templateKey)) {
+            return false;
+        }
+        if (!validatingMenus.add(templateKey)) {
+            return false;
+        }
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            try {
+                validator.accept(templateKey);
+                if (isMenuAvailable(templateKey)) {
+                    logger.info("Menu '" + templateKey + "' validated late and is available now.");
+                }
+            } catch (RuntimeException e) {
+                logger.log(Level.WARNING, "Late validation of menu '" + templateKey + "' failed", e);
+            } finally {
+                validatingMenus.remove(templateKey);
+            }
+        });
+        return true;
     }
 
     /** Currently-blocked menu keys and why, for admin visibility (e.g. {@code /knk menu broken}). */

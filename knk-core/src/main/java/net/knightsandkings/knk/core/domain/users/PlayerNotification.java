@@ -15,32 +15,42 @@ public record PlayerNotification(
     net.knightsandkings.knk.core.domain.currency.PaymentNotice payment, // set when type is TYPE_PAYMENT_RECEIVED
     net.knightsandkings.knk.core.domain.currency.CurrencyAlertNotice currencyAlert, // set when type is TYPE_CURRENCY_ALERT
     net.knightsandkings.knk.core.lootbox.KnkLootboxWorldChange lootboxWorldChanged, // set when type is TYPE_LOOTBOX_WORLD_CHANGED
-    net.knightsandkings.knk.core.domain.location.LocationOrphanDigest locationOrphanDigest // set when type is TYPE_LOCATION_ORPHAN_DIGEST
+    net.knightsandkings.knk.core.domain.location.LocationOrphanDigest locationOrphanDigest, // set when type is TYPE_LOCATION_ORPHAN_DIGEST
+    AccountLinkedNotice accountLinked // set when type is TYPE_ACCOUNT_LINKED
 ) {
+    /** Without an account-linked notice - every type before TYPE_ACCOUNT_LINKED. */
+    public PlayerNotification(long id, int userId, String uuid, String username, String type, TitleChangeResult titleChange,
+                              net.knightsandkings.knk.core.domain.currency.PaymentNotice payment,
+                              net.knightsandkings.knk.core.domain.currency.CurrencyAlertNotice currencyAlert,
+                              net.knightsandkings.knk.core.lootbox.KnkLootboxWorldChange lootboxWorldChanged,
+                              net.knightsandkings.knk.core.domain.location.LocationOrphanDigest locationOrphanDigest) {
+        this(id, userId, uuid, username, type, titleChange, payment, currencyAlert, lootboxWorldChanged, locationOrphanDigest, null);
+    }
+
     /** Without a Location orphan digest - every type before TYPE_LOCATION_ORPHAN_DIGEST. */
     public PlayerNotification(long id, int userId, String uuid, String username, String type, TitleChangeResult titleChange,
                               net.knightsandkings.knk.core.domain.currency.PaymentNotice payment,
                               net.knightsandkings.knk.core.domain.currency.CurrencyAlertNotice currencyAlert,
                               net.knightsandkings.knk.core.lootbox.KnkLootboxWorldChange lootboxWorldChanged) {
-        this(id, userId, uuid, username, type, titleChange, payment, currencyAlert, lootboxWorldChanged, null);
+        this(id, userId, uuid, username, type, titleChange, payment, currencyAlert, lootboxWorldChanged, null, null);
     }
 
     /** Without a lootbox world change - every type before TYPE_LOOTBOX_WORLD_CHANGED. */
     public PlayerNotification(long id, int userId, String uuid, String username, String type, TitleChangeResult titleChange,
                               net.knightsandkings.knk.core.domain.currency.PaymentNotice payment,
                               net.knightsandkings.knk.core.domain.currency.CurrencyAlertNotice currencyAlert) {
-        this(id, userId, uuid, username, type, titleChange, payment, currencyAlert, null, null);
+        this(id, userId, uuid, username, type, titleChange, payment, currencyAlert, null, null, null);
     }
 
     /** Without a payment - every type before TYPE_PAYMENT_RECEIVED. */
     public PlayerNotification(long id, int userId, String uuid, String username, String type, TitleChangeResult titleChange) {
-        this(id, userId, uuid, username, type, titleChange, null, null, null, null);
+        this(id, userId, uuid, username, type, titleChange, null, null, null, null, null);
     }
 
     /** Without a currency alert - every type before TYPE_CURRENCY_ALERT. */
     public PlayerNotification(long id, int userId, String uuid, String username, String type, TitleChangeResult titleChange,
                               net.knightsandkings.knk.core.domain.currency.PaymentNotice payment) {
-        this(id, userId, uuid, username, type, titleChange, payment, null, null, null);
+        this(id, userId, uuid, username, type, titleChange, payment, null, null, null, null);
     }
 
     public static final String TYPE_TITLE_CHANGED = "TitleChanged";
@@ -85,4 +95,10 @@ public record PlayerNotification(
      * {@link #locationOrphanDigest()}.
      */
     public static final String TYPE_LOCATION_ORPHAN_DIGEST = "LocationOrphanDigest";
+    /**
+     * The player's Minecraft account was just linked to a web account (invitations, KNG-214: a claim code or an
+     * {@code /account link} code). Payload in {@link #accountLinked()}: the masked address. Shown on the player's
+     * next join when they are offline, so a code given away is noticed.
+     */
+    public static final String TYPE_ACCOUNT_LINKED = "AccountLinked";
 }

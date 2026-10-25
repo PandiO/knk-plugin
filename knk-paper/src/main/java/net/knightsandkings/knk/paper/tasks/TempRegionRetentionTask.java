@@ -2,12 +2,12 @@ package net.knightsandkings.knk.paper.tasks;
 
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldguard.WorldGuard;
-import com.sk89q.worldguard.protection.flags.StringFlag;
 import com.sk89q.worldguard.protection.managers.RegionManager;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.DomainsQueryApi;
 import net.knightsandkings.knk.core.regions.RegionRenamePlan;
+import net.knightsandkings.knk.core.regions.SubRegionMirror;
 import net.knightsandkings.knk.core.regions.TempRegionCleanupPolicy;
 import net.knightsandkings.knk.core.regions.TempRegionCleanupPolicy.Decision;
 import net.knightsandkings.knk.core.regions.TempRegionCleanupPolicy.Usage;
@@ -32,18 +32,25 @@ import java.util.logging.Logger;
  * repair nor according to a fresh API lookup made right before deleting. If the API can't be asked, nothing is deleted.
  *
  * Runs daily by default; checks region creation metadata to determine age.
+ *
+ * KNG-258: also deletes orphaned domain sub-regions ({@code domain_<d>_sub_<s>} no domain lists, marked
+ * {@code knk-orphaned-since} by the access sync) once they have been orphaned longer than the same retention period,
+ * with the same fresh API lookup ({@link TempRegionCleanupPolicy#decideOrphanedSubRegion}).
  */
 public class TempRegionRetentionTask {
     private static final Logger LOGGER = Logger.getLogger(TempRegionRetentionTask.class.getName());
     private static final long LOOKUP_TIMEOUT_SECONDS = 15;
 
     // Custom flag to read creation timestamp (must match the one in WgRegionIdTaskHandler)
-    private static final StringFlag CREATION_TIMESTAMP = new StringFlag("knk-creation-timestamp");
+    // Read by name (RegionBookkeepingFlags): an unregistered flag comes back from the region file as another object.
+    private static final String CREATION_TIMESTAMP = net.knightsandkings.knk.paper.regions.RegionBookkeepingFlags.CREATION_TIMESTAMP;
+    private static final String ORPHANED_SINCE = net.knightsandkings.knk.paper.regions.RegionBookkeepingFlags.ORPHANED_SINCE;
 
     private final Plugin plugin;
     private final long retentionMillis;
     private final Predicate<String> knownDomainRegion;
     private final Function<String, Usage> domainUsage;
+    private final Predicate<String> listedSubRegion;
     private BukkitTask task;
 
     /**
@@ -54,6 +61,16 @@ public class TempRegionRetentionTask {
      */
     public TempRegionRetentionTask(Plugin plugin, long retentionDays, Predicate<String> knownDomainRegion,
                                    Function<String, Usage> domainUsage) {
+        this(plugin, retentionDays, knownDomainRegion, domainUsage, null);
+    }
+
+    /**
+     * @param listedSubRegion KNG-258: sub-regions the last access sync listed for a domain (true for everything until it
+     *                        has run); null keeps every orphaned sub-region
+     */
+    public TempRegionRetentionTask(Plugin plugin, long retentionDays, Predicate<String> knownDomainRegion,
+                                   Function<String, Usage> domainUsage, Predicate<String> listedSubRegion) {
+        this.listedSubRegion = listedSubRegion != null ? listedSubRegion : regionId -> true;
         this.plugin = plugin;
         this.retentionMillis = retentionDays * 24 * 60 * 60 * 1000;
         this.knownDomainRegion = knownDomainRegion != null ? knownDomainRegion : regionId -> false;
@@ -120,10 +137,13 @@ public class TempRegionRetentionTask {
      * @param orphanedFinalNames {@code domain_<id>} regions no domain uses according to a fresh API lookup: reported
      *                           only, never deleted (a v2 region can carry the same name, managed-worldguard-regions.md
      *                           §8 item 9; check {@code /rg info} first). Only filled when asked for.
+     * @param orphanedSubRegions KNG-258: domain sub-regions no domain lists, deleted (or deletable) together with the temp
+     *                           regions above; {@code orphanedSubRegionsWaiting} are orphaned but not long enough (or
+     *                           not marked yet, or the API couldn't be asked)
      */
     public record Sweep(List<String> deleted, List<String> deletable, List<String> inUse, List<String> tooRecent,
                         List<String> noTimestamp, List<String> usageUnknown, List<String> orphanedFinalNames,
-                        List<String> deleteFailed) {
+                        List<String> deleteFailed, List<String> orphanedSubRegions, List<String> orphanedSubRegionsWaiting) {
         public int temporaryTotal() {
             return deleted.size() + deletable.size() + inUse.size() + tooRecent.size() + noTimestamp.size()
                     + usageUnknown.size() + deleteFailed.size();
@@ -136,7 +156,7 @@ public class TempRegionRetentionTask {
     private void runCleanup() {
         try {
             Sweep sweep = sweep(System.currentTimeMillis() - retentionMillis, true, false);
-            int deletedCount = sweep.deleted().size();
+            int deletedCount = sweep.deleted().size() + sweep.orphanedSubRegions().size();
             int keptInUse = sweep.inUse().size();
             int keptUnknown = sweep.usageUnknown().size();
             if (deletedCount > 0 || keptInUse > 0 || keptUnknown > 0) {
@@ -161,7 +181,8 @@ public class TempRegionRetentionTask {
      */
     public Sweep sweep(long cutoffMillis, boolean delete, boolean findOrphanedFinals) {
         Sweep sweep = new Sweep(new ArrayList<>(), new ArrayList<>(), new ArrayList<>(), new ArrayList<>(),
-                new ArrayList<>(), new ArrayList<>(), new ArrayList<>(), new ArrayList<>());
+                new ArrayList<>(), new ArrayList<>(), new ArrayList<>(), new ArrayList<>(), new ArrayList<>(),
+                new ArrayList<>());
         for (World world : plugin.getServer().getWorlds()) {
             RegionManager regionManager = WorldGuard.getInstance().getPlatform()
                 .getRegionContainer().get(BukkitAdapter.adapt(world));
@@ -171,9 +192,21 @@ public class TempRegionRetentionTask {
             }
 
             List<String> regionsToDelete = new ArrayList<>();
+            List<String> orphanedSubRegionsToDelete = new ArrayList<>();
 
             for (ProtectedRegion region : new ArrayList<>(regionManager.getRegions().values())) {
                 String name = world.getName() + "/" + region.getId();
+                if (SubRegionMirror.isSubRegionName(region.getId())) {
+                    // KNG-258: an orphaned domain sub-region, counted from when it was orphaned
+                    Decision orphan = TempRegionCleanupPolicy.decideOrphanedSubRegion(region.getId(),
+                            flag(region, ORPHANED_SINCE), cutoffMillis, listedSubRegion, domainUsage);
+                    if (orphan == Decision.DELETE) {
+                        orphanedSubRegionsToDelete.add(region.getId());
+                    } else if (orphan != Decision.KEEP_KNOWN_DOMAIN_REGION && orphan != Decision.KEEP_IN_USE) {
+                        sweep.orphanedSubRegionsWaiting().add(name);
+                    }
+                    continue;
+                }
                 if (!TempRegionCleanupPolicy.isTemporary(region.getId())) {
                     if (findOrphanedFinals && RegionRenamePlan.isFinalName(region.getId())
                             && !knownDomainRegion.test(region.getId())
@@ -182,7 +215,7 @@ public class TempRegionRetentionTask {
                     }
                     continue;
                 }
-                Decision decision = TempRegionCleanupPolicy.decide(region.getId(), region.getFlag(CREATION_TIMESTAMP),
+                Decision decision = TempRegionCleanupPolicy.decide(region.getId(), flag(region, CREATION_TIMESTAMP),
                         cutoffMillis, knownDomainRegion, domainUsage);
                 switch (decision) {
                     case DELETE -> regionsToDelete.add(region.getId());
@@ -195,9 +228,26 @@ public class TempRegionRetentionTask {
                     case KEEP_INVALID_TIMESTAMP -> {
                         sweep.noTimestamp().add(name);
                         LOGGER.warning("Invalid creation timestamp for region " + region.getId()
-                                + ": " + region.getFlag(CREATION_TIMESTAMP));
+                                + ": " + flag(region, CREATION_TIMESTAMP));
                     }
                     default -> sweep.noTimestamp().add(name);
+                }
+            }
+
+            for (String regionId : orphanedSubRegionsToDelete) {
+                String name = world.getName() + "/" + regionId;
+                if (!delete) {
+                    sweep.orphanedSubRegions().add(name);
+                    continue;
+                }
+                try {
+                    regionManager.removeRegion(regionId);
+                    sweep.orphanedSubRegions().add(name);
+                    LOGGER.info("Deleted orphaned sub-region (no domain lists it, orphaned past the retention period): "
+                        + regionId + " from world " + world.getName());
+                } catch (Exception e) {
+                    sweep.deleteFailed().add(name);
+                    LOGGER.warning("Failed to delete orphaned sub-region " + regionId + ": " + e.getMessage());
                 }
             }
 
@@ -219,5 +269,9 @@ public class TempRegionRetentionTask {
             }
         }
         return sweep;
+    }
+
+    private static String flag(ProtectedRegion region, String name) {
+        return net.knightsandkings.knk.paper.regions.RegionBookkeepingFlags.get(region, name);
     }
 }

@@ -23,7 +23,11 @@ dependencies {
     compileOnly("org.apache.logging.log4j:log4j-core:2.24.1")
     
     testImplementation("io.papermc.paper:paper-api:${property("paperApiVersion")}")
-    testImplementation("org.junit.jupiter:junit-jupiter:5.10.0")
+    // One JUnit version for every artifact (api, engine, platform). Without the BOM, a transitive
+    // junit-jupiter-api (mockito-junit-jupiter brings 5.13.4) upgrades api/commons while the engine stays at
+    // the explicit version, and the engine then fails test discovery with NoSuchMethodError.
+    testImplementation(platform("org.junit:junit-bom:${property("junitBomVersion")}"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
     // Content-port seed contract test reads knk-web-api's exported seed JSON through the api-client DTOs.
     testImplementation("com.fasterxml.jackson.core:jackson-databind:2.17.2")
     testImplementation("org.mockito:mockito-core:5.24.0")

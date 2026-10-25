@@ -14,7 +14,6 @@ import com.sk89q.worldedit.regions.Polygonal2DRegion;
 import com.sk89q.worldedit.regions.Region;
 import com.sk89q.worldguard.WorldGuard;
 import com.sk89q.worldguard.protection.flags.Flag;
-import com.sk89q.worldguard.protection.flags.StringFlag;
 import com.sk89q.worldguard.protection.managers.RegionManager;
 import com.sk89q.worldguard.protection.managers.RemovalStrategy;
 import com.sk89q.worldguard.protection.regions.ProtectedCuboidRegion;
@@ -22,7 +21,9 @@ import com.sk89q.worldguard.protection.regions.ProtectedPolygonalRegion;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import net.knightsandkings.knk.core.domain.validation.ValidationResult;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
+import net.knightsandkings.knk.paper.regions.DomainRegionUnion;
 import net.knightsandkings.knk.paper.regions.WorldGuardRegionRenamer;
+import net.knightsandkings.knk.paper.regions.WorldGuardSubRegionMirrorStore;
 import net.knightsandkings.knk.paper.tasks.validation.ParentRegionFeedback;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
@@ -47,8 +48,6 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
     private static final String FIELD_NAME = "WgRegionId";
     private static final String TEMP_REGION_PREFIX = "tempregion_worldtask_";
     
-    // Custom flag to store creation timestamp
-    public static final StringFlag CREATION_TIMESTAMP = new StringFlag("knk-creation-timestamp");
 
     private final WorldTasksApi worldTasksApi;
     private final Plugin plugin;
@@ -70,6 +69,18 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
 
     public void setRegionFinalizer(RegionFinalizer regionFinalizer) {
         this.regionFinalizer = regionFinalizer;
+    }
+
+    /** KNG-255: told when a domain sub-region got its final name and was made a copy of its main region. */
+    @FunctionalInterface
+    public interface SubRegionFinalizer {
+        void finalized(String subRegionId, String mainRegionId, String world);
+    }
+
+    private volatile SubRegionFinalizer subRegionFinalizer;
+
+    public void setSubRegionFinalizer(SubRegionFinalizer subRegionFinalizer) {
+        this.subRegionFinalizer = subRegionFinalizer;
     }
 
     /**
@@ -238,6 +249,8 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 // Validate region against validation rules from InputJson (KNG-173: a warning saves, a block refuses)
                 player.sendMessage("§7Validating region selection...");
                 ValidationResult validation = validateRegion(player, world, selectionPoints(selection),
+                    net.knightsandkings.knk.paper.integration.WorldGuardIntegration.createRegionFromSelection(
+                        selection, "knk_selection_check", 0),
                     "Your selection", context);
                 if (!reportValidation(player, validation)) {
                     return; // Block save
@@ -268,9 +281,15 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 String tempRegionId = TEMP_REGION_PREFIX + context.taskId;
                 ProtectedRegion region = net.knightsandkings.knk.paper.integration.WorldGuardIntegration.createRegionFromSelection(
                     selection, tempRegionId, context.priority);
+                // KNG-257: say what a round selection became
+                net.knightsandkings.knk.paper.integration.SelectionShapes.outlineOf(selection)
+                    .map(net.knightsandkings.knk.paper.integration.SelectionShapes.Outline::note)
+                    .ifPresent(note -> player.sendMessage("§7[WorldTask] " + note + "."));
                 
                 // Store creation timestamp for retention policy
-                region.setFlag(CREATION_TIMESTAMP, String.valueOf(System.currentTimeMillis()));
+                net.knightsandkings.knk.paper.regions.RegionBookkeepingFlags.set(region,
+                    net.knightsandkings.knk.paper.regions.RegionBookkeepingFlags.CREATION_TIMESTAMP,
+                    String.valueOf(System.currentTimeMillis()));
                 
                 // Apply flags if any
                 if (!context.flags.isEmpty()) {
@@ -342,7 +361,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
 
                 // KNG-173: the task's validation rules apply to a selected region the same as to a drawn one
                 player.sendMessage("§7Validating region " + regionName + "...");
-                ValidationResult validation = validateRegion(player, world, regionPoints(region),
+                ValidationResult validation = validateRegion(player, world, regionPoints(region), region,
                     "Region " + regionName, context);
                 if (!reportValidation(player, validation)) {
                     return;
@@ -638,7 +657,22 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      */
     public boolean renameRegion(String oldRegionId, String newRegionId, String domainType, String parentRegionId,
                                 String world, String replaceRegionId) {
+        return renameRegion(oldRegionId, newRegionId, domainType, parentRegionId, world, replaceRegionId, null);
+    }
+
+    /**
+     * KNG-255: as above; with {@code subRegionOf} (the domain's main region) the renamed region is one of the domain's
+     * sub-regions: instead of the category policy it becomes a copy of the main region at once (priority, parent = the
+     * main region, flags, owners, members, {@link net.knightsandkings.knk.core.regions.SubRegionMirror}), and the
+     * {@link SubRegionFinalizer} is told. The rename itself follows the same plan as a main region's (KNG-103 replace).
+     */
+    public boolean renameRegion(String oldRegionId, String newRegionId, String domainType, String parentRegionId,
+                                String world, String replaceRegionId, String subRegionOf) {
         boolean renamed = renameRegionInternal(oldRegionId, newRegionId, world, replaceRegionId);
+        if (renamed && subRegionOf != null && !subRegionOf.isBlank()) {
+            finalizeSubRegion(newRegionId, subRegionOf.trim(), world);
+            return true;
+        }
         RegionFinalizer finalizer = regionFinalizer;
         if (renamed && finalizer != null && domainType != null && !domainType.isBlank()) {
             try {
@@ -654,6 +688,34 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
             }
         }
         return renamed;
+    }
+
+    private void finalizeSubRegion(String subRegionId, String mainRegionId, String worldName) {
+        try {
+            World world = findWorldByRegion(subRegionId, worldName);
+            RegionManager manager = world == null ? null
+                : WorldGuard.getInstance().getPlatform().getRegionContainer().get(BukkitAdapter.adapt(world));
+            ProtectedRegion sub = manager == null ? null : manager.getRegion(subRegionId);
+            ProtectedRegion main = manager == null ? null : manager.getRegion(mainRegionId);
+            if (sub == null || main == null) {
+                // The rename succeeded; the next access sync sets the sub-region up once the API lists it.
+                LOGGER.warning("Sub-region " + subRegionId + " renamed, but " + (sub == null ? "it" : "its main region " + mainRegionId)
+                    + " is not in the same world; it is set up by the next region access sync");
+                return;
+            }
+            WorldGuardSubRegionMirrorStore.apply(sub, main,
+                net.knightsandkings.knk.core.regions.SubRegionMirror.desiredFor(main.getId(), WorldGuardSubRegionMirrorStore.stateOf(main)),
+                WorldGuard.getInstance().getFlagRegistry());
+            manager.saveChanges();
+            LOGGER.info("Sub-region " + subRegionId + " set up as a copy of " + mainRegionId + " in " + world.getName());
+            SubRegionFinalizer finalizer = subRegionFinalizer;
+            if (finalizer != null) {
+                finalizer.finalized(subRegionId, mainRegionId, world.getName());
+            }
+        } catch (Exception e) {
+            // The rename itself succeeded; the next access sync makes it a copy of the main region.
+            LOGGER.warning("Setting up sub-region " + subRegionId + " as a copy of " + mainRegionId + " failed: " + e.getMessage());
+        }
     }
 
     private boolean renameRegionInternal(String oldRegionId, String newRegionId, String worldName, String replaceRegionId) {
@@ -758,8 +820,11 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 return true;
             }
 
-            // Use shape-aware containment check logic
-            boolean isContained = isRegionInsideRegion(parentRegion, childRegion);
+            // Use shape-aware containment check logic; KNG-257: against the parent domain's every region
+            List<ProtectedRegion> parentUnion = DomainRegionUnion.of(regionManager, parentRegion);
+            boolean isContained = parentUnion.size() > 1
+                ? DomainRegionUnion.outside(parentUnion, childRegion, regionPoints(childRegion), 1).isEmpty()
+                : isRegionInsideRegion(parentRegion, childRegion);
             
             LOGGER.info("Region containment check: " + childRegionId + " inside " + parentRegionId + " = " + isContained);
             return isContained;
@@ -852,8 +917,8 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      * @param context      task context containing InputJson with validation rules
      * @return ValidationResult indicating success or failure
      */
-    private ValidationResult validateRegion(Player player, World subjectWorld, List<BlockVector3> points, String what,
-                                            TaskContext context) {
+    private ValidationResult validateRegion(Player player, World subjectWorld, List<BlockVector3> points,
+                                            ProtectedRegion subject, String what, TaskContext context) {
         try {
             // Parse validation context from InputJson
             LOGGER.info("validateRegion called for task " + context.taskId);
@@ -886,7 +951,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 LOGGER.info("Processing validation rule: " + validationType);
 
                 if ("RegionContainment".equals(validationType)) {
-                    ValidationResult result = validateRegionContainment(player, subjectWorld, points, what, rule);
+                    ValidationResult result = validateRegionContainment(player, subjectWorld, points, subject, what, rule);
                     if (!result.isValid()) {
                         LOGGER.info("Validation failed (blocking: " + result.isBlocking() + "): " + result.getMessage());
                     }
@@ -916,7 +981,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      * @return ValidationResult
      */
     private ValidationResult validateRegionContainment(Player player, World subjectWorld, List<BlockVector3> points,
-                                                       String what, JsonObject rule) {
+                                                       ProtectedRegion subject, String what, JsonObject rule) {
         try {
             // Parse config
             JsonObject config = rule.has("configJson") && !rule.get("configJson").isJsonNull()
@@ -981,21 +1046,19 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 return parent.wrongWorld(what, subjectWorld.getName(), parentWorld.getName());
             }
 
-            // Check every corner point of the region against the parent region
+            // Check the region's corner points against the parent domain's regions (KNG-257: its main region and its
+            // sub-regions; with several, its columns are sampled too)
             StringBuilder violations = new StringBuilder();
-            int violationCount = 0;
             final int maxViolations = 5; // Limit violation output
 
             player.sendMessage("§7Checking against " + parent.describe() + "...");
-            for (BlockVector3 point : points) {
-                if (!parentRegion.contains(point)) {
-                    violationCount++;
-                    if (violationCount <= maxViolations) {
-                        if (violations.length() > 0) violations.append(", ");
-                        violations.append("(").append(point.x()).append(", ").append(point.y()).append(", ")
-                            .append(point.z()).append(")");
-                    }
-                }
+            List<ProtectedRegion> parentUnion = DomainRegionUnion.of(regionManager, parentRegion);
+            List<BlockVector3> outside = DomainRegionUnion.outside(parentUnion, subject, points, 1000);
+            int violationCount = outside.size();
+            for (BlockVector3 point : outside.subList(0, Math.min(maxViolations, outside.size()))) {
+                if (violations.length() > 0) violations.append(", ");
+                violations.append("(").append(point.x()).append(", ").append(point.y()).append(", ")
+                    .append(point.z()).append(")");
             }
 
             LOGGER.info("Containment check complete. Points checked: " + points.size() + ", outside: " + violationCount);
@@ -1056,8 +1119,10 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      * highest Y, a cuboid's eight corners, else the minimum and maximum point.
      */
     static List<BlockVector3> selectionPoints(Region selection) {
-        if (selection instanceof Polygonal2DRegion poly) {
-            return polygonPoints(poly.getPoints(), poly.getMinimumY(), poly.getMaximumY());
+        // KNG-257: a cylinder, ellipsoid or convex selection is checked as the polygon it is stored as.
+        var outline = net.knightsandkings.knk.paper.integration.SelectionShapes.outlineOf(selection);
+        if (outline.isPresent()) {
+            return polygonPoints(outline.get().points(), outline.get().minY(), outline.get().maxY());
         }
         if (selection instanceof CuboidRegion) {
             return cuboidCorners(selection.getMinimumPoint(), selection.getMaximumPoint());

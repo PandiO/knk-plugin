@@ -22,6 +22,10 @@ import java.util.List;
  * @param killStreakAnnounceAbove             streaks strictly above this are announced
  * @param spawnPickerDelayTicks               delay before the spawn picker opens after a respawn
  * @param enchantDropChancePerMille           chance per second of an enchant-book drop, in per mille
+ * @param giveNavigationItem                  the global default for giving players the navigation compass at the hub (KNG-234)
+ * @param playerSkipMatchmakingSeconds        seconds of matchmaking left after a player's {@code /siege skip} (playtest 2026-10-24;
+ *                                            never less than {@code voteClose + 1}, so voting gets its last second)
+ * @param adminSkipMatchmakingSeconds         seconds left after {@code /siege admin skip} (same floor; legacy T-31)
  */
 public record KnkSiegeConfiguration(
         int captureAttackBase,
@@ -46,14 +50,58 @@ public record KnkSiegeConfiguration(
         int enchantLevelMin,
         int enchantLevelMax,
         int maxBooksAlive,
-        SiegeNonMemberGateView nonMemberGateView
+        SiegeNonMemberGateView nonMemberGateView,
+        boolean giveNavigationItem,
+        int playerSkipMatchmakingSeconds,
+        int adminSkipMatchmakingSeconds
 ) {
+    /** Seconds left after a player's {@code /siege skip} before the setting existed (developer request 2026-09-26). */
+    public static final int DEFAULT_PLAYER_SKIP_MATCHMAKING_SECONDS = 60;
+    /** Seconds left after {@code /siege admin skip} before the setting existed: one second before voting closes (T-31). */
+    public static final int DEFAULT_ADMIN_SKIP_MATCHMAKING_SECONDS = 31;
+
     public KnkSiegeConfiguration {
         matchmakingAnnouncementMarks = copy(matchmakingAnnouncementMarks);
         killAnnouncementThresholds = copy(killAnnouncementThresholds);
         allowedCommands = copy(allowedCommands);
         allowedEnchantmentKeys = copy(allowedEnchantmentKeys);
         if (nonMemberGateView == null) nonMemberGateView = SiegeNonMemberGateView.PRE_LOCKDOWN_VIEW;
+    }
+
+    /** The tunables without the skip settings (everything before the 2026-10-24 playtest): the former fixed values. */
+    public KnkSiegeConfiguration(int captureAttackBase, int captureAttackPerExtra, int captureAttackPerExtraInstantVictory,
+                                 int captureDefendBase, int captureDefendPerExtra, int captureDefendPerExtraInstantVictory,
+                                 double sideCaptureReduction, int voteCloseSecondsBeforeStart, int drawSecondsBeforeStart,
+                                 int hubSecondsBeforeStart, int teamSplitSecondsBeforeStart,
+                                 List<Integer> matchmakingAnnouncementMarks, List<Integer> killAnnouncementThresholds,
+                                 int killStreakAnnounceAbove, double headshotMultiplier, List<String> allowedCommands,
+                                 int spawnPickerDelayTicks, int enchantDropChancePerMille, List<String> allowedEnchantmentKeys,
+                                 int enchantLevelMin, int enchantLevelMax, int maxBooksAlive,
+                                 SiegeNonMemberGateView nonMemberGateView, boolean giveNavigationItem) {
+        this(captureAttackBase, captureAttackPerExtra, captureAttackPerExtraInstantVictory, captureDefendBase,
+                captureDefendPerExtra, captureDefendPerExtraInstantVictory, sideCaptureReduction, voteCloseSecondsBeforeStart,
+                drawSecondsBeforeStart, hubSecondsBeforeStart, teamSplitSecondsBeforeStart, matchmakingAnnouncementMarks,
+                killAnnouncementThresholds, killStreakAnnounceAbove, headshotMultiplier, allowedCommands, spawnPickerDelayTicks,
+                enchantDropChancePerMille, allowedEnchantmentKeys, enchantLevelMin, enchantLevelMax, maxBooksAlive,
+                nonMemberGateView, giveNavigationItem, DEFAULT_PLAYER_SKIP_MATCHMAKING_SECONDS, DEFAULT_ADMIN_SKIP_MATCHMAKING_SECONDS);
+    }
+
+    /** The tunables without the navigation compass switch (everything before KNG-234): it is off. */
+    public KnkSiegeConfiguration(int captureAttackBase, int captureAttackPerExtra, int captureAttackPerExtraInstantVictory,
+                                 int captureDefendBase, int captureDefendPerExtra, int captureDefendPerExtraInstantVictory,
+                                 double sideCaptureReduction, int voteCloseSecondsBeforeStart, int drawSecondsBeforeStart,
+                                 int hubSecondsBeforeStart, int teamSplitSecondsBeforeStart,
+                                 List<Integer> matchmakingAnnouncementMarks, List<Integer> killAnnouncementThresholds,
+                                 int killStreakAnnounceAbove, double headshotMultiplier, List<String> allowedCommands,
+                                 int spawnPickerDelayTicks, int enchantDropChancePerMille, List<String> allowedEnchantmentKeys,
+                                 int enchantLevelMin, int enchantLevelMax, int maxBooksAlive,
+                                 SiegeNonMemberGateView nonMemberGateView) {
+        this(captureAttackBase, captureAttackPerExtra, captureAttackPerExtraInstantVictory, captureDefendBase,
+                captureDefendPerExtra, captureDefendPerExtraInstantVictory, sideCaptureReduction, voteCloseSecondsBeforeStart,
+                drawSecondsBeforeStart, hubSecondsBeforeStart, teamSplitSecondsBeforeStart, matchmakingAnnouncementMarks,
+                killAnnouncementThresholds, killStreakAnnounceAbove, headshotMultiplier, allowedCommands, spawnPickerDelayTicks,
+                enchantDropChancePerMille, allowedEnchantmentKeys, enchantLevelMin, enchantLevelMax, maxBooksAlive,
+                nonMemberGateView, false);
     }
 
     /**

@@ -2,6 +2,7 @@ package net.knightsandkings.knk.paper.events;
 
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Entity;
 import org.bukkit.event.Cancellable;
 import org.bukkit.event.Event;
@@ -20,20 +21,29 @@ public class GateDoorIgniteEvent extends Event implements Cancellable {
     public enum Cause {
         FLAMING_PROJECTILE,
         FIRE_CHARGE,
-        FLINT_AND_STEEL
+        FLINT_AND_STEEL,
+        /** A melee hit with a Fire Aspect weapon that rolled its ignition chance (GateFireAspect). */
+        FIRE_ASPECT
     }
 
     private final CachedGateDoor gate;
     private final Cause cause;
     private final Entity causingEntity;
     private final Block hitBlock;
+    private final BlockFace hitFace;
     private boolean cancelled;
 
     public GateDoorIgniteEvent(CachedGateDoor gate, Cause cause, Entity causingEntity, Block hitBlock) {
+        this(gate, cause, causingEntity, hitBlock, null);
+    }
+
+    /** @param hitFace the face of {@code hitBlock} that was struck / ignited, or null when unknown */
+    public GateDoorIgniteEvent(CachedGateDoor gate, Cause cause, Entity causingEntity, Block hitBlock, BlockFace hitFace) {
         this.gate = gate;
         this.cause = cause;
         this.causingEntity = causingEntity;
         this.hitBlock = hitBlock;
+        this.hitFace = hitFace;
     }
 
     public CachedGateDoor getGate() {
@@ -53,6 +63,14 @@ public class GateDoorIgniteEvent extends Event implements Cancellable {
 
     public Block getHitBlock() {
         return hitBlock;
+    }
+
+    /**
+     * The face of the hit block the ignition came from (the side the attacker is on), or null when the
+     * source didn't say - GateFireSystem then works the side out from where the igniter stands.
+     */
+    public BlockFace getHitFace() {
+        return hitFace;
     }
 
     @Override

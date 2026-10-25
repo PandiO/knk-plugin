@@ -7,9 +7,7 @@ import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.core.siege.ObjectiveState;
 import net.knightsandkings.knk.core.siege.ObjectiveState.CaptureEvent;
 import net.knightsandkings.knk.core.siege.SiegeLobbyStateMachine;
-import net.knightsandkings.knk.core.siege.SiegeMatchRoster.SpawnChoice;
 import net.knightsandkings.knk.core.siege.SiegePhase;
-import net.knightsandkings.knk.core.siege.SiegeSpawnOptions;
 import net.knightsandkings.knk.core.siege.SiegeSpawnOptions.SpawnOption;
 import net.knightsandkings.knk.core.siege.VoteTally;
 import net.knightsandkings.knk.core.siege.menu.SiegeBodyRowView;
@@ -152,10 +150,12 @@ final class SiegeMenuSnapshots {
                         match.roster().membersOf(own.id()).size(),
                         (int) match.board().objectives().stream().filter(o -> o.holderTeamId() == own.id()).count(),
                         SiegeMenuFormat.bannerPatterns(own.bannerDesign()));
-                SpawnChoice choice = match.roster().spawnChoice(id).orElse(null);
-                spawnName = SiegeSpawnOptions.forTeam(own, match.board(), choice).stream()
-                        .filter(SpawnOption::current).map(SpawnOption::name).findFirst().orElse(null);
             }
+        }
+        // Playtest 2026-10-24: the current spawn is known from the team split on (pre-match choices included).
+        SiegeService.SpawnScope scope = service.spawnScopeOf(id).filter(sc -> sc.lobby() == lobby).orElse(null);
+        if (scope != null) {
+            spawnName = scope.options(id).stream().filter(SpawnOption::current).map(SpawnOption::name).findFirst().orElse(null);
         }
         return new SiegeViewerMenuView(true, null, team, spawnName);
     }
@@ -200,15 +200,13 @@ final class SiegeMenuSnapshots {
         return rows;
     }
 
+    /** The viewer's spawn options: in their running match, or at the hub once the teams are split (playtest 2026-10-24). */
     static List<SpawnOptionView> spawnOptions(SiegeService service, Player viewer) {
         if (viewer == null) return List.of();
-        SiegeMatch match = service.runningMatchOf(viewer.getUniqueId()).orElse(null);
-        if (match == null) return List.of();
-        KnkSiegeTeam team = match.teamOf(viewer.getUniqueId()).orElse(null);
-        if (team == null) return List.of();
-        String banner = SiegeMenuFormat.bannerPatterns(team.bannerDesign());
-        SpawnChoice choice = match.roster().spawnChoice(viewer.getUniqueId()).orElse(null);
-        return SiegeSpawnOptions.forTeam(team, match.board(), choice).stream()
+        SiegeService.SpawnScope scope = service.spawnScopeOf(viewer.getUniqueId()).orElse(null);
+        if (scope == null) return List.of();
+        String banner = SiegeMenuFormat.bannerPatterns(scope.team().bannerDesign());
+        return scope.options(viewer.getUniqueId()).stream()
                 .map(option -> new SpawnOptionView(option, banner))
                 .toList();
     }

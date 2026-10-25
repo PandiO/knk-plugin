@@ -27,6 +27,13 @@ public interface SiegeMatchObserver {
      */
     default void areaLockdownStarted(SiegeLobbyRuntime lobby, KnkSiegeScenario scenario) { }
 
+    /**
+     * A member's inventory was saved and they were prepared for the match, just before the hub teleport
+     * (KNG-234: the navigation compass is given here, so it never enters the saved inventory and goes away
+     * with the vault restore). Called once per member, main thread.
+     */
+    default void memberReadiedAtHub(SiegeLobbyRuntime lobby, KnkSiegeScenario scenario, Player player) { }
+
     /** The match started; members are at their spawnpoints. */
     default void matchStarted(SiegeLobbyRuntime lobby, SiegeMatch match) { }
 

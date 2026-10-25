@@ -89,6 +89,28 @@ class SiegeGatePlanTest {
     }
 
     @Test
+    void defenders_theOwnerAllianceOnly() {
+        SiegeGatePlan plan = SiegeGatePlan.of(scenario);
+
+        assertTrue(plan.isDefender(10, 1, alliances));
+        assertFalse(plan.isDefender(10, 2, alliances));    // attacker
+        assertFalse(plan.isDefender(10, 4, alliances));    // another attacker alliance
+        assertFalse(plan.isDefender(10, null, alliances)); // non-member
+        assertTrue(plan.isDefender(11, 4, alliances));     // the postern belongs to team 4 (not damageable, still held)
+        assertFalse(plan.isDefender(20, 1, alliances));    // area gate: no owner
+        assertFalse(plan.isDefender(99, 1, alliances));    // not in the plan
+    }
+
+    @Test
+    void defenders_followTheGateWhenAnObjectiveChangesHands() {
+        SiegeGatePlan plan = SiegeGatePlan.of(scenario);
+        plan.onCapture(2, 3);
+
+        assertTrue(plan.isDefender(10, 2, alliances));  // ally of the new owner (team 3)
+        assertFalse(plan.isDefender(10, 1, alliances)); // the old defenders
+    }
+
+    @Test
     void capture_handsTheObjectiveGateOver_everyTime() {
         SiegeGatePlan plan = SiegeGatePlan.of(scenario);
 

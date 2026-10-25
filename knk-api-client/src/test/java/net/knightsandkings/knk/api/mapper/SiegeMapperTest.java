@@ -168,6 +168,8 @@ class SiegeMapperTest {
         assertEquals(1.5, c.headshotMultiplier());
         assertEquals(List.of("/siege", "/msg", "/r", "/staffchat", "/menu"), c.allowedCommands());
         assertEquals(20, c.spawnPickerDelayTicks());
+        assertEquals(60, c.playerSkipMatchmakingSeconds());
+        assertEquals(31, c.adminSkipMatchmakingSeconds());
         assertEquals(30, c.enchantDropChancePerMille());
         assertEquals(17, c.allowedEnchantmentKeys().size());
         assertTrue(c.allowedEnchantmentKeys().contains("minecraft:sharpness"));
@@ -175,6 +177,37 @@ class SiegeMapperTest {
         assertEquals(2, c.enchantLevelMax());
         assertEquals(10, c.maxBooksAlive());
         assertEquals(SiegeNonMemberGateView.PRE_LOCKDOWN_VIEW, c.nonMemberGateView());
+    }
+
+    @Test
+    void mapsTheNavigationItemChoiceOfEveryLevel() throws IOException {
+        String json = """
+                {
+                  "configuration": { "giveNavigationItem": true },
+                  "lobbies": [
+                    { "id": 1, "name": "A", "key": "a", "navigationItem": "DoNotGive",
+                      "rotation": [ { "weight": 1, "scenario": { "id": 4, "name": "S", "navigationItem": "Give" } },
+                                    { "weight": 1, "scenario": { "id": 5, "name": "T" } } ] }
+                  ]
+                }
+                """;
+
+        KnkSiegeRuntimeConfig config = SiegeMapper.toCore(objectMapper.readValue(json, RuntimeConfigDto.class));
+
+        assertTrue(config.configuration().giveNavigationItem());
+        var lobby = config.lobbies().get(0);
+        assertEquals(net.knightsandkings.knk.core.domain.siege.SiegeNavigationItemMode.DO_NOT_GIVE, lobby.navigationItem());
+        assertEquals(net.knightsandkings.knk.core.domain.siege.SiegeNavigationItemMode.GIVE, lobby.rotation().get(0).scenario().navigationItem());
+        assertEquals(net.knightsandkings.knk.core.domain.siege.SiegeNavigationItemMode.INHERIT, lobby.rotation().get(1).scenario().navigationItem());
+    }
+
+    @Test
+    void theNavigationItemIsOffAndInheritedWhenTheApiDoesNotSayAnything() throws IOException {
+        KnkSiegeRuntimeConfig config = SiegeMapper.toCore(objectMapper.readValue(
+                "{\"configuration\":{},\"lobbies\":[{\"id\":1,\"name\":\"A\",\"key\":\"a\"}]}", RuntimeConfigDto.class));
+
+        assertFalse(config.configuration().giveNavigationItem());
+        assertEquals(net.knightsandkings.knk.core.domain.siege.SiegeNavigationItemMode.INHERIT, config.lobbies().get(0).navigationItem());
     }
 
     @Test

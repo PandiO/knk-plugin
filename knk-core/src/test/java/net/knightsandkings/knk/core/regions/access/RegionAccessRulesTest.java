@@ -96,4 +96,63 @@ class RegionAccessRulesTest {
         assertEquals(AccessState.ALLOW, RegionAccessRules.fromAllowed(true));
         assertEquals(AccessState.DENY, RegionAccessRules.fromAllowed(false));
     }
+
+    // ===== KNG-255: a domain's main region and sub-regions are one domain =====
+
+    private record DomainRegion(String regionId, String displayName, AccessState entry, AccessState exit, boolean isMember,
+                                String domainId) implements RegionView {
+    }
+
+    private static DomainRegion part(String id, String domainId, AccessState entry, AccessState exit) {
+        return new DomainRegion(id, "Garrison", entry, exit, false, domainId);
+    }
+
+    @Test
+    void walkingFromTheMainRegionIntoASubRegionOfANoExitDomainIsAllowed() {
+        // House (main) and tower (sub) of a gate that may not be left; the border between them is inside the domain.
+        DomainRegion house = part("domain_9", "9", AccessState.DENY, AccessState.DENY);
+        DomainRegion tower = part("domain_9_sub_1", "9", AccessState.DENY, AccessState.DENY);
+
+        assertTrue(rules.evaluate(List.of(tower), List.of(house), List.of(tower)).isEmpty());
+        assertTrue(rules.evaluate(List.of(house), List.of(tower), List.of(house)).isEmpty());
+    }
+
+    @Test
+    void enteringASubRegionFromOverlapWithTheMainRegionIsNoEntry() {
+        DomainRegion house = part("domain_9", "9", AccessState.DENY, AccessState.UNSET);
+        DomainRegion tower = part("domain_9_sub_1", "9", AccessState.DENY, AccessState.UNSET);
+
+        // Standing in the house, stepping where house and tower overlap: the tower is entered, the domain is not.
+        assertTrue(rules.evaluate(List.of(tower), List.of(), List.of(house, tower)).isEmpty());
+    }
+
+    @Test
+    void leavingTheLastRegionOfTheDomainIsStillRefused_AndEnteringTheFirstToo() {
+        DomainRegion tower = part("domain_9_sub_1", "9", AccessState.DENY, AccessState.DENY);
+        Region street = region("district_1", AccessState.UNSET, AccessState.UNSET);
+
+        assertEquals(RegionTransitionType.EXIT,
+            rules.evaluate(List.of(), List.of(tower), List.of(street)).orElseThrow().type());
+        assertEquals(RegionTransitionType.ENTER,
+            rules.evaluate(List.of(tower), List.of(), List.of(street, tower)).orElseThrow().type());
+    }
+
+    @Test
+    void regionsOfTwoDomainsOrWithoutADomainIdStayTheirOwn() {
+        DomainRegion gate = part("domain_9", "9", AccessState.UNSET, AccessState.DENY);
+        DomainRegion other = part("domain_10_sub_1", "10", AccessState.DENY, AccessState.UNSET);
+        Region legacy = region("legacy", AccessState.UNSET, AccessState.DENY);
+        Region legacyTwin = region("legacy_2", AccessState.DENY, AccessState.UNSET);
+
+        assertEquals("domain_9", rules.evaluate(List.of(), List.of(gate), List.of(other)).orElseThrow().regionId());
+        assertEquals("legacy_2", rules.evaluate(List.of(legacyTwin), List.of(legacy), List.of(legacyTwin)).orElseThrow().regionId());
+    }
+
+    @Test
+    void withoutTheDestinationNothingIsGrouped() {
+        DomainRegion house = part("domain_9", "9", AccessState.UNSET, AccessState.DENY);
+        DomainRegion tower = part("domain_9_sub_1", "9", AccessState.UNSET, AccessState.UNSET);
+
+        assertEquals(RegionTransitionType.EXIT, rules.evaluate(List.of(tower), List.of(house), null).orElseThrow().type());
+    }
 }

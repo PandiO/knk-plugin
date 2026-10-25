@@ -9,6 +9,7 @@ import org.bukkit.ChatColor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.plugin.Plugin;
 
+import net.knightsandkings.knk.core.regions.SubRegionMirror;
 import net.knightsandkings.knk.core.regions.managed.RepairReport;
 import net.knightsandkings.knk.paper.regions.access.DomainAccessFlagSync;
 import net.knightsandkings.knk.paper.regions.managed.ManagedRegionsBootstrap;
@@ -24,6 +25,11 @@ import net.knightsandkings.knk.paper.tasks.TempRegionRetentionTask;
  * as the daily 14-day cleanup ({@link TempRegionRetentionTask}), plus {@code domain_<id>} regions no domain uses (report
  * only). {@code /knk regions temp purge [hours]} deletes the temp regions no domain uses that are older than
  * {@code hours} (default {@value #DEFAULT_PURGE_HOURS}, at least 1, so a region step still in progress is safe).
+ * KNG-258: it also lists the orphaned domain sub-regions (no domain lists them any more), and purge deletes the ones
+ * orphaned longer than {@code hours}.
+ *
+ * <p>{@code /knk regions sync} (KNG-255) runs the domain access sync now, which also makes every domain's sub-regions
+ * copies of its main region (flags, owners, members, priority); otherwise that happens every few minutes.
  */
 public class RegionsAdminCommand {
 
@@ -53,15 +59,15 @@ public class RegionsAdminCommand {
         return new CommandMetadata(
                 "regions",
                 "Repair the WorldGuard parent, priority and flags of every Knights and Kings region (same pass as at startup)",
-                "/knk regions <repair|temp [purge [hours]]>",
+                "/knk regions <repair|sync|temp [purge [hours]]>",
                 PERMISSION,
-                List.of("/knk regions repair", "/knk regions temp", "/knk regions temp purge 24"));
+                List.of("/knk regions repair", "/knk regions sync", "/knk regions temp", "/knk regions temp purge 24"));
     }
 
     public List<String> complete(CommandSender sender, String[] args) {
         if (args.length == 1) {
             String prefix = args[0].toLowerCase(Locale.ROOT);
-            return List.of("repair", "temp").stream().filter(option -> option.startsWith(prefix)).toList();
+            return List.of("repair", "sync", "temp").stream().filter(option -> option.startsWith(prefix)).toList();
         }
         if (args.length == 2 && "temp".equalsIgnoreCase(args[0]) && "purge".startsWith(args[1].toLowerCase(Locale.ROOT))) {
             return List.of("purge");
@@ -73,8 +79,17 @@ public class RegionsAdminCommand {
         if (args.length > 0 && "temp".equalsIgnoreCase(args[0])) {
             return temp(sender, args);
         }
+        if (args.length > 0 && "sync".equalsIgnoreCase(args[0])) {
+            if (accessSync == null) {
+                sender.sendMessage(ChatColor.RED + "The domain access sync is not running on this server.");
+                return true;
+            }
+            sender.sendMessage(ChatColor.GRAY + "Syncing domain access rules and sub-regions...");
+            reportAccessSync(sender);
+            return true;
+        }
         if (args.length == 0 || !"repair".equalsIgnoreCase(args[0])) {
-            sender.sendMessage(ChatColor.YELLOW + "Usage: /knk regions repair | /knk regions temp [purge [hours]]");
+            sender.sendMessage(ChatColor.YELLOW + "Usage: /knk regions repair | /knk regions sync | /knk regions temp [purge [hours]]");
             return true;
         }
         sender.sendMessage(ChatColor.GRAY + "Repairing managed regions...");
@@ -93,19 +108,32 @@ public class RegionsAdminCommand {
             }
         }));
         if (accessSync != null) {
-            accessSync.syncNow().whenComplete((report, error) -> Bukkit.getScheduler().runTask(plugin, () -> {
-                if (error != null) {
-                    Throwable cause = error.getCause() != null ? error.getCause() : error;
-                    sender.sendMessage(ChatColor.RED + "Domain access sync could not run: " + cause.getMessage()
-                            + " (the rules last saved on the regions stay in force)");
-                    return;
-                }
-                sender.sendMessage((report.failures().isEmpty() ? ChatColor.GREEN : ChatColor.YELLOW)
-                        + "Domain access sync: " + report.summary());
-                report.failures().stream().limit(5).forEach(failure -> sender.sendMessage(ChatColor.RED + failure));
-            }));
+            reportAccessSync(sender);
         }
         return true;
+    }
+
+    private void reportAccessSync(CommandSender sender) {
+        accessSync.syncNow().whenComplete((report, error) -> Bukkit.getScheduler().runTask(plugin, () -> {
+            if (error != null) {
+                Throwable cause = error.getCause() != null ? error.getCause() : error;
+                sender.sendMessage(ChatColor.RED + "Domain access sync could not run: " + cause.getMessage()
+                        + " (the rules last saved on the regions stay in force)");
+                return;
+            }
+            sender.sendMessage((report.failures().isEmpty() ? ChatColor.GREEN : ChatColor.YELLOW)
+                    + "Domain access sync: " + report.summary());
+            report.failures().stream().limit(5).forEach(failure -> sender.sendMessage(ChatColor.RED + failure));
+            SubRegionMirror.Report subRegions = accessSync.lastSubRegionReport();
+            if (subRegions != null && subRegions.domains() > 0) {
+                boolean clean = subRegions.failures().isEmpty() && subRegions.missingSubRegions().isEmpty()
+                        && subRegions.missingMainRegions().isEmpty();
+                sender.sendMessage((clean ? ChatColor.GREEN : ChatColor.YELLOW) + "Sub-regions: " + subRegions.summary());
+                subRegions.missingSubRegions().stream().limit(5)
+                        .forEach(missing -> sender.sendMessage(ChatColor.GRAY + "- not in WorldGuard: " + missing));
+                subRegions.failures().stream().limit(5).forEach(failure -> sender.sendMessage(ChatColor.RED + failure));
+            }
+        }));
     }
 
     private boolean temp(CommandSender sender, String[] args) {
@@ -159,6 +187,11 @@ public class RegionsAdminCommand {
         list(sender, purge ? "Deleted" : "Unused (purge deletes)", purge ? sweep.deleted() : sweep.deletable());
         list(sender, "Used by a domain (POST /api/Regions/finalize-temp-names renames them)", sweep.inUse());
         list(sender, "Delete failed", sweep.deleteFailed());
+        // KNG-258
+        list(sender, purge ? "Orphaned sub-regions deleted" : "Orphaned sub-regions past the retention (purge deletes)",
+                sweep.orphanedSubRegions());
+        list(sender, "Orphaned sub-regions not old enough yet (adopt one again with 'select' in a sub-region task)",
+                sweep.orphanedSubRegionsWaiting());
         if (!purge) {
             list(sender, "domain_<id> regions no domain uses (not deleted; check /rg info first)", sweep.orphanedFinalNames());
             if (!sweep.deletable().isEmpty()) {

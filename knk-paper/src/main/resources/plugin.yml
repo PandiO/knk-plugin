@@ -7,6 +7,8 @@ depend:
   - WorldGuard
 softdepend:
   - WorldEdit
+  # Optional: Bedrock players (Geyser) get delayed menu switches - menus.bedrock-transition-delay-ticks.
+  - floodgate
   
 commands:
   knk:
@@ -30,8 +32,8 @@ commands:
     # No permission: here (KNG-77) - gated on knk.gatedoor.* / knk.gate.* inside GateDoorCommand.
 
   account:
-    description: "Manage your in-game account (create, link, view status)"
-    usage: "/account [create|link|status]"
+    description: "Manage your in-game account (link a web login, view status)"
+    usage: "/account [link|status]"
     aliases: [acc]
     permission: knk.account.use
 
@@ -344,7 +346,7 @@ permissions:
     default: false
 
   knk.admin.regions:
-    description: Access to /knk regions repair (re-applies the managed WorldGuard parent, priority and flags to every Knights and Kings region) and /knk regions temp [purge [hours]] (reports leftover tempregion_worldtask_* regions and unused domain_<id> regions; purge deletes unused temp regions)
+    description: Access to /knk regions repair (re-applies the managed WorldGuard parent, priority and flags to every Knights and Kings region), /knk regions sync (domain access flags now, and every sub-region made a copy of its main region) and /knk regions temp [purge [hours]] (reports leftover tempregion_worldtask_* regions and unused domain_<id> regions; purge deletes unused temp regions)
     default: false
 
   knk.admin.cache:

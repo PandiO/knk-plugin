@@ -213,7 +213,7 @@ public class UserCommand implements TabExecutor {
         lines.add("&6--- Statistics: &f" + user.username() + " &6---");
         if (full) {
             lines.addAll(view.getQuickStatsLines());
-            lines.add("&7Account: &f" + (user.isFullAccount() ? "web account linked" : "Minecraft only &7(/account create)"));
+            lines.add("&7Account: &f" + (user.isFullAccount() ? "web account linked" : "Minecraft only &7(/account link to add a web login)"));
             if (user.activeMode() != null && user.activeMode() != ActiveMode.NONE) {
                 lines.add("&7Mode: &f" + user.activeMode().toWireValue());
             }

@@ -120,10 +120,12 @@ public class KnkApiClient {
     private final UsersQueryApi usersQueryApi;
     private final UsersCommandApi usersCommandApi;
     private final PlayerNotificationsApi playerNotificationsApi;
+    private final net.knightsandkings.knk.core.ports.api.AdmissionApi admissionApi;
     private final DiscoveriesApi discoveriesApi;
     private final StatisticsApiImpl statisticsApi;
     private final net.knightsandkings.knk.core.ports.api.TelemetryApi telemetryApi;
     private final net.knightsandkings.knk.core.ports.api.WorldAnalyticsApi worldAnalyticsApi;
+    private final net.knightsandkings.knk.core.ports.api.MinecraftCatalogApi minecraftCatalogApi;
     private final LeaderboardsApiImpl leaderboardsApi;
     private final UserIgnoresApi userIgnoresApi;
     private final PrivateMessageLogApi privateMessageLogApi;
@@ -157,6 +159,7 @@ public class KnkApiClient {
     private final net.knightsandkings.knk.core.ports.api.LootboxesCommandApi lootboxesCommandApi;
     private final CurrencyApi currencyApi;
     private final RoadNetworkQueryApi roadNetworkQueryApi;
+    private final net.knightsandkings.knk.core.ports.api.NavigationCompassSettingsApi navigationCompassSettingsApi;
     private final RoadNetworkCommandApi roadNetworkCommandApi;
     private final net.knightsandkings.knk.core.ports.api.LocationRetentionApi locationRetentionApi;
 
@@ -179,6 +182,7 @@ public class KnkApiClient {
         this.executor = executor;
         this.telemetryApi = new net.knightsandkings.knk.api.impl.TelemetryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.worldAnalyticsApi = new net.knightsandkings.knk.api.impl.WorldAnalyticsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.minecraftCatalogApi = new net.knightsandkings.knk.api.impl.MinecraftCatalogApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         
         // Initialize API implementations
         this.healthApi = new HealthApiImpl(
@@ -197,6 +201,7 @@ public class KnkApiClient {
         this.usersQueryApi = new UsersQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.usersCommandApi = new UsersCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.playerNotificationsApi = new PlayerNotificationsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.admissionApi = new net.knightsandkings.knk.api.impl.AdmissionApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.discoveriesApi = new DiscoveriesApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.statisticsApi = new StatisticsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.leaderboardsApi = new LeaderboardsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -232,6 +237,7 @@ public class KnkApiClient {
         this.lootboxesQueryApi = new net.knightsandkings.knk.api.impl.LootboxesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.lootboxesCommandApi = new net.knightsandkings.knk.api.impl.LootboxesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.roadNetworkQueryApi = new RoadNetworkQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.navigationCompassSettingsApi = new net.knightsandkings.knk.api.impl.NavigationCompassSettingsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.roadNetworkCommandApi = new RoadNetworkCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.locationRetentionApi = new net.knightsandkings.knk.api.impl.LocationRetentionApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
     }
@@ -351,6 +357,11 @@ public class KnkApiClient {
         return playerNotificationsApi;
     }
 
+    /** The admission gate (invitations, KNG-214): {@code api/Admission/{uuid}?name=}. */
+    public net.knightsandkings.knk.core.ports.api.AdmissionApi getAdmissionApi() {
+        return admissionApi;
+    }
+
     /** Domain discovery (KNG-20): {@code api/users/{userId}/discoveries}. */
     public DiscoveriesApi getDiscoveriesApi() {
         return discoveriesApi;
@@ -371,6 +382,11 @@ public class KnkApiClient {
         return worldAnalyticsApi;
     }
 
+    /** Minecraft catalogue scan snapshots (KNG-200): {@code api/MinecraftCatalog}. */
+    public net.knightsandkings.knk.core.ports.api.MinecraftCatalogApi getMinecraftCatalogApi() {
+        return minecraftCatalogApi;
+    }
+
     /** Leaderboards (KNG-34): {@code api/leaderboards}. */
     public net.knightsandkings.knk.core.ports.api.LeaderboardsApi getLeaderboardsApi() {
         return leaderboardsApi;
@@ -384,6 +400,11 @@ public class KnkApiClient {
     /** Road navigation reads (KNG-27): tiles, conditional tile graphs, meta, profiles, surveys, seeds, edge search. */
     public RoadNetworkQueryApi getRoadNetworkQueryApi() {
         return roadNetworkQueryApi;
+    }
+
+    /** The navigation compass item rule and where it works (KNG-234). */
+    public net.knightsandkings.knk.core.ports.api.NavigationCompassSettingsApi getNavigationCompassSettingsApi() {
+        return navigationCompassSettingsApi;
     }
 
     /** Road navigation writes (KNG-27): build upload, dirty marks, profiles, surveys, seeds, node/edge review. */
@@ -580,6 +601,8 @@ public class KnkApiClient {
                 httpClientBuilder.hostnameVerifier((hostname, session) -> true);
             }
             
+            // KNG-232: duration of every REST call (no-op while metrics.enabled is false).
+            httpClientBuilder.eventListenerFactory(ApiCallMetricsListener.FACTORY);
             OkHttpClient httpClient = httpClientBuilder.build();
             
             JavaTimeModule javaTimeModule = new JavaTimeModule();

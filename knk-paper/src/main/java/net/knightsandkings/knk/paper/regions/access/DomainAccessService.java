@@ -124,10 +124,20 @@ public class DomainAccessService {
      */
     public Optional<Refusal> onCrossing(Player player, Location to, Collection<? extends RegionView> entered,
                                         Collection<? extends RegionView> exited, boolean cancellable) {
+        return onCrossing(player, to, entered, exited, null, cancellable);
+    }
+
+    /**
+     * As above, with every region at {@code to} ({@code destination}, KNG-255): a crossing between two regions of the
+     * same domain (its main region and a sub-region) is neither leaving nor entering it.
+     */
+    public Optional<Refusal> onCrossing(Player player, Location to, Collection<? extends RegionView> entered,
+                                        Collection<? extends RegionView> exited, Collection<? extends RegionView> destination,
+                                        boolean cancellable) {
         if ((entered == null || entered.isEmpty()) && (exited == null || exited.isEmpty())) {
             return Optional.empty();
         }
-        Optional<Refusal> refusal = worded(player.getLocation(), rules.evaluate(player.getUniqueId(), entered, exited, exemptions));
+        Optional<Refusal> refusal = worded(player.getLocation(), rules.evaluate(player.getUniqueId(), entered, exited, destination, exemptions));
         if (refusal.isEmpty() || !cancellable || bypasses(player, to)) {
             return Optional.empty();
         }
@@ -155,7 +165,7 @@ public class DomainAccessService {
         if (entered.isEmpty() && exited.isEmpty()) {
             return Optional.empty();
         }
-        Optional<Refusal> refusal = worded(from, rules.evaluate(player.getUniqueId(), entered, exited, exemptions));
+        Optional<Refusal> refusal = worded(from, rules.evaluate(player.getUniqueId(), entered, exited, after.values(), exemptions));
         if (refusal.isEmpty() || bypasses(player, to)) {
             return Optional.empty();
         }

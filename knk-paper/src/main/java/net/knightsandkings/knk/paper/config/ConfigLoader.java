@@ -123,12 +123,28 @@ public class ConfigLoader {
             loadWorldAnalytics(config.getConfigurationSection("world-analytics")),
             loadRegionHttp(config.getConfigurationSection("region-http")),
             loadWeb(config.getConfigurationSection("web")),
-            loadOnboarding(config.getConfigurationSection("onboarding")));
+            loadOnboarding(config.getConfigurationSection("onboarding")),
+            loadMetrics(config.getConfigurationSection("metrics")));
         knkConfig.validate();
         
         return knkConfig;
     }
     
+    /** metrics: missing means the performance metrics endpoint is off (KNG-232). */
+    static KnkConfig.MetricsConfig loadMetrics(ConfigurationSection section) {
+        KnkConfig.MetricsConfig defaults = KnkConfig.MetricsConfig.defaults();
+        if (section == null) {
+            return defaults;
+        }
+        return new KnkConfig.MetricsConfig(
+            section.getBoolean("enabled", defaults.enabled()),
+            section.getString("bind-address", defaults.bindAddress()),
+            section.getInt("port", defaults.port()),
+            section.getString("token", defaults.token()),
+            section.getInt("sample-seconds", defaults.sampleSeconds())
+        );
+    }
+
     /** region-http: an older config.yml without the section (or without bind-address) gets the loopback default. */
     static KnkConfig.RegionHttpConfig loadRegionHttp(ConfigurationSection section) {
         KnkConfig.RegionHttpConfig defaults = KnkConfig.RegionHttpConfig.defaults();

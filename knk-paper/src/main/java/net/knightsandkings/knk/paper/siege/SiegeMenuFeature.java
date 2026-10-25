@@ -166,12 +166,11 @@ public final class SiegeMenuFeature implements MenuFeature {
         SiegeService s = service.get();
         Player player = context.player();
         if (s == null || player == null) return ConditionOutcome.deny();
-        SiegeMatch match = s.runningMatchOf(player.getUniqueId()).orElse(null);
-        if (match == null) return ConditionOutcome.deny("The siege is over.");
-        var team = match.teamOf(player.getUniqueId()).orElse(null);
+        SiegeService.SpawnScope scope = s.spawnScopeOf(player.getUniqueId()).orElse(null);
+        if (scope == null) return ConditionOutcome.deny("The siege is over.");
         SpawnChoice choice = choiceOfOption(params.get("option"));
-        if (team == null || choice == null) return ConditionOutcome.deny();
-        if (SiegeSpawnOptions.isAvailable(team, match.board(), choice)) return ConditionOutcome.allow();
+        if (choice == null) return ConditionOutcome.deny();
+        if (SiegeSpawnOptions.isAvailable(scope.team(), scope.board(), choice)) return ConditionOutcome.allow();
         return ConditionOutcome.deny(choice.kind() == net.knightsandkings.knk.core.siege.SiegeMatchRoster.SpawnKind.OBJECTIVE
                 ? "This objective is being captured, or your team no longer holds it." : "You can't spawn there.");
     }

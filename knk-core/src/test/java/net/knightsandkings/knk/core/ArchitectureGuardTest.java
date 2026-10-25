@@ -29,6 +29,7 @@ class ArchitectureGuardTest {
         "roads",
         "navigation",
         "domain/roads",
+        "catalog",
         // arena duels DESIGN §11: the minigame participation port and registry
         "minigame"
     );

@@ -57,6 +57,11 @@ installed (a JDK 25 Gradle doesn't detect can be passed with
 - Arena duels: pure rules in `knk-core/.../core/duel/` (views in `core/duel/view/`), runtime in
   `duel/`, negotiation UI in `duel/ui/`, menus in `menu/content/DuelMenuFeature` and `DuelMenus`;
   see `docs/specs/arena-duels/` and `docs/guides/arena-duels.md` in `knk-workspace`
+- Performance metrics (KNG-232, `metrics.enabled`, default off): Prometheus `/metrics` on its own port
+  (`metrics/MetricsHttpServer`, wired by `metrics/MetricsService`); collectors and instruments in
+  `knk-core/.../core/metrics/` (`PluginMetrics.timed(name, runnable)` wraps a recurring task,
+  `ApiCallMetricsListener` in `knk-api-client` times every REST call); see
+  `docs/guides/performance-metrics-and-capacity.md` in `knk-workspace`
 - Config: `src/main/resources/config.yml`, `plugin.yml`
 - Inventory menu runtime lives in `knk-paper/.../paper/menu/`, with feature
   implementations in `menu/content/` and reusable logic in `knk-core`.

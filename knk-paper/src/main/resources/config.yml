@@ -69,15 +69,52 @@ region-http:
   # Port to listen on (the API's region callback URL must use the same port).
   port: 8081
 
+# Performance metrics (KNG-232): a Prometheus /metrics endpoint with TPS, tick time, players, chunks/entities per
+# world, JVM heap/off-heap/GC, process CPU and RSS, the container's memory and CPU (cgroup), API-call and task
+# durations. For sizing the server and building scaling curves - see knk-workspace
+# docs/guides/performance-metrics-and-capacity.md. Off by default; it never touches Bukkit from the HTTP thread.
+metrics:
+  enabled: false
+  # 127.0.0.1 only accepts a scraper on this host. For Prometheus in another container use the Docker
+  # host/bridge IP and set a token; never 0.0.0.0 on a public server.
+  bind-address: "127.0.0.1"
+  port: 9225
+  # Bearer token the scraper sends (Authorization: Bearer <token>). Required when bind-address is not
+  # loopback; plugin start refuses otherwise. e.g. `openssl rand -hex 32`.
+  token: ""
+  # How often the main thread samples TPS/tick time/chunks/entities (1-60)
+  sample-seconds: 5
+
 # Public web app, used in player messages (e.g. where to enter a /account link code).
 web:
   # Base URL without a trailing slash, e.g. "https://app.knightsandkings.net". Empty: messages
   # leave the link out.
   public-url: ""
 
+# Admission gate (invitations, KNG-214; knk-workspace docs/specs/invitations/DESIGN.md §5.2). At pre-login, after
+# Mojang authentication, the plugin asks knk-web-api whether the UUID belongs to an admitted account. A stranger is
+# turned away with a claim code on the disconnect screen, to enter at link-url.
+#   whitelist (default): no gate; the vanilla whitelist (when on) decides, as before. Also the kill switch.
+#   open:                no gate.
+#   invite:              operators bypass; admitted accounts get in; everyone else gets the code. When the API can't
+#                        answer within api-timeout-ms, players the offline cache knows get in and strangers are told
+#                        to retry (fail-closed). Switch the API's Security:Registration:Mode to Invite at the same time.
+# Changing the mode needs a restart. Messages: & colour codes; \n starts a new line.
+admission:
+  mode: whitelist
+  api-timeout-ms: 3000
+  link-url: ""                     # empty: {web.public-url}/link
+  # Placeholders {url}, {code} (formatted XXXX-XXXX), {minutes} (from the code's expiry).
+  kick: "&6Knights & Kings is invite-only.\n&fGo to &e{url} &fand enter\n&e&l{code}\n&7(valid {minutes} minutes)\n&cNever give this code to anyone; staff never ask for it."
+  unavailable: "&cCan't check your access right now.\n&fTry again in a minute."
+  deactivated: "&cThis account is deactivated.\n&fContact staff if you think this is a mistake."
+  # In-game message after a link (on the next join when offline). Placeholder {maskedEmail}.
+  account-linked: "&aYour Minecraft account is now linked to the web account &e{maskedEmail}&a.\n&cNot you? Tell staff right away."
+
 # A new player's first minutes and the web-account reminder (KNG-128/129). & colour codes.
 onboarding:
-  # Sent instead of "Welcome back" when the account was created at this join. {player}
+  # Sent instead of "Welcome back" on a player's first join: the account was created at this join, or it
+  # was made on the website first (invite / link code) and the server has never seen the player. {player}
   first-join-welcome:
     - "&6Welcome to Knights & Kings, &e{player}&6!"
     - "&7Explore the kingdom: every town, district and structure you find for the first time earns you coins and XP."
@@ -367,6 +404,15 @@ world-analytics:
   excluded-game-modes: [CREATIVE, SPECTATOR]
   max-pending-batches: 12
 
+# InventoryMenu engine (docs/specs/inventory-menu/ in knk-workspace).
+menus:
+  # Bedrock players (Geyser + Floodgate, alpha cross-play finding 2026-10-24): when a menu click opens
+  # another menu (sub-menu, Back, a resize), the current menu closes first and the next one opens this
+  # many ticks later, so Geyser's late close of the previous form doesn't close the new menu. A close
+  # the client sends in that window (or as many ticks after the open) is ignored as stale.
+  # 0 = off (switch in the same tick, as for Java players). Needs Floodgate; Java players are never delayed.
+  bedrock-transition-delay-ticks: 3
+
 # Road navigation (KNG-27, docs/specs/navigation/DESIGN.md §4). Road materials live in the API's road
 # profiles (learned by /knk road survey, edited in the web app), not here. Every key has a default.
 navigation:
@@ -514,6 +560,38 @@ gates:
   fire-duration-seconds: 8
   fire-damage-per-tick: 2.0
   fire-tick-interval-seconds: 1
+  # A burning door block is drawn as regular fire on the side of the block the attacker was on, with smoke
+  # rising off the opposite (inside) face so defenders can see which blocks burn. It is a client-side
+  # picture only (it never exists in the world, so it can't spread or burn the gate).
+  # Damage cracks: a damaged gate's door blocks show vanilla's block-breaking cracks, 10 stages that
+  # follow the gate's HP (each stage is a tenth of its HP) until it is destroyed. Purely visual.
+  damage-cracks:
+    enabled: true
+  # A click or break attempt on a gate door does what the held item would do to a player: the player's
+  # attack damage (the item's "Attack Damage" tooltip line plus Strength) plus Sharpness, which the tooltip
+  # doesn't show. An empty hand does 1. from-held-item: false goes back to the flat 10 per hit; multiplier
+  # scales the item damage for balance. Arrows, explosions and fire are unchanged.
+  melee-damage:
+    from-held-item: true
+    multiplier: 1.0
+  # Siege playtest 2026-10-24. Fire Aspect on the weapon: every melee hit on a door block has
+  # ignite-chance-per-level x level (I 15 %, II 30 %) to set that block alight - the same burn a flaming arrow
+  # starts, for fire-duration-seconds. 0 turns it off. A defender's hits never burn their own gate.
+  fire-aspect:
+    ignite-chance-per-level: 0.15
+  # Cleaving (custom enchantment, levels I-IV, lore line "Cleaving II"): melee hits on a door block do
+  # (1 + damage-bonus-per-level x level) times the weapon's gate damage (netherite sword 8 -> 10/12/14/16), and a
+  # right-click on a door block with the strike ready is a charged strike of charged-hit-multiplier[level] times
+  # that boosted hit (50/72/98/128 of a default 500 HP gate), then cools down charged-cooldown-seconds[level]
+  # (per player). A missing level in either list uses the last entry.
+  cleaving:
+    damage-bonus-per-level: 0.25
+    charged-hit-multiplier: [5, 6, 7, 8]
+    charged-cooldown-seconds: [60, 50, 40, 30]
+  # chaos / flash_chaos hurt every gate with a door block within this many blocks (measured to the nearest
+  # edge of the block) of whoever used them, with the enchantment's own damage. Entities are still only
+  # hurt within 3 blocks.
+  area-enchantment-radius-blocks: 5.0
   # Pass-through system: InstantOpen mode removes only the door blocks within
   # passthrough-instant-open-radius-blocks of the triggering player's position (sideways, across
   # the gate's full depth), restoring them once the player crosses to the far side or after
@@ -564,7 +642,7 @@ messages:
   
   # Link code generated (/account link). Placeholders: {code}, {minutes}, {url} (web.public-url).
   # \n starts a new chat line; lines that use {url} are left out while web.public-url is empty.
-  link-code-generated: "&aYour link code is &6{code}&a. It expires in {minutes} minutes.\n&aNew to the website? Register at &e{url}/auth/register\n&aEnter the code when you register on the website, or on your Account page if you already have a web login."
+  link-code-generated: "&aYour link code is &6{code}&a. It expires in {minutes} minutes.\n&aNew to the website? Register at &e{url}/auth/register\n&aEnter the code when you register on the website, or on your Account page if you already have a web login.\n&cNever give this code to anyone; staff never ask for it."
   
   # /account link <code>: codes are entered on the website, not in game (nothing is validated or linked).
   # Same rules as above: \n starts a new line; lines with {url} are left out while web.public-url is empty.
@@ -726,6 +804,11 @@ worlds:
 # every other flag (greetings, custom ones) stay as they are, and no region is created or deleted.
 
 regions:
+  # Leftover regions the daily cleanup deletes (KNG-103, KNG-258): a tempregion_worldtask_* region no domain uses, this
+  # many days after it was drawn, and a domain sub-region (domain_<id>_sub_<n>) no domain lists any more, this many days
+  # after it was orphaned. Never one a domain uses, and nothing while the API can't be asked.
+  temp-retention:
+    days: 14
   managed:
     startup-repair:
       enabled: true
@@ -860,6 +943,9 @@ cache:
       retry-attempts: 3
       retry-backoff-ms: 100
 
+    # KNG-262: this TTL applies (for most other entities ttl-minutes is still ignored and the global
+    # ttl-seconds is used). A web-app edit of a blueprint shows in game after at most this long,
+    # or at once after /knk cache refresh.
     itemBlueprints:
       ttl-minutes: 20
       max-ttl-minutes: 120
