@@ -92,9 +92,10 @@ class GlobalRegionProtectionListenerTest {
     }
 
     private BlockPlaceEvent place(int x) {
+        Block placed = block(Material.STONE, x); // stub the block before stubbing the event (no nested stubbing)
         BlockPlaceEvent event = mock(BlockPlaceEvent.class);
         when(event.getPlayer()).thenReturn(player);
-        when(event.getBlock()).thenReturn(block(Material.STONE, x));
+        when(event.getBlock()).thenReturn(placed);
         return event;
     }
 
