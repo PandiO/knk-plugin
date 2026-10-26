@@ -1721,6 +1721,9 @@ public class KnKPlugin extends JavaPlugin {
             mainThread, System::currentTimeMillis, new net.knightsandkings.knk.paper.navigation.BukkitCompassItems());
         getServer().getPluginManager().registerEvents(
             new net.knightsandkings.knk.paper.navigation.NavigationCompassListener(navigationCompass), this);
+        // PandiO/knk-workspace#176: an objective behind a closed gate is navigated to the gate in the way
+        navigationCompass.setGateApproaches((objective, team) -> gateManager == null ? java.util.Optional.empty()
+            : net.knightsandkings.knk.paper.navigation.SiegeGateApproaches.of(gateManager).approach(objective, team));
         if (siegeService != null) {
             // KNG-234: sieges that want it give the compass at the hub
             siegeService.addObserver(navigationCompass);
