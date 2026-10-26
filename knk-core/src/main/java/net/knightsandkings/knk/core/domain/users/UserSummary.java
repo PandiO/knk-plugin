@@ -115,6 +115,14 @@ public record UserSummary(
     }
 
     /**
+     * Copy with the coin, gem and experience balances the API sent after a change (realtime
+     * {@code UserBalancesChanged}, PandiO/knk-workspace#179) - committed values, never computed locally.
+     */
+    public UserSummary withBalances(int coins, int gems, int experiencePoints) {
+        return new UserSummary(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience, premiumTierGroupId, premiumTierName, premiumTierExpiresAt, isFrozen, frozenReason, gender, chatPrimaryColor, chatSecondaryColor, nameColor, permissionGroups);
+    }
+
+    /**
      * Copy with an updated admin-freeze state (after /freeze or /unfreeze) - used by
      * AdminFreezeManager to keep the cached UserSummary consistent with the join-time restore.
      */

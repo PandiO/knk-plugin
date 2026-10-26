@@ -58,4 +58,21 @@ public class UserCache extends BaseCache<UUID, UserSummary> {
         }
         getStale(uuid).ifPresent(user -> put(uuid, user.withBalances((int) coins, (int) gems)));
     }
+
+    /**
+     * As {@link #updateBalances(UUID, long, long)}, with experience too (realtime {@code UserBalancesChanged},
+     * PandiO/knk-workspace#179). Returns the entry as it was before, or null when the player isn't cached (then
+     * nothing changes) or a value is out of range.
+     */
+    public UserSummary updateBalances(UUID uuid, long coins, long gems, long experiencePoints) {
+        if (uuid == null || coins < 0 || gems < 0 || experiencePoints < 0 || coins > Integer.MAX_VALUE
+                || gems > Integer.MAX_VALUE || experiencePoints > Integer.MAX_VALUE) {
+            return null;
+        }
+        UserSummary before = getStale(uuid).orElse(null);
+        if (before != null) {
+            put(uuid, before.withBalances((int) coins, (int) gems, (int) experiencePoints));
+        }
+        return before;
+    }
 }

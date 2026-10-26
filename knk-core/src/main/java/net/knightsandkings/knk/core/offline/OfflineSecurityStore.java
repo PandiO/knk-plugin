@@ -291,6 +291,19 @@ public final class OfflineSecurityStore {
         dirty.set(true);
     }
 
+    /**
+     * Drops every remembered permission answer of {@code userId}: their groups or grants changed (realtime
+     * {@code UserPermissionsChanged}, PandiO/knk-workspace#179, fixes #76), so an answer from before the change must
+     * not decide a check during a later outage. New answers are recorded again as checks reach the API.
+     */
+    public void forgetPermissionAnswers(int userId) {
+        int before = permissions.size();
+        forgetPermissions(userId);
+        if (permissions.size() != before) {
+            dirty.set(true);
+        }
+    }
+
     /** The API's last answer for {@code userId}/{@code node}, if within {@code permissionMaxAge}. */
     public Optional<Boolean> permission(int userId, String node) {
         PermissionAnswer answer = node == null ? null : permissions.get(new PermissionKey(userId, node));
