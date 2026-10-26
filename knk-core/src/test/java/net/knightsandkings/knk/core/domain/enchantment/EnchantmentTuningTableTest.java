@@ -26,29 +26,42 @@ class EnchantmentTuningTableTest {
         }
     }
 
+    /** PandiO/knk-workspace#156; knk-web-api's EnchantmentCombatDefaultsSeedTests pins the same numbers. */
     @Test
-    void builtInValuesAreThePreviousBehaviour() {
+    void builtInValuesAreTheWeakerDefaults() {
         EnchantmentTuningTable table = new EnchantmentTuningTable();
-        // On hit: 15 % per level, level x 3 s (wither level x 2 s), no cooldown; blindness on every hit.
-        for (String id : List.of("poison", "freeze", "confusion")) {
+        for (String id : List.of("poison", "wither", "confusion", "freeze")) {
             EnchantmentTuning tuning = table.get(id);
-            assertEquals(0.45d, tuning.chanceAt(3), 1e-9, id);
-            assertEquals(180, tuning.durationTicksAt(3), id);
-            assertEquals(0L, tuning.effectiveCooldownMs(), id);
+            assertEquals(0.10d, tuning.chanceAt(1), 1e-9, id);
+            assertEquals(0.20d, tuning.chanceAt(3), 1e-9, id);
+            assertTrue(tuning.cooldownEnabled(), id);
         }
-        assertEquals(120, table.get("wither").durationTicksAt(3));
-        assertEquals(1.0d, table.get("blindness").chanceAt(1), 1e-9);
+        assertEquals(List.of(60, 90, 120), durations(table.get("poison")));
+        assertEquals(List.of(60, 90, 120), durations(table.get("confusion")));
+        assertEquals(List.of(40, 60, 80), durations(table.get("wither")));
+        assertEquals(8_000L, table.get("poison").effectiveCooldownMs());
+        // Freeze: 1.5 / 2.25 / 3 s, then 20 s before the same attacker can freeze again.
+        assertEquals(List.of(30, 45, 60), durations(table.get("freeze")));
+        assertEquals(20_000L, table.get("freeze").effectiveCooldownMs());
+        // Blindness no longer on every hit: 20 / 30 / 40 %, 2 / 3 / 4 s, 10 s cooldown.
+        assertEquals(0.40d, table.get("blindness").chanceAt(3), 1e-9);
+        assertEquals(List.of(40, 60, 80), durations(table.get("blindness")));
+        assertEquals(10_000L, table.get("blindness").effectiveCooldownMs());
+        // Unchanged: strength and the right-click abilities.
+        assertEquals(0.45d, table.get("strength").chanceAt(3), 1e-9);
         assertEquals(300, table.get("strength").durationTicksAt(2));
         assertEquals(120_000L, table.get("strength").effectiveCooldownMs());
-        // Right-click abilities: 90-120 s cooldowns; resistance level x 100 + 100 ticks.
         assertEquals(90_000L, table.get("chaos").effectiveCooldownMs());
         assertEquals(90_000L, table.get("flash_chaos").effectiveCooldownMs());
         assertEquals(90_000L, table.get("invisibility").effectiveCooldownMs());
         assertEquals(120_000L, table.get("health_boost").effectiveCooldownMs());
         assertEquals(120_000L, table.get("armor_repair").effectiveCooldownMs());
-        assertEquals(200, table.get("resistance").durationTicksAt(1));
-        assertEquals(300, table.get("resistance").durationTicksAt(2));
+        assertEquals(List.of(200, 300, 400), durations(table.get("resistance")));
         assertEquals(200, table.get("invisibility").durationTicksAt(1));
+    }
+
+    private static List<Integer> durations(EnchantmentTuning tuning) {
+        return List.of(tuning.durationTicksAt(1), tuning.durationTicksAt(2), tuning.durationTicksAt(3));
     }
 
     @Test

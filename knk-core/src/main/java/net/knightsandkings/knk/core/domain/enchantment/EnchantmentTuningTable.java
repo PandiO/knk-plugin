@@ -33,19 +33,23 @@ public final class EnchantmentTuningTable {
     }
 
     /**
-     * The built-in values: the behaviour before #151 (chance 15 % per level, durations of level x 3 s, no cooldown on
-     * the on-hit effects; 90-120 s on the right-click abilities).
+     * The built-in values, the defaults of PandiO/knk-workspace#156 (alpha test run 1: custom enchantments proc too
+     * often and hit too hard). knk-web-api writes the same numbers into empty enchantment definitions at startup
+     * ({@code AbilityDefinition.CanonicalCatalog}); change both together. Before #156: 15 % chance per level, level x 3 s
+     * (wither level x 2 s), no cooldown, blindness on every hit.
      */
     static Map<String, EnchantmentTuning> builtInValues() {
         Map<String, EnchantmentTuning> map = new LinkedHashMap<>();
-        // On hit: chance, no cooldown (strength: 120 s), duration level x the level-I value.
-        map.put("poison", new EnchantmentTuning(0.15d, 0.15d, false, 0L, 60, 1.0d));
-        map.put("wither", new EnchantmentTuning(0.15d, 0.15d, false, 0L, 40, 1.0d));
-        map.put("freeze", new EnchantmentTuning(0.15d, 0.15d, false, 0L, 60, 1.0d));
-        map.put("blindness", new EnchantmentTuning(1.0d, 0.0d, false, 0L, 60, 1.0d));
-        map.put("confusion", new EnchantmentTuning(0.15d, 0.15d, false, 0L, 60, 1.0d));
+        // On hit: 10 % at level I + 5 per level (blindness 20 + 10), half the level-I duration more per level,
+        // a cooldown per attacker; freeze 1.5 s at level I and 20 s between procs.
+        map.put("poison", new EnchantmentTuning(0.10d, 0.05d, true, 8_000L, 60, 0.5d));
+        map.put("wither", new EnchantmentTuning(0.10d, 0.05d, true, 8_000L, 40, 0.5d));
+        map.put("freeze", new EnchantmentTuning(0.10d, 0.05d, true, 20_000L, 30, 0.5d));
+        map.put("blindness", new EnchantmentTuning(0.20d, 0.10d, true, 10_000L, 40, 0.5d));
+        map.put("confusion", new EnchantmentTuning(0.10d, 0.05d, true, 8_000L, 60, 0.5d));
+        // Self-buff on hit, unchanged: 15 % per level, 15 s, 120 s cooldown.
         map.put("strength", new EnchantmentTuning(0.15d, 0.15d, true, 120_000L, 300, 0.0d));
-        // Right-click abilities: always go off, cooldown per player.
+        // Right-click abilities, unchanged: always go off, cooldown per player.
         map.put("chaos", new EnchantmentTuning(1.0d, 0.0d, true, 90_000L, 0, 0.0d));
         map.put("flash_chaos", new EnchantmentTuning(1.0d, 0.0d, true, 90_000L, 0, 0.0d));
         map.put("health_boost", new EnchantmentTuning(1.0d, 0.0d, true, 120_000L, 0, 0.0d));
