@@ -111,6 +111,14 @@ admission:
   # In-game message after a link (on the next join when offline). Placeholder {maskedEmail}.
   account-linked: "&aYour Minecraft account is now linked to the web account &e{maskedEmail}&a.\n&cNot you? Tell staff right away."
 
+# Refused joins (PandiO/knk-workspace#159): online holders of knk.notify.joinattempt get a chat line when a player's join
+# is refused - vanilla ban, whitelist or full server, the admission gate above (no admitted account, deactivated,
+# access can't be checked), a missing world or an unusable hub - with the reason. One line per player per cooldown, so
+# a client retrying in a loop doesn't flood chat. Both read on every refusal.
+join-refusal-notify:
+  enabled: true
+  cooldown-seconds: 60
+
 # A new player's first minutes and the web-account reminder (KNG-128/129). & colour codes.
 onboarding:
   # Sent instead of "Welcome back" on a player's first join: the account was created at this join, or it

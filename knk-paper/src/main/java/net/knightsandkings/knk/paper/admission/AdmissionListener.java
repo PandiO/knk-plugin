@@ -71,6 +71,9 @@ public final class AdmissionListener implements Listener {
         Decision decision = evaluate(uuid, name);
         if (decision instanceof Deny deny) {
             LOGGER.info("[KnK Admission] Refused " + name + " (" + uuid + "): " + deny.messageKey());
+            // PandiO/knk-workspace#159: the reason for the staff notice (never the screen: it holds the claim code)
+            JoinRefusalReasons.shared().record(uuid, name,
+                net.knightsandkings.knk.core.admission.JoinRefusal.fromAdmissionKey(deny.messageKey()), null);
             Map<String, String> placeholders = new HashMap<>(deny.placeholders());
             placeholders.put("url", AdmissionMessages.url(settings.linkUrl()));
             event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_WHITELIST,

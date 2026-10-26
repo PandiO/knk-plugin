@@ -2675,6 +2675,17 @@ public class KnKPlugin extends JavaPlugin {
     private void initializeAdmission() {
         var admission = net.knightsandkings.knk.paper.admission.AdmissionSettings.fromConfig(
             getConfig().getConfigurationSection("admission"), config.web().publicUrl());
+        // PandiO/knk-workspace#159: holders of knk.notify.joinattempt hear about refused joins, with the reason.
+        getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.admission.JoinRefusalNotifier(
+            net.knightsandkings.knk.paper.admission.JoinRefusalReasons.shared(),
+            new net.knightsandkings.knk.core.admission.JoinRefusalThrottle(
+                java.time.Duration.ofSeconds(Math.max(0, getConfig().getLong("join-refusal-notify.cooldown-seconds", 60))),
+                java.time.Clock.systemUTC()),
+            () -> getConfig().getBoolean("join-refusal-notify.enabled", true),
+            org.bukkit.Bukkit::getOnlinePlayers,
+            (player, node) -> player.hasPermission(node) || (knkPermissible != null && knkPermissible.hasPermission(player, node)),
+            MenuService.mainThreadExecutor(this),
+            net.knightsandkings.knk.paper.admission.JoinRefusalNotifier.bukkitChecks()), this);
         var offline = offlineSecurity;
         getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.admission.AdmissionListener(
             admission, apiClient.getAdmissionApi(), uuid -> org.bukkit.Bukkit.getOfflinePlayer(uuid).isOp(),
