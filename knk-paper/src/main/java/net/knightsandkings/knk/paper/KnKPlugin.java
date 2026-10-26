@@ -329,6 +329,8 @@ public class KnKPlugin extends JavaPlugin {
         net.knightsandkings.knk.paper.regions.access.DomainAccessFlags.register(getLogger());
         // KNG-258: the creation timestamp and orphan mark must survive a restart (read back by name either way)
         net.knightsandkings.knk.paper.regions.RegionBookkeepingFlags.register(getLogger());
+        // PandiO/knk-workspace#162: knk-effect-damage allow|deny on a domain's region
+        net.knightsandkings.knk.paper.regions.EffectDamageFlag.register(getLogger());
     }
 
     @Override
@@ -932,6 +934,15 @@ public class KnKPlugin extends JavaPlugin {
             // in towns. siegeService is created later (initializeSiege), so it's read per hit.
             initializeEnchantmentRuntime(new WorldGuardCombatSafezones(regionDomainResolver,
                 (attacker, victim) -> siegeService != null && siegeService.allowsCombat(attacker, victim)));
+            // PandiO/knk-workspace#162: no effect damage (fire, poison, wither, ...) for players in domains unless
+            // knk-effect-damage or pvp allows it there; siege members keep the siege's rules (read per hit).
+            getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.regions.DomainEffectDamageListener(
+                () -> getConfig().getBoolean(net.knightsandkings.knk.paper.regions.DomainEffectDamageListener.ENABLED_PATH, true),
+                net.knightsandkings.knk.paper.regions.DomainEffectDamageListener.causes(
+                    getConfig().getStringList(net.knightsandkings.knk.paper.regions.DomainEffectDamageListener.CAUSES_PATH),
+                    getLogger()::warning),
+                regionDomainResolver,
+                player -> siegeService != null && siegeService.activeLobbyOf(player.getUniqueId()).isPresent()), this);
             getLogger().info("Registered custom enchantment runtime listeners and /ce command");
 
             // Teleport engine + staff teleports (docs/specs/teleport, Phase 1) - before the commands,
