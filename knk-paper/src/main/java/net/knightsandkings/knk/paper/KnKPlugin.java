@@ -866,11 +866,11 @@ public class KnKPlugin extends JavaPlugin {
                 anvilCaptureManager, new MenuRefreshSchedule()
             );
             // Alpha cross-play finding 2026-10-24: delayed menu switches for Bedrock (Floodgate) players.
-            menuService.configureBedrockTransitions(
-                net.knightsandkings.knk.paper.menu.FloodgatePlayers.detect(
-                    getServer().getPluginManager().getPlugin("floodgate"), getLogger()),
-                Math.min(20, getConfig().getInt("menus.bedrock-transition-delay-ticks", 3))
-            );
+            java.util.function.Predicate<java.util.UUID> bedrockPlayers = net.knightsandkings.knk.paper.menu.FloodgatePlayers.detect(
+                getServer().getPluginManager().getPlugin("floodgate"), getLogger());
+            int bedrockTransitionTicks = Math.min(20, getConfig().getInt("menus.bedrock-transition-delay-ticks", 3));
+            menuService.configureBedrockTransitions(bedrockPlayers, bedrockTransitionTicks);
+            initializeMenuOpenerItem(bedrockPlayers, bedrockTransitionTicks);
             getLogger().info("InventoryMenu rendering engine initialized (Phase 2 + 9)");
             if (telemetryHooks != null) {
                 menuService.addObserver(telemetryHooks); // menu.opened / menu.action / menu.click (KNG-34 link 6)
@@ -1525,6 +1525,32 @@ public class KnKPlugin extends JavaPlugin {
         if (discoveryListener != null) {
             discoveryListener.resync(player);
         }
+    }
+
+    /**
+     * The menu item (alpha test run 1, PandiO/knk-workspace#160): an inventory item that opens {@code /menu}, for
+     * console and Bedrock players. Settings in {@code menus.menu-item}; read once at enable. The click runs
+     * {@code /menu} itself, so its permission ({@code knk.menu}) and every command rule apply.
+     */
+    private void initializeMenuOpenerItem(java.util.function.Predicate<java.util.UUID> bedrockPlayers, int bedrockDelayTicks) {
+        net.knightsandkings.knk.core.menu.opener.MenuOpenerSettings settings =
+            net.knightsandkings.knk.paper.menu.opener.MenuOpenerConfig.read(
+                getConfig().getConfigurationSection("menus.menu-item"), getLogger());
+        net.knightsandkings.knk.paper.menu.opener.MenuOpenerService service =
+            new net.knightsandkings.knk.paper.menu.opener.MenuOpenerService(
+                () -> settings, bedrockPlayers, new net.knightsandkings.knk.paper.menu.opener.BukkitMenuOpenerItems(),
+                player -> player.performCommand("menu"),
+                (task, ticks) -> getServer().getScheduler().runTaskLater(this, task, ticks),
+                System::currentTimeMillis, bedrockDelayTicks);
+        getServer().getPluginManager().registerEvents(
+            new net.knightsandkings.knk.paper.menu.opener.MenuOpenerListener(service), this);
+        // a reload (or a config change) reaches players already online, not only the next joins
+        for (org.bukkit.entity.Player online : getServer().getOnlinePlayers()) {
+            service.ensureLater(online, settings.giveOnJoin());
+        }
+        getLogger().info("Menu item " + (settings.enabled()
+            ? "on (" + settings.material() + " in slot " + settings.slot() + ", for " + settings.audience() + " players)"
+            : "off"));
     }
 
     /**

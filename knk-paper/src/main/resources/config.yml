@@ -412,6 +412,26 @@ menus:
   # the client sends in that window (or as many ticks after the open) is ignored as stale.
   # 0 = off (switch in the same tick, as for Java players). Needs Floodgate; Java players are never delayed.
   bedrock-transition-delay-ticks: 3
+  # The menu item (alpha test run 1, PandiO/knk-workspace#160): an item in the inventory that opens /menu, for
+  # console and Bedrock players, who can't type commands easily. It is a pointer, not a game item: it never drops
+  # on the ground (death included), never goes into a chest, crafting grid, item frame or kit scan, and can't be
+  # placed. A player's own item in the slot is moved to a free slot; with a full inventory nothing is given.
+  # Read at startup (restart or /reload to change it).
+  menu-item:
+    enabled: true
+    give-to: all              # all | bedrock (Floodgate players only)
+    give-on-join: true        # put it back at every join when it is missing
+    keep-on-death: true       # give it back at respawn
+    material: NETHER_STAR
+    name: "&6&lMenu &7(click to open)"
+    lore:
+      - "&7Opens the Knights & Kings menu (&e/menu&7)."
+    slot: 8                   # 0-8 hotbar (8 = right-most), 9-35 main inventory
+    # RIGHT_CLICK (air, or a block that does nothing itself), LEFT_CLICK, INVENTORY_CLICK (on the item in the
+    # player's own inventory; only while movable is false)
+    open-on: [RIGHT_CLICK, LEFT_CLICK, INVENTORY_CLICK]
+    droppable: false          # true: dropping takes it away until the next join or respawn
+    movable: false            # true: it may be moved within the player's own inventory
 
 # Road navigation (KNG-27, docs/specs/navigation/DESIGN.md §4). Road materials live in the API's road
 # profiles (learned by /knk road survey, edited in the web app), not here. Every key has a default.

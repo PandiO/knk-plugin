@@ -153,7 +153,12 @@ public class KitScanTaskHandler implements IWorldTaskHandler {
         return result;
     }
 
+    /** Empty, or the menu item (PandiO/knk-workspace#160): a pointer to /menu, never part of a kit. */
     private static boolean isEmpty(ItemStack item) {
-        return item == null || item.getType().isAir() || item.getAmount() <= 0;
+        return item == null || item.getType().isAir() || item.getAmount() <= 0
+            || MENU_ITEM.isOpener(item);
     }
+
+    private static final net.knightsandkings.knk.paper.menu.opener.MenuOpenerItems MENU_ITEM =
+        new net.knightsandkings.knk.paper.menu.opener.BukkitMenuOpenerItems();
 }
