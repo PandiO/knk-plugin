@@ -433,6 +433,19 @@ menus:
     droppable: false          # true: dropping takes it away until the next join or respawn
     movable: false            # true: it may be moved within the player's own inventory
 
+# Cross-play (Geyser + Floodgate) fixes.
+crossplay:
+  # Ghost blocks (alpha test run 1, PandiO/knk-workspace#161): a Bedrock client removes a block it mines on its own,
+  # before the server answers; when the break is refused (protection, hub, gate, ...) the block can stay gone for
+  # that player only. A refused break is sent to the player again every interval-ticks while they keep swinging,
+  # and once more window-ticks after the last swing. Needs Floodgate (Bedrock players); all-players: true also
+  # does it for Java players (only for testing - Java clients correct themselves).
+  block-resync:
+    enabled: true
+    all-players: false
+    window-ticks: 30
+    interval-ticks: 5
+
 # Road navigation (KNG-27, docs/specs/navigation/DESIGN.md §4). Road materials live in the API's road
 # profiles (learned by /knk road survey, edited in the web app), not here. Every key has a default.
 navigation:

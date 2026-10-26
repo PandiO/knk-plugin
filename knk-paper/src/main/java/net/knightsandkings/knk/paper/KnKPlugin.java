@@ -871,6 +871,7 @@ public class KnKPlugin extends JavaPlugin {
             int bedrockTransitionTicks = Math.min(20, getConfig().getInt("menus.bedrock-transition-delay-ticks", 3));
             menuService.configureBedrockTransitions(bedrockPlayers, bedrockTransitionTicks);
             initializeMenuOpenerItem(bedrockPlayers, bedrockTransitionTicks);
+            initializeBedrockBlockResync(bedrockPlayers);
             getLogger().info("InventoryMenu rendering engine initialized (Phase 2 + 9)");
             if (telemetryHooks != null) {
                 menuService.addObserver(telemetryHooks); // menu.opened / menu.action / menu.click (KNG-34 link 6)
@@ -1551,6 +1552,29 @@ public class KnKPlugin extends JavaPlugin {
         getLogger().info("Menu item " + (settings.enabled()
             ? "on (" + settings.material() + " in slot " + settings.slot() + ", for " + settings.audience() + " players)"
             : "off"));
+    }
+
+    /**
+     * Ghost blocks on Bedrock clients (alpha test run 1, PandiO/knk-workspace#161): a refused break is sent to a
+     * Bedrock (Floodgate) player again while they keep mining. Settings in {@code crossplay.block-resync}.
+     */
+    private void initializeBedrockBlockResync(java.util.function.Predicate<java.util.UUID> bedrockPlayers) {
+        org.bukkit.configuration.ConfigurationSection section = getConfig().getConfigurationSection("crossplay.block-resync");
+        boolean enabled = section == null || section.getBoolean("enabled", true);
+        if (!enabled) {
+            getLogger().info("Bedrock block resync off (crossplay.block-resync.enabled)");
+            return;
+        }
+        boolean allPlayers = section != null && section.getBoolean("all-players", false);
+        int window = section == null ? 30 : Math.max(1, Math.min(200, section.getInt("window-ticks", 30)));
+        int interval = section == null ? 5 : Math.max(1, Math.min(40, section.getInt("interval-ticks", 5)));
+        net.knightsandkings.knk.paper.crossplay.BedrockBlockResync resync = new net.knightsandkings.knk.paper.crossplay.BedrockBlockResync(
+            new net.knightsandkings.knk.core.crossplay.BlockResyncWatch(window, interval, 16),
+            allPlayers ? id -> true : bedrockPlayers, getServer()::getPlayer);
+        getServer().getPluginManager().registerEvents(resync, this);
+        getServer().getScheduler().runTaskTimer(this, resync::tick, 1L, 1L);
+        getLogger().info("Bedrock block resync on (" + (allPlayers ? "all players" : "Bedrock players") + ", window "
+            + window + " ticks, every " + interval + ")");
     }
 
     /**
