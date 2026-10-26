@@ -11,12 +11,12 @@ import org.bukkit.potion.PotionEffectType;
 
 public class ConfusionEffect extends AttackEnchantmentEffect {
     public ConfusionEffect(Plugin plugin) {
-        super("confusion", 0.15d, plugin);
+        super("confusion", plugin);
     }
 
     @Override
     protected void applyEffect(ItemStack weapon, Player attacker, LivingEntity target, int level) {
-        int durationTicks = level * 60;
+        int durationTicks = tuning().durationTicksAt(level);
         target.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, durationTicks, 2));
         playEffect(target.getLocation(), Effect.POTION_BREAK, 0);
     }

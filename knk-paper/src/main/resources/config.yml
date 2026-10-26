@@ -695,6 +695,10 @@ enchant-books:
 custom-enchantments:
   disable-for-creative: false
   cooldown-message: "&c%seconds% seconds remaining"
+  # PandiO/knk-workspace#151: the chance, cooldown, duration and level multiplier of each custom enchantment are set
+  # in the web app (enchantment form, step "Combat values"); empty there = the plugin's built-in value. The plugin
+  # re-reads them from the API this often (and at /ce reload); while the API is down the last values stay.
+  tuning-refresh-minutes: 5
   messages:
     cmd-help-header: "&6Custom Enchantments Commands:"
     cmd-unknown: "&cUnknown subcommand."
@@ -713,10 +717,11 @@ custom-enchantments:
     cmd-remove-success: "&aEnchantment was removed from item successfully."
     cmd-player-not-found: "&cCould not find player %player%."
     cmd-clear: "&aRemoved cooldowns for %player%."
-    cmd-reload: "&aPlugin configuration was reloaded."
+    cmd-reload: "&aPlugin configuration was reloaded; enchantment combat values are being reloaded from the API."
     cmd-info-header: "&6Custom enchantments on held item:"
     cmd-info-line: "&7- &f%name% %level% &8(id: %id%) &7cooldown: %cooldown%s"
     cmd-info-none: "&7No custom enchantments found on held item."
+    cmd-info-tuning: "&8   chance %chance%%, duration %duration%s, cooldown %cooldownSetting%"
     ench-use: "&cYou cannot use %enchantment%."
 
 # Cache configuration

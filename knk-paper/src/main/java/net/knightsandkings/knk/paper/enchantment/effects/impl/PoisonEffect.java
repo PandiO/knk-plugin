@@ -13,16 +13,16 @@ import java.util.function.DoubleSupplier;
 
 public class PoisonEffect extends AttackEnchantmentEffect {
     public PoisonEffect(Plugin plugin) {
-        super("poison", 0.15d, plugin);
+        super("poison", plugin);
     }
 
     PoisonEffect(Plugin plugin, DoubleSupplier rollSupplier) {
-        super("poison", 0.15d, plugin, rollSupplier);
+        super("poison", plugin, rollSupplier);
     }
 
     @Override
     protected void applyEffect(ItemStack weapon, Player attacker, LivingEntity target, int level) {
-        int durationTicks = level * 60;
+        int durationTicks = tuning().durationTicksAt(level);
         target.addPotionEffect(new PotionEffect(PotionEffectType.POISON, durationTicks, 1));
         playEffect(target.getLocation(), Effect.POTION_BREAK, 0);
     }

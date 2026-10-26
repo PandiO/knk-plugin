@@ -3620,6 +3620,26 @@ public class KnKPlugin extends JavaPlugin {
         // The gates start after the enchantments: chaos / flash_chaos read the gate seam when they go off.
         EnchantmentBootstrap bootstrap = new EnchantmentBootstrap(this, safezones, () -> gateAreaDamage);
         this.enchantmentRuntime = bootstrap.initialize();
+        startEnchantmentTuningRefresh();
+    }
+
+    /**
+     * PandiO/knk-workspace#151: the admin-set combat values of the custom enchantments, now and every
+     * {@code custom-enchantments.tuning-refresh-minutes}, and on /ce reload. Until the first load the built-in values apply.
+     */
+    private void startEnchantmentTuningRefresh() {
+        if (enchantmentDefinitionsQueryApi == null || enchantmentRuntime == null) {
+            getLogger().warning("No enchantment definitions API: custom enchantments use their built-in combat values");
+            return;
+        }
+        var refresh = new net.knightsandkings.knk.paper.enchantment.EnchantmentTuningRefresh(
+            enchantmentDefinitionsQueryApi::listCombatValues,
+            net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuningTable.getInstance(),
+            getLogger());
+        enchantmentRuntime.commandHandler().setReloadHook(refresh::refresh);
+        int minutes = Math.max(1, getConfig().getInt("custom-enchantments.tuning-refresh-minutes", 5));
+        long ticks = minutes * 60L * 20L;
+        getServer().getScheduler().runTaskTimerAsynchronously(this, () -> refresh.refresh(), 0L, ticks);
     }
 
     private AuthProvider createAuthProvider(KnkConfig.AuthConfig authConfig) {

@@ -2,6 +2,8 @@ package net.knightsandkings.knk.paper.commands.enchantment;
 
 import net.knightsandkings.knk.core.domain.enchantment.Enchantment;
 import net.knightsandkings.knk.core.domain.enchantment.EnchantmentRegistry;
+import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuning;
+import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuningTable;
 import net.knightsandkings.knk.core.ports.enchantment.CooldownManager;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentRepository;
 import org.bukkit.Bukkit;
@@ -101,6 +103,10 @@ public class InfoEnchantmentCommand implements EnchantmentSubcommand {
                     )
             );
             sender.sendMessage(handler.colorize(line));
+            sender.sendMessage(handler.colorize(handler.message(
+                    "messages.cmd-info-tuning",
+                    "&8   chance %chance%%, duration %duration%s, cooldown %cooldownSetting%",
+                    tuningPlaceholders(EnchantmentTuningTable.getInstance().get(enchantmentId), level))));
         }
 
         return true;
@@ -112,5 +118,18 @@ public class InfoEnchantmentCommand implements EnchantmentSubcommand {
             return handler.visiblePlayerNames(sender, args[0]);
         }
         return List.of();
+    }
+
+    /** PandiO/knk-workspace#151: the combat values in effect at this level (admin-set or built-in). */
+    static Map<String, String> tuningPlaceholders(EnchantmentTuning tuning, int level) {
+        String chance = formatNumber(tuning.chanceAt(level) * 100.0d);
+        String duration = formatNumber(tuning.durationTicksAt(level) / 20.0d);
+        String cooldown = tuning.cooldownEnabled() ? formatNumber(tuning.cooldownMs() / 1000.0d) + "s" : "off";
+        return Map.of("%chance%", chance, "%duration%", duration, "%cooldownSetting%", cooldown);
+    }
+
+    private static String formatNumber(double value) {
+        double rounded = Math.round(value * 100.0d) / 100.0d;
+        return rounded == Math.rint(rounded) ? Long.toString((long) rounded) : Double.toString(rounded);
     }
 }

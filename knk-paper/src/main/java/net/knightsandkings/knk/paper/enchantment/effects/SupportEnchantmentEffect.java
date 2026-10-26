@@ -1,5 +1,7 @@
 package net.knightsandkings.knk.paper.enchantment.effects;
 
+import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuning;
+import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuningTable;
 import org.bukkit.Bukkit;
 import org.bukkit.Effect;
 import org.bukkit.Location;
@@ -40,6 +42,11 @@ public abstract class SupportEnchantmentEffect implements EnchantmentEffect {
     }
 
     protected abstract void applyEffect(ItemStack item, Player player, int level);
+
+    /** This ability's current combat values (PandiO/knk-workspace#151); right-click abilities don't roll a chance. */
+    protected final EnchantmentTuning tuning() {
+        return EnchantmentTuningTable.getInstance().get(enchantmentId);
+    }
 
     protected final void runOnMainThread(Runnable runnable) {
         if (Bukkit.getServer() == null) {

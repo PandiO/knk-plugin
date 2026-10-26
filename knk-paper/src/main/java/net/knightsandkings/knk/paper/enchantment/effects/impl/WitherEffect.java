@@ -12,12 +12,12 @@ import org.bukkit.potion.PotionEffectType;
 
 public class WitherEffect extends AttackEnchantmentEffect {
     public WitherEffect(Plugin plugin) {
-        super("wither", 0.15d, plugin);
+        super("wither", plugin);
     }
 
     @Override
     protected void applyEffect(ItemStack weapon, Player attacker, LivingEntity target, int level) {
-        int durationTicks = level * 40;
+        int durationTicks = tuning().durationTicksAt(level);
         target.addPotionEffect(new PotionEffect(PotionEffectType.WITHER, durationTicks, 1));
 
         Location particleLocation = attacker.getLocation().clone().add(0.0d, 1.5d, 0.0d);
