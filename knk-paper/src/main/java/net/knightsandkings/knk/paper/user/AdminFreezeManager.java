@@ -27,11 +27,18 @@ public class AdminFreezeManager {
     private static final Logger LOGGER = Logger.getLogger(AdminFreezeManager.class.getName());
 
     private final Map<UUID, String> frozen = new ConcurrentHashMap<>();
+    // PandiO/knk-workspace#155: told when a player's freeze starts (true) and ends (false), so a frozen player held in
+    // mid-air gets flight allowed and isn't kicked for flying.
+    private volatile java.util.function.BiConsumer<UUID, Boolean> freezeHook = (uuid, frozenNow) -> { };
     // KNG-58: the last freeze the API (or this server) set, for a join while the API is down.
     private volatile net.knightsandkings.knk.core.offline.OfflineSecurityStore offline;
 
     public void setOfflineStore(net.knightsandkings.knk.core.offline.OfflineSecurityStore offline) {
         this.offline = offline;
+    }
+
+    public void setFreezeHook(java.util.function.BiConsumer<UUID, Boolean> freezeHook) {
+        this.freezeHook = freezeHook != null ? freezeHook : (uuid, frozenNow) -> { };
     }
 
     public boolean isFrozen(UUID uuid) {
@@ -44,6 +51,7 @@ public class AdminFreezeManager {
 
     public void freeze(UUID uuid, String reason) {
         frozen.put(uuid, reason);
+        freezeHook.accept(uuid, true);
         if (offline != null) {
             offline.setFrozen(uuid, true, reason);
         }
@@ -51,6 +59,7 @@ public class AdminFreezeManager {
 
     public void unfreeze(UUID uuid) {
         frozen.remove(uuid);
+        freezeHook.accept(uuid, false);
         if (offline != null) {
             offline.setFrozen(uuid, false, null);
         }
@@ -94,6 +103,7 @@ public class AdminFreezeManager {
 
     private void applyOnJoin(Plugin plugin, Player player, String reason) {
         frozen.put(player.getUniqueId(), reason != null ? reason : "");
+        freezeHook.accept(player.getUniqueId(), true);
         Bukkit.getScheduler().runTask(plugin, () -> {
             if (player.isOnline()) {
                 player.sendMessage(org.bukkit.ChatColor.RED + "You are frozen: " + frozen.get(player.getUniqueId()));
@@ -103,5 +113,6 @@ public class AdminFreezeManager {
 
     public void forget(UUID uuid) {
         frozen.remove(uuid);
+        freezeHook.accept(uuid, false);
     }
 }
