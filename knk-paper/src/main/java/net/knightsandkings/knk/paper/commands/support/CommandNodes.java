@@ -8,6 +8,7 @@ import java.util.stream.Stream;
 import net.knightsandkings.knk.core.messaging.PrivateMessageNodes;
 import net.knightsandkings.knk.paper.commands.EnderchestCommand;
 import net.knightsandkings.knk.paper.commands.FlyCommand;
+import net.knightsandkings.knk.paper.commands.GamemodeCommand;
 import net.knightsandkings.knk.paper.commands.InventoryCommand;
 import net.knightsandkings.knk.paper.commands.RestoreCommand;
 import net.knightsandkings.knk.paper.currency.PlayerCurrencyService;
@@ -46,6 +47,7 @@ public final class CommandNodes {
             Map.entry("baltop", List.of(PlayerCurrencyService.BALTOP_NODE)),
             Map.entry("transactions", List.of(PlayerCurrencyService.TRANSACTIONS_NODE, PlayerCurrencyService.TRANSACTIONS_OTHERS_NODE)),
             Map.entry("fly", List.of(FlyCommand.NODE, FlyCommand.NODE_OTHERS)),
+            Map.entry("gamemode", GamemodeCommand.NODES),
             Map.entry("heal", restoreNodes(RestoreCommand.Kind.HEAL)),
             Map.entry("feed", restoreNodes(RestoreCommand.Kind.FEED)),
             Map.entry("enderchest", List.of(EnderchestCommand.NODE, EnderchestCommand.NODE_OPEN)),

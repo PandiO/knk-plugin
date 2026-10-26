@@ -61,6 +61,8 @@ public final class HubAdmissionListener implements Listener {
         String refusal = refusal(hub.unusable(), operator.test(event.getUniqueId()));
         if (refusal != null) {
             LOGGER.warning("[KnK Hub] Refused " + event.getName() + ": " + hub.unusable().orElse(""));
+            net.knightsandkings.knk.paper.admission.JoinRefusalReasons.shared().record(event.getUniqueId(), event.getName(),
+                net.knightsandkings.knk.core.admission.JoinRefusal.Reason.HUB_UNUSABLE, hub.unusable().orElse(null)); // #159
             event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, Component.text(refusal));
         }
     }

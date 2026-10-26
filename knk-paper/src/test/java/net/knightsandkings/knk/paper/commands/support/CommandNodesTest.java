@@ -28,6 +28,24 @@ class CommandNodesTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void everyNodeOfAGatedCommandIsDeclaredInPluginYml() throws Exception {
+        // PandiO/knk-workspace#158 (command permission scan 2026-10-26): every node a rank can be given is documented.
+        try (var in = java.nio.file.Files.newInputStream(java.nio.file.Path.of("src/main/resources/plugin.yml"))) {
+            Map<String, Object> yaml = new Yaml().load(new InputStreamReader(in, StandardCharsets.UTF_8));
+            Map<String, Object> permissions = (Map<String, Object>) yaml.get("permissions");
+            for (String name : CommandNodes.commands()) {
+                for (String node : CommandNodes.anyOf(name)) {
+                    assertTrue(permissions.containsKey(node), "/" + name + ": " + node + " is not declared in plugin.yml");
+                }
+            }
+            Map<String, Object> umbrella = (Map<String, Object>) ((Map<String, Object>) permissions.get("knk.admin")).get("children");
+            assertTrue(umbrella.containsKey(net.knightsandkings.knk.paper.commands.KnkAdminCommand.ITEM_NODE),
+                "knk.admin keeps covering /knk item");
+        }
+    }
+
+    @Test
     void openCommandsAreNotGated() {
         for (String open : java.util.List.of("msg", "reply", "tpa", "tpaccept", "gate", "gatedoor", "knk", "afk", "leaderboard", "stats")) {
             assertTrue(CommandNodes.anyOf(open).isEmpty(), open);

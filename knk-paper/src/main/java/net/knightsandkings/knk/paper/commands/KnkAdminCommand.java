@@ -57,6 +57,8 @@ import net.knightsandkings.knk.paper.commands.support.CommandPermissions;
  */
 public class KnkAdminCommand implements CommandExecutor, TabCompleter {
     private final CommandRegistry registry = new CommandRegistry();
+    /** {@code /knk item} (held-item rename/lore and the enchantment catalogue), PandiO/knk-workspace#158. */
+    public static final String ITEM_NODE = "knk.admin.item";
     private CommandPermissions commandPermissions = CommandPermissions.bukkitOnly();
     /** Nodes a subcommand checks synchronously inside its executor; asked for before it runs (KNG-24). */
     private final java.util.Map<String, List<String>> nodesCheckedInside = new java.util.HashMap<>();
@@ -237,7 +239,9 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                         "Rename/edit lore on your held item, or manage the enchantment definition catalog",
                         "/knk item rename <displayName> | /knk item lore <add <text>|set <line> <text>|remove <line>> | " +
                                 "/knk item enchantments <list|vanilla|search|apply>",
-                        "knk.admin",
+                        // Own node (PandiO/knk-workspace#158) instead of the knk.admin umbrella, so a rank can
+                        // be given held-item editing without every /knk subcommand. knk.admin still covers it.
+                        ITEM_NODE,
                         List.of(
                                 "/knk item rename &6&lFlametongue",
                                 "/knk item lore add &7A blade wreathed in fire",

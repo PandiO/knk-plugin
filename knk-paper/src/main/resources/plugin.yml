@@ -183,6 +183,15 @@ commands:
     description: "Toggle or set flight for yourself or an online player"
     usage: "/fly [on|off] [player]"
 
+  # PandiO/knk-workspace#158: vanilla /gamemode needs minecraft.command.gamemode (op), which in-house grants never
+  # reach. Declaring it here makes the bare label resolve to this plugin (as /tp); vanilla stays reachable as
+  # /minecraft:gamemode. No permission: entry - knk.gamemode.<mode> and knk.gamemode.others are checked through
+  # KnkPermissible inside GamemodeCommand.
+  gamemode:
+    description: "Set your game mode, or an online player's"
+    usage: "/gamemode <survival|creative|adventure|spectator> [player]"
+    aliases: [gm]
+
   heal:
     description: "Heal yourself, an online player, or everyone online"
     usage: "/heal [player|all]"
@@ -308,6 +317,7 @@ permissions:
       knk.admin.location.retention: true
       knk.admin.enchantments: true
       knk.admin.itemblueprints: true
+      knk.admin.item: true
       knk.admin.menu: true
       knk.admin.streets: true
       knk.admin.street: true
@@ -403,6 +413,12 @@ permissions:
 
   knk.admin.itemblueprints:
     description: Access to /knk itemblueprints
+    default: false
+
+  knk.admin.item:
+    description: >-
+      /knk item - rename your held item, edit its lore, and list/search/apply enchantment definitions
+      (PandiO/knk-workspace#158; until then the knk.admin umbrella itself).
     default: false
 
   knk.admin.menu:
@@ -684,6 +700,38 @@ permissions:
 
   knk.feed.all:
     description: Feed every online player with /feed all (KNG-9).
+    default: op
+
+  # PandiO/knk-workspace#158: /gamemode (GamemodeCommand). Resolved through KnkPermissible, same caveat as
+  # knk.kit.list. A mode needs its own node; another player also needs knk.gamemode.others.
+  knk.gamemode.*:
+    description: Every game mode, for yourself and (with .others) for online players.
+    default: op
+    children:
+      knk.gamemode.survival: true
+      knk.gamemode.creative: true
+      knk.gamemode.adventure: true
+      knk.gamemode.spectator: true
+      knk.gamemode.others: true
+
+  knk.gamemode.survival:
+    description: /gamemode survival (s, 0)
+    default: op
+
+  knk.gamemode.creative:
+    description: /gamemode creative (c, 1)
+    default: op
+
+  knk.gamemode.adventure:
+    description: /gamemode adventure (a, 2)
+    default: op
+
+  knk.gamemode.spectator:
+    description: /gamemode spectator (sp, 3)
+    default: op
+
+  knk.gamemode.others:
+    description: /gamemode <mode> <player> - set an online player's game mode (also needs that mode's node).
     default: op
 
   knk.enderchest:
@@ -999,6 +1047,22 @@ permissions:
     description: >-
       Walk and teleport into domains with AllowEntry off and out of domains with AllowExit off. A
       staff teleport of another player carries the staff member's bypass (e.g. putting someone in a jail).
+    default: op
+
+  knk.region.bypass.containers:
+    description: >-
+      Open chests, barrels, shulker boxes, hoppers and other storage (and storage minecarts and boats) in
+      regions whose rules refuse it - towns and other domains refuse it to non-members unless the region
+      allows it (PandiO/knk-workspace#157). Meant for moderators and admins, not the general staff rank.
+      Players in staff mode or owner mode always pass. knk.region.bypass doesn't cover it.
+    default: op
+
+  knk.notify.joinattempt:
+    description: >-
+      Get a chat line when a player's join is refused - vanilla ban, whitelist or full server, the invite-only
+      admission gate (no admitted account, account deactivated, access can't be checked), a missing world or an
+      unusable hub - with the reason (PandiO/knk-workspace#159). One line per player per
+      join-refusal-notify.cooldown-seconds.
     default: op
 
   # Siege minigame (docs/specs/siege-minigame/DESIGN.md §11.1). Checked through KnkPermissible, like

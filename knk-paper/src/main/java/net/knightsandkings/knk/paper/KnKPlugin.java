@@ -330,6 +330,8 @@ public class KnKPlugin extends JavaPlugin {
         net.knightsandkings.knk.paper.regions.access.DomainAccessFlags.register(getLogger());
         // KNG-258: the creation timestamp and orphan mark must survive a restart (read back by name either way)
         net.knightsandkings.knk.paper.regions.RegionBookkeepingFlags.register(getLogger());
+        // PandiO/knk-workspace#162: knk-effect-damage allow|deny on a domain's region
+        net.knightsandkings.knk.paper.regions.EffectDamageFlag.register(getLogger());
     }
 
     @Override
@@ -657,6 +659,9 @@ public class KnKPlugin extends JavaPlugin {
             // Gate pass-through (and navigation's gate verdicts) honour KnK's permission model as well as Bukkit's.
             net.knightsandkings.knk.paper.gates.GatePassThroughRules.setPermissionCheck((player, node) ->
                 player.hasPermission(node) || (knkPermissible != null && knkPermissible.hasPermission(player, node)));
+            // So do menu items' visibility/action permissions and the permission-node condition (PandiO/knk-workspace#158).
+            net.knightsandkings.knk.paper.menu.MenuPermissions.setCheck((player, node) ->
+                player.hasPermission(node) || (knkPermissible != null && knkPermissible.hasPermission(player, node)));
             // A grant or group change made in the web app shows in game within the 30 s cache time;
             // /knk cache refresh applies it at once.
             cacheManager.registerRefreshHook("permissions", permissionsDataAccess::invalidateAll);
@@ -940,6 +945,15 @@ public class KnKPlugin extends JavaPlugin {
             // in towns. siegeService is created later (initializeSiege), so it's read per hit.
             initializeEnchantmentRuntime(new WorldGuardCombatSafezones(regionDomainResolver,
                 (attacker, victim) -> siegeService != null && siegeService.allowsCombat(attacker, victim)));
+            // PandiO/knk-workspace#162: no effect damage (fire, poison, wither, ...) for players in domains unless
+            // knk-effect-damage or pvp allows it there; siege members keep the siege's rules (read per hit).
+            getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.regions.DomainEffectDamageListener(
+                () -> getConfig().getBoolean(net.knightsandkings.knk.paper.regions.DomainEffectDamageListener.ENABLED_PATH, true),
+                net.knightsandkings.knk.paper.regions.DomainEffectDamageListener.causes(
+                    getConfig().getStringList(net.knightsandkings.knk.paper.regions.DomainEffectDamageListener.CAUSES_PATH),
+                    getLogger()::warning),
+                regionDomainResolver,
+                player -> siegeService != null && siegeService.activeLobbyOf(player.getUniqueId()).isPresent()), this);
             getLogger().info("Registered custom enchantment runtime listeners and /ce command");
 
             // Teleport engine + staff teleports (docs/specs/teleport, Phase 1) - before the commands,
@@ -1935,6 +1949,15 @@ public class KnKPlugin extends JavaPlugin {
                 getLogger()::warning),
             regionTracker.regionIds()::at,
             player -> hasRegionBypass(player) || hasWorldGuardRegionBypass(player)), this);
+        // PandiO/knk-workspace#157: storage in regions that refuse it (towns and other domains) for players in staff or
+        // owner mode and holders of knk.region.bypass.containers (Moderator and Admin), before WorldGuard's own check.
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.regions.ContainerAccessWorldGuardListener(
+            new net.knightsandkings.knk.paper.regions.ContainerAccessBypass(
+                player -> modeService != null
+                    && modeService.getActiveMode(player) != net.knightsandkings.knk.core.domain.users.ActiveMode.NONE,
+                player -> player.hasPermission(net.knightsandkings.knk.paper.regions.ContainerAccessBypass.NODE)
+                    || (knkPermissible != null
+                        && knkPermissible.hasPermission(player, net.knightsandkings.knk.paper.regions.ContainerAccessBypass.NODE)))), this);
         if (gameSettingsManager != null) {
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.GameSettingsWorldListener(this, gameSettingsManager), this);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.GameSettingsMotdListener(gameSettingsManager), this);
@@ -2671,6 +2694,17 @@ public class KnKPlugin extends JavaPlugin {
     private void initializeAdmission() {
         var admission = net.knightsandkings.knk.paper.admission.AdmissionSettings.fromConfig(
             getConfig().getConfigurationSection("admission"), config.web().publicUrl());
+        // PandiO/knk-workspace#159: holders of knk.notify.joinattempt hear about refused joins, with the reason.
+        getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.admission.JoinRefusalNotifier(
+            net.knightsandkings.knk.paper.admission.JoinRefusalReasons.shared(),
+            new net.knightsandkings.knk.core.admission.JoinRefusalThrottle(
+                java.time.Duration.ofSeconds(Math.max(0, getConfig().getLong("join-refusal-notify.cooldown-seconds", 60))),
+                java.time.Clock.systemUTC()),
+            () -> getConfig().getBoolean("join-refusal-notify.enabled", true),
+            org.bukkit.Bukkit::getOnlinePlayers,
+            (player, node) -> player.hasPermission(node) || (knkPermissible != null && knkPermissible.hasPermission(player, node)),
+            MenuService.mainThreadExecutor(this),
+            net.knightsandkings.knk.paper.admission.JoinRefusalNotifier.bukkitChecks()), this);
         var offline = offlineSecurity;
         getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.admission.AdmissionListener(
             admission, apiClient.getAdmissionApi(), uuid -> org.bukkit.Bukkit.getOfflinePlayer(uuid).isOp(),
@@ -3093,6 +3127,8 @@ public class KnKPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(offlineStorage, this);
 
         registerTabCommand("fly", new net.knightsandkings.knk.paper.commands.FlyCommand(support));
+        // PandiO/knk-workspace#158: vanilla /gamemode is op-only (in-house grants never reach Bukkit permissions).
+        registerTabCommand("gamemode", new net.knightsandkings.knk.paper.commands.GamemodeCommand(support));
         registerTabCommand("heal", new net.knightsandkings.knk.paper.commands.RestoreCommand(
             support, net.knightsandkings.knk.paper.commands.RestoreCommand.Kind.HEAL));
         registerTabCommand("feed", new net.knightsandkings.knk.paper.commands.RestoreCommand(

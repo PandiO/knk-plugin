@@ -117,14 +117,14 @@ public final class MenuClickListener implements Listener {
             return;
         }
 
-        if (!item.isVisibleTo(player::hasPermission)) {
+        if (!item.isVisibleTo(MenuPermissions.of(player))) {
             // Defense in depth (DESIGN_REVIEW.md §2.4) - render-time exclusion
             // should already make this unreachable (the item wouldn't be in
             // itemsBySlot at all), but never trust that alone.
             return;
         }
 
-        if (!item.isActionAllowedFor(player::hasPermission)) {
+        if (!item.isActionAllowedFor(MenuPermissions.of(player))) {
             LOGGER.fine(() -> "Player " + player.getName() + " lacks actionPermission '" + item.actionPermission()
                     + "' for menu item (id " + item.id() + "); click rejected");
             return;

@@ -111,6 +111,14 @@ admission:
   # In-game message after a link (on the next join when offline). Placeholder {maskedEmail}.
   account-linked: "&aYour Minecraft account is now linked to the web account &e{maskedEmail}&a.\n&cNot you? Tell staff right away."
 
+# Refused joins (PandiO/knk-workspace#159): online holders of knk.notify.joinattempt get a chat line when a player's join
+# is refused - vanilla ban, whitelist or full server, the admission gate above (no admitted account, deactivated,
+# access can't be checked), a missing world or an unusable hub - with the reason. One line per player per cooldown, so
+# a client retrying in a loop doesn't flood chat. Both read on every refusal.
+join-refusal-notify:
+  enabled: true
+  cooldown-seconds: 60
+
 # A new player's first minutes and the web-account reminder (KNG-128/129). & colour codes.
 onboarding:
   # Sent instead of "Welcome back" on a player's first join: the account was created at this join, or it
@@ -815,6 +823,14 @@ regions:
     crafting-blocks: [CRAFTING_TABLE, CRAFTER, FURNACE, BLAST_FURNACE, SMOKER, BREWING_STAND, ANVIL, CHIPPED_ANVIL,
                       DAMAGED_ANVIL, ENCHANTING_TABLE, SMITHING_TABLE, GRINDSTONE, STONECUTTER, LOOM, CARTOGRAPHY_TABLE,
                       FLETCHING_TABLE]
+  # Effect damage in domains (PandiO/knk-workspace#162): players inside a town, district, structure or other domain take
+  # no damage from these causes, unless the WorldGuard flag knk-effect-damage is allow there (/rg flag <region>
+  # knk-effect-damage allow), or it is unset and pvp is allow there (battlegrounds, a town opened for PvP). deny stops it
+  # even where PvP is allowed. Siege members in a match keep the siege's rules. `enabled` is read on every event;
+  # `causes` (Bukkit DamageCause names; empty = this default list) needs a restart.
+  effect-damage:
+    enabled: true
+    causes: [FIRE, FIRE_TICK, LAVA, CAMPFIRE, HOT_FLOOR, POISON, WITHER, MAGIC, DRAGON_BREATH, FREEZE]
   managed:
     startup-repair:
       enabled: true
