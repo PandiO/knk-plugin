@@ -316,6 +316,9 @@ public class KnKPlugin extends JavaPlugin {
     private volatile net.knightsandkings.knk.paper.enchantment.GateAreaDamage gateAreaDamage =
         net.knightsandkings.knk.paper.enchantment.GateAreaDamage.NONE;
     private net.knightsandkings.knk.paper.connectivity.ApiConnectivityMonitor apiConnectivityMonitor;
+    // Realtime channel (PandiO/knk-workspace#178): off unless realtime.enabled; counters always kept for /knk health.
+    private final net.knightsandkings.knk.core.realtime.RealtimeStats realtimeStats = new net.knightsandkings.knk.core.realtime.RealtimeStats();
+    private net.knightsandkings.knk.paper.realtime.RealtimeService realtimeService;
     private volatile boolean skipApiWhileDown = true;
     /** Kept for the siege non-member pass-through (Phase 7b, TELEPORT mode only). */
     private net.knightsandkings.knk.paper.gates.GatePassThroughService gatePassThroughService;
@@ -1104,6 +1107,9 @@ public class KnKPlugin extends JavaPlugin {
             initializeRoads();
             initializeNavigation();
 
+            // Last, so every refresh path the resync calls exists (PandiO/knk-workspace#178).
+            initializeRealtime();
+
             getLogger().info("KnightsAndKings Plugin Enabled!");
             
         } catch (Exception e) {
@@ -1131,6 +1137,10 @@ public class KnKPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (realtimeService != null) {
+            realtimeService.stop();
+            realtimeService = null;
+        }
         if (apiConnectivityMonitor != null) {
             apiConnectivityMonitor.stop();
         }
@@ -1968,6 +1978,46 @@ public class KnKPlugin extends JavaPlugin {
         return skipApiWhileDown;
     }
 
+    /**
+     * The realtime channel to knk-web-api's game hub (PandiO/knk-workspace#178, DESIGN §4.4). With
+     * {@code realtime.enabled: false} (the default) it only logs that it is off. On every (re)connect it sends the
+     * roster and runs these existing refresh paths, in order (P3): the {@code /knk cache refresh} hooks (permissions,
+     * item blueprints, game settings, teleport, navigation, region domains, ...), the domain access flag sync and the
+     * lootbox runtime refresh.
+     */
+    private void initializeRealtime() {
+        try {
+            var settings = net.knightsandkings.knk.paper.realtime.RealtimeSettings.fromConfig(getConfig());
+            var hooks = new net.knightsandkings.knk.core.realtime.ResyncHooks();
+            if (cacheManager != null) {
+                hooks.register("cache refresh hooks", cacheManager::runRefreshHooks);
+            }
+            if (domainAccessSync != null) {
+                hooks.register("domain access flags", () -> domainAccessSync.syncNow().exceptionally(error -> null));
+            }
+            if (lootboxRuntime != null) {
+                hooks.register("lootbox runtime", () -> lootboxRuntime.refresh().exceptionally(error -> null));
+            }
+            realtimeService = new net.knightsandkings.knk.paper.realtime.RealtimeService(this, settings,
+                config.api().baseUrl(), createAuthProvider(config.api().auth()), hooks, realtimeStats,
+                uuid -> cacheManager == null ? null
+                    : cacheManager.getUserCache().getStale(uuid).map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null));
+            if (metricsService != null) {
+                metricsService.register(realtimeStats);
+            }
+            realtimeService.start();
+        } catch (RuntimeException e) {
+            // The channel is optional: polls and TTLs keep working without it (P5).
+            getLogger().log(java.util.logging.Level.SEVERE, "Realtime channel failed to start; polls and TTLs as before", e);
+        }
+    }
+
+    /** {@code /knk health}: the realtime channel's state (PandiO/knk-workspace#178). */
+    public String realtimeStatusLine() {
+        var service = realtimeService;
+        return service != null ? service.statusLine() : "realtime: off";
+    }
+
     /** Private messages waiting for knk-web-api's PM log (/knk health); -1 when that sink is off. */
     public int privateMessageLogQueueDepth() {
         var apiLog = apiPrivateMessageLog;
@@ -2005,8 +2055,8 @@ public class KnKPlugin extends JavaPlugin {
     private void registerCommands() {
         PluginCommand knkCommand = getCommand("knk");
         if (knkCommand != null) {
-            // Use "localhost" as default serverId; TODO: make this configurable
-            String serverId = "localhost";
+            // realtime.server-id (PandiO/knk-workspace#178); default "localhost", the value that used to be hard-coded.
+            String serverId = net.knightsandkings.knk.paper.realtime.RealtimeSettings.fromConfig(getConfig()).serverId();
             KnkAdminCommand knkAdminCommand = new KnkAdminCommand(
                 this, 
                 apiClient.getHealthApi(), 

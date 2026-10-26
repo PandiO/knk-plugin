@@ -69,6 +69,27 @@ region-http:
   # Port to listen on (the API's region callback URL must use the same port).
   port: 8081
 
+# Realtime channel to knk-web-api (PandiO/knk-workspace#178; knk-workspace docs/specs/realtime-signalr/DESIGN.md).
+# One SignalR connection to the API's game hub. Off by default: with enabled: false the plugin works exactly as
+# before (polls, cache TTLs, task codes). When on, the plugin reports who is online (the API's User.IsOnline is then
+# corrected after a crash or an API restart) and, on every (re)connect, re-reads what the API may have changed while
+# it was away (the /knk cache refresh hooks, domain access flags, lootbox runtime). Later phases push rank,
+# permission, balance and entity changes over it. Needs api.auth.type: apikey (the hub takes the same key).
+realtime:
+  enabled: false
+  # This game server's id: sent to the hub (X-Knk-Server-Id) and stored on world tasks claimed here. Letters, digits,
+  # '.', '_' and '-' (max 64). Give every game server that shares one API its own id.
+  server-id: "localhost"
+  # Full hub URL. Empty = api.base-url without its trailing /api plus hub-path
+  # (http://api:5000/api -> http://api:5000/api/hubs/game). The plugin talks to the API directly, not through nginx.
+  hub-url: ""
+  hub-path: "/api/hubs/game"
+  # Seconds between reconnect attempts after a drop; the last value repeats. No attempts while the API connectivity
+  # probe (api.connectivity) says DOWN; one right away when it is UP again.
+  backoff-seconds: [1, 2, 5, 10, 30]
+  # Random spread of each delay (0.2 = +/-20%), so several servers don't retry in step
+  backoff-jitter: 0.2
+
 # Performance metrics (KNG-232): a Prometheus /metrics endpoint with TPS, tick time, players, chunks/entities per
 # world, JVM heap/off-heap/GC, process CPU and RSS, the container's memory and CPU (cgroup), API-call and task
 # durations. For sizing the server and building scaling curves - see knk-workspace

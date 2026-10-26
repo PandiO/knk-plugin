@@ -64,6 +64,14 @@ tasks {
         relocate("com.fasterxml.jackson", "net.knightsandkings.knk.libs.jackson")
         relocate("okhttp3", "net.knightsandkings.knk.libs.okhttp3")
         relocate("okio", "net.knightsandkings.knk.libs.okio")
+        // SignalR client (PandiO/knk-workspace#178): its RxJava and Gson must not meet the server's copies.
+        relocate("io.reactivex.rxjava3", "net.knightsandkings.knk.libs.rxjava3")
+        relocate("org.reactivestreams", "net.knightsandkings.knk.libs.reactivestreams")
+        relocate("com.google.gson", "net.knightsandkings.knk.libs.gson")
+        // slf4j comes with Paper; SignalR's log lines go to the server log through it.
+        dependencies {
+            exclude(dependency("org.slf4j:.*"))
+        }
     }
 
     register<Copy>("deployToDevServer") {

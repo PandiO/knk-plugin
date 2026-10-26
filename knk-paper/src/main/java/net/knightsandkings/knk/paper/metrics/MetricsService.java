@@ -20,6 +20,7 @@ public final class MetricsService {
     private final Plugin plugin;
     private final KnkConfig.MetricsConfig config;
     private MetricsHttpServer server;
+    private MetricsRegistry registry;
     private BukkitTask sampler;
 
     public MetricsService(Plugin plugin, KnkConfig.MetricsConfig config) {
@@ -33,6 +34,7 @@ public final class MetricsService {
             return;
         }
         MetricsRegistry registry = new MetricsRegistry();
+        this.registry = registry;
         MinecraftMetricsCollector minecraft = new MinecraftMetricsCollector();
         registry.register(minecraft);
         registry.register(new HostMetricsCollector());
@@ -57,6 +59,17 @@ public final class MetricsService {
                 plugin.getLogger().log(Level.WARNING, "Metrics sample failed: " + e, e);
             }
         }, 1L, ticks);
+    }
+
+    /**
+     * Adds a collector to the running endpoint (e.g. the realtime counters, PandiO/knk-workspace#178). No-op while
+     * metrics are off.
+     */
+    public void register(net.knightsandkings.knk.core.metrics.MetricsCollector collector) {
+        MetricsRegistry current = registry;
+        if (current != null && server != null) {
+            current.register(collector);
+        }
     }
 
     public void stop() {

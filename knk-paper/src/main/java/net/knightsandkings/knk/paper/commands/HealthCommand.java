@@ -28,15 +28,23 @@ public class HealthCommand implements CommandExecutor {
     private final HealthApi healthApi;
     /** Queued PM log entries, or a negative number when the API sink is off; null = not shown. */
     private final IntSupplier pmLogQueueDepth;
+    /** The realtime channel's status line (PandiO/knk-workspace#178); null = not shown. */
+    private final java.util.function.Supplier<String> realtimeStatus;
     
     public HealthCommand(Plugin plugin, HealthApi healthApi) {
         this(plugin, healthApi, null);
     }
 
     public HealthCommand(Plugin plugin, HealthApi healthApi, IntSupplier pmLogQueueDepth) {
+        this(plugin, healthApi, pmLogQueueDepth, null);
+    }
+
+    public HealthCommand(Plugin plugin, HealthApi healthApi, IntSupplier pmLogQueueDepth,
+                         java.util.function.Supplier<String> realtimeStatus) {
         this.plugin = plugin;
         this.healthApi = healthApi;
         this.pmLogQueueDepth = pmLogQueueDepth;
+        this.realtimeStatus = realtimeStatus;
     }
     
     @Override
@@ -46,6 +54,12 @@ public class HealthCommand implements CommandExecutor {
         if (pmLogQueueDepth != null) {
             int depth = pmLogQueueDepth.getAsInt();
             sender.sendMessage(ChatColor.GRAY + (depth < 0 ? "  pm-log: API sink off" : "  pm-log queue: " + depth));
+        }
+        if (realtimeStatus != null) {
+            String line = realtimeStatus.get();
+            if (line != null) {
+                sender.sendMessage(ChatColor.GRAY + "  " + line);
+            }
         }
         
         // Execute health check asynchronously (a direct probe, never cached)
