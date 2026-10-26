@@ -882,11 +882,12 @@ public class KnKPlugin extends JavaPlugin {
                 anvilCaptureManager, new MenuRefreshSchedule()
             );
             // Alpha cross-play finding 2026-10-24: delayed menu switches for Bedrock (Floodgate) players.
-            menuService.configureBedrockTransitions(
-                net.knightsandkings.knk.paper.menu.FloodgatePlayers.detect(
-                    getServer().getPluginManager().getPlugin("floodgate"), getLogger()),
-                Math.min(20, getConfig().getInt("menus.bedrock-transition-delay-ticks", 3))
-            );
+            java.util.function.Predicate<java.util.UUID> bedrockPlayers = net.knightsandkings.knk.paper.menu.FloodgatePlayers.detect(
+                getServer().getPluginManager().getPlugin("floodgate"), getLogger());
+            int bedrockTransitionTicks = Math.min(20, getConfig().getInt("menus.bedrock-transition-delay-ticks", 3));
+            menuService.configureBedrockTransitions(bedrockPlayers, bedrockTransitionTicks);
+            initializeMenuOpenerItem(bedrockPlayers, bedrockTransitionTicks);
+            initializeBedrockBlockResync(bedrockPlayers);
             getLogger().info("InventoryMenu rendering engine initialized (Phase 2 + 9)");
             if (telemetryHooks != null) {
                 menuService.addObserver(telemetryHooks); // menu.opened / menu.action / menu.click (KNG-34 link 6)
@@ -1561,6 +1562,55 @@ public class KnKPlugin extends JavaPlugin {
     }
 
     /**
+     * The menu item (alpha test run 1, PandiO/knk-workspace#160): an inventory item that opens {@code /menu}, for
+     * console and Bedrock players. Settings in {@code menus.menu-item}; read once at enable. The click runs
+     * {@code /menu} itself, so its permission ({@code knk.menu}) and every command rule apply.
+     */
+    private void initializeMenuOpenerItem(java.util.function.Predicate<java.util.UUID> bedrockPlayers, int bedrockDelayTicks) {
+        net.knightsandkings.knk.core.menu.opener.MenuOpenerSettings settings =
+            net.knightsandkings.knk.paper.menu.opener.MenuOpenerConfig.read(
+                getConfig().getConfigurationSection("menus.menu-item"), getLogger());
+        net.knightsandkings.knk.paper.menu.opener.MenuOpenerService service =
+            new net.knightsandkings.knk.paper.menu.opener.MenuOpenerService(
+                () -> settings, bedrockPlayers, new net.knightsandkings.knk.paper.menu.opener.BukkitMenuOpenerItems(),
+                player -> player.performCommand("menu"),
+                (task, ticks) -> getServer().getScheduler().runTaskLater(this, task, ticks),
+                System::currentTimeMillis, bedrockDelayTicks);
+        getServer().getPluginManager().registerEvents(
+            new net.knightsandkings.knk.paper.menu.opener.MenuOpenerListener(service), this);
+        // a reload (or a config change) reaches players already online, not only the next joins
+        for (org.bukkit.entity.Player online : getServer().getOnlinePlayers()) {
+            service.ensureLater(online, settings.giveOnJoin());
+        }
+        getLogger().info("Menu item " + (settings.enabled()
+            ? "on (" + settings.material() + " in slot " + settings.slot() + ", for " + settings.audience() + " players)"
+            : "off"));
+    }
+
+    /**
+     * Ghost blocks on Bedrock clients (alpha test run 1, PandiO/knk-workspace#161): a refused break is sent to a
+     * Bedrock (Floodgate) player again while they keep mining. Settings in {@code crossplay.block-resync}.
+     */
+    private void initializeBedrockBlockResync(java.util.function.Predicate<java.util.UUID> bedrockPlayers) {
+        org.bukkit.configuration.ConfigurationSection section = getConfig().getConfigurationSection("crossplay.block-resync");
+        boolean enabled = section == null || section.getBoolean("enabled", true);
+        if (!enabled) {
+            getLogger().info("Bedrock block resync off (crossplay.block-resync.enabled)");
+            return;
+        }
+        boolean allPlayers = section != null && section.getBoolean("all-players", false);
+        int window = section == null ? 30 : Math.max(1, Math.min(200, section.getInt("window-ticks", 30)));
+        int interval = section == null ? 5 : Math.max(1, Math.min(40, section.getInt("interval-ticks", 5)));
+        net.knightsandkings.knk.paper.crossplay.BedrockBlockResync resync = new net.knightsandkings.knk.paper.crossplay.BedrockBlockResync(
+            new net.knightsandkings.knk.core.crossplay.BlockResyncWatch(window, interval, 16),
+            allPlayers ? id -> true : bedrockPlayers, getServer()::getPlayer);
+        getServer().getPluginManager().registerEvents(resync, this);
+        getServer().getScheduler().runTaskTimer(this, resync::tick, 1L, 1L);
+        getLogger().info("Bedrock block resync on (" + (allPlayers ? "all players" : "Bedrock players") + ", window "
+            + window + " ticks, every " + interval + ")");
+    }
+
+    /**
      * Road navigation (KNG-27, docs/specs/navigation/DESIGN.md §4, §5, §7; plan Phase 3): the network cache,
      * the dirty tracker, the build queue, the survey service and the overlay. Only when
      * {@code navigation.enabled}; {@code /knk road} is registered regardless and answers "disabled" otherwise.
@@ -1704,6 +1754,9 @@ public class KnKPlugin extends JavaPlugin {
             mainThread, System::currentTimeMillis, new net.knightsandkings.knk.paper.navigation.BukkitCompassItems());
         getServer().getPluginManager().registerEvents(
             new net.knightsandkings.knk.paper.navigation.NavigationCompassListener(navigationCompass), this);
+        // PandiO/knk-workspace#176: an objective behind a closed gate is navigated to the gate in the way
+        navigationCompass.setGateApproaches((objective, team) -> gateManager == null ? java.util.Optional.empty()
+            : net.knightsandkings.knk.paper.navigation.SiegeGateApproaches.of(gateManager).approach(objective, team));
         if (siegeService != null) {
             // KNG-234: sieges that want it give the compass at the hub
             siegeService.addObserver(navigationCompass);

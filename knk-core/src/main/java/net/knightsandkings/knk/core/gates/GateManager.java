@@ -219,6 +219,21 @@ public class GateManager {
     }
 
     /**
+     * World positions of a gate's door blocks in its open position (the last animation frame), regardless of the
+     * gate's current state: where a drawbridge lies when lowered (PandiO/knk-workspace#176, the siege approach point).
+     *
+     * @param gateId gate (door) ID
+     * @return the open-frame block positions, or an empty list for an unknown gate
+     */
+    public List<Vector> openFootprint(int gateId) {
+        CachedGateDoor gate = gateCache.get(gateId);
+        if (gate == null) {
+            return List.of();
+        }
+        return doorBlockPositions(gate, Math.max(0, gate.getAnimationDurationTicks()));
+    }
+
+    /**
      * World positions of a gate's door blocks at the given animation frame, skipping any
      * block clipped away by ClipToGeometryBounds (see GateFrameCalculator).
      */
