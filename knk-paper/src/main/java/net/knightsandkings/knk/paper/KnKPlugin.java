@@ -1919,6 +1919,15 @@ public class KnKPlugin extends JavaPlugin {
                 getLogger()::warning),
             regionTracker.regionIds()::at,
             player -> hasRegionBypass(player) || hasWorldGuardRegionBypass(player)), this);
+        // PandiO/knk-workspace#157: storage in regions that refuse it (towns and other domains) for players in staff or
+        // owner mode and holders of knk.region.bypass.containers (Moderator and Admin), before WorldGuard's own check.
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.regions.ContainerAccessWorldGuardListener(
+            new net.knightsandkings.knk.paper.regions.ContainerAccessBypass(
+                player -> modeService != null
+                    && modeService.getActiveMode(player) != net.knightsandkings.knk.core.domain.users.ActiveMode.NONE,
+                player -> player.hasPermission(net.knightsandkings.knk.paper.regions.ContainerAccessBypass.NODE)
+                    || (knkPermissible != null
+                        && knkPermissible.hasPermission(player, net.knightsandkings.knk.paper.regions.ContainerAccessBypass.NODE)))), this);
         if (gameSettingsManager != null) {
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.GameSettingsWorldListener(this, gameSettingsManager), this);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.GameSettingsMotdListener(gameSettingsManager), this);
