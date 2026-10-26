@@ -23,6 +23,8 @@ public class EnchantmentCommandHandler implements CommandExecutor, TabCompleter 
     private final EnchantmentCommandValidator validator;
     private final Map<String, EnchantmentSubcommand> subcommands;
     private final VisiblePlayers visiblePlayers = VisiblePlayers.bukkit();
+    // PandiO/knk-workspace#151: /ce reload also reloads the enchantments' combat values from the API.
+    private volatile Runnable reloadHook = () -> { };
 
     public EnchantmentCommandHandler(
             Plugin plugin,
@@ -40,6 +42,15 @@ public class EnchantmentCommandHandler implements CommandExecutor, TabCompleter 
         register(new InfoEnchantmentCommand(this, repository, cooldownManager, validator));
         register(new ClearCooldownCommand(this, cooldownManager, validator));
         register(new ReloadEnchantmentCommand(this));
+    }
+
+    /** Runs on /ce reload after the config reload (the combat-values refresh). */
+    public void setReloadHook(Runnable reloadHook) {
+        this.reloadHook = reloadHook != null ? reloadHook : () -> { };
+    }
+
+    void runReloadHook() {
+        reloadHook.run();
     }
 
     @Override

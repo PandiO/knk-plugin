@@ -1,5 +1,7 @@
 package net.knightsandkings.knk.paper.enchantment.effects;
 
+import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuning;
+import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuningTable;
 import org.bukkit.Bukkit;
 import org.bukkit.Effect;
 import org.bukkit.Location;
@@ -12,27 +14,38 @@ import org.bukkit.plugin.Plugin;
 import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.DoubleSupplier;
+import java.util.function.Supplier;
 
+/**
+ * An enchantment effect that may go off when its holder hits something. The chance, duration and level scaling come
+ * from {@link EnchantmentTuningTable} at the moment of the hit, so an admin's change in the web app applies without a
+ * restart (PandiO/knk-workspace#151).
+ */
 public abstract class AttackEnchantmentEffect implements EnchantmentEffect {
     private final String enchantmentId;
-    private final Double triggerProbabilityPerLevel;
     private final Plugin plugin;
     private final DoubleSupplier rollSupplier;
+    private final Supplier<EnchantmentTuning> tuning;
 
-    protected AttackEnchantmentEffect(String enchantmentId, Double triggerProbabilityPerLevel, Plugin plugin) {
-        this(enchantmentId, triggerProbabilityPerLevel, plugin, () -> ThreadLocalRandom.current().nextDouble());
+    protected AttackEnchantmentEffect(String enchantmentId, Plugin plugin) {
+        this(enchantmentId, plugin, () -> ThreadLocalRandom.current().nextDouble());
     }
 
+    protected AttackEnchantmentEffect(String enchantmentId, Plugin plugin, DoubleSupplier rollSupplier) {
+        this(enchantmentId, plugin, rollSupplier, () -> EnchantmentTuningTable.getInstance().get(enchantmentId));
+    }
+
+    /** @param tuning read per hit; tests pass fixed values */
     protected AttackEnchantmentEffect(
             String enchantmentId,
-            Double triggerProbabilityPerLevel,
             Plugin plugin,
-            DoubleSupplier rollSupplier
+            DoubleSupplier rollSupplier,
+            Supplier<EnchantmentTuning> tuning
     ) {
         this.enchantmentId = Objects.requireNonNull(enchantmentId, "enchantmentId must not be null");
-        this.triggerProbabilityPerLevel = triggerProbabilityPerLevel;
         this.plugin = Objects.requireNonNull(plugin, "plugin must not be null");
         this.rollSupplier = Objects.requireNonNull(rollSupplier, "rollSupplier must not be null");
+        this.tuning = Objects.requireNonNull(tuning, "tuning must not be null");
     }
 
     @Override
@@ -57,12 +70,17 @@ public abstract class AttackEnchantmentEffect implements EnchantmentEffect {
             return false;
         }
 
-        if (triggerProbabilityPerLevel == null) {
+        double chance = tuning().chanceAt(level);
+        if (chance >= 1.0d) {
             return true;
         }
-
-        double chance = Math.min(1.0d, Math.max(0.0d, triggerProbabilityPerLevel * level));
         return rollSupplier.getAsDouble() < chance;
+    }
+
+    /** This enchantment's current combat values. */
+    protected final EnchantmentTuning tuning() {
+        EnchantmentTuning current = tuning.get();
+        return current != null ? current : EnchantmentTuning.NONE;
     }
 
     protected final void runOnMainThread(Runnable runnable) {

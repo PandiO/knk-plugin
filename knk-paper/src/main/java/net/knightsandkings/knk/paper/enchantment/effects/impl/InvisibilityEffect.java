@@ -15,7 +15,7 @@ public class InvisibilityEffect extends SupportEnchantmentEffect {
 
     @Override
     protected void applyEffect(ItemStack item, Player player, int level) {
-        player.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, 200, 0));
+        player.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, tuning().durationTicksAt(level), 0));
         playEffect(player.getLocation().clone().add(0.0d, 1.0d, 0.0d), Effect.POTION_BREAK, 0);
     }
 }

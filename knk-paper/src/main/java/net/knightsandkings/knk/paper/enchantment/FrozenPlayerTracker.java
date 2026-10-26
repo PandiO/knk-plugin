@@ -12,13 +12,39 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class FrozenPlayerTracker {
+    /**
+     * Told when a player's freeze starts and ends (PandiO/knk-workspace#155: flight is allowed while frozen, so a player
+     * held in mid-air isn't kicked for flying). Creatures are not reported.
+     */
+    public interface PlayerFreezeHook {
+        PlayerFreezeHook NONE = new PlayerFreezeHook() {
+            @Override
+            public void frozen(UUID playerId) {
+            }
+
+            @Override
+            public void released(UUID playerId) {
+            }
+        };
+
+        void frozen(UUID playerId);
+
+        void released(UUID playerId);
+    }
+
     private final Plugin plugin;
     private final Map<UUID, Integer> pendingUnfreezeTasks = new ConcurrentHashMap<>();
     private final Map<UUID, Long> frozenUntilMillis = new ConcurrentHashMap<>();
     private final Map<UUID, Boolean> originalAiStates = new ConcurrentHashMap<>();
+    private final Map<UUID, Boolean> frozenPlayers = new ConcurrentHashMap<>();
+    private volatile PlayerFreezeHook hook = PlayerFreezeHook.NONE;
 
     public FrozenPlayerTracker(Plugin plugin) {
         this.plugin = plugin;
+    }
+
+    public void setPlayerFreezeHook(PlayerFreezeHook hook) {
+        this.hook = hook != null ? hook : PlayerFreezeHook.NONE;
     }
 
     public void freeze(LivingEntity target, int durationTicks) {
@@ -35,21 +61,27 @@ public class FrozenPlayerTracker {
         }
 
         if (!(target instanceof Player)) {
-            try {
-                originalAiStates.put(targetId, target.hasAI());
-                target.setAI(false);
-            } catch (UnsupportedOperationException ignored) {
-                originalAiStates.remove(targetId);
+            if (!originalAiStates.containsKey(targetId)) {
+                try {
+                    originalAiStates.put(targetId, target.hasAI());
+                    target.setAI(false);
+                } catch (UnsupportedOperationException ignored) {
+                    originalAiStates.remove(targetId);
+                }
             }
             target.setVelocity(new Vector(0.0d, 0.0d, 0.0d));
+        } else if (frozenPlayers.put(targetId, Boolean.TRUE) == null) {
+            hook.frozen(targetId);
         }
 
-        int taskId = Bukkit.getScheduler().scheduleSyncDelayedTask(plugin, () -> {
-            restoreEntityState(targetId);
-            frozenUntilMillis.remove(targetId);
-            pendingUnfreezeTasks.remove(targetId);
+        int[] taskId = new int[1];
+        taskId[0] = Bukkit.getScheduler().scheduleSyncDelayedTask(plugin, () -> {
+            // Only the freeze this task belongs to ends here; a newer one has its own task.
+            if (pendingUnfreezeTasks.remove(targetId, taskId[0])) {
+                end(targetId);
+            }
         }, durationTicks);
-        pendingUnfreezeTasks.put(targetId, taskId);
+        pendingUnfreezeTasks.put(targetId, taskId[0]);
     }
 
     public void freeze(Player player, int durationTicks) {
@@ -62,17 +94,7 @@ public class FrozenPlayerTracker {
         }
 
         Long frozenUntil = frozenUntilMillis.get(playerId);
-        if (frozenUntil == null) {
-            return false;
-        }
-
-        if (frozenUntil <= System.currentTimeMillis()) {
-            frozenUntilMillis.remove(playerId);
-            pendingUnfreezeTasks.remove(playerId);
-            return false;
-        }
-
-        return true;
+        return frozenUntil != null && frozenUntil > System.currentTimeMillis();
     }
 
     public void unfreeze(UUID playerId) {
@@ -80,11 +102,18 @@ public class FrozenPlayerTracker {
             return;
         }
 
-        frozenUntilMillis.remove(playerId);
-        restoreEntityState(playerId);
         Integer taskId = pendingUnfreezeTasks.remove(playerId);
         if (taskId != null) {
             Bukkit.getScheduler().cancelTask(taskId);
+        }
+        end(playerId);
+    }
+
+    private void end(UUID entityId) {
+        frozenUntilMillis.remove(entityId);
+        restoreEntityState(entityId);
+        if (frozenPlayers.remove(entityId) != null) {
+            hook.released(entityId);
         }
     }
 

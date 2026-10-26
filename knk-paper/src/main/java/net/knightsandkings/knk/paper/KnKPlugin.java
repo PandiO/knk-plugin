@@ -223,6 +223,7 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.onboarding.NewPlayerWindow newPlayerWindow;
     private ModeService modeService;
     private net.knightsandkings.knk.paper.user.AdminFreezeManager adminFreezeManager;
+    private net.knightsandkings.knk.paper.freeze.FreezeFlightGuard freezeFlightGuard;
     private net.knightsandkings.knk.paper.user.MessagingService messagingService;
     private net.knightsandkings.knk.paper.user.SpyService spyService;
     private net.knightsandkings.knk.paper.user.IgnoreService ignoreService;
@@ -667,6 +668,16 @@ public class KnKPlugin extends JavaPlugin {
             this.adminFreezeManager = new net.knightsandkings.knk.paper.user.AdminFreezeManager();
             modeService.setOfflineStore(offlineSecurity);
             adminFreezeManager.setOfflineStore(offlineSecurity);
+            // PandiO/knk-workspace#155: frozen players get flight allowed while frozen (not kicked for hanging in the air)
+            this.freezeFlightGuard = new net.knightsandkings.knk.paper.freeze.FreezeFlightGuard(this);
+            getServer().getPluginManager().registerEvents(freezeFlightGuard, this);
+            adminFreezeManager.setFreezeHook((uuid, frozenNow) -> {
+                if (frozenNow) {
+                    freezeFlightGuard.frozen(uuid, net.knightsandkings.knk.core.freeze.FreezeFlightLedger.Source.ADMIN);
+                } else {
+                    freezeFlightGuard.released(uuid, net.knightsandkings.knk.core.freeze.FreezeFlightLedger.Source.ADMIN);
+                }
+            });
             startOfflineSecurityTasks();
             initPrivateMessaging();
             this.rankHierarchy = new net.knightsandkings.knk.paper.commands.support.RankHierarchy(usersQueryApi);
@@ -1133,6 +1144,14 @@ public class KnKPlugin extends JavaPlugin {
     public void onDisable() {
         if (apiConnectivityMonitor != null) {
             apiConnectivityMonitor.stop();
+        }
+        // #155: frozen players get their own flight setting back before they are saved.
+        if (freezeFlightGuard != null) {
+            try {
+                freezeFlightGuard.releaseAll();
+            } catch (RuntimeException e) {
+                getLogger().log(java.util.logging.Level.SEVERE, "Handing back frozen players' flight failed", e);
+            }
         }
         if (gameSettingsManager != null) {
             gameSettingsManager.stop();
@@ -3626,6 +3645,42 @@ public class KnKPlugin extends JavaPlugin {
         // The gates start after the enchantments: chaos / flash_chaos read the gate seam when they go off.
         EnchantmentBootstrap bootstrap = new EnchantmentBootstrap(this, safezones, () -> gateAreaDamage);
         this.enchantmentRuntime = bootstrap.initialize();
+        if (freezeFlightGuard != null) {
+            var guard = freezeFlightGuard;
+            var source = net.knightsandkings.knk.core.freeze.FreezeFlightLedger.Source.ENCHANTMENT;
+            enchantmentRuntime.frozenPlayerTracker().setPlayerFreezeHook(
+                new net.knightsandkings.knk.paper.enchantment.FrozenPlayerTracker.PlayerFreezeHook() {
+                    @Override
+                    public void frozen(java.util.UUID playerId) {
+                        guard.frozen(playerId, source);
+                    }
+
+                    @Override
+                    public void released(java.util.UUID playerId) {
+                        guard.released(playerId, source);
+                    }
+                });
+        }
+        startEnchantmentTuningRefresh();
+    }
+
+    /**
+     * PandiO/knk-workspace#151: the admin-set combat values of the custom enchantments, now and every
+     * {@code custom-enchantments.tuning-refresh-minutes}, and on /ce reload. Until the first load the built-in values apply.
+     */
+    private void startEnchantmentTuningRefresh() {
+        if (enchantmentDefinitionsQueryApi == null || enchantmentRuntime == null) {
+            getLogger().warning("No enchantment definitions API: custom enchantments use their built-in combat values");
+            return;
+        }
+        var refresh = new net.knightsandkings.knk.paper.enchantment.EnchantmentTuningRefresh(
+            enchantmentDefinitionsQueryApi::listCombatValues,
+            net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuningTable.getInstance(),
+            getLogger());
+        enchantmentRuntime.commandHandler().setReloadHook(refresh::refresh);
+        int minutes = Math.max(1, getConfig().getInt("custom-enchantments.tuning-refresh-minutes", 5));
+        long ticks = minutes * 60L * 20L;
+        getServer().getScheduler().runTaskTimerAsynchronously(this, () -> refresh.refresh(), 0L, ticks);
     }
 
     private AuthProvider createAuthProvider(KnkConfig.AuthConfig authConfig) {

@@ -2,11 +2,14 @@ package net.knightsandkings.knk.api.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import net.knightsandkings.knk.api.auth.AuthProvider;
+import com.fasterxml.jackson.core.type.TypeReference;
+import net.knightsandkings.knk.api.dto.EnchantmentCombatValuesDto;
 import net.knightsandkings.knk.api.dto.EnchantmentDefinitionDto;
 import net.knightsandkings.knk.api.dto.EnchantmentDefinitionListDtoPagedResultDto;
 import net.knightsandkings.knk.api.dto.PagedQueryDto;
 import net.knightsandkings.knk.api.mapper.EnchantmentDefinitionMapper;
 import net.knightsandkings.knk.core.domain.common.Page;
+import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuningOverride;
 import net.knightsandkings.knk.core.domain.enchantments.KnkEnchantmentDefinition;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.EnchantmentDefinitionsQueryApi;
@@ -17,6 +20,8 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 
 import java.io.IOException;
+import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.logging.Logger;
@@ -194,5 +199,68 @@ public class EnchantmentDefinitionsQueryApiImpl implements EnchantmentDefinition
                 throw apiEx;
             }
         }, executor);
+    }
+
+    /**
+     * PandiO/knk-workspace#151: GET /EnchantmentDefinitions (every definition, plugin key) and keeps the combat values
+     * of the custom ones.
+     */
+    @Override
+    public CompletableFuture<List<EnchantmentTuningOverride>> listCombatValues() {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + BASE_ENDPOINT;
+            Request.Builder requestBuilder = new Request.Builder().url(url).addHeader("Accept", "application/json");
+            if (authProvider != null && authProvider.getAuthHeader() != null) {
+                requestBuilder.addHeader(authProvider.getAuthHeaderName(), authProvider.getAuthHeader());
+            }
+            if (debugLogging) {
+                LOGGER.info("API Request: GET " + url);
+            }
+
+            try (Response response = httpClient.newCall(requestBuilder.build()).execute()) {
+                String responseBody = response.body() != null ? response.body().string() : "";
+                if (!response.isSuccessful()) {
+                    String snippet = responseBody.substring(0, Math.min(responseBody.length(), MAX_RESPONSE_SNIPPET_LENGTH));
+                    throw new ApiException(url, response.code(), "List enchantment definitions failed", snippet);
+                }
+                if (responseBody.isEmpty()) {
+                    throw new ApiException(url, response.code(), "Empty response body", "");
+                }
+                List<EnchantmentCombatValuesDto> dtos;
+                try {
+                    dtos = objectMapper.readValue(responseBody, new TypeReference<List<EnchantmentCombatValuesDto>>() {});
+                } catch (Exception parseEx) {
+                    throw new ApiException(url, response.code(), "Failed to parse response: " + parseEx.getMessage(),
+                            responseBody.substring(0, Math.min(responseBody.length(), MAX_RESPONSE_SNIPPET_LENGTH)));
+                }
+                return toOverrides(dtos);
+            } catch (ApiException e) {
+                throw e;
+            } catch (IOException e) {
+                ApiException apiEx = new ApiException(url, 0, "IO error during list enchantment definitions",
+                        e.getClass().getSimpleName() + ": " + e.getMessage());
+                apiEx.initCause(e);
+                throw apiEx;
+            }
+        }, executor);
+    }
+
+    /** The custom definitions' combat values; vanilla definitions carry none. */
+    static List<EnchantmentTuningOverride> toOverrides(List<EnchantmentCombatValuesDto> dtos) {
+        if (dtos == null) {
+            return List.of();
+        }
+        return dtos.stream()
+                .filter(Objects::nonNull)
+                .filter(dto -> Boolean.TRUE.equals(dto.isCustom()) && dto.key() != null)
+                .map(dto -> new EnchantmentTuningOverride(
+                        dto.key(),
+                        dto.procChancePercent(),
+                        dto.procChancePerLevelPercent(),
+                        dto.cooldownEnabled(),
+                        dto.cooldownSeconds(),
+                        dto.effectDurationSeconds(),
+                        dto.levelMultiplier()))
+                .toList();
     }
 }
