@@ -892,6 +892,68 @@ permissions:
     description: Allows reloading custom enchantment config with /ce reload
     default: op
 
+  # Custom enchantments (PandiO/knk-workspace#193). Resolved through KnkPermissible as well as Bukkit
+  # (EnchantmentPermissions): a rank grant works, ops pass through default: op. An enchantment <id> may be
+  # used with customenchantments.<id> or customenchantments.use.<id>; grant customenchantments.use.* to give
+  # every enchantment, including ones added later. Not customenchantments.*: in-house it would also grant
+  # the /ce admin nodes above. Checked today for abilities on right-click and /ce add <id>; attack effects
+  # on hit have no permission check.
+  customenchantments.use.*:
+    description: Use every custom enchantment (grant this one to a rank)
+    default: op
+
+  customenchantments.poison:
+    description: Use the Poison (attack) custom enchantment
+    default: op
+
+  customenchantments.wither:
+    description: Use the Wither (attack) custom enchantment
+    default: op
+
+  customenchantments.freeze:
+    description: Use the Freeze (attack) custom enchantment
+    default: op
+
+  customenchantments.blindness:
+    description: Use the Blindness (attack) custom enchantment
+    default: op
+
+  customenchantments.confusion:
+    description: Use the Confusion (attack) custom enchantment
+    default: op
+
+  customenchantments.strength:
+    description: Use the Strength (attack) custom enchantment
+    default: op
+
+  customenchantments.cleaving:
+    description: Use the Cleaving (attack) custom enchantment
+    default: op
+
+  customenchantments.chaos:
+    description: Use the Chaos (ability) custom enchantment
+    default: op
+
+  customenchantments.flash_chaos:
+    description: Use the Flash Chaos (ability) custom enchantment
+    default: op
+
+  customenchantments.health_boost:
+    description: Use the Health Boost (ability) custom enchantment
+    default: op
+
+  customenchantments.armor_repair:
+    description: Use the Armor Repair (ability) custom enchantment
+    default: op
+
+  customenchantments.resistance:
+    description: Use the Resistance (ability) custom enchantment
+    default: op
+
+  customenchantments.invisibility:
+    description: Use the Invisibility (ability) custom enchantment
+    default: op
+
   # Teleports (docs/specs/teleport/DESIGN.md §3.3, KNG-17). Resolved through KnkPermissible, same
   # caveat as knk.kit.list (ops pass via the op bypass; non-ops need a real grant or group membership).
   knk.teleport.staff:

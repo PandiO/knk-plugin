@@ -16,6 +16,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 public class InfoEnchantmentCommand implements EnchantmentSubcommand {
+    static final String OTHERS_PERMISSION = "customenchantments.command.info.others";
+
     private final EnchantmentCommandHandler handler;
     private final EnchantmentRepository repository;
     private final CooldownManager cooldownManager;
@@ -55,6 +57,11 @@ public class InfoEnchantmentCommand implements EnchantmentSubcommand {
             }
             targetPlayer = senderPlayer.get();
         } else {
+            // PandiO/knk-workspace#193: the node was declared but never checked, so anyone could look.
+            if (!handler.permissions().commands().has(sender, OTHERS_PERMISSION)) {
+                sender.sendMessage(handler.colorize(handler.message("messages.cmd-no-permission", "&cYou don't have permission to use this command.")));
+                return true;
+            }
             targetPlayer = Bukkit.getPlayerExact(args[0]);
             if (targetPlayer == null) {
                 sender.sendMessage(handler.colorize(handler.message("messages.cmd-player-not-found", "&cCould not find player %player%.", Map.of("%player%", args[0]))));
@@ -108,7 +115,7 @@ public class InfoEnchantmentCommand implements EnchantmentSubcommand {
 
     @Override
     public List<String> tabComplete(CommandSender sender, String[] args) {
-        if (args.length == 1 && sender.hasPermission("customenchantments.command.info.others")) {
+        if (args.length == 1 && handler.permissions().commands().hasForCompletion(sender, OTHERS_PERMISSION)) {
             return handler.visiblePlayerNames(sender, args[0]);
         }
         return List.of();
