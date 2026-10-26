@@ -112,7 +112,7 @@ public final class MenuConditionHandlers {
         if (node == null || node.isBlank()) {
             throw new MenuActionException("permission-node condition is missing its required 'node' param");
         }
-        return context.player().hasPermission(node)
+        return MenuPermissions.has(context.player(), node)
                 ? ConditionOutcome.allow()
                 : ConditionOutcome.deny("You don't have permission to do that.");
     }

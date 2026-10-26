@@ -171,11 +171,11 @@ public final class UserManagerMenuFeature implements MenuFeature {
 
     CompletableFuture<Page<OnlinePlayerRow>> fetchOnline(MenuContentSourceContext context, PagedQuery query) {
         Player viewer = context.player();
-        if (viewer != null && viewer.hasPermission(MANAGE_NODE) && viewer.hasPermission(UserAdminService.MANAGE_ALL_NODE)) {
+        if (viewer != null && holds(viewer, MANAGE_NODE) && holds(viewer, UserAdminService.MANAGE_ALL_NODE)) {
             return fetchEveryone(viewer, query);
         }
         Integer viewerId = viewer != null ? viewerId(viewer) : null;
-        if (viewer == null || viewerId == null || !viewer.hasPermission(MANAGE_NODE)) {
+        if (viewer == null || viewerId == null || !holds(viewer, MANAGE_NODE)) {
             return CompletableFuture.completedFuture(page(List.of(OnlinePlayerRow.none())));
         }
         String search = query != null && query.searchTerm() != null ? query.searchTerm().trim().toLowerCase(Locale.ROOT) : "";
@@ -244,7 +244,7 @@ public final class UserManagerMenuFeature implements MenuFeature {
         Player viewer = context.player();
         Integer userId = parseId(params.get("userId"));
         String name = params.get("name");
-        if (viewer == null || userId == null || name == null || name.isBlank() || !viewer.hasPermission(MANAGE_NODE)) {
+        if (viewer == null || userId == null || name == null || name.isBlank() || !holds(viewer, MANAGE_NODE)) {
             return CompletableFuture.completedFuture(TargetUserView.unknown(name));
         }
         Integer viewerId = viewerId(viewer);
@@ -257,7 +257,7 @@ public final class UserManagerMenuFeature implements MenuFeature {
                     if (user == null || !Objects.equals(user.id(), userId)) {
                         return CompletableFuture.completedFuture(TargetUserView.unknown(name));
                     }
-                    CompletableFuture<Boolean> outranks = viewer.hasPermission(UserAdminService.MANAGE_ALL_NODE)
+                    CompletableFuture<Boolean> outranks = holds(viewer, UserAdminService.MANAGE_ALL_NODE)
                             ? CompletableFuture.completedFuture(true)
                             : viewerId != null
                             ? admin.outranks(viewerId, userId).exceptionally(ex -> null)
@@ -310,7 +310,7 @@ public final class UserManagerMenuFeature implements MenuFeature {
     // ===== conditions =====
 
     ConditionOutcome outranksTarget(MenuActionContext context, Map<String, String> params) {
-        if (context.player() != null && context.player().hasPermission(UserAdminService.MANAGE_ALL_NODE)) {
+        if (context.player() != null && holds(context.player(), UserAdminService.MANAGE_ALL_NODE)) {
             return ConditionOutcome.allow();
         }
         Integer userId = parseId(params.get("userId"));
@@ -557,7 +557,7 @@ public final class UserManagerMenuFeature implements MenuFeature {
         Player player = context.player();
         boolean freezing = !"unfreeze".equalsIgnoreCase(params.get("op"));
         String node = freezing ? "knk.freeze" : "knk.unfreeze";
-        if (!player.hasPermission(node)) {
+        if (!holds(player, node)) {
             player.sendMessage(ChatColor.RED + "You don't have permission to do that.");
             return;
         }
@@ -596,6 +596,14 @@ public final class UserManagerMenuFeature implements MenuFeature {
     }
 
     // ===== helpers =====
+
+    /**
+     * Bukkit grant or in-house grant (ranks, wildcards; cached answer) - PandiO/knk-workspace#158: these checks were
+     * Bukkit's only, so a rank given knk.admin.user.manage or knk.freeze couldn't use the menu without being op.
+     */
+    private boolean holds(Player player, String node) {
+        return player.hasPermission(node) || (admin != null && admin.hasPermission(player, node));
+    }
 
     private Integer viewerId(Player viewer) {
         return userCache.getStale(viewer.getUniqueId()).map(UserSummary::id).orElse(null);

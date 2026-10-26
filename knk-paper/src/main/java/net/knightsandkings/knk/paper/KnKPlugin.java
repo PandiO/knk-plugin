@@ -656,6 +656,9 @@ public class KnKPlugin extends JavaPlugin {
             // Gate pass-through (and navigation's gate verdicts) honour KnK's permission model as well as Bukkit's.
             net.knightsandkings.knk.paper.gates.GatePassThroughRules.setPermissionCheck((player, node) ->
                 player.hasPermission(node) || (knkPermissible != null && knkPermissible.hasPermission(player, node)));
+            // So do menu items' visibility/action permissions and the permission-node condition (PandiO/knk-workspace#158).
+            net.knightsandkings.knk.paper.menu.MenuPermissions.setCheck((player, node) ->
+                player.hasPermission(node) || (knkPermissible != null && knkPermissible.hasPermission(player, node)));
             // A grant or group change made in the web app shows in game within the 30 s cache time;
             // /knk cache refresh applies it at once.
             cacheManager.registerRefreshHook("permissions", permissionsDataAccess::invalidateAll);
@@ -3074,6 +3077,8 @@ public class KnKPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(offlineStorage, this);
 
         registerTabCommand("fly", new net.knightsandkings.knk.paper.commands.FlyCommand(support));
+        // PandiO/knk-workspace#158: vanilla /gamemode is op-only (in-house grants never reach Bukkit permissions).
+        registerTabCommand("gamemode", new net.knightsandkings.knk.paper.commands.GamemodeCommand(support));
         registerTabCommand("heal", new net.knightsandkings.knk.paper.commands.RestoreCommand(
             support, net.knightsandkings.knk.paper.commands.RestoreCommand.Kind.HEAL));
         registerTabCommand("feed", new net.knightsandkings.knk.paper.commands.RestoreCommand(
