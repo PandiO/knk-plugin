@@ -62,6 +62,18 @@ class RealtimeSettingsTest {
     }
 
     @Test
+    void fallbackPollMultiplierDefaultsToFour_AndIsClamped() throws Exception {
+        assertEquals(4, RealtimeSettings.fromConfig(bundledConfig()).fallbackPollMultiplier());
+        YamlConfiguration config = new YamlConfiguration();
+        config.set("realtime.fallback-poll-multiplier", 0);
+        assertEquals(1, RealtimeSettings.fromConfig(config).fallbackPollMultiplier());
+        config.set("realtime.fallback-poll-multiplier", 1000);
+        assertEquals(RealtimeSettings.MAX_POLL_MULTIPLIER, RealtimeSettings.fromConfig(config).fallbackPollMultiplier());
+        config.set("realtime.fallback-poll-multiplier", 6);
+        assertEquals(6, RealtimeSettings.fromConfig(config).fallbackPollMultiplier());
+    }
+
+    @Test
     void anInvalidServerIdFallsBackToLocalhost() {
         YamlConfiguration config = new YamlConfiguration();
         config.set("realtime.server-id", "has spaces");

@@ -319,6 +319,12 @@ public class KnKPlugin extends JavaPlugin {
     // Realtime channel (PandiO/knk-workspace#178): off unless realtime.enabled; counters always kept for /knk health.
     private final net.knightsandkings.knk.core.realtime.RealtimeStats realtimeStats = new net.knightsandkings.knk.core.realtime.RealtimeStats();
     private net.knightsandkings.knk.paper.realtime.RealtimeService realtimeService;
+    // Realtime S2 (#179): realtime.fallback-poll-multiplier, read in initializeRealtime; the periodic re-syncs the hub's
+    // events cover run this many times slower while it is connected (DESIGN §7.2, Q4).
+    private volatile int realtimePollMultiplier = net.knightsandkings.knk.core.realtime.FallbackPolling.DEFAULT_MULTIPLIER;
+    private final net.knightsandkings.knk.core.realtime.FallbackPolling fallbackPolling =
+        new net.knightsandkings.knk.core.realtime.FallbackPolling(
+            () -> realtimeService != null && realtimeService.isConnected(), () -> realtimePollMultiplier);
     private volatile boolean skipApiWhileDown = true;
     /** Kept for the siege non-member pass-through (Phase 7b, TELEPORT mode only). */
     private net.knightsandkings.knk.paper.gates.GatePassThroughService gatePassThroughService;
@@ -615,6 +621,8 @@ public class KnKPlugin extends JavaPlugin {
             // Promotion effects etc. for writes made through the web app (not a plugin command)
             playerNotificationPoller = new PlayerNotificationPoller(
                 apiClient.getPlayerNotificationsApi(), this);
+            // Realtime S2 (#179): no HTTP poll while the hub pushes; a drain on every (re)connect instead.
+            playerNotificationPoller.setHubConnected(fallbackPolling::connected);
             playerNotificationPoller.start();
             
             getLogger().info("WorldTaskHandlerRegistry initialized with handlers");
@@ -1855,7 +1863,8 @@ public class KnKPlugin extends JavaPlugin {
         this.visiblePlayers = net.knightsandkings.knk.paper.commands.support.VisiblePlayers.bukkit();
         this.spyService = new net.knightsandkings.knk.paper.user.SpyService(
             knkPermissible, new org.bukkit.NamespacedKey(this, "socialspy"), org.bukkit.Bukkit::getOnlinePlayers);
-        spyService.start(this, pmConfig.spyRefreshSeconds());
+        // Realtime S2 (#179): permission changes reach the audience as events; the timer slows down while connected.
+        spyService.start(this, pmConfig.spyRefreshSeconds(), fallbackPolling);
         this.ignoreService = new net.knightsandkings.knk.paper.user.IgnoreService(
             apiClient.getUserIgnoresApi(),
             uuid -> cacheManager.getUserCache().getStale(uuid)
@@ -1982,8 +1991,8 @@ public class KnKPlugin extends JavaPlugin {
      * The realtime channel to knk-web-api's game hub (PandiO/knk-workspace#178, DESIGN §4.4). With
      * {@code realtime.enabled: false} (the default) it only logs that it is off. On every (re)connect it sends the
      * roster and runs these existing refresh paths, in order (P3): the {@code /knk cache refresh} hooks (permissions,
-     * item blueprints, game settings, teleport, navigation, region domains, ...), the domain access flag sync and the
-     * lootbox runtime refresh.
+     * item blueprints, game settings, teleport, navigation, region domains, ...), the domain access flag sync, the
+     * lootbox runtime refresh, then (S2, #179) a re-read of every online player and one drain of the notification queue.
      */
     private void initializeRealtime() {
         try {
@@ -1998,10 +2007,12 @@ public class KnKPlugin extends JavaPlugin {
             if (lootboxRuntime != null) {
                 hooks.register("lootbox runtime", () -> lootboxRuntime.refresh().exceptionally(error -> null));
             }
+            realtimePollMultiplier = settings.fallbackPollMultiplier();
             realtimeService = new net.knightsandkings.knk.paper.realtime.RealtimeService(this, settings,
                 config.api().baseUrl(), createAuthProvider(config.api().auth()), hooks, realtimeStats,
                 uuid -> cacheManager == null ? null
                     : cacheManager.getUserCache().getStale(uuid).map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null));
+            registerUserStateSync(hooks);
             if (metricsService != null) {
                 metricsService.register(realtimeStats);
             }
@@ -2009,6 +2020,40 @@ public class KnKPlugin extends JavaPlugin {
         } catch (RuntimeException e) {
             // The channel is optional: polls and TTLs keep working without it (P5).
             getLogger().log(java.util.logging.Level.SEVERE, "Realtime channel failed to start; polls and TTLs as before", e);
+        }
+    }
+
+    /**
+     * Realtime S2 (PandiO/knk-workspace#179, DESIGN §6.1): the user-state handlers (permissions, groups, balances,
+     * freeze, mode, user, pushed notifications) on the dispatcher, before the client starts; and two resync steps
+     * after the S1 ones: re-read every online player, then drain the notification queue once.
+     */
+    private void registerUserStateSync(net.knightsandkings.knk.core.realtime.ResyncHooks hooks) {
+        if (cacheManager == null || usersDataAccess == null) {
+            getLogger().warning("Realtime: user-state events not handled (user cache not ready)");
+            return;
+        }
+        java.util.concurrent.Executor main = runnable -> {
+            if (!isEnabled()) {
+                return;
+            }
+            if (org.bukkit.Bukkit.isPrimaryThread()) {
+                runnable.run();
+            } else {
+                org.bukkit.Bukkit.getScheduler().runTask(this, runnable);
+            }
+        };
+        var display = new net.knightsandkings.knk.paper.realtime.BukkitUserStateDisplay(
+            (player, summary) -> net.knightsandkings.knk.paper.utils.ScoreboardUtil.setScoreboard(List.of(player), knkPermissible, summary),
+            modeService, spyService, getLogger());
+        var sync = new net.knightsandkings.knk.paper.realtime.UserStateSync(main, org.bukkit.Bukkit::getPlayer,
+            org.bukkit.Bukkit::getOnlinePlayers, cacheManager.getUserCache(), usersDataAccess, permissionsDataAccess,
+            permissionGroupsDataAccess, offlineSecurity, adminFreezeManager, display,
+            playerNotificationPoller == null ? null : playerNotificationPoller::deliverPushed, getLogger());
+        sync.register(realtimeService.dispatcher());
+        hooks.register("online users", sync::resyncOnlinePlayers);
+        if (playerNotificationPoller != null) {
+            hooks.register("player notifications", playerNotificationPoller::drainNow);
         }
     }
 

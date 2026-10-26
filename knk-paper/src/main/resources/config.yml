@@ -89,6 +89,11 @@ realtime:
   backoff-seconds: [1, 2, 5, 10, 30]
   # Random spread of each delay (0.2 = +/-20%), so several servers don't retry in step
   backoff-jitter: 0.2
+  # While connected, the periodic re-syncs whose changes the hub now pushes run this many times less often (they stay
+  # as a safety net). With the user-state events (#179) that is the social-spy re-check (60 s -> 4 min); the player
+  # notification poll stops entirely while connected (pushed instead) and drains once on every (re)connect.
+  # 1 = no slowdown. Hub down = every interval as configured.
+  fallback-poll-multiplier: 4
 
 # Performance metrics (KNG-232): a Prometheus /metrics endpoint with TPS, tick time, players, chunks/entities per
 # world, JVM heap/off-heap/GC, process CPU and RSS, the container's memory and CPU (cgroup), API-call and task

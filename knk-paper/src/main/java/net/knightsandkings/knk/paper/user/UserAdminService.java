@@ -484,16 +484,24 @@ public final class UserAdminService {
             CompletableFuture<Void> call = freezing ? api.freezeById(target.id(), reason) : api.unfreezeById(target.id());
             call.thenAccept(v -> mainThread.execute(() -> {
                 Player targetPlayer = Bukkit.getPlayerExact(target.username());
+                // The realtime UserFrozenChanged echo of this change (#179) may have applied it first: tell the
+                // player only once.
                 if (freezing) {
                     if (targetPlayer != null) {
+                        boolean wasFrozen = freezeManager.isFrozen(targetPlayer.getUniqueId());
                         freezeManager.freeze(targetPlayer.getUniqueId(), reason);
-                        targetPlayer.sendMessage(ChatColor.RED + "You have been frozen: " + reason);
+                        if (!wasFrozen) {
+                            targetPlayer.sendMessage(ChatColor.RED + "You have been frozen: " + reason);
+                        }
                     }
                     sender.sendMessage(ChatColor.GREEN + "Froze " + target.username() + (targetPlayer == null ? " (offline - takes effect on next join)." : "."));
                 } else {
                     if (targetPlayer != null) {
+                        boolean wasFrozen = freezeManager.isFrozen(targetPlayer.getUniqueId());
                         freezeManager.unfreeze(targetPlayer.getUniqueId());
-                        targetPlayer.sendMessage(ChatColor.GREEN + "You have been unfrozen.");
+                        if (wasFrozen) {
+                            targetPlayer.sendMessage(ChatColor.GREEN + "You have been unfrozen.");
+                        }
                     }
                     sender.sendMessage(ChatColor.GREEN + "Unfroze " + target.username() + ".");
                 }

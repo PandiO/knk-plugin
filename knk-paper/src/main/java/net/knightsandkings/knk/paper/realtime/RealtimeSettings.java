@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.paper.realtime;
 
 import net.knightsandkings.knk.api.impl.HealthApiImpl;
+import net.knightsandkings.knk.core.realtime.FallbackPolling;
 import net.knightsandkings.knk.core.realtime.ReconnectBackoff;
 import org.bukkit.configuration.ConfigurationSection;
 
@@ -20,6 +21,8 @@ import java.util.regex.Pattern;
  * @param hubPath   hub path on the API (default {@code /api/hubs/game})
  * @param backoff   delays between reconnect attempts; the last one repeats
  * @param jitter    0-1, random spread of each delay
+ * @param fallbackPollMultiplier how many times slower the periodic re-syncs that the hub's events cover run while it
+ *                  is connected (DESIGN §7.2, Q4; default 4, 1 = no slowdown; PandiO/knk-workspace#179)
  */
 public record RealtimeSettings(
     boolean enabled,
@@ -27,11 +30,15 @@ public record RealtimeSettings(
     String hubUrl,
     String hubPath,
     List<Duration> backoff,
-    double jitter
+    double jitter,
+    int fallbackPollMultiplier
 ) {
     public static final String SECTION = "realtime";
     public static final String DEFAULT_SERVER_ID = "localhost";
     public static final String DEFAULT_HUB_PATH = "/api/hubs/game";
+
+    /** Above this a re-sync would effectively stop; the safety net must keep running. */
+    public static final int MAX_POLL_MULTIPLIER = 60;
 
     private static final Pattern SERVER_ID = Pattern.compile("^[A-Za-z0-9._-]{1,64}$");
 
@@ -41,6 +48,12 @@ public record RealtimeSettings(
         hubPath = hubPath == null || hubPath.isBlank() ? DEFAULT_HUB_PATH : (hubPath.startsWith("/") ? hubPath.trim() : "/" + hubPath.trim());
         backoff = backoff == null || backoff.isEmpty() ? ReconnectBackoff.DEFAULT_STEPS : List.copyOf(backoff);
         jitter = Math.max(0.0, Math.min(1.0, jitter));
+        fallbackPollMultiplier = Math.max(1, Math.min(MAX_POLL_MULTIPLIER, fallbackPollMultiplier));
+    }
+
+    /** S1 shape (no multiplier): the default multiplier. */
+    public RealtimeSettings(boolean enabled, String serverId, String hubUrl, String hubPath, List<Duration> backoff, double jitter) {
+        this(enabled, serverId, hubUrl, hubPath, backoff, jitter, FallbackPolling.DEFAULT_MULTIPLIER);
     }
 
     public static RealtimeSettings defaults() {
@@ -72,7 +85,8 @@ public record RealtimeSettings(
             s.getString("hub-url", d.hubUrl()),
             s.getString("hub-path", d.hubPath()),
             steps,
-            s.getDouble("backoff-jitter", d.jitter())
+            s.getDouble("backoff-jitter", d.jitter()),
+            s.getInt("fallback-poll-multiplier", d.fallbackPollMultiplier())
         );
     }
 
