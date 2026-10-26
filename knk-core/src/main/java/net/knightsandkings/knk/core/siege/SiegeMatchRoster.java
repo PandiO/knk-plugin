@@ -137,6 +137,27 @@ public final class SiegeMatchRoster {
         return Collections.unmodifiableMap(counts);
     }
 
+    /**
+     * Adds a member to a running match (alpha run 1, PandiO/knk-workspace#150 rejoin and #152 admin join):
+     * fresh stats, no spawn choice. False when they are already a member or {@code teamId} is not one of
+     * this roster's teams.
+     */
+    public boolean add(UUID playerId, int teamId) {
+        if (members.containsKey(playerId) || !teamIds.contains(teamId)) return false;
+        members.put(playerId, new Member(playerId, teamId));
+        return true;
+    }
+
+    /** The team with the fewest members (the first in scenario order on a tie); empty without teams. */
+    public OptionalInt smallestTeam() {
+        Map<Integer, Integer> counts = membersPerTeam();
+        Integer best = null;
+        for (Map.Entry<Integer, Integer> e : counts.entrySet()) {
+            if (best == null || e.getValue() < counts.get(best)) best = e.getKey();
+        }
+        return best == null ? OptionalInt.empty() : OptionalInt.of(best);
+    }
+
     /** Removes a member (leave, quit, kick) and returns their final state. */
     public Optional<MemberView> remove(UUID playerId) {
         Member m = members.remove(playerId);

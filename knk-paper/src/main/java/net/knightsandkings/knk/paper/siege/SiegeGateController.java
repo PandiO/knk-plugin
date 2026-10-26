@@ -13,12 +13,15 @@ import net.knightsandkings.knk.core.ports.api.SiegeGatesCommandApi;
 import net.knightsandkings.knk.core.siege.AllianceResolver;
 import net.knightsandkings.knk.core.siege.ObjectiveState.CaptureEvent;
 import net.knightsandkings.knk.core.siege.SiegeGatePlan;
+import net.knightsandkings.knk.core.siege.SiegeDefenderPassThrough;
+import net.knightsandkings.knk.core.siege.SiegeDefenderPassThrough.OpenGateClick;
 import net.knightsandkings.knk.core.siege.SiegeGatePlan.Control;
 import net.knightsandkings.knk.paper.gates.GatePassThroughService;
 import net.knightsandkings.knk.paper.gates.HealthSystem;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.scheduler.BukkitTask;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -77,6 +80,12 @@ public final class SiegeGateController implements SiegeMatchObserver {
     private final Map<Integer, Lockdown> byLobby = new HashMap<>();
     private final Map<Integer, Lockdown> byGate = new HashMap<>();
     private GatePassThroughService passThrough;
+    /** #154: defenders pass through (open, then close by itself) instead of toggling. */
+    private boolean defenderPassThrough = true;
+    /** #154: hold time of a defender pass-through; 0 = the gate's own PassThroughDurationSeconds. */
+    private int defenderPassThroughSeconds;
+    /** #154: gate structure -> the scheduled close of its defender pass-through. */
+    private final Map<Integer, BukkitTask> passThroughCloses = new HashMap<>();
 
     /**
      * Phase 7b: one door of an applied lockdown with its pre-lockdown state - the non-member view
@@ -91,6 +100,19 @@ public final class SiegeGateController implements SiegeMatchObserver {
         this.gateManager = gateManager;
         this.healthSystem = healthSystem;
         this.api = api;
+    }
+
+    /**
+     * Alpha run 1 (PandiO/knk-workspace#154): {@code gates.siege.defender-pass-through} and
+     * {@code gates.siege.defender-pass-through-seconds} (0: the gate's own pass-through time).
+     */
+    public void setDefenderPassThrough(boolean enabled, int holdSeconds) {
+        this.defenderPassThrough = enabled;
+        this.defenderPassThroughSeconds = Math.max(0, holdSeconds);
+    }
+
+    public boolean isDefenderPassThrough() {
+        return defenderPassThrough;
     }
 
     /** Phase 7b: the temporary TELEPORT pass-through for non-members (DESIGN §8.5). */
@@ -177,6 +199,7 @@ public final class SiegeGateController implements SiegeMatchObserver {
         if (lockdown == null) return;
         lockdown.plan.onCapture(capture.objectiveId(), capture.newHolderTeamId()).ifPresent(transfer -> {
             if (!lockdown.snapshots.containsKey(transfer.gateStructureId())) return;
+            cancelPassThroughClose(transfer.gateStructureId()); // the capture sets the state now
             setOpen(transfer.gateStructureId(), transfer.open());
             logger.info("[Siege] Lobby " + lobby.key() + ": gate " + transfer.gateStructureId() + " now belongs to team "
                     + transfer.newOwnerTeamId() + " (" + (transfer.open() ? "opened" : "closed") + " on capture)");
@@ -188,6 +211,7 @@ public final class SiegeGateController implements SiegeMatchObserver {
         Lockdown lockdown = byLobby.remove(lobby.id());
         if (lockdown == null) return;
         lockdown.snapshots.keySet().forEach(id -> byGate.remove(id, lockdown));
+        lockdown.snapshots.keySet().forEach(this::cancelPassThroughClose);
 
         Long matchId = lockdown.matchId;
         if (matchId == null) {
@@ -254,9 +278,60 @@ public final class SiegeGateController implements SiegeMatchObserver {
         if (lockdown == null) return Control.NOT_IN_PLAN;
         Control decision = lockdown.plan.canControl(gateStructureId, teamOf(lockdown, player), lockdown.alliances);
         if (decision == Control.ALLOWED) {
+            cancelPassThroughClose(gateStructureId);
             setOpen(gateStructureId, open);
         }
         return decision;
+    }
+
+    /**
+     * A member right-clicked the closed locked gate (#154). With defender pass-through on, a member allowed
+     * to control it opens it (animated) and it closes by itself after the hold time; with it off the gate
+     * opens and stays open (the MVP toggle). Returns why it was refused, as {@link #control}.
+     */
+    public Control openClosedGate(Player player, int gateStructureId) {
+        if (!defenderPassThrough) return control(player, gateStructureId, true);
+        Lockdown lockdown = byGate.get(gateStructureId);
+        if (lockdown == null) return Control.NOT_IN_PLAN;
+        Control decision = lockdown.plan.canControl(gateStructureId, teamOf(lockdown, player), lockdown.alliances);
+        if (decision == Control.ALLOWED) {
+            setOpen(gateStructureId, true);
+            schedulePassThroughClose(gateStructureId);
+        }
+        return decision;
+    }
+
+    /**
+     * A member right-clicked the open locked gate (#154): a defender pass-through holding it open is extended,
+     * any other open gate is closed (as before) - both only for a member allowed to control it.
+     */
+    public Control clickOpenGate(Player player, int gateStructureId) {
+        OpenGateClick click = SiegeDefenderPassThrough.onOpenGateClick(defenderPassThrough,
+                passThroughCloses.containsKey(gateStructureId));
+        if (click == OpenGateClick.CLOSE) return control(player, gateStructureId, false);
+        Lockdown lockdown = byGate.get(gateStructureId);
+        if (lockdown == null) return Control.NOT_IN_PLAN;
+        Control decision = lockdown.plan.canControl(gateStructureId, teamOf(lockdown, player), lockdown.alliances);
+        if (decision == Control.ALLOWED) schedulePassThroughClose(gateStructureId);
+        return decision;
+    }
+
+    /** (Re)schedules the close of a defender pass-through. */
+    private void schedulePassThroughClose(int gateStructureId) {
+        cancelPassThroughClose(gateStructureId);
+        int seconds = SiegeDefenderPassThrough.holdSeconds(defenderPassThroughSeconds,
+                gateManager.getDoorsForStructure(gateStructureId).stream()
+                        .mapToInt(CachedGateDoor::getEffectivePassThroughDurationSeconds));
+        BukkitTask task = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            passThroughCloses.remove(gateStructureId);
+            if (isLocked(gateStructureId)) setOpen(gateStructureId, false);
+        }, seconds * 20L);
+        passThroughCloses.put(gateStructureId, task);
+    }
+
+    private void cancelPassThroughClose(int gateStructureId) {
+        BukkitTask task = passThroughCloses.remove(gateStructureId);
+        if (task != null) task.cancel();
     }
 
     /** May this player (null: no attributable player) damage the locked gate? True for unlocked gates. */

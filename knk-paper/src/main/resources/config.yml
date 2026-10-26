@@ -367,6 +367,15 @@ statistics:
     # they still get no reward. false = the completion payload as before
     report-departed-members: true
 
+# Siege minigame runtime settings that live in the plugin (lobbies, scenarios and SiegeConfiguration are
+# edited in the web app).
+siege:
+  # A member who disconnects (quit, or a server kick such as the flying kick) at the hub or in a running
+  # match keeps their place this long: logging back in puts them back on their team, and they count as
+  # present at the end (rewards). Their leave is reported only when the window passes. 0 = the old rule:
+  # a disconnect is a leave (PandiO/knk-workspace#150).
+  rejoin-window-seconds: 300
+
 # Diagnostic telemetry (KNG-34 link 6, docs/specs/player-statistics DESIGN.md §F.12): a timeline of
 # meaningful actions and outcomes (joins, menus, command labels, Siege lobby/match steps, failed API
 # calls) that only the owner can read in the web app. Never chat, command arguments, IPs or tokens.
@@ -598,6 +607,13 @@ gates:
   # passthrough-instant-open-timeout-seconds elapses (safety net if they turn back or disconnect).
   passthrough-instant-open-radius-blocks: 1
   passthrough-instant-open-timeout-seconds: 5
+  # Gates locked down by a siege (PandiO/knk-workspace#154): the alliance that owns a gate passes through
+  # it - a right-click opens it (animated) and it closes again by itself, so it can't be left open for the
+  # attackers; another right-click while it is open extends that. false = right-clicks toggle the gate.
+  siege:
+    defender-pass-through: true
+    # How long it stays open; 0 = the gate's own Pass-through duration (seconds)
+    defender-pass-through-seconds: 0
   # Rotation gap-fill (docs/features/gate-structure-animation/ROTATION_GAP_FILL_DESIGN.md):
   # Mechanism 1 automatically fills the checkerboard-sparse open-state footprint of a
   # diagonal-hinge ROTATION gate (e.g. a DRAWBRIDGE facing a diagonal direction) at its resting

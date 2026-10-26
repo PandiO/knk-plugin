@@ -161,4 +161,27 @@ class SiegeMatchRosterTest {
         assertEquals(List.of(player(1)), roster.resetObjectiveChoice(7, 2, teamId -> null));
         assertTrue(roster.spawnChoice(player(1)).isEmpty());
     }
+
+    @Test
+    void aMemberCanBeAddedToARunningMatchOnceAndOnlyToOneOfItsTeams() {
+        SiegeMatchRoster roster = roster();
+
+        assertTrue(roster.add(player(12), 2));
+        assertFalse(roster.add(player(12), 1), "already a member");
+        assertFalse(roster.add(player(13), 99), "not a team of this match");
+        assertEquals(OptionalInt.of(2), roster.teamOf(player(12)));
+        MemberView added = roster.member(player(12)).orElseThrow();
+        assertEquals(0, added.kills());
+        assertEquals(null, added.spawnChoice());
+        assertEquals(Map.of(1, 2, 2, 2, 3, 0), roster.membersPerTeam());
+    }
+
+    @Test
+    void smallestTeamIsTheOneWithTheFewestMembersFirstInScenarioOrderOnATie() {
+        SiegeMatchRoster roster = roster();
+        assertEquals(OptionalInt.of(3), roster.smallestTeam());
+        roster.add(player(21), 3);
+        assertEquals(OptionalInt.of(2), roster.smallestTeam(), "2 and 3 have one each; 2 comes first");
+        assertEquals(OptionalInt.empty(), new SiegeMatchRoster(new LinkedHashMap<>()).smallestTeam());
+    }
 }

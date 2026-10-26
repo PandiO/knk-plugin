@@ -1021,6 +1021,10 @@ permissions:
     description: /siege admin start|stop|skip|kick - start matchmaking, abort (restore, no rewards), skip, remove a member
     default: false
 
+  knk.siege.admin.join:
+    description: /siege join <player> [lobby] [team] - put a player into a round, also at the hub or in a running match (team given, their kept team after a disconnect, or the smallest). Admin only, not the general staff rank (PandiO/knk-workspace#152)
+    default: false
+
   knk.siege.admin.reload:
     description: /siege admin reload - refresh the runtime config for lobbies not in a match
     default: false

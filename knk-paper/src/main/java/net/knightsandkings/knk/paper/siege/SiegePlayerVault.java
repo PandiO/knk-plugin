@@ -93,6 +93,15 @@ public final class SiegePlayerVault {
      * be written: the caller must then not take the player into the match.
      */
     public boolean snapshot(Player player, int lobbyId, String matchToken) {
+        return snapshot(player, lobbyId, matchToken, null);
+    }
+
+    /**
+     * {@link #snapshot(Player, int, String)} with the return location given ({@code null}: where the player
+     * stands now). A member who rejoins a round (PandiO/knk-workspace#150) keeps the location from before
+     * the siege, not the spot in the arena where they logged back in.
+     */
+    public boolean snapshot(Player player, int lobbyId, String matchToken, Location returnLocation) {
         Snapshot snapshot = new Snapshot(
                 player.getUniqueId(),
                 lobbyId,
@@ -106,7 +115,7 @@ public final class SiegePlayerVault {
                 player.getSaturation(),
                 List.copyOf(player.getActivePotionEffects()),
                 player.getGameMode(),
-                player.getLocation().clone(),
+                returnLocation != null ? returnLocation.clone() : player.getLocation().clone(),
                 false);
         try {
             write(snapshot);
@@ -183,6 +192,16 @@ public final class SiegePlayerVault {
      */
     public boolean restoreOnJoin(Player player) {
         return restore(player);
+    }
+
+    /**
+     * The return location of a vault whose inventory was already given back on quit (the file waits only
+     * for the teleport home). Empty when there is no such file - none at all, or one whose inventory still
+     * has to be restored (a crash leftover). A rejoin (PandiO/knk-workspace#150) takes this location over.
+     */
+    public Optional<Location> restoredReturnLocation(UUID playerId) {
+        return load(playerId).filter(Snapshot::inventoryRestored)
+                .map(s -> s.returnLocation() == null ? null : s.returnLocation().clone());
     }
 
     /** Where a member who died before the end must respawn (consumed). */
