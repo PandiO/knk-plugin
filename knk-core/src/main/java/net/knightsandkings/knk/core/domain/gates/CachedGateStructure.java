@@ -1,5 +1,10 @@
 package net.knightsandkings.knk.core.domain.gates;
 
+import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
+
+import java.util.EnumMap;
+import java.util.Map;
+
 /**
  * Cached representation of a gate structure's structure-level data: identity, the guard/siege
  * systems, and the structure-level cascading override fields (decision 5.0-B,
@@ -32,6 +37,10 @@ public class CachedGateStructure {
     private String openedStateOverride;
     private Boolean allowPassThroughOverride;
     private Integer passThroughDurationSecondsOverride;
+    // PandiO/knk-workspace#167: per pass-through style, null = each door's own "offers this style" value;
+    // the default style override null = each door's own default style.
+    private final Map<GatePassThroughMethod, Boolean> allowPassThroughStyleOverrides = new EnumMap<>(GatePassThroughMethod.class);
+    private GatePassThroughMethod defaultPassThroughMethodOverride;
     private Boolean showHealthDisplayOverride;
     private String healthDisplayModeOverride;
     private Integer healthDisplayYOffsetOverride;
@@ -131,6 +140,28 @@ public class CachedGateStructure {
 
     public void setAllowPassThroughOverride(Boolean allowPassThroughOverride) {
         this.allowPassThroughOverride = allowPassThroughOverride;
+    }
+
+    /** PandiO/knk-workspace#167: whether every door offers the style (true/false), or null for each door's own. */
+    public Boolean getAllowPassThroughStyleOverride(GatePassThroughMethod method) {
+        return allowPassThroughStyleOverrides.get(method);
+    }
+
+    /** Null clears the override for that style. */
+    public void setAllowPassThroughStyleOverride(GatePassThroughMethod method, Boolean allowed) {
+        if (allowed == null) {
+            allowPassThroughStyleOverrides.remove(method);
+        } else {
+            allowPassThroughStyleOverrides.put(method, allowed);
+        }
+    }
+
+    public GatePassThroughMethod getDefaultPassThroughMethodOverride() {
+        return defaultPassThroughMethodOverride;
+    }
+
+    public void setDefaultPassThroughMethodOverride(GatePassThroughMethod method) {
+        this.defaultPassThroughMethodOverride = method;
     }
 
     public Integer getPassThroughDurationSecondsOverride() {

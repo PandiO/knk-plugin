@@ -392,7 +392,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         registerSubcommand(
                 new CommandMetadata("gate", "Control a whole gate (structure and all its doors)",
                         "/knk gate <open|close|toggle|info|list|repair|tp|override|reload|passthrough> [structure|here]", null,
-                        List.of("/gate list", "/gate toggle here", "/gate open North Gate", "/gate repair 16", "/gate passthrough <default|instant|teleport>")),
+                        List.of("/gate list", "/gate toggle here", "/gate open North Gate", "/gate repair 16", "/gate passthrough <default|snap|instant|teleport>")),
                 (sender, args) -> gateCommand.onCommand(sender, null, "knk", args),
                 gateCommand::complete
         );

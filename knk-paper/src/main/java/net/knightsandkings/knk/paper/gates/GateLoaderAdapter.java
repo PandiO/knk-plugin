@@ -6,6 +6,7 @@ import net.knightsandkings.knk.api.dto.GateStructureDto;
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.domain.gates.CachedGateStructure;
+import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.gates.DrawbridgeKeyframes;
 import net.knightsandkings.knk.core.gates.GateBlockPairing;
 import net.knightsandkings.knk.core.gates.GateFrameCalculator;
@@ -20,6 +21,7 @@ import org.bukkit.util.Vector;
 import java.util.Comparator;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -230,6 +232,13 @@ public class GateLoaderAdapter {
         structure.setOpenedStateOverride(dto.getOpenedStateOverride());
         structure.setAllowPassThroughOverride(dto.getAllowPassThroughOverride());
         structure.setPassThroughDurationSecondsOverride(dto.getPassThroughDurationSecondsOverride());
+        // PandiO/knk-workspace#167: per-style "offers this style" overrides and the default-style override.
+        structure.setAllowPassThroughStyleOverride(GatePassThroughMethod.DEFAULT, dto.getAllowAnimatedPassThroughOverride());
+        structure.setAllowPassThroughStyleOverride(GatePassThroughMethod.SNAP, dto.getAllowSnapPassThroughOverride());
+        structure.setAllowPassThroughStyleOverride(GatePassThroughMethod.INSTANT_OPEN, dto.getAllowWalkPathPassThroughOverride());
+        structure.setAllowPassThroughStyleOverride(GatePassThroughMethod.TELEPORT, dto.getAllowTeleportPassThroughOverride());
+        structure.setDefaultPassThroughMethodOverride(dto.getDefaultPassThroughMethodOverride() == null || dto.getDefaultPassThroughMethodOverride().isBlank()
+            ? null : GatePassThroughMethod.fromWireValue(dto.getDefaultPassThroughMethodOverride()));
         structure.setShowHealthDisplayOverride(dto.getShowHealthDisplayOverride());
         structure.setHealthDisplayModeOverride(dto.getHealthDisplayModeOverride());
         structure.setHealthDisplayYOffsetOverride(dto.getHealthDisplayYOffsetOverride());
@@ -239,6 +248,19 @@ public class GateLoaderAdapter {
         structure.setContinuousDamageMultiplierOverride(dto.getContinuousDamageMultiplierOverride());
 
         return structure;
+    }
+
+    /**
+     * PandiO/knk-workspace#167: the styles a door offers. A flag the API didn't send (an API from before #167)
+     * keeps that style's pre-#167 availability: animated, walk-path and teleport on, snap (new) off.
+     */
+    static Set<GatePassThroughMethod> allowedPassThroughMethods(GateDoorDto dto) {
+        EnumSet<GatePassThroughMethod> allowed = EnumSet.noneOf(GatePassThroughMethod.class);
+        if (dto.getAllowAnimatedPassThrough() == null || dto.getAllowAnimatedPassThrough()) allowed.add(GatePassThroughMethod.DEFAULT);
+        if (Boolean.TRUE.equals(dto.getAllowSnapPassThrough())) allowed.add(GatePassThroughMethod.SNAP);
+        if (dto.getAllowWalkPathPassThrough() == null || dto.getAllowWalkPathPassThrough()) allowed.add(GatePassThroughMethod.INSTANT_OPEN);
+        if (dto.getAllowTeleportPassThrough() == null || dto.getAllowTeleportPassThrough()) allowed.add(GatePassThroughMethod.TELEPORT);
+        return allowed;
     }
 
     /**
@@ -294,6 +316,8 @@ public class GateLoaderAdapter {
         door.setAllowPassThrough(Boolean.TRUE.equals(dto.getAllowPassThrough()));
         door.setPassThroughDurationSeconds(
             dto.getPassThroughDurationSeconds() != null ? dto.getPassThroughDurationSeconds() : 2);
+        door.setAllowedPassThroughMethods(allowedPassThroughMethods(dto));
+        door.setDefaultPassThroughMethod(GatePassThroughMethod.fromWireValue(dto.getDefaultPassThroughMethod()));
         door.setAllowContinuousDamage(dto.getAllowContinuousDamage() == null || dto.getAllowContinuousDamage());
         door.setContinuousDamageMultiplier(
             dto.getContinuousDamageMultiplier() != null ? dto.getContinuousDamageMultiplier() : 1.0);

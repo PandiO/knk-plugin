@@ -70,7 +70,10 @@ public class GateCommand implements CommandExecutor {
         "override", "reload", "passthrough", "help");
     /** How long {@code /gate tp} waits for the spawn point before using a door instead. */
     static final long SPAWN_LOOKUP_TIMEOUT_SECONDS = 5;
-    static final List<String> OVERRIDE_FIELDS = List.of("active", "destroyed", "invincible", "canrespawn", "openedstate");
+    static final List<String> OVERRIDE_FIELDS = List.of("active", "destroyed", "invincible", "canrespawn", "openedstate",
+        "passanimated", "passsnap", "passwalkpath", "passteleport", "passdefault");
+    /** PandiO/knk-workspace#167: the pass-through style words of /gate passthrough and /gate override passdefault. */
+    static final List<String> PASS_THROUGH_STYLES = List.of("default", "snap", "instant", "teleport");
 
     private final GateManager gateManager;
     private final GateStructuresApi gateStructuresApi;
@@ -173,10 +176,10 @@ public class GateCommand implements CommandExecutor {
             sender.sendMessage(ChatColor.GRAY + "/gate repair [structure]");
             sender.sendMessage(ChatColor.GRAY + "/gate tp <structure>");
             sender.sendMessage(ChatColor.GRAY + "/gate override <structure> <field> <value|clear>");
-            sender.sendMessage(ChatColor.GRAY + "  fields: active, destroyed, invincible, canrespawn, openedstate");
+            sender.sendMessage(ChatColor.GRAY + "  fields: " + String.join(", ", OVERRIDE_FIELDS));
             sender.sendMessage(ChatColor.GRAY + "/gate reload [district <id>]");
         }
-        sender.sendMessage(ChatColor.GRAY + "/gate passthrough <default|instant|teleport>");
+        sender.sendMessage(ChatColor.GRAY + "/gate passthrough <default|snap|instant|teleport>");
         sender.sendMessage(ChatColor.GRAY + "One door: /gatedoor help. Long form: /knk gate ...");
     }
 
@@ -368,6 +371,11 @@ public class GateCommand implements CommandExecutor {
         addOverride(overrides, "invincible", structure.getIsInvincibleOverride());
         addOverride(overrides, "canrespawn", structure.getCanRespawnOverride());
         addOverride(overrides, "openedstate", structure.getOpenedStateOverride());
+        addOverride(overrides, "passanimated", structure.getAllowPassThroughStyleOverride(GatePassThroughMethod.DEFAULT));
+        addOverride(overrides, "passsnap", structure.getAllowPassThroughStyleOverride(GatePassThroughMethod.SNAP));
+        addOverride(overrides, "passwalkpath", structure.getAllowPassThroughStyleOverride(GatePassThroughMethod.INSTANT_OPEN));
+        addOverride(overrides, "passteleport", structure.getAllowPassThroughStyleOverride(GatePassThroughMethod.TELEPORT));
+        addOverride(overrides, "passdefault", structure.getDefaultPassThroughMethodOverride());
         sender.sendMessage(ChatColor.GRAY + "Overrides: " + ChatColor.WHITE + (overrides.isEmpty() ? "none" : String.join(", ", overrides)));
         for (CachedGateDoor door : doors) {
             String jammed = door.isJammed() ? " " + ChatColor.RED + "(JAMMED)" : "";
@@ -565,9 +573,10 @@ public class GateCommand implements CommandExecutor {
      * Persists via PATCH .../overrides, and mirrors onto the in-memory CachedGateStructure at once.
      *
      * <p>Covers active, destroyed, invincible, canrespawn, openedstate - the fields the backlog's
-     * admin force-state and Siege capture-destroys-all-doors use cases need. The other
-     * cascade-overridable fields (pass-through/display) are supported by the model and API but not
-     * exposed here yet.
+     * admin force-state and Siege capture-destroys-all-doors use cases need - and the pass-through
+     * styles (PandiO/knk-workspace#167: passanimated, passsnap, passwalkpath, passteleport, passdefault).
+     * The other cascade-overridable fields (allow pass-through, display) are supported by the model and
+     * API but not exposed here yet.
      */
     public boolean executeOverride(CommandSender sender, String[] args) {
         if (!requireAdmin(sender)) {
@@ -575,7 +584,7 @@ public class GateCommand implements CommandExecutor {
         }
         if (args.length < 3) {
             sender.sendMessage(ChatColor.YELLOW + "Usage: /gate override <structure name|id> | here <field> <value|clear>");
-            sender.sendMessage(ChatColor.YELLOW + "Fields: active, destroyed, invincible, canrespawn, openedstate");
+            sender.sendMessage(ChatColor.YELLOW + "Fields: " + String.join(", ", OVERRIDE_FIELDS));
             return true;
         }
 
@@ -653,9 +662,40 @@ public class GateCommand implements CommandExecutor {
                     }
                 }
             }
+            case "passanimated", "passsnap", "passwalkpath", "passteleport" -> {
+                // PandiO/knk-workspace#167: whether every door of the structure offers this pass-through style.
+                Boolean value = clear ? null : parseBoolean(valueArg);
+                if (!clear && value == null) {
+                    sender.sendMessage(ChatColor.RED + "Value for '" + field + "' must be true, false, or clear.");
+                    return true;
+                }
+                GatePassThroughMethod style = switch (field) {
+                    case "passanimated" -> GatePassThroughMethod.DEFAULT;
+                    case "passsnap" -> GatePassThroughMethod.SNAP;
+                    case "passwalkpath" -> GatePassThroughMethod.INSTANT_OPEN;
+                    default -> GatePassThroughMethod.TELEPORT;
+                };
+                switch (style) {
+                    case DEFAULT -> { request.setAllowAnimatedPassThroughOverride(value); request.setClearAllowAnimatedPassThroughOverride(clear); }
+                    case SNAP -> { request.setAllowSnapPassThroughOverride(value); request.setClearAllowSnapPassThroughOverride(clear); }
+                    case INSTANT_OPEN -> { request.setAllowWalkPathPassThroughOverride(value); request.setClearAllowWalkPathPassThroughOverride(clear); }
+                    case TELEPORT -> { request.setAllowTeleportPassThroughOverride(value); request.setClearAllowTeleportPassThroughOverride(clear); }
+                }
+                structure.setAllowPassThroughStyleOverride(style, value);
+            }
+            case "passdefault" -> {
+                GatePassThroughMethod value = clear ? null : parsePassThroughStyle(valueArg);
+                if (!clear && value == null) {
+                    sender.sendMessage(ChatColor.RED + "Value for 'passdefault' must be default, snap, instant, teleport, or clear.");
+                    return true;
+                }
+                request.setDefaultPassThroughMethodOverride(value == null ? null : value.toWireValue());
+                request.setClearDefaultPassThroughMethodOverride(clear);
+                structure.setDefaultPassThroughMethodOverride(value);
+            }
             default -> {
                 sender.sendMessage(ChatColor.RED + "Unknown override field '" + field + "'. "
-                    + "Fields: active, destroyed, invincible, canrespawn, openedstate");
+                    + "Fields: " + String.join(", ", OVERRIDE_FIELDS));
                 return true;
             }
         }
@@ -671,6 +711,17 @@ public class GateCommand implements CommandExecutor {
             ? ChatColor.GREEN + "Cleared " + field + " override on " + structureLabel(structure) + "."
             : ChatColor.GREEN + "Set " + field + " override on " + structureLabel(structure) + " to " + valueArg + ".");
         return true;
+    }
+
+    /** PandiO/knk-workspace#167: default (animated), snap, instant (walk-path) or teleport; null otherwise. */
+    static GatePassThroughMethod parsePassThroughStyle(String value) {
+        return switch (value.toLowerCase(Locale.ROOT)) {
+            case "default", "animated" -> GatePassThroughMethod.DEFAULT;
+            case "snap" -> GatePassThroughMethod.SNAP;
+            case "instant", "walkpath" -> GatePassThroughMethod.INSTANT_OPEN;
+            case "teleport" -> GatePassThroughMethod.TELEPORT;
+            default -> null;
+        };
     }
 
     private static Boolean parseBoolean(String value) {
@@ -694,8 +745,9 @@ public class GateCommand implements CommandExecutor {
     // === passthrough ===
 
     /**
-     * {@code /gate passthrough <default|instant|teleport>}: sets the sender's own preferred gate
-     * pass-through method, updating the in-memory cache immediately and persisting asynchronously.
+     * {@code /gate passthrough <default|snap|instant|teleport>}: sets the sender's own preferred gate
+     * pass-through method, updating the in-memory cache immediately and persisting asynchronously. A door
+     * that doesn't offer the chosen style uses its own default style (PandiO/knk-workspace#167).
      */
     public boolean executePassThrough(CommandSender sender, String[] args) {
         if (!(sender instanceof Player player)) {
@@ -703,17 +755,12 @@ public class GateCommand implements CommandExecutor {
             return true;
         }
         if (args.length < 1) {
-            sender.sendMessage(ChatColor.YELLOW + "Usage: /gate passthrough <default|instant|teleport>");
+            sender.sendMessage(ChatColor.YELLOW + "Usage: /gate passthrough <default|snap|instant|teleport>");
             return true;
         }
-        GatePassThroughMethod method = switch (args[0].toLowerCase(Locale.ROOT)) {
-            case "default" -> GatePassThroughMethod.DEFAULT;
-            case "instant" -> GatePassThroughMethod.INSTANT_OPEN;
-            case "teleport" -> GatePassThroughMethod.TELEPORT;
-            default -> null;
-        };
+        GatePassThroughMethod method = parsePassThroughStyle(args[0]);
         if (method == null) {
-            sender.sendMessage(ChatColor.RED + "Unknown pass-through method '" + args[0] + "'. Use default, instant, or teleport.");
+            sender.sendMessage(ChatColor.RED + "Unknown pass-through method '" + args[0] + "'. Use default, snap, instant, or teleport.");
             return true;
         }
 
@@ -730,7 +777,8 @@ public class GateCommand implements CommandExecutor {
                     return null;
                 });
         }
-        sender.sendMessage(ChatColor.GREEN + "Gate pass-through method set to " + method + ".");
+        sender.sendMessage(ChatColor.GREEN + "Gate pass-through method set to " + method + "."
+            + ChatColor.GRAY + " A gate that doesn't offer it uses its own default.");
         return true;
     }
 
@@ -813,9 +861,13 @@ public class GateCommand implements CommandExecutor {
                     return filterByPrefix(OVERRIDE_FIELDS, current);
                 }
                 if (args.length == 4) {
-                    return "openedstate".equalsIgnoreCase(args[2])
-                        ? filterByPrefix(List.of("OPEN", "CLOSED", "clear"), current)
-                        : filterByPrefix(List.of("true", "false", "clear"), current);
+                    if ("openedstate".equalsIgnoreCase(args[2])) {
+                        return filterByPrefix(List.of("OPEN", "CLOSED", "clear"), current);
+                    }
+                    if ("passdefault".equalsIgnoreCase(args[2])) {
+                        return filterByPrefix(Stream.concat(PASS_THROUGH_STYLES.stream(), Stream.of("clear")).toList(), current);
+                    }
+                    return filterByPrefix(List.of("true", "false", "clear"), current);
                 }
                 return List.of();
             }
@@ -823,7 +875,7 @@ public class GateCommand implements CommandExecutor {
                 return args.length == 2 ? filterByPrefix(List.of("district"), current) : List.of();
             }
             case "passthrough" -> {
-                return args.length == 2 ? filterByPrefix(List.of("default", "instant", "teleport"), current) : List.of();
+                return args.length == 2 ? filterByPrefix(PASS_THROUGH_STYLES, current) : List.of();
             }
             default -> {
                 return List.of();

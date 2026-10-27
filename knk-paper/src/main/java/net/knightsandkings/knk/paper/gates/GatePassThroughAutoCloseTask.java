@@ -12,14 +12,25 @@ import org.bukkit.scheduler.BukkitRunnable;
 public class GatePassThroughAutoCloseTask extends BukkitRunnable {
     private final GateManager gateManager;
     private final int gateId;
+    // PandiO/knk-workspace#167: a snap pass-through also closes at once, without the closing animation.
+    private final boolean snap;
 
     public GatePassThroughAutoCloseTask(GateManager gateManager, int gateId) {
+        this(gateManager, gateId, false);
+    }
+
+    public GatePassThroughAutoCloseTask(GateManager gateManager, int gateId, boolean snap) {
         this.gateManager = gateManager;
         this.gateId = gateId;
+        this.snap = snap;
     }
 
     @Override
     public void run() {
-        gateManager.closeGate(gateId);
+        if (snap) {
+            gateManager.snapGate(gateId, false);
+        } else {
+            gateManager.closeGate(gateId);
+        }
     }
 }

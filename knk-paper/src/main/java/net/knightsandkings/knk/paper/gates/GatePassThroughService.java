@@ -22,7 +22,8 @@ import java.util.Map;
 import java.util.logging.Logger;
 
 /**
- * Implements the three gate pass-through modes a player can trigger by right-clicking a closed,
+ * Implements the four gate pass-through styles (PandiO/knk-workspace#167: animated = DEFAULT, SNAP,
+ * walk-path = INSTANT_OPEN, TELEPORT) - originally the three gate pass-through modes a player can trigger by right-clicking a closed,
  * AllowPassThrough-enabled gate door (see GatePassThroughConsequenceListener for the permission
  * and mode-resolution logic that calls into this class).
  *
@@ -68,8 +69,24 @@ public class GatePassThroughService {
         switch (mode) {
             case INSTANT_OPEN -> handleInstantOpen(gate, player);
             case TELEPORT -> handleTeleport(gate, player);
+            case SNAP -> handleSnap(gate);
             default -> handleDefault(gate);
         }
+    }
+
+    /**
+     * Snap style (PandiO/knk-workspace#167): the door changes to its open resting frame at once, stays open for
+     * the pass-through time, then changes back to closed at once - no animation either way. Re-triggering while
+     * it is open resets the close timer, as for the animated style. A door that is animating (someone else's
+     * animated pass-through, a /gate toggle) is jumped to open as well.
+     */
+    private void handleSnap(CachedGateDoor gate) {
+        int gateId = gate.getId();
+        AnimationState state = gate.getCurrentState();
+        if (state != AnimationState.OPEN && !gateManager.snapGate(gateId, true)) {
+            return;
+        }
+        scheduleAutoClose(gate, true);
     }
 
     /**
@@ -95,6 +112,10 @@ public class GatePassThroughService {
     }
 
     private void scheduleAutoClose(CachedGateDoor gate) {
+        scheduleAutoClose(gate, false);
+    }
+
+    private void scheduleAutoClose(CachedGateDoor gate, boolean snap) {
         int gateId = gate.getId();
         BukkitTask existing = pendingAutoClose.remove(gateId);
         if (existing != null) {
@@ -102,7 +123,7 @@ public class GatePassThroughService {
         }
 
         long delayTicks = Math.max(1, gate.getEffectivePassThroughDurationSeconds()) * 20L;
-        BukkitTask task = new GatePassThroughAutoCloseTask(gateManager, gateId).runTaskLater(plugin, delayTicks);
+        BukkitTask task = new GatePassThroughAutoCloseTask(gateManager, gateId, snap).runTaskLater(plugin, delayTicks);
         pendingAutoClose.put(gateId, task);
     }
 

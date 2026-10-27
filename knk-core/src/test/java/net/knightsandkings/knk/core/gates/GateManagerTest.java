@@ -263,6 +263,27 @@ class GateManagerTest {
         return closedGateWithOneBlockAt(id, new Vector(100, 64, 100));
     }
 
+    @Test
+    void snapGateJumpsToTheLastFrameOfTheOpeningSoTheNextAnimationTickFinishesIt() {
+        // PandiO/knk-workspace#167 snap pass-through.
+        GateManager manager = new GateManager();
+        CachedGateDoor gate = closedGateWithOneBlock(7);
+        gate.setIsActive(true);
+        manager.cacheGate(gate);
+
+        long before = System.currentTimeMillis();
+        assertTrue(manager.snapGate(7, true));
+        assertEquals(AnimationState.OPENING, gate.getCurrentState());
+        long elapsedTicks = (before - gate.getAnimationStartTime()) / 50;
+        assertTrue(elapsedTicks >= gate.getAnimationDurationTicks(), "start time must be a whole animation ago");
+
+        gate.setCurrentState(AnimationState.OPEN);
+        assertFalse(manager.snapGate(7, true), "already open");
+        assertTrue(manager.snapGate(7, false));
+        assertEquals(AnimationState.CLOSING, gate.getCurrentState());
+        assertFalse(manager.snapGate(99, true), "unknown door");
+    }
+
     private static CachedGateDoor closedGateWithOneBlockAt(int id, Vector anchorPoint) {
         CachedGateDoor gate = new CachedGateDoor(
             id,

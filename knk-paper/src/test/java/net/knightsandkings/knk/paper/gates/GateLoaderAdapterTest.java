@@ -6,6 +6,7 @@ import net.knightsandkings.knk.api.dto.GateStructureDto;
 import net.knightsandkings.knk.api.GateStructuresApi;
 import net.knightsandkings.knk.core.domain.gates.BlockSnapshot;
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
+import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.gates.GateManager;
 import org.bukkit.util.Vector;
 import org.junit.jupiter.api.Test;
@@ -158,6 +159,54 @@ class GateLoaderAdapterTest {
         assertNotNull(gate);
         assertFalse(gate.isAllowPassThrough());
         assertEquals(2, gate.getPassThroughDurationSeconds());
+    }
+
+    @Test
+    void loadAndCacheStructure_MapsPassThroughStylesAndTheirStructureOverrides() {
+        // PandiO/knk-workspace#167
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
+
+        GateDoorDto door = doorOf(4, 4, "Styled Door");
+        door.setGateType("SLIDING");
+        door.setMotionType("VERTICAL");
+        door.setGeometryDefinitionMode("PLANE_GRID");
+        door.setAnimationDurationTicks(60);
+        door.setAnimationTickRate(1);
+        door.setGeometryDepth(1);
+        door.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
+        door.setAllowAnimatedPassThrough(false);
+        door.setAllowSnapPassThrough(true);
+        door.setAllowWalkPathPassThrough(false);
+        door.setAllowTeleportPassThrough(true);
+        door.setDefaultPassThroughMethod("Snap");
+        GateStructureDto structure = structureOf(4, "Styled Gate", door);
+        structure.setAllowTeleportPassThroughOverride(false);
+        structure.setDefaultPassThroughMethodOverride("Teleport");
+
+        adapter.loadAndCacheStructure(structure);
+
+        CachedGateDoor gate = gateManager.getGate(4);
+        assertEquals(java.util.EnumSet.of(GatePassThroughMethod.SNAP, GatePassThroughMethod.TELEPORT), gate.getAllowedPassThroughMethods());
+        assertEquals(GatePassThroughMethod.SNAP, gate.getDefaultPassThroughMethod());
+        // Teleport is switched off by the structure but stays offered as the structure's default style.
+        assertEquals(java.util.EnumSet.of(GatePassThroughMethod.SNAP, GatePassThroughMethod.TELEPORT), gate.getEffectiveAllowedPassThroughMethods());
+        assertEquals(GatePassThroughMethod.TELEPORT, gate.getEffectiveDefaultPassThroughMethod());
+    }
+
+    @Test
+    void loadAndCacheStructure_ADoorWithoutStyleFieldsKeepsThePre167Styles() {
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
+
+        GateDoorDto door = doorOf(5, 5, "Old API Door");
+        door.setAnchorPoint("{\"x\":0,\"y\":0,\"z\":0}");
+        adapter.loadAndCacheStructure(structureOf(5, "Old API Gate", door));
+
+        CachedGateDoor gate = gateManager.getGate(5);
+        assertEquals(java.util.EnumSet.of(GatePassThroughMethod.DEFAULT, GatePassThroughMethod.INSTANT_OPEN, GatePassThroughMethod.TELEPORT),
+            gate.getEffectiveAllowedPassThroughMethods());
+        assertEquals(GatePassThroughMethod.DEFAULT, gate.getEffectiveDefaultPassThroughMethod());
     }
 
     @Test

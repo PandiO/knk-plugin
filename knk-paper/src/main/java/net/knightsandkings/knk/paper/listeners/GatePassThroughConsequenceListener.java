@@ -2,6 +2,7 @@ package net.knightsandkings.knk.paper.listeners;
 
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
+import net.knightsandkings.knk.core.gates.GatePassThroughStyles;
 import net.knightsandkings.knk.paper.events.GateDoorInteractEvent;
 import net.knightsandkings.knk.paper.gates.GatePassThroughRules;
 import net.knightsandkings.knk.paper.gates.GatePassThroughService;
@@ -14,7 +15,7 @@ import org.bukkit.event.Listener;
 /**
  * Reacts to GateDoorInteractEvent (a right-click on a closed, active gate door - see
  * GateDoorHitService) by resolving whether the player is authorized for gate pass-through and,
- * if so, which of the three modes to use, then dispatching to GatePassThroughService.
+ * if so, which pass-through style to use, then dispatching to GatePassThroughService.
  *
  * Mirrors the detection/consequence split GateDamageConsequenceListener established for damage:
  * GateDoorHitService/GateEventListener only detect and fire the event, this class owns the
@@ -44,27 +45,22 @@ public class GatePassThroughConsequenceListener implements Listener {
             return;
         }
 
-        GatePassThroughMethod mode = resolveMode(player, isAdmin);
+        GatePassThroughMethod mode = resolveMode(player, gate, isAdmin);
         passThroughService.dispatch(gate, player, mode);
     }
 
     /**
-     * Resolves the player's preferred method, downgrading INSTANT_OPEN to DEFAULT when they lack
-     * the extra knk.gate.passthrough.instant permission (silent fallback, not a denial - the gate
-     * should "just work" at whatever tier the player is permitted).
+     * PandiO/knk-workspace#167: the player's preferred style when the door offers it, otherwise the door's
+     * default style ({@link GatePassThroughStyles}). Walk-path (INSTANT_OPEN) still needs the extra
+     * knk.gate.passthrough.instant node (or gate admin); without it the door's default is used (silent
+     * fallback, not a denial - the gate should "just work" at whatever tier the player is permitted).
      */
-    private GatePassThroughMethod resolveMode(Player player, boolean isAdmin) {
+    GatePassThroughMethod resolveMode(Player player, CachedGateDoor gate, boolean isAdmin) {
         PlayerUserData userData = userManager.getCachedUser(player.getUniqueId());
         GatePassThroughMethod preferred = userData != null
             ? userData.gatePassThroughMethodDefault()
             : GatePassThroughMethod.DEFAULT;
-
-        if (preferred == GatePassThroughMethod.INSTANT_OPEN
-            && !isAdmin
-            && !GatePassThroughRules.mayUseInstant(player)) {
-            return GatePassThroughMethod.DEFAULT;
-        }
-
-        return preferred;
+        boolean mayUseInstant = isAdmin || GatePassThroughRules.mayUseInstant(player);
+        return GatePassThroughStyles.resolve(gate, preferred, mayUseInstant);
     }
 }
