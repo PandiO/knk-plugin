@@ -1029,8 +1029,10 @@ public final class SiegeService {
 
         Player player = Bukkit.getPlayer(id);
         SiegeMatch match = rt.match().orElse(null);
-        // #198: after the end (post-match wait) a leave is no longer a leave of the match.
-        boolean duringMatch = match != null && match.roster().contains(id) && !rt.matchOver();
+        // #198: a leave or quit during the post-match wait is no longer a leave of the match (the release at its end is
+        // reported as before: round_over, during the match).
+        boolean duringMatch = match != null && match.roster().contains(id)
+                && (!rt.matchOver() || cause == LeaveCause.ROUND_OVER || cause == LeaveCause.SHUTDOWN);
         String leaveCause = cause.name().toLowerCase(java.util.Locale.ROOT);
         observers.forEach(o -> safely("memberLeft", () -> o.memberLeft(rt, id, userId, leaveCause, duringMatch)));
         if (match != null && match.roster().contains(id)) {
