@@ -151,6 +151,7 @@ public class KnkApiClient {
     private final net.knightsandkings.knk.api.impl.TeleportDestinationsApiImpl teleportDestinationsApi;
     private final net.knightsandkings.knk.core.ports.api.LootboxesQueryApi lootboxesQueryApi;
     private final net.knightsandkings.knk.core.ports.api.LootboxesCommandApi lootboxesCommandApi;
+    private final net.knightsandkings.knk.core.ports.api.ItemInstancesApi itemInstancesApi;
     private final CurrencyApi currencyApi;
     private final RoadNetworkQueryApi roadNetworkQueryApi;
     private final net.knightsandkings.knk.core.ports.api.NavigationCompassSettingsApi navigationCompassSettingsApi;
@@ -228,6 +229,7 @@ public class KnkApiClient {
         this.teleportDestinationsApi = new net.knightsandkings.knk.api.impl.TeleportDestinationsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.lootboxesQueryApi = new net.knightsandkings.knk.api.impl.LootboxesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.lootboxesCommandApi = new net.knightsandkings.knk.api.impl.LootboxesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.itemInstancesApi = new net.knightsandkings.knk.api.impl.ItemInstancesApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.roadNetworkQueryApi = new RoadNetworkQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.navigationCompassSettingsApi = new net.knightsandkings.knk.api.impl.NavigationCompassSettingsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.roadNetworkCommandApi = new RoadNetworkCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -270,6 +272,11 @@ public class KnkApiClient {
     /** Lootboxes Phase 3: runtime config, active boxes, pending claims, odds. */
     public net.knightsandkings.knk.core.ports.api.LootboxesQueryApi getLootboxesQueryApi() {
         return lootboxesQueryApi;
+    }
+
+    /** PandiO/knk-workspace#175: new ItemInstances for {@code /knk item more}'s copies. */
+    public net.knightsandkings.knk.core.ports.api.ItemInstancesApi getItemInstancesApi() {
+        return itemInstancesApi;
     }
 
     /** Lootboxes Phase 3: spawn, claim, deliver, admin give, in-game areas. */

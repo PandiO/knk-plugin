@@ -318,6 +318,7 @@ permissions:
       knk.admin.enchantments: true
       knk.admin.itemblueprints: true
       knk.admin.item: true
+      knk.admin.item.more: true
       knk.admin.menu: true
       knk.admin.streets: true
       knk.admin.street: true
@@ -419,6 +420,11 @@ permissions:
     description: >-
       /knk item - rename your held item, edit its lore, and list/search/apply enchantment definitions
       (PandiO/knk-workspace#158; until then the knk.admin umbrella itself).
+    default: false
+  knk.admin.item.more:
+    description: >-
+      /knk item more - fill the held stack to its max, or give another full stack when it's full. Items with an
+      instance id get new instances from the API (one per copy). Needs knk.admin.item too (PandiO/knk-workspace#175).
     default: false
 
   knk.admin.menu:

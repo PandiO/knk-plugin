@@ -2135,6 +2135,13 @@ public class KnKPlugin extends JavaPlugin {
             // KNG-77/78/79: /gate and /gatedoor run /knk gate|gatedoor (same permissions and warm-up);
             // `here` radius and look-at reach from config.yml gates.here.* / gates.lookat.*.
             knkAdminCommand.setGateTargetingSettings(gateTargetingSettings());
+            // PandiO/knk-workspace#175: /knk item more; instance items get new ItemInstances from the API.
+            knkAdminCommand.setItemMoreCommand(new net.knightsandkings.knk.paper.commands.ItemMoreCommand(
+                MenuService.mainThreadExecutor(this),
+                uuid -> usersDataAccess == null ? java.util.concurrent.CompletableFuture.completedFuture(null)
+                    : usersDataAccess.getByUuidAsync(uuid).thenApply(result ->
+                        result != null && result.isSuccess() && result.value().isPresent() ? result.value().get().id() : null),
+                apiClient.getItemInstancesApi()));
             // KNG-105: /gate tp goes to the structure's own spawn point (its Domain Location) when set.
             knkAdminCommand.setGateSpawnLookup(gateSpawnLookup(), MenuService.mainThreadExecutor(this));
             registerKnkShortcut("gate", knkAdminCommand);
