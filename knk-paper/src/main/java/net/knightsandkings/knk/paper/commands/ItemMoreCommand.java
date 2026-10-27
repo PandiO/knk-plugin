@@ -37,23 +37,19 @@ import net.knightsandkings.knk.paper.mapper.ItemInstanceTag;
  * There is no soulbound model to honour (an instance's flags are copied as they are).
  * <p>
  * <b>{@code /knk item more <amount>}</b> (smoke test run 1, 2026-10-27): exactly {@code amount} more, whatever the
- * item's max stack size (1..{@value #MAX_AMOUNT}, a full inventory of 64-stacks). Plain items are added like a pickup
- * - topping up matching stacks, then empty slots, in stacks of the item's max size (a max-1 blueprint item gives
- * {@code amount} single items). Instance items get {@code amount} new instances, one per copy and slot, in one clone
- * call. What doesn't fit is not given (nothing is dropped, and no instance is minted for it); the reply says how many
- * were.
+ * item's max stack size; any amount from 1 up (developer, 2026-10-27). Plain items are added like a pickup - topping
+ * up matching stacks, then empty slots, in stacks of the item's max size (a max-1 blueprint item gives single items)
+ * - until the inventory is full. Instance items get one new instance per copy and free slot, in one clone call. What
+ * doesn't fit is not given: nothing is ever dropped, and no instance is minted for it; the reply says how many were.
  */
 public final class ItemMoreCommand {
 
     public static final String NODE = "knk.admin.item.more";
 
-    /** Highest {@code /knk item more <amount>}: 36 storage slots x 64. */
-    public static final int MAX_AMOUNT = 36 * 64;
-
     /** Tab completion for the amount. */
     public static final List<String> AMOUNT_SUGGESTIONS = List.of("1", "8", "16", "32", "64");
 
-    private static final String USAGE = "Usage: /knk item more [amount 1-" + MAX_AMOUNT + "]";
+    private static final String USAGE = "Usage: /knk item more [amount]";
 
     private static final Logger LOGGER = Logger.getLogger(ItemMoreCommand.class.getName());
 
@@ -130,14 +126,20 @@ public final class ItemMoreCommand {
      * empty slots); the part that doesn't fit is not given.
      */
     private static void givePlain(Player player, ItemStack held, int max, int amount) {
+        // Never build more stacks than the inventory can take, so a huge amount stays cheap.
+        int toGive = (int) Math.min(amount, roomFor(player.getInventory(), held, max));
+        if (toGive <= 0) {
+            player.sendMessage(ChatColor.RED + "Your inventory has no room for any more of this item.");
+            return;
+        }
         List<ItemStack> stacks = new ArrayList<>();
-        for (int left = amount; left > 0; left -= max) {
+        for (int left = toGive; left > 0; left -= max) {
             ItemStack stack = held.clone();
             stack.setAmount(Math.min(max, left));
             stacks.add(stack);
         }
         Map<Integer, ItemStack> rest = player.getInventory().addItem(stacks.toArray(ItemStack[]::new));
-        int notGiven = 0;
+        int notGiven = amount - toGive;
         if (rest != null) {
             for (ItemStack item : rest.values()) {
                 notGiven += item == null ? 0 : item.getAmount();
@@ -184,7 +186,10 @@ public final class ItemMoreCommand {
             }));
     }
 
-    /** One single item per new id; what no longer fits (the inventory changed meanwhile) drops at the player's feet. */
+    /**
+     * One single item per new id. Nothing is dropped: if the inventory filled up while the API answered, the copies
+     * that don't fit are not handed out (their minted ids are logged and named in the reply).
+     */
     private static void give(Player player, ItemStack template, List<Long> ids, long sourceId) {
         List<ItemStack> copies = new ArrayList<>();
         for (Long id : ids) {
@@ -201,25 +206,47 @@ public final class ItemMoreCommand {
             return;
         }
         Map<Integer, ItemStack> left = player.getInventory().addItem(copies.toArray(ItemStack[]::new));
-        if (left != null) {
-            left.values().forEach(item -> player.getWorld().dropItemNaturally(player.getLocation(), item));
+        int notFit = left == null ? 0 : left.size();
+        int given = ids.size() - notFit;
+        if (notFit > 0) {
+            List<Long> lost = new ArrayList<>();
+            left.values().forEach(item -> ItemInstanceTag.read(item).ifPresent(lost::add));
+            LOGGER.warning("[KnK Item] /knk item more: " + player.getName() + "'s inventory filled up while copies of instance "
+                + sourceId + " were minted; ids " + lost + " were not handed out");
         }
-        player.sendMessage(ChatColor.GREEN + "Gave you " + ids.size() + " cop" + (ids.size() == 1 ? "y" : "ies")
-            + " with new instance id" + (ids.size() == 1 ? "" : "s") + " (" + joinIds(ids) + ")."
-            + (left != null && !left.isEmpty() ? " " + left.size() + " didn't fit and dropped at your feet." : ""));
+        player.sendMessage((notFit > 0 ? ChatColor.YELLOW : ChatColor.GREEN) + "Gave you " + given + " cop"
+            + (given == 1 ? "y" : "ies") + " with new instance id" + (ids.size() == 1 ? "" : "s") + " (" + joinIds(ids) + ")."
+            + (notFit > 0 ? " " + notFit + " no longer fit and " + (notFit == 1 ? "was" : "were") + " not given." : ""));
     }
 
-    /** 1..{@value #MAX_AMOUNT}, else null. */
+    /** Any whole number from 1 up (very large values are capped at {@link Integer#MAX_VALUE}), else null. */
     static Integer parseAmount(String raw) {
         if (raw == null || raw.isBlank()) {
             return null;
         }
+        String trimmed = raw.trim();
+        if (!trimmed.matches("\\d+")) {
+            return null;
+        }
         try {
-            int value = Integer.parseInt(raw.trim());
-            return value >= 1 && value <= MAX_AMOUNT ? value : null;
+            long value = new java.math.BigInteger(trimmed).min(java.math.BigInteger.valueOf(Integer.MAX_VALUE)).longValue();
+            return value >= 1 ? (int) value : null;
         } catch (NumberFormatException ex) {
             return null;
         }
+    }
+
+    /** How many of {@code held} the storage slots can still take: free space on similar stacks plus empty slots. */
+    static long roomFor(PlayerInventory inventory, ItemStack held, int max) {
+        long room = 0;
+        for (ItemStack slot : inventory.getStorageContents()) {
+            if (isAir(slot)) {
+                room += max;
+            } else if (slot.isSimilar(held)) {
+                room += Math.max(0, max - slot.getAmount());
+            }
+        }
+        return room;
     }
 
     private static int emptySlots(PlayerInventory inventory) {

@@ -228,12 +228,14 @@ class ItemMoreCommandTest {
 
         org.mockito.ArgumentCaptor<ItemStack[]> given = org.mockito.ArgumentCaptor.forClass(ItemStack[].class);
         verify(inventory).addItem(given.capture());
-        assertEquals(64, given.getValue().length);
+        // 36 empty storage slots hold 36 single swords: given until the inventory is full, the rest not given.
+        assertEquals(36, given.getValue().length);
         for (ItemStack copy : given.getValue()) {
             assertEquals(1, copy.getAmount());
         }
         verify(sword, never()).setAmount(anyInt());
-        verify(player).sendMessage(contains("Gave you 64 more"));
+        verify(player).sendMessage(contains("Gave you 36 of 64"));
+        verify(player).sendMessage(contains("no room for 28 more (not given)"));
     }
 
     @Test
@@ -284,15 +286,34 @@ class ItemMoreCommandTest {
     @Test
     void aBadAmountShowsTheUsageAndGivesNothing() {
         plain(Material.BREAD, 10, 64);
-        for (String bad : new String[] {"0", "-3", "abc", String.valueOf(ItemMoreCommand.MAX_AMOUNT + 1)}) {
+        for (String bad : new String[] {"0", "-3", "abc", "1.5"}) {
             command.execute(player, new String[] {bad});
         }
         command.execute(player, new String[] {"5", "6"});
-        verify(player, org.mockito.Mockito.times(5)).sendMessage(contains("Usage: /knk item more [amount 1-2304]"));
+        verify(player, org.mockito.Mockito.times(5)).sendMessage(contains("Usage: /knk item more [amount]"));
         verify(inventory, never()).addItem(any(ItemStack[].class));
-        assertEquals(2304, ItemMoreCommand.MAX_AMOUNT);
-        assertEquals(Integer.valueOf(2304), ItemMoreCommand.parseAmount("2304"));
         assertEquals(Integer.valueOf(1), ItemMoreCommand.parseAmount(" 1 "));
+    }
+
+    @Test
+    void anyAmountIsAcceptedWithoutAnUpperLimit() {
+        assertEquals(Integer.valueOf(2305), ItemMoreCommand.parseAmount("2305"));
+        assertEquals(Integer.valueOf(1_000_000), ItemMoreCommand.parseAmount("1000000"));
+        assertEquals(Integer.valueOf(Integer.MAX_VALUE), ItemMoreCommand.parseAmount("99999999999999999999"));
+    }
+
+    @Test
+    void aHugeAmountOnlyBuildsWhatTheInventoryCanTake() {
+        List<ItemStack> clones = new ArrayList<>();
+        plainCloning(Material.BREAD, 10, 64, clones);
+        fill(2);
+
+        command.execute(player, new String[] {"1000000"});
+
+        org.mockito.ArgumentCaptor<ItemStack[]> given = org.mockito.ArgumentCaptor.forClass(ItemStack[].class);
+        verify(inventory).addItem(given.capture());
+        assertEquals(List.of(64, 64), java.util.Arrays.stream(given.getValue()).map(ItemStack::getAmount).toList());
+        verify(player, never()).getWorld();
     }
 
     @Test
@@ -326,5 +347,26 @@ class ItemMoreCommandTest {
 
         verify(api).cloneAsync(500, 5, 42, 42);
         verify(player).sendMessage(contains("room for 5 of 64; the rest is not made"));
+    }
+
+    @Test
+    void mintedCopiesThatNoLongerFitAreNotDropped() {
+        instanceItem(500, 1, 1);
+        fill(3);
+        when(api.cloneAsync(500, 3, 42, 42))
+            .thenReturn(CompletableFuture.completedFuture(List.of(501L, 502L, 503L)));
+        when(inventory.addItem(any(ItemStack[].class))).thenAnswer(inv -> {
+            ItemStack[] items = inv.getArguments().length == 1 && inv.getArgument(0) instanceof ItemStack[] array
+                ? array : java.util.Arrays.stream(inv.getArguments()).map(ItemStack.class::cast).toArray(ItemStack[]::new);
+            HashMap<Integer, ItemStack> left = new HashMap<>();
+            left.put(2, items[2]);
+            return left;
+        });
+
+        command.execute(player, new String[] {"3"});
+
+        verify(player, never()).getWorld();
+        verify(player).sendMessage(contains("Gave you 2 copies"));
+        verify(player).sendMessage(contains("1 no longer fit and was not given"));
     }
 }
