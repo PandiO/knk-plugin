@@ -10,6 +10,8 @@ import java.util.Map;
 import java.util.Optional;
 
 public class ClearCooldownCommand implements EnchantmentSubcommand {
+    static final String OTHERS_PERMISSION = "customenchantments.command.cooldown.clear.others";
+
     private final EnchantmentCommandHandler handler;
     private final CooldownManager cooldownManager;
     private final EnchantmentCommandValidator validator;
@@ -45,7 +47,7 @@ public class ClearCooldownCommand implements EnchantmentSubcommand {
             }
             target = playerOptional.get();
         } else {
-            if (!sender.hasPermission("customenchantments.command.cooldown.clear.others")) {
+            if (!handler.permissions().commands().has(sender, OTHERS_PERMISSION)) {
                 sender.sendMessage(handler.colorize(handler.message("messages.cmd-no-permission", "&cYou don't have permission to use this command.")));
                 return true;
             }
@@ -68,7 +70,7 @@ public class ClearCooldownCommand implements EnchantmentSubcommand {
 
     @Override
     public List<String> tabComplete(CommandSender sender, String[] args) {
-        if (args.length == 1 && sender.hasPermission("customenchantments.command.cooldown.clear.others")) {
+        if (args.length == 1 && handler.permissions().commands().hasForCompletion(sender, OTHERS_PERMISSION)) {
             return handler.visiblePlayerNames(sender, args[0]);
         }
         return List.of();

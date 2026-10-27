@@ -3777,7 +3777,9 @@ public class KnKPlugin extends JavaPlugin {
 
     private void initializeEnchantmentRuntime(CombatSafezoneCheck safezones) {
         // The gates start after the enchantments: chaos / flash_chaos read the gate seam when they go off.
-        EnchantmentBootstrap bootstrap = new EnchantmentBootstrap(this, safezones, () -> gateAreaDamage);
+        // PandiO/knk-workspace#193: abilities and /ce honour rank grants as well as Bukkit/op.
+        EnchantmentBootstrap bootstrap = new EnchantmentBootstrap(this, safezones, () -> gateAreaDamage,
+            new net.knightsandkings.knk.paper.enchantment.EnchantmentPermissions(commandPermissions()));
         this.enchantmentRuntime = bootstrap.initialize();
         // #169: the board owners (ScoreboardUtil, the siege boards) go through a running name-tag blackout.
         net.knightsandkings.knk.paper.utils.ViewerScoreboards.setOverlay(enchantmentRuntime.nameTagBlackout());

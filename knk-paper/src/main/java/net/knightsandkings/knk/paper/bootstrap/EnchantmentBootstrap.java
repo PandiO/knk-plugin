@@ -8,6 +8,7 @@ import net.knightsandkings.knk.core.ports.enchantment.EnchantmentRepository;
 import net.knightsandkings.knk.paper.commands.enchantment.EnchantmentCommandHandler;
 import net.knightsandkings.knk.paper.config.EnchantmentConfigManager;
 import net.knightsandkings.knk.paper.enchantbook.EnchantBooks;
+import net.knightsandkings.knk.paper.enchantment.EnchantmentPermissions;
 import net.knightsandkings.knk.paper.enchantment.ExecutorImpl;
 import net.knightsandkings.knk.paper.enchantment.GateAreaDamage;
 import net.knightsandkings.knk.paper.enchantment.FrozenPlayerTracker;
@@ -30,6 +31,7 @@ public class EnchantmentBootstrap {
         private final Plugin plugin;
         private final CombatSafezoneCheck safezones;
     private final Supplier<GateAreaDamage> gateAreaDamage;
+    private final EnchantmentPermissions permissions;
 
         public EnchantmentBootstrap(Plugin plugin) {
         this(plugin, CombatSafezoneCheck.NONE);
@@ -42,7 +44,14 @@ public class EnchantmentBootstrap {
 
     /** @param gateAreaDamage how the area enchantments (chaos, flash_chaos) damage gate doors in range; read per activation */
     public EnchantmentBootstrap(Plugin plugin, CombatSafezoneCheck safezones, Supplier<GateAreaDamage> gateAreaDamage) {
+        this(plugin, safezones, gateAreaDamage, EnchantmentPermissions.bukkitOnly());
+    }
+
+    /** @param permissions who may use abilities and the {@code /ce} subcommands (Bukkit or a rank grant, PandiO/knk-workspace#193) */
+    public EnchantmentBootstrap(Plugin plugin, CombatSafezoneCheck safezones, Supplier<GateAreaDamage> gateAreaDamage,
+                                EnchantmentPermissions permissions) {
         this.plugin = plugin;
+        this.permissions = permissions != null ? permissions : EnchantmentPermissions.bukkitOnly();
         this.safezones = safezones != null ? safezones : CombatSafezoneCheck.NONE;
         this.gateAreaDamage = gateAreaDamage != null ? gateAreaDamage : () -> GateAreaDamage.NONE;
     }
@@ -62,7 +71,8 @@ public class EnchantmentBootstrap {
                 plugin,
                 configManager,
                 enchantmentRepository,
-                cooldownManager
+                cooldownManager,
+                permissions
         );
 
         var pluginManager = plugin.getServer().getPluginManager();
@@ -81,7 +91,8 @@ public class EnchantmentBootstrap {
                         enchantmentExecutor,
                         cooldownManager,
                         configManager.disableForCreative(),
-                        configManager.cooldownMessageTemplate()
+                        configManager.cooldownMessageTemplate(),
+                        permissions
                 ),
                 plugin
         );
