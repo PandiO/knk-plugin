@@ -98,7 +98,8 @@ public class ScoreboardUtil {
 
             team.addPlayer(p);
             if (!keepOwnScoreboard.test(p)) {
-                p.setScoreboard(scoreboard);
+                // #169: behind a name-tag blackout the shared board becomes the one handed back afterwards.
+                ViewerScoreboards.set(p, scoreboard);
             }
 
             // Set tab layout header/footer

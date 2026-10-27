@@ -12,6 +12,8 @@ import net.knightsandkings.knk.paper.enchantment.ExecutorImpl;
 import net.knightsandkings.knk.paper.enchantment.GateAreaDamage;
 import net.knightsandkings.knk.paper.enchantment.FrozenPlayerTracker;
 import net.knightsandkings.knk.paper.enchantment.InMemoryCooldownManager;
+import net.knightsandkings.knk.paper.enchantment.display.EffectBossBars;
+import net.knightsandkings.knk.paper.enchantment.display.NameTagBlackout;
 import net.knightsandkings.knk.paper.listeners.EnchantBookListener;
 import net.knightsandkings.knk.paper.listeners.EnchantmentCombatListener;
 import net.knightsandkings.knk.paper.listeners.EnchantmentEnchantTableListener;
@@ -50,7 +52,12 @@ public class EnchantmentBootstrap {
         EnchantmentRepository enchantmentRepository = new LocalEnchantmentRepositoryImpl();
         CooldownManager cooldownManager = new InMemoryCooldownManager();
         FrozenPlayerTracker frozenPlayerTracker = new FrozenPlayerTracker(plugin);
-        EnchantmentExecutor enchantmentExecutor = new ExecutorImpl(plugin, cooldownManager, frozenPlayerTracker, safezones, gateAreaDamage);
+        ExecutorImpl enchantmentExecutor = new ExecutorImpl(plugin, cooldownManager, frozenPlayerTracker, safezones, gateAreaDamage);
+        // #169: flash_chaos hides name tags in the victim's own view; #170: a boss bar per timed debuff.
+        NameTagBlackout nameTagBlackout = new NameTagBlackout();
+        EffectBossBars effectBossBars = new EffectBossBars(nameTagBlackout);
+        effectBossBars.remainingFrom("freeze", frozenPlayerTracker::remainingMillis);
+        enchantmentExecutor.setEffectDisplay(effectBossBars);
         EnchantmentCommandHandler commandHandler = new EnchantmentCommandHandler(
                 plugin,
                 configManager,
@@ -80,6 +87,8 @@ public class EnchantmentBootstrap {
         );
         pluginManager.registerEvents(new EnchantmentEnchantTableListener(enchantmentRepository), plugin);
         pluginManager.registerEvents(new FreezeMovementListener(frozenPlayerTracker), plugin);
+        pluginManager.registerEvents(nameTagBlackout, plugin);
+        pluginManager.registerEvents(effectBossBars, plugin);
         // Permanent enchantment books (KNG-5), capped by the target's grade (KNG-6).
         EnchantBooks enchantBooks = new EnchantBooks(
                 enchantmentRepository,
@@ -103,7 +112,9 @@ public class EnchantmentBootstrap {
                 cooldownManager,
                 enchantmentExecutor,
                 frozenPlayerTracker,
-                commandHandler
+                commandHandler,
+                effectBossBars,
+                nameTagBlackout
         );
     }
 
@@ -113,7 +124,9 @@ public class EnchantmentBootstrap {
             CooldownManager cooldownManager,
             EnchantmentExecutor enchantmentExecutor,
             FrozenPlayerTracker frozenPlayerTracker,
-            EnchantmentCommandHandler commandHandler
+            EnchantmentCommandHandler commandHandler,
+            EffectBossBars effectBossBars,
+            NameTagBlackout nameTagBlackout
     ) {
     }
 }

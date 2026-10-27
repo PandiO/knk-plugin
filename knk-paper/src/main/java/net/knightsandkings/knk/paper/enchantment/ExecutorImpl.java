@@ -3,6 +3,7 @@ package net.knightsandkings.knk.paper.enchantment;
 import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuningTable;
 import net.knightsandkings.knk.core.ports.enchantment.CooldownManager;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentExecutor;
+import net.knightsandkings.knk.paper.enchantment.display.EffectDisplay;
 import net.knightsandkings.knk.paper.enchantment.effects.AttackEnchantmentEffect;
 import net.knightsandkings.knk.paper.enchantment.effects.SupportEnchantmentEffect;
 import net.knightsandkings.knk.paper.enchantment.effects.impl.ArmorRepairEffect;
@@ -61,6 +62,14 @@ public class ExecutorImpl implements EnchantmentExecutor {
         this.cooldownManager = cooldownManager;
         this.attackEffects = buildAttackEffects(plugin, frozenPlayerTracker);
         this.supportEffects = buildSupportEffects(plugin, safezones, gateAreaDamage);
+    }
+
+    /**
+     * Where every effect shows its victim a debuff boss bar (PandiO/knk-workspace#170) or a name-tag blackout (#169).
+     */
+    public void setEffectDisplay(EffectDisplay display) {
+        attackEffects.values().forEach(effect -> effect.setDisplay(display));
+        supportEffects.values().forEach(effect -> effect.setDisplay(display));
     }
 
     @Override

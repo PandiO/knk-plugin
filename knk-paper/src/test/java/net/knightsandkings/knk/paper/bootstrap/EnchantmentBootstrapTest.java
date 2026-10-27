@@ -70,7 +70,10 @@ class EnchantmentBootstrapTest {
         assertNotNull(runtime.enchantmentRepository());
         assertNotNull(runtime.cooldownManager());
         assertNotNull(runtime.commandHandler());
-        assertTrue(listenerRegistrations.get() >= 4);
+        // #169/#170: the effect displays exist and listen for death and quit.
+        assertNotNull(runtime.effectBossBars());
+        assertNotNull(runtime.nameTagBlackout());
+        assertTrue(listenerRegistrations.get() >= 6);
     }
 
     private static Object defaultValue(Class<?> returnType) {

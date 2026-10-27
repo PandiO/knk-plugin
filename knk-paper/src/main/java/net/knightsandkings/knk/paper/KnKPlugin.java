@@ -682,6 +682,15 @@ public class KnKPlugin extends JavaPlugin {
                 } else {
                     freezeFlightGuard.released(uuid, net.knightsandkings.knk.core.freeze.FreezeFlightLedger.Source.ADMIN);
                 }
+                // PandiO/knk-workspace#170: a static "Frozen" boss bar while staff hold the player (any thread).
+                if (enchantmentRuntime != null) {
+                    var bars = enchantmentRuntime.effectBossBars();
+                    if (getServer().isPrimaryThread()) {
+                        bars.staffFrozen(uuid, frozenNow);
+                    } else if (isEnabled()) {
+                        getServer().getScheduler().runTask(this, () -> bars.staffFrozen(uuid, frozenNow));
+                    }
+                }
             });
             startOfflineSecurityTasks();
             initPrivateMessaging();
@@ -1163,6 +1172,16 @@ public class KnKPlugin extends JavaPlugin {
     public void onDisable() {
         if (apiConnectivityMonitor != null) {
             apiConnectivityMonitor.stop();
+        }
+        // #169/#170: hand back real scoreboards behind a name-tag blackout and hide the effect boss bars.
+        if (enchantmentRuntime != null) {
+            try {
+                enchantmentRuntime.nameTagBlackout().showAll();
+                enchantmentRuntime.effectBossBars().hideAll();
+            } catch (RuntimeException e) {
+                getLogger().log(java.util.logging.Level.SEVERE, "Clearing effect displays failed", e);
+            }
+            net.knightsandkings.knk.paper.utils.ViewerScoreboards.setOverlay(null);
         }
         // #155: frozen players get their own flight setting back before they are saved.
         if (freezeFlightGuard != null) {
@@ -3760,6 +3779,11 @@ public class KnKPlugin extends JavaPlugin {
         // The gates start after the enchantments: chaos / flash_chaos read the gate seam when they go off.
         EnchantmentBootstrap bootstrap = new EnchantmentBootstrap(this, safezones, () -> gateAreaDamage);
         this.enchantmentRuntime = bootstrap.initialize();
+        // #169: the board owners (ScoreboardUtil, the siege boards) go through a running name-tag blackout.
+        net.knightsandkings.knk.paper.utils.ViewerScoreboards.setOverlay(enchantmentRuntime.nameTagBlackout());
+        // #170: effect boss bars count down every 5 ticks; #169: blackouts end on time, mirrors follow each second.
+        getServer().getScheduler().runTaskTimer(this, enchantmentRuntime.effectBossBars()::tick, 5L, 5L);
+        getServer().getScheduler().runTaskTimer(this, enchantmentRuntime.nameTagBlackout()::tick, 20L, 20L);
         if (freezeFlightGuard != null) {
             var guard = freezeFlightGuard;
             var source = net.knightsandkings.knk.core.freeze.FreezeFlightLedger.Source.ENCHANTMENT;
