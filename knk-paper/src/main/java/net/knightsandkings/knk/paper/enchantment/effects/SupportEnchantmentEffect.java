@@ -82,7 +82,7 @@ public abstract class SupportEnchantmentEffect implements EnchantmentEffect {
 
     /**
      * Where this effect shows the victim a timed debuff (boss bar, PandiO/knk-workspace#170) or a name-tag blackout
-     * (#169). {@link EffectDisplay#NONE} until set.
+     * while blinded (#169). {@link EffectDisplay#NONE} until set.
      */
     public final void setDisplay(EffectDisplay display) {
         this.display = display != null ? display : EffectDisplay.NONE;

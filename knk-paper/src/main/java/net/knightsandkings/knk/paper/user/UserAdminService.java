@@ -486,14 +486,20 @@ public final class UserAdminService {
                 Player targetPlayer = Bukkit.getPlayerExact(target.username());
                 if (freezing) {
                     if (targetPlayer != null) {
-                        freezeManager.freeze(targetPlayer.getUniqueId(), reason);
+                        freezeManager.freeze(targetPlayer.getUniqueId(), reason, freezerName(sender));
                         targetPlayer.sendMessage(ChatColor.RED + "You have been frozen: " + reason);
+                    }
+                    if (targetPlayer == null && target.uuid() != null) {
+                        // #170: their boss bar names the freezer when they join on this server run.
+                        freezeManager.rememberFreezer(target.uuid(), reason, freezerName(sender));
                     }
                     sender.sendMessage(ChatColor.GREEN + "Froze " + target.username() + (targetPlayer == null ? " (offline - takes effect on next join)." : "."));
                 } else {
                     if (targetPlayer != null) {
                         freezeManager.unfreeze(targetPlayer.getUniqueId());
                         targetPlayer.sendMessage(ChatColor.GREEN + "You have been unfrozen.");
+                    } else if (target.uuid() != null) {
+                        freezeManager.rememberFreezer(target.uuid(), null, null);
                     }
                     sender.sendMessage(ChatColor.GREEN + "Unfroze " + target.username() + ".");
                 }
@@ -501,6 +507,20 @@ public final class UserAdminService {
             })).exceptionally(ex -> fail(sender, done, ex));
         }, () -> done.complete(false));
         return done;
+    }
+
+    /**
+     * Who the frozen player's boss bar names (PandiO/knk-workspace#170): the staff member, or null (shown as
+     * {@code staff}) for the console and for a staff member who is vanished, so a freeze doesn't give them away.
+     */
+    String freezerName(CommandSender sender) {
+        if (!(sender instanceof Player player)) {
+            return null;
+        }
+        if (modeService != null && modeService.isVanished(player)) {
+            return null;
+        }
+        return player.getName();
     }
 
     /**

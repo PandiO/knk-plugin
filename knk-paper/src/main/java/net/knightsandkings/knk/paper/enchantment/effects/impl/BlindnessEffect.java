@@ -19,6 +19,8 @@ public class BlindnessEffect extends AttackEnchantmentEffect {
         int durationTicks = tuning().durationTicksAt(level);
         target.addPotionEffect(new PotionEffect(PotionEffectType.BLINDNESS, durationTicks, 0));
         display().debuff(target, "blindness", "Blindness", PotionEffectType.BLINDNESS, durationTicks);
+        // PandiO/knk-workspace#169: a blinded player sees no name tags for as long as the blindness lasts.
+        display().hideNameTags(target, durationTicks);
         playSound(target.getLocation(), Sound.ENTITY_WITHER_SPAWN, 1.0f, 1.0f);
     }
 }

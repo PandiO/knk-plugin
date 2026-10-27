@@ -116,7 +116,7 @@ class EffectBossBarsTest {
         bars.staffFrozen(player.getUniqueId(), true);
         potions.put("poison", effect(80));
         bars.debuff(player, "poison", "Poison", poisonType, 80);
-        assertEquals(List.of("Frozen", "Poison · 4s"), texts());
+        assertEquals(List.of("Frozen by staff", "Poison · 4s"), texts());
         assertEquals(1.0f, shown.get(0).progress(), 0.0001f);
 
         now.set(3_600_000L);
@@ -124,13 +124,60 @@ class EffectBossBarsTest {
         PlayerDeathEvent death = mock(PlayerDeathEvent.class);
         when(death.getEntity()).thenReturn(player);
         bars.onDeath(death);
-        assertEquals(List.of("Frozen"), texts());
+        assertEquals(List.of("Frozen by staff"), texts());
 
         PlayerQuitEvent quit = mock(PlayerQuitEvent.class);
         when(quit.getPlayer()).thenReturn(player);
         bars.onQuit(quit);
         assertTrue(shown.isEmpty());
         assertFalse(bars.has(player.getUniqueId(), EffectBossBars.STAFF_FREEZE));
+    }
+
+    /** #170 round 2: the staff freeze bar is red and names the freezer and the reason. */
+    @Test
+    void staffFreezeBarIsRedAndNamesWhoFrozeAndWhy() {
+        bars.staffFrozen(player.getUniqueId(), true, EffectBossBars.staffFreezeLabel("Admin", "griefing"));
+
+        assertEquals(List.of("Frozen by Admin for: griefing"), texts());
+        assertEquals(BossBar.Color.RED, shown.get(0).color());
+        assertEquals(net.kyori.adventure.text.format.NamedTextColor.RED, shown.get(0).name().color());
+        // The enchantment freeze keeps its own blue bar.
+        assertEquals(BossBar.Color.BLUE, EffectBossBars.barColor("freeze"));
+    }
+
+    @Test
+    void staffFreezeLabel_UnknownFreezerIsStaff_NoReasonDropsTheForPart_LongReasonIsCut() {
+        assertEquals("Frozen by staff for: spam", EffectBossBars.staffFreezeLabel(null, "spam"));
+        assertEquals("Frozen by staff for: spam", EffectBossBars.staffFreezeLabel("  ", " spam "));
+        assertEquals("Frozen by Admin", EffectBossBars.staffFreezeLabel("Admin", null));
+        assertEquals("Frozen by staff", EffectBossBars.staffFreezeLabel(null, "   "));
+        String cut = EffectBossBars.staffFreezeLabel("Admin", "x".repeat(200));
+        assertEquals("Frozen by Admin for: " + "x".repeat(EffectBossBars.MAX_REASON_LENGTH - 1) + "…", cut);
+        // The two-argument call (no freezer known, no reason) still shows a bar.
+        bars.staffFrozen(player.getUniqueId(), true);
+        assertEquals(List.of("Frozen by staff"), texts());
+    }
+
+    /** #169 round 2: the invisibility ability reaches the invoker's name-tag hiding; creatures don't. */
+    @Test
+    void invisibleIsForwardedForPlayersOnly() {
+        org.bukkit.scoreboard.Scoreboard shared = FakeBoards.board();
+        org.bukkit.scoreboard.Team rank = shared.registerNewTeam("default");
+        rank.setCanSeeFriendlyInvisibles(true);
+        when(player.getName()).thenReturn("Sneaky");
+        bars.invisible(player, 200); // no InvisibleNameTag set yet: nothing happens
+        assertTrue(rank.canSeeFriendlyInvisibles());
+
+        bars.setInvisibleNameTag(new InvisibleNameTag(() -> shared));
+        bars.invisible(mock(Zombie.class), 200);
+        bars.invisible(player, 0);
+        assertTrue(rank.canSeeFriendlyInvisibles());
+        bars.invisible(player, 200);
+        assertTrue(rank.canSeeFriendlyInvisibles(), "Sneaky is on no team yet");
+
+        rank.addEntry("Sneaky");
+        bars.invisible(player, 200);
+        assertFalse(rank.canSeeFriendlyInvisibles());
     }
 
     @Test

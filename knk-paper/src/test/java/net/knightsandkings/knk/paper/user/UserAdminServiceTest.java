@@ -272,6 +272,49 @@ class UserAdminServiceTest {
         verify(console).sendMessage("§aUnfroze Steve.");
     }
 
+    /** #170 round 2: the frozen player's boss bar names the staff member who froze them. */
+    @Test
+    void freezingAnOnlinePlayerRecordsWhoFroze_TheConsoleIsUnknown() {
+        Player steve = mock(Player.class);
+        UUID steveUuid = UUID.randomUUID();
+        when(steve.getUniqueId()).thenReturn(steveUuid);
+        bukkit.when(() -> Bukkit.getPlayerExact("Steve")).thenReturn(steve);
+        when(ranks.actorOutranks(42, 7)).thenReturn(CompletableFuture.completedFuture(true));
+        when(acting.freezeById(7, "griefing")).thenReturn(CompletableFuture.completedFuture(null));
+        when(api.freezeById(7, "spam")).thenReturn(CompletableFuture.completedFuture(null));
+
+        assertTrue(service.setFrozen(staff, target, true, "griefing").join());
+        assertEquals("Admin", freeze.frozenBy(steveUuid));
+        assertEquals("griefing", freeze.reasonFor(steveUuid));
+
+        CommandSender console = mock(CommandSender.class);
+        assertTrue(service.setFrozen(console, target, true, "spam").join());
+        org.junit.jupiter.api.Assertions.assertNull(freeze.frozenBy(steveUuid));
+    }
+
+    @Test
+    void freezingAnOfflinePlayerRemembersWhoFrozeForTheirJoin() {
+        when(ranks.actorOutranks(42, 7)).thenReturn(CompletableFuture.completedFuture(true));
+        when(acting.freezeById(7, "griefing")).thenReturn(CompletableFuture.completedFuture(null));
+        when(acting.unfreezeById(7)).thenReturn(CompletableFuture.completedFuture(null));
+
+        assertTrue(service.setFrozen(staff, target, true, "griefing").join());
+        assertEquals("Admin", freeze.frozenBy(target.uuid()));
+        assertTrue(service.setFrozen(staff, target, false, null).join());
+        org.junit.jupiter.api.Assertions.assertNull(freeze.frozenBy(target.uuid()));
+    }
+
+    @Test
+    void aVanishedStaffMemberIsNotNamed() {
+        net.knightsandkings.knk.paper.modes.ModeService modes = mock(net.knightsandkings.knk.paper.modes.ModeService.class);
+        UserAdminService withModes = new UserAdminService(Runnable::run, users, api, groupsApi, ranks, modes, freeze);
+        when(modes.isVanished(staff)).thenReturn(true);
+        org.junit.jupiter.api.Assertions.assertNull(withModes.freezerName(staff));
+        when(modes.isVanished(staff)).thenReturn(false);
+        assertEquals("Admin", withModes.freezerName(staff));
+        org.junit.jupiter.api.Assertions.assertNull(withModes.freezerName(mock(CommandSender.class)));
+    }
+
     @Test
     void kickAndBanRunPapersCommandsAsTheStaffMember() {
         when(staff.performCommand(anyString())).thenReturn(true);

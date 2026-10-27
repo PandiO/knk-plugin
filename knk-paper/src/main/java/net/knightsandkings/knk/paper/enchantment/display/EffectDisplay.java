@@ -5,7 +5,7 @@ import org.bukkit.potion.PotionEffectType;
 
 /**
  * What the custom enchantments tell the victim's screen when they land a timed debuff (PandiO/knk-workspace#170) or
- * a flash_chaos blackout (#169). Only players are shown anything; other entities are ignored. Main thread.
+ * blind them (#169: no name tags while blinded). Only players are shown anything; other entities are ignored. Main thread.
  */
 public interface EffectDisplay {
 
@@ -28,6 +28,16 @@ public interface EffectDisplay {
      */
     void debuff(LivingEntity victim, String key, String label, PotionEffectType potion, int durationTicks);
 
-    /** Hides every other player's name tag in the victim's own view for {@code durationTicks}. */
+    /**
+     * Hides every other player's name tag in the victim's own view for {@code durationTicks}, or until the victim's
+     * blindness ends sooner (milk). Called by the blindness ability (#169).
+     */
     void hideNameTags(LivingEntity victim, int durationTicks);
+
+    /**
+     * The invisibility ability made {@code invoker} invisible for {@code durationTicks}: their own name tag must not
+     * show to other players meanwhile (#169 round 2). Default: nothing.
+     */
+    default void invisible(LivingEntity invoker, int durationTicks) {
+    }
 }

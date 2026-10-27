@@ -682,13 +682,16 @@ public class KnKPlugin extends JavaPlugin {
                 } else {
                     freezeFlightGuard.released(uuid, net.knightsandkings.knk.core.freeze.FreezeFlightLedger.Source.ADMIN);
                 }
-                // PandiO/knk-workspace#170: a static "Frozen" boss bar while staff hold the player (any thread).
+                // PandiO/knk-workspace#170: a static red "Frozen by <staff> for: <reason>" boss bar while staff hold
+                // the player (any thread).
                 if (enchantmentRuntime != null) {
                     var bars = enchantmentRuntime.effectBossBars();
+                    String label = net.knightsandkings.knk.paper.enchantment.display.EffectBossBars.staffFreezeLabel(
+                            adminFreezeManager.frozenBy(uuid), adminFreezeManager.reasonFor(uuid));
                     if (getServer().isPrimaryThread()) {
-                        bars.staffFrozen(uuid, frozenNow);
+                        bars.staffFrozen(uuid, frozenNow, label);
                     } else if (isEnabled()) {
-                        getServer().getScheduler().runTask(this, () -> bars.staffFrozen(uuid, frozenNow));
+                        getServer().getScheduler().runTask(this, () -> bars.staffFrozen(uuid, frozenNow, label));
                     }
                 }
             });

@@ -34,7 +34,7 @@ import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 
 /**
- * PandiO/knk-workspace#169: the flash_chaos victim sees a mirror of their own board with every name tag hidden; nobody
+ * PandiO/knk-workspace#169: a blinded player (round 1: the flash_chaos victim) sees a mirror of their own board with every name tag hidden; nobody
  * is re-teamed on the real boards, and the real board comes back on the end, death, quit or plugin disable, also when
  * a siege match swapped it meanwhile.
  */
@@ -121,6 +121,44 @@ class NameTagBlackoutTest {
         blackout.tick();
         assertSame(rankBoard, viewer.getScoreboard());
         assertFalse(blackout.isHidden(viewer.getUniqueId()));
+    }
+
+    /** Round 2: the blackout follows the blindness, so milk (blindness gone) ends it before its time. */
+    @Test
+    void theBlackoutEndsEarlyWhenTheBlindnessIsGone() {
+        bukkit.when(() -> Bukkit.getPlayer(viewer.getUniqueId())).thenReturn(viewer);
+        boolean[] blind = {true};
+        blackout.hide(viewer, 200, p -> blind[0]); // 10 s
+        Scoreboard mirror = viewer.getScoreboard();
+
+        now.set(1_000L);
+        blackout.tick();
+        assertSame(mirror, viewer.getScoreboard());
+
+        blind[0] = false; // milk
+        now.set(2_000L);
+        blackout.tick();
+        assertSame(rankBoard, viewer.getScoreboard());
+        assertFalse(blackout.isHidden(viewer.getUniqueId()));
+
+        // A new blindness later starts a fresh blackout with its own check.
+        blind[0] = true;
+        blackout.hide(viewer, 200, p -> blind[0]);
+        assertTrue(blackout.isHidden(viewer.getUniqueId()));
+    }
+
+    @Test
+    void aSecondBlindnessExtendsTheBlackout_WithoutACheckOnlyTheTimeCounts() {
+        bukkit.when(() -> Bukkit.getPlayer(viewer.getUniqueId())).thenReturn(viewer);
+        blackout.hide(viewer, 100);               // 5 s, no check
+        now.set(2_000L);
+        blackout.hide(viewer, 200, p -> true);    // until 12 s
+        now.set(11_000L);
+        blackout.tick();
+        assertTrue(blackout.isHidden(viewer.getUniqueId()));
+        now.set(12_000L);
+        blackout.tick();
+        assertSame(rankBoard, viewer.getScoreboard());
     }
 
     @Test

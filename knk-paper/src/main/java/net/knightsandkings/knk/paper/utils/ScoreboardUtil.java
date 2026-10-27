@@ -47,6 +47,12 @@ public class ScoreboardUtil {
         Team staff = scoreboard.registerNewTeam(TabListTeam.STAFF);
         staff.color(NamedTextColor.BLUE);
 
+        // PandiO/knk-workspace#169: rank teams are colour groups, not allies, so an invisible player's name tag (and
+        // see-through body) isn't shown to everyone of the same rank, as vanilla does for a team by default.
+        def.setCanSeeFriendlyInvisibles(false);
+        owner.setCanSeeFriendlyInvisibles(false);
+        staff.setCanSeeFriendlyInvisibles(false);
+
         Objective health = scoreboard.registerNewObjective("Health", Criteria.HEALTH.getName(), Component.text("❤").color(ColorOptions.error), RenderType.HEARTS);
         health.setDisplaySlot(DisplaySlot.BELOW_NAME);
 
@@ -113,6 +119,7 @@ public class ScoreboardUtil {
         Team team = scoreboard.getTeam(target.name());
         if (team == null) {
             team = scoreboard.registerNewTeam(target.name());
+            team.setCanSeeFriendlyInvisibles(false); // #169, as in setTeams
         }
         if (target.color() != null) {
             team.color(target.color());
