@@ -6,6 +6,7 @@ import net.knightsandkings.knk.core.siege.ObjectiveState;
 import net.knightsandkings.knk.core.siege.ObjectiveState.Presence;
 import net.knightsandkings.knk.core.siege.SiegeDisplayText;
 import net.knightsandkings.knk.core.siege.SiegeMatchRoster.MemberView;
+import net.knightsandkings.knk.paper.utils.ViewerScoreboards;
 import net.knightsandkings.knk.core.siege.SiegeObjectiveBoard.BoardStep;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -87,9 +88,10 @@ public final class SiegeScoreboardPresenter implements SiegeMatchObserver {
             Team team = b.getTeam("siege_" + teamId);
             if (team != null) team.addEntry(p.getName());
         });
-        previousBoards.putIfAbsent(p.getUniqueId(), p.getScoreboard());
+        // #169: through a name-tag blackout, so the board kept and handed back is the real one.
+        previousBoards.putIfAbsent(p.getUniqueId(), ViewerScoreboards.current(p));
         Scoreboard own = boards.get(teamId);
-        if (own != null) p.setScoreboard(own);
+        if (own != null) ViewerScoreboards.set(p, own);
     }
 
     @Override
@@ -130,7 +132,7 @@ public final class SiegeScoreboardPresenter implements SiegeMatchObserver {
 
     private void restore(Player player) {
         Scoreboard previous = previousBoards.remove(player.getUniqueId());
-        if (previous != null) player.setScoreboard(previous);
+        if (previous != null) ViewerScoreboards.set(player, previous);
         if (lastTabName.remove(player.getUniqueId()) != null) player.playerListName(null);
     }
 

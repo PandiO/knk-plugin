@@ -23,6 +23,7 @@ public class FreezeEffect extends AttackEnchantmentEffect {
     protected void applyEffect(ItemStack weapon, Player attacker, LivingEntity target, int level) {
         int durationTicks = tuning().durationTicksAt(level);
         frozenPlayerTracker.freeze(target, durationTicks);
+        display().debuff(target, "freeze", "Frozen", null, durationTicks);
         playSound(target.getLocation(), Sound.BLOCK_GLASS_BREAK, 0.8f, 1.2f);
 
         for (int tick = 0; tick <= durationTicks; tick += 20) {
