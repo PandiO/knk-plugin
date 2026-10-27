@@ -216,11 +216,11 @@ commands:
   # KnkPermissible inside StaffTeleportCommand (same reasoning as /kit and /fly).
   tp:
     description: "Staff teleport: to a player, a player to a player, or to coordinates"
-    usage: "/tp <player> [-s] | /tp <player> <target> [-s] | /tp <x> <y> <z> [world] [yaw pitch]"
+    usage: "/tp <player> [-s] | /tp <player> <target> [-s] | /tp <x> <y> <z> [world] [yaw pitch] | /tp all <player> [-s]"
 
   tphere:
     description: "Staff teleport: bring a player to you"
-    usage: "/tphere <player> [-s]"
+    usage: "/tphere <player> [-s] | /tphere all [-s]"
 
   # Player teleport requests (DESIGN.md §3.5, Phase 3). Nodes checked in TeleportRequestCommand.
   tpa:
@@ -249,7 +249,7 @@ commands:
   # the main world's spawn. Nodes checked in SpawnCommand.
   spawn:
     description: "Teleport to the server spawn, or send a player there"
-    usage: "/spawn | /spawn <player> [-s]"
+    usage: "/spawn | /spawn <player> [-s] | /spawn all [-s]"
 
   # Domain teleports (DESIGN.md §3.7, Phase 5) - Towns/Districts/Structures enabled as destinations
   # in the web app. Nodes checked in WarpCommand; the web API checks requirements and the price.
@@ -277,7 +277,7 @@ commands:
     aliases: [nav]
   hub:
     description: "Teleport to the hub (the hub spawn on the Game Settings page); /hub return is the outage return button"
-    usage: "/hub | /hub <player> [-s] | /hub return"
+    usage: "/hub | /hub <player> [-s] | /hub all [-s] | /hub return"
     # KNG-188: /hub is open to every player (no node) and goes through the teleport engine like /spawn (warmup,
     # cooldown, the groups' spawn price). /hub <player> [-s] needs knk.teleport.staff.others (and .silent).
   lootbox:
@@ -950,8 +950,45 @@ permissions:
     default: op
 
   knk.teleport.staff.others:
-    description: Move other players - /tp <player> <target>, /tphere <player>, /spawn <player> and /warp <destination> <player>. You must outrank everyone involved.
+    description: Move other players - /tp <player> <target>, /tphere <player>, /spawn <player>, /hub <player> and /warp <destination> <player>. Everyone involved must be of your rank or lower (PandiO/knk-workspace#171; was strictly lower).
     default: op
+
+  # PandiO/knk-workspace#171: the all forms move every online player of your rank or lower who isn't exempt and not in
+  # staff or owner mode (never you). One node per form.
+  knk.teleport.all.hub:
+    description: /hub all [-s] - send every eligible player to the hub.
+    default: op
+  knk.teleport.all.spawn:
+    description: /spawn all [-s] - send every eligible player to their spawn.
+    default: op
+  knk.teleport.all.tp:
+    description: /tp all <player> [-s] - send every eligible player to that player.
+    default: op
+  knk.teleport.all.tphere:
+    description: /tphere all [-s] - bring every eligible player to you.
+    default: op
+  # #171: not moved by other players' teleports of that type, nor by its all form. Staff and owner mode exempt by
+  # default. The console and knk.admin.user.manage.all still move an exempt player they name (not with all).
+  knk.teleport.exempt.*:
+    description: Exempt from every kind of teleport by other players (/hub, /spawn, /tp, /tphere and their all forms).
+    default: false
+    children:
+      knk.teleport.exempt.hub: true
+      knk.teleport.exempt.spawn: true
+      knk.teleport.exempt.tp: true
+      knk.teleport.exempt.tphere: true
+  knk.teleport.exempt.hub:
+    description: Not sent to the hub by other players (/hub <you>, /hub all).
+    default: false
+  knk.teleport.exempt.spawn:
+    description: Not sent to spawn by other players (/spawn <you>, /spawn all).
+    default: false
+  knk.teleport.exempt.tp:
+    description: Not moved by other players' /tp <you> <target> or /tp all <player>.
+    default: false
+  knk.teleport.exempt.tphere:
+    description: Not pulled by other players' /tphere <you> or /tphere all.
+    default: false
 
   knk.teleport.staff.silent:
     description: The -s flag on staff teleports - no message to the moved or visited player. Vanished staff are always silent.

@@ -2451,10 +2451,15 @@ public class KnKPlugin extends JavaPlugin {
             knkPermissible, mainThread, org.bukkit.Bukkit::getPlayerExact, org.bukkit.Bukkit::getOnlinePlayers,
             () -> cacheManager.getUserCache().usernamesSnapshot()
         );
-        // Same rank check as /freeze, /inventory and /knk user (console and knk.admin.user.manage.all pass).
+        // PandiO/knk-workspace#171: teleporting another player needs the same rank or lower (before: strictly lower,
+        // as /freeze, /inventory and /knk user still do); console and knk.admin.user.manage.all pass.
         net.knightsandkings.knk.paper.commands.support.TargetRankCheck rankCheck = (sender, targetName, onAllowed) ->
             userAdminService.resolveTarget(sender, targetName, summary ->
-                userAdminService.withRankCheck(sender, summary, api -> onAllowed.accept(summary), () -> { }));
+                userAdminService.withRankCheck(sender, summary, true, api -> onAllowed.accept(summary), () -> { }));
+        // #171: knk.teleport.exempt.<type> and staff/owner mode exempt a player from others' teleports; the all forms.
+        var teleportExemptions = new net.knightsandkings.knk.paper.teleport.TeleportExemptions(support,
+            player -> modeService.getActiveMode(player) != net.knightsandkings.knk.core.domain.users.ActiveMode.NONE,
+            userAdminService::mayTeleport, userAdminService::overridesTeleportExemption);
         this.teleportRequestCommand = new net.knightsandkings.knk.paper.commands.TeleportRequestCommand(
             net.knightsandkings.knk.paper.commands.TeleportRequestCommand.Form.TPA, support, targets, teleportRequestService);
         this.staffTeleportCommand = new net.knightsandkings.knk.paper.commands.StaffTeleportCommand(
@@ -2462,10 +2467,12 @@ public class KnKPlugin extends JavaPlugin {
             modeService::isVanished, org.bukkit.Bukkit::getWorld,
             () -> org.bukkit.Bukkit.getWorlds().stream().map(org.bukkit.World::getName).toList()
         );
+        staffTeleportCommand.setExemptions(teleportExemptions);
         // Phase 4: /spawn (DESIGN.md §3.6).
         this.spawnCommand = createSpawnCommand(support, rankCheck, targets);
         if (spawnCommand != null) {
             spawnCommand.setCharges(charges);
+            spawnCommand.setExemptions(teleportExemptions);
         }
         // KNG-188: /hub to the hub spawn of the Game Settings, a HUB teleport (the hub starts after the teleports).
         this.hubTeleportCommand = new net.knightsandkings.knk.paper.commands.HubTeleportCommand(support, rankCheck,
@@ -2475,6 +2482,7 @@ public class KnKPlugin extends JavaPlugin {
                 ? java.util.Optional.of("no hub is selected on the Game Settings page") : hubService.unusable(),
             modeService::isVanished);
         hubTeleportCommand.setCharges(charges);
+        hubTeleportCommand.setExemptions(teleportExemptions);
         hubTeleportCommand.setSettleInWorld(this::settleInWorld);
         // Phase 5: /warp, /warps (DESIGN.md §3.7).
         this.warpCommand = createWarpCommand(support, rankCheck, targets, charges);

@@ -3,7 +3,9 @@ package net.knightsandkings.knk.paper.commands;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.ArrayList;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
@@ -25,6 +27,7 @@ import net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport;
 import net.knightsandkings.knk.paper.commands.support.TargetRankCheck;
 import net.knightsandkings.knk.paper.teleport.SpawnDestinationResolver;
 import net.knightsandkings.knk.paper.teleport.TeleportCharges;
+import net.knightsandkings.knk.paper.teleport.TeleportExemptions;
 import net.knightsandkings.knk.paper.teleport.TeleportNodes;
 import net.knightsandkings.knk.paper.teleport.TeleportPlan;
 import net.knightsandkings.knk.paper.teleport.TeleportService;
@@ -38,8 +41,11 @@ import net.knightsandkings.knk.paper.teleport.VisibleTargetResolver;
  *       (the universal escape hatch, DESIGN §4 D5), but a player teleport: warmup, cooldown, combat
  *       tag, safe-spot check and every guard apply.</li>
  *   <li>{@code /spawn <player> [-s]} - send someone to spawn ({@value TeleportNodes#STAFF_OTHERS};
- *       you must outrank them). A staff teleport: instant, audited. Console allowed. {@code -s} needs
- *       {@value TeleportNodes#STAFF_SILENT}; always silent while you're vanished.</li>
+ *       your rank or lower since PandiO/knk-workspace#171). A staff teleport: instant, audited. Console allowed. {@code -s} needs
+ *       {@value TeleportNodes#STAFF_SILENT}; always silent while you're vanished. Same rank or lower, and not a
+ *       player exempt from it ({@code knk.teleport.exempt.spawn}, staff/owner mode) unless you override
+ *       (PandiO/knk-workspace#171).</li>
+ *   <li>{@code /spawn all [-s]} - every eligible player to their spawn ({@code knk.teleport.all.spawn}, #171).</li>
  * </ul>
  * Permissions resolve through {@code KnkPermissible}, hence no {@code permission:} in plugin.yml.
  */
@@ -57,6 +63,8 @@ public class SpawnCommand implements TabExecutor {
     /** A player's own spawn (their group's Game Settings override, KNG-52), or null for the server spawn. */
     private volatile Function<Player, SpawnPoint> playerSpawn = player -> null;
     private volatile TeleportCharges charges;
+    /** Exempt players and {@code /spawn all} (#171); null = nobody exempt, no {@code all}. */
+    private volatile TeleportExemptions exemptions;
 
     public SpawnCommand(PlayerCommandSupport support, TargetRankCheck rankCheck, VisibleTargetResolver targets,
                         TeleportService teleportService, SpawnDestinationResolver spawn, Predicate<Player> isVanished) {
@@ -82,10 +90,13 @@ public class SpawnCommand implements TabExecutor {
         StaffTeleportCommand.Parsed parsed = StaffTeleportCommand.Parsed.of(args);
         if (parsed.args().isEmpty() && !parsed.silent()) {
             self(sender);
+        } else if (parsed.args().size() == 1 && exemptions != null
+                && TeleportExemptions.ALL_ARGUMENT.equalsIgnoreCase(parsed.args().get(0))) {
+            all(sender, parsed.silent());
         } else if (parsed.args().size() == 1) {
             other(sender, parsed.args().get(0), parsed.silent());
         } else {
-            sender.sendMessage(ChatColor.YELLOW + "Usage: /spawn | /spawn <player> [-s]");
+            sender.sendMessage(ChatColor.YELLOW + "Usage: /spawn | /spawn <player> [-s]" + (exemptions != null ? " | /spawn all [-s]" : ""));
         }
         return true;
     }
@@ -131,6 +142,11 @@ public class SpawnCommand implements TabExecutor {
         this.charges = charges;
     }
 
+    /** Exempt players and {@code /spawn all} (PandiO/knk-workspace#171). */
+    public void setExemptions(TeleportExemptions exemptions) {
+        this.exemptions = exemptions;
+    }
+
     private void other(CommandSender sender, String targetName, boolean silentRequested) {
         Player target = targets.find(sender, targetName);
         if (target == null) {
@@ -142,7 +158,7 @@ public class SpawnCommand implements TabExecutor {
             return;
         }
         support.whenAllowed(sender, TeleportNodes.STAFF_OTHERS, () -> withSilent(sender, silentRequested, silent ->
-            rankCheck.whenOutranks(sender, target.getName(), summary -> withSpawn(sender, target, (destination, point) -> {
+            rankCheck.whenOutranks(sender, target.getName(), summary -> notExempt(sender, target, () -> withSpawn(sender, target, (destination, point) -> {
                 TeleportPlan plan = TeleportPlan.staffToLocation(sender, target, destination, point.label(), silent);
                 teleportService.start(plan).thenAccept(outcome -> StaffTeleportCommand.report(sender, plan, outcome, () -> {
                     sender.sendMessage(ChatColor.GREEN + "Sent " + target.getName() + " to spawn.");
@@ -150,7 +166,40 @@ public class SpawnCommand implements TabExecutor {
                         target.sendMessage(ChatColor.GRAY + sender.getName() + " sent you to spawn.");
                     }
                 }));
-            }))));
+            })))));
+    }
+
+    /**
+     * {@code /spawn all}: every eligible player to their own spawn (a group spawn override, else the server spawn),
+     * PandiO/knk-workspace#171.
+     */
+    private void all(CommandSender sender, boolean silentRequested) {
+        TeleportExemptions rules = exemptions;
+        support.whenAllowed(sender, TeleportExemptions.Type.SPAWN.allNode(), () -> withSilent(sender, silentRequested, silent ->
+            rules.forAll(sender, TeleportExemptions.Type.SPAWN, Set.of(), players ->
+                TeleportExemptions.runAll(sender, players, "to spawn", target -> {
+                    CompletableFuture<TeleportOutcome> done = new CompletableFuture<>();
+                    // withSpawn tells the sender itself when there is no spawn; that player then counts as not moved.
+                    withSpawn(sender, target, (destination, point) -> {
+                        TeleportPlan plan = TeleportPlan.staffToLocation(sender, target, destination, point.label(), silent);
+                        teleportService.start(plan).whenComplete((outcome, ex) -> {
+                            if (outcome != null && outcome.isTeleported() && !silent && target.isOnline()) {
+                                target.sendMessage(ChatColor.GRAY + sender.getName() + " sent you to spawn.");
+                            }
+                            done.complete(outcome != null ? outcome : TeleportOutcome.failed(UNAVAILABLE));
+                        });
+                    }, () -> done.complete(TeleportOutcome.failed(UNAVAILABLE)));
+                    return done;
+                }))));
+    }
+
+    private void notExempt(CommandSender sender, Player target, Runnable next) {
+        TeleportExemptions rules = exemptions;
+        if (rules == null) {
+            next.run();
+        } else {
+            rules.whenNotExempt(sender, target, TeleportExemptions.Type.SPAWN, next);
+        }
     }
 
     /**
@@ -159,6 +208,11 @@ public class SpawnCommand implements TabExecutor {
      * is already resolved and used as is.
      */
     private void withSpawn(CommandSender sender, Player traveller, BiConsumer<Location, SpawnPoint> next) {
+        withSpawn(sender, traveller, next, () -> { });
+    }
+
+    /** {@link #withSpawn(CommandSender, Player, BiConsumer)}; {@code onUnavailable} runs after the sender was told. */
+    private void withSpawn(CommandSender sender, Player traveller, BiConsumer<Location, SpawnPoint> next, Runnable onUnavailable) {
         SpawnPoint own;
         try {
             own = playerSpawn.apply(traveller);
@@ -179,17 +233,20 @@ public class SpawnCommand implements TabExecutor {
         } catch (RuntimeException ex) {
             LOGGER.log(Level.WARNING, "[KnK Teleport] Could not resolve the spawn", ex);
             sender.sendMessage(ChatColor.RED + UNAVAILABLE);
+            onUnavailable.run();
             return;
         }
         resolved.whenComplete((point, ex) -> support.mainThread().execute(() -> {
             if (ex != null || point == null) {
                 LOGGER.log(Level.WARNING, "[KnK Teleport] Could not resolve the spawn", ex);
                 sender.sendMessage(ChatColor.RED + UNAVAILABLE);
+                onUnavailable.run();
                 return;
             }
             Location destination = spawn.toLocation(point);
             if (destination == null || destination.getWorld() == null) {
                 sender.sendMessage(ChatColor.RED + UNAVAILABLE);
+                onUnavailable.run();
                 return;
             }
             next.accept(destination, point);
@@ -223,11 +280,25 @@ public class SpawnCommand implements TabExecutor {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         // KNG-107: the <player> form and its -s only for staff holding their nodes (cached check).
+        TeleportExemptions rules = exemptions;
+        boolean all = rules != null && args.length >= 1 && rules.offersAll(sender, TeleportExemptions.Type.SPAWN, args[0]);
         if (!support.holds(sender, TeleportNodes.STAFF_OTHERS)) {
+            if (args.length == 1 && all) {
+                return new ArrayList<>(List.of(TeleportExemptions.ALL_ARGUMENT));
+            }
+            if (args.length == 2 && rules != null && TeleportExemptions.ALL_ARGUMENT.equalsIgnoreCase(args[0])
+                    && support.holds(sender, TeleportExemptions.Type.SPAWN.allNode())
+                    && "-s".startsWith(args[1].toLowerCase(Locale.ROOT)) && support.holds(sender, TeleportNodes.STAFF_SILENT)) {
+                return List.of("-s");
+            }
             return Collections.emptyList();
         }
         if (args.length == 1) {
-            return targets.complete(sender, args[0]);
+            List<String> options = new ArrayList<>(targets.complete(sender, args[0]));
+            if (all) {
+                options.add(TeleportExemptions.ALL_ARGUMENT);
+            }
+            return options;
         }
         if (args.length == 2 && "-s".startsWith(args[1].toLowerCase(Locale.ROOT))
                 && support.holds(sender, TeleportNodes.STAFF_SILENT)) {
