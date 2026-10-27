@@ -58,7 +58,7 @@ import net.kyori.adventure.text.format.NamedTextColor;
  *       list when the menu isn't available.</li>
  *   <li>{@code /warps}, {@code /warp list} - the destinations with price and lock state in chat.</li>
  *   <li>{@code /warp <destination> <player> [-s]} - send someone ({@value TeleportNodes#STAFF_OTHERS},
- *       you must outrank them): a staff teleport - instant, free, audited. Console allowed.</li>
+ *       your rank or lower since PandiO/knk-workspace#171): a staff teleport - instant, free, audited. Console allowed.</li>
  * </ul>
  * The list comes from {@link TeleportDestinationsDataAccess} (cached per player); it is only used to
  * resolve names and show locks - the server decides at the charge. The teleport menu's destination

@@ -15,6 +15,7 @@ import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
+import net.knightsandkings.knk.paper.teleport.TeleportExemptions;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -373,5 +374,134 @@ class StaffTeleportCommandTest {
         assertEquals(List.of("-s"), complete(tp, "Alice", "-"));
         assertEquals(List.of("Alice"), complete(tphere, "a"));
         assertEquals(List.of("-s"), complete(tphere, "Alice", ""));
+    }
+
+    // ===== PandiO/knk-workspace#171: exemptions and the all form =====
+
+    /** Exempt nodes per player name (the exemptions' own permission view; the command's grants stay sender-wide). */
+    private final Map<String, Set<String>> exemptGrants = new java.util.HashMap<>();
+    private final Set<Player> inMode = new HashSet<>();
+    private final Set<Player> higherForAll = new HashSet<>();
+    private boolean overridesExemption;
+
+    private net.knightsandkings.knk.paper.teleport.TeleportExemptions exemptions(List<Player> onlinePlayers) {
+        KnkPermissible perPlayer = mock(KnkPermissible.class);
+        when(perPlayer.checkAsync(any(), anyString())).thenAnswer(inv -> {
+            Player player = inv.getArgument(0);
+            String node = inv.getArgument(1);
+            boolean held = exemptGrants.getOrDefault(player.getName(), Set.of()).contains(node) || granted.contains(node) && player.getName().equals("Staff");
+            return CompletableFuture.completedFuture(net.knightsandkings.knk.core.domain.permissions.PermissionDecision.of(held));
+        });
+        when(perPlayer.hasPermission(any(Player.class), anyString())).thenAnswer(inv -> granted.contains(inv.<String>getArgument(1)));
+        PlayerCommandSupport exemptSupport = new PlayerCommandSupport(perPlayer, Runnable::run, name -> null, () -> onlinePlayers);
+        return new net.knightsandkings.knk.paper.teleport.TeleportExemptions(exemptSupport, inMode::contains,
+            (sender, target) -> CompletableFuture.completedFuture(!higherForAll.contains(target)),
+            sender -> CompletableFuture.completedFuture(overridesExemption));
+    }
+
+    private void exempt(Player player, String node) {
+        exemptGrants.computeIfAbsent(player.getName(), k -> new HashSet<>()).add(node);
+    }
+
+    private List<TeleportPlan> startedPlans() {
+        ArgumentCaptor<TeleportPlan> plan = ArgumentCaptor.forClass(TeleportPlan.class);
+        verify(teleportService, org.mockito.Mockito.atLeast(0)).start(plan.capture());
+        return plan.getAllValues();
+    }
+
+    @Test
+    void tpAllSendsEveryEligiblePlayerToTheTargetAndReportsTheCount() {
+        grant(TeleportExemptions.Type.TP.allNode());
+        Player carol = player("Carol", new Location(world, 5, 64, 5));
+        Player dave = player("Dave", new Location(world, 6, 64, 6));
+        Player erin = player("Erin", new Location(world, 7, 64, 7));
+        exempt(carol, "knk.teleport.exempt.tp");
+        inMode.add(dave);
+        higherForAll.add(erin);
+        tp.setExemptions(exemptions(List.of(staff, alice, bob, carol, dave, erin)));
+
+        run(tp, staff, "all", "Bob");
+
+        List<TeleportPlan> plans = startedPlans();
+        assertEquals(1, plans.size());
+        assertSame(alice, plans.get(0).subject());
+        assertSame(bob, plans.get(0).visited());
+        assertEquals(List.of("Bob"), rankChecked);
+        verify(staff).sendMessage(contains("Teleported 1 of 1 player to Bob."));
+        verify(alice).sendMessage(contains("Staff teleported you to Bob"));
+    }
+
+    @Test
+    void tpAllNeedsItsOwnNode() {
+        grant(TeleportNodes.STAFF_OTHERS);
+        tp.setExemptions(exemptions(List.of(staff, alice, bob)));
+
+        run(tp, staff, "all", "Bob");
+
+        verify(teleportService, never()).start(any());
+        verify(staff).sendMessage(contains("don't have permission"));
+    }
+
+    @Test
+    void tphereAllBringsEveryEligiblePlayerSilently() {
+        grant(TeleportExemptions.Type.TPHERE.allNode(), TeleportNodes.STAFF_SILENT);
+        exempt(bob, "knk.teleport.exempt.tphere");
+        tp.setExemptions(exemptions(List.of(staff, alice, bob)));
+        StaffTeleportCommand here = tp.withForm(StaffTeleportCommand.Form.TPHERE);
+
+        run(here, staff, "all", "-s");
+
+        List<TeleportPlan> plans = startedPlans();
+        assertEquals(1, plans.size());
+        assertSame(alice, plans.get(0).subject());
+        assertSame(staff, plans.get(0).visited());
+        assertTrue(plans.get(0).silent());
+        verify(alice, never()).sendMessage(anyString());
+    }
+
+    @Test
+    void tphereRefusesAnExemptPlayerUnlessOverridden() {
+        grant(TeleportNodes.STAFF_OTHERS);
+        exempt(alice, "knk.teleport.exempt.tphere");
+        tp.setExemptions(exemptions(List.of(staff, alice, bob)));
+        StaffTeleportCommand here = tp.withForm(StaffTeleportCommand.Form.TPHERE);
+
+        run(here, staff, "Alice");
+        verify(teleportService, never()).start(any());
+        verify(staff).sendMessage(contains("Alice is exempt"));
+
+        overridesExemption = true;
+        run(here, staff, "Alice");
+        assertSame(alice, startedPlan().subject());
+    }
+
+    @Test
+    void tpOfAPlayerInStaffModeIsRefused() {
+        grant(TeleportNodes.STAFF_OTHERS);
+        inMode.add(alice);
+        tp.setExemptions(exemptions(List.of(staff, alice, bob)));
+
+        run(tp, staff, "Alice", "Bob");
+
+        verify(teleportService, never()).start(any());
+        verify(staff).sendMessage(contains("staff or owner mode"));
+    }
+
+    @Test
+    void withoutExemptionsAllIsAPlayerName() {
+        grant(TeleportNodes.STAFF);
+
+        run(tp, staff, "all");
+
+        verify(staff).sendMessage(contains("No online player named 'all'"));
+    }
+
+    @Test
+    void completionOffersAllToHoldersOfItsNode() {
+        tp.setExemptions(exemptions(List.of(staff, alice, bob)));
+        grant(TeleportExemptions.Type.TP.allNode());
+        assertEquals(List.of("all"), complete(tp, "a"));
+        assertEquals(List.of("Bob"), complete(tp, "all", "b"));
+        assertEquals(List.of(), complete(tp.withForm(StaffTeleportCommand.Form.TPHERE), "a"));
     }
 }
