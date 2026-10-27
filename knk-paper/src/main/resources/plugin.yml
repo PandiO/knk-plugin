@@ -423,7 +423,8 @@ permissions:
     default: false
   knk.admin.item.more:
     description: >-
-      /knk item more - fill the held stack to its max, or give another full stack when it's full. Items with an
+      /knk item more [amount] - fill the held stack to its max, or give another full stack when it's full; with an
+      amount, exactly that many more (1-2304, any max stack size; what doesn't fit isn't given). Items with an
       instance id get new instances from the API (one per copy). Needs knk.admin.item too (PandiO/knk-workspace#175).
     default: false
 

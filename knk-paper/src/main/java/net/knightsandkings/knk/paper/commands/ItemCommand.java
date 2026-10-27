@@ -69,7 +69,7 @@ public class ItemCommand implements CommandExecutor {
     private void sendUsage(CommandSender sender) {
         sender.sendMessage(ChatColor.YELLOW + "Usage: /knk item rename <displayName> | " +
                 "/knk item lore <add <text>|set <line> <text>|remove <line>> | " +
-                "/knk item enchantments <list|vanilla|search|apply> | /knk item more");
+                "/knk item enchantments <list|vanilla|search|apply> | /knk item more [amount]");
     }
 
     private void handleRename(CommandSender sender, String[] args) {
