@@ -3609,6 +3609,10 @@ public class KnKPlugin extends JavaPlugin {
         // Alpha run 1 (PandiO/knk-workspace#150): a disconnected member keeps their place for this long.
         siegeService.setRejoinWindow(java.time.Duration.ofSeconds(Math.max(0, getConfig().getInt("siege.rejoin-window-seconds",
             (int) SiegeService.DEFAULT_REJOIN_WINDOW.toSeconds()))));
+        // Alpha run 1 (PandiO/knk-workspace#164/#174): match page links in the result and /siege history; the same value
+        // as the API's App:PublicBaseUrl. Empty: no links.
+        siegeService.setPublicWebUrl(config.web().publicUrl());
+        siegeService.setHistoryApi(apiClient.getSiegeMatchHistoryApi());
 
         PluginCommand siegeCommand = getCommand("siege");
         if (siegeCommand != null) {

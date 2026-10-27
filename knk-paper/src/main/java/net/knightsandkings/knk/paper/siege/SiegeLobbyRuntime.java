@@ -40,6 +40,8 @@ public final class SiegeLobbyRuntime {
     private SiegeObjectiveBoard preMatchBoard;
     private final Map<UUID, SpawnChoice> preMatchSpawnChoices = new HashMap<>();
     private SiegeMatch match;
+    /** The match ended and was recorded; its members wait at the hub with the result (PandiO/knk-workspace#198). */
+    private boolean matchOver;
     private boolean disabledLogged;
 
     SiegeLobbyRuntime(SiegeLobbyStateMachine machine) {
@@ -85,6 +87,14 @@ public final class SiegeLobbyRuntime {
 
     public Optional<SiegeMatch> match() {
         return Optional.ofNullable(match);
+    }
+
+    /**
+     * True from the end of a match until its members are released (alpha run 1, PandiO/knk-workspace#198): the
+     * match is recorded and its rewards granted, and the members wait at the hub with the result (POST_MATCH).
+     */
+    public boolean matchOver() {
+        return matchOver;
     }
 
     public Optional<KnkSiegeScenario> drawnScenario() {
@@ -155,6 +165,10 @@ public final class SiegeLobbyRuntime {
         this.match = match;
     }
 
+    void setMatchOver(boolean matchOver) {
+        this.matchOver = matchOver;
+    }
+
     /** Clears everything round-specific (after an end or a cancel). Members are handled by the caller. */
     void clearRound() {
         matchToken = null;
@@ -163,6 +177,7 @@ public final class SiegeLobbyRuntime {
         preMatchBoard = null;
         preMatchSpawnChoices.clear();
         match = null;
+        matchOver = false;
     }
 
     boolean disabledLogged() {

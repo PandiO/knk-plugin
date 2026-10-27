@@ -85,7 +85,8 @@ public final class SiegeMapper {
                 SiegeNonMemberGateView.fromApi(dto.nonMemberGateView()),
                 or(dto.giveNavigationItem(), d.giveNavigationItem()),
                 or(dto.playerSkipMatchmakingSeconds(), d.playerSkipMatchmakingSeconds()),
-                or(dto.adminSkipMatchmakingSeconds(), d.adminSkipMatchmakingSeconds())
+                or(dto.adminSkipMatchmakingSeconds(), d.adminSkipMatchmakingSeconds()),
+                or(dto.postMatchSeconds(), KnkSiegeConfiguration.DEFAULT_POST_MATCH_SECONDS)
         );
     }
 

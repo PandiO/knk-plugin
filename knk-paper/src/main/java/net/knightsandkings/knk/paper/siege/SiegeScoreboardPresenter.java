@@ -7,6 +7,7 @@ import net.knightsandkings.knk.core.siege.ObjectiveState.Presence;
 import net.knightsandkings.knk.core.siege.SiegeDisplayText;
 import net.knightsandkings.knk.core.siege.SiegeMatchRoster.MemberView;
 import net.knightsandkings.knk.core.siege.SiegeObjectiveBoard.BoardStep;
+import net.knightsandkings.knk.paper.utils.ScoreboardUtil;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
@@ -30,19 +31,30 @@ import java.util.UUID;
  * Per-team scoreboards during a match (DESIGN §6.5, §6.6): one {@link Scoreboard} per siege team so the
  * sidebar can be viewer-relative - the team, the time left, and the objectives (instant-victory first)
  * coloured green when the viewer's alliance holds them and red otherwise, with a marker while
- * contested. Every siege team is a Bukkit team on each board, so name tags carry team colours. The
- * tab list shows {@code [Team] name [K/D]} through {@link Player#playerListName(Component)}.
+ * contested. Every siege team is a Bukkit team on each board, so name tags carry team colours.
  * <p>
- * The player's previous scoreboard (normally {@code ScoreboardUtil}'s shared one) and tab name are
- * restored when they leave the match or it ends.
+ * Alpha run 1 (PandiO/knk-workspace#163): only the match's <b>members</b> see these boards. The tab list
+ * shows {@code [Team] name} through the board's team prefix and {@code [K/D]} through a tab-list objective on the
+ * siege boards, so nothing global changes a player's name: everyone else keeps the shared {@code ScoreboardUtil}
+ * board, where a member carries a {@code " [Siege]"} suffix (tab list and name tag, {@link ScoreboardUtil#setSiegeTag})
+ * from the start (or their late join) until they are restored. A member keeps their team's board through the
+ * post-match wait at the hub (#198), which shows the result and the time until the return.
+ * <p>
+ * The player's previous scoreboard (normally {@code ScoreboardUtil}'s shared one) is restored when they
+ * leave the match or are released after it. Every board assignment goes through {@link #setBoard}/{@link #boardOf}
+ * (the one place package G's {@code ViewerScoreboards} wraps for the Flash Chaos name-tag blackout).
  */
 public final class SiegeScoreboardPresenter implements SiegeMatchObserver {
 
     private static final int MAX_LINES = 15;
 
+    /** The tab-list objective on the siege boards: each member's {@code [kills/deaths]} (#163). */
+    static final String TAB_OBJECTIVE = "siege_kd";
+
     private final Map<UUID, Scoreboard> previousBoards = new HashMap<>();
     private final Map<String, Map<Integer, Scoreboard>> boardsByMatch = new HashMap<>();
-    private final Map<UUID, String> lastTabName = new HashMap<>();
+    /** Matches that ended and wait at the hub (#198): their boards show the result. */
+    private final Map<String, Boolean> endedMatches = new HashMap<>();
 
     @Override
     public void matchStarted(SiegeLobbyRuntime lobby, SiegeMatch match) {
@@ -60,6 +72,9 @@ public final class SiegeScoreboardPresenter implements SiegeMatchObserver {
                     Component.text(lobby.displayName(), NamedTextColor.GOLD, TextDecoration.BOLD));
             sidebar.setDisplaySlot(DisplaySlot.SIDEBAR);
             sidebar.numberFormat(NumberFormat.blank());
+            // #163: kills/deaths in the tab list for the members only (was a global custom tab name).
+            Objective tab = board.registerNewObjective(TAB_OBJECTIVE, Criteria.DUMMY, Component.text("K/D"));
+            tab.setDisplaySlot(DisplaySlot.PLAYER_LIST);
             boards.put(viewerTeam.id(), board);
         }
         boardsByMatch.put(match.matchToken(), boards);
@@ -78,7 +93,6 @@ public final class SiegeScoreboardPresenter implements SiegeMatchObserver {
         Map<Integer, Scoreboard> boards = boardsByMatch.get(match.matchToken());
         if (boards == null) return;
         match.roster().teamOf(player.getUniqueId()).ifPresent(teamId -> show(boards, player, teamId));
-        lastTabName.remove(player.getUniqueId());
         refresh(lobby, match);
     }
 
@@ -87,9 +101,22 @@ public final class SiegeScoreboardPresenter implements SiegeMatchObserver {
             Team team = b.getTeam("siege_" + teamId);
             if (team != null) team.addEntry(p.getName());
         });
-        previousBoards.putIfAbsent(p.getUniqueId(), p.getScoreboard());
+        previousBoards.putIfAbsent(p.getUniqueId(), boardOf(p));
         Scoreboard own = boards.get(teamId);
-        if (own != null) p.setScoreboard(own);
+        if (own != null) setBoard(p, own);
+        ScoreboardUtil.setSiegeTag(p, true);
+    }
+
+    // ==================== Board assignment (one place, see the class comment) ====================
+
+    /** Gives the player this board. With package G merged: {@code ViewerScoreboards.set(player, board)}. */
+    private static void setBoard(Player player, Scoreboard board) {
+        player.setScoreboard(board);
+    }
+
+    /** The player's own board. With package G merged: {@code ViewerScoreboards.current(player)}. */
+    private static Scoreboard boardOf(Player player) {
+        return player.getScoreboard();
     }
 
     @Override
@@ -109,13 +136,38 @@ public final class SiegeScoreboardPresenter implements SiegeMatchObserver {
         restore(player);
     }
 
+    /**
+     * The match ended (#198): its members keep their board through the post-match wait, which shows the result;
+     * they are restored when they are released ({@link #memberRemoved}). Without a wait that is right away.
+     */
     @Override
     public void matchEnded(SiegeLobbyRuntime lobby, SiegeMatch match) {
-        for (UUID id : match.roster().playerIds()) {
-            Player p = Bukkit.getPlayer(id);
-            if (p != null) restore(p);
-        }
-        boardsByMatch.remove(match.matchToken());
+        if (!boardsByMatch.containsKey(match.matchToken())) return;
+        endedMatches.put(match.matchToken(), Boolean.TRUE);
+        refresh(lobby, match);
+    }
+
+    @Override
+    public void postMatchSecond(SiegeLobbyRuntime lobby, SiegeMatch match) {
+        refresh(lobby, match);
+    }
+
+    /** Everyone was released: anyone still holding a board of the round gets their own back, and the boards go. */
+    @Override
+    public void roundReleased(SiegeLobbyRuntime lobby) {
+        lobby.match().ifPresent(match -> {
+            for (UUID id : match.roster().playerIds()) {
+                Player p = Bukkit.getPlayer(id);
+                if (p != null) {
+                    restore(p);
+                } else {
+                    previousBoards.remove(id);
+                    ScoreboardUtil.forgetSiegeTag(id);
+                }
+            }
+            boardsByMatch.remove(match.matchToken());
+            endedMatches.remove(match.matchToken());
+        });
     }
 
     @Override
@@ -126,12 +178,13 @@ public final class SiegeScoreboardPresenter implements SiegeMatchObserver {
         }
         previousBoards.clear();
         boardsByMatch.clear();
+        endedMatches.clear();
     }
 
     private void restore(Player player) {
         Scoreboard previous = previousBoards.remove(player.getUniqueId());
-        if (previous != null) player.setScoreboard(previous);
-        if (lastTabName.remove(player.getUniqueId()) != null) player.playerListName(null);
+        if (previous != null) setBoard(player, previous);
+        ScoreboardUtil.setSiegeTag(player, false);
     }
 
     // ==================== Rendering ====================
@@ -140,6 +193,7 @@ public final class SiegeScoreboardPresenter implements SiegeMatchObserver {
         Map<Integer, Scoreboard> boards = boardsByMatch.get(match.matchToken());
         if (boards == null) return;
         int secondsLeft = lobby.machine().secondsRemaining();
+        boolean ended = endedMatches.containsKey(match.matchToken());
         List<ObjectiveState> objectives = new ArrayList<>(match.board().objectives());
         objectives.sort(Comparator.comparing((ObjectiveState s) -> !s.objective().instantVictory()));
 
@@ -149,8 +203,16 @@ public final class SiegeScoreboardPresenter implements SiegeMatchObserver {
             int viewerAlliance = viewerTeam.allianceGroup();
             List<Component> lines = new ArrayList<>();
             lines.add(Component.text("Team: ", NamedTextColor.GRAY).append(SiegeBukkit.teamComponent(viewerTeam)));
-            lines.add(Component.text("Time left: ", NamedTextColor.GRAY)
-                    .append(Component.text(SiegeMessages.clock(secondsLeft), NamedTextColor.WHITE)));
+            if (ended) {
+                lines.add(Component.text("Match over", NamedTextColor.GOLD, TextDecoration.BOLD));
+                lines.add(Component.text("Return in: ", NamedTextColor.GRAY)
+                        .append(Component.text(SiegeMessages.clock(secondsLeft), NamedTextColor.WHITE)));
+            } else {
+                lines.add(Component.text("Time left: ", NamedTextColor.GRAY)
+                        .append(Component.text(SiegeMessages.clock(secondsLeft),
+                                secondsLeft <= net.knightsandkings.knk.core.siege.SiegeLobbyStateMachine.FINAL_COUNTDOWN_SECONDS
+                                        ? NamedTextColor.RED : NamedTextColor.WHITE)));
+            }
             lines.add(Component.empty());
             for (ObjectiveState state : objectives) {
                 boolean ours = match.alliances().knows(state.holderTeamId())
@@ -164,17 +226,23 @@ public final class SiegeScoreboardPresenter implements SiegeMatchObserver {
             render(board, lines);
         }
 
+        // #163: [kills/deaths] next to each member in the tab list, on the siege boards only.
         for (MemberView member : match.roster().members()) {
             Player p = Bukkit.getPlayer(member.playerId());
             if (p == null) continue;
-            KnkSiegeTeam team = match.scenario().team(member.teamId()).orElse(null);
-            String key = member.teamId() + ":" + member.kills() + ":" + member.deaths();
-            if (key.equals(lastTabName.get(p.getUniqueId()))) continue;
-            p.playerListName(Component.text("[" + SiegeBukkit.teamName(team) + "] ", SiegeBukkit.color(team))
-                    .append(Component.text(p.getName(), NamedTextColor.WHITE))
-                    .append(Component.text(" [" + member.kills() + "/" + member.deaths() + "]", NamedTextColor.GRAY)));
-            lastTabName.put(p.getUniqueId(), key);
+            for (Scoreboard board : boards.values()) {
+                Objective tab = board.getObjective(TAB_OBJECTIVE);
+                if (tab != null) showKillsDeaths(tab.getScore(p.getName()), member.kills(), member.deaths());
+            }
         }
+    }
+
+    /** The tab-list score: kills as the number (for sorting), shown as {@code [k/d]}. */
+    static void showKillsDeaths(Score score, int kills, int deaths) {
+        if (!score.isScoreSet() || score.getScore() != kills) score.setScore(kills);
+        Component shown = Component.text("[" + kills + "/" + deaths + "]", NamedTextColor.GRAY);
+        NumberFormat format = NumberFormat.fixed(shown);
+        if (!format.equals(score.numberFormat())) score.numberFormat(format);
     }
 
     /** Fixed entry keys with descending scores; the text is each score's custom name. */

@@ -39,6 +39,7 @@ import net.knightsandkings.knk.api.impl.PermissionGroupsQueryApiImpl;
 import net.knightsandkings.knk.api.impl.ClansQueryApiImpl;
 import net.knightsandkings.knk.api.impl.SiegeLobbiesQueryApiImpl;
 import net.knightsandkings.knk.api.impl.SiegeMatchesCommandApiImpl;
+import net.knightsandkings.knk.api.impl.SiegeMatchHistoryApiImpl;
 import net.knightsandkings.knk.api.impl.SiegeGatesCommandApiImpl;
 import net.knightsandkings.knk.api.impl.SiegeScenariosQueryApiImpl;
 import net.knightsandkings.knk.api.impl.TitleBracketsQueryApiImpl;
@@ -139,6 +140,7 @@ public class KnkApiClient {
     private final SiegeLobbiesQueryApi siegeLobbiesQueryApi;
     private final SiegeScenariosQueryApi siegeScenariosQueryApi;
     private final SiegeMatchesCommandApi siegeMatchesCommandApi;
+    private final net.knightsandkings.knk.core.ports.api.SiegeMatchHistoryApi siegeMatchHistoryApi;
     private final SiegeGatesCommandApi siegeGatesCommandApi;
     private final TitleBracketsQueryApi titleBracketsQueryApi;
     private final KitsQueryApi kitsQueryApi;
@@ -215,6 +217,7 @@ public class KnkApiClient {
         this.siegeLobbiesQueryApi = new SiegeLobbiesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeScenariosQueryApi = new SiegeScenariosQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeMatchesCommandApi = new SiegeMatchesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.siegeMatchHistoryApi = new SiegeMatchHistoryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeGatesCommandApi = new SiegeGatesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.titleBracketsQueryApi = new TitleBracketsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.kitsQueryApi = new KitsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -474,6 +477,11 @@ public class KnkApiClient {
     /** Siege Phase 6: match lifecycle checkpoints (wrap it in knk-core's SiegeMatchRecorder). */
     public SiegeMatchesCommandApi getSiegeMatchesCommandApi() {
         return siegeMatchesCommandApi;
+    }
+
+    /** Alpha run 1 (PandiO/knk-workspace#174): a player's finished matches for {@code /siege history}. */
+    public net.knightsandkings.knk.core.ports.api.SiegeMatchHistoryApi getSiegeMatchHistoryApi() {
+        return siegeMatchHistoryApi;
     }
 
     /** Siege Phase 7a: the persisted gate lockdown (snapshots, overrides, restore). */

@@ -170,6 +170,8 @@ class SiegeMapperTest {
         assertEquals(20, c.spawnPickerDelayTicks());
         assertEquals(60, c.playerSkipMatchmakingSeconds());
         assertEquals(31, c.adminSkipMatchmakingSeconds());
+        // PandiO/knk-workspace#198: the fixture (an API before the setting) has no postMatchSeconds: the API default.
+        assertEquals(KnkSiegeConfiguration.DEFAULT_POST_MATCH_SECONDS, c.postMatchSeconds());
         assertEquals(30, c.enchantDropChancePerMille());
         assertEquals(17, c.allowedEnchantmentKeys().size());
         assertTrue(c.allowedEnchantmentKeys().contains("minecraft:sharpness"));
@@ -289,6 +291,15 @@ class SiegeMapperTest {
         assertEquals("SPATIAL_CHECKS_UNAVAILABLE", readiness.warnings().get(0).code());
         assertNull(readiness.warnings().get(0).entityId());
         assertNull(SiegeMapper.toCore((ReadinessDto) null));
+    }
+
+    /** PandiO/knk-workspace#198: the configured post-match wait reaches the core configuration; 0 is kept. */
+    @Test
+    void mapsThePostMatchSeconds() throws IOException {
+        String json = "{\"configuration\":{\"postMatchSeconds\":45},\"lobbies\":[]}";
+        assertEquals(45, SiegeMapper.toCore(objectMapper.readValue(json, RuntimeConfigDto.class)).configuration().postMatchSeconds());
+        String off = "{\"configuration\":{\"postMatchSeconds\":0},\"lobbies\":[]}";
+        assertEquals(0, SiegeMapper.toCore(objectMapper.readValue(off, RuntimeConfigDto.class)).configuration().postMatchSeconds());
     }
 
     private RuntimeConfigDto readFixture() throws IOException {

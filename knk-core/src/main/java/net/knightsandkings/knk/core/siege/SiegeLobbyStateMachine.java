@@ -13,6 +13,8 @@ import net.knightsandkings.knk.core.siege.SiegeEffect.CancelReason;
 import net.knightsandkings.knk.core.siege.SiegeEffect.DisableReason;
 import net.knightsandkings.knk.core.siege.SiegeEffect.DrawScenarioEffect;
 import net.knightsandkings.knk.core.siege.SiegeEffect.EndMatchEffect;
+import net.knightsandkings.knk.core.siege.SiegeEffect.FinalCountdownEffect;
+import net.knightsandkings.knk.core.siege.SiegeEffect.PostMatchOverEffect;
 import net.knightsandkings.knk.core.siege.SiegeEffect.LobbyDisabledEffect;
 import net.knightsandkings.knk.core.siege.SiegeEffect.MatchmakingStartedEffect;
 import net.knightsandkings.knk.core.siege.SiegeEffect.PhaseChangedEffect;
@@ -56,6 +58,9 @@ public final class SiegeLobbyStateMachine {
 
     /** Seconds after the start at which the teams' start messages show (legacy: progressExpire − 2). */
     public static final int START_MESSAGE_DELAY_SECONDS = 2;
+
+    /** The last seconds of a running match that are counted down to the members (PandiO/knk-workspace#199). */
+    public static final int FINAL_COUNTDOWN_SECONDS = 15;
 
     /**
      * A player's {@code /siege skip} during matchmaking left this many seconds before the value became a
@@ -158,11 +163,23 @@ public final class SiegeLobbyStateMachine {
                 secondsElapsed++;
                 if (secondsRemaining <= 0) {
                     endMatch(SiegeEndReason.TIME_EXPIRED, effects);
-                } else if (secondsElapsed == START_MESSAGE_DELAY_SECONDS) {
-                    effects.add(new StartMessageEffect(drawnScenario));
+                } else {
+                    if (secondsElapsed == START_MESSAGE_DELAY_SECONDS) {
+                        effects.add(new StartMessageEffect(drawnScenario));
+                    }
+                    if (secondsRemaining <= FINAL_COUNTDOWN_SECONDS) {
+                        effects.add(new FinalCountdownEffect(secondsRemaining));
+                    }
                 }
             }
             case ENDING -> enterCooldown(effects);
+            case POST_MATCH -> {
+                secondsRemaining--;
+                if (secondsRemaining <= 0) {
+                    effects.add(new PostMatchOverEffect(drawnScenario));
+                    enterCooldown(effects);
+                }
+            }
             case COOLDOWN -> {
                 secondsRemaining--;
                 if (secondsRemaining <= 0) beginMatchmaking(effects);
@@ -184,8 +201,8 @@ public final class SiegeLobbyStateMachine {
 
     /**
      * The runtime ended the running match: an instant-victory capture, elimination or not enough
-     * players (DESIGN §6.8, §7.5). IN_PROGRESS → ENDING; the next tick enters cooldown.
-     * No-op outside IN_PROGRESS.
+     * players (DESIGN §6.8, §7.5). IN_PROGRESS → POST_MATCH for the configured post-match time (#198), or
+     * ENDING when it is 0 (the next tick enters cooldown). No-op outside IN_PROGRESS.
      */
     public List<SiegeEffect> endMatch(SiegeEndReason reason) {
         if (phase != SiegePhase.IN_PROGRESS) return List.of();
@@ -212,6 +229,8 @@ public final class SiegeLobbyStateMachine {
                         : reason == SiegeEndReason.API_OUTAGE ? CancelReason.API_OUTAGE : CancelReason.ADMIN_STOPPED,
                     phase == SiegePhase.HUB));
             case IN_PROGRESS -> effects.add(new EndMatchEffect(drawnScenario, reason));
+            // #198: the match is already recorded; the members waiting at the hub are restored now.
+            case POST_MATCH -> effects.add(new PostMatchOverEffect(drawnScenario));
             default -> { }
         }
         locks.release(lobby.id());
@@ -289,12 +308,12 @@ public final class SiegeLobbyStateMachine {
         return phase;
     }
 
-    /** Seconds until the phase's next boundary: match start, match end, or end of cooldown. */
+    /** Seconds until the phase's next boundary: match start, match end, end of the post-match wait, or end of cooldown. */
     public int secondsRemaining() {
         return Math.max(0, secondsRemaining);
     }
 
-    /** Seconds since the match started (IN_PROGRESS/ENDING). */
+    /** Seconds since the match started (IN_PROGRESS/ENDING/POST_MATCH). */
     public int secondsElapsed() {
         return secondsElapsed;
     }
@@ -423,9 +442,19 @@ public final class SiegeLobbyStateMachine {
         effects.add(new StartMatchEffect(drawnScenario, matchDurationSeconds, memberCount));
     }
 
+    /**
+     * Alpha run 1 (PandiO/knk-workspace#198): with a post-match time the members wait at the hub with the result
+     * (POST_MATCH) before they are restored; without one the match ends as before (ENDING, cooldown next tick).
+     */
     private void endMatch(SiegeEndReason reason, List<SiegeEffect> effects) {
-        secondsRemaining = 0;
-        moveTo(SiegePhase.ENDING, effects);
+        int postMatch = configuration.postMatchSeconds();
+        if (postMatch > 0) {
+            secondsRemaining = postMatch;
+            moveTo(SiegePhase.POST_MATCH, effects);
+        } else {
+            secondsRemaining = 0;
+            moveTo(SiegePhase.ENDING, effects);
+        }
         effects.add(new EndMatchEffect(drawnScenario, reason));
     }
 

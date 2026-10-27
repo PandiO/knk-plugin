@@ -3,6 +3,9 @@ package net.knightsandkings.knk.paper.utils;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
 
 import org.bukkit.Bukkit;
@@ -88,6 +91,10 @@ public class ScoreboardUtil {
                 knkPermissible.hasPermission(p, "knk.mode.owner"),
                 knkPermissible.hasPermission(p, "knk.mode.staff"),
                 userSummary));
+            // PandiO/knk-workspace#163: a siege member keeps the " [Siege]" tag through a rank refresh.
+            if (siegeTagged.contains(p.getUniqueId())) {
+                team = siegeTeamFor(scoreboard, team);
+            }
 
             team.addPlayer(p);
             if (!keepOwnScoreboard.test(p)) {
@@ -117,6 +124,87 @@ public class ScoreboardUtil {
             team.color(target.color());
         }
         return team;
+    }
+
+    // ==================== Siege tag (alpha run 1, PandiO/knk-workspace#163) ====================
+
+    /** Suffix behind a siege member's name on the shared board (tab list and name tag), while they are in a match. */
+    public static final Component SIEGE_SUFFIX = Component.text(" [Siege]", NamedTextColor.GOLD);
+    /** The shared board's tagged twin of a team: {@code <team>.siege}, same look plus {@link #SIEGE_SUFFIX}. */
+    static final String SIEGE_TEAM_SUFFIX = ".siege";
+
+    private static final Set<UUID> siegeTagged = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Tags or untags a siege member on the shared board: everyone outside the match sees their name (tab list and
+     * name tag) with {@code " [Siege]"} after it, while the member themself sees the siege board. The member moves to
+     * the tagged twin of their rank team ({@code default.siege}, {@code tier_12.siege}, ...) and back; their rank
+     * team and colour are kept. Only the shared board's teams change, never the board a player sees. Main thread.
+     */
+    public static void setSiegeTag(Player player, boolean tagged) {
+        if (player == null) {
+            return;
+        }
+        boolean changed = tagged ? siegeTagged.add(player.getUniqueId()) : siegeTagged.remove(player.getUniqueId());
+        if (!changed) {
+            return;
+        }
+        Scoreboard shared = getScoreboard();
+        Team current = shared.getEntryTeam(player.getName());
+        Team base = current == null ? teamFor(shared, new TabListTeam(TabListTeam.DEFAULT, null)) : baseTeamOf(shared, current);
+        Team target = tagged ? siegeTeamFor(shared, base) : base;
+        if (current != target) {
+            target.addEntry(player.getName());
+        }
+    }
+
+    /**
+     * Drops the tag of a player who is offline (released while away): their next join puts them back on their rank
+     * team ({@link #setScoreboard}).
+     */
+    public static void forgetSiegeTag(UUID playerId) {
+        if (playerId != null) {
+            siegeTagged.remove(playerId);
+        }
+    }
+
+    /** Whether the player carries the siege tag on the shared board (#163). */
+    public static boolean hasSiegeTag(UUID playerId) {
+        return playerId != null && siegeTagged.contains(playerId);
+    }
+
+    /** The tagged twin of {@code base}, registered on first use; its look follows the base team every time. */
+    static Team siegeTeamFor(Scoreboard scoreboard, Team base) {
+        String name = siegeTeamName(base.getName());
+        Team twin = scoreboard.getTeam(name);
+        if (twin == null) {
+            twin = scoreboard.registerNewTeam(name);
+        }
+        if (base.hasColor()) {
+            twin.color(NamedTextColor.nearestTo(base.color()));
+        }
+        twin.prefix(base.prefix());
+        twin.suffix(SIEGE_SUFFIX);
+        return twin;
+    }
+
+    /** The rank team behind a team: itself, or the base of a tagged twin. */
+    static Team baseTeamOf(Scoreboard scoreboard, Team team) {
+        String baseName = baseTeamName(team.getName());
+        if (baseName.equals(team.getName())) {
+            return team;
+        }
+        Team base = scoreboard.getTeam(baseName);
+        return base != null ? base : teamFor(scoreboard, new TabListTeam(baseName, null));
+    }
+
+    static String siegeTeamName(String baseName) {
+        return baseName.endsWith(SIEGE_TEAM_SUFFIX) ? baseName : baseName + SIEGE_TEAM_SUFFIX;
+    }
+
+    static String baseTeamName(String teamName) {
+        return teamName.endsWith(SIEGE_TEAM_SUFFIX)
+            ? teamName.substring(0, teamName.length() - SIEGE_TEAM_SUFFIX.length()) : teamName;
     }
 
     // Package-private for ScoreboardUtilTest (setScoreboard itself needs a live Bukkit server).

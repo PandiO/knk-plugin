@@ -134,7 +134,7 @@ commands:
 
   siege:
     description: "Siege minigame: lobbies, join/leave, vote, spawn choice, admin controls (docs/specs/siege-minigame/DESIGN.md §11.1)"
-    usage: "/siege [join|leave|menu|info|vote|spawn|skip|admin] ..."
+    usage: "/siege [join|leave|menu|info|vote|spawn|history|skip|admin] ..."
     # No permission: here - each subcommand is gated on its own knk.siege.* node through
     # KnkPermissible inside SiegeCommand, same reasoning as /kit and /knk.
 
