@@ -185,6 +185,42 @@ public final class SiegeService {
     /** Command label -> primary command name, over the server's command map (for the command filter). */
     private final java.util.function.UnaryOperator<String> commandAliases;
 
+    /**
+     * Alpha run 1 (PandiO/knk-workspace#166): when a player's current AFK state began (null while active), from the
+     * statistics AFK tracker. Without statistics (or with AFK off) every present second counts as active.
+     */
+    private java.util.function.Function<UUID, Instant> afkSince = id -> null;
+
+    /** The AFK source for the participation reward ({@code StatisticsService::afkSince}); null: nobody is ever AFK. */
+    public void setAfkSource(java.util.function.Function<UUID, Instant> afkSince) {
+        this.afkSince = afkSince == null ? id -> null : afkSince;
+    }
+
+    /**
+     * Alpha run 1 (PandiO/knk-workspace#165): the lobby (runtime id) whose lockdown holds a gate structure, or null
+     * ({@code SiegeGateController::lobbyIdOf}); set when the siege gates are up.
+     */
+    private java.util.function.IntFunction<Integer> gateLobby = structureId -> null;
+
+    public void setGateLobbySource(java.util.function.IntFunction<Integer> gateLobby) {
+        this.gateLobby = gateLobby == null ? structureId -> null : gateLobby;
+    }
+
+    /**
+     * #165: effective gate HP a player took off a gate structure. Credited to the player's running match when that
+     * match's lockdown holds the gate (the siege gate rules already refused damage by anyone else). A member keeps
+     * what they did when they leave and rejoin. Main thread.
+     */
+    public void recordGateDamage(UUID playerId, int gateStructureId, double loss) {
+        if (playerId == null || !(loss > 0)) return;
+        Optional<SiegeLobbyRuntime> rt = lobbyOf(playerId).filter(l -> l.phase() == SiegePhase.IN_PROGRESS);
+        if (rt.isEmpty()) return;
+        Integer lockedBy = gateLobby.apply(gateStructureId);
+        if (lockedBy == null || lockedBy != rt.get().id()) return;
+        rt.get().match().filter(m -> m.roster().contains(playerId))
+                .ifPresent(match -> match.contributions().addGateDamage(playerId, loss));
+    }
+
     public SiegeService(
             Plugin plugin,
             SiegeDataAccess dataAccess,
@@ -302,6 +338,10 @@ public final class SiegeService {
     }
 
     private void stepMatch(SiegeLobbyRuntime rt, SiegeMatch match) {
+        Instant observedAt = Instant.now();
+        for (UUID member : match.roster().playerIds()) {
+            match.contributions().observe(member, observedAt, safeAfkSince(member));
+        }
         Map<Integer, List<Presence>> presence = presence(match);
         BoardStep step = match.board().step(presence);
         Instant now = Instant.now();
@@ -570,6 +610,9 @@ public final class SiegeService {
         // the roster, and everyone starts at their choice - no picker at the start any more.
         SiegeMatch match = new SiegeMatch(scenario, rt.machine().configuration(), token, teams, Map.copyOf(rt.preMatchSpawnChoices()));
         rt.setMatch(match);
+        // #166: every member's match window starts now.
+        Instant joinedAt = Instant.now();
+        match.roster().playerIds().forEach(id -> match.contributions().joined(id, rt.userIds().get(id), joinedAt));
 
         for (MemberView member : match.roster().members()) {
             Player player = Bukkit.getPlayer(member.playerId());
@@ -655,6 +698,7 @@ public final class SiegeService {
             }
         }
 
+        match.contributions().close(Instant.now(), this::safeAfkSince);
         Completion completion = completion(rt, match, result);
         Map<Integer, UUID> playerByUserId = new HashMap<>();
         rt.userIds().forEach((uuid, userId) -> playerByUserId.put(userId, uuid));
@@ -678,6 +722,7 @@ public final class SiegeService {
         }
         SiegeDepartedMembers departed = departedMembers.remove(match);
         if (departed != null && reportDepartedMembers) participants = departed.appendTo(participants);
+        participants = withContributions(match, participants);
         List<ObjectiveResult> objectives = new ArrayList<>();
         for (ObjectiveState state : match.board().objectives()) {
             if (state.captures().isEmpty()) {
@@ -690,6 +735,35 @@ public final class SiegeService {
             }
         }
         return new Completion(result.reason(), result.winnerOrNull(), participants, objectives);
+    }
+
+    /**
+     * #165/#166: each reported member's gate damage and activity over the whole match (a rejoined member's time
+     * away within the rejoin window included). A member whose user id was never known to the match reports none.
+     */
+    private static List<ParticipantResult> withContributions(SiegeMatch match, List<ParticipantResult> participants) {
+        Map<Integer, UUID> players = match.contributions().playersByUserId();
+        Instant now = Instant.now();
+        List<ParticipantResult> out = new ArrayList<>(participants.size());
+        for (ParticipantResult p : participants) {
+            UUID playerId = players.get(p.userId());
+            if (playerId == null) {
+                out.add(p);
+                continue;
+            }
+            var c = match.contributions().of(playerId, now);
+            out.add(p.withContribution(c.gateDamage(), c.activeSeconds(), c.matchSeconds()));
+        }
+        return out;
+    }
+
+    /** The AFK source, never throwing into the tick. */
+    private Instant safeAfkSince(UUID playerId) {
+        try {
+            return afkSince.apply(playerId);
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     private void announceResult(SiegeLobbyRuntime rt, SiegeMatch match, WinResolver.Result result) {
@@ -727,7 +801,7 @@ public final class SiegeService {
     }
 
     /**
-     * The server's breakdown for one player (DESIGN §7.6: win, objectives gained, captures), in the
+     * The server's breakdown for one player (DESIGN §7.6: win, objectives gained, captures, gate damage, taking part), in the
      * shared KNG-16 reward format: one line per currency, coins with their base and the personal/rank
      * multipliers the API applied ({@code Siege reward: 250 ×2 Personal ×1.2 Royal = +600 coins}), then
      * a detail line with what earned it. A title promotion from the XP arrives separately, through the
@@ -754,6 +828,9 @@ public final class SiegeService {
         if (r.won()) why.add("win");
         if (r.holdingCount() > 0) why.add(r.holdingCount() + (r.holdingCount() == 1 ? " objective gained" : " objectives gained"));
         if (r.captureCount() > 0) why.add(r.captureCount() + (r.captureCount() == 1 ? " capture" : " captures"));
+        // Alpha run 1 (PandiO/knk-workspace#165/#166).
+        if (r.gateDamageSteps() > 0) why.add(r.gateDamage() + " gate damage");
+        if (r.participation()) why.add("taking part");
         if (!why.isEmpty()) lines.add(Component.text("  " + String.join(" · ", why), NamedTextColor.GRAY));
         return lines;
     }
@@ -868,6 +945,7 @@ public final class SiegeService {
         if (match != null && match.roster().contains(id)) {
             if (cause != LeaveCause.ROUND_OVER && cause != LeaveCause.SHUTDOWN) {
                 Optional<MemberView> removed = match.roster().remove(id);
+                match.contributions().left(id, leftAt, safeAfkSince(id));
                 if (userId != null) {
                     if (reportDepartedMembers) removed.ifPresent(view -> departedMembers
                             .computeIfAbsent(match, m -> new SiegeDepartedMembers()).departed(userId, view, leftAt));
@@ -1048,6 +1126,7 @@ public final class SiegeService {
             SiegeBukkit.toLocation(scenario.hubLocation()).ifPresent(location -> SiegeBukkit.teleport(player, location));
         } else {
             match.roster().add(id, placed.id());
+            match.contributions().joined(id, userId, Instant.now()); // #166: a rejoin keeps the first join as window start
             SiegeSpawnOptions.defaultChoice(placed).ifPresent(c -> match.roster().setSpawnChoice(id, c));
             SiegeSpawnOptions.resolveRespawn(placed, match.board(), match.roster().spawnChoice(id).orElse(null))
                     .flatMap(o -> SiegeBukkit.toLocation(o.location()))

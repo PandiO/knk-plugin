@@ -17,8 +17,13 @@ public final class KnkSiegeMatchRecords {
     /**
      * A participant's final stats, sent with {@code complete}.
      *
-     * @param leftAt null for a member present at the end; set for a member who left early and is reported
-     *               only for their stats (KNG-34 leaver fix - the server grants them no reward)
+     * @param leftAt        null for a member present at the end; set for a member who left early and is reported
+     *                      only for their stats (KNG-34 leaver fix - the server grants them no reward)
+     * @param gateDamage    effective gate HP this member took off the match's gates: direct hits and their share of
+     *                      fires they lit (alpha run 1, PandiO/knk-workspace#165; the server pays per full step)
+     * @param activeSeconds this member's active (not AFK) seconds in the match (#166)
+     * @param matchSeconds  their time in the match: first joining it to the end (or their last leave), time away
+     *                      within the rejoin window included (#166; the server pays participation from the share)
      */
     public record ParticipantResult(
             int userId,
@@ -27,11 +32,32 @@ public final class KnkSiegeMatchRecords {
             int deaths,
             int highestKillStreak,
             int captures,
-            Instant leftAt
+            Instant leftAt,
+            double gateDamage,
+            long activeSeconds,
+            long matchSeconds
     ) {
+        public ParticipantResult {
+            if (!(gateDamage > 0)) gateDamage = 0; // NaN and negatives
+            if (Double.isInfinite(gateDamage)) gateDamage = Double.MAX_VALUE;
+            matchSeconds = Math.max(0, matchSeconds);
+            activeSeconds = Math.max(0, Math.min(activeSeconds, matchSeconds));
+        }
+
+        /** Without gate damage and activity (before #165/#166). */
+        public ParticipantResult(int userId, int siegeTeamId, int kills, int deaths, int highestKillStreak, int captures, Instant leftAt) {
+            this(userId, siegeTeamId, kills, deaths, highestKillStreak, captures, leftAt, 0, 0, 0);
+        }
+
         /** A member present at the end. */
         public ParticipantResult(int userId, int siegeTeamId, int kills, int deaths, int highestKillStreak, int captures) {
             this(userId, siegeTeamId, kills, deaths, highestKillStreak, captures, null);
+        }
+
+        /** This result with the member's gate damage (#165) and activity (#166) in the match. */
+        public ParticipantResult withContribution(double gateDamage, long activeSeconds, long matchSeconds) {
+            return new ParticipantResult(userId, siegeTeamId, kills, deaths, highestKillStreak, captures, leftAt, gateDamage,
+                    activeSeconds, matchSeconds);
         }
     }
 
@@ -71,6 +97,11 @@ public final class KnkSiegeMatchRecords {
      * @param baseCoins       the coins before the multipliers (DESIGN §7.6 amounts)
      * @param coinMultipliers the personal and rank (premium) multipliers the server applied, KNG-16
      *                        style (smoke test 2026-09-26); empty when none or on a repeat call
+     * @param gateDamage      the gate HP the server recorded for them (#165)
+     * @param gateDamageSteps the full gate damage reward steps in it (paid per step)
+     * @param participation   true when the participation reward was paid (active long enough, #166)
+     * @param activeSeconds   their active seconds as recorded
+     * @param matchSeconds    their match time as recorded
      */
     public record ParticipantReward(
             int userId,
@@ -82,10 +113,23 @@ public final class KnkSiegeMatchRecords {
             int experience,
             int gems,
             int baseCoins,
-            List<net.knightsandkings.knk.core.domain.users.RewardMultiplier> coinMultipliers
+            List<net.knightsandkings.knk.core.domain.users.RewardMultiplier> coinMultipliers,
+            int gateDamage,
+            int gateDamageSteps,
+            boolean participation,
+            int activeSeconds,
+            int matchSeconds
     ) {
         public ParticipantReward {
             coinMultipliers = coinMultipliers == null ? List.of() : List.copyOf(coinMultipliers);
+        }
+
+        /** Without the gate damage and participation figures (before #165/#166). */
+        public ParticipantReward(int userId, boolean presentAtEnd, boolean won, int holdingCount, int captureCount,
+                                 int coins, int experience, int gems, int baseCoins,
+                                 List<net.knightsandkings.knk.core.domain.users.RewardMultiplier> coinMultipliers) {
+            this(userId, presentAtEnd, won, holdingCount, captureCount, coins, experience, gems, baseCoins, coinMultipliers,
+                    0, 0, false, 0, 0);
         }
 
         /** Without a multiplier breakdown: the base is the granted amount. */

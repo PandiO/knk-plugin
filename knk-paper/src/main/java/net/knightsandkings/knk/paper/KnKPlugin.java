@@ -1028,8 +1028,12 @@ public class KnKPlugin extends JavaPlugin {
             double fireDamagePerTick = getConfig().getDouble("gates.fire-damage-per-tick", 2.0);
             GateFireSystem gateFireSystem = new GateFireSystem(healthSystem, gateManager, fireDurationMillis, fireDamagePerTick);
             // KNG-34: effective gate HP loss credited to players (reads the loss only; HP outcomes unchanged).
-            net.knightsandkings.knk.paper.gates.GateDamageSink gateDamageSink = statisticsGateSink != null
-                ? statisticsGateSink : net.knightsandkings.knk.paper.gates.GateDamageSink.NONE;
+            // Alpha run 1 (PandiO/knk-workspace#165): the same losses also count towards the siege gate damage reward
+            // (siegeService is created later, so the siege sink reads it per hit).
+            net.knightsandkings.knk.paper.gates.GateDamageSink gateDamageSink =
+                net.knightsandkings.knk.paper.gates.CompositeGateDamageSink.of(
+                    statisticsGateSink,
+                    new net.knightsandkings.knk.paper.siege.SiegeGateDamageSink(() -> siegeService));
             gateFireSystem.setDamageSink(gateDamageSink);
 
             this.gateAreaDamage = new net.knightsandkings.knk.paper.gates.GateAreaDamageService(gateManager, gateDoorHitService,
@@ -3599,6 +3603,8 @@ public class KnKPlugin extends JavaPlugin {
         // moved otherwise. Same scoped exemption and WorldGuard resync as hubTransfer.
         net.knightsandkings.knk.paper.siege.SiegeBukkit.setTeleporter(this::hubTransfer);
         // KNG-34 leaver fix: members who left early are reported with their stats (no reward).
+        // Alpha run 1 (PandiO/knk-workspace#166): AFK time from the statistics tracker (none without statistics).
+        if (statisticsService != null) siegeService.setAfkSource(statisticsService::afkSince);
         siegeService.setReportDepartedMembers(config.statistics().enabled() && config.statistics().siege().reportDepartedMembers());
         // Alpha run 1 (PandiO/knk-workspace#150): a disconnected member keeps their place for this long.
         siegeService.setRejoinWindow(java.time.Duration.ofSeconds(Math.max(0, getConfig().getInt("siege.rejoin-window-seconds",
@@ -3667,6 +3673,7 @@ public class KnKPlugin extends JavaPlugin {
             siegeGates.setDefenderPassThrough(getConfig().getBoolean("gates.siege.defender-pass-through", true),
                 getConfig().getInt("gates.siege.defender-pass-through-seconds", 0));
             if (statisticsGateSink != null) statisticsGateSink.setLockedByMatch(siegeGates::isLocked);
+            siegeService.setGateLobbySource(siegeGates::lobbyIdOf); // #165: gate damage counts for the gate's own match
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeGateListener(siegeGates, gateManager), this);
             siegeGates.recoverOnStartup();
             // Phase 7b: non-members see the locked gates removed and walk through them (degrade

@@ -414,6 +414,12 @@ public final class SiegeGateController implements SiegeMatchObserver {
         return snapshot.doors().stream().anyMatch(d -> d.gateDoorId() == door.getId() && d.opened() && !d.destroyed());
     }
 
+    /** The runtime id of the lobby whose lockdown holds this gate structure; null when none does (#165). */
+    public Integer lobbyIdOf(int gateStructureId) {
+        Lockdown lockdown = byGate.get(gateStructureId);
+        return lockdown == null ? null : lockdown.runtime.id();
+    }
+
     /** The lobby display name holding a locked gate, for messages. */
     public Optional<String> lobbyNameOf(int gateStructureId) {
         Lockdown lockdown = byGate.get(gateStructureId);

@@ -39,7 +39,11 @@ public final class SiegeMatchDtos {
             @JsonProperty("highestKillStreak") int highestKillStreak,
             @JsonProperty("captures") int captures,
             // KNG-34: only for a member who left early (reported for their stats); omitted otherwise.
-            @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("leftAt") String leftAt
+            @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("leftAt") String leftAt,
+            // Alpha run 1 (PandiO/knk-workspace#165/#166): gate HP dealt, active and match-window seconds.
+            @JsonProperty("gateDamage") double gateDamage,
+            @JsonProperty("activeSeconds") long activeSeconds,
+            @JsonProperty("matchSeconds") long matchSeconds
     ) {}
 
     public record ObjectiveResult(
@@ -75,7 +79,12 @@ public final class SiegeMatchDtos {
             @JsonProperty("experience") Integer experience,
             @JsonProperty("gems") Integer gems,
             @JsonProperty("baseCoins") Integer baseCoins,
-            @JsonProperty("coinMultipliers") List<RewardMultiplierDto> coinMultipliers
+            @JsonProperty("coinMultipliers") List<RewardMultiplierDto> coinMultipliers,
+            @JsonProperty("gateDamage") Integer gateDamage,
+            @JsonProperty("gateDamageSteps") Integer gateDamageSteps,
+            @JsonProperty("participation") Boolean participation,
+            @JsonProperty("activeSeconds") Integer activeSeconds,
+            @JsonProperty("matchSeconds") Integer matchSeconds
     ) {}
 
     public record ResultResponse(

@@ -34,7 +34,8 @@ public final class SiegeMatchMapper {
                 completion.winningAllianceGroup(),
                 completion.participants().stream()
                         .map(p -> new SiegeMatchDtos.ParticipantResult(p.userId(), p.siegeTeamId(), p.kills(), p.deaths(),
-                                p.highestKillStreak(), p.captures(), iso(p.leftAt())))
+                                p.highestKillStreak(), p.captures(), iso(p.leftAt()),
+                                p.gateDamage(), p.activeSeconds(), p.matchSeconds()))
                         .toList(),
                 completion.objectives().stream()
                         .map(o -> new SiegeMatchDtos.ObjectiveResult(o.objectiveId(), o.finalHolderTeamId(),
@@ -61,7 +62,12 @@ public final class SiegeMatchMapper {
                         orZero(r.experience()),
                         orZero(r.gems()),
                         r.baseCoins() == null ? orZero(r.coins()) : r.baseCoins(),
-                        UsersMapper.mapRewardMultipliers(r.coinMultipliers())))
+                        UsersMapper.mapRewardMultipliers(r.coinMultipliers()),
+                        orZero(r.gateDamage()),
+                        orZero(r.gateDamageSteps()),
+                        Boolean.TRUE.equals(r.participation()),
+                        orZero(r.activeSeconds()),
+                        orZero(r.matchSeconds())))
                 .toList();
         long matchId = dto.matchId() == null ? requestedMatchId : dto.matchId();
         return new RewardSummary(matchId, Boolean.TRUE.equals(dto.alreadyCompleted()), rewards);
