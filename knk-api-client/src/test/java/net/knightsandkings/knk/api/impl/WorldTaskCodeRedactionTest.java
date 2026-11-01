@@ -30,4 +30,19 @@ class WorldTaskCodeRedactionTest {
         assertFalse(headless.contains("taskCode"), headless);
         assertTrue(headless.contains("\"claimMode\":\"headless\""), headless);
     }
+
+    @Test
+    void aTaskFromTheApiReadsWithItsNewFields() throws Exception {
+        ObjectMapper mapper = new ObjectMapper().registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
+        String json = "{\"id\":7,\"status\":\"InProgress\",\"taskType\":\"LocationSelection\",\"linkCode\":\"AB12CD\","
+            + "\"claimedByUuid\":\"u-1\",\"claimedAt\":\"2026-11-01T12:00:00.0000000\",\"expiresAt\":\"2026-11-01T12:30:00Z\","
+            + "\"leaseUntil\":null,\"releaseCount\":1,\"offerState\":\"None\",\"entityType\":\"Town\"}";
+
+        net.knightsandkings.knk.api.dto.WorldTaskDto task = mapper.readValue(json, net.knightsandkings.knk.api.dto.WorldTaskDto.class);
+
+        assertEquals(7, task.id());
+        assertEquals("u-1", task.claimedByUuid());
+        assertEquals("Town", task.entityType());
+        assertFalse(task.isPending());
+    }
 }
