@@ -82,7 +82,8 @@ public class SiegeCombatListener implements Listener {
         return switch (outcome) {
             case DENY_VICTIM_SAFE -> "You can't hurt players inside their spawn area!";
             case DENY_ATTACKER_SAFE -> "You can't hurt players while you are inside your spawn area!";
-            case DENY_NOT_STARTED -> "The siege hasn't started yet.";
+            // Also at the hub after the match (PandiO/knk-workspace#198).
+            case DENY_NOT_STARTED -> "There is no fighting outside the running match.";
             case DENY_MEMBER_VS_NON_MEMBER -> attackerInSiege
                     ? "In a siege you can only fight enemies in your own match."
                     : "You can't attack players who are in a siege.";

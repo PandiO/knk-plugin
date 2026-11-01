@@ -183,6 +183,14 @@ public final class StatisticsService {
         return sessions.isAfk(playerId);
     }
 
+    /**
+     * When the player's current AFK state began - for automatic AFK the last activity, so the idle window
+     * before the threshold counts as AFK too (siege participation, PandiO/knk-workspace#166); null while active.
+     */
+    public java.time.Instant afkSince(UUID playerId) {
+        return sessions.afkSince(playerId);
+    }
+
     // ===== facts =====
 
     /** Distance and falls are not recorded in an excluded game mode. */

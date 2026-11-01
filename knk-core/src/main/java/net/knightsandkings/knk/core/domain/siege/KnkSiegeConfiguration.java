@@ -26,6 +26,9 @@ import java.util.List;
  * @param playerSkipMatchmakingSeconds        seconds of matchmaking left after a player's {@code /siege skip} (playtest 2026-10-24;
  *                                            never less than {@code voteClose + 1}, so voting gets its last second)
  * @param adminSkipMatchmakingSeconds         seconds left after {@code /siege admin skip} (same floor; legacy T-31)
+ * @param postMatchSeconds                    seconds members wait at the scenario hub with the result after a match that
+ *                                            ended normally, before they are restored (alpha run 1,
+ *                                            PandiO/knk-workspace#198; 0 = restored at once, as before)
  */
 public record KnkSiegeConfiguration(
         int captureAttackBase,
@@ -53,12 +56,15 @@ public record KnkSiegeConfiguration(
         SiegeNonMemberGateView nonMemberGateView,
         boolean giveNavigationItem,
         int playerSkipMatchmakingSeconds,
-        int adminSkipMatchmakingSeconds
+        int adminSkipMatchmakingSeconds,
+        int postMatchSeconds
 ) {
     /** Seconds left after a player's {@code /siege skip} before the setting existed (developer request 2026-09-26). */
     public static final int DEFAULT_PLAYER_SKIP_MATCHMAKING_SECONDS = 60;
     /** Seconds left after {@code /siege admin skip} before the setting existed: one second before voting closes (T-31). */
     public static final int DEFAULT_ADMIN_SKIP_MATCHMAKING_SECONDS = 31;
+    /** The post-match wait at the hub (#198): the API's default, also used when an older API doesn't send it. */
+    public static final int DEFAULT_POST_MATCH_SECONDS = 30;
 
     public KnkSiegeConfiguration {
         matchmakingAnnouncementMarks = copy(matchmakingAnnouncementMarks);
@@ -66,6 +72,40 @@ public record KnkSiegeConfiguration(
         allowedCommands = copy(allowedCommands);
         allowedEnchantmentKeys = copy(allowedEnchantmentKeys);
         if (nonMemberGateView == null) nonMemberGateView = SiegeNonMemberGateView.PRE_LOCKDOWN_VIEW;
+        postMatchSeconds = Math.max(0, postMatchSeconds);
+    }
+
+    /**
+     * The tunables without the post-match wait (everything before PandiO/knk-workspace#198): none, members are restored
+     * as soon as the match ends, as before. The runtime config always carries the value ({@code SiegeMapper}).
+     */
+    public KnkSiegeConfiguration(int captureAttackBase, int captureAttackPerExtra, int captureAttackPerExtraInstantVictory,
+                                 int captureDefendBase, int captureDefendPerExtra, int captureDefendPerExtraInstantVictory,
+                                 double sideCaptureReduction, int voteCloseSecondsBeforeStart, int drawSecondsBeforeStart,
+                                 int hubSecondsBeforeStart, int teamSplitSecondsBeforeStart,
+                                 List<Integer> matchmakingAnnouncementMarks, List<Integer> killAnnouncementThresholds,
+                                 int killStreakAnnounceAbove, double headshotMultiplier, List<String> allowedCommands,
+                                 int spawnPickerDelayTicks, int enchantDropChancePerMille, List<String> allowedEnchantmentKeys,
+                                 int enchantLevelMin, int enchantLevelMax, int maxBooksAlive,
+                                 SiegeNonMemberGateView nonMemberGateView, boolean giveNavigationItem,
+                                 int playerSkipMatchmakingSeconds, int adminSkipMatchmakingSeconds) {
+        this(captureAttackBase, captureAttackPerExtra, captureAttackPerExtraInstantVictory, captureDefendBase,
+                captureDefendPerExtra, captureDefendPerExtraInstantVictory, sideCaptureReduction, voteCloseSecondsBeforeStart,
+                drawSecondsBeforeStart, hubSecondsBeforeStart, teamSplitSecondsBeforeStart, matchmakingAnnouncementMarks,
+                killAnnouncementThresholds, killStreakAnnounceAbove, headshotMultiplier, allowedCommands, spawnPickerDelayTicks,
+                enchantDropChancePerMille, allowedEnchantmentKeys, enchantLevelMin, enchantLevelMax, maxBooksAlive,
+                nonMemberGateView, giveNavigationItem, playerSkipMatchmakingSeconds, adminSkipMatchmakingSeconds, 0);
+    }
+
+    /** This configuration with another post-match wait (#198). */
+    public KnkSiegeConfiguration withPostMatchSeconds(int seconds) {
+        return new KnkSiegeConfiguration(captureAttackBase, captureAttackPerExtra, captureAttackPerExtraInstantVictory,
+                captureDefendBase, captureDefendPerExtra, captureDefendPerExtraInstantVictory, sideCaptureReduction,
+                voteCloseSecondsBeforeStart, drawSecondsBeforeStart, hubSecondsBeforeStart, teamSplitSecondsBeforeStart,
+                matchmakingAnnouncementMarks, killAnnouncementThresholds, killStreakAnnounceAbove, headshotMultiplier,
+                allowedCommands, spawnPickerDelayTicks, enchantDropChancePerMille, allowedEnchantmentKeys, enchantLevelMin,
+                enchantLevelMax, maxBooksAlive, nonMemberGateView, giveNavigationItem, playerSkipMatchmakingSeconds,
+                adminSkipMatchmakingSeconds, seconds);
     }
 
     /** The tunables without the skip settings (everything before the 2026-10-24 playtest): the former fixed values. */
@@ -106,7 +146,7 @@ public record KnkSiegeConfiguration(
 
     /**
      * The legacy values the API seeds {@code SiegeConfiguration} with (Phase 2 decision 9), for
-     * tests and as a documented reference. The allowed-enchantment list is left empty here; the
+     * tests and as a documented reference. No post-match wait (legacy: restored at once; the API's default is 30 s). The allowed-enchantment list is left empty here; the
      * seeded list lives server-side.
      */
     public static KnkSiegeConfiguration legacyDefaults() {

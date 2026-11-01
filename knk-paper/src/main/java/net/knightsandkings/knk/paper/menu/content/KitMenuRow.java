@@ -30,6 +30,11 @@ public final class KitMenuRow implements MenuRowKey {
     }
 
     static final int DESCRIPTION_WIDTH = 32;
+    /** Widest visible "Other contents" line (PandiO/knk-workspace#172: one long line ran off the screen). */
+    static final int CONTENTS_WIDTH = 40;
+    /** At most this many "Other contents" lines; the last one says "… and N more" when items are left out. */
+    static final int CONTENTS_MAX_LINES = 6;
+    private static final String OTHER_CONTENTS_LABEL = "Other contents: ";
     static final String FALLBACK_MATERIAL = "CHEST";
 
     private final int kitId;
@@ -131,14 +136,58 @@ public final class KitMenuRow implements MenuRowKey {
                             others.add(content.quantity() > 1 ? info.name() + " x" + content.quantity() : info.name());
                         }
                     });
-            if (!others.isEmpty()) {
-                lines.add("&7Other contents: &f" + String.join(", ", others));
-            }
+            lines.addAll(otherContentLines(others));
         }
         if (!lines.isEmpty()) {
             lines.add(0, "&7Contents:");
         }
         return lines;
+    }
+
+    /**
+     * PandiO/knk-workspace#172: the "Other contents" list wrapped at {@value #CONTENTS_WIDTH} visible characters
+     * (the label counts on the first line; an item is never split, one longer than the width is cut with "…"),
+     * at most {@value #CONTENTS_MAX_LINES} lines, the last of them "… and N more" when items didn't fit.
+     */
+    static List<String> otherContentLines(List<String> items) {
+        List<String> result = new ArrayList<>();
+        if (items == null || items.isEmpty()) {
+            return result;
+        }
+        List<List<String>> wrapped = new ArrayList<>();
+        List<String> current = new ArrayList<>();
+        int width = OTHER_CONTENTS_LABEL.length();
+        for (String raw : items) {
+            String item = raw.length() > CONTENTS_WIDTH ? raw.substring(0, CONTENTS_WIDTH - 1) + "…" : raw;
+            // +1: the comma that ends a line when the next item wraps.
+            int needed = current.isEmpty() ? item.length() : 2 + item.length();
+            if (!current.isEmpty() && width + needed + 1 > CONTENTS_WIDTH) {
+                wrapped.add(current);
+                current = new ArrayList<>();
+                width = 0;
+                needed = item.length();
+            }
+            current.add(item);
+            width += needed;
+        }
+        wrapped.add(current);
+
+        int shownLines = wrapped.size();
+        int hidden = 0;
+        if (wrapped.size() > CONTENTS_MAX_LINES) {
+            shownLines = CONTENTS_MAX_LINES - 1;
+            for (int i = shownLines; i < wrapped.size(); i++) {
+                hidden += wrapped.get(i).size();
+            }
+        }
+        for (int i = 0; i < shownLines; i++) {
+            String text = String.join(", ", wrapped.get(i)) + (i < shownLines - 1 || hidden > 0 ? "," : "");
+            result.add(i == 0 ? "&7" + OTHER_CONTENTS_LABEL + "&f" + text : "&f" + text);
+        }
+        if (hidden > 0) {
+            result.add("&7… and " + hidden + " more");
+        }
+        return result;
     }
 
     private static void addPiece(List<String> lines, String label, Integer blueprintId, Map<Integer, BlueprintInfo> blueprints) {

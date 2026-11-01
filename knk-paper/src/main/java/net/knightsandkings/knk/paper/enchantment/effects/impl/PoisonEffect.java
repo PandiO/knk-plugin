@@ -24,6 +24,7 @@ public class PoisonEffect extends AttackEnchantmentEffect {
     protected void applyEffect(ItemStack weapon, Player attacker, LivingEntity target, int level) {
         int durationTicks = tuning().durationTicksAt(level);
         target.addPotionEffect(new PotionEffect(PotionEffectType.POISON, durationTicks, 1));
+        display().debuff(target, "poison", "Poison", PotionEffectType.POISON, durationTicks);
         playEffect(target.getLocation(), Effect.POTION_BREAK, 0);
     }
 }

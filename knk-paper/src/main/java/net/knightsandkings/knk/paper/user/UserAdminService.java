@@ -190,6 +190,16 @@ public final class UserAdminService {
      * message (or a failure) was sent.
      */
     public void withRankCheck(CommandSender sender, UserSummary target, Consumer<UsersCommandApi> onAllowed, Runnable onDenied) {
+        withRankCheck(sender, target, false, onAllowed, onDenied);
+    }
+
+    /**
+     * {@link #withRankCheck(CommandSender, UserSummary, Consumer, Runnable)}, where {@code sameRankAllowed} lets the
+     * sender also act on a player of their own rank (PandiO/knk-workspace#171: teleporting other players is allowed
+     * for players of the same rank or lower; account edits, freeze and inventories stay strictly lower).
+     */
+    public void withRankCheck(CommandSender sender, UserSummary target, boolean sameRankAllowed,
+                              Consumer<UsersCommandApi> onAllowed, Runnable onDenied) {
         if (!(sender instanceof Player senderPlayer)) {
             onAllowed.accept(usersCommandApi); // Console always allowed - matches /knk gate admin's console-safe precedent.
             return;
@@ -205,9 +215,13 @@ public final class UserAdminService {
             // Live check (KNG-24): /freeze and the Player manager reach this without a warmed cache.
             permissions.hasAsync(senderPlayer, MANAGE_ALL_NODE).thenCompose(bypass -> bypass
                     ? CompletableFuture.completedFuture(true)
-                    : rankHierarchy.actorOutranks(actor.id(), target.id())).thenAccept(outranks -> mainThread.execute(() -> {
+                    : sameRankAllowed
+                        ? rankHierarchy.actorAtLeast(actor.id(), target.id())
+                        : rankHierarchy.actorOutranks(actor.id(), target.id())).thenAccept(outranks -> mainThread.execute(() -> {
                 if (!outranks) {
-                    sender.sendMessage(ChatColor.RED + "You cannot act on a player of equal or higher rank.");
+                    sender.sendMessage(ChatColor.RED + (sameRankAllowed
+                        ? "You cannot act on a player of higher rank."
+                        : "You cannot act on a player of equal or higher rank."));
                     onDenied.run();
                     return;
                 }
@@ -226,6 +240,44 @@ public final class UserAdminService {
             });
             return null;
         });
+    }
+
+    /**
+     * PandiO/knk-workspace#171, quietly (no message): whether {@code sender} may teleport {@code target} - the
+     * console and {@link #MANAGE_ALL_NODE} always, otherwise when the sender's rank is the same or higher. False when
+     * either account can't be resolved or the check fails. Used by the {@code all} teleports.
+     */
+    public CompletableFuture<Boolean> mayTeleport(CommandSender sender, Player target) {
+        if (!(sender instanceof Player senderPlayer)) {
+            return CompletableFuture.completedFuture(true);
+        }
+        return permissions.hasAsync(senderPlayer, MANAGE_ALL_NODE).thenCompose(bypass -> {
+            if (Boolean.TRUE.equals(bypass)) {
+                return CompletableFuture.completedFuture(true);
+            }
+            CompletableFuture<UserSummary> actor = userOf(senderPlayer);
+            CompletableFuture<UserSummary> subject = userOf(target);
+            return actor.thenCombine(subject, (a, t) -> new UserSummary[] {a, t}).thenCompose(pair ->
+                pair[0] == null || pair[1] == null
+                    ? CompletableFuture.completedFuture(false)
+                    : rankHierarchy.actorAtLeast(pair[0].id(), pair[1].id()));
+        }).exceptionally(ex -> false);
+    }
+
+    /**
+     * PandiO/knk-workspace#171: whether {@code sender} overrides teleport exemptions ({@code knk.teleport.exempt.*},
+     * staff/owner mode) on a single-player teleport - the console and {@link #MANAGE_ALL_NODE}. Never fails.
+     */
+    public CompletableFuture<Boolean> overridesTeleportExemption(CommandSender sender) {
+        if (!(sender instanceof Player senderPlayer)) {
+            return CompletableFuture.completedFuture(true);
+        }
+        return permissions.hasAsync(senderPlayer, MANAGE_ALL_NODE).exceptionally(ex -> false);
+    }
+
+    private CompletableFuture<UserSummary> userOf(Player player) {
+        return usersDataAccess.getByUuidAsync(player.getUniqueId())
+                .thenApply(result -> result != null && result.isSuccess() ? result.value().orElse(null) : null);
     }
 
     /** Whether {@code actorUserId} outranks {@code targetUserId} (the menu's click condition reads a cached answer). */

@@ -51,11 +51,21 @@ public interface SiegeMatchObserver {
      */
     default void memberJoinedMatch(SiegeLobbyRuntime lobby, SiegeMatch match, Player player) { }
 
-    /** A member left the running match (leave, quit, kick) before the vault restore. */
+    /**
+     * A member left the running match (leave, quit, kick), or was released after it (round over, the end of the
+     * post-match wait, shutdown), before the vault restore.
+     */
     default void memberRemoved(SiegeLobbyRuntime lobby, SiegeMatch match, Player player) { }
 
-    /** The match ended (any reason), before members are restored. */
+    /**
+     * The match ended (any reason), before members are restored. After a normal end the members then wait at the hub
+     * for the post-match time (alpha run 1, PandiO/knk-workspace#198) and are released afterwards
+     * ({@link #memberRemoved} per member, then {@link #roundReleased}).
+     */
     default void matchEnded(SiegeLobbyRuntime lobby, SiegeMatch match) { }
+
+    /** One second of the post-match wait at the hub (#198), after {@link #matchEnded}. */
+    default void postMatchSecond(SiegeLobbyRuntime lobby, SiegeMatch match) { }
 
     /**
      * Phase 7a: the round is over (match ended, matchmaking cancelled, admin stop, shutdown), after

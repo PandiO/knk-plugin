@@ -2,6 +2,7 @@ package net.knightsandkings.knk.paper.enchantment.effects;
 
 import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuning;
 import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuningTable;
+import net.knightsandkings.knk.paper.enchantment.display.EffectDisplay;
 import org.bukkit.Bukkit;
 import org.bukkit.Effect;
 import org.bukkit.Location;
@@ -26,6 +27,7 @@ public abstract class AttackEnchantmentEffect implements EnchantmentEffect {
     private final Plugin plugin;
     private final DoubleSupplier rollSupplier;
     private final Supplier<EnchantmentTuning> tuning;
+    private volatile EffectDisplay display = EffectDisplay.NONE;
 
     protected AttackEnchantmentEffect(String enchantmentId, Plugin plugin) {
         this(enchantmentId, plugin, () -> ThreadLocalRandom.current().nextDouble());
@@ -109,6 +111,18 @@ public abstract class AttackEnchantmentEffect implements EnchantmentEffect {
             return;
         }
         location.getWorld().playSound(location, sound, volume, pitch);
+    }
+
+    /**
+     * Where this effect shows the victim a timed debuff (boss bar, PandiO/knk-workspace#170) or a name-tag blackout
+     * (#169). {@link EffectDisplay#NONE} until set.
+     */
+    public final void setDisplay(EffectDisplay display) {
+        this.display = display != null ? display : EffectDisplay.NONE;
+    }
+
+    protected final EffectDisplay display() {
+        return display;
     }
 
     protected final Plugin plugin() {

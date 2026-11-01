@@ -66,6 +66,11 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
             case "menu" -> gameMenu(sender);
             case "vote" -> playerOnly(sender, p -> service.vote(p, joined(rest)));
             case "spawn" -> playerOnly(sender, p -> service.spawn(p, joined(rest)));
+            // Alpha run 1 (PandiO/knk-workspace#174): the last five matches with links to the web app.
+            case "history" -> {
+                if (sender instanceof Player && !allowed(sender, SiegeService.PERMISSION_PLAY)) return true;
+                playerOnly(sender, service::history);
+            }
             case "skip" -> {
                 if (!allowed(sender, SiegeService.PERMISSION_SKIP)) return true;
                 send(sender, service.skip(sender, arg(rest, 0), false));
@@ -157,6 +162,7 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
             case MATCHMAKING, HUB -> "starts in " + SiegeMessages.duration(rt.machine().secondsRemaining());
             case IN_PROGRESS -> SiegeMessages.clock(rt.machine().secondsRemaining()) + " left";
             case COOLDOWN -> "next round in " + SiegeMessages.duration(rt.machine().secondsRemaining());
+            case POST_MATCH -> "members return in " + SiegeMessages.duration(rt.machine().secondsRemaining());
             case ENDING, DISABLED -> "";
         };
         String scenario = rt.drawnScenario().map(s -> " - " + scenarioName(s)).orElse("");
@@ -261,6 +267,8 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
             }
             case COOLDOWN -> msg = line(msg, "Next matchmaking in " + SiegeMessages.duration(seconds) + ".");
             case ENDING -> msg = line(msg, "The match is ending.");
+            case POST_MATCH -> msg = line(msg, "The match is over; members return in " + SiegeMessages.duration(seconds)
+                    + " (or now with /siege leave).");
             case DISABLED -> msg = line(msg, rt.lobby().hasReadyScenario()
                     ? "Stopped by an admin." : "No ready scenario in the rotation.");
         }
@@ -337,7 +345,7 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
 
     private void help(CommandSender sender) {
         sender.sendMessage(SiegeMessages.info("/siege - lobbies | join [lobby] | leave | menu | info [lobby] | vote [n|name|random] | "
-                + "spawn [option] | skip [lobby] (cooldown, or shorten matchmaking)" + (!(sender instanceof Player p) || service.hasPermission(p, SiegeService.PERMISSION_ADMIN_LIST)
+                + "spawn [option] | history | skip [lobby] (cooldown, or shorten matchmaking)" + (!(sender instanceof Player p) || service.hasPermission(p, SiegeService.PERMISSION_ADMIN_LIST)
                 ? " | admin ..." : "")));
     }
 
@@ -347,7 +355,7 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
             Stream<String> player = canSuggest(sender, SiegeService.PERMISSION_PLAY)
-                    ? Stream.of("join", "leave", "menu", "info", "vote", "spawn") : Stream.empty();
+                    ? Stream.of("join", "leave", "menu", "info", "vote", "spawn", "history") : Stream.empty();
             Stream<String> skip = canSuggest(sender, SiegeService.PERMISSION_SKIP) ? Stream.of("skip") : Stream.empty();
             Stream<String> admin = canSuggestAnyAdmin(sender) ? Stream.of("admin") : Stream.empty();
             return filter(Stream.of(player, skip, admin, Stream.of("help")).flatMap(s -> s), args[0]);
@@ -485,7 +493,7 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
         return switch (phase) {
             case MATCHMAKING -> NamedTextColor.GREEN;
             case HUB, IN_PROGRESS -> NamedTextColor.GOLD;
-            case ENDING, COOLDOWN -> NamedTextColor.YELLOW;
+            case ENDING, POST_MATCH, COOLDOWN -> NamedTextColor.YELLOW;
             case DISABLED -> NamedTextColor.RED;
         };
     }

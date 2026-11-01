@@ -87,6 +87,18 @@ public sealed interface SiegeEffect {
     record EndMatchEffect(KnkSiegeScenario scenario, SiegeEndReason reason) implements SiegeEffect {}
 
     /**
+     * One of the last {@link SiegeLobbyStateMachine#FINAL_COUNTDOWN_SECONDS} seconds of a running match (alpha run 1,
+     * PandiO/knk-workspace#199): {@code secondsLeft} (1 or more) until it ends on time. Runtime: countdown for the members.
+     */
+    record FinalCountdownEffect(int secondsLeft) implements SiegeEffect {}
+
+    /**
+     * The post-match wait at the hub is over (#198), or an admin stop / shutdown cut it short. Runtime: restore and
+     * release every member (the match was already completed or aborted when it ended).
+     */
+    record PostMatchOverEffect(KnkSiegeScenario scenario) implements SiegeEffect {}
+
+    /**
      * The round was called off before a match started. Runtime: announce, release every member
      * (restoring them first when {@code membersInHub}); no match is recorded.
      */

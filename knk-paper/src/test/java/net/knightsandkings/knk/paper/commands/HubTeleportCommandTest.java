@@ -19,6 +19,7 @@ import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
+import net.knightsandkings.knk.paper.teleport.TeleportExemptions;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -357,5 +358,93 @@ class HubTeleportCommandTest {
 
         verify(staff).sendMessage(eq(org.bukkit.ChatColor.GREEN + "Sent Bob to the hub."));
         assertTrue(settled.isEmpty());
+    }
+
+    // ===== PandiO/knk-workspace#171: exemptions and the all form =====
+
+    /** Exempt nodes per player name (the exemptions' own permission view; the command's grants stay sender-wide). */
+    private final Map<String, Set<String>> exemptGrants = new java.util.HashMap<>();
+    private final Set<Player> inMode = new HashSet<>();
+    private final Set<Player> higherForAll = new HashSet<>();
+    private boolean overridesExemption;
+
+    private net.knightsandkings.knk.paper.teleport.TeleportExemptions exemptions(List<Player> onlinePlayers) {
+        KnkPermissible perPlayer = mock(KnkPermissible.class);
+        when(perPlayer.checkAsync(any(), anyString())).thenAnswer(inv -> {
+            Player player = inv.getArgument(0);
+            String node = inv.getArgument(1);
+            boolean held = exemptGrants.getOrDefault(player.getName(), Set.of()).contains(node) || granted.contains(node) && player.getName().equals("Staff");
+            return CompletableFuture.completedFuture(net.knightsandkings.knk.core.domain.permissions.PermissionDecision.of(held));
+        });
+        when(perPlayer.hasPermission(any(Player.class), anyString())).thenAnswer(inv -> granted.contains(inv.<String>getArgument(1)));
+        PlayerCommandSupport exemptSupport = new PlayerCommandSupport(perPlayer, Runnable::run, name -> null, () -> onlinePlayers);
+        return new net.knightsandkings.knk.paper.teleport.TeleportExemptions(exemptSupport, inMode::contains,
+            (sender, target) -> CompletableFuture.completedFuture(!higherForAll.contains(target)),
+            sender -> CompletableFuture.completedFuture(overridesExemption));
+    }
+
+    private void exempt(Player player, String node) {
+        exemptGrants.computeIfAbsent(player.getName(), k -> new HashSet<>()).add(node);
+    }
+
+    private List<TeleportPlan> startedPlans() {
+        ArgumentCaptor<TeleportPlan> plan = ArgumentCaptor.forClass(TeleportPlan.class);
+        verify(teleportService, org.mockito.Mockito.atLeast(0)).start(plan.capture());
+        return plan.getAllValues();
+    }
+
+    @Test
+    void hubAllSendsEveryEligiblePlayerToTheHub() {
+        grant(TeleportExemptions.Type.HUB.allNode());
+        Player carol = player("Carol");
+        exempt(bob, "knk.teleport.exempt.hub");
+        inMode.add(carol);
+        teleport.setExemptions(exemptions(List.of(staff, alice, bob, carol)));
+
+        run(staff, "all");
+
+        List<TeleportPlan> plans = startedPlans();
+        assertEquals(1, plans.size());
+        assertSame(alice, plans.get(0).subject());
+        assertEquals(hubSpawn, plans.get(0).destination().get());
+        assertEquals(TeleportKind.STAFF, plans.get(0).kind());
+        assertEquals(List.of(alice), settled);
+        verify(staff).sendMessage(contains("Teleported 1 of 1 player to the hub."));
+        verify(alice).sendMessage(contains("Staff sent you to the hub"));
+    }
+
+    @Test
+    void hubAllWithoutAHubMovesNobody() {
+        grant(TeleportExemptions.Type.HUB.allNode());
+        hub = Optional.empty();
+        teleport.setExemptions(exemptions(List.of(staff, alice, bob)));
+
+        run(staff, "all");
+
+        verify(teleportService, never()).start(any());
+        verify(staff).sendMessage(contains(HubTeleportCommand.UNAVAILABLE));
+    }
+
+    @Test
+    void hubAllNeedsItsNode() {
+        grant(TeleportNodes.STAFF_OTHERS);
+        teleport.setExemptions(exemptions(List.of(staff, alice, bob)));
+
+        run(staff, "all");
+
+        verify(teleportService, never()).start(any());
+        verify(staff).sendMessage(contains("don't have permission"));
+    }
+
+    @Test
+    void hubOfAnExemptPlayerIsRefused() {
+        grant(TeleportNodes.STAFF_OTHERS);
+        exempt(bob, "knk.teleport.exempt.hub");
+        teleport.setExemptions(exemptions(List.of(staff, alice, bob)));
+
+        run(staff, "Bob");
+
+        verify(teleportService, never()).start(any());
+        verify(staff).sendMessage(contains("Bob is exempt"));
     }
 }

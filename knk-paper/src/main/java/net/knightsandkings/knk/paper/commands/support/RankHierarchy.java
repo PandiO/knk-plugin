@@ -34,6 +34,22 @@ public final class RankHierarchy {
         return actorWeight.thenCombine(targetWeight, (a, t) -> a > t);
     }
 
+    /**
+     * PandiO/knk-workspace#171: a future resolving true iff actorUserId's highest active group weight is at least
+     * targetUserId's - the "same rank or lower" rule for teleporting other players. Yourself always resolves true.
+     */
+    public CompletableFuture<Boolean> actorAtLeast(int actorUserId, int targetUserId) {
+        if (actorUserId == targetUserId) {
+            return CompletableFuture.completedFuture(true);
+        }
+        return weightOf(actorUserId).thenCombine(weightOf(targetUserId), (a, t) -> a >= t);
+    }
+
+    /** A user's highest active group weight; 0 without memberships (bare Default). */
+    public CompletableFuture<Integer> weightOf(int userId) {
+        return usersQueryApi.getGroupMemberships(userId).thenApply(RankHierarchy::maxWeight);
+    }
+
     private static int maxWeight(List<GroupMembershipSummary> memberships) {
         return memberships.stream()
             .filter(GroupMembershipSummary::isActive)

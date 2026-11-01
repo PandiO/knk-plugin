@@ -17,6 +17,7 @@ import net.knightsandkings.knk.paper.modes.ModeService;
 import net.knightsandkings.knk.paper.navigation.NavigateCommand;
 import net.knightsandkings.knk.paper.siege.SiegeService;
 import net.knightsandkings.knk.paper.teleport.BackService;
+import net.knightsandkings.knk.paper.teleport.TeleportExemptions;
 import net.knightsandkings.knk.paper.teleport.TeleportNodes;
 
 /**
@@ -35,10 +36,11 @@ import net.knightsandkings.knk.paper.teleport.TeleportNodes;
 public final class CommandNodes {
 
     private static final Map<String, List<String>> ANY_OF = Map.ofEntries(
-            Map.entry("tp", List.of(TeleportNodes.STAFF, TeleportNodes.LEGACY_ADMIN_TP, TeleportNodes.STAFF_OTHERS)),
-            Map.entry("tphere", List.of(TeleportNodes.STAFF_OTHERS)),
+            Map.entry("tp", List.of(TeleportNodes.STAFF, TeleportNodes.LEGACY_ADMIN_TP, TeleportNodes.STAFF_OTHERS,
+                    TeleportExemptions.Type.TP.allNode())),
+            Map.entry("tphere", List.of(TeleportNodes.STAFF_OTHERS, TeleportExemptions.Type.TPHERE.allNode())),
             Map.entry("tpahere", List.of(TeleportNodes.REQUEST_HERE)),
-            Map.entry("spawn", List.of(TeleportNodes.SPAWN, TeleportNodes.STAFF_OTHERS)),
+            Map.entry("spawn", List.of(TeleportNodes.SPAWN, TeleportNodes.STAFF_OTHERS, TeleportExemptions.Type.SPAWN.allNode())),
             Map.entry("warp", List.of(TeleportNodes.WARP, TeleportNodes.STAFF_OTHERS)),
             Map.entry("warps", List.of(TeleportNodes.WARP)),
             Map.entry("back", Stream.concat(BackService.PLAYER_NODES.stream(), Stream.of(TeleportNodes.STAFF_BACK_OTHERS)).toList()),

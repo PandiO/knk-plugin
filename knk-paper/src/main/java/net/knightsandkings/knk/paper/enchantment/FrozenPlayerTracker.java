@@ -97,6 +97,18 @@ public class FrozenPlayerTracker {
         return frozenUntil != null && frozenUntil > System.currentTimeMillis();
     }
 
+    /**
+     * How long the entity's freeze still lasts, 0 when it isn't frozen (PandiO/knk-workspace#170: the freeze boss bar
+     * follows it, also when a new freeze replaces a running one or death ends it early).
+     */
+    public long remainingMillis(UUID entityId) {
+        if (entityId == null) {
+            return 0L;
+        }
+        Long frozenUntil = frozenUntilMillis.get(entityId);
+        return frozenUntil == null ? 0L : Math.max(0L, frozenUntil - System.currentTimeMillis());
+    }
+
     public void unfreeze(UUID playerId) {
         if (playerId == null) {
             return;

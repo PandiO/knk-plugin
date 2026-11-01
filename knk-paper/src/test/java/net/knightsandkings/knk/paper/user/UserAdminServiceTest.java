@@ -248,6 +248,47 @@ class UserAdminServiceTest {
     }
 
     @Test
+    void teleportRankRuleAllowsTheSameRankButStrictRuleDoesNot() {
+        // PandiO/knk-workspace#171: teleports of others need the same rank or lower; edits stay strictly lower.
+        when(ranks.actorAtLeast(42, 7)).thenReturn(CompletableFuture.completedFuture(true));
+        when(ranks.actorOutranks(42, 7)).thenReturn(CompletableFuture.completedFuture(false));
+        List<String> allowed = new java.util.ArrayList<>();
+
+        service.withRankCheck(staff, target, true, a -> allowed.add("same-rank"), () -> { });
+        service.withRankCheck(staff, target, a -> allowed.add("strict"), () -> { });
+
+        assertEquals(List.of("same-rank"), allowed);
+        verify(staff).sendMessage("§cYou cannot act on a player of equal or higher rank.");
+    }
+
+    @Test
+    void teleportRankRuleRefusesAHigherRank() {
+        when(ranks.actorAtLeast(42, 7)).thenReturn(CompletableFuture.completedFuture(false));
+
+        service.withRankCheck(staff, target, true, a -> { throw new AssertionError("allowed"); }, () -> { });
+
+        verify(staff).sendMessage("§cYou cannot act on a player of higher rank.");
+    }
+
+    @Test
+    void mayTeleportIsQuietAndHonoursManageAllAndTheConsole() {
+        Player steve = mock(Player.class);
+        when(steve.getUniqueId()).thenReturn(target.uuid());
+        when(users.getByUuidAsync(target.uuid())).thenReturn(CompletableFuture.completedFuture(FetchResult.hit(target)));
+        when(ranks.actorAtLeast(42, 7)).thenReturn(CompletableFuture.completedFuture(false));
+
+        assertFalse(service.mayTeleport(staff, steve).join());
+        assertTrue(service.mayTeleport(mock(CommandSender.class), steve).join());
+        assertFalse(service.overridesTeleportExemption(staff).join());
+        assertTrue(service.overridesTeleportExemption(mock(CommandSender.class)).join());
+
+        when(staff.hasPermission(UserAdminService.MANAGE_ALL_NODE)).thenReturn(true);
+        assertTrue(service.mayTeleport(staff, steve).join());
+        assertTrue(service.overridesTeleportExemption(staff).join());
+        verify(staff, never()).sendMessage(anyString());
+    }
+
+    @Test
     void groupChangeGoesThroughTheActorsApi() {
         PermissionGroupSummary royal = new PermissionGroupSummary(5, "Royal", 30, true, 1.2);
         when(ranks.actorOutranks(42, 7)).thenReturn(CompletableFuture.completedFuture(true));

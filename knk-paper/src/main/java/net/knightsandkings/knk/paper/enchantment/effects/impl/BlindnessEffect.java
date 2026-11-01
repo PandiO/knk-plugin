@@ -18,6 +18,7 @@ public class BlindnessEffect extends AttackEnchantmentEffect {
     protected void applyEffect(ItemStack weapon, Player attacker, LivingEntity target, int level) {
         int durationTicks = tuning().durationTicksAt(level);
         target.addPotionEffect(new PotionEffect(PotionEffectType.BLINDNESS, durationTicks, 0));
+        display().debuff(target, "blindness", "Blindness", PotionEffectType.BLINDNESS, durationTicks);
         playSound(target.getLocation(), Sound.ENTITY_WITHER_SPAWN, 1.0f, 1.0f);
     }
 }

@@ -103,7 +103,9 @@ public final class AfkPresentation {
      */
     static Component teamStyledName(Player player) {
         Component name = Component.text(player.getName());
-        Scoreboard scoreboard = player.getScoreboard();
+        // PandiO/knk-workspace#163: a siege member sees their match board; the name everyone else sees is the shared one.
+        Scoreboard scoreboard = net.knightsandkings.knk.paper.utils.ScoreboardUtil.hasSiegeTag(player.getUniqueId())
+                ? net.knightsandkings.knk.paper.utils.ScoreboardUtil.getScoreboard() : player.getScoreboard();
         Team team = scoreboard == null ? null : scoreboard.getEntryTeam(player.getName());
         if (team == null) {
             return name;

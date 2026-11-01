@@ -39,6 +39,7 @@ import net.knightsandkings.knk.api.impl.PermissionGroupsQueryApiImpl;
 import net.knightsandkings.knk.api.impl.ClansQueryApiImpl;
 import net.knightsandkings.knk.api.impl.SiegeLobbiesQueryApiImpl;
 import net.knightsandkings.knk.api.impl.SiegeMatchesCommandApiImpl;
+import net.knightsandkings.knk.api.impl.SiegeMatchHistoryApiImpl;
 import net.knightsandkings.knk.api.impl.SiegeGatesCommandApiImpl;
 import net.knightsandkings.knk.api.impl.SiegeScenariosQueryApiImpl;
 import net.knightsandkings.knk.api.impl.TitleBracketsQueryApiImpl;
@@ -139,6 +140,7 @@ public class KnkApiClient {
     private final SiegeLobbiesQueryApi siegeLobbiesQueryApi;
     private final SiegeScenariosQueryApi siegeScenariosQueryApi;
     private final SiegeMatchesCommandApi siegeMatchesCommandApi;
+    private final net.knightsandkings.knk.core.ports.api.SiegeMatchHistoryApi siegeMatchHistoryApi;
     private final SiegeGatesCommandApi siegeGatesCommandApi;
     private final TitleBracketsQueryApi titleBracketsQueryApi;
     private final KitsQueryApi kitsQueryApi;
@@ -151,6 +153,7 @@ public class KnkApiClient {
     private final net.knightsandkings.knk.api.impl.TeleportDestinationsApiImpl teleportDestinationsApi;
     private final net.knightsandkings.knk.core.ports.api.LootboxesQueryApi lootboxesQueryApi;
     private final net.knightsandkings.knk.core.ports.api.LootboxesCommandApi lootboxesCommandApi;
+    private final net.knightsandkings.knk.core.ports.api.ItemInstancesApi itemInstancesApi;
     private final CurrencyApi currencyApi;
     private final RoadNetworkQueryApi roadNetworkQueryApi;
     private final net.knightsandkings.knk.core.ports.api.NavigationCompassSettingsApi navigationCompassSettingsApi;
@@ -215,6 +218,7 @@ public class KnkApiClient {
         this.siegeLobbiesQueryApi = new SiegeLobbiesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeScenariosQueryApi = new SiegeScenariosQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeMatchesCommandApi = new SiegeMatchesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.siegeMatchHistoryApi = new SiegeMatchHistoryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeGatesCommandApi = new SiegeGatesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.titleBracketsQueryApi = new TitleBracketsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.kitsQueryApi = new KitsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -228,6 +232,7 @@ public class KnkApiClient {
         this.teleportDestinationsApi = new net.knightsandkings.knk.api.impl.TeleportDestinationsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.lootboxesQueryApi = new net.knightsandkings.knk.api.impl.LootboxesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.lootboxesCommandApi = new net.knightsandkings.knk.api.impl.LootboxesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.itemInstancesApi = new net.knightsandkings.knk.api.impl.ItemInstancesApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.roadNetworkQueryApi = new RoadNetworkQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.navigationCompassSettingsApi = new net.knightsandkings.knk.api.impl.NavigationCompassSettingsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.roadNetworkCommandApi = new RoadNetworkCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -270,6 +275,11 @@ public class KnkApiClient {
     /** Lootboxes Phase 3: runtime config, active boxes, pending claims, odds. */
     public net.knightsandkings.knk.core.ports.api.LootboxesQueryApi getLootboxesQueryApi() {
         return lootboxesQueryApi;
+    }
+
+    /** PandiO/knk-workspace#175: new ItemInstances for {@code /knk item more}'s copies. */
+    public net.knightsandkings.knk.core.ports.api.ItemInstancesApi getItemInstancesApi() {
+        return itemInstancesApi;
     }
 
     /** Lootboxes Phase 3: spawn, claim, deliver, admin give, in-game areas. */
@@ -474,6 +484,11 @@ public class KnkApiClient {
     /** Siege Phase 6: match lifecycle checkpoints (wrap it in knk-core's SiegeMatchRecorder). */
     public SiegeMatchesCommandApi getSiegeMatchesCommandApi() {
         return siegeMatchesCommandApi;
+    }
+
+    /** Alpha run 1 (PandiO/knk-workspace#174): a player's finished matches for {@code /siege history}. */
+    public net.knightsandkings.knk.core.ports.api.SiegeMatchHistoryApi getSiegeMatchHistoryApi() {
+        return siegeMatchHistoryApi;
     }
 
     /** Siege Phase 7a: the persisted gate lockdown (snapshots, overrides, restore). */

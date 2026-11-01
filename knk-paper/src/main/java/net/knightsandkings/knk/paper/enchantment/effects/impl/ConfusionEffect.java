@@ -18,6 +18,7 @@ public class ConfusionEffect extends AttackEnchantmentEffect {
     protected void applyEffect(ItemStack weapon, Player attacker, LivingEntity target, int level) {
         int durationTicks = tuning().durationTicksAt(level);
         target.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, durationTicks, 2));
+        display().debuff(target, "nausea", "Nausea", PotionEffectType.NAUSEA, durationTicks);
         playEffect(target.getLocation(), Effect.POTION_BREAK, 0);
     }
 }
