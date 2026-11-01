@@ -27,6 +27,17 @@ public class AdminFreezeManager {
     private static final Logger LOGGER = Logger.getLogger(AdminFreezeManager.class.getName());
 
     private final Map<UUID, String> frozen = new ConcurrentHashMap<>();
+    /**
+     * PandiO/knk-workspace#170: who froze a player, for the boss bar, in memory only (the API stores FrozenByUserId
+     * but doesn't hand it out). Kept through a quit so a relog on the same server run still names them; dropped on
+     * unfreeze. Absent: console, a vanished staff member, or a freeze from before a restart or from the web app.
+     */
+    private final Map<UUID, Freezer> freezers = new ConcurrentHashMap<>();
+
+    /** The staff member's name and the reason they froze with (a different reason later means someone else froze). */
+    private record Freezer(String name, String reason) {
+    }
+
     // PandiO/knk-workspace#155: told when a player's freeze starts (true) and ends (false), so a frozen player held in
     // mid-air gets flight allowed and isn't kicked for flying.
     private volatile java.util.function.BiConsumer<UUID, Boolean> freezeHook = (uuid, frozenNow) -> { };
@@ -49,7 +60,23 @@ public class AdminFreezeManager {
         return frozen.get(uuid);
     }
 
+    /** Who froze the player, or null when unknown (console, vanished staff, restart, web app). */
+    public String frozenBy(UUID uuid) {
+        Freezer freezer = uuid == null ? null : freezers.get(uuid);
+        return freezer == null ? null : freezer.name();
+    }
+
     public void freeze(UUID uuid, String reason) {
+        freeze(uuid, reason, null);
+    }
+
+    /** @param frozenBy the staff member's name for the boss bar, null to show {@code staff} (#170) */
+    public void freeze(UUID uuid, String reason, String frozenBy) {
+        if (frozenBy != null && !frozenBy.isBlank()) {
+            freezers.put(uuid, new Freezer(frozenBy, reason));
+        } else {
+            freezers.remove(uuid);
+        }
         frozen.put(uuid, reason);
         freezeHook.accept(uuid, true);
         if (offline != null) {
@@ -57,8 +84,24 @@ public class AdminFreezeManager {
         }
     }
 
+    /**
+     * Notes who froze an offline player (the freeze itself takes effect on their next join), so the join on this
+     * server run names them on the boss bar (#170). Null {@code frozenBy} forgets any earlier one.
+     */
+    public void rememberFreezer(UUID uuid, String reason, String frozenBy) {
+        if (uuid == null) {
+            return;
+        }
+        if (frozenBy != null && !frozenBy.isBlank()) {
+            freezers.put(uuid, new Freezer(frozenBy, reason));
+        } else {
+            freezers.remove(uuid);
+        }
+    }
+
     public void unfreeze(UUID uuid) {
         frozen.remove(uuid);
+        freezers.remove(uuid);
         freezeHook.accept(uuid, false);
         if (offline != null) {
             offline.setFrozen(uuid, false, null);
@@ -102,6 +145,11 @@ public class AdminFreezeManager {
     }
 
     private void applyOnJoin(Plugin plugin, Player player, String reason) {
+        // #170: the freezer is only known for a freeze made on this server run with the same reason.
+        Freezer freezer = freezers.get(player.getUniqueId());
+        if (freezer != null && !java.util.Objects.equals(blankToEmpty(freezer.reason()), blankToEmpty(reason))) {
+            freezers.remove(player.getUniqueId());
+        }
         frozen.put(player.getUniqueId(), reason != null ? reason : "");
         freezeHook.accept(player.getUniqueId(), true);
         Bukkit.getScheduler().runTask(plugin, () -> {
@@ -111,6 +159,11 @@ public class AdminFreezeManager {
         });
     }
 
+    private static String blankToEmpty(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    /** Quit: the freeze stops holding the player until the next join; who froze them is kept for that join. */
     public void forget(UUID uuid) {
         frozen.remove(uuid);
         freezeHook.accept(uuid, false);

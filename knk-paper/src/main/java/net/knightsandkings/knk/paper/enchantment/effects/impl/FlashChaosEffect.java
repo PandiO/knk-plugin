@@ -24,7 +24,6 @@ public class FlashChaosEffect extends SupportEnchantmentEffect {
     private static final double EFFECT_RADIUS = 5.0d;
     private static final double DAMAGE_AMOUNT = 60.0d;
     static final int SLOWNESS_TICKS = 100;
-    /** Also the name-tag blackout (PandiO/knk-workspace#169). */
     static final int NAUSEA_TICKS = 250;
 
     private final CombatSafezoneCheck safezones;
@@ -77,8 +76,7 @@ public class FlashChaosEffect extends SupportEnchantmentEffect {
                 targetPlayer.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, NAUSEA_TICKS, 1));
                 display().debuff(targetPlayer, "slowness", "Slowness", PotionEffectType.SLOWNESS, SLOWNESS_TICKS);
                 display().debuff(targetPlayer, "nausea", "Nausea", PotionEffectType.NAUSEA, NAUSEA_TICKS);
-                // #169: the flash blinds the victim to name tags for as long as the nausea lasts.
-                display().hideNameTags(targetPlayer, NAUSEA_TICKS);
+                // #169 round 2 (developer, 2026-10-27): no name-tag blackout here any more; only blindness hides tags.
             }
         }
 

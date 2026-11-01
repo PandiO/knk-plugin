@@ -29,8 +29,8 @@ import java.util.function.ToLongFunction;
 
 /**
  * One boss bar per timed debuff a custom enchantment put on a player (PandiO/knk-workspace#170): {@code Poison · 4s},
- * {@code Frozen · 2s}, counting down, plus a static {@code Frozen} bar while staff hold the player with
- * {@code /freeze}. The bars are this class's own Adventure bars, so they sit next to the navigation bar
+ * {@code Frozen · 2s}, counting down, plus a static red {@code Frozen by <staff> for: <reason>} bar while staff hold
+ * the player with {@code /freeze}. The bars are this class's own Adventure bars, so they sit next to the navigation bar
  * ({@code NavigationHud}) and any other plugin's bars without touching them.
  * <p>
  * A bar follows the real effect: a potion bar reads the player's potion effect every tick of {@link #tick} (milk or a
@@ -43,12 +43,17 @@ public final class EffectBossBars implements EffectDisplay, Listener {
     /** The key and label of the staff {@code /freeze} bar. */
     public static final String STAFF_FREEZE = "staff_freeze";
     public static final String FROZEN_LABEL = "Frozen";
+    /** Who froze the player when it isn't known (console, vanished staff, a restart, the web app). */
+    public static final String UNKNOWN_FREEZER = "staff";
+    /** Longest reason shown on the staff freeze bar before it is cut with an ellipsis. */
+    static final int MAX_REASON_LENGTH = 60;
 
     private final TimedEffectBoard board = new TimedEffectBoard();
     private final Map<UUID, Map<String, BossBar>> bars = new ConcurrentHashMap<>();
     private final Map<UUID, Map<String, Function<Player, PotionEffect>>> potions = new ConcurrentHashMap<>();
     private final Map<String, ToLongFunction<UUID>> remainingSources = new ConcurrentHashMap<>();
     private final NameTagBlackout blackout;
+    private volatile InvisibleNameTag invisibleNameTag;
     private final Function<UUID, Player> players;
     private final LongSupplier clock;
 
@@ -102,20 +107,42 @@ public final class EffectBossBars implements EffectDisplay, Listener {
         render(player, now);
     }
 
+    /** #169: the blackout ends with the blindness (milk ends it early). */
     @Override
     public void hideNameTags(LivingEntity victim, int durationTicks) {
         if (blackout != null && victim instanceof Player player) {
-            blackout.hide(player, durationTicks);
+            blackout.hide(player, durationTicks, p -> p.hasPotionEffect(PotionEffectType.BLINDNESS));
         }
     }
 
-    /** Staff {@code /freeze} started ({@code true}) or ended: the static "Frozen" bar. */
+    /** Where {@link #invisible} goes (#169 round 2); none until set. */
+    public void setInvisibleNameTag(InvisibleNameTag invisibleNameTag) {
+        this.invisibleNameTag = invisibleNameTag;
+    }
+
+    @Override
+    public void invisible(LivingEntity invoker, int durationTicks) {
+        InvisibleNameTag target = invisibleNameTag;
+        if (target != null && invoker instanceof Player player && durationTicks > 0) {
+            target.invisible(player);
+        }
+    }
+
+    /** Staff {@code /freeze} started ({@code true}) or ended, freezer and reason unknown. */
     public void staffFrozen(UUID playerId, boolean frozen) {
+        staffFrozen(playerId, frozen, staffFreezeLabel(null, null));
+    }
+
+    /**
+     * Staff {@code /freeze} started ({@code true}) or ended: the static red bar with {@code label} (see
+     * {@link #staffFreezeLabel}).
+     */
+    public void staffFrozen(UUID playerId, boolean frozen, String label) {
         if (playerId == null) {
             return;
         }
         if (frozen) {
-            board.startStatic(playerId, STAFF_FREEZE, FROZEN_LABEL);
+            board.startStatic(playerId, STAFF_FREEZE, label == null || label.isBlank() ? FROZEN_LABEL : label);
         } else {
             board.end(playerId, STAFF_FREEZE);
         }
@@ -252,9 +279,28 @@ public final class EffectBossBars implements EffectDisplay, Listener {
         potions.remove(id);
     }
 
+    /**
+     * The staff freeze bar text (PandiO/knk-workspace#170 round 2): {@code Frozen by <frozenBy> for: <reason>}, with
+     * {@value #UNKNOWN_FREEZER} for an unknown freezer and without {@code " for: ..."} when there is no reason. A
+     * reason longer than {@value #MAX_REASON_LENGTH} characters is cut with an ellipsis.
+     */
+    public static String staffFreezeLabel(String frozenBy, String reason) {
+        String by = frozenBy == null || frozenBy.isBlank() ? UNKNOWN_FREEZER : frozenBy.trim();
+        String text = FROZEN_LABEL + " by " + by;
+        String why = reason == null ? "" : reason.strip();
+        if (why.isEmpty()) {
+            return text;
+        }
+        if (why.length() > MAX_REASON_LENGTH) {
+            why = why.substring(0, MAX_REASON_LENGTH - 1).stripTrailing() + "…";
+        }
+        return text + " for: " + why;
+    }
+
     static BossBar.Color barColor(String key) {
         return switch (key) {
-            case "freeze", STAFF_FREEZE -> BossBar.Color.BLUE;
+            case STAFF_FREEZE -> BossBar.Color.RED;
+            case "freeze" -> BossBar.Color.BLUE;
             case "poison" -> BossBar.Color.GREEN;
             case "blindness", "nausea" -> BossBar.Color.PURPLE;
             case "wither", "slowness" -> BossBar.Color.WHITE;
@@ -262,9 +308,10 @@ public final class EffectBossBars implements EffectDisplay, Listener {
         };
     }
 
-    private static NamedTextColor textColor(String key) {
+    static NamedTextColor textColor(String key) {
         return switch (key) {
-            case "freeze", STAFF_FREEZE -> NamedTextColor.AQUA;
+            case STAFF_FREEZE -> NamedTextColor.RED;
+            case "freeze" -> NamedTextColor.AQUA;
             case "poison" -> NamedTextColor.GREEN;
             case "blindness", "nausea" -> NamedTextColor.LIGHT_PURPLE;
             case "wither", "slowness" -> NamedTextColor.GRAY;

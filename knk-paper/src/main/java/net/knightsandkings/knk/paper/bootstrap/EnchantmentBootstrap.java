@@ -13,7 +13,9 @@ import net.knightsandkings.knk.paper.enchantment.GateAreaDamage;
 import net.knightsandkings.knk.paper.enchantment.FrozenPlayerTracker;
 import net.knightsandkings.knk.paper.enchantment.InMemoryCooldownManager;
 import net.knightsandkings.knk.paper.enchantment.display.EffectBossBars;
+import net.knightsandkings.knk.paper.enchantment.display.InvisibleNameTag;
 import net.knightsandkings.knk.paper.enchantment.display.NameTagBlackout;
+import net.knightsandkings.knk.paper.utils.ScoreboardUtil;
 import net.knightsandkings.knk.paper.listeners.EnchantBookListener;
 import net.knightsandkings.knk.paper.listeners.EnchantmentCombatListener;
 import net.knightsandkings.knk.paper.listeners.EnchantmentEnchantTableListener;
@@ -53,9 +55,11 @@ public class EnchantmentBootstrap {
         CooldownManager cooldownManager = new InMemoryCooldownManager();
         FrozenPlayerTracker frozenPlayerTracker = new FrozenPlayerTracker(plugin);
         ExecutorImpl enchantmentExecutor = new ExecutorImpl(plugin, cooldownManager, frozenPlayerTracker, safezones, gateAreaDamage);
-        // #169: flash_chaos hides name tags in the victim's own view; #170: a boss bar per timed debuff.
+        // #169: blindness hides name tags in the victim's own view, invisibility hides the invoker's own tag;
+        // #170: a boss bar per timed debuff.
         NameTagBlackout nameTagBlackout = new NameTagBlackout();
         EffectBossBars effectBossBars = new EffectBossBars(nameTagBlackout);
+        effectBossBars.setInvisibleNameTag(new InvisibleNameTag(ScoreboardUtil::getScoreboard));
         effectBossBars.remainingFrom("freeze", frozenPlayerTracker::remainingMillis);
         enchantmentExecutor.setEffectDisplay(effectBossBars);
         EnchantmentCommandHandler commandHandler = new EnchantmentCommandHandler(

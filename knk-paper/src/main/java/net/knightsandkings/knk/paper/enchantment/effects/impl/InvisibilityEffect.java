@@ -15,7 +15,10 @@ public class InvisibilityEffect extends SupportEnchantmentEffect {
 
     @Override
     protected void applyEffect(ItemStack item, Player player, int level) {
-        player.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, tuning().durationTicksAt(level), 0));
+        int durationTicks = tuning().durationTicksAt(level);
+        player.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, durationTicks, 0));
+        // PandiO/knk-workspace#169: the invoker's own name tag stays hidden from other players while invisible.
+        display().invisible(player, durationTicks);
         playEffect(player.getLocation().clone().add(0.0d, 1.0d, 0.0d), Effect.POTION_BREAK, 0);
     }
 }

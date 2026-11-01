@@ -23,13 +23,14 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.LongSupplier;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Hides other players' name tags in one viewer's own view while a flash_chaos blackout runs
- * (PandiO/knk-workspace#169).
+ * Hides other players' name tags in one viewer's own view while a custom enchantment's blindness lasts
+ * (PandiO/knk-workspace#169; round 1 used flash_chaos, the developer moved it to blindness on 2026-10-27).
  * <p>
  * <b>How:</b> name-tag visibility is a team option, and a player can be in only one team per board, so the players
  * are never re-teamed. Instead the viewer is shown a private <i>mirror</i> of their own board (the shared rank board
@@ -38,10 +39,11 @@ import java.util.logging.Logger;
  * {@link Team.OptionStatus#NEVER}, plus one catch-all team for online players who are on no team. Nobody else's view
  * changes. The mirror is re-synced from the real board every second, so the siege sidebar keeps ticking.
  * <p>
- * The real board is handed back when the blackout ends, on death and on quit. While it runs, the board owners set
+ * The real board is handed back when the blackout ends, when the effect behind it is gone sooner (the viewer drank
+ * milk: see {@link #hide(Player, int, Predicate)}), on death and on quit. While it runs, the board owners set
  * and read the viewer's board through {@link ViewerScoreboards}, which this class answers: a siege match that starts
  * or ends during the blackout swaps the board behind the mirror, which the viewer gets back afterwards. Overlapping
- * flashes extend one blackout to the latest end. Main thread.
+ * blindness hits extend one blackout to the latest end. Main thread.
  */
 public final class NameTagBlackout implements Listener, ViewerScoreboards.Overlay {
 
@@ -53,6 +55,8 @@ public final class NameTagBlackout implements Listener, ViewerScoreboards.Overla
     private final ViewerBlackoutLedger ledger = new ViewerBlackoutLedger();
     private final Map<UUID, Scoreboard> underlying = new ConcurrentHashMap<>();
     private final Map<UUID, Scoreboard> mirrors = new ConcurrentHashMap<>();
+    /** Whether the effect behind a blackout still runs (checked every second; false ends the blackout early). */
+    private final Map<UUID, Predicate<Player>> stillApplies = new ConcurrentHashMap<>();
     private final Supplier<Scoreboard> newBoard;
     private final Supplier<Collection<? extends Player>> onlinePlayers;
     private final LongSupplier clock;
@@ -67,13 +71,29 @@ public final class NameTagBlackout implements Listener, ViewerScoreboards.Overla
         this.clock = clock;
     }
 
-    /** Starts (or extends) the viewer's blackout. */
+    /** Starts (or extends) the viewer's blackout for {@code durationTicks}. */
     public void hide(Player viewer, int durationTicks) {
+        hide(viewer, durationTicks, null);
+    }
+
+    /**
+     * Starts (or extends) the viewer's blackout for {@code durationTicks}, ending it sooner once {@code stillApplies}
+     * says the effect behind it is gone (e.g. the blindness was cured with milk). Null: only the duration counts.
+     */
+    public void hide(Player viewer, int durationTicks, Predicate<Player> stillApplies) {
         if (viewer == null || durationTicks <= 0) {
             return;
         }
         UUID id = viewer.getUniqueId();
-        if (!ledger.start(id, durationTicks * 50L, clock.getAsLong())) {
+        boolean started = ledger.start(id, durationTicks * 50L, clock.getAsLong());
+        if (ledger.isActive(id)) {
+            if (stillApplies != null) {
+                this.stillApplies.put(id, stillApplies);
+            } else if (started) {
+                this.stillApplies.remove(id);
+            }
+        }
+        if (!started) {
             return;
         }
         Scoreboard own = viewer.getScoreboard();
@@ -92,6 +112,7 @@ public final class NameTagBlackout implements Listener, ViewerScoreboards.Overla
         UUID id = viewer.getUniqueId();
         ledger.end(id);
         mirrors.remove(id);
+        stillApplies.remove(id);
         Scoreboard own = underlying.remove(id);
         if (own != null && viewer.isOnline()) {
             viewer.setScoreboard(own);
@@ -102,7 +123,7 @@ public final class NameTagBlackout implements Listener, ViewerScoreboards.Overla
         return ledger.isActive(viewerId);
     }
 
-    /** Every second: ends the blackouts that ran out and re-syncs the mirrors of the rest. */
+    /** Every second: ends the blackouts that ran out (or whose effect is gone) and re-syncs the mirrors of the rest. */
     public void tick() {
         for (UUID id : ledger.expire(clock.getAsLong())) {
             Player viewer = Bukkit.getPlayer(id);
@@ -117,6 +138,11 @@ public final class NameTagBlackout implements Listener, ViewerScoreboards.Overla
             Scoreboard mirror = mirrors.get(id);
             Scoreboard own = underlying.get(id);
             if (viewer == null || mirror == null || own == null) {
+                continue;
+            }
+            Predicate<Player> effect = stillApplies.get(id);
+            if (effect != null && !effect.test(viewer)) {
+                show(viewer);
                 continue;
             }
             try {
@@ -176,6 +202,7 @@ public final class NameTagBlackout implements Listener, ViewerScoreboards.Overla
     private void forget(UUID id) {
         ledger.end(id);
         mirrors.remove(id);
+        stillApplies.remove(id);
         underlying.remove(id);
     }
 
