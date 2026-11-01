@@ -2,6 +2,7 @@ package net.knightsandkings.knk.paper.commands.enchantment;
 
 import net.knightsandkings.knk.core.domain.enchantment.Enchantment;
 import net.knightsandkings.knk.core.domain.enchantment.EnchantmentRegistry;
+import net.knightsandkings.knk.paper.enchantment.EnchantmentPermissions;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
@@ -10,6 +11,16 @@ import java.util.Locale;
 import java.util.Optional;
 
 public class EnchantmentCommandValidator {
+    private final EnchantmentPermissions permissions;
+
+    public EnchantmentCommandValidator() {
+        this(EnchantmentPermissions.bukkitOnly());
+    }
+
+    public EnchantmentCommandValidator(EnchantmentPermissions permissions) {
+        this.permissions = permissions != null ? permissions : EnchantmentPermissions.bukkitOnly();
+    }
+
     public Optional<Player> requirePlayer(CommandSender sender) {
         if (sender instanceof Player player) {
             return Optional.of(player);
@@ -53,6 +64,6 @@ public class EnchantmentCommandValidator {
     }
 
     public boolean hasEnchantmentPermission(CommandSender sender, String enchantmentId) {
-        return sender.hasPermission("customenchantments." + normalizeEnchantmentId(enchantmentId));
+        return permissions.canUse(sender, normalizeEnchantmentId(enchantmentId));
     }
 }

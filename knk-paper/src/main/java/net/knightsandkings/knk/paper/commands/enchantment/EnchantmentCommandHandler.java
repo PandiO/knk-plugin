@@ -3,6 +3,7 @@ package net.knightsandkings.knk.paper.commands.enchantment;
 import net.knightsandkings.knk.core.ports.enchantment.CooldownManager;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentRepository;
 import net.knightsandkings.knk.paper.config.EnchantmentConfigManager;
+import net.knightsandkings.knk.paper.enchantment.EnchantmentPermissions;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -21,6 +22,7 @@ public class EnchantmentCommandHandler implements CommandExecutor, TabCompleter 
     private final Plugin plugin;
     private final EnchantmentConfigManager configManager;
     private final EnchantmentCommandValidator validator;
+    private final EnchantmentPermissions permissions;
     private final Map<String, EnchantmentSubcommand> subcommands;
     private final VisiblePlayers visiblePlayers = VisiblePlayers.bukkit();
     // PandiO/knk-workspace#151: /ce reload also reloads the enchantments' combat values from the API.
@@ -32,9 +34,24 @@ public class EnchantmentCommandHandler implements CommandExecutor, TabCompleter 
             EnchantmentRepository repository,
             CooldownManager cooldownManager
     ) {
+        this(plugin, configManager, repository, cooldownManager, EnchantmentPermissions.bukkitOnly());
+    }
+
+    /**
+     * @param permissions the subcommand nodes and {@code /ce add <id>} are checked through Bukkit and the
+     *                    rank model (PandiO/knk-workspace#193)
+     */
+    public EnchantmentCommandHandler(
+            Plugin plugin,
+            EnchantmentConfigManager configManager,
+            EnchantmentRepository repository,
+            CooldownManager cooldownManager,
+            EnchantmentPermissions permissions
+    ) {
         this.plugin = plugin;
         this.configManager = configManager;
-        this.validator = new EnchantmentCommandValidator();
+        this.permissions = permissions != null ? permissions : EnchantmentPermissions.bukkitOnly();
+        this.validator = new EnchantmentCommandValidator(this.permissions);
         this.subcommands = new LinkedHashMap<>();
 
         register(new AddEnchantmentCommand(this, repository, validator));
@@ -84,18 +101,18 @@ public class EnchantmentCommandHandler implements CommandExecutor, TabCompleter 
         }
 
         String permission = subcommand.permission();
-        if (permission != null && !permission.isBlank() && !sender.hasPermission(permission)) {
-            sender.sendMessage(colorize(message("messages.cmd-no-permission", "&cYou don't have permission to use this command.")));
-            return true;
-        }
-
-        return subcommand.execute(sender, subArgs);
+        EnchantmentSubcommand chosen = subcommand;
+        permissions.commands().whenAllowed(sender, permission == null || permission.isBlank() ? null : permission,
+                () -> chosen.execute(sender, subArgs));
+        return true;
     }
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length <= 1) {
-            List<String> root = List.of("add", "remove", "info", "cooldown", "reload");
+            List<String> root = List.of("add", "remove", "info", "cooldown", "reload").stream()
+                    .filter(name -> mayUse(sender, subcommands.get("cooldown".equals(name) ? "cooldown-clear" : name)))
+                    .toList();
             return filterByPrefix(root, args.length == 0 ? "" : args[0]);
         }
 
@@ -114,10 +131,24 @@ public class EnchantmentCommandHandler implements CommandExecutor, TabCompleter 
         }
 
         EnchantmentSubcommand subcommand = subcommands.get(first);
-        if (subcommand == null) {
+        if (subcommand == null || !mayUse(sender, subcommand)) {
             return List.of();
         }
         return subcommand.tabComplete(sender, copyArgs(args, 1));
+    }
+
+    /** Whether tab completion offers the subcommand (Bukkit or a cached rank grant of its node). */
+    private boolean mayUse(CommandSender sender, EnchantmentSubcommand subcommand) {
+        if (subcommand == null) {
+            return false;
+        }
+        String permission = subcommand.permission();
+        return permission == null || permission.isBlank() || permissions.commands().hasForCompletion(sender, permission);
+    }
+
+    /** Who may use what: the per-enchantment nodes and the {@code /ce} subcommand nodes. */
+    public EnchantmentPermissions permissions() {
+        return permissions;
     }
 
     public Plugin plugin() {
