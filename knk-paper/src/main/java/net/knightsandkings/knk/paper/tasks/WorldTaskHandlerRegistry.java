@@ -2,9 +2,10 @@ package net.knightsandkings.knk.paper.tasks;
 
 import org.bukkit.entity.Player;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 import java.util.stream.Stream;
 
@@ -14,8 +15,20 @@ import java.util.stream.Stream;
  */
 public class WorldTaskHandlerRegistry {
     private static final Logger LOGGER = Logger.getLogger(WorldTaskHandlerRegistry.class.getName());
-    private final Map<String, IWorldTaskHandler> handlers = new HashMap<>();
-    private final Map<String, IWorldTaskHandler> handlersByTaskType = new HashMap<>();
+    // #180: read from the async chat thread (WorldTaskChatListener's quick check), so concurrent maps.
+    private final Map<String, IWorldTaskHandler> handlers = new ConcurrentHashMap<>();
+    private final Map<String, IWorldTaskHandler> handlersByTaskType = new ConcurrentHashMap<>();
+    private volatile WorldTaskLifecycle lifecycle = WorldTaskLifecycle.NONE;
+
+    /** PandiO/knk-workspace#180: tells every registered handler (now and later) what to report on in-game cancel/discard. */
+    public void setLifecycle(WorldTaskLifecycle lifecycle) {
+        this.lifecycle = lifecycle != null ? lifecycle : WorldTaskLifecycle.NONE;
+        allHandlers().forEach(handler -> handler.setLifecycle(this.lifecycle));
+    }
+
+    private Stream<IWorldTaskHandler> allHandlers() {
+        return Stream.concat(handlers.values().stream(), handlersByTaskType.values().stream()).distinct();
+    }
 
     /**
      * Register a handler for a specific field type.
@@ -27,6 +40,7 @@ public class WorldTaskHandlerRegistry {
             LOGGER.warning("Handler for field '" + fieldName + "' is already registered. Overwriting.");
         }
         handlers.put(fieldName, handler);
+        handler.setLifecycle(lifecycle);
         LOGGER.info("Registered WorldTask handler for field: " + fieldName);
     }
 
@@ -40,6 +54,7 @@ public class WorldTaskHandlerRegistry {
             LOGGER.warning("Handler for task type '" + taskType + "' is already registered. Overwriting.");
         }
         handlersByTaskType.put(taskType, handler);
+        handler.setLifecycle(lifecycle);
         LOGGER.info("Registered WorldTask handler for task type: " + taskType);
     }
 
@@ -59,8 +74,8 @@ public class WorldTaskHandlerRegistry {
      * @return The handler, if registered
      */
     public Optional<IWorldTaskHandler> getHandler(String taskType, String fieldName) {
-        IWorldTaskHandler taskTypeHandler = handlersByTaskType.get(taskType);
-        return taskTypeHandler != null ? Optional.of(taskTypeHandler) : getHandler(fieldName);
+        IWorldTaskHandler taskTypeHandler = taskType == null ? null : handlersByTaskType.get(taskType);
+        return taskTypeHandler != null ? Optional.of(taskTypeHandler) : fieldName == null ? Optional.empty() : getHandler(fieldName);
     }
 
     /**
@@ -101,12 +116,29 @@ public class WorldTaskHandlerRegistry {
      * @param player The player
      */
     public void cancelAllTasks(Player player) {
-        for (IWorldTaskHandler handler : handlers.values()) {
-            if (handler.isHandling(player)) {
-                handler.cancel(player);
-                LOGGER.fine("Cancelled task for player " + player.getName() + " in handler " + handler.getFieldName());
-            }
+        // #180: handlers registered only by task type hold tasks too (they were skipped before).
+        allHandlers().filter(handler -> handler.isHandling(player)).forEach(handler -> {
+            handler.cancel(player);
+            LOGGER.fine("Cancelled task for player " + player.getName() + " in handler " + handler.getFieldName());
+        });
+    }
+
+    /**
+     * PandiO/knk-workspace#180: stops the local session of one task (the web app cancelled it, the sweep released it, or
+     * another server holds it now). Returns false when the player has no handler for that task.
+     */
+    public boolean stopTask(Player player, int taskId) {
+        Optional<IWorldTaskHandler> handler = getActiveHandler(player);
+        if (handler.isPresent() && Integer.valueOf(taskId).equals(handler.get().getTaskId(player))) {
+            handler.get().cancel(player);
+            return true;
         }
+        return false;
+    }
+
+    /** #180: whether any handler is handling this player (thread-safe; used off the main thread). */
+    public boolean isHandling(UUID playerId) {
+        return allHandlers().anyMatch(handler -> handler.isHandling(playerId));
     }
 
     /**
@@ -115,7 +147,7 @@ public class WorldTaskHandlerRegistry {
      * @return true if the player is handling a task
      */
     public boolean isHandlingAnyTask(Player player) {
-        return handlers.values().stream().anyMatch(h -> h.isHandling(player));
+        return allHandlers().anyMatch(h -> h.isHandling(player));
     }
 
     /**
@@ -125,8 +157,7 @@ public class WorldTaskHandlerRegistry {
      */
     public Optional<IWorldTaskHandler> getActiveHandler(Player player) {
         // A handler registered only by task type can hold a task too (KNG-174)
-        return Stream.concat(handlers.values().stream(), handlersByTaskType.values().stream())
-                .distinct()
+        return allHandlers()
                 .filter(h -> h.isHandling(player))
                 .findFirst();
     }
@@ -142,7 +173,7 @@ public class WorldTaskHandlerRegistry {
             String task = taskId != null
                     ? "task #" + taskId + " (" + handler.getFieldName() + ")"
                     : "a " + handler.getFieldName() + " task";
-            return "You still have " + task + " open. Finish it, or type 'cancel' to stop it, then claim again.";
+            return "You still have " + task + " open. Finish it, or type 'cancel' to hand it back, then claim again.";
         });
     }
 

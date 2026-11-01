@@ -43,7 +43,7 @@ class WorldTaskHandlerRegistryTest {
         registry.registerHandler(handler);
 
         assertEquals(Optional.of("You still have task #88 (Location) open. "
-                        + "Finish it, or type 'cancel' to stop it, then claim again."),
+                        + "Finish it, or type 'cancel' to hand it back, then claim again."),
                 registry.openTaskRefusal(player));
     }
 
@@ -69,7 +69,28 @@ class WorldTaskHandlerRegistryTest {
 
         assertEquals(Optional.of(handler), registry.getActiveHandler(player));
         assertEquals(Optional.of("You still have a Location task open. "
-                        + "Finish it, or type 'cancel' to stop it, then claim again."),
+                        + "Finish it, or type 'cancel' to hand it back, then claim again."),
                 registry.openTaskRefusal(player));
+    }
+
+    // PandiO/knk-workspace#180: handlers registered only by task type are stopped too, and get the lifecycle.
+    @Test
+    void cancelAllAndStopTaskReachHandlersRegisteredOnlyByTaskType() {
+        WorldTaskHandlerRegistry registry = new WorldTaskHandlerRegistry();
+        IWorldTaskHandler typeOnly = mock(IWorldTaskHandler.class);
+        when(typeOnly.getFieldName()).thenReturn("Scan");
+        Player player = mock(Player.class);
+        when(typeOnly.isHandling(player)).thenReturn(true);
+        when(typeOnly.getTaskId(player)).thenReturn(12);
+        WorldTaskLifecycle lifecycle = mock(WorldTaskLifecycle.class);
+        registry.registerHandler("CustomScan", typeOnly);
+        registry.setLifecycle(lifecycle);
+
+        org.junit.jupiter.api.Assertions.assertFalse(registry.stopTask(player, 13));
+        org.junit.jupiter.api.Assertions.assertTrue(registry.stopTask(player, 12));
+        registry.cancelAllTasks(player);
+
+        verify(typeOnly, org.mockito.Mockito.times(2)).cancel(player);
+        verify(typeOnly).setLifecycle(lifecycle);
     }
 }
