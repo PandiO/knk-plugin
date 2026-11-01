@@ -102,10 +102,6 @@ public final class SiegeScoreboardPresenter implements SiegeMatchObserver {
             Team team = b.getTeam("siege_" + teamId);
             if (team != null) team.addEntry(p.getName());
         });
-        // #169: through a name-tag blackout, so the board kept and handed back is the real one.
-        previousBoards.putIfAbsent(p.getUniqueId(), ViewerScoreboards.current(p));
-        Scoreboard own = boards.get(teamId);
-        if (own != null) ViewerScoreboards.set(p, own);
         previousBoards.putIfAbsent(p.getUniqueId(), boardOf(p));
         Scoreboard own = boards.get(teamId);
         if (own != null) setBoard(p, own);
@@ -114,14 +110,14 @@ public final class SiegeScoreboardPresenter implements SiegeMatchObserver {
 
     // ==================== Board assignment (one place, see the class comment) ====================
 
-    /** Gives the player this board. With package G merged: {@code ViewerScoreboards.set(player, board)}. */
+    /** Gives the player this board, through a #169 name-tag blackout so the board kept and handed back is the real one. */
     private static void setBoard(Player player, Scoreboard board) {
-        player.setScoreboard(board);
+        ViewerScoreboards.set(player, board);
     }
 
-    /** The player's own board. With package G merged: {@code ViewerScoreboards.current(player)}. */
+    /** The player's own board (not a #169 blackout board). */
     private static Scoreboard boardOf(Player player) {
-        return player.getScoreboard();
+        return ViewerScoreboards.current(player);
     }
 
     @Override
@@ -188,8 +184,6 @@ public final class SiegeScoreboardPresenter implements SiegeMatchObserver {
 
     private void restore(Player player) {
         Scoreboard previous = previousBoards.remove(player.getUniqueId());
-        if (previous != null) ViewerScoreboards.set(player, previous);
-        if (lastTabName.remove(player.getUniqueId()) != null) player.playerListName(null);
         if (previous != null) setBoard(player, previous);
         ScoreboardUtil.setSiegeTag(player, false);
     }
