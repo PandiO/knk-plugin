@@ -240,7 +240,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                         "item",
                         "Rename/edit lore on your held item, or manage the enchantment definition catalog",
                         "/knk item rename <displayName> | /knk item lore <add <text>|set <line> <text>|remove <line>> | " +
-                                "/knk item enchantments <list|vanilla|search|apply> | /knk item more",
+                                "/knk item enchantments <list|vanilla|search|apply> | /knk item more [amount]",
                         // Own node (PandiO/knk-workspace#158) instead of the knk.admin umbrella, so a rank can
                         // be given held-item editing without every /knk subcommand. knk.admin still covers it.
                         ITEM_NODE,
@@ -255,7 +255,8 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                                 "/knk item enchantments apply 1 3",
                                 "/knk item enchantments apply sharpness 3",
                                 "/knk item enchantments apply poison 2",
-                                "/knk item more"
+                                "/knk item more",
+                                "/knk item more 64"
                         )
                 ),
                 (sender, args) -> {
@@ -266,7 +267,8 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                                         sender.sendMessage(ChatColor.RED + "/knk item more isn't available right now.");
                                         return true;
                                 }
-                                commandPermissions.whenAllowed(sender, ItemMoreCommand.NODE, () -> more.execute(sender));
+                                String[] moreArgs = Arrays.copyOfRange(args, 1, args.length);
+                                commandPermissions.whenAllowed(sender, ItemMoreCommand.NODE, () -> more.execute(sender, moreArgs));
                                 return true;
                         }
                         return itemCommand.onCommand(sender, null, "knk", args);
@@ -719,6 +721,12 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                 }
 
                 String sub = itemArgs[0].toLowerCase(Locale.ROOT);
+
+                if ("more".equals(sub)) {
+                        // #175 round 2: /knk item more [amount]
+                        return itemArgs.length == 2 ? filterByPrefix(ItemMoreCommand.AMOUNT_SUGGESTIONS, itemArgs[1])
+                                        : Collections.emptyList();
+                }
 
                 if ("lore".equals(sub) && itemArgs.length == 2) {
                         return filterByPrefix(List.of("add", "set", "remove"), itemArgs[1]);
