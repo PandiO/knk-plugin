@@ -309,68 +309,108 @@ public class GateDisplayManager {
     }
 
     /**
+     * The values one hover is rendered from. {@link #live} reads the door as it is; the siege renders a
+     * pre-game hover for non-members from the lockdown snapshot (DESIGN §8.5, PandiO/knk-workspace#213), with
+     * {@code siegeActive = false} so SIEGE_ONLY lines stay hidden.
+     */
+    public record HoverState(String structureName, String doorName, String gateNameMode, String doorNameMode,
+                             String statusMode, boolean showHealth, String healthMode, boolean siegeActive,
+                             double healthCurrent, double healthMax, boolean destroyed, AnimationState state,
+                             boolean jammed, boolean invincible) {
+
+        public static HoverState live(CachedGateDoor gate) {
+            return new HoverState(gate.getStructureName(), gate.getName(), gate.getEffectiveGateNameDisplayMode(),
+                gate.getDoorNameDisplayMode(), gate.getEffectiveStatusDisplayMode(), gate.isEffectivelyShowHealthDisplay(),
+                gate.getEffectiveHealthDisplayMode(), gate.getCurrentSiegeId() != null, gate.getHealthCurrent(),
+                gate.getHealthMax(), gate.isEffectivelyDestroyed(), gate.getCurrentState(), gate.isJammed(),
+                gate.isEffectivelyInvincible());
+        }
+
+        /** The hover the door had before the siege: its pre-game open state, health and invincibility. */
+        public static HoverState preGame(CachedGateDoor gate, boolean opened, boolean destroyed, double health,
+                                         boolean invincible) {
+            return new HoverState(gate.getStructureName(), gate.getName(), gate.getEffectiveGateNameDisplayMode(),
+                gate.getDoorNameDisplayMode(), gate.getEffectiveStatusDisplayMode(), gate.isEffectivelyShowHealthDisplay(),
+                gate.getEffectiveHealthDisplayMode(), false, health, gate.getHealthMax(), destroyed,
+                opened ? AnimationState.OPEN : AnimationState.CLOSED, false, invincible);
+        }
+    }
+
+    /** The live hover text of a gate (null: nothing to show). */
+    private Component buildDisplayText(CachedGateDoor gate) {
+        return buildDisplayText(HoverState.live(gate));
+    }
+
+    /** The display entity currently shown for this door, if any (main thread). */
+    public TextDisplay displayOf(int gateId) {
+        TextDisplay display = displays.get(gateId);
+        return display != null && display.isValid() ? display : null;
+    }
+
+    /**
      * Combines structure + door info (decision 5.0-D): the structure's own name (gated by
      * GateNameDisplayMode, unchanged from before item 5 - it always meant "the top-level gate's
      * name"), this door's own name (gated by the new DoorNameDisplayMode), then health and
      * status - each line independently gated by its own (possibly structure-overridden) mode.
+     * Null when no line is visible.
      */
-    private Component buildDisplayText(CachedGateDoor gate) {
+    public static Component buildDisplayText(HoverState gate) {
         Component text = null;
 
-        if (isTopicVisible(gate.getEffectiveGateNameDisplayMode(), gate)) {
-            text = appendLine(text, Component.text(gate.getStructureName(), NamedTextColor.WHITE));
+        if (isTopicVisible(gate.gateNameMode(), gate)) {
+            text = appendLine(text, Component.text(gate.structureName(), NamedTextColor.WHITE));
         }
 
-        if (isTopicVisible(gate.getDoorNameDisplayMode(), gate)) {
-            text = appendLine(text, Component.text(gate.getName(), NamedTextColor.GRAY));
+        if (isTopicVisible(gate.doorNameMode(), gate)) {
+            text = appendLine(text, Component.text(gate.doorName(), NamedTextColor.GRAY));
         }
 
         if (isHealthVisible(gate)) {
             text = appendLine(text, buildHealthLine(gate));
         }
 
-        if (isTopicVisible(gate.getEffectiveStatusDisplayMode(), gate)) {
+        if (isTopicVisible(gate.statusMode(), gate)) {
             text = appendLine(text, buildStatusLine(gate));
         }
 
         return text;
     }
 
-    private Component appendLine(Component existing, Component line) {
+    private static Component appendLine(Component existing, Component line) {
         return existing == null ? line : existing.append(Component.newline()).append(line);
     }
 
     /** Shared visibility rule for the Gate Name / Door Name / Status topics (ALWAYS / NEVER / SIEGE_ONLY). */
-    private boolean isTopicVisible(String mode, CachedGateDoor gate) {
+    private static boolean isTopicVisible(String mode, HoverState gate) {
         String resolved = mode != null ? mode : "ALWAYS";
         return switch (resolved) {
             case "NEVER" -> false;
-            case "SIEGE_ONLY" -> gate.getCurrentSiegeId() != null;
+            case "SIEGE_ONLY" -> gate.siegeActive();
             default -> true;
         };
     }
 
     /** Health has its own rule since it has the extra DAMAGED_ONLY mode and a master toggle. */
-    private boolean isHealthVisible(CachedGateDoor gate) {
-        if (!gate.isEffectivelyShowHealthDisplay()) {
+    private static boolean isHealthVisible(HoverState gate) {
+        if (!gate.showHealth()) {
             return false;
         }
 
-        String mode = gate.getEffectiveHealthDisplayMode() != null ? gate.getEffectiveHealthDisplayMode() : "ALWAYS";
+        String mode = gate.healthMode() != null ? gate.healthMode() : "ALWAYS";
         return switch (mode) {
             case "NEVER" -> false;
-            case "DAMAGED_ONLY" -> gate.getHealthCurrent() < gate.getHealthMax();
-            case "SIEGE_ONLY" -> gate.getCurrentSiegeId() != null;
+            case "DAMAGED_ONLY" -> gate.healthCurrent() < gate.healthMax();
+            case "SIEGE_ONLY" -> gate.siegeActive();
             default -> true;
         };
     }
 
-    private Component buildHealthLine(CachedGateDoor gate) {
-        double max = Math.max(1.0, gate.getHealthMax());
-        double ratio = gate.getHealthCurrent() / max;
+    private static Component buildHealthLine(HoverState gate) {
+        double max = Math.max(1.0, gate.healthMax());
+        double ratio = gate.healthCurrent() / max;
 
         NamedTextColor color;
-        if (gate.isEffectivelyDestroyed()) {
+        if (gate.destroyed()) {
             color = NamedTextColor.DARK_RED;
         } else if (ratio >= 0.75) {
             color = NamedTextColor.GREEN;
@@ -382,7 +422,7 @@ public class GateDisplayManager {
             color = NamedTextColor.RED;
         }
 
-        String healthText = String.format("%.0f/%.0f hp", gate.getHealthCurrent(), gate.getHealthMax());
+        String healthText = String.format("%.0f/%.0f hp", gate.healthCurrent(), gate.healthMax());
         return Component.text(healthText, color);
     }
 
@@ -391,22 +431,22 @@ public class GateDisplayManager {
      * INVINCIBLE used to replace the state, so a siege gate its owners open and close but nobody may
      * damage always read INVINCIBLE; and JAMMED was never shown.
      */
-    private Component buildStatusLine(CachedGateDoor gate) {
-        if (gate.isEffectivelyDestroyed()) {
+    private static Component buildStatusLine(HoverState gate) {
+        if (gate.destroyed()) {
             return Component.text("DESTROYED", NamedTextColor.DARK_RED);
         }
 
-        AnimationState state = gate.getCurrentState();
+        AnimationState state = gate.state();
         Component line = state == null ? Component.text("UNKNOWN", NamedTextColor.GRAY) : switch (state) {
             case OPEN -> Component.text("OPEN", NamedTextColor.GREEN);
             case OPENING -> Component.text("OPENING", NamedTextColor.GOLD);
             case CLOSING -> Component.text("CLOSING", NamedTextColor.GOLD);
             case CLOSED -> Component.text("CLOSED", NamedTextColor.RED);
         };
-        if (gate.isJammed()) {
+        if (gate.jammed()) {
             line = line.append(Component.text(" (JAMMED)", NamedTextColor.DARK_RED));
         }
-        if (gate.isEffectivelyInvincible()) {
+        if (gate.invincible()) {
             line = line.append(Component.text(" \u00b7 INVINCIBLE", NamedTextColor.AQUA));
         }
         return line;

@@ -332,10 +332,34 @@ public class KnKPlugin extends JavaPlugin {
         net.knightsandkings.knk.paper.regions.RegionBookkeepingFlags.register(getLogger());
         // PandiO/knk-workspace#162: knk-effect-damage allow|deny on a domain's region
         net.knightsandkings.knk.paper.regions.EffectDamageFlag.register(getLogger());
+        // PandiO/knk-workspace#217: PacketEvents (shaded) for the siege's per-player gate hover. Optional: if it
+        // can't load, non-members just see the live hover.
+        try {
+            com.github.retrooper.packetevents.PacketEvents.setAPI(
+                io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder.build(this));
+            com.github.retrooper.packetevents.PacketEvents.getAPI().getSettings().checkForUpdates(false);
+            com.github.retrooper.packetevents.PacketEvents.getAPI().load();
+            packetEventsLoaded = true;
+        } catch (Throwable e) {
+            getLogger().log(java.util.logging.Level.WARNING,
+                "PacketEvents could not load; siege non-members will see the live gate hover", e);
+        }
     }
+
+    /** #217: PacketEvents loaded in onLoad (initialised in onEnable, terminated in onDisable). */
+    private boolean packetEventsLoaded;
 
     @Override
     public void onEnable() {
+        if (packetEventsLoaded) {
+            try {
+                com.github.retrooper.packetevents.PacketEvents.getAPI().init();
+            } catch (Throwable e) {
+                packetEventsLoaded = false;
+                getLogger().log(java.util.logging.Level.WARNING,
+                    "PacketEvents could not start; siege non-members will see the live gate hover", e);
+            }
+        }
         try {
             // Load and validate config
             saveDefaultConfig();
@@ -1173,6 +1197,13 @@ public class KnKPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (packetEventsLoaded) {
+            try {
+                com.github.retrooper.packetevents.PacketEvents.getAPI().terminate();
+            } catch (Throwable e) {
+                getLogger().log(java.util.logging.Level.WARNING, "PacketEvents did not shut down cleanly", e);
+            }
+        }
         if (apiConnectivityMonitor != null) {
             apiConnectivityMonitor.stop();
         }
@@ -3704,7 +3735,7 @@ public class KnKPlugin extends JavaPlugin {
 
         // Phase 7a: the gates of the scenario area (lockdown, owner control, damage rules, restore,
         // crash recovery). The area itself stays open to non-members (smoke test 2026-09-26): they can't
-        // fight members, capture or touch siege gates, and walk through the locked gates.
+        // fight members, capture or touch siege gates, and see every gate in its pre-game state (#213).
         if (gateManager != null && gateHealthSystem != null) {
             var siegeGates = new net.knightsandkings.knk.paper.siege.SiegeGateController(
                 this, gateManager, gateHealthSystem, apiClient.getSiegeGatesCommandApi());
@@ -3715,14 +3746,29 @@ public class KnKPlugin extends JavaPlugin {
                 getConfig().getInt("gates.siege.defender-pass-through-seconds", 0));
             if (statisticsGateSink != null) statisticsGateSink.setLockedByMatch(siegeGates::isLocked);
             siegeService.setGateLobbySource(siegeGates::lobbyIdOf); // #165: gate damage counts for the gate's own match
-            pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeGateListener(siegeGates, gateManager), this);
+            var siegeGateListener = new net.knightsandkings.knk.paper.listeners.SiegeGateListener(siegeGates, gateManager);
+            pluginManager.registerEvents(siegeGateListener, this);
             siegeGates.recoverOnStartup();
-            // Phase 7b: non-members see the locked gates removed and walk through them (degrade
-            // switch: NonMemberGateView = PassThroughOnly).
+            // Pass-through service for the TELEPORT carry of non-members (DESIGN §8.5).
             if (gatePassThroughService != null) siegeGates.setPassThrough(gatePassThroughService);
+            // #213: non-members keep every siege-area gate's pre-game state - per-player blocks, the crossing
+            // check, per-player opening and (PacketEvents) the pre-game hover.
             var siegeGateView = new net.knightsandkings.knk.paper.siege.SiegeGateViewService(this, siegeGates, gateManager,
                 getConfig().getBoolean("gates.rotationGapFill.rasterization-enabled", true));
+            siegeGateListener.setNonMemberClicks(siegeGateView::handleNonMemberClick);
             pluginManager.registerEvents(siegeGateView, this);
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.siege.SiegeGateCrossingGuard(siegeGateView,
+                p -> modeService != null && modeService.getActiveMode(p) != net.knightsandkings.knk.core.domain.users.ActiveMode.NONE), this);
+            if (packetEventsLoaded && gateDisplayManager != null) {
+                try {
+                    var hover = new net.knightsandkings.knk.paper.siege.SiegeGateHoverPackets();
+                    com.github.retrooper.packetevents.PacketEvents.getAPI().getEventManager().registerListener(hover,
+                        com.github.retrooper.packetevents.event.PacketListenerPriority.NORMAL);
+                    siegeGateView.setHover(gateDisplayManager, hover);
+                } catch (RuntimeException e) {
+                    getLogger().log(java.util.logging.Level.WARNING, "Siege pre-game gate hover disabled", e);
+                }
+            }
             siegeGateView.start();
         } else {
             getLogger().warning("Siege gate integration disabled: the gate system isn't initialized");

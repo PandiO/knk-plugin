@@ -16,6 +16,11 @@ import net.knightsandkings.knk.core.siege.SiegeGatePlan;
 import net.knightsandkings.knk.core.siege.SiegeDefenderPassThrough;
 import net.knightsandkings.knk.core.siege.SiegeDefenderPassThrough.OpenGateClick;
 import net.knightsandkings.knk.core.siege.SiegeGatePlan.Control;
+import net.knightsandkings.knk.core.siege.SiegePreGameGate;
+import net.knightsandkings.knk.core.siege.SiegePreGameGate.Click;
+import net.knightsandkings.knk.core.siege.SiegePreGameGate.Pre;
+import net.knightsandkings.knk.core.siege.SiegePreGameGate.Real;
+import net.knightsandkings.knk.paper.gates.GatePassThroughRules;
 import net.knightsandkings.knk.paper.gates.GatePassThroughService;
 import net.knightsandkings.knk.paper.gates.HealthSystem;
 import org.bukkit.Bukkit;
@@ -88,11 +93,18 @@ public final class SiegeGateController implements SiegeMatchObserver {
     private final Map<Integer, BukkitTask> passThroughCloses = new HashMap<>();
 
     /**
-     * Phase 7b: one door of an applied lockdown with its pre-lockdown state - the non-member view
-     * ({@code SiegeGateViewService}) and the right-click pass-through use it.
+     * One door of an applied lockdown with its pre-game state (DESIGN §8.5, PandiO/knk-workspace#213): the
+     * non-member view ({@code SiegeGateViewService}), the crossing check and the pre-game hover use it.
+     *
+     * @param preHealth            the door's health before the match
+     * @param preInvincible        whether it was invincible before the match (structure override or the door's own)
      */
     public record LockedDoor(SiegeLobbyRuntime lobby, SiegeNonMemberGateView viewMode, int gateStructureId, int doorId,
-                             boolean preOpened, boolean preDestroyed) {}
+                             boolean preOpened, boolean preDestroyed, double preHealth, boolean preInvincible) {
+        public Pre pre() {
+            return Pre.of(preOpened, preDestroyed);
+        }
+    }
 
     public SiegeGateController(Plugin plugin, GateManager gateManager, HealthSystem healthSystem, SiegeGatesCommandApi api) {
         this.plugin = plugin;
@@ -358,31 +370,41 @@ public final class SiegeGateController implements SiegeMatchObserver {
         for (Lockdown lockdown : byLobby.values()) {
             if (!lockdown.applied) continue;
             SiegeNonMemberGateView mode = lockdown.runtime.machine().configuration().nonMemberGateView();
-            lockdown.snapshots.forEach((structureId, snapshot) -> snapshot.doors().forEach(door ->
-                    doors.add(new LockedDoor(lockdown.runtime, mode, structureId, door.gateDoorId(), door.opened(), door.destroyed()))));
+            lockdown.snapshots.forEach((structureId, snapshot) -> snapshot.doors().forEach(door -> {
+                CachedGateDoor live = gateManager.getGate(door.gateDoorId());
+                boolean invincible = snapshot.invincibleOverride() != null ? snapshot.invincibleOverride()
+                        : live != null && live.isInvincible();
+                doors.add(new LockedDoor(lockdown.runtime, mode, structureId, door.gateDoorId(), door.opened(),
+                        door.destroyed(), door.healthCurrent(), invincible));
+            }));
         }
         return doors;
     }
 
     /**
-     * Phase 7b (DESIGN §8.5 "temporary pass-through"): a non-member right-clicked a locked door that
-     * is closed now but was open before the lockdown - carry them across with the gate's TELEPORT
-     * pass-through (never DEFAULT/INSTANT_OPEN, which would open the real door for the siege).
-     * (Smoke test 2026-09-26: the scenario area is no longer closed to non-members.)
-     *
-     * @return true when this handled the click
+     * DESIGN §8.5 (PandiO/knk-workspace#213): a non-member right-clicked a locked door - it is the door they
+     * see (its pre-game state), not the siege's. Carries them across with the gate's TELEPORT pass-through when
+     * the real door is solid (never DEFAULT/INSTANT_OPEN, which would open the real door for the siege). Returns
+     * {@link Click#OPEN_FOR_PLAYER} for the caller ({@code SiegeGateViewService}) to open it for this player only,
+     * {@link Click#DENY} when the door was closed before the match and they may not pass it under the pre-game
+     * rules, and {@link Click#IGNORE} for members, unlocked doors and doors open both before and now.
      */
-    public boolean tryNonMemberPassThrough(Player player, CachedGateDoor door) {
+    public Click nonMemberClick(Player player, CachedGateDoor door) {
         Lockdown lockdown = byGate.get(door.getGateStructureId());
-        if (!canCarryNonMember(door) || lockdown.runtime.isMember(player.getUniqueId())) return false;
-        if (!wasOpenBeforeLockdown(lockdown, door) || door.getCurrentState() != AnimationState.CLOSED) return false;
-        passThrough.dispatch(door, player, GatePassThroughMethod.TELEPORT);
-        return true;
+        if (lockdown == null || !lockdown.applied || lockdown.runtime.isMember(player.getUniqueId())) return Click.IGNORE;
+        Pre pre = preStateOf(lockdown, door);
+        if (pre == null) return Click.IGNORE;
+        Click click = SiegePreGameGate.onClick(pre, realStateOf(door), mayPassPreGame(lockdown, player, door));
+        if (click == Click.CARRY) {
+            if (passThrough == null) return Click.IGNORE;
+            passThrough.dispatch(door, player, GatePassThroughMethod.TELEPORT);
+        }
+        return click;
     }
 
     /**
-     * Smoke test 2026-09-26: a non-member walked into a locked door that is really solid but removed
-     * in their view ({@code SiegeGateViewService}) - carry them across with the gate's TELEPORT
+     * A non-member walked into a locked door that is really solid but hidden in their view
+     * ({@code SiegeGateViewService}: it was open before the match) - carry them across with the gate's TELEPORT
      * pass-through. The real door and the siege are untouched.
      */
     public void carryNonMemberThrough(Player player, CachedGateDoor door) {
@@ -392,26 +414,68 @@ public final class SiegeGateController implements SiegeMatchObserver {
     }
 
     /**
-     * Read-only (road navigation plan §2 R39, D2): would the siege's own non-member rule carry a
-     * non-member through this locked door? True when its structure is under an applied lockdown
-     * and the pass-through service is wired, and - with {@code NonMemberGateView = PassThroughOnly} -
-     * the door was open (and not destroyed) before the lockdown; with the default
-     * {@code PreLockdownView} non-members walk through whatever they see removed. Membership is the
-     * caller's check (a member gets no carry). The two carry paths above use this; navigation's
-     * {@code GateAvailability} reads it as {@code siegeCarries}. Main thread.
+     * Read-only (road navigation plan §2 R39, D2): would the siege's own non-member rule carry a non-member
+     * through this locked door whatever their rights? True when its structure is under an applied lockdown, the
+     * pass-through service is wired and the door was open or destroyed before the match (#213: a door closed
+     * before the match stays closed to non-members - see {@link #canNonMemberPass}). Membership is the caller's
+     * check. Main thread.
      */
     public boolean canCarryNonMember(CachedGateDoor door) {
         Lockdown lockdown = byGate.get(door.getGateStructureId());
         if (lockdown == null || passThrough == null) return false;
-        SiegeNonMemberGateView mode = lockdown.runtime.machine().configuration().nonMemberGateView();
-        return mode == SiegeNonMemberGateView.PRE_LOCKDOWN_VIEW || wasOpenBeforeLockdown(lockdown, door);
+        Pre pre = preStateOf(lockdown, door);
+        return pre != null && pre != Pre.CLOSED;
     }
 
-    /** The lockdown's snapshot says this door stood open (and not destroyed) when the lockdown began. */
-    private static boolean wasOpenBeforeLockdown(Lockdown lockdown, CachedGateDoor door) {
+    /**
+     * #213, for navigation: can this non-member get past the locked door - it was open before the match, or
+     * they may pass it under the pre-game rules (per-player opening or TELEPORT)? Main thread.
+     */
+    public boolean canNonMemberPass(Player player, CachedGateDoor door) {
+        Lockdown lockdown = byGate.get(door.getGateStructureId());
+        if (lockdown == null || passThrough == null) return false;
+        Pre pre = preStateOf(lockdown, door);
+        if (pre == null) return false;
+        return pre != Pre.CLOSED || mayPassPreGame(lockdown, player, door);
+    }
+
+    /** #213: the door's pre-game state when a lockdown holds it, else null (main thread). */
+    public Pre preStateOf(CachedGateDoor door) {
+        Lockdown lockdown = byGate.get(door.getGateStructureId());
+        return lockdown == null ? null : preStateOf(lockdown, door);
+    }
+
+    private static Pre preStateOf(Lockdown lockdown, CachedGateDoor door) {
         StructureSnapshot snapshot = lockdown.snapshots.get(door.getGateStructureId());
-        if (snapshot == null) return false;
-        return snapshot.doors().stream().anyMatch(d -> d.gateDoorId() == door.getId() && d.opened() && !d.destroyed());
+        if (snapshot == null) return null;
+        return snapshot.doors().stream()
+                .filter(d -> d.gateDoorId() == door.getId())
+                .findFirst()
+                .map(d -> Pre.of(d.opened(), d.destroyed()))
+                .orElse(null);
+    }
+
+    /** The door's real (siege) state. */
+    public static Real realStateOf(CachedGateDoor door) {
+        if (door.isEffectivelyDestroyed()) return Real.DESTROYED;
+        AnimationState state = door.getCurrentState();
+        if (state == null) return Real.CLOSED;
+        return switch (state) {
+            case CLOSED -> Real.CLOSED;
+            case OPEN -> Real.OPEN;
+            case OPENING, CLOSING -> Real.MOVING;
+        };
+    }
+
+    /**
+     * The gate's pass-through rule as it was before the match (the lockdown turns pass-through off): a gate
+     * admin passes any door; anyone else needs the use node on a door that allowed pass-through before.
+     */
+    private static boolean mayPassPreGame(Lockdown lockdown, Player player, CachedGateDoor door) {
+        StructureSnapshot snapshot = lockdown.snapshots.get(door.getGateStructureId());
+        boolean allowed = snapshot != null && snapshot.allowPassThroughOverride() != null
+                ? snapshot.allowPassThroughOverride() : door.isAllowPassThrough();
+        return GatePassThroughRules.canPass(GatePassThroughRules.isAdmin(player), GatePassThroughRules.mayUse(player), allowed);
     }
 
     /** The runtime id of the lobby whose lockdown holds this gate structure; null when none does (#165). */

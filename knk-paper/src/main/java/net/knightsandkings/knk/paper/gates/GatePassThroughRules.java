@@ -44,10 +44,15 @@ public final class GatePassThroughRules {
      * them once on the main thread and judges every door of the network off it).
      */
     public static boolean canPass(boolean admin, boolean useNode, CachedGateDoor gate) {
-        if (admin) {
-            return true;
-        }
-        return gate.isEffectivelyAllowPassThrough() && useNode;
+        return canPass(admin, useNode, gate.isEffectivelyAllowPassThrough());
+    }
+
+    /**
+     * The same rule with the door's allow-pass-through flag given (the siege's pre-game rule reads the flag from
+     * the lockdown snapshot, PandiO/knk-workspace#213).
+     */
+    public static boolean canPass(boolean admin, boolean useNode, boolean doorAllowsPassThrough) {
+        return admin || (doorAllowsPassThrough && useNode);
     }
 
     public static boolean isAdmin(Player player) {

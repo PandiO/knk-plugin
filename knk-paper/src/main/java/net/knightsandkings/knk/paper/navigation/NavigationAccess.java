@@ -28,7 +28,9 @@ import net.knightsandkings.knk.core.roads.route.GateAvailability;
 import net.knightsandkings.knk.core.roads.route.GateAvailability.GateView;
 import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
 import net.knightsandkings.knk.core.roads.route.StaticFlagsAvailability;
+import net.knightsandkings.knk.core.domain.gates.AnimationState;
 import net.knightsandkings.knk.core.siege.SiegeGateStance;
+import net.knightsandkings.knk.core.siege.SiegePreGameGate;
 import net.knightsandkings.knk.paper.gates.GatePassThroughRules;
 import net.knightsandkings.knk.paper.regions.RegionIds;
 import net.knightsandkings.knk.paper.siege.SiegeGateController;
@@ -40,7 +42,7 @@ import net.knightsandkings.knk.paper.siege.SiegeGateController;
  * <ul>
  *   <li>{@code GateState} ← {@link GateManager#getGate} → {@link GateView} from the door's
  *       <i>effective</i> accessors (R5), {@link SiegeGateController#isLocked} and
- *       {@link SiegeGateController#canCarryNonMember} (R24, R39, D2);</li>
+ *       {@link SiegeGateController#canNonMemberPass} and, for non-members, the door's pre-game state (R24, R39, D2; #213);</li>
  *   <li>{@code PassRule} ← {@link GatePassThroughRules} (R25);</li>
  *   <li>{@code DomainLookup} ← {@link RegionDomainResolver#getDomainByRegionIdNoRefresh} in the network's
  *       world (KNG-112), falling back to the API off the main thread (R7); the player's current regions from
@@ -160,9 +162,14 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
             // KNG-234: the gate's real state decides. A match member is never routed through a closed gate that is
             // not theirs to open (an attacker's route to the objective behind a gate objective stops at the gate).
             SiegeGateStance stance = SiegeGateStance.of(locked, member, member && siege.mayControl(player, structureId),
-                locked && !member && siege.canCarryNonMember(door));
-            gates.put(doorId, new GateView(doorId, gateName(door), door.getCurrentState(), door.isJammed(),
-                door.isEffectivelyDestroyed(), door.isEffectivelyAllowPassThrough(), stance.siegeLocked(), stance.siegeCarries()));
+                locked && !member && siege.canNonMemberPass(player, door));
+            // #213: a non-member is routed by the door as they see it - its pre-game state, not the siege's.
+            SiegePreGameGate.Pre pre = locked && !member ? siege.preStateOf(door) : null;
+            AnimationState state = pre == null ? door.getCurrentState()
+                : pre == SiegePreGameGate.Pre.CLOSED ? AnimationState.CLOSED : AnimationState.OPEN;
+            boolean destroyed = pre == null ? door.isEffectivelyDestroyed() : pre == SiegePreGameGate.Pre.DESTROYED;
+            gates.put(doorId, new GateView(doorId, gateName(door), state, pre == null && door.isJammed(),
+                destroyed, door.isEffectivelyAllowPassThrough(), stance.siegeLocked(), stance.siegeCarries()));
             passable.put(doorId, stance.passable() || GatePassThroughRules.canPass(admin, use, door));
         }
         GateAvailability.GateState gateState = doorId -> Optional.ofNullable(gates.get(doorId));

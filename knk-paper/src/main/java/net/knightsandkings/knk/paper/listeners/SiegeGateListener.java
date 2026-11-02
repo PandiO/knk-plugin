@@ -20,6 +20,8 @@ import org.bukkit.event.block.Action;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
 
+import java.util.function.BiConsumer;
+
 /**
  * Siege Phase 7a (DESIGN §8.3): gates locked down by a match. Right-clicking a closed locked gate
  * ({@link GateDoorInteractEvent}) lets the owner team's alliance pass through: it opens and closes again by
@@ -27,16 +29,24 @@ import org.bukkit.inventory.EquipmentSlot;
  * stays open, the MVP toggle). Right-clicking an open one extends such a pass-through, or closes a gate that
  * stands open for another reason. The gate's own pass-through never runs. Damage ({@link GateDoorDamageEvent},
  * fire via {@link GateDoorIgniteEvent}) counts only from an enemy of the owner on a damageable selected
- * gate. Runs at LOWEST so the gate package's consequence listeners see the cancellation.
+ * gate. Runs at LOWEST so the gate package's consequence listeners see the cancellation. Non-members' clicks go to
+ * the non-member gate view: they click the door as it was before the match (DESIGN §8.5, PandiO/knk-workspace#213).
  */
 public final class SiegeGateListener implements Listener {
 
     private final SiegeGateController gates;
     private final GateManager gateManager;
+    /** #213: handles a non-member's click on a locked door (their pre-game view); null until wired. */
+    private BiConsumer<Player, CachedGateDoor> nonMemberClicks;
 
     public SiegeGateListener(SiegeGateController gates, GateManager gateManager) {
         this.gates = gates;
         this.gateManager = gateManager;
+    }
+
+    /** #213: the siege non-member gate view handles non-members' clicks on locked doors. */
+    public void setNonMemberClicks(BiConsumer<Player, CachedGateDoor> nonMemberClicks) {
+        this.nonMemberClicks = nonMemberClicks;
     }
 
     /** Fired by the gate package for right-clicks on a CLOSED door. */
@@ -45,8 +55,11 @@ public final class SiegeGateListener implements Listener {
         int structureId = event.getGate().getGateStructureId();
         if (!gates.isLocked(structureId)) return;
         event.setCancelled(true);
-        // Phase 7b: a non-member at a gate that was open before the lockdown is carried across.
-        if (gates.tryNonMemberPassThrough(event.getPlayer(), event.getGate())) return;
+        // #213: a non-member clicks the door they see - its pre-game state (carried across, or refused).
+        if (!gates.isLockdownMember(event.getPlayer(), structureId)) {
+            if (nonMemberClicks != null) nonMemberClicks.accept(event.getPlayer(), event.getGate());
+            return;
+        }
         respond(event.getPlayer(), structureId, gates.openClosedGate(event.getPlayer(), structureId));
     }
 
@@ -62,6 +75,8 @@ public final class SiegeGateListener implements Listener {
         if (door == null || door.getCurrentState() != AnimationState.OPEN) return;
         int structureId = door.getGateStructureId();
         if (!gates.isLocked(structureId)) return;
+        // #213: non-members see the pre-game door; SiegeGateViewService handles their clicks.
+        if (!gates.isLockdownMember(event.getPlayer(), structureId)) return;
         event.setCancelled(true);
         respond(event.getPlayer(), structureId, gates.clickOpenGate(event.getPlayer(), structureId));
     }

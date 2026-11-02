@@ -68,4 +68,13 @@ class GatePassThroughRulesTest {
         when(player.hasPermission(GatePassThroughRules.USE_NODE)).thenReturn(true);
         assertTrue(GatePassThroughRules.canPass(player, gate));
     }
+
+    @Test
+    void theFlagOverloadAppliesTheSameRule() {
+        // PandiO/knk-workspace#213: the siege's pre-game rule reads the door's flag from the lockdown snapshot.
+        assertTrue(GatePassThroughRules.canPass(true, false, false));
+        assertTrue(GatePassThroughRules.canPass(false, true, true));
+        assertFalse(GatePassThroughRules.canPass(false, true, false));
+        assertFalse(GatePassThroughRules.canPass(false, false, true));
+    }
 }
