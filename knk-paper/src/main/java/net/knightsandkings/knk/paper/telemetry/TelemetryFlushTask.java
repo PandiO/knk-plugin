@@ -39,6 +39,15 @@ public final class TelemetryFlushTask {
     private BukkitTask flushTimer;
     private BukkitTask pollTimer;
 
+    // Realtime S3 (PandiO/knk-workspace#182): the event that replaces this re-sync is pushed while the hub is connected,
+    // so the timer then runs realtime.fallback-poll-multiplier times less often (decision Q4); set before start().
+    private volatile net.knightsandkings.knk.core.realtime.FallbackPolling fallbackPolling =
+        net.knightsandkings.knk.core.realtime.FallbackPolling.never();
+
+    public void setFallbackPolling(net.knightsandkings.knk.core.realtime.FallbackPolling polling) {
+        this.fallbackPolling = polling == null ? net.knightsandkings.knk.core.realtime.FallbackPolling.never() : polling;
+    }
+
     public TelemetryFlushTask(TelemetryEmitter emitter, TelemetryApi api) {
         this.emitter = emitter;
         this.api = api;
@@ -48,7 +57,7 @@ public final class TelemetryFlushTask {
         long flushTicks = Math.max(1, flushIntervalSeconds) * 20L;
         long pollTicks = Math.max(10, configPollSeconds) * 20L;
         flushTimer = Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, () -> flush(), flushTicks, flushTicks);
-        pollTimer = Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, this::pollConfig, 1L, pollTicks);
+        pollTimer = Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, fallbackPolling.throttle(() -> pollConfig()), 1L, pollTicks);
     }
 
     /** Stops the timers and sends what is buffered with a bounded wait (plugin disable). */

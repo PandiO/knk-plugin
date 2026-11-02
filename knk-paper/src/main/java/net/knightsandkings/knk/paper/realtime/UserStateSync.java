@@ -212,6 +212,23 @@ public final class UserStateSync {
         });
     }
 
+    /**
+     * S3 (PandiO/knk-workspace#182, DESIGN §6.3): an {@code EntityChanged} for a user (the generic edit in the form wizard
+     * or dashboard, L6-9) takes the same path as {@code UserChanged}: re-read and redraw while online, else drop.
+     */
+    public void userEntityChanged(UUID uuid) {
+        if (uuid == null) {
+            return;
+        }
+        mainThread.execute(() -> {
+            if (onlinePlayer.apply(uuid) == null) {
+                users.invalidate(uuid);
+            } else {
+                refreshAndRedraw(uuid);
+            }
+        });
+    }
+
     void onPlayerNotification(RealtimeEnvelope envelope) {
         PlayerNotification notification = UserStateEvents.parseNotification(envelope);
         if (notification == null) {
