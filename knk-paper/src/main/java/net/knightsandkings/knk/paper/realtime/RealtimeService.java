@@ -230,6 +230,15 @@ public final class RealtimeService implements Listener {
         }
     }
 
+    /**
+     * Fire-and-forget hub invocation (WT2 #181: {@code WorldTaskOfferResult}). False when not connected or the send
+     * failed; callers fall back to what the API does without an answer (offer timeout).
+     */
+    public boolean send(String method, Object argument) {
+        RealtimeClient c = client;
+        return c != null && c.isConnected() && c.send(method, argument);
+    }
+
     /** The server id the API confirmed in its last {@code Welcome}, or null. */
     public String acceptedServerId() {
         return acceptedServerId;

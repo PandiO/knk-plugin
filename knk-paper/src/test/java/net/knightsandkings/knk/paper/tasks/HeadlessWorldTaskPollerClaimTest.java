@@ -43,4 +43,14 @@ class HeadlessWorldTaskPollerClaimTest {
         verify(handler, never()).execute(eq(scan(2, "Pending")), any());
         verify(handler, never()).execute(eq(scan(2, "InProgress")), any());
     }
+
+    @Test
+    void whileTheHubIsConnectedThePollIsOnlyTheSixtySecondSafetyNet() {
+        // PandiO/knk-workspace#181: WorldTaskCreated starts scans; the poll stays at the idle interval.
+        HeadlessWorldTaskPoller poller = new HeadlessWorldTaskPoller(mock(WorldTasksApi.class), mock(Plugin.class), 5, 60, "s1");
+
+        org.junit.jupiter.api.Assertions.assertEquals(60L * 20L, poller.nextInterval(true, true));
+        org.junit.jupiter.api.Assertions.assertEquals(5L * 20L, poller.nextInterval(true, false));
+        org.junit.jupiter.api.Assertions.assertEquals(10L * 20L, poller.nextInterval(false, false));
+    }
 }

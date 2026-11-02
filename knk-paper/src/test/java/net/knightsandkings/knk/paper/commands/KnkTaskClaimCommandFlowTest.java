@@ -130,4 +130,25 @@ class KnkTaskClaimCommandFlowTest {
 
         verify(api, never()).claim(anyInt(), any(ClaimTaskDto.class));
     }
+
+    @Test
+    void acceptAndDeclineGoToTheOfferResponder_NotToACodeClaim() {
+        // PandiO/knk-workspace#181: the clickable [Accept] / [Decline] of a "Hand off to..." offer.
+        java.util.List<String> answers = new java.util.ArrayList<>();
+        registry.setOfferResponder((who, taskId, accept) -> answers.add(who.getName() + ":" + taskId + ":" + accept));
+
+        command.onCommand(player, mock(Command.class), "knk", new String[] {"accept", "42"});
+        command.onCommand(player, mock(Command.class), "knk", new String[] {"DECLINE", "43"});
+
+        assertEquals(java.util.List.of("Steve:42:true", "Steve:43:false"), answers);
+        verifyNoInteractions(api);
+    }
+
+    @Test
+    void acceptWithoutTheRealtimeChannel_SaysThereIsNoOffer() {
+        command.onCommand(player, mock(Command.class), "knk", new String[] {"accept", "42"});
+
+        verify(player).sendMessage(contains("no open offer"));
+        verifyNoInteractions(api);
+    }
 }

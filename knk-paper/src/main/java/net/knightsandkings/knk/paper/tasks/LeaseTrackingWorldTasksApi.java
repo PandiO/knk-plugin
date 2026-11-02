@@ -82,6 +82,12 @@ public class LeaseTrackingWorldTasksApi implements WorldTasksApi {
     }
 
     @Override
+    public CompletableFuture<WorldTaskDto> release(int id, String serverId, String reason, boolean handBack) {
+        leases.forget(id);
+        return delegate.release(id, serverId != null ? serverId : leases.serverId(), reason, handBack);
+    }
+
+    @Override
     public CompletableFuture<WorldTaskDto> cancel(int id, String reason) {
         leases.forget(id);
         return delegate.cancel(id, reason);

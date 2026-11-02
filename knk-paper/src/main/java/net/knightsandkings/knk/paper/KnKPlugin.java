@@ -2189,6 +2189,7 @@ public class KnKPlugin extends JavaPlugin {
                 uuid -> cacheManager == null ? null
                     : cacheManager.getUserCache().getStale(uuid).map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null));
             registerUserStateSync(hooks);
+            registerWorldTaskSync(hooks);
             if (metricsService != null) {
                 metricsService.register(realtimeStats);
             }
@@ -2231,6 +2232,46 @@ public class KnKPlugin extends JavaPlugin {
         if (playerNotificationPoller != null) {
             hooks.register("player notifications", playerNotificationPoller::drainNow);
         }
+    }
+
+    /**
+     * WT2 (PandiO/knk-workspace#181, DESIGN §8.3–§8.4): world tasks over the hub (offers with auto-claim or Accept/Decline,
+     * cancel/withdraw, headless scans started by a push), before the client starts; the headless poll drops to its 60 s
+     * safety net while connected; and a resync step that hands back what this server held before a restart (the API
+     * offers waiting tasks again when the roster arrives).
+     */
+    private void registerWorldTaskSync(net.knightsandkings.knk.core.realtime.ResyncHooks hooks) {
+        if (worldTaskHandlerRegistry == null || worldTaskLeases == null || worldTasksApi == null) {
+            getLogger().warning("Realtime: world-task events not handled (world tasks not ready)");
+            return;
+        }
+        java.util.concurrent.Executor main = runnable -> {
+            if (!isEnabled()) {
+                return;
+            }
+            if (org.bukkit.Bukkit.isPrimaryThread()) {
+                runnable.run();
+            } else {
+                org.bukkit.Bukkit.getScheduler().runTask(this, runnable);
+            }
+        };
+        var service = realtimeService;
+        var sync = new net.knightsandkings.knk.paper.realtime.WorldTaskRealtimeSync(main, org.bukkit.Bukkit::getPlayer,
+            worldTaskHandlerRegistry, worldTasksApi, worldTaskLeases, worldTaskLeases.serverId(), service::send,
+            () -> {
+                if (headlessWorldTaskPoller != null) {
+                    headlessWorldTaskPoller.pollNow();
+                }
+            },
+            (player, claimed) -> net.knightsandkings.knk.paper.commands.KnkTaskClaimCommand.startClaimed(
+                this, worldTasksApi, worldTaskHandlerRegistry, player, claimed),
+            (delay, task) -> org.bukkit.Bukkit.getScheduler().runTaskLater(this, task, Math.max(1L, delay.toMillis() / 50L)),
+            java.time.Clock.systemUTC(), getLogger());
+        sync.register(service.dispatcher());
+        if (headlessWorldTaskPoller != null) {
+            headlessWorldTaskPoller.setHubConnected(service::isConnected);
+        }
+        hooks.register("world tasks", () -> worldTaskLeases.releaseOrphans().exceptionally(error -> 0));
     }
 
     /** {@code /knk health}: the realtime channel's state (PandiO/knk-workspace#178). */

@@ -359,8 +359,9 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         // numeric id needs knk.tasks.any (checked in KnkTaskClaimCommand).
         KnkTaskClaimCommand taskClaimCommand = new KnkTaskClaimCommand(plugin, worldTasksApi, worldTaskHandlerRegistry, serverId);
         registry.register(
-                new CommandMetadata("task", "Claim a world task with its task code", "/knk task <task code>", "knk.tasks",
-                        List.of("/knk task ABC123")),
+                new CommandMetadata("task", "Claim a world task with its task code, or answer an offer from the web app",
+                        "/knk task <task code> | accept <id> | decline <id>", "knk.tasks",
+                        List.of("/knk task ABC123", "/knk task accept 42")),
                 (sender, args) -> taskClaimCommand.onCommand(sender, null, "knk", args),
                 "task-claim"
         );

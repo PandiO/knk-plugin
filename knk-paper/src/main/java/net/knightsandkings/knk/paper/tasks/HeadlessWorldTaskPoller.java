@@ -42,6 +42,7 @@ public class HeadlessWorldTaskPoller {
 
     private volatile long currentIntervalTicks;
     private volatile boolean running;
+    private volatile java.util.function.BooleanSupplier hubConnected = () -> false;
     private org.bukkit.scheduler.BukkitTask task;
 
     public HeadlessWorldTaskPoller(WorldTasksApi worldTasksApi, Plugin plugin, String serverId) {
@@ -59,6 +60,22 @@ public class HeadlessWorldTaskPoller {
         this.minIntervalTicks = Math.max(1L, minIntervalSeconds) * 20L;
         this.maxIntervalTicks = Math.max(this.minIntervalTicks, Math.max(1L, maxIntervalSeconds) * 20L);
         this.currentIntervalTicks = this.minIntervalTicks;
+    }
+
+    /**
+     * PandiO/knk-workspace#181 (DESIGN §8.4): while the realtime channel is connected, {@code WorldTaskCreated} starts a
+     * scan at once ({@link #pollNow()}) and this poll is only the safety net, at the idle interval (60 s).
+     */
+    public void setHubConnected(java.util.function.BooleanSupplier connected) {
+        this.hubConnected = connected != null ? connected : () -> false;
+    }
+
+    /** #181: one poll right away (a {@code WorldTaskCreated} arrived), next to the scheduled ones. */
+    public void pollNow() {
+        if (!running) {
+            return;
+        }
+        plugin.getServer().getScheduler().runTaskAsynchronously(plugin, (Runnable) () -> pollOnce(false));
     }
 
     public void registerHandler(IHeadlessWorldTaskHandler handler) {
@@ -87,29 +104,46 @@ public class HeadlessWorldTaskPoller {
         if (!running) {
             return;
         }
-        task = plugin.getServer().getScheduler().runTaskLaterAsynchronously(plugin, this::pollOnce, delayTicks);
+        task = plugin.getServer().getScheduler().runTaskLaterAsynchronously(plugin, () -> pollOnce(), delayTicks);
     }
 
     void pollOnce() {
+        pollOnce(true);
+    }
+
+    /** @param scheduled false for {@link #pollNow()}: it doesn't schedule the next poll (the scheduled chain goes on). */
+    void pollOnce(boolean scheduled) {
         worldTasksApi.listByStatus("Pending").thenAccept(tasks -> {
             boolean dispatchedAny = false;
             for (WorldTaskDto candidate : tasks) {
                 dispatchedAny |= dispatchIfSupported(candidate);
             }
-            onPollFinished(dispatchedAny);
+            if (scheduled) {
+                onPollFinished(dispatchedAny);
+            }
         }).exceptionally(ex -> {
             LOGGER.warning("HeadlessWorldTaskPoller failed to list pending tasks: " + ex.getMessage());
-            onPollFinished(false);
+            if (scheduled) {
+                onPollFinished(false);
+            }
             return null;
         });
     }
 
-    /** Polls fast while there is headless work, and backs off exponentially while idle. */
+    /**
+     * Polls fast while there is headless work, and backs off exponentially while idle; #181: while the hub is connected the
+     * safety-net poll stays at the idle interval (pushes start the scans).
+     */
     private void onPollFinished(boolean dispatchedAny) {
-        currentIntervalTicks = dispatchedAny
-            ? minIntervalTicks
-            : Math.min(maxIntervalTicks, currentIntervalTicks * 2L);
+        currentIntervalTicks = nextInterval(dispatchedAny, hubConnected.getAsBoolean());
         scheduleNextPoll(currentIntervalTicks);
+    }
+
+    long nextInterval(boolean dispatchedAny, boolean connected) {
+        if (connected) {
+            return maxIntervalTicks;
+        }
+        return dispatchedAny ? minIntervalTicks : Math.min(maxIntervalTicks, currentIntervalTicks * 2L);
     }
 
     private boolean dispatchIfSupported(WorldTaskDto candidate) {

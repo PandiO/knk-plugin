@@ -179,6 +179,11 @@ public class WorldTasksApiImpl extends BaseApiImpl implements WorldTasksApi {
     }
 
     @Override
+    public CompletableFuture<WorldTaskDto> release(int id, String serverId, String reason, boolean handBack) {
+        return postLease(id, "release", new WorldTaskLeaseDto(serverId, reason, handBack ? Boolean.TRUE : null));
+    }
+
+    @Override
     public CompletableFuture<WorldTaskDto> cancel(int id, String reason) {
         return postLease(id, "cancel", new WorldTaskLeaseDto(null, reason));
     }

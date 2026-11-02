@@ -55,6 +55,21 @@ public class KnkTaskClaimCommand implements CommandExecutor {
             return true;
         }
 
+        // #181: the clickable [Accept] / [Decline] of an offer from the web app ("Hand off to…").
+        if (args.length == 2 && (args[0].equalsIgnoreCase("accept") || args[0].equalsIgnoreCase("decline"))) {
+            if (!args[1].matches("\\d{1,9}")) {
+                sender.sendMessage(ChatColor.RED + "Usage: /knk task " + args[0].toLowerCase(java.util.Locale.ROOT) + " <task id>");
+                return true;
+            }
+            var responder = handlerRegistry.offerResponder();
+            if (responder.isEmpty()) {
+                sender.sendMessage(ChatColor.RED + "There is no open offer (offers need the realtime channel).");
+                return true;
+            }
+            responder.get().respond(player, Integer.parseInt(args[1]), args[0].equalsIgnoreCase("accept"));
+            return true;
+        }
+
         if (args.length == 0) {
             sender.sendMessage(ChatColor.RED + "Usage: /knk task <task code>");
             sender.sendMessage(ChatColor.GRAY + "Tip: use the task code from the web app (e.g. /knk task ABC123)");
@@ -130,7 +145,15 @@ public class KnkTaskClaimCommand implements CommandExecutor {
         player.sendMessage(ChatColor.GREEN + "✓ Successfully claimed task!");
         player.sendMessage(ChatColor.GRAY + "Task: " + ChatColor.WHITE
             + taskLabel(claimedTask.entityType(), claimedTask.fieldName()));
+        startClaimed(plugin, worldTasksApi, handlerRegistry, player, claimedTask);
+    }
 
+    /**
+     * Starts the handler of a task this player just claimed (main thread); a task whose type has no handler here is failed
+     * with the reason (#180). Shared with the realtime offer path (#181). Returns whether a handler started.
+     */
+    public static boolean startClaimed(Plugin plugin, WorldTasksApi worldTasksApi, WorldTaskHandlerRegistry handlerRegistry,
+                                       Player player, WorldTaskDto claimedTask) {
         boolean started = handlerRegistry.startTask(
             player,
             claimedTask.taskType(),
@@ -141,7 +164,7 @@ public class KnkTaskClaimCommand implements CommandExecutor {
 
         if (started) {
             player.sendMessage(ChatColor.YELLOW + "Handler started. Follow the prompts to complete the task.");
-            return;
+            return true;
         }
 
         // #180: no handler here means nobody can ever finish it in this state; fail it with the reason (the web app
@@ -153,6 +176,7 @@ public class KnkTaskClaimCommand implements CommandExecutor {
             plugin.getLogger().warning("Failing task " + claimedTask.id() + " without a handler failed: " + ex.getMessage());
             return null;
         });
+        return false;
     }
 
     /** The player's message for a refused claim. */

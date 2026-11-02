@@ -19,6 +19,24 @@ public class WorldTaskHandlerRegistry {
     private final Map<String, IWorldTaskHandler> handlers = new ConcurrentHashMap<>();
     private final Map<String, IWorldTaskHandler> handlersByTaskType = new ConcurrentHashMap<>();
     private volatile WorldTaskLifecycle lifecycle = WorldTaskLifecycle.NONE;
+    private volatile OfferResponder offerResponder;
+
+    /**
+     * PandiO/knk-workspace#181: answers {@code /knk task accept <id>} and {@code /knk task decline <id>} (the clickable
+     * Accept/Decline of a "Hand off to…" offer). Only set while the realtime channel is on.
+     */
+    public interface OfferResponder {
+        /** Accepts or declines the player's open offer of {@code taskId}; tells the player what happened. */
+        void respond(Player player, int taskId, boolean accept);
+    }
+
+    public void setOfferResponder(OfferResponder responder) {
+        this.offerResponder = responder;
+    }
+
+    public Optional<OfferResponder> offerResponder() {
+        return Optional.ofNullable(offerResponder);
+    }
 
     /** PandiO/knk-workspace#180: tells every registered handler (now and later) what to report on in-game cancel/discard. */
     public void setLifecycle(WorldTaskLifecycle lifecycle) {

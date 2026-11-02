@@ -83,6 +83,14 @@ public interface WorldTasksApi {
     }
 
     /** #180: ends the task for good (Pending/InProgress → Cancelled); the player discards it in game. */
+    /**
+     * #181: release, saying whether the player handed it back on purpose (in-game {@code cancel}): such a task is not offered
+     * to them again when they rejoin.
+     */
+    default CompletableFuture<WorldTaskDto> release(int id, String serverId, String reason, boolean handBack) {
+        return release(id, serverId, reason);
+    }
+
     default CompletableFuture<WorldTaskDto> cancel(int id, String reason) {
         return CompletableFuture.failedFuture(new UnsupportedOperationException("cancel"));
     }
