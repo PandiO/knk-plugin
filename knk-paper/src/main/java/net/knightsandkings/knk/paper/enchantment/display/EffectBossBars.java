@@ -54,6 +54,7 @@ public final class EffectBossBars implements EffectDisplay, Listener {
     private final Map<String, ToLongFunction<UUID>> remainingSources = new ConcurrentHashMap<>();
     private final NameTagBlackout blackout;
     private volatile InvisibleNameTag invisibleNameTag;
+    private volatile InvisibleEquipment invisibleEquipment;
     private final Function<UUID, Player> players;
     private final LongSupplier clock;
 
@@ -120,11 +121,23 @@ public final class EffectBossBars implements EffectDisplay, Listener {
         this.invisibleNameTag = invisibleNameTag;
     }
 
+    /** Where {@link #invisible} hides armour and held items (#211); none until set. */
+    public void setInvisibleEquipment(InvisibleEquipment invisibleEquipment) {
+        this.invisibleEquipment = invisibleEquipment;
+    }
+
     @Override
     public void invisible(LivingEntity invoker, int durationTicks) {
+        if (!(invoker instanceof Player player) || durationTicks <= 0) {
+            return;
+        }
         InvisibleNameTag target = invisibleNameTag;
-        if (target != null && invoker instanceof Player player && durationTicks > 0) {
+        if (target != null) {
             target.invisible(player);
+        }
+        InvisibleEquipment equipment = invisibleEquipment;
+        if (equipment != null) {
+            equipment.hide(player);
         }
     }
 

@@ -180,6 +180,20 @@ class EffectBossBarsTest {
         assertFalse(rank.canSeeFriendlyInvisibles());
     }
 
+    /** #211: the invisibility ability also reaches the equipment mask; creatures and zero durations don't. */
+    @Test
+    void invisibleHidesTheEquipmentForPlayersOnly() {
+        InvisibleEquipment equipment = org.mockito.Mockito.mock(InvisibleEquipment.class);
+        bars.setInvisibleEquipment(equipment);
+
+        bars.invisible(mock(Zombie.class), 200);
+        bars.invisible(player, 0);
+        org.mockito.Mockito.verify(equipment, org.mockito.Mockito.never()).hide(org.mockito.ArgumentMatchers.any());
+
+        bars.invisible(player, 200);
+        org.mockito.Mockito.verify(equipment).hide(player);
+    }
+
     @Test
     void unfreezingByStaffHidesTheFrozenBar() {
         bars.staffFrozen(player.getUniqueId(), true);

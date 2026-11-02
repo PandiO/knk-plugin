@@ -14,6 +14,7 @@ import net.knightsandkings.knk.paper.enchantment.GateAreaDamage;
 import net.knightsandkings.knk.paper.enchantment.FrozenPlayerTracker;
 import net.knightsandkings.knk.paper.enchantment.InMemoryCooldownManager;
 import net.knightsandkings.knk.paper.enchantment.display.EffectBossBars;
+import net.knightsandkings.knk.paper.enchantment.display.InvisibleEquipment;
 import net.knightsandkings.knk.paper.enchantment.display.InvisibleNameTag;
 import net.knightsandkings.knk.paper.enchantment.display.NameTagBlackout;
 import net.knightsandkings.knk.paper.utils.ScoreboardUtil;
@@ -69,6 +70,9 @@ public class EnchantmentBootstrap {
         NameTagBlackout nameTagBlackout = new NameTagBlackout();
         EffectBossBars effectBossBars = new EffectBossBars(nameTagBlackout);
         effectBossBars.setInvisibleNameTag(new InvisibleNameTag(ScoreboardUtil::getScoreboard));
+        // #211: invisibility also hides armour and held items from everyone who doesn't see through it.
+        InvisibleEquipment invisibleEquipment = new InvisibleEquipment(plugin);
+        effectBossBars.setInvisibleEquipment(invisibleEquipment);
         effectBossBars.remainingFrom("freeze", frozenPlayerTracker::remainingMillis);
         enchantmentExecutor.setEffectDisplay(effectBossBars);
         EnchantmentCommandHandler commandHandler = new EnchantmentCommandHandler(
@@ -104,6 +108,7 @@ public class EnchantmentBootstrap {
         pluginManager.registerEvents(new FreezeMovementListener(frozenPlayerTracker), plugin);
         pluginManager.registerEvents(nameTagBlackout, plugin);
         pluginManager.registerEvents(effectBossBars, plugin);
+        pluginManager.registerEvents(invisibleEquipment, plugin);
         // Permanent enchantment books (KNG-5), capped by the target's grade (KNG-6).
         EnchantBooks enchantBooks = new EnchantBooks(
                 enchantmentRepository,
@@ -129,7 +134,8 @@ public class EnchantmentBootstrap {
                 frozenPlayerTracker,
                 commandHandler,
                 effectBossBars,
-                nameTagBlackout
+                nameTagBlackout,
+                invisibleEquipment
         );
     }
 
@@ -141,7 +147,8 @@ public class EnchantmentBootstrap {
             FrozenPlayerTracker frozenPlayerTracker,
             EnchantmentCommandHandler commandHandler,
             EffectBossBars effectBossBars,
-            NameTagBlackout nameTagBlackout
+            NameTagBlackout nameTagBlackout,
+            InvisibleEquipment invisibleEquipment
     ) {
     }
 }
