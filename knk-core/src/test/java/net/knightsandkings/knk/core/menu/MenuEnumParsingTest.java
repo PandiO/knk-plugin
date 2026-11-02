@@ -16,6 +16,17 @@ class MenuEnumParsingTest {
                 MenuEnumParsing.parse(VariableRefreshPolicyStandin.class, "OnDirty", null, "refreshPolicy", "test"));
     }
 
+    /** PandiO/knk-workspace#49: knk-web-api's MenuDisplayMode "Blink" is the plugin's BLINK. */
+    @Test
+    void webApiDisplayModeNamesMapOntoThePluginConstants() {
+        assertEquals(MenuDisplayMode.BLINK,
+                MenuEnumParsing.parse(MenuDisplayMode.class, "Blink", MenuDisplayMode.NORMAL, "displayMode", "test"));
+        for (String name : new String[] {"Normal", "Disabled", "Highlight", "Hidden"}) {
+            assertEquals(name.toUpperCase(java.util.Locale.ROOT),
+                    MenuEnumParsing.parse(MenuDisplayMode.class, name, MenuDisplayMode.NORMAL, "displayMode", "test").name());
+        }
+    }
+
     @Test
     void nullRawReturnsTheProvidedDefaultWithoutError() {
         assertEquals(MenuOverflowMode.HIDE,
