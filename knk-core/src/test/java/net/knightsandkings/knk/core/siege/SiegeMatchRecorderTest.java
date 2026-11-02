@@ -246,6 +246,36 @@ class SiegeMatchRecorderTest {
         assertNull(await(recorder.createMatch(1, 100)));
     }
 
+    // PandiO/knk-workspace#31 / #182: the startup recovery runs again on the realtime reconnect until it got through.
+    @Test
+    void retryRecovery_afterAFailedStartup_abortsOnce_thenNeverAgain() throws Exception {
+        SiegeMatchRecorder recorder = recorder(spool());
+        for (int i = 0; i < 10; i++) api.abortUnfinishedFailures.add(network());
+        await(recorder.recoverOnStartup());
+        assertFalse(recorder.recovered());
+
+        api.abortUnfinishedFailures.clear();
+        assertTrue(await(recorder.retryRecovery()));
+        assertTrue(recorder.recovered());
+        long aborts = api.calls.stream().filter(c -> c.startsWith("abortUnfinished")).count();
+
+        assertTrue(await(recorder.retryRecovery()));
+        assertEquals(aborts, api.calls.stream().filter(c -> c.startsWith("abortUnfinished")).count());
+    }
+
+    @Test
+    void retryRecovery_neverAbortsOnceThisRunCreatedAMatch() throws Exception {
+        SiegeMatchRecorder recorder = recorder(spool());
+        for (int i = 0; i < 10; i++) api.abortUnfinishedFailures.add(network());
+        await(recorder.recoverOnStartup());
+        api.abortUnfinishedFailures.clear();
+        await(recorder.createMatch(1, 100)); // a lobby ran on the cached config while the API came back
+        api.calls.clear();
+
+        assertTrue(await(recorder.retryRecovery()));
+        assertFalse(api.calls.contains("abortUnfinished SERVER_RESTART"));
+    }
+
     @Test
     void createMatch_replaysLeftoverSpooledResults() throws Exception {
         SiegeResultSpool spool = spool();
