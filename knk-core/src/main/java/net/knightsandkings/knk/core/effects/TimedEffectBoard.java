@@ -9,6 +9,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Predicate;
 
 /**
  * The effects a player is shown a boss bar for (PandiO/knk-workspace#170): one entry per effect key (for example
@@ -95,11 +96,35 @@ public final class TimedEffectBoard {
 
     /** Ends every timed bar of the player (death); static bars stay. */
     public void endTimed(UUID playerId) {
+        endTimed(playerId, key -> true);
+    }
+
+    /**
+     * Ends the player's timed bars whose key {@code which} accepts; static bars and the other timed bars stay (death
+     * ends the debuff bars, not the ability cooldown bars of PandiO/knk-workspace#202).
+     */
+    public void endTimed(UUID playerId, Predicate<String> which) {
         Map<String, Entry> own = playerId == null ? null : entries.get(playerId);
-        if (own == null) {
+        if (own == null || which == null) {
             return;
         }
-        own.values().removeIf(e -> e.timed);
+        synchronized (own) {
+            own.entrySet().removeIf(e -> e.getValue().timed && which.test(e.getKey()));
+        }
+        if (own.isEmpty()) {
+            entries.remove(playerId, own);
+        }
+    }
+
+    /** Ends every bar of the player whose key {@code which} accepts, timed or static. */
+    public void endWhere(UUID playerId, Predicate<String> which) {
+        Map<String, Entry> own = playerId == null ? null : entries.get(playerId);
+        if (own == null || which == null) {
+            return;
+        }
+        synchronized (own) {
+            own.keySet().removeIf(which);
+        }
         if (own.isEmpty()) {
             entries.remove(playerId, own);
         }

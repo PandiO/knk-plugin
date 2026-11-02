@@ -89,4 +89,31 @@ class TimedEffectBoardTest {
         assertEquals("59s", TimedEffectBoard.clock(59_000L));
         assertEquals("1:05", TimedEffectBoard.clock(65_000L));
     }
+
+    /** PandiO/knk-workspace#202: death ends the debuff bars, not the ability cooldown bars. */
+    @Test
+    void endTimedWithAFilterKeepsTheOtherBars() {
+        board.startTimed(player, "poison", "Poison", 4_000L, 0L);
+        board.startTimed(player, "cooldown:chaos", "Chaos cooldown", 90_000L, 0L);
+        board.startStatic(player, "staff_freeze", "Frozen");
+
+        board.endTimed(player, key -> !key.startsWith("cooldown:"));
+
+        assertFalse(board.has(player, "poison"));
+        assertTrue(board.has(player, "cooldown:chaos"));
+        assertTrue(board.has(player, "staff_freeze"));
+    }
+
+    @Test
+    void endWhereEndsMatchingBarsOnly_AndForgetsAnEmptyPlayer() {
+        board.startTimed(player, "cooldown:chaos", "Chaos cooldown", 90_000L, 0L);
+        board.startTimed(player, "cooldown:freeze", "Freeze cooldown", 20_000L, 0L);
+        board.startTimed(player, "poison", "Poison", 4_000L, 0L);
+
+        board.endWhere(player, key -> key.startsWith("cooldown:"));
+        assertEquals(List.of("poison"), board.views(player, 0L).stream().map(TimedEffectBoard.View::key).toList());
+
+        board.endWhere(player, key -> true);
+        assertTrue(board.players().isEmpty());
+    }
 }

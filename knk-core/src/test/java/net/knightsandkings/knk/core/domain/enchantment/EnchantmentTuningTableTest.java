@@ -161,4 +161,70 @@ class EnchantmentTuningTableTest {
         assertEquals("healthboost", EnchantmentTuningTable.matchKey(" health boost "));
         assertEquals("", EnchantmentTuningTable.matchKey(null));
     }
+
+    // PandiO/knk-workspace#201: Flash Chaos's Slowness (duration + effect level) and Nausea (second duration).
+
+    @Test
+    void flashChaosBuiltInValuesAreTheOldHardCodedOnes() {
+        EnchantmentTuning flash = new EnchantmentTuningTable().get("flash_chaos");
+        assertEquals(100, flash.durationTicksAt(1));
+        assertEquals(1, flash.effectLevel());
+        assertEquals(0, flash.effectAmplifier());
+        assertEquals(250, flash.secondaryDurationTicksAt(1));
+        // The other enchantments have no effect level and no second effect.
+        EnchantmentTuning freeze = new EnchantmentTuningTable().get("freeze");
+        assertEquals(0, freeze.effectLevel());
+        assertEquals(0, freeze.secondaryDurationTicksAt(3));
+    }
+
+    @Test
+    void flashChaosOverrideSetsSlownessAndNausea_AndBothScaleWithTheMultiplier() {
+        EnchantmentTuningTable table = new EnchantmentTuningTable();
+        table.replaceOverrides(List.of(new EnchantmentTuningOverride("knk:flash_chaos", null, null, null, null, 8d, 0.5d,
+                3, 20d)));
+
+        EnchantmentTuning flash = table.get("flash_chaos");
+        assertEquals(160, flash.durationTicksAt(1));
+        assertEquals(240, flash.durationTicksAt(2));
+        assertEquals(3, flash.effectLevel());
+        assertEquals(2, flash.effectAmplifier());
+        assertEquals(400, flash.secondaryDurationTicksAt(1));
+        assertEquals(600, flash.secondaryDurationTicksAt(2));
+        assertEquals(90_000L, flash.effectiveCooldownMs());
+    }
+
+    @Test
+    void flashChaosOverrideWithoutTheNewValuesKeepsTheBuiltInOnes() {
+        EnchantmentTuningTable table = new EnchantmentTuningTable();
+        table.replaceOverrides(List.of(override("flash_chaos", null, null, true, 60, null, null)));
+
+        EnchantmentTuning flash = table.get("flash_chaos");
+        assertEquals(60_000L, flash.effectiveCooldownMs());
+        assertEquals(100, flash.durationTicksAt(1));
+        assertEquals(1, flash.effectLevel());
+        assertEquals(250, flash.secondaryDurationTicksAt(1));
+    }
+
+    @Test
+    void effectLevelAndSecondDurationAreClamped() {
+        EnchantmentTuningTable table = new EnchantmentTuningTable();
+        table.replaceOverrides(List.of(new EnchantmentTuningOverride("flash_chaos", null, null, null, null, null, null,
+                99, 9_999d)));
+        EnchantmentTuning flash = table.get("flash_chaos");
+        assertEquals(EnchantmentTuning.MAX_EFFECT_LEVEL, flash.effectLevel());
+        assertEquals(72_000, flash.secondaryDurationTicks());
+
+        table.replaceOverrides(List.of(new EnchantmentTuningOverride("flash_chaos", null, null, null, null, null, null,
+                0, -3d)));
+        flash = table.get("flash_chaos");
+        assertEquals(1, flash.effectLevel());
+        assertEquals(0, flash.secondaryDurationTicks());
+    }
+
+    @Test
+    void anOverrideWithOnlyTheNewValuesIsNotEmpty() {
+        assertFalse(new EnchantmentTuningOverride("flash_chaos", null, null, null, null, null, null, 2, null).isEmpty());
+        assertFalse(new EnchantmentTuningOverride("flash_chaos", null, null, null, null, null, null, null, 1d).isEmpty());
+        assertTrue(override("flash_chaos", null, null, null, null, null, null).isEmpty());
+    }
 }

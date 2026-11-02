@@ -69,11 +69,13 @@ class EnchantmentBootstrapTest {
         assertNotNull(runtime.configManager());
         assertNotNull(runtime.enchantmentRepository());
         assertNotNull(runtime.cooldownManager());
+        // #202: the cooldown store also shows the ability cooldown bars.
+        assertTrue(runtime.cooldownManager() instanceof net.knightsandkings.knk.paper.enchantment.CooldownBarCooldownManager);
         assertNotNull(runtime.commandHandler());
         // #169/#170: the effect displays exist and listen for death and quit.
         assertNotNull(runtime.effectBossBars());
         assertNotNull(runtime.nameTagBlackout());
-        assertTrue(listenerRegistrations.get() >= 6);
+        assertTrue(listenerRegistrations.get() >= 7);
     }
 
     private static Object defaultValue(Class<?> returnType) {
