@@ -1,6 +1,7 @@
 name: KnightsAndKings
 api: "1.21"
-version: 0.1.0
+# Set at build time (knk-paper/build.gradle.kts): "0.1.0+<git short sha>", or "dev" without git.
+version: "${pluginVersion}"
 main: net.knightsandkings.knk.paper.KnKPlugin
 api-version: "26.3"
 depend:
