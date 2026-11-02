@@ -3,6 +3,7 @@ package net.knightsandkings.knk.paper.mapper;
 import net.knightsandkings.knk.core.domain.item.ItemLoreLayout;
 import net.knightsandkings.knk.core.domain.item.KnkItemBlueprint;
 import net.knightsandkings.knk.core.domain.item.KnkItemBlueprintOrigin;
+import net.knightsandkings.knk.core.util.LoreWrap;
 import net.knightsandkings.knk.paper.enchantbook.EnchantBookItems;
 import net.knightsandkings.knk.paper.utils.DisplayTextFormatter;
 import org.bukkit.Material;
@@ -41,7 +42,10 @@ public final class ItemBlueprintBukkitMapper {
                 meta.setDisplayName(DisplayTextFormatter.translateToLegacy(blueprint.defaultDisplayName()));
             }
 
-            List<String> lore = buildLore(blueprint.defaultDisplayDescription());
+            List<String> authoredDescription = descriptionLines(blueprint.defaultDisplayDescription());
+            List<String> lore = new ArrayList<>(LoreWrap.wrapAll(authoredDescription));
+            // #212/#40: when the wrap changed the description, keep the authored lines for an item scan.
+            ItemDescriptionTag.stamp(meta, authoredDescription, lore);
 
             String gradeLoreLine = buildGradeLoreLine(blueprint);
             if (gradeLoreLine != null) {
@@ -50,7 +54,7 @@ public final class ItemBlueprintBukkitMapper {
 
             String originLoreLine = buildOriginLoreLine(blueprint);
             if (originLoreLine != null) {
-                lore.add(originLoreLine);
+                lore.addAll(LoreWrap.wrap(originLoreLine));
             }
 
             lore = ItemLoreLayout.compose(List.of(), lore);
@@ -76,23 +80,27 @@ public final class ItemBlueprintBukkitMapper {
     /**
      * The description's lines as lore. A line without a color of its own is dark gray ({@code &8}): lore without one
      * is vanilla's purple, which no description should end up in by accident. A color the description sets itself
-     * (also at the start of the line) overrides it.
+     * (also at the start of the line) overrides it. A line wider than {@code lore.max-width} visible characters
+     * continues on the next lore line in the same colour ({@link LoreWrap}, PandiO/knk-workspace#212); an item scan
+     * gives the authored lines back ({@link ItemDescriptionTag}, {@code ScannedItemJsonBuilder}'s {@code descriptionLore}).
      */
     static List<String> buildLore(String description) {
-        List<String> lore = new ArrayList<>();
-        if (description == null || description.isBlank()) {
-            return lore;
-        }
+        return new ArrayList<>(LoreWrap.wrapAll(descriptionLines(description)));
+    }
 
-        String[] lines = description.split("\\r?\\n");
-        for (String line : lines) {
+    /** The description's lines in their colour, before the lore wrap ({@link #buildLore} without the wrap). */
+    static List<String> descriptionLines(String description) {
+        List<String> lines = new ArrayList<>();
+        if (description == null || description.isBlank()) {
+            return lines;
+        }
+        for (String line : description.split("\\r?\\n")) {
             String trimmed = line != null ? line.trim() : "";
             if (!trimmed.isEmpty()) {
-                lore.add(DisplayTextFormatter.translateToLegacy(DESCRIPTION_COLOR + trimmed));
+                lines.add(DisplayTextFormatter.translateToLegacy(DESCRIPTION_COLOR + trimmed));
             }
         }
-
-        return lore;
+        return lines;
     }
 
     /**

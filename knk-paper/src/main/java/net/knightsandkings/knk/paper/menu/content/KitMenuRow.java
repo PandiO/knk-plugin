@@ -3,6 +3,7 @@ package net.knightsandkings.knk.paper.menu.content;
 import net.knightsandkings.knk.core.domain.item.KnkKit;
 import net.knightsandkings.knk.core.domain.item.KnkKitAvailability;
 import net.knightsandkings.knk.core.menu.MenuRowKey;
+import net.knightsandkings.knk.core.util.LoreWrap;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -76,10 +77,7 @@ public final class KitMenuRow implements MenuRowKey {
         String name = availability.name() != null && !availability.name().isBlank() ? availability.name() : "Kit #" + availability.kitId();
         boolean purchasable = availability.isSinglePurchasePremium() && !availability.isPurchased();
 
-        List<String> lore = new ArrayList<>();
-        for (String line : wrap(availability.description(), DESCRIPTION_WIDTH)) {
-            lore.add("&7" + line);
-        }
+        List<String> lore = new ArrayList<>(descriptionLines(availability.description()));
         List<String> contents = contentLines(kit, blueprints);
         if (!contents.isEmpty()) {
             if (!lore.isEmpty()) {
@@ -88,7 +86,8 @@ public final class KitMenuRow implements MenuRowKey {
             lore.addAll(contents);
         }
         lore.add("");
-        lore.addAll(statusLines(availability, purchasable));
+        // PandiO/knk-workspace#212: a long rank-rule / requirement reason wraps like every other lore line.
+        lore.addAll(LoreWrap.wrapAll(statusLines(availability, purchasable)));
 
         String displayMode = !availability.canClaim() && !purchasable ? "DISABLED" : "NORMAL";
         String prompt = purchasable
@@ -147,30 +146,18 @@ public final class KitMenuRow implements MenuRowKey {
     /**
      * PandiO/knk-workspace#172: the "Other contents" list wrapped at {@value #CONTENTS_WIDTH} visible characters
      * (the label counts on the first line; an item is never split, one longer than the width is cut with "…"),
-     * at most {@value #CONTENTS_MAX_LINES} lines, the last of them "… and N more" when items didn't fit.
+     * at most {@value #CONTENTS_MAX_LINES} lines, the last of them "… and N more" when items didn't fit. The
+     * measuring, cutting and packing are the shared lore wrap's ({@link LoreWrap#truncate},
+     * {@link LoreWrap#packItems}, PandiO/knk-workspace#212); only the cap and the colours are this row's.
      */
     static List<String> otherContentLines(List<String> items) {
         List<String> result = new ArrayList<>();
         if (items == null || items.isEmpty()) {
             return result;
         }
-        List<List<String>> wrapped = new ArrayList<>();
-        List<String> current = new ArrayList<>();
-        int width = OTHER_CONTENTS_LABEL.length();
-        for (String raw : items) {
-            String item = raw.length() > CONTENTS_WIDTH ? raw.substring(0, CONTENTS_WIDTH - 1) + "…" : raw;
-            // +1: the comma that ends a line when the next item wraps.
-            int needed = current.isEmpty() ? item.length() : 2 + item.length();
-            if (!current.isEmpty() && width + needed + 1 > CONTENTS_WIDTH) {
-                wrapped.add(current);
-                current = new ArrayList<>();
-                width = 0;
-                needed = item.length();
-            }
-            current.add(item);
-            width += needed;
-        }
-        wrapped.add(current);
+        List<String> shortened = items.stream().map(item -> LoreWrap.truncate(item, CONTENTS_WIDTH)).toList();
+        // ", " between items; one character kept free for the comma that ends a line when the next item wraps.
+        List<List<String>> wrapped = LoreWrap.packItems(shortened, 2, 1, CONTENTS_WIDTH, OTHER_CONTENTS_LABEL.length());
 
         int shownLines = wrapped.size();
         int hidden = 0;
@@ -213,27 +200,12 @@ public final class KitMenuRow implements MenuRowKey {
         return FALLBACK_MATERIAL;
     }
 
-    /** Greedy word wrap; blank/null → no lines. */
-    static List<String> wrap(String text, int width) {
-        List<String> lines = new ArrayList<>();
-        if (text == null || text.isBlank()) {
-            return lines;
+    /** The kit's description in gray, wrapped at {@value #DESCRIPTION_WIDTH} by the shared lore wrap; blank/null → no lines. */
+    static List<String> descriptionLines(String description) {
+        if (description == null || description.isBlank()) {
+            return List.of();
         }
-        StringBuilder line = new StringBuilder();
-        for (String word : text.trim().split("\\s+")) {
-            if (line.length() > 0 && line.length() + 1 + word.length() > width) {
-                lines.add(line.toString());
-                line.setLength(0);
-            }
-            if (line.length() > 0) {
-                line.append(' ');
-            }
-            line.append(word);
-        }
-        if (line.length() > 0) {
-            lines.add(line.toString());
-        }
-        return lines;
+        return LoreWrap.wrap("&7" + description.trim().replaceAll("\\s+", " "), DESCRIPTION_WIDTH);
     }
 
     static String formatRemaining(Duration remaining) {
