@@ -3,6 +3,9 @@ package net.knightsandkings.knk.paper.tasks;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.knightsandkings.knk.api.impl.enchantment.LocalEnchantmentRepositoryImpl;
+import net.knightsandkings.knk.core.domain.item.ItemLoreLayout;
+import net.knightsandkings.knk.core.util.LoreWrap;
+import net.knightsandkings.knk.paper.mapper.ItemDescriptionTag;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentRepository;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
@@ -22,8 +25,10 @@ import java.util.logging.Logger;
  * (docs/specs/kits/DESIGN.md §6.1: "reuse, don't reimplement"). Extracted verbatim from
  * ItemScanTaskHandler's original buildOutputJson, so ItemScan's own output is unchanged.
  *
- * {@link #build} emits, in this order: material, maxStackSize, displayName, lore,
- * vanillaEnchantments, customEnchantments, persistentDataContainer. Callers add their own
+ * {@link #build} emits, in this order: material, maxStackSize, displayName, lore, descriptionLore,
+ * vanillaEnchantments, customEnchantments, persistentDataContainer. {@code lore} is the item's raw
+ * lore; {@code descriptionLore} (PandiO/knk-workspace#40) is the part a blueprint's Display description
+ * should hold - see {@link #descriptionLore}. Callers add their own
  * envelope (fieldName/status/warnings/capturedAt) and any extra per-item fields (KitScan adds
  * quantity and slot) - stack size is deliberately not part of this shared shape, since ItemScan
  * never emitted it.
@@ -82,6 +87,12 @@ public class ScannedItemJsonBuilder {
         }
         result.add("lore", loreArray);
 
+        JsonArray descriptionArray = new JsonArray();
+        for (String line : descriptionLore(lore, ItemDescriptionTag.read(meta))) {
+            descriptionArray.add(line);
+        }
+        result.add("descriptionLore", descriptionArray);
+
         JsonArray vanillaEnchantments = new JsonArray();
         if (meta != null) {
             for (Map.Entry<Enchantment, Integer> entry : meta.getEnchants().entrySet()) {
@@ -114,6 +125,51 @@ public class ScannedItemJsonBuilder {
 
         result.add("persistentDataContainer", readPersistentDataContainer(meta));
         return result;
+    }
+
+    /**
+     * PandiO/knk-workspace#40: the scanned lore without the lines the plugin generates itself when it builds a
+     * blueprint item - custom-enchantment lines (they are scanned into {@code customEnchantments}), the grade
+     * line, origin lines and the blank spacers around them ({@link ItemLoreLayout#descriptionLines}) - and never
+     * with the lore wrap of #212 in it:
+     * <ul>
+     *   <li>the item carries the authored description ({@link ItemDescriptionTag}, stamped only when the wrap
+     *       changed something) and its description lines still show that text (wrapped at any width): the
+     *       authored lines, exactly;</li>
+     *   <li>it carries the tag but the text changed since (lore edited by hand): continuation lines joined back
+     *       by {@link LoreWrap#unwrap};</li>
+     *   <li>no tag: the plugin didn't wrap this description, so the lines stay as they are.</li>
+     * </ul>
+     *
+     * @param authored the item's {@link ItemDescriptionTag} lines, empty when it has none
+     */
+    public List<String> descriptionLore(List<String> lore, List<String> authored) {
+        List<String> description = ItemLoreLayout.descriptionLines(lore,
+                line -> !customEnchantmentRepository.getEnchantments(List.of(line)).join().isEmpty());
+        if (authored == null || authored.isEmpty()) {
+            return description;
+        }
+        if (sameText(description, authored)) {
+            return List.copyOf(authored);
+        }
+        return LoreWrap.unwrap(description);
+    }
+
+    /**
+     * The same visible text, whitespace and colour codes ignored: the description lines are the authored ones as
+     * wrapped at any width (the server's {@code lore.max-width} may have changed since the item was built, and the
+     * server may write a colour code differently on the way back).
+     */
+    private static boolean sameText(List<String> scanned, List<String> authored) {
+        return visibleText(scanned).equals(visibleText(authored));
+    }
+
+    private static String visibleText(List<String> lines) {
+        StringBuilder out = new StringBuilder();
+        for (String line : lines) {
+            out.append(LoreWrap.stripCodes(line));
+        }
+        return out.toString().replaceAll("\\s+", "");
     }
 
     /**

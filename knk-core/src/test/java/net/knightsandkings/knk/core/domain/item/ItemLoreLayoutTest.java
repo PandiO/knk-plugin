@@ -43,4 +43,34 @@ class ItemLoreLayoutTest {
         assertEquals(List.of(ENCHANTMENT, "", DESCRIPTION, "", GRADE, ORIGIN), composed);
         assertEquals(composed, ItemLoreLayout.compose(List.of(ENCHANTMENT), composed.subList(2, composed.size())));
     }
+    // ===== PandiO/knk-workspace#40: the description part, without the generated lines =====
+
+    @Test
+    void descriptionLinesLeaveOutEnchantmentsSpacersGradeAndOrigin() {
+        List<String> lore = ItemLoreLayout.compose(List.of(ENCHANTMENT, "§7Chaos I"),
+                List.of("§8Forged in the last fire of a fallen dojo.", "§8Its edge never cools.", GRADE, ORIGIN));
+
+        assertEquals(List.of("§8Forged in the last fire of a fallen dojo.", "§8Its edge never cools."),
+                ItemLoreLayout.descriptionLines(lore, line -> line.equals(ENCHANTMENT) || line.equals("§7Chaos I")));
+    }
+
+    @Test
+    void descriptionLinesStopAtAnOriginLineWithoutAGrade() {
+        // No grade: compose keeps the origin line at the bottom of the description block.
+        List<String> lore = ItemLoreLayout.compose(List.of(), List.of(DESCRIPTION, ORIGIN));
+
+        assertEquals(List.of(DESCRIPTION), ItemLoreLayout.descriptionLines(lore, line -> false));
+    }
+
+    @Test
+    void descriptionLinesOfGeneratedLinesOnlyAreEmpty() {
+        assertEquals(List.of(), ItemLoreLayout.descriptionLines(List.of(ENCHANTMENT, "", "&l&bGrade: ★★"), ENCHANTMENT::equals));
+        assertEquals(List.of(), ItemLoreLayout.descriptionLines(null, line -> false));
+    }
+
+    @Test
+    void descriptionLinesKeepAPlainItemsLore() {
+        assertEquals(List.of("§5Just some lore", "second line"),
+                ItemLoreLayout.descriptionLines(List.of("§5Just some lore", "second line"), null));
+    }
 }

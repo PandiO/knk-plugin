@@ -341,6 +341,9 @@ public class KnKPlugin extends JavaPlugin {
             saveDefaultConfig();
             config = ConfigLoader.load(getConfig());
             getLogger().info("Configuration loaded successfully");
+            // PandiO/knk-workspace#212: one maximum lore line width for blueprint items and every menu.
+            net.knightsandkings.knk.core.util.LoreWrap.setMaxWidth(
+                getConfig().getInt("lore.max-width", net.knightsandkings.knk.core.util.LoreWrap.DEFAULT_MAX_WIDTH));
             // First, so the API calls of the rest of startup are timed as well (KNG-232).
             metricsService = new net.knightsandkings.knk.paper.metrics.MetricsService(this, config.metrics());
             metricsService.start();

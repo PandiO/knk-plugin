@@ -128,10 +128,30 @@ class KitMenuRowTest {
     }
 
     @Test
-    void wrapBreaksOnWordsAndSkipsBlank() {
-        assertEquals(List.of("aaa bbb", "ccc"), KitMenuRow.wrap("aaa bbb ccc", 7));
-        assertTrue(KitMenuRow.wrap("  ", 10).isEmpty());
-        assertTrue(KitMenuRow.wrap(null, 10).isEmpty());
+    void descriptionWrapsGrayOnWordsAndSkipsBlank() {
+        assertEquals(List.of("&7A basic set of iron gear for new", "&7knights and squires alike"),
+                KitMenuRow.descriptionLines("A basic set of iron gear for new\nknights   and squires alike"));
+        assertTrue(KitMenuRow.descriptionLines("  ").isEmpty());
+        assertTrue(KitMenuRow.descriptionLines(null).isEmpty());
+    }
+
+    // ===== PandiO/knk-workspace#212: the rank-rule / requirement line wraps too =====
+
+    @Test
+    void aLongRankRuleReasonWrapsInItsColour() {
+        String reason = "You need the rank Knight (or higher) in the Kingdom of Cinix to claim this kit";
+        KitMenuRow row = KitMenuRow.of(availability(false, reason, null, false, null, false, null), kit(3, 2), BLUEPRINTS, CLOCK);
+
+        List<String> lore = row.getLoreLines();
+        int first = lore.indexOf("&cYou need the rank Knight (or higher) in");
+        assertTrue(first > 0, "reason starts a line: " + lore);
+        List<String> reasonLines = lore.subList(first, lore.size());
+        assertTrue(reasonLines.size() > 1, "wrapped: " + reasonLines);
+        for (String line : reasonLines) {
+            assertTrue(line.startsWith("&c"), "colour kept: " + line);
+            assertTrue(visibleLength(line) <= net.knightsandkings.knk.core.util.LoreWrap.DEFAULT_MAX_WIDTH, "too wide: " + line);
+        }
+        assertEquals(reason, String.join(" ", reasonLines.stream().map(l -> l.substring(2)).toList()));
     }
     // ===== PandiO/knk-workspace#172: "Other contents" wraps and is capped =====
 
