@@ -11,12 +11,12 @@ import org.bukkit.potion.PotionEffectType;
 
 public class StrengthEffect extends AttackEnchantmentEffect {
     public StrengthEffect(Plugin plugin) {
-        super("strength", 0.15d, plugin);
+        super("strength", plugin);
     }
 
     @Override
     protected void applyEffect(ItemStack weapon, Player attacker, LivingEntity target, int level) {
-        attacker.addPotionEffect(new PotionEffect(PotionEffectType.STRENGTH, 300, Math.max(level - 1, 0)));
+        attacker.addPotionEffect(new PotionEffect(PotionEffectType.STRENGTH, tuning().durationTicksAt(level), Math.max(level - 1, 0)));
         playEffect(attacker.getLocation(), Effect.POTION_BREAK, 0);
     }
 }

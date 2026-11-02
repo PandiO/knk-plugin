@@ -57,7 +57,11 @@ import net.knightsandkings.knk.paper.commands.support.CommandPermissions;
  */
 public class KnkAdminCommand implements CommandExecutor, TabCompleter {
     private final CommandRegistry registry = new CommandRegistry();
+    /** {@code /knk item} (held-item rename/lore and the enchantment catalogue), PandiO/knk-workspace#158. */
+    public static final String ITEM_NODE = "knk.admin.item";
     private CommandPermissions commandPermissions = CommandPermissions.bukkitOnly();
+    /** {@code /knk item more} (PandiO/knk-workspace#175); null until KnKPlugin sets it. */
+    private volatile ItemMoreCommand itemMoreCommand;
     /** Nodes a subcommand checks synchronously inside its executor; asked for before it runs (KNG-24). */
     private final java.util.Map<String, List<String>> nodesCheckedInside = new java.util.HashMap<>();
     private GateCommand gateCommand;
@@ -237,8 +241,10 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                         "item",
                         "Rename/edit lore on your held item, or manage the enchantment definition catalog",
                         "/knk item rename <displayName> | /knk item lore <add <text>|set <line> <text>|remove <line>> | " +
-                                "/knk item enchantments <list|vanilla|search|apply>",
-                        "knk.admin",
+                                "/knk item enchantments <list|vanilla|search|apply> | /knk item more [amount]",
+                        // Own node (PandiO/knk-workspace#158) instead of the knk.admin umbrella, so a rank can
+                        // be given held-item editing without every /knk subcommand. knk.admin still covers it.
+                        ITEM_NODE,
                         List.of(
                                 "/knk item rename &6&lFlametongue",
                                 "/knk item lore add &7A blade wreathed in fire",
@@ -249,10 +255,25 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                                 "/knk item enchantments search key minecraft:sharpness",
                                 "/knk item enchantments apply 1 3",
                                 "/knk item enchantments apply sharpness 3",
-                                "/knk item enchantments apply poison 2"
+                                "/knk item enchantments apply poison 2",
+                                "/knk item more",
+                                "/knk item more 64"
                         )
                 ),
-                (sender, args) -> itemCommand.onCommand(sender, null, "knk", args)
+                (sender, args) -> {
+                        // #175: /knk item more also needs its own admin node.
+                        if (args.length >= 1 && "more".equalsIgnoreCase(args[0])) {
+                                ItemMoreCommand more = itemMoreCommand;
+                                if (more == null) {
+                                        sender.sendMessage(ChatColor.RED + "/knk item more isn't available right now.");
+                                        return true;
+                                }
+                                String[] moreArgs = Arrays.copyOfRange(args, 1, args.length);
+                                commandPermissions.whenAllowed(sender, ItemMoreCommand.NODE, () -> more.execute(sender, moreArgs));
+                                return true;
+                        }
+                        return itemCommand.onCommand(sender, null, "knk", args);
+                }
         );
 
         ItemBlueprintsDebugCommand itemBlueprintsCommand = new ItemBlueprintsDebugCommand(
@@ -542,6 +563,11 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
+    /** {@code /knk item more} (PandiO/knk-workspace#175). */
+    public void setItemMoreCommand(ItemMoreCommand itemMoreCommand) {
+        this.itemMoreCommand = itemMoreCommand;
+    }
+
     /** {@code gates.here.*} / {@code gates.lookat.*} for the gate commands' implicit targets (KNG-78/79). */
     public void setGateTargetingSettings(net.knightsandkings.knk.paper.gates.GateTargeting.Settings settings) {
         if (gateCommand != null) {
@@ -692,10 +718,16 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                         return Collections.emptyList();
                 }
                 if (itemArgs.length == 1) {
-                        return filterByPrefix(List.of("rename", "lore", "enchantments"), itemArgs[0]);
+                        return filterByPrefix(List.of("rename", "lore", "enchantments", "more"), itemArgs[0]);
                 }
 
                 String sub = itemArgs[0].toLowerCase(Locale.ROOT);
+
+                if ("more".equals(sub)) {
+                        // #175 round 2: /knk item more [amount]
+                        return itemArgs.length == 2 ? filterByPrefix(ItemMoreCommand.AMOUNT_SUGGESTIONS, itemArgs[1])
+                                        : Collections.emptyList();
+                }
 
                 if ("lore".equals(sub) && itemArgs.length == 2) {
                         return filterByPrefix(List.of("add", "set", "remove"), itemArgs[1]);

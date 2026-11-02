@@ -1,8 +1,9 @@
 package net.knightsandkings.knk.paper.enchantment;
 
-import net.knightsandkings.knk.core.domain.enchantment.EnchantmentRegistry;
+import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuningTable;
 import net.knightsandkings.knk.core.ports.enchantment.CooldownManager;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentExecutor;
+import net.knightsandkings.knk.paper.enchantment.display.EffectDisplay;
 import net.knightsandkings.knk.paper.enchantment.effects.AttackEnchantmentEffect;
 import net.knightsandkings.knk.paper.enchantment.effects.SupportEnchantmentEffect;
 import net.knightsandkings.knk.paper.enchantment.effects.impl.ArmorRepairEffect;
@@ -63,6 +64,14 @@ public class ExecutorImpl implements EnchantmentExecutor {
         this.supportEffects = buildSupportEffects(plugin, safezones, gateAreaDamage);
     }
 
+    /**
+     * Where every effect shows its victim a debuff boss bar (PandiO/knk-workspace#170) or a name-tag blackout (#169).
+     */
+    public void setEffectDisplay(EffectDisplay display) {
+        attackEffects.values().forEach(effect -> effect.setDisplay(display));
+        supportEffects.values().forEach(effect -> effect.setDisplay(display));
+    }
+
     @Override
     public CompletableFuture<Void> executeOnMeleeHit(
             Map<String, Integer> enchantments,
@@ -108,11 +117,11 @@ public class ExecutorImpl implements EnchantmentExecutor {
                     continue;
                 }
 
-                EnchantmentRegistry.getInstance().getById(enchantmentId).ifPresent(definition -> {
-                    if (definition.cooldownMs() > 0) {
-                        cooldownManager.applyCooldown(attackerId, enchantmentId, definition.cooldownMs()).join();
-                    }
-                });
+                // #151: the cooldown (on/off, length) an admin set, else the built-in one.
+                long cooldownMs = EnchantmentTuningTable.getInstance().get(enchantmentId).effectiveCooldownMs();
+                if (cooldownMs > 0L) {
+                    cooldownManager.applyCooldown(attackerId, enchantmentId, cooldownMs).join();
+                }
             }
         });
     }
@@ -159,11 +168,11 @@ public class ExecutorImpl implements EnchantmentExecutor {
                 }
 
                 triggeredAny = true;
-                EnchantmentRegistry.getInstance().getById(enchantmentId).ifPresent(definition -> {
-                    if (definition.cooldownMs() > 0) {
-                        cooldownManager.applyCooldown(playerId, enchantmentId, definition.cooldownMs()).join();
-                    }
-                });
+                // #151: the cooldown (on/off, length) an admin set, else the built-in one.
+                long cooldownMs = EnchantmentTuningTable.getInstance().get(enchantmentId).effectiveCooldownMs();
+                if (cooldownMs > 0L) {
+                    cooldownManager.applyCooldown(playerId, enchantmentId, cooldownMs).join();
+                }
             }
 
             return triggeredAny;

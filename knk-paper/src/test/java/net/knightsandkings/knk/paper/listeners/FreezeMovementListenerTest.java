@@ -85,6 +85,66 @@ class FreezeMovementListenerTest {
         }
     }
 
+    /** PandiO/knk-workspace#155: the flight guard hears when a player's freeze starts and ends, once each. */
+    @Test
+    void thePlayerFreezeHookHearsStartAndEnd_AndAnOlderTimerDoesNotEndANewerFreeze() {
+        UUID playerId = UUID.randomUUID();
+        FrozenPlayerTracker tracker = new FrozenPlayerTracker((Plugin) Proxy.newProxyInstance(
+                Plugin.class.getClassLoader(), new Class[]{Plugin.class}, (proxy, method, args) -> null));
+        java.util.List<String> heard = new java.util.ArrayList<>();
+        tracker.setPlayerFreezeHook(new FrozenPlayerTracker.PlayerFreezeHook() {
+            @Override
+            public void frozen(UUID id) {
+                heard.add("frozen");
+            }
+
+            @Override
+            public void released(UUID id) {
+                heard.add("released");
+            }
+        });
+        java.util.List<Runnable> timers = new java.util.ArrayList<>();
+        try (var bukkit = org.mockito.Mockito.mockStatic(org.bukkit.Bukkit.class)) {
+            var scheduler = org.mockito.Mockito.mock(org.bukkit.scheduler.BukkitScheduler.class);
+            bukkit.when(org.bukkit.Bukkit::getScheduler).thenReturn(scheduler);
+            java.util.concurrent.atomic.AtomicInteger ids = new java.util.concurrent.atomic.AtomicInteger(40);
+            org.mockito.Mockito.when(scheduler.scheduleSyncDelayedTask(org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.any(Runnable.class), org.mockito.ArgumentMatchers.anyLong()))
+                .thenAnswer(inv -> {
+                    timers.add(inv.getArgument(1));
+                    return ids.incrementAndGet();
+                });
+
+            tracker.freeze(testPlayer(playerId), 60);
+            tracker.freeze(testPlayer(playerId), 60); // a second proc before the first ended
+            assertEquals(java.util.List.of("frozen"), heard);
+
+            timers.get(0).run(); // the first freeze's timer (cancelled in game) must not end the second
+            assertEquals(java.util.List.of("frozen"), heard);
+            assertEquals(true, tracker.isFrozen(playerId));
+
+            timers.get(1).run();
+            assertEquals(java.util.List.of("frozen", "released"), heard);
+            assertEquals(false, tracker.isFrozen(playerId));
+
+            tracker.unfreeze(playerId); // nothing left to end
+            assertEquals(java.util.List.of("frozen", "released"), heard);
+        }
+    }
+
+    @Test
+    void quittingEndsTheFreeze() {
+        UUID playerId = UUID.randomUUID();
+        TestFrozenPlayerTracker tracker = new TestFrozenPlayerTracker(playerId, true);
+        FreezeMovementListener listener = new FreezeMovementListener(tracker);
+        org.bukkit.event.player.PlayerQuitEvent quit = org.mockito.Mockito.mock(org.bukkit.event.player.PlayerQuitEvent.class);
+        org.mockito.Mockito.when(quit.getPlayer()).thenReturn(testPlayer(playerId));
+
+        listener.onQuit(quit);
+
+        assertEquals(playerId, tracker.unfrozen);
+    }
+
     private static Player testPlayer(UUID playerId) {
         return (Player) Proxy.newProxyInstance(
                 Player.class.getClassLoader(),

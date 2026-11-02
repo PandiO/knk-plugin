@@ -15,7 +15,7 @@ public class ResistanceEffect extends SupportEnchantmentEffect {
 
     @Override
     protected void applyEffect(ItemStack item, Player player, int level) {
-        int durationTicks = (level * 100) + 100;
+        int durationTicks = tuning().durationTicksAt(level);
         int amplifier = Math.max(level - 1, 0);
         player.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, durationTicks, amplifier));
         playEffect(player.getLocation(), Effect.POTION_BREAK, 0);

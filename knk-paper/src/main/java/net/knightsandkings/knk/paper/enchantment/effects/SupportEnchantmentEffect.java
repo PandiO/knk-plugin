@@ -1,5 +1,8 @@
 package net.knightsandkings.knk.paper.enchantment.effects;
 
+import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuning;
+import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuningTable;
+import net.knightsandkings.knk.paper.enchantment.display.EffectDisplay;
 import org.bukkit.Bukkit;
 import org.bukkit.Effect;
 import org.bukkit.Location;
@@ -14,6 +17,7 @@ import java.util.Objects;
 public abstract class SupportEnchantmentEffect implements EnchantmentEffect {
     private final String enchantmentId;
     private final Plugin plugin;
+    private volatile EffectDisplay display = EffectDisplay.NONE;
 
     protected SupportEnchantmentEffect(String enchantmentId, Plugin plugin) {
         this.enchantmentId = Objects.requireNonNull(enchantmentId, "enchantmentId must not be null");
@@ -40,6 +44,11 @@ public abstract class SupportEnchantmentEffect implements EnchantmentEffect {
     }
 
     protected abstract void applyEffect(ItemStack item, Player player, int level);
+
+    /** This ability's current combat values (PandiO/knk-workspace#151); right-click abilities don't roll a chance. */
+    protected final EnchantmentTuning tuning() {
+        return EnchantmentTuningTable.getInstance().get(enchantmentId);
+    }
 
     protected final void runOnMainThread(Runnable runnable) {
         if (Bukkit.getServer() == null) {
@@ -69,6 +78,18 @@ public abstract class SupportEnchantmentEffect implements EnchantmentEffect {
         }
 
         location.getWorld().playSound(location, sound, volume, pitch);
+    }
+
+    /**
+     * Where this effect shows the victim a timed debuff (boss bar, PandiO/knk-workspace#170) or a name-tag blackout
+     * while blinded (#169). {@link EffectDisplay#NONE} until set.
+     */
+    public final void setDisplay(EffectDisplay display) {
+        this.display = display != null ? display : EffectDisplay.NONE;
+    }
+
+    protected final EffectDisplay display() {
+        return display;
     }
 
     protected final Plugin plugin() {

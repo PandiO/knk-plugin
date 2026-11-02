@@ -27,7 +27,8 @@ class SiegeResultSpoolTest {
 
     static Completion completion() {
         return new Completion(SiegeEndReason.INSTANT_VICTORY, 2,
-                List.of(new ParticipantResult(7, 202, 3, 1, 2, 1), new ParticipantResult(8, 201, 0, 2, 0, 0),
+                List.of(new ParticipantResult(7, 202, 3, 1, 2, 1).withContribution(312.5, 540, 600),
+                        new ParticipantResult(8, 201, 0, 2, 0, 0),
                         // KNG-34: a departed member round-trips with its leftAt
                         new ParticipantResult(9, 201, 1, 1, 1, 0, Instant.parse("2026-09-26T21:01:00Z"))),
                 List.of(new ObjectiveResult(501, 202, 7, Instant.parse("2026-09-26T21:05:00Z")),
@@ -83,5 +84,22 @@ class SiegeResultSpoolTest {
     @Test
     void missingDirectoryIsAnEmptySpool() {
         assertEquals(List.of(), new SiegeResultSpool(dir.resolve("nope"), Logger.getLogger("test")).list());
+    }
+
+    @Test
+    void anOlderFileWithoutGateDamageOrActivity_readsAsZero() throws Exception {
+        Path folder = dir.resolve("pending-results");
+        Files.createDirectories(folder);
+        Files.writeString(folder.resolve("3.json"), """
+                {"version":1,"type":"complete","matchId":3,"endReason":"TIME_EXPIRED","winningAllianceGroup":null,
+                 "participants":[{"userId":7,"siegeTeamId":202,"kills":1,"deaths":0,"highestKillStreak":1,"captures":0,"leftAt":null}],
+                 "objectives":[],"spooledAt":"2026-10-27T12:00:00Z"}""");
+
+        PendingComplete read = (PendingComplete) spool().list().get(0);
+
+        ParticipantResult p = read.completion().participants().get(0);
+        assertEquals(0.0, p.gateDamage());
+        assertEquals(0, p.activeSeconds());
+        assertEquals(0, p.matchSeconds());
     }
 }

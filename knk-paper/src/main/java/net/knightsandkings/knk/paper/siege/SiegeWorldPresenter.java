@@ -129,17 +129,30 @@ public final class SiegeWorldPresenter implements SiegeMatchObserver, Listener {
         visualsByMatch.put(match.matchToken(), visuals);
         for (UUID id : match.roster().playerIds()) {
             Player p = Bukkit.getPlayer(id);
-            int teamId = match.roster().teamOf(id).orElse(-1);
-            if (p == null || !match.alliances().knows(teamId)) continue;
-            int alliance = match.alliances().allianceOf(teamId);
-            for (ObjectiveVisual v : visuals.values()) {
-                p.hideEntity(plugin, v.neutral);
-                TextDisplay own = v.byAlliance.get(alliance);
-                if (own != null) p.showEntity(plugin, own);
-            }
+            if (p != null) showAllianceLabels(match, visuals, p);
         }
         writeBlockLog();
         paint(match, Map.of());
+    }
+
+    /** A rejoin or admin join (PandiO/knk-workspace#150, #152): the late member sees their alliance's labels. */
+    @Override
+    public void memberJoinedMatch(SiegeLobbyRuntime lobby, SiegeMatch match, Player player) {
+        Map<Integer, ObjectiveVisual> visuals = visualsByMatch.get(match.matchToken());
+        if (visuals != null) showAllianceLabels(match, visuals, player);
+    }
+
+    private void showAllianceLabels(SiegeMatch match, Map<Integer, ObjectiveVisual> visuals, Player p) {
+        int teamId = match.roster().teamOf(p.getUniqueId()).orElse(-1);
+        if (!match.alliances().knows(teamId)) return;
+        int alliance = match.alliances().allianceOf(teamId);
+        for (ObjectiveVisual v : visuals.values()) {
+            if (v.neutral != null) p.hideEntity(plugin, v.neutral);
+            v.byAlliance.forEach((group, display) -> {
+                if (group == alliance) p.showEntity(plugin, display);
+                else p.hideEntity(plugin, display);
+            });
+        }
     }
 
     @Override

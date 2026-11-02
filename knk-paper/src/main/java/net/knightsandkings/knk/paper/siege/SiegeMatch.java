@@ -4,6 +4,7 @@ import net.knightsandkings.knk.core.domain.siege.KnkSiegeScenario;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeTeam;
 import net.knightsandkings.knk.core.siege.AllianceResolver;
 import net.knightsandkings.knk.core.siege.CaptureCalculator;
+import net.knightsandkings.knk.core.siege.SiegeMatchContributions;
 import net.knightsandkings.knk.core.siege.SiegeMatchRoster;
 import net.knightsandkings.knk.core.siege.SiegeObjectiveBoard;
 import net.knightsandkings.knk.core.siege.WinResolver;
@@ -37,6 +38,8 @@ public final class SiegeMatch {
     private final Map<String, Instant> captureTimes = new HashMap<>();
     /** The attacking team shown on each objective's banner gradient (last leading attacker). */
     private final Map<Integer, Integer> leadingAttackerByObjective = new HashMap<>();
+    /** Alpha run 1 (PandiO/knk-workspace#165/#166): gate damage and active time per member. */
+    private final SiegeMatchContributions contributions = new SiegeMatchContributions();
 
     SiegeMatch(KnkSiegeScenario scenario, KnkSiegeConfiguration configuration, String matchToken,
                Map<Integer, List<UUID>> teams) {
@@ -88,6 +91,11 @@ public final class SiegeMatch {
 
     public Instant startedAt() {
         return startedAt;
+    }
+
+    /** Gate damage and active time per member (#165/#166), reported with {@code complete}. */
+    public SiegeMatchContributions contributions() {
+        return contributions;
     }
 
     public Optional<KnkSiegeTeam> teamOf(UUID playerId) {

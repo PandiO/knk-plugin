@@ -8,10 +8,15 @@ import net.knightsandkings.knk.core.ports.enchantment.EnchantmentRepository;
 import net.knightsandkings.knk.paper.commands.enchantment.EnchantmentCommandHandler;
 import net.knightsandkings.knk.paper.config.EnchantmentConfigManager;
 import net.knightsandkings.knk.paper.enchantbook.EnchantBooks;
+import net.knightsandkings.knk.paper.enchantment.EnchantmentPermissions;
 import net.knightsandkings.knk.paper.enchantment.ExecutorImpl;
 import net.knightsandkings.knk.paper.enchantment.GateAreaDamage;
 import net.knightsandkings.knk.paper.enchantment.FrozenPlayerTracker;
 import net.knightsandkings.knk.paper.enchantment.InMemoryCooldownManager;
+import net.knightsandkings.knk.paper.enchantment.display.EffectBossBars;
+import net.knightsandkings.knk.paper.enchantment.display.InvisibleNameTag;
+import net.knightsandkings.knk.paper.enchantment.display.NameTagBlackout;
+import net.knightsandkings.knk.paper.utils.ScoreboardUtil;
 import net.knightsandkings.knk.paper.listeners.EnchantBookListener;
 import net.knightsandkings.knk.paper.listeners.EnchantmentCombatListener;
 import net.knightsandkings.knk.paper.listeners.EnchantmentEnchantTableListener;
@@ -28,6 +33,7 @@ public class EnchantmentBootstrap {
         private final Plugin plugin;
         private final CombatSafezoneCheck safezones;
     private final Supplier<GateAreaDamage> gateAreaDamage;
+    private final EnchantmentPermissions permissions;
 
         public EnchantmentBootstrap(Plugin plugin) {
         this(plugin, CombatSafezoneCheck.NONE);
@@ -40,7 +46,14 @@ public class EnchantmentBootstrap {
 
     /** @param gateAreaDamage how the area enchantments (chaos, flash_chaos) damage gate doors in range; read per activation */
     public EnchantmentBootstrap(Plugin plugin, CombatSafezoneCheck safezones, Supplier<GateAreaDamage> gateAreaDamage) {
+        this(plugin, safezones, gateAreaDamage, EnchantmentPermissions.bukkitOnly());
+    }
+
+    /** @param permissions who may use abilities and the {@code /ce} subcommands (Bukkit or a rank grant, PandiO/knk-workspace#193) */
+    public EnchantmentBootstrap(Plugin plugin, CombatSafezoneCheck safezones, Supplier<GateAreaDamage> gateAreaDamage,
+                                EnchantmentPermissions permissions) {
         this.plugin = plugin;
+        this.permissions = permissions != null ? permissions : EnchantmentPermissions.bukkitOnly();
         this.safezones = safezones != null ? safezones : CombatSafezoneCheck.NONE;
         this.gateAreaDamage = gateAreaDamage != null ? gateAreaDamage : () -> GateAreaDamage.NONE;
     }
@@ -50,12 +63,20 @@ public class EnchantmentBootstrap {
         EnchantmentRepository enchantmentRepository = new LocalEnchantmentRepositoryImpl();
         CooldownManager cooldownManager = new InMemoryCooldownManager();
         FrozenPlayerTracker frozenPlayerTracker = new FrozenPlayerTracker(plugin);
-        EnchantmentExecutor enchantmentExecutor = new ExecutorImpl(plugin, cooldownManager, frozenPlayerTracker, safezones, gateAreaDamage);
+        ExecutorImpl enchantmentExecutor = new ExecutorImpl(plugin, cooldownManager, frozenPlayerTracker, safezones, gateAreaDamage);
+        // #169: blindness hides name tags in the victim's own view, invisibility hides the invoker's own tag;
+        // #170: a boss bar per timed debuff.
+        NameTagBlackout nameTagBlackout = new NameTagBlackout();
+        EffectBossBars effectBossBars = new EffectBossBars(nameTagBlackout);
+        effectBossBars.setInvisibleNameTag(new InvisibleNameTag(ScoreboardUtil::getScoreboard));
+        effectBossBars.remainingFrom("freeze", frozenPlayerTracker::remainingMillis);
+        enchantmentExecutor.setEffectDisplay(effectBossBars);
         EnchantmentCommandHandler commandHandler = new EnchantmentCommandHandler(
                 plugin,
                 configManager,
                 enchantmentRepository,
-                cooldownManager
+                cooldownManager,
+                permissions
         );
 
         var pluginManager = plugin.getServer().getPluginManager();
@@ -74,12 +95,15 @@ public class EnchantmentBootstrap {
                         enchantmentExecutor,
                         cooldownManager,
                         configManager.disableForCreative(),
-                        configManager.cooldownMessageTemplate()
+                        configManager.cooldownMessageTemplate(),
+                        permissions
                 ),
                 plugin
         );
         pluginManager.registerEvents(new EnchantmentEnchantTableListener(enchantmentRepository), plugin);
         pluginManager.registerEvents(new FreezeMovementListener(frozenPlayerTracker), plugin);
+        pluginManager.registerEvents(nameTagBlackout, plugin);
+        pluginManager.registerEvents(effectBossBars, plugin);
         // Permanent enchantment books (KNG-5), capped by the target's grade (KNG-6).
         EnchantBooks enchantBooks = new EnchantBooks(
                 enchantmentRepository,
@@ -103,7 +127,9 @@ public class EnchantmentBootstrap {
                 cooldownManager,
                 enchantmentExecutor,
                 frozenPlayerTracker,
-                commandHandler
+                commandHandler,
+                effectBossBars,
+                nameTagBlackout
         );
     }
 
@@ -113,7 +139,9 @@ public class EnchantmentBootstrap {
             CooldownManager cooldownManager,
             EnchantmentExecutor enchantmentExecutor,
             FrozenPlayerTracker frozenPlayerTracker,
-            EnchantmentCommandHandler commandHandler
+            EnchantmentCommandHandler commandHandler,
+            EffectBossBars effectBossBars,
+            NameTagBlackout nameTagBlackout
     ) {
     }
 }

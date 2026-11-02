@@ -65,4 +65,19 @@ class ScoreboardUtilTest {
         assertEquals("", plain(ScoreboardUtil.premiumTierFooterLine(s)));
         assertEquals(s, s.withActiveMode(ActiveMode.NONE));
     }
+
+    // ==================== Siege tag (alpha run 1, PandiO/knk-workspace#163) ====================
+
+    @Test
+    void siegeTeamNames_pairWithTheirRankTeam() {
+        assertEquals("default.siege", ScoreboardUtil.siegeTeamName("default"));
+        assertEquals("tier_12.siege", ScoreboardUtil.siegeTeamName("tier_12.siege"));
+        assertEquals("tier_12", ScoreboardUtil.baseTeamName("tier_12.siege"));
+        assertEquals("staff", ScoreboardUtil.baseTeamName("staff"));
+    }
+
+    @Test
+    void theSiegeSuffixReadsSiege() {
+        assertEquals(" [Siege]", plain(ScoreboardUtil.SIEGE_SUFFIX));
+    }
 }

@@ -23,6 +23,8 @@ public class FlashChaosEffect extends SupportEnchantmentEffect {
     private static final double DAMAGE_RADIUS = 3.0d;
     private static final double EFFECT_RADIUS = 5.0d;
     private static final double DAMAGE_AMOUNT = 60.0d;
+    static final int SLOWNESS_TICKS = 100;
+    static final int NAUSEA_TICKS = 250;
 
     private final CombatSafezoneCheck safezones;
     private final Supplier<GateAreaDamage> gateAreaDamage;
@@ -70,8 +72,11 @@ public class FlashChaosEffect extends SupportEnchantmentEffect {
 
             applyKnockback(player, livingEntity);
             if (livingEntity instanceof Player targetPlayer) {
-                targetPlayer.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 100, 0));
-                targetPlayer.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, 250, 1));
+                targetPlayer.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, SLOWNESS_TICKS, 0));
+                targetPlayer.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, NAUSEA_TICKS, 1));
+                display().debuff(targetPlayer, "slowness", "Slowness", PotionEffectType.SLOWNESS, SLOWNESS_TICKS);
+                display().debuff(targetPlayer, "nausea", "Nausea", PotionEffectType.NAUSEA, NAUSEA_TICKS);
+                // #169 round 2 (developer, 2026-10-27): no name-tag blackout here any more; only blindness hides tags.
             }
         }
 

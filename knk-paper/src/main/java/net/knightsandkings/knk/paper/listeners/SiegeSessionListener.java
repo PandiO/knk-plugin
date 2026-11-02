@@ -15,8 +15,10 @@ import java.util.function.Consumer;
  * <ul>
  *   <li><b>Quit</b> while a member: leave the lobby. During HUB/IN_PROGRESS the inventory and stats
  *       are restored right here (the player is still valid inside {@code PlayerQuitEvent}); the
- *       return location waits for the next join. No mid-match rejoin (DESIGN §13 Q5).</li>
- *   <li><b>Join</b> with a leftover vault file and no membership: finish the quit restore, or after a
+ *       return location waits for the next join. The member's place is kept for {@code siege.rejoin-window-seconds}
+ *       (alpha run 1, PandiO/knk-workspace#150).</li>
+ *   <li><b>Join</b> within that window: back into the round on their team. Otherwise, with a leftover vault
+ *       file and no membership: finish the quit restore, or after a
  *       crash restore everything. Runs two ticks later so it lands after {@code PlayerListener.onJoin}'s
  *       spawn teleport and the other join handlers.</li>
  * </ul>

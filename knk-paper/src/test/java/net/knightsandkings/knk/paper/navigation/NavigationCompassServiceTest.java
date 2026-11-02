@@ -177,6 +177,40 @@ class NavigationCompassServiceTest {
     }
 
     @Test
+    void anAttackerIsSentToTheGateInTheWayNotBehindIt() {
+        // PandiO/knk-workspace#176: the approach port says a closed gate stands before the Gate objective
+        java.util.List<String> asked = new java.util.ArrayList<>();
+        compass.setGateApproaches((objective, team) -> {
+            asked.add(objective.name() + "/" + team.name());
+            return objective.id() == 2
+                ? Optional.of(new KnkLocation(2, "L2", 7.5, 60.0, 3.5, 0f, 0f, "siege_world"))
+                : Optional.empty();
+        });
+        inMatch(ATT);
+
+        compass.use(player, false);
+
+        Destination destination = navigatedTo(1);
+        assertEquals("Gate", destination.name());
+        assertEquals(7.5, destination.point()[0]);
+        assertEquals(60.0, destination.point()[1]);
+        assertEquals(3.5, destination.point()[2]);
+        assertTrue(asked.contains("Gate/Raiders"), asked.toString());
+        // the match scope offers the same place, so /navigate Gate is still allowed
+        assertTrue(compass.allows(player, destination));
+    }
+
+    @Test
+    void defendersGoToTheCapturePointWhateverTheGate() {
+        compass.setGateApproaches((objective, team) -> Optional.of(new KnkLocation(0, "x", 1.0, 1.0, 1.0, 0f, 0f, "siege_world")));
+        inMatch(DEF);
+
+        compass.use(player, false);
+
+        assertEquals(20.0, navigatedTo(1).point()[0]);
+    }
+
+    @Test
     void shiftClickStopsARunningNavigationAndBringsItBack() {
         inMatch(DEF);
         compass.use(player, false);

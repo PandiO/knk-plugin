@@ -223,6 +223,7 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.onboarding.NewPlayerWindow newPlayerWindow;
     private ModeService modeService;
     private net.knightsandkings.knk.paper.user.AdminFreezeManager adminFreezeManager;
+    private net.knightsandkings.knk.paper.freeze.FreezeFlightGuard freezeFlightGuard;
     private net.knightsandkings.knk.paper.user.MessagingService messagingService;
     private net.knightsandkings.knk.paper.user.SpyService spyService;
     private net.knightsandkings.knk.paper.user.IgnoreService ignoreService;
@@ -338,6 +339,8 @@ public class KnKPlugin extends JavaPlugin {
         net.knightsandkings.knk.paper.regions.access.DomainAccessFlags.register(getLogger());
         // KNG-258: the creation timestamp and orphan mark must survive a restart (read back by name either way)
         net.knightsandkings.knk.paper.regions.RegionBookkeepingFlags.register(getLogger());
+        // PandiO/knk-workspace#162: knk-effect-damage allow|deny on a domain's region
+        net.knightsandkings.knk.paper.regions.EffectDamageFlag.register(getLogger());
     }
 
     @Override
@@ -667,6 +670,9 @@ public class KnKPlugin extends JavaPlugin {
             // Gate pass-through (and navigation's gate verdicts) honour KnK's permission model as well as Bukkit's.
             net.knightsandkings.knk.paper.gates.GatePassThroughRules.setPermissionCheck((player, node) ->
                 player.hasPermission(node) || (knkPermissible != null && knkPermissible.hasPermission(player, node)));
+            // So do menu items' visibility/action permissions and the permission-node condition (PandiO/knk-workspace#158).
+            net.knightsandkings.knk.paper.menu.MenuPermissions.setCheck((player, node) ->
+                player.hasPermission(node) || (knkPermissible != null && knkPermissible.hasPermission(player, node)));
             // A grant or group change made in the web app shows in game within the 30 s cache time;
             // /knk cache refresh applies it at once.
             cacheManager.registerRefreshHook("permissions", permissionsDataAccess::invalidateAll);
@@ -678,6 +684,28 @@ public class KnKPlugin extends JavaPlugin {
             this.adminFreezeManager = new net.knightsandkings.knk.paper.user.AdminFreezeManager();
             modeService.setOfflineStore(offlineSecurity);
             adminFreezeManager.setOfflineStore(offlineSecurity);
+            // PandiO/knk-workspace#155: frozen players get flight allowed while frozen (not kicked for hanging in the air)
+            this.freezeFlightGuard = new net.knightsandkings.knk.paper.freeze.FreezeFlightGuard(this);
+            getServer().getPluginManager().registerEvents(freezeFlightGuard, this);
+            adminFreezeManager.setFreezeHook((uuid, frozenNow) -> {
+                if (frozenNow) {
+                    freezeFlightGuard.frozen(uuid, net.knightsandkings.knk.core.freeze.FreezeFlightLedger.Source.ADMIN);
+                } else {
+                    freezeFlightGuard.released(uuid, net.knightsandkings.knk.core.freeze.FreezeFlightLedger.Source.ADMIN);
+                }
+                // PandiO/knk-workspace#170: a static red "Frozen by <staff> for: <reason>" boss bar while staff hold
+                // the player (any thread).
+                if (enchantmentRuntime != null) {
+                    var bars = enchantmentRuntime.effectBossBars();
+                    String label = net.knightsandkings.knk.paper.enchantment.display.EffectBossBars.staffFreezeLabel(
+                            adminFreezeManager.frozenBy(uuid), adminFreezeManager.reasonFor(uuid));
+                    if (getServer().isPrimaryThread()) {
+                        bars.staffFrozen(uuid, frozenNow, label);
+                    } else if (isEnabled()) {
+                        getServer().getScheduler().runTask(this, () -> bars.staffFrozen(uuid, frozenNow, label));
+                    }
+                }
+            });
             startOfflineSecurityTasks();
             initPrivateMessaging();
             this.rankHierarchy = new net.knightsandkings.knk.paper.commands.support.RankHierarchy(usersQueryApi);
@@ -877,11 +905,12 @@ public class KnKPlugin extends JavaPlugin {
                 anvilCaptureManager, new MenuRefreshSchedule()
             );
             // Alpha cross-play finding 2026-10-24: delayed menu switches for Bedrock (Floodgate) players.
-            menuService.configureBedrockTransitions(
-                net.knightsandkings.knk.paper.menu.FloodgatePlayers.detect(
-                    getServer().getPluginManager().getPlugin("floodgate"), getLogger()),
-                Math.min(20, getConfig().getInt("menus.bedrock-transition-delay-ticks", 3))
-            );
+            java.util.function.Predicate<java.util.UUID> bedrockPlayers = net.knightsandkings.knk.paper.menu.FloodgatePlayers.detect(
+                getServer().getPluginManager().getPlugin("floodgate"), getLogger());
+            int bedrockTransitionTicks = Math.min(20, getConfig().getInt("menus.bedrock-transition-delay-ticks", 3));
+            menuService.configureBedrockTransitions(bedrockPlayers, bedrockTransitionTicks);
+            initializeMenuOpenerItem(bedrockPlayers, bedrockTransitionTicks);
+            initializeBedrockBlockResync(bedrockPlayers);
             getLogger().info("InventoryMenu rendering engine initialized (Phase 2 + 9)");
             if (telemetryHooks != null) {
                 menuService.addObserver(telemetryHooks); // menu.opened / menu.action / menu.click (KNG-34 link 6)
@@ -940,6 +969,15 @@ public class KnKPlugin extends JavaPlugin {
             // in towns. siegeService is created later (initializeSiege), so it's read per hit.
             initializeEnchantmentRuntime(new WorldGuardCombatSafezones(regionDomainResolver,
                 (attacker, victim) -> siegeService != null && siegeService.allowsCombat(attacker, victim)));
+            // PandiO/knk-workspace#162: no effect damage (fire, poison, wither, ...) for players in domains unless
+            // knk-effect-damage or pvp allows it there; siege members keep the siege's rules (read per hit).
+            getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.regions.DomainEffectDamageListener(
+                () -> getConfig().getBoolean(net.knightsandkings.knk.paper.regions.DomainEffectDamageListener.ENABLED_PATH, true),
+                net.knightsandkings.knk.paper.regions.DomainEffectDamageListener.causes(
+                    getConfig().getStringList(net.knightsandkings.knk.paper.regions.DomainEffectDamageListener.CAUSES_PATH),
+                    getLogger()::warning),
+                regionDomainResolver,
+                player -> siegeService != null && siegeService.activeLobbyOf(player.getUniqueId()).isPresent()), this);
             getLogger().info("Registered custom enchantment runtime listeners and /ce command");
 
             // Teleport engine + staff teleports (docs/specs/teleport, Phase 1) - before the commands,
@@ -1013,8 +1051,12 @@ public class KnKPlugin extends JavaPlugin {
             double fireDamagePerTick = getConfig().getDouble("gates.fire-damage-per-tick", 2.0);
             GateFireSystem gateFireSystem = new GateFireSystem(healthSystem, gateManager, fireDurationMillis, fireDamagePerTick);
             // KNG-34: effective gate HP loss credited to players (reads the loss only; HP outcomes unchanged).
-            net.knightsandkings.knk.paper.gates.GateDamageSink gateDamageSink = statisticsGateSink != null
-                ? statisticsGateSink : net.knightsandkings.knk.paper.gates.GateDamageSink.NONE;
+            // Alpha run 1 (PandiO/knk-workspace#165): the same losses also count towards the siege gate damage reward
+            // (siegeService is created later, so the siege sink reads it per hit).
+            net.knightsandkings.knk.paper.gates.GateDamageSink gateDamageSink =
+                net.knightsandkings.knk.paper.gates.CompositeGateDamageSink.of(
+                    statisticsGateSink,
+                    new net.knightsandkings.knk.paper.siege.SiegeGateDamageSink(() -> siegeService));
             gateFireSystem.setDamageSink(gateDamageSink);
 
             this.gateAreaDamage = new net.knightsandkings.knk.paper.gates.GateAreaDamageService(gateManager, gateDoorHitService,
@@ -1151,6 +1193,24 @@ public class KnKPlugin extends JavaPlugin {
         }
         if (apiConnectivityMonitor != null) {
             apiConnectivityMonitor.stop();
+        }
+        // #169/#170: hand back real scoreboards behind a name-tag blackout and hide the effect boss bars.
+        if (enchantmentRuntime != null) {
+            try {
+                enchantmentRuntime.nameTagBlackout().showAll();
+                enchantmentRuntime.effectBossBars().hideAll();
+            } catch (RuntimeException e) {
+                getLogger().log(java.util.logging.Level.SEVERE, "Clearing effect displays failed", e);
+            }
+            net.knightsandkings.knk.paper.utils.ViewerScoreboards.setOverlay(null);
+        }
+        // #155: frozen players get their own flight setting back before they are saved.
+        if (freezeFlightGuard != null) {
+            try {
+                freezeFlightGuard.releaseAll();
+            } catch (RuntimeException e) {
+                getLogger().log(java.util.logging.Level.SEVERE, "Handing back frozen players' flight failed", e);
+            }
         }
         if (gameSettingsManager != null) {
             gameSettingsManager.stop();
@@ -1546,6 +1606,55 @@ public class KnKPlugin extends JavaPlugin {
     }
 
     /**
+     * The menu item (alpha test run 1, PandiO/knk-workspace#160): an inventory item that opens {@code /menu}, for
+     * console and Bedrock players. Settings in {@code menus.menu-item}; read once at enable. The click runs
+     * {@code /menu} itself, so its permission ({@code knk.menu}) and every command rule apply.
+     */
+    private void initializeMenuOpenerItem(java.util.function.Predicate<java.util.UUID> bedrockPlayers, int bedrockDelayTicks) {
+        net.knightsandkings.knk.core.menu.opener.MenuOpenerSettings settings =
+            net.knightsandkings.knk.paper.menu.opener.MenuOpenerConfig.read(
+                getConfig().getConfigurationSection("menus.menu-item"), getLogger());
+        net.knightsandkings.knk.paper.menu.opener.MenuOpenerService service =
+            new net.knightsandkings.knk.paper.menu.opener.MenuOpenerService(
+                () -> settings, bedrockPlayers, new net.knightsandkings.knk.paper.menu.opener.BukkitMenuOpenerItems(),
+                player -> player.performCommand("menu"),
+                (task, ticks) -> getServer().getScheduler().runTaskLater(this, task, ticks),
+                System::currentTimeMillis, bedrockDelayTicks);
+        getServer().getPluginManager().registerEvents(
+            new net.knightsandkings.knk.paper.menu.opener.MenuOpenerListener(service), this);
+        // a reload (or a config change) reaches players already online, not only the next joins
+        for (org.bukkit.entity.Player online : getServer().getOnlinePlayers()) {
+            service.ensureLater(online, settings.giveOnJoin());
+        }
+        getLogger().info("Menu item " + (settings.enabled()
+            ? "on (" + settings.material() + " in slot " + settings.slot() + ", for " + settings.audience() + " players)"
+            : "off"));
+    }
+
+    /**
+     * Ghost blocks on Bedrock clients (alpha test run 1, PandiO/knk-workspace#161): a refused break is sent to a
+     * Bedrock (Floodgate) player again while they keep mining. Settings in {@code crossplay.block-resync}.
+     */
+    private void initializeBedrockBlockResync(java.util.function.Predicate<java.util.UUID> bedrockPlayers) {
+        org.bukkit.configuration.ConfigurationSection section = getConfig().getConfigurationSection("crossplay.block-resync");
+        boolean enabled = section == null || section.getBoolean("enabled", true);
+        if (!enabled) {
+            getLogger().info("Bedrock block resync off (crossplay.block-resync.enabled)");
+            return;
+        }
+        boolean allPlayers = section != null && section.getBoolean("all-players", false);
+        int window = section == null ? 30 : Math.max(1, Math.min(200, section.getInt("window-ticks", 30)));
+        int interval = section == null ? 5 : Math.max(1, Math.min(40, section.getInt("interval-ticks", 5)));
+        net.knightsandkings.knk.paper.crossplay.BedrockBlockResync resync = new net.knightsandkings.knk.paper.crossplay.BedrockBlockResync(
+            new net.knightsandkings.knk.core.crossplay.BlockResyncWatch(window, interval, 16),
+            allPlayers ? id -> true : bedrockPlayers, getServer()::getPlayer);
+        getServer().getPluginManager().registerEvents(resync, this);
+        getServer().getScheduler().runTaskTimer(this, resync::tick, 1L, 1L);
+        getLogger().info("Bedrock block resync on (" + (allPlayers ? "all players" : "Bedrock players") + ", window "
+            + window + " ticks, every " + interval + ")");
+    }
+
+    /**
      * Road navigation (KNG-27, docs/specs/navigation/DESIGN.md §4, §5, §7; plan Phase 3): the network cache,
      * the dirty tracker, the build queue, the survey service and the overlay. Only when
      * {@code navigation.enabled}; {@code /knk road} is registered regardless and answers "disabled" otherwise.
@@ -1689,6 +1798,9 @@ public class KnKPlugin extends JavaPlugin {
             mainThread, System::currentTimeMillis, new net.knightsandkings.knk.paper.navigation.BukkitCompassItems());
         getServer().getPluginManager().registerEvents(
             new net.knightsandkings.knk.paper.navigation.NavigationCompassListener(navigationCompass), this);
+        // PandiO/knk-workspace#176: an objective behind a closed gate is navigated to the gate in the way
+        navigationCompass.setGateApproaches((objective, team) -> gateManager == null ? java.util.Optional.empty()
+            : net.knightsandkings.knk.paper.navigation.SiegeGateApproaches.of(gateManager).approach(objective, team));
         if (siegeService != null) {
             // KNG-234: sieges that want it give the compass at the hub
             siegeService.addObserver(navigationCompass);
@@ -1935,6 +2047,15 @@ public class KnKPlugin extends JavaPlugin {
                 getLogger()::warning),
             regionTracker.regionIds()::at,
             player -> hasRegionBypass(player) || hasWorldGuardRegionBypass(player)), this);
+        // PandiO/knk-workspace#157: storage in regions that refuse it (towns and other domains) for players in staff or
+        // owner mode and holders of knk.region.bypass.containers (Moderator and Admin), before WorldGuard's own check.
+        pluginManager.registerEvents(new net.knightsandkings.knk.paper.regions.ContainerAccessWorldGuardListener(
+            new net.knightsandkings.knk.paper.regions.ContainerAccessBypass(
+                player -> modeService != null
+                    && modeService.getActiveMode(player) != net.knightsandkings.knk.core.domain.users.ActiveMode.NONE,
+                player -> player.hasPermission(net.knightsandkings.knk.paper.regions.ContainerAccessBypass.NODE)
+                    || (knkPermissible != null
+                        && knkPermissible.hasPermission(player, net.knightsandkings.knk.paper.regions.ContainerAccessBypass.NODE)))), this);
         if (gameSettingsManager != null) {
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.GameSettingsWorldListener(this, gameSettingsManager), this);
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.GameSettingsMotdListener(gameSettingsManager), this);
@@ -2135,6 +2256,13 @@ public class KnKPlugin extends JavaPlugin {
             // KNG-77/78/79: /gate and /gatedoor run /knk gate|gatedoor (same permissions and warm-up);
             // `here` radius and look-at reach from config.yml gates.here.* / gates.lookat.*.
             knkAdminCommand.setGateTargetingSettings(gateTargetingSettings());
+            // PandiO/knk-workspace#175: /knk item more; instance items get new ItemInstances from the API.
+            knkAdminCommand.setItemMoreCommand(new net.knightsandkings.knk.paper.commands.ItemMoreCommand(
+                MenuService.mainThreadExecutor(this),
+                uuid -> usersDataAccess == null ? java.util.concurrent.CompletableFuture.completedFuture(null)
+                    : usersDataAccess.getByUuidAsync(uuid).thenApply(result ->
+                        result != null && result.isSuccess() && result.value().isPresent() ? result.value().get().id() : null),
+                apiClient.getItemInstancesApi()));
             // KNG-105: /gate tp goes to the structure's own spawn point (its Domain Location) when set.
             knkAdminCommand.setGateSpawnLookup(gateSpawnLookup(), MenuService.mainThreadExecutor(this));
             registerKnkShortcut("gate", knkAdminCommand);
@@ -2451,10 +2579,15 @@ public class KnKPlugin extends JavaPlugin {
             knkPermissible, mainThread, org.bukkit.Bukkit::getPlayerExact, org.bukkit.Bukkit::getOnlinePlayers,
             () -> cacheManager.getUserCache().usernamesSnapshot()
         );
-        // Same rank check as /freeze, /inventory and /knk user (console and knk.admin.user.manage.all pass).
+        // PandiO/knk-workspace#171: teleporting another player needs the same rank or lower (before: strictly lower,
+        // as /freeze, /inventory and /knk user still do); console and knk.admin.user.manage.all pass.
         net.knightsandkings.knk.paper.commands.support.TargetRankCheck rankCheck = (sender, targetName, onAllowed) ->
             userAdminService.resolveTarget(sender, targetName, summary ->
-                userAdminService.withRankCheck(sender, summary, api -> onAllowed.accept(summary), () -> { }));
+                userAdminService.withRankCheck(sender, summary, true, api -> onAllowed.accept(summary), () -> { }));
+        // #171: knk.teleport.exempt.<type> and staff/owner mode exempt a player from others' teleports; the all forms.
+        var teleportExemptions = new net.knightsandkings.knk.paper.teleport.TeleportExemptions(support,
+            player -> modeService.getActiveMode(player) != net.knightsandkings.knk.core.domain.users.ActiveMode.NONE,
+            userAdminService::mayTeleport, userAdminService::overridesTeleportExemption);
         this.teleportRequestCommand = new net.knightsandkings.knk.paper.commands.TeleportRequestCommand(
             net.knightsandkings.knk.paper.commands.TeleportRequestCommand.Form.TPA, support, targets, teleportRequestService);
         this.staffTeleportCommand = new net.knightsandkings.knk.paper.commands.StaffTeleportCommand(
@@ -2462,10 +2595,12 @@ public class KnKPlugin extends JavaPlugin {
             modeService::isVanished, org.bukkit.Bukkit::getWorld,
             () -> org.bukkit.Bukkit.getWorlds().stream().map(org.bukkit.World::getName).toList()
         );
+        staffTeleportCommand.setExemptions(teleportExemptions);
         // Phase 4: /spawn (DESIGN.md §3.6).
         this.spawnCommand = createSpawnCommand(support, rankCheck, targets);
         if (spawnCommand != null) {
             spawnCommand.setCharges(charges);
+            spawnCommand.setExemptions(teleportExemptions);
         }
         // KNG-188: /hub to the hub spawn of the Game Settings, a HUB teleport (the hub starts after the teleports).
         this.hubTeleportCommand = new net.knightsandkings.knk.paper.commands.HubTeleportCommand(support, rankCheck,
@@ -2475,6 +2610,7 @@ public class KnKPlugin extends JavaPlugin {
                 ? java.util.Optional.of("no hub is selected on the Game Settings page") : hubService.unusable(),
             modeService::isVanished);
         hubTeleportCommand.setCharges(charges);
+        hubTeleportCommand.setExemptions(teleportExemptions);
         hubTeleportCommand.setSettleInWorld(this::settleInWorld);
         // Phase 5: /warp, /warps (DESIGN.md §3.7).
         this.warpCommand = createWarpCommand(support, rankCheck, targets, charges);
@@ -2747,6 +2883,17 @@ public class KnKPlugin extends JavaPlugin {
     private void initializeAdmission() {
         var admission = net.knightsandkings.knk.paper.admission.AdmissionSettings.fromConfig(
             getConfig().getConfigurationSection("admission"), config.web().publicUrl());
+        // PandiO/knk-workspace#159: holders of knk.notify.joinattempt hear about refused joins, with the reason.
+        getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.admission.JoinRefusalNotifier(
+            net.knightsandkings.knk.paper.admission.JoinRefusalReasons.shared(),
+            new net.knightsandkings.knk.core.admission.JoinRefusalThrottle(
+                java.time.Duration.ofSeconds(Math.max(0, getConfig().getLong("join-refusal-notify.cooldown-seconds", 60))),
+                java.time.Clock.systemUTC()),
+            () -> getConfig().getBoolean("join-refusal-notify.enabled", true),
+            org.bukkit.Bukkit::getOnlinePlayers,
+            (player, node) -> player.hasPermission(node) || (knkPermissible != null && knkPermissible.hasPermission(player, node)),
+            MenuService.mainThreadExecutor(this),
+            net.knightsandkings.knk.paper.admission.JoinRefusalNotifier.bukkitChecks()), this);
         var offline = offlineSecurity;
         getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.admission.AdmissionListener(
             admission, apiClient.getAdmissionApi(), uuid -> org.bukkit.Bukkit.getOfflinePlayer(uuid).isOp(),
@@ -3169,6 +3316,8 @@ public class KnKPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(offlineStorage, this);
 
         registerTabCommand("fly", new net.knightsandkings.knk.paper.commands.FlyCommand(support));
+        // PandiO/knk-workspace#158: vanilla /gamemode is op-only (in-house grants never reach Bukkit permissions).
+        registerTabCommand("gamemode", new net.knightsandkings.knk.paper.commands.GamemodeCommand(support));
         registerTabCommand("heal", new net.knightsandkings.knk.paper.commands.RestoreCommand(
             support, net.knightsandkings.knk.paper.commands.RestoreCommand.Kind.HEAL));
         registerTabCommand("feed", new net.knightsandkings.knk.paper.commands.RestoreCommand(
@@ -3586,7 +3735,16 @@ public class KnKPlugin extends JavaPlugin {
         // moved otherwise. Same scoped exemption and WorldGuard resync as hubTransfer.
         net.knightsandkings.knk.paper.siege.SiegeBukkit.setTeleporter(this::hubTransfer);
         // KNG-34 leaver fix: members who left early are reported with their stats (no reward).
+        // Alpha run 1 (PandiO/knk-workspace#166): AFK time from the statistics tracker (none without statistics).
+        if (statisticsService != null) siegeService.setAfkSource(statisticsService::afkSince);
         siegeService.setReportDepartedMembers(config.statistics().enabled() && config.statistics().siege().reportDepartedMembers());
+        // Alpha run 1 (PandiO/knk-workspace#150): a disconnected member keeps their place for this long.
+        siegeService.setRejoinWindow(java.time.Duration.ofSeconds(Math.max(0, getConfig().getInt("siege.rejoin-window-seconds",
+            (int) SiegeService.DEFAULT_REJOIN_WINDOW.toSeconds()))));
+        // Alpha run 1 (PandiO/knk-workspace#164/#174): match page links in the result and /siege history; the same value
+        // as the API's App:PublicBaseUrl. Empty: no links.
+        siegeService.setPublicWebUrl(config.web().publicUrl());
+        siegeService.setHistoryApi(apiClient.getSiegeMatchHistoryApi());
 
         PluginCommand siegeCommand = getCommand("siege");
         if (siegeCommand != null) {
@@ -3647,7 +3805,11 @@ public class KnKPlugin extends JavaPlugin {
                 this, gateManager, gateHealthSystem, apiClient.getSiegeGatesCommandApi());
             this.siegeGates = siegeGates;
             siegeService.addObserver(siegeGates);
+            // Alpha run 1 (PandiO/knk-workspace#154): defenders pass through instead of toggling.
+            siegeGates.setDefenderPassThrough(getConfig().getBoolean("gates.siege.defender-pass-through", true),
+                getConfig().getInt("gates.siege.defender-pass-through-seconds", 0));
             if (statisticsGateSink != null) statisticsGateSink.setLockedByMatch(siegeGates::isLocked);
+            siegeService.setGateLobbySource(siegeGates::lobbyIdOf); // #165: gate damage counts for the gate's own match
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeGateListener(siegeGates, gateManager), this);
             siegeGates.recoverOnStartup();
             // Phase 7b: non-members see the locked gates removed and walk through them (degrade
@@ -3713,8 +3875,51 @@ public class KnKPlugin extends JavaPlugin {
 
     private void initializeEnchantmentRuntime(CombatSafezoneCheck safezones) {
         // The gates start after the enchantments: chaos / flash_chaos read the gate seam when they go off.
-        EnchantmentBootstrap bootstrap = new EnchantmentBootstrap(this, safezones, () -> gateAreaDamage);
+        // PandiO/knk-workspace#193: abilities and /ce honour rank grants as well as Bukkit/op.
+        EnchantmentBootstrap bootstrap = new EnchantmentBootstrap(this, safezones, () -> gateAreaDamage,
+            new net.knightsandkings.knk.paper.enchantment.EnchantmentPermissions(commandPermissions()));
         this.enchantmentRuntime = bootstrap.initialize();
+        // #169: the board owners (ScoreboardUtil, the siege boards) go through a running name-tag blackout.
+        net.knightsandkings.knk.paper.utils.ViewerScoreboards.setOverlay(enchantmentRuntime.nameTagBlackout());
+        // #170: effect boss bars count down every 5 ticks; #169: blackouts end on time, mirrors follow each second.
+        getServer().getScheduler().runTaskTimer(this, enchantmentRuntime.effectBossBars()::tick, 5L, 5L);
+        getServer().getScheduler().runTaskTimer(this, enchantmentRuntime.nameTagBlackout()::tick, 20L, 20L);
+        if (freezeFlightGuard != null) {
+            var guard = freezeFlightGuard;
+            var source = net.knightsandkings.knk.core.freeze.FreezeFlightLedger.Source.ENCHANTMENT;
+            enchantmentRuntime.frozenPlayerTracker().setPlayerFreezeHook(
+                new net.knightsandkings.knk.paper.enchantment.FrozenPlayerTracker.PlayerFreezeHook() {
+                    @Override
+                    public void frozen(java.util.UUID playerId) {
+                        guard.frozen(playerId, source);
+                    }
+
+                    @Override
+                    public void released(java.util.UUID playerId) {
+                        guard.released(playerId, source);
+                    }
+                });
+        }
+        startEnchantmentTuningRefresh();
+    }
+
+    /**
+     * PandiO/knk-workspace#151: the admin-set combat values of the custom enchantments, now and every
+     * {@code custom-enchantments.tuning-refresh-minutes}, and on /ce reload. Until the first load the built-in values apply.
+     */
+    private void startEnchantmentTuningRefresh() {
+        if (enchantmentDefinitionsQueryApi == null || enchantmentRuntime == null) {
+            getLogger().warning("No enchantment definitions API: custom enchantments use their built-in combat values");
+            return;
+        }
+        var refresh = new net.knightsandkings.knk.paper.enchantment.EnchantmentTuningRefresh(
+            enchantmentDefinitionsQueryApi::listCombatValues,
+            net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuningTable.getInstance(),
+            getLogger());
+        enchantmentRuntime.commandHandler().setReloadHook(refresh::refresh);
+        int minutes = Math.max(1, getConfig().getInt("custom-enchantments.tuning-refresh-minutes", 5));
+        long ticks = minutes * 60L * 20L;
+        getServer().getScheduler().runTaskTimerAsynchronously(this, () -> refresh.refresh(), 0L, ticks);
     }
 
     private AuthProvider createAuthProvider(KnkConfig.AuthConfig authConfig) {

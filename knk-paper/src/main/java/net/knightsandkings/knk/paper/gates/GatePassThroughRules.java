@@ -13,6 +13,7 @@ import org.bukkit.entity.Player;
 public final class GatePassThroughRules {
     public static final String ADMIN_NODE = "knk.gate.admin";
     public static final String USE_NODE = "knk.gate.passthrough.use";
+    public static final String INSTANT_NODE = "knk.gate.passthrough.instant";
 
     /**
      * How a node is checked: Bukkit's permissions by default; the plugin adds KnK's permission model
@@ -51,5 +52,13 @@ public final class GatePassThroughRules {
 
     public static boolean isAdmin(Player player) {
         return permission.test(player, ADMIN_NODE);
+    }
+
+    /**
+     * Whether the player holds {@value #INSTANT_NODE} (the InstantOpen mode); through the same check as the other
+     * nodes, so a rank's in-house grant counts (PandiO/knk-workspace#158 - it used to be Bukkit's only).
+     */
+    public static boolean mayUseInstant(Player player) {
+        return permission.test(player, INSTANT_NODE);
     }
 }

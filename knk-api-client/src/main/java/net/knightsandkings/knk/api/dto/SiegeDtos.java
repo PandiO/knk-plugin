@@ -51,7 +51,9 @@ public final class SiegeDtos {
             @JsonProperty("nonMemberGateView") String nonMemberGateView,
             @JsonProperty("giveNavigationItem") Boolean giveNavigationItem,
             @JsonProperty("playerSkipMatchmakingSeconds") Integer playerSkipMatchmakingSeconds,
-            @JsonProperty("adminSkipMatchmakingSeconds") Integer adminSkipMatchmakingSeconds
+            @JsonProperty("adminSkipMatchmakingSeconds") Integer adminSkipMatchmakingSeconds,
+            // Alpha run 1 (PandiO/knk-workspace#198): the post-match wait at the hub; null from an older API.
+            @JsonProperty("postMatchSeconds") Integer postMatchSeconds
     ) {}
 
     public record RuntimeLobbyDto(

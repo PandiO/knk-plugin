@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.enchantment.effects;
 
+import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuning;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
@@ -47,6 +48,34 @@ class AttackEnchantmentEffectTest {
         assertTrue(called.get());
     }
 
+    @Test
+    void chanceGrowsPerLevelAsTuned() {
+        AtomicBoolean called = new AtomicBoolean(false);
+        // 15 % at level I, +15 per level: 45 % at level III, so a roll of 0.40 goes off there but not at level II.
+        AttackEnchantmentEffect effect = new TestAttackEffect("freeze", 0.15d, () -> 0.40d, called);
+
+        assertFalse(effect.tryExecute(null, null, null, 2));
+        assertTrue(effect.tryExecute(null, null, null, 3));
+    }
+
+    @Test
+    void readsTheTuningAtEveryHit() {
+        AtomicBoolean called = new AtomicBoolean(false);
+        java.util.concurrent.atomic.AtomicReference<EnchantmentTuning> current =
+                new java.util.concurrent.atomic.AtomicReference<>(new EnchantmentTuning(0.0d, 0.0d, false, 0L, 60, 1.0d));
+        AttackEnchantmentEffect effect = new AttackEnchantmentEffect("freeze", TestAttackEffect.testPlugin(), () -> 0.5d, current::get) {
+            @Override
+            protected void applyEffect(ItemStack weapon, Player attacker, LivingEntity target, int level) {
+                called.set(true);
+            }
+        };
+
+        assertFalse(effect.tryExecute(null, null, null, 1));
+        current.set(new EnchantmentTuning(0.6d, 0.0d, false, 0L, 60, 1.0d));
+        assertTrue(effect.tryExecute(null, null, null, 1));
+        assertTrue(called.get());
+    }
+
     private static final class TestAttackEffect extends AttackEnchantmentEffect {
         private final AtomicBoolean called;
 
@@ -56,7 +85,9 @@ class AttackEnchantmentEffectTest {
                 java.util.function.DoubleSupplier rollSupplier,
                 AtomicBoolean called
         ) {
-            super(enchantmentId, triggerProbability, testPlugin(), rollSupplier);
+            super(enchantmentId, testPlugin(), rollSupplier, () -> triggerProbability == null
+                    ? new EnchantmentTuning(1.0d, 0.0d, false, 0L, 60, 1.0d)
+                    : new EnchantmentTuning(triggerProbability, triggerProbability, false, 0L, 60, 1.0d));
             this.called = called;
         }
 

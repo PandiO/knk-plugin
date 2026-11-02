@@ -60,12 +60,17 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
         String[] rest = args.length == 0 ? new String[0] : Arrays.copyOfRange(args, 1, args.length);
         switch (sub) {
             case "" -> overview(sender);
-            case "join" -> playerOnly(sender, p -> service.join(p, arg(rest, 0)));
+            case "join" -> join(sender, rest);
             case "leave" -> playerOnly(sender, service::leave);
             case "info" -> info(sender, arg(rest, 0));
             case "menu" -> gameMenu(sender);
             case "vote" -> playerOnly(sender, p -> service.vote(p, joined(rest)));
             case "spawn" -> playerOnly(sender, p -> service.spawn(p, joined(rest)));
+            // Alpha run 1 (PandiO/knk-workspace#174): the last five matches with links to the web app.
+            case "history" -> {
+                if (sender instanceof Player && !allowed(sender, SiegeService.PERMISSION_PLAY)) return true;
+                playerOnly(sender, service::history);
+            }
             case "skip" -> {
                 if (!allowed(sender, SiegeService.PERMISSION_SKIP)) return true;
                 send(sender, service.skip(sender, arg(rest, 0), false));
@@ -81,6 +86,29 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
     }
 
     // ==================== Player ====================
+
+    /**
+     * {@code /siege join [lobby]}, and for admins {@code /siege join <player> [lobby] [team]}
+     * (PandiO/knk-workspace#152): a lobby key always means the sender joins; an online player's name puts
+     * that player into the round (also a running match). The console can only use the admin form.
+     */
+    private void join(CommandSender sender, String[] rest) {
+        String first = arg(rest, 0);
+        if (first != null && service.lobbyByKey(first).isEmpty()) {
+            boolean admin = canSuggest(sender, SiegeService.PERMISSION_ADMIN_JOIN);
+            Player target = admin ? Bukkit.getPlayerExact(first) : null;
+            if (target != null && VisiblePlayers.canSee(sender, target)) {
+                send(sender, service.adminJoin(sender, target, arg(rest, 1), joined(Arrays.copyOfRange(rest, Math.min(2, rest.length), rest.length))));
+                return;
+            }
+            if (admin) {
+                sender.sendMessage(SiegeMessages.bad("There is no siege lobby or online player '" + first
+                        + "'. Usage: /siege join <player> [lobby] [team], or /siege join <lobby>."));
+                return;
+            }
+        }
+        playerOnly(sender, p -> service.join(p, first));
+    }
 
     private void overview(CommandSender sender) {
         if (sender instanceof Player && !allowed(sender, SiegeService.PERMISSION_PLAY)) return;
@@ -134,6 +162,7 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
             case MATCHMAKING, HUB -> "starts in " + SiegeMessages.duration(rt.machine().secondsRemaining());
             case IN_PROGRESS -> SiegeMessages.clock(rt.machine().secondsRemaining()) + " left";
             case COOLDOWN -> "next round in " + SiegeMessages.duration(rt.machine().secondsRemaining());
+            case POST_MATCH -> "members return in " + SiegeMessages.duration(rt.machine().secondsRemaining());
             case ENDING, DISABLED -> "";
         };
         String scenario = rt.drawnScenario().map(s -> " - " + scenarioName(s)).orElse("");
@@ -238,6 +267,8 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
             }
             case COOLDOWN -> msg = line(msg, "Next matchmaking in " + SiegeMessages.duration(seconds) + ".");
             case ENDING -> msg = line(msg, "The match is ending.");
+            case POST_MATCH -> msg = line(msg, "The match is over; members return in " + SiegeMessages.duration(seconds)
+                    + " (or now with /siege leave).");
             case DISABLED -> msg = line(msg, rt.lobby().hasReadyScenario()
                     ? "Stopped by an admin." : "No ready scenario in the rotation.");
         }
@@ -293,7 +324,8 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
                 sender.sendMessage(SiegeMessages.info(WEB_APP_HINT));
             }
             default -> sender.sendMessage(SiegeMessages.info(
-                    "Admin: /siege admin list | start <lobby> | stop <lobby> [reason] | skip <lobby> | kick <player> | reload | manage"));
+                    "Admin: /siege admin list | start <lobby> | stop <lobby> [reason] | skip <lobby> | kick <player> | reload | manage"
+                            + " - and /siege join <player> [lobby] [team] puts a player into a round, also a running match"));
         }
     }
 
@@ -313,7 +345,7 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
 
     private void help(CommandSender sender) {
         sender.sendMessage(SiegeMessages.info("/siege - lobbies | join [lobby] | leave | menu | info [lobby] | vote [n|name|random] | "
-                + "spawn [option] | skip [lobby] (cooldown, or shorten matchmaking)" + (!(sender instanceof Player p) || service.hasPermission(p, SiegeService.PERMISSION_ADMIN_LIST)
+                + "spawn [option] | history | skip [lobby] (cooldown, or shorten matchmaking)" + (!(sender instanceof Player p) || service.hasPermission(p, SiegeService.PERMISSION_ADMIN_LIST)
                 ? " | admin ..." : "")));
     }
 
@@ -323,7 +355,7 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
             Stream<String> player = canSuggest(sender, SiegeService.PERMISSION_PLAY)
-                    ? Stream.of("join", "leave", "menu", "info", "vote", "spawn") : Stream.empty();
+                    ? Stream.of("join", "leave", "menu", "info", "vote", "spawn", "history") : Stream.empty();
             Stream<String> skip = canSuggest(sender, SiegeService.PERMISSION_SKIP) ? Stream.of("skip") : Stream.empty();
             Stream<String> admin = canSuggestAnyAdmin(sender) ? Stream.of("admin") : Stream.empty();
             return filter(Stream.of(player, skip, admin, Stream.of("help")).flatMap(s -> s), args[0]);
@@ -332,7 +364,10 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
         if (args.length == 2) {
             // KNG-107: no arguments for a subcommand the sender wasn't offered.
             return switch (sub) {
-                case "join", "info" -> canSuggest(sender, SiegeService.PERMISSION_PLAY)
+                case "join" -> filter(Stream.concat(
+                        canSuggest(sender, SiegeService.PERMISSION_PLAY) ? service.lobbies().stream().map(SiegeLobbyRuntime::key) : Stream.empty(),
+                        canSuggest(sender, SiegeService.PERMISSION_ADMIN_JOIN) ? joinablePlayers(sender) : Stream.empty()), args[1]);
+                case "info" -> canSuggest(sender, SiegeService.PERMISSION_PLAY)
                         ? filter(service.lobbies().stream().map(SiegeLobbyRuntime::key), args[1]) : List.of();
                 case "skip" -> canSuggest(sender, SiegeService.PERMISSION_SKIP)
                         ? filter(service.lobbies().stream().map(SiegeLobbyRuntime::key), args[1]) : List.of();
@@ -341,6 +376,14 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
                 case "admin" -> filter(adminActions(sender), args[1]);
                 default -> List.of();
             };
+        }
+        // #152: /siege join <player> <lobby> <team>
+        if (sub.equals("join") && (args.length == 3 || args.length == 4) && canSuggest(sender, SiegeService.PERMISSION_ADMIN_JOIN)
+                && service.lobbyByKey(args[1]).isEmpty() && Bukkit.getPlayerExact(args[1]) != null) {
+            if (args.length == 3) return filter(service.lobbies().stream().map(SiegeLobbyRuntime::key), args[2]);
+            return filter(service.lobbyByKey(args[2]).stream()
+                    .flatMap(rt -> rt.match().map(SiegeMatch::scenario).or(rt::drawnScenario).stream())
+                    .flatMap(s -> s.teams().stream()).map(SiegeBukkit::teamName).map(n -> n.split(" ")[0]), args[3]);
         }
         if (args.length == 3 && sub.equals("admin") && canSuggest(sender, SiegeService.PERMISSION_ADMIN_CONTROL)) {
             String adminSub = args[1].toLowerCase(Locale.ROOT);
@@ -354,6 +397,14 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
             }
         }
         return List.of();
+    }
+
+    /** Online players the sender can see who aren't in a siege (for {@code /siege join <player>}). */
+    private Stream<String> joinablePlayers(CommandSender sender) {
+        return Bukkit.getOnlinePlayers().stream()
+                .filter(p -> service.lobbyOf(p.getUniqueId()).isEmpty())
+                .filter(p -> VisiblePlayers.canSee(sender, p))
+                .map(Player::getName);
     }
 
     private Stream<String> voteNames(CommandSender sender) {
@@ -442,7 +493,7 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
         return switch (phase) {
             case MATCHMAKING -> NamedTextColor.GREEN;
             case HUB, IN_PROGRESS -> NamedTextColor.GOLD;
-            case ENDING, COOLDOWN -> NamedTextColor.YELLOW;
+            case ENDING, POST_MATCH, COOLDOWN -> NamedTextColor.YELLOW;
             case DISABLED -> NamedTextColor.RED;
         };
     }

@@ -54,6 +54,10 @@ public final class KnkWorldsListener implements Listener {
         }
         String refusal = refusal(readiness.get(), operator.test(event.getUniqueId()));
         if (refusal != null) {
+            // PandiO/knk-workspace#159: the reason for the staff notice
+            net.knightsandkings.knk.paper.admission.JoinRefusalReasons.shared().record(event.getUniqueId(), event.getName(),
+                net.knightsandkings.knk.core.admission.JoinRefusal.Reason.WORLD_NOT_READY,
+                String.join(", ", readiness.get().unavailableRequired().stream().map(WorldReadiness.Status::name).toList()));
             event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, Component.text(refusal));
         }
     }

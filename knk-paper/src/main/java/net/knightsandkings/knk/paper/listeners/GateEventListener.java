@@ -128,8 +128,8 @@ public class GateEventListener implements Listener {
             return;
         }
 
-        // Allow admins to break gate blocks
-        if (player.hasPermission("knk.gate.admin")) {
+        // Allow admins to break gate blocks (Bukkit's or KnK's permission model, PandiO/knk-workspace#158)
+        if (net.knightsandkings.knk.paper.gates.GatePassThroughRules.isAdmin(player)) {
             LOGGER.info("Admin " + player.getName() + " broke gate block at " + block.getLocation());
             return;
         }

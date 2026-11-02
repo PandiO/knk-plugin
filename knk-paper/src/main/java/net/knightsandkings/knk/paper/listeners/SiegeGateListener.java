@@ -22,8 +22,10 @@ import org.bukkit.inventory.EquipmentSlot;
 
 /**
  * Siege Phase 7a (DESIGN §8.3): gates locked down by a match. Right-clicking a closed locked gate
- * ({@link GateDoorInteractEvent}) opens it and right-clicking an open one closes it - only for the
- * owner team's alliance; the gate's own pass-through never runs. Damage ({@link GateDoorDamageEvent},
+ * ({@link GateDoorInteractEvent}) lets the owner team's alliance pass through: it opens and closes again by
+ * itself (alpha run 1, PandiO/knk-workspace#154; with {@code gates.siege.defender-pass-through: false} it
+ * stays open, the MVP toggle). Right-clicking an open one extends such a pass-through, or closes a gate that
+ * stands open for another reason. The gate's own pass-through never runs. Damage ({@link GateDoorDamageEvent},
  * fire via {@link GateDoorIgniteEvent}) counts only from an enemy of the owner on a damageable selected
  * gate. Runs at LOWEST so the gate package's consequence listeners see the cancellation.
  */
@@ -45,7 +47,7 @@ public final class SiegeGateListener implements Listener {
         event.setCancelled(true);
         // Phase 7b: a non-member at a gate that was open before the lockdown is carried across.
         if (gates.tryNonMemberPassThrough(event.getPlayer(), event.getGate())) return;
-        respond(event.getPlayer(), structureId, gates.control(event.getPlayer(), structureId, true));
+        respond(event.getPlayer(), structureId, gates.openClosedGate(event.getPlayer(), structureId));
     }
 
     /** The gate package fires nothing for OPEN doors, so closing is handled here. */
@@ -61,7 +63,7 @@ public final class SiegeGateListener implements Listener {
         int structureId = door.getGateStructureId();
         if (!gates.isLocked(structureId)) return;
         event.setCancelled(true);
-        respond(event.getPlayer(), structureId, gates.control(event.getPlayer(), structureId, false));
+        respond(event.getPlayer(), structureId, gates.clickOpenGate(event.getPlayer(), structureId));
     }
 
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)

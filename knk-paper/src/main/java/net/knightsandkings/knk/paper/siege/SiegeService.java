@@ -33,6 +33,8 @@ import net.knightsandkings.knk.core.siege.SiegeEffect.CancelMatchmakingEffect;
 import net.knightsandkings.knk.core.siege.SiegeEffect.CancelReason;
 import net.knightsandkings.knk.core.siege.SiegeEffect.DrawScenarioEffect;
 import net.knightsandkings.knk.core.siege.SiegeEffect.EndMatchEffect;
+import net.knightsandkings.knk.core.siege.SiegeEffect.FinalCountdownEffect;
+import net.knightsandkings.knk.core.siege.SiegeEffect.PostMatchOverEffect;
 import net.knightsandkings.knk.core.siege.SiegeEffect.LobbyDisabledEffect;
 import net.knightsandkings.knk.core.siege.SiegeEffect.MatchmakingStartedEffect;
 import net.knightsandkings.knk.core.siege.SiegeEffect.PhaseChangedEffect;
@@ -51,6 +53,8 @@ import net.knightsandkings.knk.core.siege.SiegeMatchRoster.SpawnChoice;
 import net.knightsandkings.knk.core.siege.SiegeMatchRoster.SpawnKind;
 import net.knightsandkings.knk.core.siege.SiegeObjectiveBoard.BoardStep;
 import net.knightsandkings.knk.core.siege.SiegePhase;
+import net.knightsandkings.knk.core.siege.SiegeRejoinSlots;
+import net.knightsandkings.knk.core.siege.SiegeRejoinSlots.Slot;
 import net.knightsandkings.knk.core.siege.SiegeRuntimeLocks;
 import net.knightsandkings.knk.core.siege.AllianceResolver;
 import net.knightsandkings.knk.core.siege.CaptureCalculator;
@@ -64,7 +68,6 @@ import net.knightsandkings.knk.core.siege.VoteTally.VoteChoice;
 import net.knightsandkings.knk.core.siege.VoteTally.VoteResult;
 import net.knightsandkings.knk.core.siege.WinResolver;
 import net.knightsandkings.knk.paper.permissions.KnkPermissible;
-import net.knightsandkings.knk.paper.chat.RewardMessageFormat;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.title.Title;
@@ -143,10 +146,14 @@ public final class SiegeService {
     public static final String PERMISSION_ADMIN_CONTROL = "knk.siege.admin.control";
     public static final String PERMISSION_ADMIN_RELOAD = "knk.siege.admin.reload";
     public static final String PERMISSION_ADMIN_MANAGE = "knk.siege.admin.manage";
+    /** {@code /siege join <player>}: add a player to a round, also a running match (PandiO/knk-workspace#152). */
+    public static final String PERMISSION_ADMIN_JOIN = "knk.siege.admin.join";
     public static final String PERMISSION_BYPASS_COMMANDS = "knk.siege.bypass.commands";
 
     /** DESIGN §6.1: lobbies start matchmaking about two seconds after enable (v1/v2 used 2 s). */
     private static final long BOOTSTRAP_START_DELAY_TICKS = 40L;
+    /** How long a disconnected member's place is kept when {@code siege.rejoin-window-seconds} isn't set (#150). */
+    public static final Duration DEFAULT_REJOIN_WINDOW = Duration.ofSeconds(300);
     /** How long after match start / a respawn a spawn pick still teleports (then it only sets the choice). */
     private static final Duration SPAWN_PICK_WINDOW = Duration.ofSeconds(20);
 
@@ -178,6 +185,42 @@ public final class SiegeService {
     private MenuHooks menuHooks;
     /** Command label -> primary command name, over the server's command map (for the command filter). */
     private final java.util.function.UnaryOperator<String> commandAliases;
+
+    /**
+     * Alpha run 1 (PandiO/knk-workspace#166): when a player's current AFK state began (null while active), from the
+     * statistics AFK tracker. Without statistics (or with AFK off) every present second counts as active.
+     */
+    private java.util.function.Function<UUID, Instant> afkSince = id -> null;
+
+    /** The AFK source for the participation reward ({@code StatisticsService::afkSince}); null: nobody is ever AFK. */
+    public void setAfkSource(java.util.function.Function<UUID, Instant> afkSince) {
+        this.afkSince = afkSince == null ? id -> null : afkSince;
+    }
+
+    /**
+     * Alpha run 1 (PandiO/knk-workspace#165): the lobby (runtime id) whose lockdown holds a gate structure, or null
+     * ({@code SiegeGateController::lobbyIdOf}); set when the siege gates are up.
+     */
+    private java.util.function.IntFunction<Integer> gateLobby = structureId -> null;
+
+    public void setGateLobbySource(java.util.function.IntFunction<Integer> gateLobby) {
+        this.gateLobby = gateLobby == null ? structureId -> null : gateLobby;
+    }
+
+    /**
+     * #165: effective gate HP a player took off a gate structure. Credited to the player's running match when that
+     * match's lockdown holds the gate (the siege gate rules already refused damage by anyone else). A member keeps
+     * what they did when they leave and rejoin. Main thread.
+     */
+    public void recordGateDamage(UUID playerId, int gateStructureId, double loss) {
+        if (playerId == null || !(loss > 0)) return;
+        Optional<SiegeLobbyRuntime> rt = lobbyOf(playerId).filter(l -> l.phase() == SiegePhase.IN_PROGRESS);
+        if (rt.isEmpty()) return;
+        Integer lockedBy = gateLobby.apply(gateStructureId);
+        if (lockedBy == null || lockedBy != rt.get().id()) return;
+        rt.get().match().filter(m -> m.roster().contains(playerId))
+                .ifPresent(match -> match.contributions().addGateDamage(playerId, loss));
+    }
 
     public SiegeService(
             Plugin plugin,
@@ -282,11 +325,16 @@ public final class SiegeService {
     // ==================== Ticker ====================
 
     private void tick() {
+        expireRejoinSlots();
         for (SiegeLobbyRuntime rt : new ArrayList<>(lobbies.values())) {
             try {
                 apply(rt, rt.machine().tick(rt.memberCount()));
                 if (rt.phase() == SiegePhase.IN_PROGRESS) {
                     rt.match().ifPresent(match -> stepMatch(rt, match));
+                } else if (rt.phase() == SiegePhase.POST_MATCH) {
+                    // #198: the scoreboards count down to the return.
+                    rt.match().ifPresent(match -> observers.forEach(o -> safely("postMatchSecond",
+                            () -> o.postMatchSecond(rt, match))));
                 }
             } catch (RuntimeException e) {
                 logger.log(Level.SEVERE, "[Siege] Tick failed for lobby " + rt.key(), e);
@@ -295,6 +343,10 @@ public final class SiegeService {
     }
 
     private void stepMatch(SiegeLobbyRuntime rt, SiegeMatch match) {
+        Instant observedAt = Instant.now();
+        for (UUID member : match.roster().playerIds()) {
+            match.contributions().observe(member, observedAt, safeAfkSince(member));
+        }
         Map<Integer, List<Presence>> presence = presence(match);
         BoardStep step = match.board().step(presence);
         Instant now = Instant.now();
@@ -386,6 +438,8 @@ public final class SiegeService {
             case StartMatchEffect e -> onStartMatch(rt, e);
             case StartMessageEffect e -> onStartMessage(rt, e.scenario());
             case EndMatchEffect e -> onEndMatch(rt, e.reason());
+            case FinalCountdownEffect e -> onFinalCountdown(rt, e.secondsLeft());
+            case PostMatchOverEffect e -> onPostMatchOver(rt);
             case CancelMatchmakingEffect e -> onCancel(rt, e);
             case RefreshConfigEffect e -> refreshConfig(null);
             case LobbyDisabledEffect e -> {
@@ -563,6 +617,9 @@ public final class SiegeService {
         // the roster, and everyone starts at their choice - no picker at the start any more.
         SiegeMatch match = new SiegeMatch(scenario, rt.machine().configuration(), token, teams, Map.copyOf(rt.preMatchSpawnChoices()));
         rt.setMatch(match);
+        // #166: every member's match window starts now.
+        Instant joinedAt = Instant.now();
+        match.roster().playerIds().forEach(id -> match.contributions().joined(id, rt.userIds().get(id), joinedAt));
 
         for (MemberView member : match.roster().members()) {
             Player player = Bukkit.getPlayer(member.playerId());
@@ -636,30 +693,174 @@ public final class SiegeService {
         WinResolver.Result result = match.winResolver().resolve(reason, match.board(), alliancesLeft);
         announceResult(rt, match, result);
 
-        if (!result.isAborted()) {
-            // The rewards themselves come from the server's complete answer (printRewardSummary).
-            boolean unrecorded = isUnrecorded(rt);
-            for (MemberView member : match.roster().members()) {
-                tell(member.playerId(), statsLine(member));
-                if (unrecorded) {
-                    tell(member.playerId(), SiegeMessages.bad("This match couldn't be recorded (the server couldn't reach "
-                            + "the API when it was drawn), so no rewards are granted this round."));
-                }
-            }
-        }
-
+        match.contributions().close(Instant.now(), this::safeAfkSince);
         Completion completion = completion(rt, match, result);
-        Map<Integer, UUID> playerByUserId = new HashMap<>();
-        rt.userIds().forEach((uuid, userId) -> playerByUserId.put(userId, uuid));
+        // Alpha run 1 (PandiO/knk-workspace#164): each member present at the end gets a compact result with every stat
+        // and reward in its hover, once the server answered complete (or after a short wait without the rewards).
+        SiegeResultDelivery delivery = result.isAborted() ? null : resultDelivery(rt, match, result);
         withMatchId(rt, id -> result.isAborted()
                 ? guarded("abortMatch", matchApi.abortMatch(id, reason))
                 : guarded("completeMatch", matchApi.completeMatch(id, completion))
-                        .thenAccept(summary -> printRewardSummary(summary, playerByUserId)));
+                        .thenAccept(summary -> onRewards(delivery, summary)));
+        if (delivery != null) {
+            if (isUnrecorded(rt) || rt.matchIdFuture() == null) {
+                delivery.deliver(SiegeResultMessage.RewardState.UNRECORDED, null);
+            } else {
+                later(RESULT_REWARD_WAIT_TICKS, () -> delivery.deliver(SiegeResultMessage.RewardState.PENDING, null));
+            }
+        }
 
         observers.forEach(o -> safely("matchEnded", () -> o.matchEnded(rt, match)));
-        releaseAll(rt);
         logger.info("[Siege] Lobby " + rt.key() + " match ended: " + reason + " -> " + result.decision()
                 + result.winningAllianceGroup().stream().mapToObj(g -> " (alliance " + g + ")").findFirst().orElse(""));
+        if (rt.phase() == SiegePhase.POST_MATCH && !result.isAborted()) {
+            beginPostMatch(rt, match, result);
+        } else {
+            releaseAll(rt);
+        }
+    }
+
+    // ---------- Post-match (alpha run 1, PandiO/knk-workspace#198) and final countdown (#199) ----------
+
+    /** How long the result waits for the server's reward answer before it is shown without the rewards (5 s). */
+    static final long RESULT_REWARD_WAIT_TICKS = 100L;
+
+    /**
+     * #198: the match is recorded (complete was sent); the members wait at the scenario hub with the result for the
+     * configured post-match time, still snapshotted, then {@link #onPostMatchOver} restores them. {@code /siege leave}
+     * restores a member at once. Places kept for disconnected members end here: the completion already reported them.
+     */
+    private void beginPostMatch(SiegeLobbyRuntime rt, SiegeMatch match, WinResolver.Result result) {
+        rt.setMatchOver(true);
+        rejoinSlots.dropLobby(rt.id());
+        int seconds = rt.machine().secondsRemaining();
+        Optional<Location> hub = SiegeBukkit.toLocation(match.scenario().hubLocation());
+        Component back = SiegeMessages.prefixed(Component.text("You return to where you were in "
+                        + SiegeMessages.duration(seconds) + ", with your own inventory. Leave now with ", SiegeMessages.INFO)
+                .append(SiegeMessages.command("/siege leave")));
+        for (UUID id : new ArrayList<>(rt.mutableMembers())) {
+            Player player = Bukkit.getPlayer(id);
+            if (player == null) continue;
+            if (player.isDead()) player.spigot().respawn();
+            player.closeInventory();
+            player.setFireTicks(0);
+            hub.ifPresent(location -> SiegeBukkit.teleport(player, location));
+            int teamId = match.roster().teamOf(id).orElse(-1);
+            player.showTitle(SiegeResultMessage.outcomeTitle(SiegeResultMessage.outcomeOf(result, match.alliances(), teamId)));
+            player.sendMessage(back);
+        }
+        notifyChanged(rt);
+    }
+
+    /** #198: the post-match time is over (or an admin stop / shutdown cut it short): everyone goes home. */
+    private void onPostMatchOver(SiegeLobbyRuntime rt) {
+        if (!rt.matchOver()) return;
+        releaseAll(rt);
+    }
+
+    /** #199: one of the match's last seconds, counted down to its members (action bar, the last five as a title). */
+    private void onFinalCountdown(SiegeLobbyRuntime rt, int secondsLeft) {
+        SiegeMatch match = rt.match().orElse(null);
+        if (match == null) return;
+        Component bar = SiegeMessages.finalCountdownBar(secondsLeft);
+        Title title = secondsLeft <= SiegeMessages.FINAL_COUNTDOWN_TITLE_SECONDS ? SiegeMessages.finalCountdownTitle(secondsLeft) : null;
+        float pitch = secondsLeft <= SiegeMessages.FINAL_COUNTDOWN_TITLE_SECONDS ? 2.0f : 1.0f;
+        for (UUID id : match.roster().playerIds()) {
+            Player p = Bukkit.getPlayer(id);
+            if (p == null) continue;
+            p.sendActionBar(bar);
+            if (title != null) p.showTitle(title);
+            p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_HAT, 1f, pitch);
+        }
+    }
+
+    /** #164: every member present at the end, with what they did; delivered once (see {@link SiegeResultDelivery}). */
+    private SiegeResultDelivery resultDelivery(SiegeLobbyRuntime rt, SiegeMatch match, WinResolver.Result result) {
+        Instant now = Instant.now();
+        Map<UUID, SiegeResultMessage.MemberResult> results = new LinkedHashMap<>();
+        Map<Integer, UUID> playerByUserId = new HashMap<>();
+        for (MemberView member : match.roster().members()) {
+            KnkSiegeTeam team = match.scenario().team(member.teamId()).orElse(null);
+            var c = match.contributions().of(member.playerId(), now);
+            results.put(member.playerId(), new SiegeResultMessage.MemberResult(
+                    SiegeResultMessage.outcomeOf(result, match.alliances(), member.teamId()), team,
+                    member.kills(), member.deaths(), member.highestKillStreak(), member.captures(),
+                    (int) Math.floor(c.gateDamage()), c.activeSeconds(), c.matchSeconds()));
+            Integer userId = rt.userIds().get(member.playerId());
+            if (userId != null) playerByUserId.put(userId, member.playerId());
+        }
+        Long matchId = knownMatchId(rt);
+        String url = matchId == null ? null : matchPageUrl(matchId);
+        return new SiegeResultDelivery(rt.displayName(), SiegeMessages.endReason(result.reason()), results, playerByUserId, url,
+                SiegeService::tell);
+    }
+
+    /** The server's complete answer (any thread): rewards into the result, on the main thread. */
+    private void onRewards(SiegeResultDelivery delivery, RewardSummary summary) {
+        if (delivery == null || !plugin.isEnabled()) return;
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (summary == null) {
+                delivery.deliver(SiegeResultMessage.RewardState.SPOOLED, null);
+            } else {
+                delivery.deliver(SiegeResultMessage.RewardState.GRANTED, summary);
+            }
+        });
+    }
+
+    /** The round's match row id when it is already known, else null. */
+    private static Long knownMatchId(SiegeLobbyRuntime rt) {
+        CompletableFuture<Long> future = rt.matchIdFuture();
+        if (future == null || !future.isDone() || future.isCompletedExceptionally()) return null;
+        return future.getNow(null);
+    }
+
+    /**
+     * #174: where the web app shows a match ({@code web.public-url}/siege/matches/{id}); null without a public URL.
+     * The plugin learns the base URL from its own {@code web.public-url} (the same value as the API's
+     * {@code App:PublicBaseUrl}).
+     */
+    String matchPageUrl(long matchId) {
+        return SiegeResultMessage.matchPageUrl(publicWebUrl, matchId);
+    }
+
+    private String publicWebUrl = "";
+
+    private net.knightsandkings.knk.core.ports.api.SiegeMatchHistoryApi historyApi;
+
+    /** #174: where {@code /siege history} reads the player's matches; null = the command says it isn't available. */
+    public void setHistoryApi(net.knightsandkings.knk.core.ports.api.SiegeMatchHistoryApi historyApi) {
+        this.historyApi = historyApi;
+    }
+
+    /**
+     * {@code /siege history} (#174): the player's last {@link SiegeHistoryMessage#LIMIT} finished matches with links to
+     * the web app. Asynchronous: the answer arrives in chat; the reply only says when it can't be asked.
+     */
+    public Reply history(Player player) {
+        if (historyApi == null) return Reply.fail(SiegeMessages.bad("The siege history isn't available on this server."));
+        Integer userId = userCache.getStale(player.getUniqueId()).map(UserSummary::id).orElse(null);
+        if (userId == null) return Reply.fail(SiegeMessages.bad("Your profile is still loading; try again in a moment."));
+        UUID id = player.getUniqueId();
+        String name = player.getName();
+        historyApi.playerMatches(userId, SiegeHistoryMessage.LIMIT).whenComplete((matches, error) -> {
+            if (!plugin.isEnabled()) return;
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                Player online = Bukkit.getPlayer(id);
+                if (online == null) return;
+                if (error != null || matches == null) {
+                    logger.log(Level.FINE, "[Siege] /siege history failed for " + name, error);
+                    online.sendMessage(SiegeMessages.bad("Your siege history couldn't be loaded right now; try again later."));
+                    return;
+                }
+                online.sendMessage(SiegeHistoryMessage.render(name, matches, publicWebUrl, java.time.ZoneId.systemDefault()));
+            });
+        });
+        return Reply.ok(null);
+    }
+
+    /** {@code web.public-url}: the web app's base URL for the match links (#164/#174); blank = no links. */
+    public void setPublicWebUrl(String url) {
+        this.publicWebUrl = url == null ? "" : url.trim();
     }
 
     private Completion completion(SiegeLobbyRuntime rt, SiegeMatch match, WinResolver.Result result) {
@@ -671,6 +872,7 @@ public final class SiegeService {
         }
         SiegeDepartedMembers departed = departedMembers.remove(match);
         if (departed != null && reportDepartedMembers) participants = departed.appendTo(participants);
+        participants = withContributions(match, participants);
         List<ObjectiveResult> objectives = new ArrayList<>();
         for (ObjectiveState state : match.board().objectives()) {
             if (state.captures().isEmpty()) {
@@ -683,6 +885,35 @@ public final class SiegeService {
             }
         }
         return new Completion(result.reason(), result.winnerOrNull(), participants, objectives);
+    }
+
+    /**
+     * #165/#166: each reported member's gate damage and activity over the whole match (a rejoined member's time
+     * away within the rejoin window included). A member whose user id was never known to the match reports none.
+     */
+    private static List<ParticipantResult> withContributions(SiegeMatch match, List<ParticipantResult> participants) {
+        Map<Integer, UUID> players = match.contributions().playersByUserId();
+        Instant now = Instant.now();
+        List<ParticipantResult> out = new ArrayList<>(participants.size());
+        for (ParticipantResult p : participants) {
+            UUID playerId = players.get(p.userId());
+            if (playerId == null) {
+                out.add(p);
+                continue;
+            }
+            var c = match.contributions().of(playerId, now);
+            out.add(p.withContribution(c.gateDamage(), c.activeSeconds(), c.matchSeconds()));
+        }
+        return out;
+    }
+
+    /** The AFK source, never throwing into the tick. */
+    private Instant safeAfkSince(UUID playerId) {
+        try {
+            return afkSince.apply(playerId);
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     private void announceResult(SiegeLobbyRuntime rt, SiegeMatch match, WinResolver.Result result) {
@@ -712,63 +943,6 @@ public final class SiegeService {
         }
         Component message = SiegeMessages.prefixed(body);
         Bukkit.getOnlinePlayers().forEach(p -> p.sendMessage(message));
-    }
-
-    private static Component statsLine(MemberView member) {
-        return SiegeMessages.info("Your match: " + member.kills() + " kills, " + member.deaths() + " deaths, best streak "
-                + member.highestKillStreak() + ", " + member.captures() + " captures.");
-    }
-
-    /**
-     * The server's breakdown for one player (DESIGN §7.6: win, objectives gained, captures), in the
-     * shared KNG-16 reward format: one line per currency, coins with their base and the personal/rank
-     * multipliers the API applied ({@code Siege reward: 250 ×2 Personal ×1.2 Royal = +600 coins}), then
-     * a detail line with what earned it. A title promotion from the XP arrives separately, through the
-     * TitleChanged notification.
-     */
-    static List<Component> rewardLines(ParticipantReward r) {
-        if (!r.hasRewards()) {
-            return List.of(SiegeMessages.info("No rewards this time."));
-        }
-        String reason = "Siege reward";
-        List<Component> lines = new ArrayList<>();
-        if (r.coins() > 0) {
-            boolean hasBreakdown = r.baseCoins() > 0 && !r.coinMultipliers().isEmpty();
-            lines.add(RewardMessageFormat.line(reason, RewardMessageFormat.Currency.COINS,
-                    hasBreakdown ? r.baseCoins() : r.coins(), hasBreakdown ? r.coinMultipliers() : List.of(), r.coins()));
-        }
-        if (r.gems() > 0) {
-            lines.add(RewardMessageFormat.line(reason, RewardMessageFormat.Currency.GEMS, r.gems(), List.of(), r.gems()));
-        }
-        if (r.experience() > 0) {
-            lines.add(RewardMessageFormat.line(reason, RewardMessageFormat.Currency.XP, r.experience(), List.of(), r.experience()));
-        }
-        List<String> why = new ArrayList<>();
-        if (r.won()) why.add("win");
-        if (r.holdingCount() > 0) why.add(r.holdingCount() + (r.holdingCount() == 1 ? " objective gained" : " objectives gained"));
-        if (r.captureCount() > 0) why.add(r.captureCount() + (r.captureCount() == 1 ? " capture" : " captures"));
-        if (!why.isEmpty()) lines.add(Component.text("  " + String.join(" · ", why), NamedTextColor.GRAY));
-        return lines;
-    }
-
-    /**
-     * Phase 6: prints the server's reward breakdown (the API grants the rewards). A null summary means
-     * the complete call failed and was spooled by SiegeMatchRecorder (or refused - then it's logged).
-     */
-    private void printRewardSummary(RewardSummary summary, Map<Integer, UUID> playerByUserId) {
-        if (!plugin.isEnabled()) return;
-        Bukkit.getScheduler().runTask(plugin, () -> {
-            if (summary == null) {
-                playerByUserId.values().forEach(id -> tell(id, SiegeMessages.bad("Your rewards couldn't be confirmed yet: "
-                        + "the server couldn't reach the API. The result is kept and recorded automatically later.")));
-                return;
-            }
-            for (ParticipantReward r : summary.rewards()) {
-                UUID id = playerByUserId.get(r.userId());
-                if (id == null || !r.presentAtEnd()) continue;
-                rewardLines(r).forEach(line -> tell(id, line));
-            }
-        });
     }
 
     /** True when the round's match row could not be created (the round runs unrecorded, no rewards). */
@@ -807,6 +981,9 @@ public final class SiegeService {
         }
         locks.releasePlayers(rt.id());
         rt.userIds().clear();
+        // #150: places kept for disconnected members end with the round; the completion (departed members) or
+        // the API's own close of unreported rows records them as left, so no participantLeft is sent now.
+        rejoinSlots.dropLobby(rt.id());
         // Phase 7a: gates and area entry are restored while the round (match id, scenario) is still known.
         observers.forEach(o -> safely("roundReleased", () -> o.roundReleased(rt)));
         rt.match().ifPresent(departedMembers::remove);
@@ -835,7 +1012,11 @@ public final class SiegeService {
      * whether the match must end (DESIGN §6.8).
      */
     private void removeMember(SiegeLobbyRuntime rt, UUID id, LeaveCause cause, boolean checkMembership) {
-        if (!rt.mutableMembers().remove(id)) return;
+        if (!rt.mutableMembers().contains(id)) return;
+        Instant leftAt = Instant.now();
+        // #150: read before the split/roster forget them.
+        Optional<Slot> slot = cause == LeaveCause.QUIT ? rejoinSlotFor(rt, id, leftAt) : Optional.empty();
+        rt.mutableMembers().remove(id);
         Integer userId = rt.userIds().remove(id);
         locks.releasePlayer(id);
         rt.machine().removeMember(id);
@@ -848,17 +1029,24 @@ public final class SiegeService {
 
         Player player = Bukkit.getPlayer(id);
         SiegeMatch match = rt.match().orElse(null);
-        boolean duringMatch = match != null && match.roster().contains(id);
+        // #198: a leave or quit during the post-match wait is no longer a leave of the match (the release at its end is
+        // reported as before: round_over, during the match).
+        boolean duringMatch = match != null && match.roster().contains(id)
+                && (!rt.matchOver() || cause == LeaveCause.ROUND_OVER || cause == LeaveCause.SHUTDOWN);
         String leaveCause = cause.name().toLowerCase(java.util.Locale.ROOT);
         observers.forEach(o -> safely("memberLeft", () -> o.memberLeft(rt, id, userId, leaveCause, duringMatch)));
         if (match != null && match.roster().contains(id)) {
-            if (cause != LeaveCause.ROUND_OVER && cause != LeaveCause.SHUTDOWN) {
+            // #198: after the end the match is recorded; a post-match leave or quit only sends the member home.
+            if (cause != LeaveCause.ROUND_OVER && cause != LeaveCause.SHUTDOWN && !rt.matchOver()) {
                 Optional<MemberView> removed = match.roster().remove(id);
+                match.contributions().left(id, leftAt, safeAfkSince(id));
                 if (userId != null) {
-                    Instant leftAt = Instant.now();
                     if (reportDepartedMembers) removed.ifPresent(view -> departedMembers
                             .computeIfAbsent(match, m -> new SiegeDepartedMembers()).departed(userId, view, leftAt));
-                    withMatchId(rt, matchId -> guarded("participantLeft", matchApi.participantLeft(matchId, userId, leftAt)));
+                    // #150: a kept place reports the leave only when it expires (expireRejoinSlots).
+                    if (slot.isEmpty()) {
+                        withMatchId(rt, matchId -> guarded("participantLeft", matchApi.participantLeft(matchId, userId, leftAt)));
+                    }
                 }
             }
             match.closeSpawnPick(id);
@@ -870,11 +1058,287 @@ public final class SiegeService {
             else vault.restore(player);
         }
 
+        slot.ifPresent(rejoinSlots::hold);
+
         if (checkMembership && match != null && rt.phase() == SiegePhase.IN_PROGRESS) {
             match.winResolver().membershipEnd(match.roster().membersPerTeam(), match.scenario().playersMin())
                     .ifPresent(reason -> apply(rt, rt.machine().endMatch(reason)));
         }
         notifyChanged(rt);
+    }
+
+    // ==================== Rejoin (alpha run 1, PandiO/knk-workspace#150) and admin join (#152) ====================
+
+    /**
+     * Places kept for members who disconnected at the hub or in a running match (DESIGN §13 Q5). Set from
+     * {@code siege.rejoin-window-seconds}; zero is the MVP rule (a disconnect is a leave).
+     */
+    private SiegeRejoinSlots rejoinSlots = new SiegeRejoinSlots(DEFAULT_REJOIN_WINDOW);
+
+    /** {@code siege.rejoin-window-seconds}: how long a disconnected member's place is kept (zero: not at all). */
+    public void setRejoinWindow(Duration window) {
+        this.rejoinSlots = new SiegeRejoinSlots(window);
+    }
+
+    /** How a member came (back) into a round, for messages and the {@code teamAssigned} telemetry cause. */
+    private enum JoinKind {
+        REJOIN("rejoin"), ADMIN("admin_join");
+
+        final String cause;
+
+        JoinKind(String cause) {
+            this.cause = cause;
+        }
+    }
+
+    /** The round is at the hub or in a running match: the phases a disconnected member can come back to. */
+    private static boolean isRoundOn(SiegeLobbyRuntime rt) {
+        return rt.matchToken().isPresent() && (rt.phase() == SiegePhase.HUB
+                || (rt.phase() == SiegePhase.IN_PROGRESS && rt.match().isPresent()));
+    }
+
+    /** The place a quitting member keeps, when rejoining is on and their round is at the hub or in the match. */
+    private Optional<Slot> rejoinSlotFor(SiegeLobbyRuntime rt, UUID id, Instant leftAt) {
+        if (!rejoinSlots.isEnabled() || !isRoundOn(rt)) return Optional.empty();
+        SiegeMatch match = rt.match().orElse(null);
+        boolean duringMatch = match != null && match.roster().contains(id);
+        Integer teamId = duringMatch
+                ? Integer.valueOf(match.roster().teamOf(id).getAsInt())
+                : rt.splitTeamOf(id).map(KnkSiegeTeam::id).orElse(null);
+        if (match != null && !duringMatch) return Optional.empty(); // a member outside the roster: nothing to keep
+        return Optional.of(new Slot(id, rt.id(), rt.matchToken().get(), teamId, rt.userIds().get(id), leftAt, duringMatch));
+    }
+
+    /** Places whose window passed: their leave is reported now (only a match participant has a row to close). */
+    private void expireRejoinSlots() {
+        if (rejoinSlots.size() == 0) return;
+        for (Slot slot : rejoinSlots.expire(Instant.now())) {
+            SiegeLobbyRuntime rt = lobbies.get(slot.lobbyId());
+            if (rt != null) reportSlotLeft(rt, slot);
+        }
+    }
+
+    private void reportSlotLeft(SiegeLobbyRuntime rt, Slot slot) {
+        if (!slot.duringMatch() || slot.userId() == null) return;
+        if (!rt.matchToken().map(slot.matchToken()::equals).orElse(false)) return; // that round is over
+        int userId = slot.userId();
+        withMatchId(rt, matchId -> guarded("participantLeft", matchApi.participantLeft(matchId, userId, slot.leftAt())));
+    }
+
+    /** {@code PlayerJoinEvent}: a member who disconnected comes back within the window - back on their team. */
+    private boolean tryRejoin(Player player) {
+        UUID id = player.getUniqueId();
+        Optional<Slot> held = rejoinSlots.slotOf(id);
+        if (held.isEmpty()) return false;
+        SiegeLobbyRuntime rt = lobbies.get(held.get().lobbyId());
+        if (rt == null || !isRoundOn(rt)) return false;
+        Optional<Slot> slot = rejoinSlots.claim(id, rt.id(), rt.matchToken().get(), Instant.now());
+        if (slot.isEmpty()) return false;
+        Reply reply = addToRound(rt, player, slot.get().teamId(), slot.get().userId(), JoinKind.REJOIN);
+        player.sendMessage(reply.message());
+        if (!reply.ok()) {
+            reportSlotLeft(rt, slot.get());
+            return false;
+        }
+        logger.info("[Siege] " + player.getName() + " rejoined " + rt.key() + " after a disconnect");
+        return true;
+    }
+
+    /**
+     * Puts a player into the lobby's round at the hub or in the running match: vault snapshot, prepared like
+     * the others, their team (or the smallest), the hub or their team's spawn, scoreboard and labels
+     * ({@link SiegeMatchObserver#memberJoinedMatch}). A player whose inventory was given back on quit keeps
+     * their pre-siege return location. The player must not be a member of any lobby.
+     *
+     * @param teamId the team to put them on; null: their split team at the hub, else the smallest team
+     *               (before the team split at the hub: none, the split places them)
+     */
+    private Reply addToRound(SiegeLobbyRuntime rt, Player player, Integer teamId, Integer userId, JoinKind kind) {
+        UUID id = player.getUniqueId();
+        String name = player.getName();
+        SiegeMatch match = rt.match().orElse(null);
+        KnkSiegeScenario scenario = match != null ? match.scenario() : rt.drawnScenario().orElse(null);
+        if (!isRoundOn(rt) || scenario == null) {
+            return Reply.fail(SiegeMessages.bad(rt.displayName() + " has no round at the hub or in a match right now."));
+        }
+        if (userId == null) {
+            return Reply.fail(SiegeMessages.bad(name + "'s profile is still loading; try again in a moment."));
+        }
+        if (lobbyOf(id).isPresent()) {
+            return Reply.fail(SiegeMessages.bad(name + " is already in " + lobbyOf(id).get().displayName() + "."));
+        }
+        KnkSiegeTeam team = teamId == null ? null : scenario.team(teamId).orElse(null);
+        if (team == null && match != null) {
+            team = match.roster().smallestTeam().stream().boxed().findFirst().flatMap(scenario::team).orElse(null);
+            if (team == null) return Reply.fail(SiegeMessages.bad(scenarioName(scenario) + " has no teams."));
+        }
+        if (team == null && rt.split().isPresent()) {
+            team = smallestSplitTeam(rt, scenario).orElse(null);
+        }
+
+        Location returnLocation = null;
+        if (vault.hasFile(id)) {
+            Optional<Location> kept = vault.restoredReturnLocation(id);
+            if (kept.isEmpty()) {
+                vault.restoreOnJoin(player);
+                return Reply.fail(SiegeMessages.bad(name + "'s items from an earlier siege were still being restored; "
+                        + "that is done now. Try again."));
+            }
+            returnLocation = kept.get();
+        }
+        if (!locks.tryClaimPlayer(id, rt.id())) {
+            return Reply.fail(SiegeMessages.bad(name + " is already in another siege."));
+        }
+        if (player.isDead()) player.spigot().respawn();
+        player.closeInventory();
+        if (!vault.snapshot(player, rt.id(), rt.matchToken().get(), returnLocation)) {
+            locks.releasePlayer(id);
+            return Reply.fail(SiegeMessages.bad(name + "'s inventory couldn't be saved safely, so they can't take part "
+                    + "in this siege. Please tell an admin."));
+        }
+        prepareForMatch(player);
+        rt.mutableMembers().add(id);
+        rt.userIds().put(id, userId);
+        observers.forEach(o -> safely("memberReadiedAtHub", () -> o.memberReadiedAtHub(rt, scenario, player)));
+
+        KnkSiegeTeam placed = team;
+        if (match == null) {
+            if (placed != null && rt.split().isPresent()) {
+                Map<Integer, List<UUID>> copy = new LinkedHashMap<>();
+                rt.split().get().forEach((t, players) -> copy.put(t, new ArrayList<>(players)));
+                copy.computeIfAbsent(placed.id(), k -> new ArrayList<>()).add(id);
+                rt.setSplit(copy);
+                observers.forEach(o -> safely("teamAssigned", () -> o.teamAssigned(rt, id, placed.id(), kind.cause)));
+                spawnScopeOf(id).ifPresent(scope -> {
+                    if (SiegeSpawnOptions.pickerWorthOpening(scope.team(), scope.board())) {
+                        offerSpawnPicker(player, scope);
+                    } else {
+                        SiegeSpawnOptions.defaultChoice(scope.team()).ifPresent(c -> scope.setChoice(id, c));
+                    }
+                });
+            }
+            SiegeBukkit.toLocation(scenario.hubLocation()).ifPresent(location -> SiegeBukkit.teleport(player, location));
+        } else {
+            match.roster().add(id, placed.id());
+            match.contributions().joined(id, userId, Instant.now()); // #166: a rejoin keeps the first join as window start
+            SiegeSpawnOptions.defaultChoice(placed).ifPresent(c -> match.roster().setSpawnChoice(id, c));
+            SiegeSpawnOptions.resolveRespawn(placed, match.board(), match.roster().spawnChoice(id).orElse(null))
+                    .flatMap(o -> SiegeBukkit.toLocation(o.location()))
+                    .ifPresent(location -> SiegeBukkit.teleport(player, location));
+            player.showTitle(Title.title(Component.text(kind == JoinKind.REJOIN ? "Back in the siege!" : "The siege is on!",
+                    NamedTextColor.GOLD), Component.text("You fight for ", SiegeMessages.INFO).append(SiegeBukkit.teamComponent(placed))));
+            observers.forEach(o -> safely("teamAssigned", () -> o.teamAssigned(rt, id, placed.id(), kind.cause)));
+            observers.forEach(o -> safely("memberJoinedMatch", () -> o.memberJoinedMatch(rt, match, player)));
+        }
+        notifyChanged(rt);
+
+        Component msg = Component.text(kind == JoinKind.REJOIN ? "Welcome back: you are in " : "An admin added you to ",
+                        SiegeMessages.GOOD)
+                .append(Component.text(rt.displayName(), SiegeMessages.HIGHLIGHT));
+        if (placed != null) {
+            msg = msg.append(Component.text(" on team ", SiegeMessages.GOOD)).append(SiegeBukkit.teamComponent(placed));
+        }
+        msg = msg.append(Component.text(". Your inventory and position are saved and will be restored after the siege.",
+                SiegeMessages.GOOD));
+        return Reply.ok(SiegeMessages.prefixed(msg));
+    }
+
+    /** The split team with the fewest members (scenario order on a tie). */
+    private static Optional<KnkSiegeTeam> smallestSplitTeam(SiegeLobbyRuntime rt, KnkSiegeScenario scenario) {
+        Map<Integer, List<UUID>> split = rt.split().orElse(Map.of());
+        return scenario.teams().stream()
+                .min(Comparator.comparingInt(t -> split.getOrDefault(t.id(), List.of()).size()));
+    }
+
+    /**
+     * {@code /siege join <player> [lobby] [team]} (PandiO/knk-workspace#152): an admin puts a player into a
+     * round. In matchmaking that is an ordinary join for them; at the hub or in a running match they are
+     * added like a rejoin ({@link #addToRound}), on the given team, their kept place's team (#150) or the
+     * smallest. Lobby capacity, the title requirement and {@code knk.siege.play} are not checked: the admin
+     * decides. With no lobby: the lobby of their kept place, else the only lobby with a round on.
+     */
+    public Reply adminJoin(CommandSender sender, Player target, String lobbyKey, String teamText) {
+        UUID id = target.getUniqueId();
+        String name = target.getName();
+        Optional<SiegeLobbyRuntime> current = lobbyOf(id);
+        if (current.isPresent()) {
+            return Reply.fail(SiegeMessages.bad(name + " is already in " + current.get().displayName() + "."));
+        }
+        Optional<Slot> slot = rejoinSlots.slotOf(id);
+        SiegeLobbyRuntime rt;
+        if (lobbyKey != null && !lobbyKey.isBlank()) {
+            Optional<SiegeLobbyRuntime> byKey = lobbyByKey(lobbyKey);
+            if (byKey.isEmpty()) return Reply.fail(unknownLobby(lobbyKey));
+            rt = byKey.get();
+        } else if (slot.isPresent() && lobbies.get(slot.get().lobbyId()) != null && isRoundOn(lobbies.get(slot.get().lobbyId()))) {
+            rt = lobbies.get(slot.get().lobbyId());
+        } else {
+            List<SiegeLobbyRuntime> on = lobbies.values().stream()
+                    .filter(l -> l.phase() == SiegePhase.MATCHMAKING || isRoundOn(l)).toList();
+            if (on.isEmpty()) return Reply.fail(SiegeMessages.bad("No siege round is on right now."));
+            if (on.size() > 1) {
+                return Reply.fail(SiegeMessages.bad("Say which lobby: /siege join " + name + " <lobby>. Lobbies: " + lobbyKeys() + "."));
+            }
+            rt = on.get(0);
+        }
+
+        if (rt.phase() == SiegePhase.MATCHMAKING) {
+            Reply joined = join(target, rt.key());
+            if (!joined.ok()) {
+                return Reply.fail(SiegeMessages.bad(name + " couldn't join " + rt.displayName() + ":").append(Component.space())
+                        .append(joined.message()));
+            }
+            target.sendMessage(joined.message());
+            logger.info("[Siege] " + sender.getName() + " added " + name + " to " + rt.key() + " (matchmaking)");
+            return Reply.ok(SiegeMessages.good("Added " + name + " to " + rt.displayName() + " (matchmaking"
+                    + (teamText != null ? "; teams are split at the hub, so the team was not used" : "") + ")."));
+        }
+        if (!isRoundOn(rt)) {
+            return Reply.fail(SiegeMessages.bad(rt.displayName() + " is " + SiegeMessages.phaseLabel(rt.phase()).toLowerCase(Locale.ROOT)
+                    + "; players can be added during matchmaking, at the hub or in a match."));
+        }
+        KnkSiegeScenario scenario = rt.match().map(SiegeMatch::scenario).or(rt::drawnScenario).orElseThrow();
+        boolean sameRound = slot.isPresent() && slot.get().lobbyId() == rt.id()
+                && slot.get().matchToken().equals(rt.matchToken().get());
+        Integer teamId = null;
+        if (teamText != null && !teamText.isBlank()) {
+            Optional<KnkSiegeTeam> team = resolveTeam(scenario, teamText);
+            if (team.isEmpty()) {
+                return Reply.fail(SiegeMessages.bad("No team '" + teamText + "' in " + scenarioName(scenario) + ". Teams: "
+                        + scenario.teams().stream().map(t -> SiegeBukkit.teamName(t) + " (" + t.id() + ")")
+                                .reduce((a, b) -> a + ", " + b).orElse("none") + "."));
+            }
+            teamId = team.get().id();
+        } else if (sameRound) {
+            teamId = slot.get().teamId();
+        }
+        Integer userId = sameRound && slot.get().userId() != null ? slot.get().userId()
+                : userCache.getStale(id).map(UserSummary::id).orElse(null);
+
+        Reply added = addToRound(rt, target, teamId, userId, JoinKind.ADMIN);
+        if (!added.ok()) return added;
+        if (sameRound) rejoinSlots.forget(id);
+        target.sendMessage(added.message());
+        String teamName = rt.match().flatMap(m -> m.teamOf(id)).or(() -> rt.splitTeamOf(id))
+                .map(SiegeBukkit::teamName).orElse(null);
+        logger.info("[Siege] " + sender.getName() + " added " + name + " to " + rt.key() + " (" + rt.phase()
+                + (teamName != null ? ", team " + teamName : "") + ")");
+        return Reply.ok(SiegeMessages.good("Added " + name + " to " + rt.displayName()
+                + (teamName != null ? " on team " + teamName : "") + "."));
+    }
+
+    /** A scenario team by id or by (the start of) its name. */
+    private static Optional<KnkSiegeTeam> resolveTeam(KnkSiegeScenario scenario, String text) {
+        String t = text.trim();
+        try {
+            int teamId = Integer.parseInt(t);
+            Optional<KnkSiegeTeam> byId = scenario.team(teamId);
+            if (byId.isPresent()) return byId;
+        } catch (NumberFormatException ignored) { }
+        String lower = t.toLowerCase(Locale.ROOT);
+        return scenario.teams().stream()
+                .filter(team -> SiegeBukkit.teamName(team).toLowerCase(Locale.ROOT).startsWith(lower))
+                .findFirst();
     }
 
     // ==================== Player operations ====================
@@ -959,6 +1423,7 @@ public final class SiegeService {
         return switch (rt.phase()) {
             case DISABLED -> rt.displayName() + " is disabled right now.";
             case HUB, IN_PROGRESS, ENDING -> rt.displayName() + " is already under way; join the next round.";
+            case POST_MATCH -> rt.displayName() + " just ended; the next round opens after its cooldown.";
             case COOLDOWN -> rt.displayName() + " opens for the next round in " + SiegeMessages.duration(s) + ".";
             case MATCHMAKING -> rt.displayName() + " can't be joined right now.";
         };
@@ -969,12 +1434,21 @@ public final class SiegeService {
         Optional<SiegeLobbyRuntime> rt = lobbyOf(player.getUniqueId());
         if (rt.isEmpty()) return Reply.fail(SiegeMessages.bad("You are not in a siege."));
         boolean active = rt.get().phase().isMatchActive();
+        // #198: leaving the post-match wait early only sends the member home; the match is already recorded.
+        boolean matchOver = rt.get().matchOver();
         removeMember(rt.get(), player.getUniqueId(), LeaveCause.LEAVE, true);
+        if (matchOver) {
+            return Reply.ok(SiegeMessages.info("You left " + rt.get().displayName()
+                    + ". Your inventory and position were restored; your result and rewards are kept."));
+        }
         return Reply.ok(SiegeMessages.info("You left " + rt.get().displayName() + "."
                 + (active ? " Your inventory and position were restored; you get no rewards for this match." : "")));
     }
 
-    /** {@code PlayerQuitEvent}: leave, restoring the inventory now and the location on the next join. */
+    /**
+     * {@code PlayerQuitEvent}: leave, restoring the inventory now and the location on the next join. At the hub
+     * or in a running match the member's place is kept for the rejoin window (#150; {@link #handleJoin}).
+     */
     public void handleQuit(Player player) {
         lobbyOf(player.getUniqueId()).ifPresent(rt -> removeMember(rt, player.getUniqueId(), LeaveCause.QUIT, true));
     }
@@ -982,7 +1456,9 @@ public final class SiegeService {
     /** {@code PlayerJoinEvent} (one tick later): finish a quit restore or restore a crash leftover. */
     public void handleJoin(Player player) {
         UUID id = player.getUniqueId();
-        if (lobbyOf(id).isPresent() || !vault.hasFile(id)) return;
+        if (lobbyOf(id).isPresent()) return;
+        if (tryRejoin(player)) return; // #150: back into the round they disconnected from
+        if (!vault.hasFile(id)) return;
         if (vault.restoreOnJoin(player)) {
             player.sendMessage(SiegeMessages.info("You were returned to where you were before your last siege, "
                     + "with your pre-siege inventory."));
@@ -1389,7 +1865,9 @@ public final class SiegeService {
     public Optional<Location> respawnLocation(Player player) {
         Optional<Location> restored = vault.takePendingRespawn(player.getUniqueId());
         if (restored.isPresent()) return restored;
-        Optional<SiegeLobbyRuntime> hub = activeLobbyOf(player.getUniqueId()).filter(rt -> rt.phase() == SiegePhase.HUB);
+        // #198: in the post-match wait members are at the hub too.
+        Optional<SiegeLobbyRuntime> hub = activeLobbyOf(player.getUniqueId())
+                .filter(rt -> rt.phase() == SiegePhase.HUB || rt.phase() == SiegePhase.POST_MATCH);
         if (hub.isPresent()) {
             return hub.get().drawnScenario().flatMap(s -> SiegeBukkit.toLocation(s.hubLocation()));
         }
@@ -1493,6 +1971,11 @@ public final class SiegeService {
         if (found.isEmpty()) return true;
         SiegeLobbyRuntime rt = found.get();
         SiegePhase phase = rt.phase();
+        if (phase == SiegePhase.POST_MATCH) {
+            // #198: the match is recorded; only this member is sent home (restored) before the outage moves them.
+            removeMember(rt, playerId, LeaveCause.LEAVE, false);
+            return lobbyOf(playerId).isEmpty();
+        }
         if (phase != SiegePhase.MATCHMAKING && phase != SiegePhase.HUB && phase != SiegePhase.IN_PROGRESS) {
             return false;
         }

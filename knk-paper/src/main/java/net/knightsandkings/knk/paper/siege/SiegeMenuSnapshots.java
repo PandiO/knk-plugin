@@ -42,7 +42,7 @@ final class SiegeMenuSnapshots {
                 case MATCHMAKING -> 0;
                 case HUB -> 1;
                 case IN_PROGRESS -> 2;
-                case ENDING -> 3;
+                case ENDING, POST_MATCH -> 3;
                 case COOLDOWN -> 4;
                 case DISABLED -> 5;
             })
@@ -193,7 +193,7 @@ final class SiegeMenuSnapshots {
         switch (rt.phase()) {
             case MATCHMAKING, HUB -> snapshot.members().forEach(m -> rows.add(SiegeBodyRowView.member(m,
                     viewer != null && viewer.getUniqueId().equals(m.id()), snapshot.team(m.teamId()))));
-            case IN_PROGRESS, ENDING -> snapshot.objectives().forEach(o -> rows.add(SiegeBodyRowView.objective(o,
+            case IN_PROGRESS, ENDING, POST_MATCH -> snapshot.objectives().forEach(o -> rows.add(SiegeBodyRowView.objective(o,
                     snapshot.team(o.holderTeamId()), snapshot.scenario() != null && snapshot.scenario().allowRecapture())));
             case COOLDOWN, DISABLED -> { }
         }

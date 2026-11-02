@@ -20,7 +20,9 @@ import net.knightsandkings.knk.core.domain.location.KnkLocation;
 import net.knightsandkings.knk.core.navigation.compass.CompassCycle;
 import net.knightsandkings.knk.core.navigation.compass.CompassSettings;
 import net.knightsandkings.knk.core.navigation.compass.CompassUse;
+import net.knightsandkings.knk.core.domain.siege.KnkSiegeObjective;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeScenario;
+import net.knightsandkings.knk.core.domain.siege.KnkSiegeTeam;
 import net.knightsandkings.knk.core.siege.SiegeCompassTargets;
 import net.knightsandkings.knk.core.siege.SiegeNavigationItem;
 import net.knightsandkings.knk.core.siege.SiegeCompassTargets.Target;
@@ -81,6 +83,7 @@ public final class NavigationCompassService implements SiegeMatchObserver, Match
     private final java.util.Set<String> loggedRounds = new java.util.HashSet<>();
 
     private final Map<UUID, Last> last = new HashMap<>();
+    private SiegeGateApproaches gateApproaches = SiegeGateApproaches.NONE;
     private final Map<UUID, Long> lastClick = new HashMap<>();
 
     public NavigationCompassService(Supplier<CompassSettings> settings, Supplier<NavigationService> navigation,
@@ -95,6 +98,14 @@ public final class NavigationCompassService implements SiegeMatchObserver, Match
         this.mainThread = Objects.requireNonNull(mainThread, "mainThread");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.items = Objects.requireNonNull(items, "items");
+    }
+
+    /**
+     * PandiO/knk-workspace#176: an objective to capture behind a closed gate is navigated to the gate in the way, not to
+     * its capture point (the gate cache is ready after this service is built).
+     */
+    public void setGateApproaches(SiegeGateApproaches gateApproaches) {
+        this.gateApproaches = gateApproaches == null ? SiegeGateApproaches.NONE : gateApproaches;
     }
 
     // ==================== the item ====================
@@ -240,12 +251,34 @@ public final class NavigationCompassService implements SiegeMatchObserver, Match
             return List.of();
         }
         List<MatchDestination> out = new ArrayList<>();
-        for (Target target : SiegeCompassTargets.forTeam(match.scenario(), match.board(), match.alliances(), team.getAsInt())) {
+        KnkSiegeScenario scenario = match.scenario();
+        Optional<KnkSiegeTeam> ownTeam = scenario.team(team.getAsInt());
+        for (Target target : SiegeCompassTargets.forTeam(scenario, match.board(), match.alliances(), team.getAsInt())) {
             KnkLocation at = target.location();
+            if (target.kind() == SiegeCompassTargets.Kind.CAPTURE && ownTeam.isPresent()) {
+                // #176: a capture point behind a closed gate is reached through the gate - head for the gate
+                Optional<KnkSiegeObjective> objective = objectiveOf(scenario, target.key());
+                if (objective.isPresent()) {
+                    at = gateApproaches.approach(objective.get(), ownTeam.get()).orElse(at);
+                }
+            }
             out.add(new MatchDestination(target.key(), target.label(), CompassMessages.siegeDetail(target),
                 Destination.point(target.label(), at.world(), at.x(), at.y(), at.z())));
         }
         return out;
+    }
+
+    /** The objective a compass target's key ({@code objective:<id>}) names. */
+    private static Optional<KnkSiegeObjective> objectiveOf(KnkSiegeScenario scenario, String key) {
+        if (key == null || !key.startsWith("objective:")) {
+            return Optional.empty();
+        }
+        try {
+            int id = Integer.parseInt(key.substring("objective:".length()));
+            return scenario.objectives().stream().filter(o -> o.id() == id).findFirst();
+        } catch (NumberFormatException e) {
+            return Optional.empty();
+        }
     }
 
     /**
