@@ -276,6 +276,9 @@ public class KnKPlugin extends JavaPlugin {
     private DistrictGateLoader districtGateLoader;
     private WorldTaskHandlerRegistry worldTaskHandlerRegistry;
     private HeadlessWorldTaskPoller headlessWorldTaskPoller;
+    // PandiO/knk-workspace#180: the claims this server holds (heartbeat, release on cancel/quit/disable/restart)
+    private net.knightsandkings.knk.paper.tasks.WorldTaskLeases worldTaskLeases;
+    private org.bukkit.scheduler.BukkitTask worldTaskHeartbeatTask;
     private PlayerNotificationPoller playerNotificationPoller;
     private UserManager userManager;
     private ChatCaptureManager chatCaptureManager;
@@ -412,7 +415,12 @@ public class KnKPlugin extends JavaPlugin {
             this.usersCommandApi = apiClient.getUsersCommandApi();
             this.userAccountApi = apiClient.getUserAccountApi();
             this.permissionsApi = apiClient.getPermissionsApi();
-            this.worldTasksApi = apiClient.getWorldTasksApi();
+            // #180: handlers, commands and the headless poller go through the lease-tracking wrapper, which sends this
+            // server's id and keeps the held claims heartbeated.
+            this.worldTaskLeases = new net.knightsandkings.knk.paper.tasks.WorldTaskLeases(
+                apiClient.getWorldTasksApi(), worldTaskServerId());
+            this.worldTasksApi = new net.knightsandkings.knk.paper.tasks.LeaseTrackingWorldTasksApi(
+                apiClient.getWorldTasksApi(), worldTaskLeases);
             this.gateStructuresApi = apiClient.getGateStructuresApi();
             this.gateDoorsApi = apiClient.getGateDoorsApi();
             this.gateDoorRegionCaptureHandler = new GateDoorRegionCaptureHandler(this, this.gateDoorsApi);
@@ -541,6 +549,16 @@ public class KnKPlugin extends JavaPlugin {
 
             // Initialize WorldTask handler registry and register handlers
             this.worldTaskHandlerRegistry = new WorldTaskHandlerRegistry();
+            // #180: in-game cancel hands a task back, discard cancels it; a claim the API took back stops its handler.
+            worldTaskHandlerRegistry.setLifecycle(worldTaskLeases);
+            worldTaskLeases.setOnLost((held, status) -> getServer().getScheduler().runTask(this, () -> {
+                org.bukkit.entity.Player holder = held.playerId() == null ? null : getServer().getPlayer(held.playerId());
+                if (holder != null && worldTaskHandlerRegistry.stopTask(holder, held.taskId())) {
+                    holder.sendMessage(org.bukkit.ChatColor.YELLOW + "[WorldTask] Task " + held.taskId()
+                        + ("Cancelled".equalsIgnoreCase(status) ? " was cancelled in the web app."
+                            : " is no longer yours" + (status != null ? " (" + status + ")" : "") + "."));
+                }
+            }));
             
             // Register WgRegionId handler
             WgRegionIdTaskHandler wgRegionIdHandler = new WgRegionIdTaskHandler(worldTasksApi, this);
@@ -615,11 +633,27 @@ public class KnKPlugin extends JavaPlugin {
             tempRegionRetentionTask.start();
 
             // Start headless WorldTask poller (webapp-initiated tasks that need no player)
-            headlessWorldTaskPoller = new HeadlessWorldTaskPoller(worldTasksApi, this);
+            headlessWorldTaskPoller = new HeadlessWorldTaskPoller(worldTasksApi, this, worldTaskLeases.serverId());
             headlessWorldTaskPoller.registerHandler(new GateBlockScanTaskHandler(gateDoorsApi, worldTasksApi, this));
             headlessWorldTaskPoller.registerHandler(new MinecraftCatalogScanTaskHandler(
                 apiClient.getMinecraftCatalogApi(), worldTasksApi, this));
             headlessWorldTaskPoller.start();
+
+            // #180: renew the claims this server holds (the API releases a claim after 3 min without a heartbeat), and
+            // hand back what the API still has this server holding from before a restart.
+            long heartbeatTicks = Math.max(10L, getConfig().getLong("world-tasks.heartbeat-interval-seconds", 60L)) * 20L;
+            worldTaskHeartbeatTask = getServer().getScheduler().runTaskTimerAsynchronously(this,
+                () -> worldTaskLeases.heartbeatAll(), heartbeatTicks, heartbeatTicks);
+            worldTaskLeases.releaseOrphans()
+                .thenAccept(count -> {
+                    if (count > 0) {
+                        getLogger().info("Handed back " + count + " world task(s) this server held before it restarted");
+                    }
+                })
+                .exceptionally(ex -> {
+                    getLogger().warning("World task resync failed (the API releases them when their lease runs out): " + ex.getMessage());
+                    return null;
+                });
 
             // Promotion effects etc. for writes made through the web app (not a plugin command)
             playerNotificationPoller = new PlayerNotificationPoller(
@@ -1142,6 +1176,11 @@ public class KnKPlugin extends JavaPlugin {
                 this
             );
             getLogger().info("Registered WorldTaskChatListener for task chat input handling");
+            if (worldTaskLeases != null) {
+                // #180: a player who leaves hands their world tasks back
+                getServer().getPluginManager().registerEvents(
+                    new net.knightsandkings.knk.paper.listeners.WorldTaskQuitListener(worldTaskHandlerRegistry, worldTaskLeases), this);
+            }
 
             getServer().getPluginManager().registerEvents(
                 new WorldTaskLocationSelectionListener(locationHandler),
@@ -1252,6 +1291,22 @@ public class KnKPlugin extends JavaPlugin {
         }
         if (headlessWorldTaskPoller != null) {
             headlessWorldTaskPoller.stop();
+        }
+        // #180: every claim this server holds goes back to Pending (task code kept), bounded so a dead API can't hang
+        // the shutdown; what doesn't get through is released by the API once its lease runs out.
+        if (worldTaskHeartbeatTask != null) {
+            worldTaskHeartbeatTask.cancel();
+        }
+        if (worldTaskLeases != null && !worldTaskLeases.held().isEmpty()) {
+            try {
+                worldTaskLeases.releaseAll("The game server stopped").get(5, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (java.util.concurrent.TimeoutException e) {
+                getLogger().warning("World tasks still being handed back at shutdown; the API releases them after their lease");
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (java.util.concurrent.ExecutionException e) {
+                getLogger().log(java.util.logging.Level.WARNING, "Handing back world tasks at shutdown failed", e);
+            }
         }
         if (playerNotificationPoller != null) {
             playerNotificationPoller.stop();
@@ -2215,14 +2270,28 @@ public class KnKPlugin extends JavaPlugin {
     public WorldTaskHandlerRegistry getWorldTaskHandlerRegistry() {
         return worldTaskHandlerRegistry;
     }
+
+    /**
+     * PandiO/knk-workspace#180: the id this server claims world tasks under, sent with every claim, heartbeat, release
+     * and completion. Read from {@code realtime.server-id} (the key the realtime channel, PandiO/knk-workspace#178, uses
+     * for the same thing), default {@code "localhost"} (the value that used to be hard-coded); 1-64 of [A-Za-z0-9._-].
+     */
+    String worldTaskServerId() {
+        return worldTaskServerId(getConfig().getString("realtime.server-id", "localhost"));
+    }
+
+    static String worldTaskServerId(String configured) {
+        String id = configured == null ? "" : configured.trim();
+        return id.matches("[A-Za-z0-9._-]{1,64}") ? id : "localhost";
+    }
     
     // No extra helpers needed; API client constructs and owns HTTP internals.
     
     private void registerCommands() {
         PluginCommand knkCommand = getCommand("knk");
         if (knkCommand != null) {
-            // realtime.server-id (PandiO/knk-workspace#178); default "localhost", the value that used to be hard-coded.
-            String serverId = net.knightsandkings.knk.paper.realtime.RealtimeSettings.fromConfig(getConfig()).serverId();
+            // PandiO/knk-workspace#180: the world-task server id (realtime.server-id, default "localhost").
+            String serverId = worldTaskServerId();
             KnkAdminCommand knkAdminCommand = new KnkAdminCommand(
                 this, 
                 apiClient.getHealthApi(), 

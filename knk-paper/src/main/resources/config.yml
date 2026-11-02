@@ -202,6 +202,10 @@ world-tasks:
   # by the API pushing a notification (e.g. SignalR) the moment a headless task is created,
   # removing the pickup-latency/idle-load trade-off these two settings exist to balance
   headless-poll-max-interval-seconds: 60
+  # PandiO/knk-workspace#180: how often this server renews the claim of every task it holds. The API hands a claim back
+  # to Pending after 3 minutes without one (WorldTasks:LeaseMinutes), so keep this well below that.
+  # The server id sent with claims is realtime.server-id (default "localhost"; the realtime block adds it).
+  heartbeat-interval-seconds: 60
 
 # Private messages: /msg, /reply and /socialspy (docs/specs/private-messages/DESIGN.md 3.3.10)
 private-messages:
