@@ -788,6 +788,8 @@ custom-enchantments:
     cmd-info-tuning: "&8   chance %chance%%, duration %duration%s, cooldown %cooldownSetting%"
     # PandiO/knk-workspace#201: only for an enchantment with an effect level or a second effect (Flash Chaos: Slowness level, Nausea).
     cmd-info-tuning-effects: "&8   effect level %effectLevel%, second effect %secondDuration%s"
+    # PandiO/knk-workspace#223: only for Chaos / Flash Chaos (area damage and gate damage at the item's level, radii in blocks).
+    cmd-info-tuning-area: "&8   area damage %areaDamage% within %damageRadius% blocks, gates %gateDamage%, knockback within %effectRadius% blocks"
     ench-use: "&cYou cannot use %enchantment%."
 
 # Cache configuration

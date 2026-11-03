@@ -227,4 +227,76 @@ class EnchantmentTuningTableTest {
         assertFalse(new EnchantmentTuningOverride("flash_chaos", null, null, null, null, null, null, null, 1d).isEmpty());
         assertTrue(override("flash_chaos", null, null, null, null, null, null).isEmpty());
     }
+
+    // PandiO/knk-workspace#223: Chaos / Flash Chaos area damage, gate damage and radii.
+
+    private static EnchantmentTuningOverride area(String key, Double damage, Double gateDamage, Double damageRadius,
+                                                  Double effectRadius) {
+        return new EnchantmentTuningOverride(key, null, null, null, null, null, null, null, null,
+                damage, gateDamage, damageRadius, effectRadius);
+    }
+
+    @Test
+    void chaosAndFlashChaosBuiltInBlastsAreTheOldHardCodedOnes() {
+        EnchantmentTuningTable table = new EnchantmentTuningTable();
+        assertEquals(new AreaBlast(40.0d, 40.0d, 3.0d, 5.0d), table.get("chaos").area());
+        assertEquals(new AreaBlast(60.0d, 60.0d, 3.0d, 5.0d), table.get("flash_chaos").area());
+        assertEquals(40.0d, table.get("chaos").areaDamageAt(1));
+        assertEquals(60.0d, table.get("flash_chaos").gateDamageAt(1));
+        assertEquals(AreaBlast.NONE, table.get("freeze").area());
+        assertEquals(AreaBlast.NONE, EnchantmentTuning.NONE.area());
+    }
+
+    @Test
+    void anAreaOverrideReplacesOnlyTheValuesItSets() {
+        EnchantmentTuningTable table = new EnchantmentTuningTable();
+        table.replaceOverrides(List.of(area("knk:chaos", 6d, null, 2d, null)));
+
+        EnchantmentTuning chaos = table.get("chaos");
+        assertEquals(new AreaBlast(6.0d, 40.0d, 2.0d, 5.0d), chaos.area());
+        assertEquals(90_000L, chaos.cooldownMs());
+        assertEquals(new AreaBlast(60.0d, 60.0d, 3.0d, 5.0d), table.get("flash_chaos").area());
+    }
+
+    @Test
+    void areaAndGateDamageGrowWithTheLevelMultiplier_TheRadiiDoNot() {
+        EnchantmentTuningTable table = new EnchantmentTuningTable();
+        table.replaceOverrides(List.of(new EnchantmentTuningOverride("chaos", null, null, null, null, null, 0.5d, null,
+                null, 10d, 100d, 2d, 4d)));
+
+        EnchantmentTuning chaos = table.get("chaos");
+        assertEquals(10.0d, chaos.areaDamageAt(1));
+        assertEquals(15.0d, chaos.areaDamageAt(2));
+        assertEquals(20.0d, chaos.areaDamageAt(3));
+        assertEquals(150.0d, chaos.gateDamageAt(2));
+        assertEquals(10.0d, chaos.areaDamageAt(0));
+        assertEquals(2.0d, chaos.area().damageRadius());
+        assertEquals(4.0d, chaos.area().effectRadius());
+    }
+
+    @Test
+    void areaValuesAreClamped() {
+        EnchantmentTuningTable table = new EnchantmentTuningTable();
+        table.replaceOverrides(List.of(area("chaos", 5_000d, 50_000d, 100d, -1d)));
+        AreaBlast blast = table.get("chaos").area();
+        assertEquals(EnchantmentTuningTable.MAX_AREA_DAMAGE, blast.damage());
+        assertEquals(EnchantmentTuningTable.MAX_GATE_DAMAGE, blast.gateDamage());
+        assertEquals(EnchantmentTuningTable.MAX_RADIUS_BLOCKS, blast.damageRadius());
+        assertEquals(0.0d, blast.effectRadius());
+    }
+
+    @Test
+    void theReachIsTheLargerOfBothRadii() {
+        assertEquals(5.0d, new AreaBlast(1, 1, 3, 5).reach());
+        assertEquals(6.0d, new AreaBlast(1, 1, 6, 2).reach());
+        assertEquals(new AreaBlast(0, 0, 0, 0), new AreaBlast(-1, Double.NaN, Double.POSITIVE_INFINITY, -3));
+    }
+
+    @Test
+    void anOverrideWithOnlyAreaValuesIsNotEmpty() {
+        assertFalse(area("chaos", 6d, null, null, null).isEmpty());
+        assertFalse(area("chaos", null, 1d, null, null).isEmpty());
+        assertFalse(area("chaos", null, null, 1d, null).isEmpty());
+        assertFalse(area("chaos", null, null, null, 1d).isEmpty());
+    }
 }

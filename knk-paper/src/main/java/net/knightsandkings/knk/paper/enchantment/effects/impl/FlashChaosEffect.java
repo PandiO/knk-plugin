@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.enchantment.effects.impl;
 
+import net.knightsandkings.knk.core.domain.enchantment.AreaBlast;
 import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuning;
 import net.knightsandkings.knk.paper.enchantment.GateAreaDamage;
 import net.knightsandkings.knk.paper.enchantment.effects.SupportEnchantmentEffect;
@@ -21,9 +22,8 @@ import org.bukkit.util.Vector;
 import java.util.function.Supplier;
 
 public class FlashChaosEffect extends SupportEnchantmentEffect {
-    private static final double DAMAGE_RADIUS = 3.0d;
-    private static final double EFFECT_RADIUS = 5.0d;
-    private static final double DAMAGE_AMOUNT = 60.0d;
+    // PandiO/knk-workspace#223: damage, gate damage and both radii are combat values (EnchantmentTuning.area()), read
+    // per activation; built-in 60 damage within 3 blocks, 60 to gates, knockback and debuffs within 5.
 
     private final CombatSafezoneCheck safezones;
     private final Supplier<GateAreaDamage> gateAreaDamage;
@@ -38,7 +38,7 @@ public class FlashChaosEffect extends SupportEnchantmentEffect {
     }
 
     /**
-     * @param gateAreaDamage how the blast reaches gate doors in range, with this enchantment's damage; read per
+     * @param gateAreaDamage how the blast reaches gate doors in range, with this enchantment's gate damage; read per
      *                       activation because the gates start after the enchantments
      */
     public FlashChaosEffect(Plugin plugin, CombatSafezoneCheck safezones, Supplier<GateAreaDamage> gateAreaDamage) {
@@ -51,21 +51,31 @@ public class FlashChaosEffect extends SupportEnchantmentEffect {
     protected void applyEffect(ItemStack item, Player player, int level) {
         // #201: the Slowness (duration + effect level) and Nausea (second duration) are combat values (#151), read per
         // activation; built-in Slowness I 5 s and Nausea 12.5 s. The bars below follow the same numbers.
-        Debuffs debuffs = Debuffs.of(tuning(), level);
         Location playerLocation = player.getLocation();
         player.setFireTicks(0);
         playSound(playerLocation, Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 1.0f, 1.0f);
         playEffect(playerLocation.clone().add(0.0d, 1.0d, 0.0d), Effect.FIREWORK_SHOOT, 0);
+        blast(player, level);
+    }
 
-        for (Entity nearby : player.getNearbyEntities(EFFECT_RADIUS, EFFECT_RADIUS, EFFECT_RADIUS)) {
+    /** The blast itself, without sound and particles: damage, knockback, debuffs and gate damage (#223). */
+    void blast(Player player, int level) {
+        EnchantmentTuning tuning = tuning();
+        Debuffs debuffs = Debuffs.of(tuning, level);
+        AreaBlast blast = tuning.area();
+        double damage = tuning.areaDamageAt(level);
+        double reach = blast.reach();
+        Location playerLocation = player.getLocation();
+
+        for (Entity nearby : player.getNearbyEntities(reach, reach, reach)) {
             if (!(nearby instanceof LivingEntity livingEntity) || livingEntity.getUniqueId().equals(player.getUniqueId())
                     || safezones.isProtected(player, livingEntity)) {
                 continue;
             }
 
             boolean damageApplied = true;
-            if (livingEntity.getLocation().distance(playerLocation) <= DAMAGE_RADIUS) {
-                damageApplied = callDamageEventAndApply(player, livingEntity, DAMAGE_AMOUNT);
+            if (damage > 0.0d && livingEntity.getLocation().distance(playerLocation) <= blast.damageRadius()) {
+                damageApplied = callDamageEventAndApply(player, livingEntity, damage);
             }
 
             if (!damageApplied) {
@@ -88,7 +98,7 @@ public class FlashChaosEffect extends SupportEnchantmentEffect {
             }
         }
 
-        gateAreaDamage.get().damageGatesAround(player, playerLocation, DAMAGE_AMOUNT);
+        gateAreaDamage.get().damageGatesAround(player, playerLocation, tuning.gateDamageAt(level));
     }
 
     /**
@@ -103,7 +113,7 @@ public class FlashChaosEffect extends SupportEnchantmentEffect {
         }
     }
 
-    private boolean callDamageEventAndApply(Player attacker, LivingEntity target, double damage) {
+    protected boolean callDamageEventAndApply(Player attacker, LivingEntity target, double damage) {
         EntityDamageByEntityEvent damageEvent = new EntityDamageByEntityEvent(
                 attacker,
                 target,
@@ -120,7 +130,7 @@ public class FlashChaosEffect extends SupportEnchantmentEffect {
         return true;
     }
 
-    private void applyKnockback(Player attacker, LivingEntity target) {
+    protected void applyKnockback(Player attacker, LivingEntity target) {
         Vector direction = target.getLocation().toVector().subtract(attacker.getLocation().toVector());
         if (direction.lengthSquared() <= 0.0001d) {
             direction = new Vector(0.01d, 0.0d, 0.01d);

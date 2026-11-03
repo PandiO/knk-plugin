@@ -7,7 +7,7 @@ package net.knightsandkings.knk.core.domain.enchantment;
  * ({@link EnchantmentTuningOverride}).
  * <p>
  * At level {@code n}: chance = {@code procChance + procChancePerLevel x (n - 1)}, kept between 0 and 1; duration =
- * {@code durationTicks x (1 + levelMultiplier x (n - 1))}.
+ * {@code durationTicks x (1 + levelMultiplier x (n - 1))}; a blast's damage (#223) grows the same way.
  *
  * @param procChance         on-hit chance at level I, 0-1 (1 = every hit); right-click abilities don't roll it
  * @param procChancePerLevel added to the chance per level above I (may be negative)
@@ -19,6 +19,8 @@ package net.knightsandkings.knk.core.domain.enchantment;
  *                           its Slowness (#201)
  * @param secondaryDurationTicks duration at level I of a second effect in ticks; 0 when there is none. Flash Chaos:
  *                           its Nausea (#201)
+ * @param area               the area damage and radii of a right-click blast at level I (Chaos, Flash Chaos; #223);
+ *                           {@link AreaBlast#NONE} for the others. The damage grows per level like the durations
  */
 public record EnchantmentTuning(
         double procChance,
@@ -28,7 +30,8 @@ public record EnchantmentTuning(
         int durationTicks,
         double levelMultiplier,
         int effectLevel,
-        int secondaryDurationTicks
+        int secondaryDurationTicks,
+        AreaBlast area
 ) {
     /** Highest effect level, as in knk-web-api. */
     public static final int MAX_EFFECT_LEVEL = 10;
@@ -44,12 +47,21 @@ public record EnchantmentTuning(
         levelMultiplier = Math.max(0.0d, finiteOr(levelMultiplier, 0.0d));
         effectLevel = Math.max(0, Math.min(MAX_EFFECT_LEVEL, effectLevel));
         secondaryDurationTicks = Math.max(0, secondaryDurationTicks);
+        area = area != null ? area : AreaBlast.NONE;
+    }
+
+    /** An enchantment without an area blast (every one but Chaos and Flash Chaos). */
+    public EnchantmentTuning(double procChance, double procChancePerLevel, boolean cooldownEnabled, long cooldownMs,
+                             int durationTicks, double levelMultiplier, int effectLevel, int secondaryDurationTicks) {
+        this(procChance, procChancePerLevel, cooldownEnabled, cooldownMs, durationTicks, levelMultiplier, effectLevel,
+                secondaryDurationTicks, AreaBlast.NONE);
     }
 
     /** An enchantment with one effect and no effect level (every one but Flash Chaos). */
     public EnchantmentTuning(double procChance, double procChancePerLevel, boolean cooldownEnabled, long cooldownMs,
                              int durationTicks, double levelMultiplier) {
-        this(procChance, procChancePerLevel, cooldownEnabled, cooldownMs, durationTicks, levelMultiplier, 0, 0);
+        this(procChance, procChancePerLevel, cooldownEnabled, cooldownMs, durationTicks, levelMultiplier, 0, 0,
+                AreaBlast.NONE);
     }
 
     /** The chance (0-1) that a hit at this level sets the effect off; 0 below level I. */
@@ -69,6 +81,16 @@ public record EnchantmentTuning(
     /** The second effect's duration in ticks at this level, scaled like {@link #durationTicksAt} (#201). */
     public int secondaryDurationTicksAt(int level) {
         return (int) Math.round(secondaryDurationTicks * scaleAt(level));
+    }
+
+    /** The area damage to each entity in the damage radius at this level, scaled like {@link #durationTicksAt} (#223). */
+    public double areaDamageAt(int level) {
+        return area.damage() * scaleAt(level);
+    }
+
+    /** The damage to each gate in reach at this level, scaled like {@link #areaDamageAt} (#223). */
+    public double gateDamageAt(int level) {
+        return area.gateDamage() * scaleAt(level);
     }
 
     /**
@@ -102,7 +124,12 @@ public record EnchantmentTuning(
                 override.levelMultiplier() != null ? override.levelMultiplier() : levelMultiplier,
                 override.effectLevel() != null ? override.effectLevel() : effectLevel,
                 override.secondaryEffectDurationSeconds() != null
-                        ? (int) Math.round(override.secondaryEffectDurationSeconds() * 20.0d) : secondaryDurationTicks
+                        ? (int) Math.round(override.secondaryEffectDurationSeconds() * 20.0d) : secondaryDurationTicks,
+                new AreaBlast(
+                        override.areaDamage() != null ? override.areaDamage() : area.damage(),
+                        override.gateDamage() != null ? override.gateDamage() : area.gateDamage(),
+                        override.damageRadiusBlocks() != null ? override.damageRadiusBlocks() : area.damageRadius(),
+                        override.effectRadiusBlocks() != null ? override.effectRadiusBlocks() : area.effectRadius())
         );
     }
 
