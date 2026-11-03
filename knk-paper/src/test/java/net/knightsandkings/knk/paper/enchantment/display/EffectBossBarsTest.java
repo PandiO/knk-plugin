@@ -226,13 +226,35 @@ class EffectBossBarsTest {
     // PandiO/knk-workspace#202: ability cooldown bars.
 
     @Test
-    void cooldownBarCountsDownNextToTheDebuffBars_InYellow() {
+    void reshowBelowMovesTheBarsUnderABarShownLater_InBoardOrder() {
+        potions.put("poison", effect(80));
+        bars.debuff(player, "poison", "Poison", poisonType, 80);
+        bars.cooldown(player.getUniqueId(), "chaos", "Chaos cooldown", 90_000L);
+        BossBar navigation = BossBar.bossBar(Component.text("→ Merchantstreet"), 0f, BossBar.Color.YELLOW,
+                BossBar.Overlay.PROGRESS);
+        player.showBossBar(navigation);
+
+        bars.reshowBelow(player);
+
+        assertEquals(navigation, shown.get(0));
+        assertEquals(List.of("→ Merchantstreet", "Poison · 4s", "Chaos cooldown · 1:30"), texts());
+    }
+
+    @Test
+    void reshowBelowWithoutBarsDoesNothing() {
+        bars.reshowBelow(player);
+        assertTrue(shown.isEmpty());
+    }
+
+    @Test
+    void cooldownBarCountsDownNextToTheDebuffBars_InGrey() {
         potions.put("poison", effect(80));
         bars.debuff(player, "poison", "Poison", poisonType, 80);
         bars.cooldown(player.getUniqueId(), "flash_chaos", "Flash Chaos cooldown", 90_000L);
 
         assertEquals(List.of("Poison · 4s", "Flash Chaos cooldown · 1:30"), texts());
-        assertEquals(BossBar.Color.YELLOW, shown.get(1).color());
+        assertEquals(BossBar.Color.WHITE, shown.get(1).color());
+        assertEquals(net.kyori.adventure.text.format.NamedTextColor.GRAY, shown.get(1).name().color());
         assertTrue(bars.has(player.getUniqueId(), "cooldown:flash_chaos"));
 
         now.set(2_000L);

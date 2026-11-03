@@ -16,6 +16,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -39,7 +40,7 @@ import java.util.function.ToLongFunction;
  * death; every bar goes on quit (a staff freeze comes back on the next join through {@code AdminFreezeManager}).
  * Also forwards {@link #hideNameTags} to the {@link NameTagBlackout}. Main thread.
  * <p>
- * Also the yellow ability cooldown bars of PandiO/knk-workspace#202 ({@code Flash Chaos cooldown · 1:28}) for the
+ * Also the grey ability cooldown bars of PandiO/knk-workspace#202 ({@code Flash Chaos cooldown · 1:28}) for the
  * player who used the ability, fed by {@link net.knightsandkings.knk.paper.enchantment.CooldownBarCooldownManager}.
  */
 public final class EffectBossBars implements EffectDisplay, Listener {
@@ -244,6 +245,27 @@ public final class EffectBossBars implements EffectDisplay, Listener {
         return board.has(playerId, key);
     }
 
+    /**
+     * Moves the player's bars below a bar shown after them (#202, developer 2026-11-03: the navigation bar stays on
+     * top). The client stacks boss bars in the order they were shown, so hiding and showing them again puts them at
+     * the bottom, in board order. Main thread.
+     */
+    public void reshowBelow(Player player) {
+        Map<String, BossBar> own = bars.get(player.getUniqueId());
+        if (own == null || own.isEmpty()) {
+            return;
+        }
+        List<BossBar> ordered = new ArrayList<>();
+        for (View view : board.views(player.getUniqueId(), clock.getAsLong())) {
+            BossBar bar = own.get(view.key());
+            if (bar != null) {
+                ordered.add(bar);
+            }
+        }
+        ordered.forEach(player::hideBossBar);
+        ordered.forEach(player::showBossBar);
+    }
+
     /** Plugin disable: hide every bar. */
     public void hideAll() {
         for (UUID id : Set.copyOf(bars.keySet())) {
@@ -368,7 +390,8 @@ public final class EffectBossBars implements EffectDisplay, Listener {
 
     static BossBar.Color barColor(String key) {
         if (isCooldown(key)) {
-            return BossBar.Color.YELLOW;
+            // #202 (developer, 2026-11-03): grey cooldown bars; WHITE is the closest boss-bar colour to grey.
+            return BossBar.Color.WHITE;
         }
         return switch (key) {
             case STAFF_FREEZE -> BossBar.Color.RED;
@@ -382,7 +405,7 @@ public final class EffectBossBars implements EffectDisplay, Listener {
 
     static NamedTextColor textColor(String key) {
         if (isCooldown(key)) {
-            return NamedTextColor.GOLD;
+            return NamedTextColor.GRAY;
         }
         return switch (key) {
             case STAFF_FREEZE -> NamedTextColor.RED;
