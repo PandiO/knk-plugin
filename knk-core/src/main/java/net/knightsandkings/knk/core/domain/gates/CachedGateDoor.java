@@ -2,12 +2,15 @@ package net.knightsandkings.knk.core.domain.gates;
 
 import net.knightsandkings.knk.core.gates.DrawbridgeKeyframes;
 import net.knightsandkings.knk.core.gates.RigidTransform;
+import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import org.bukkit.util.Vector;
 
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Cached representation of one gate door with precomputed animation data. This model is
@@ -162,6 +165,12 @@ public class CachedGateDoor {
     // === Pass-Through ===
     private boolean allowPassThrough;
     private int passThroughDurationSeconds = 2;
+    // PandiO/knk-workspace#167: the pass-through styles this door offers and the one it uses when the
+    // player's own preference isn't offered. A door loaded without the fields (an older API) offers the
+    // three styles that existed before (#167 migration default) and animates by default.
+    private Set<GatePassThroughMethod> allowedPassThroughMethods =
+        EnumSet.of(GatePassThroughMethod.DEFAULT, GatePassThroughMethod.INSTANT_OPEN, GatePassThroughMethod.TELEPORT);
+    private GatePassThroughMethod defaultPassThroughMethod = GatePassThroughMethod.DEFAULT;
 
     // === Continuous Damage (Fire) ===
     private boolean allowContinuousDamage = true;
@@ -415,6 +424,28 @@ public class CachedGateDoor {
         return override != null ? override : allowPassThrough;
     }
 
+    /**
+     * PandiO/knk-workspace#167: the styles this door offers - per style the structure's override when set, else
+     * the door's own - always including the effective default style, so the default can never be unusable.
+     */
+    public Set<GatePassThroughMethod> getEffectiveAllowedPassThroughMethods() {
+        EnumSet<GatePassThroughMethod> allowed = EnumSet.noneOf(GatePassThroughMethod.class);
+        for (GatePassThroughMethod method : GatePassThroughMethod.values()) {
+            Boolean override = structure != null ? structure.getAllowPassThroughStyleOverride(method) : null;
+            if (override != null ? override : allowedPassThroughMethods.contains(method)) {
+                allowed.add(method);
+            }
+        }
+        allowed.add(getEffectiveDefaultPassThroughMethod());
+        return allowed;
+    }
+
+    /** PandiO/knk-workspace#167: the structure's default-style override when set, else the door's own. */
+    public GatePassThroughMethod getEffectiveDefaultPassThroughMethod() {
+        GatePassThroughMethod override = structure != null ? structure.getDefaultPassThroughMethodOverride() : null;
+        return override != null ? override : defaultPassThroughMethod;
+    }
+
     public int getEffectivePassThroughDurationSeconds() {
         Integer override = structure != null ? structure.getPassThroughDurationSecondsOverride() : null;
         return override != null ? override : passThroughDurationSeconds;
@@ -513,6 +544,16 @@ public class CachedGateDoor {
 
     public int getPassThroughDurationSeconds() {
         return passThroughDurationSeconds;
+    }
+
+    public Set<GatePassThroughMethod> getAllowedPassThroughMethods() {
+        EnumSet<GatePassThroughMethod> copy = EnumSet.noneOf(GatePassThroughMethod.class);
+        copy.addAll(allowedPassThroughMethods);
+        return copy;
+    }
+
+    public GatePassThroughMethod getDefaultPassThroughMethod() {
+        return defaultPassThroughMethod;
     }
 
     public boolean isAllowContinuousDamage() {
@@ -619,6 +660,19 @@ public class CachedGateDoor {
 
     public void setPassThroughDurationSeconds(int passThroughDurationSeconds) {
         this.passThroughDurationSeconds = passThroughDurationSeconds;
+    }
+
+    /** Null or empty means "offers none of its own" (the default style still applies). */
+    public void setAllowedPassThroughMethods(Set<GatePassThroughMethod> methods) {
+        EnumSet<GatePassThroughMethod> copy = EnumSet.noneOf(GatePassThroughMethod.class);
+        if (methods != null) {
+            copy.addAll(methods);
+        }
+        this.allowedPassThroughMethods = copy;
+    }
+
+    public void setDefaultPassThroughMethod(GatePassThroughMethod method) {
+        this.defaultPassThroughMethod = method != null ? method : GatePassThroughMethod.DEFAULT;
     }
 
     public void setAllowContinuousDamage(boolean allowContinuousDamage) {

@@ -427,6 +427,38 @@ public class GateManager {
     }
 
     /**
+     * PandiO/knk-workspace#167 snap pass-through: the door goes to its open (or closed) resting frame at once
+     * instead of animating. It enters OPENING/CLOSING with a start time a whole animation in the past, so the
+     * animation task's next tick lands on the final frame and finishes there - the same path its lag skip takes
+     * (entities in the way are moved out, the resting frame is placed, the state is persisted).
+     *
+     * @return true if the door was set to snap, false if it is missing, already there, or inactive/destroyed
+     */
+    public boolean snapGate(int gateId, boolean open) {
+        CachedGateDoor gate = gateCache.get(gateId);
+        if (gate == null) {
+            LOGGER.warning("Cannot snap gate: Gate ID " + gateId + " not found");
+            return false;
+        }
+        AnimationState target = open ? AnimationState.OPEN : AnimationState.CLOSED;
+        if (gate.getCurrentState() == target) {
+            return false;
+        }
+        if (!gate.isEffectivelyActive() || (open && gate.isEffectivelyDestroyed())) {
+            LOGGER.warning("Cannot snap gate " + gate.getName() + ": Gate is inactive or destroyed");
+            return false;
+        }
+
+        gate.setCurrentState(open ? AnimationState.OPENING : AnimationState.CLOSING);
+        gate.setCurrentFrame(open ? gate.getAnimationDurationTicks() : 0);
+        gate.setAnimationStartTime(System.currentTimeMillis() - (gate.getAnimationDurationTicks() + 1L) * 50L);
+
+        LOGGER.info("Snapping gate " + (open ? "open" : "closed") + ": " + gate.getName() + " (ID: " + gateId + ")");
+        fireStateChanged(gateId);
+        return true;
+    }
+
+    /**
      * Toggle a gate between open and closed states.
      *
      * @param gateId Gate ID

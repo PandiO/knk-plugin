@@ -20,7 +20,13 @@ public enum GatePassThroughMethod {
     /**
      * The player is teleported directly to the other side of the gate. The gate never animates.
      */
-    TELEPORT;
+    TELEPORT,
+
+    /**
+     * PandiO/knk-workspace#167: the whole door changes to its open state at once (no animation),
+     * stays open for the gate's PassThroughDurationSeconds, then changes back to closed at once.
+     */
+    SNAP;
 
     /**
      * Parses the backend's PascalCase enum wire value (e.g. "InstantOpen"), falling back to
@@ -34,6 +40,7 @@ public enum GatePassThroughMethod {
         return switch (value.trim().toLowerCase()) {
             case "instantopen" -> INSTANT_OPEN;
             case "teleport" -> TELEPORT;
+            case "snap" -> SNAP;
             default -> DEFAULT;
         };
     }
@@ -46,6 +53,7 @@ public enum GatePassThroughMethod {
         return switch (this) {
             case INSTANT_OPEN -> "InstantOpen";
             case TELEPORT -> "Teleport";
+            case SNAP -> "Snap";
             case DEFAULT -> "Default";
         };
     }

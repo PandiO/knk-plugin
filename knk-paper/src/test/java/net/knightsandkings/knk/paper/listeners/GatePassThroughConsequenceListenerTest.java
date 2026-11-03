@@ -150,4 +150,30 @@ class GatePassThroughConsequenceListenerTest {
 
         verify(passThroughService).dispatch(gate, player, GatePassThroughMethod.INSTANT_OPEN);
     }
+
+    @Test
+    void usesTheDoorDefaultWhenTheDoorDoesNotOfferThePreferredStyle() {
+        // PandiO/knk-workspace#167
+        gate.setAllowPassThrough(true);
+        gate.setAllowedPassThroughMethods(java.util.EnumSet.of(GatePassThroughMethod.SNAP));
+        gate.setDefaultPassThroughMethod(GatePassThroughMethod.SNAP);
+        when(player.hasPermission("knk.gate.passthrough.use")).thenReturn(true);
+        when(userManager.getCachedUser(playerUuid)).thenReturn(userDataWithMethod(GatePassThroughMethod.TELEPORT));
+
+        listener.onGateDoorInteract(new GateDoorInteractEvent(gate, player, null));
+
+        verify(passThroughService).dispatch(gate, player, GatePassThroughMethod.SNAP);
+    }
+
+    @Test
+    void dispatchesSnapWhenPreferredAndOffered() {
+        gate.setAllowPassThrough(true);
+        gate.setAllowedPassThroughMethods(java.util.EnumSet.of(GatePassThroughMethod.DEFAULT, GatePassThroughMethod.SNAP));
+        when(player.hasPermission("knk.gate.passthrough.use")).thenReturn(true);
+        when(userManager.getCachedUser(playerUuid)).thenReturn(userDataWithMethod(GatePassThroughMethod.SNAP));
+
+        listener.onGateDoorInteract(new GateDoorInteractEvent(gate, player, null));
+
+        verify(passThroughService).dispatch(gate, player, GatePassThroughMethod.SNAP);
+    }
 }

@@ -161,6 +161,23 @@ public class GateDoorDto {
     @JsonProperty("passThroughDurationSeconds")
     private Integer passThroughDurationSeconds;
 
+    // PandiO/knk-workspace#167: the styles the door offers and its default style (a GatePassThroughMethod
+    // wire name: Default, InstantOpen, Teleport, Snap). Null from an older API = the pre-#167 behaviour.
+    @JsonProperty("allowAnimatedPassThrough")
+    private Boolean allowAnimatedPassThrough;
+
+    @JsonProperty("allowSnapPassThrough")
+    private Boolean allowSnapPassThrough;
+
+    @JsonProperty("allowWalkPathPassThrough")
+    private Boolean allowWalkPathPassThrough;
+
+    @JsonProperty("allowTeleportPassThrough")
+    private Boolean allowTeleportPassThrough;
+
+    @JsonProperty("defaultPassThroughMethod")
+    private String defaultPassThroughMethod;
+
     // === Display Position ===
     @JsonProperty("infoDisplayLocation")
     @JsonDeserialize(using = GateStructureDto.CoordinateStringDeserializer.class)
@@ -547,6 +564,46 @@ public class GateDoorDto {
 
     public void setPassThroughDurationSeconds(Integer passThroughDurationSeconds) {
         this.passThroughDurationSeconds = passThroughDurationSeconds;
+    }
+
+    public Boolean getAllowAnimatedPassThrough() {
+        return allowAnimatedPassThrough;
+    }
+
+    public void setAllowAnimatedPassThrough(Boolean allowAnimatedPassThrough) {
+        this.allowAnimatedPassThrough = allowAnimatedPassThrough;
+    }
+
+    public Boolean getAllowSnapPassThrough() {
+        return allowSnapPassThrough;
+    }
+
+    public void setAllowSnapPassThrough(Boolean allowSnapPassThrough) {
+        this.allowSnapPassThrough = allowSnapPassThrough;
+    }
+
+    public Boolean getAllowWalkPathPassThrough() {
+        return allowWalkPathPassThrough;
+    }
+
+    public void setAllowWalkPathPassThrough(Boolean allowWalkPathPassThrough) {
+        this.allowWalkPathPassThrough = allowWalkPathPassThrough;
+    }
+
+    public Boolean getAllowTeleportPassThrough() {
+        return allowTeleportPassThrough;
+    }
+
+    public void setAllowTeleportPassThrough(Boolean allowTeleportPassThrough) {
+        this.allowTeleportPassThrough = allowTeleportPassThrough;
+    }
+
+    public String getDefaultPassThroughMethod() {
+        return defaultPassThroughMethod;
+    }
+
+    public void setDefaultPassThroughMethod(String defaultPassThroughMethod) {
+        this.defaultPassThroughMethod = defaultPassThroughMethod;
     }
 
     public String getInfoDisplayLocation() {

@@ -245,6 +245,12 @@ public class GateDoorCommand implements CommandExecutor {
         sender.sendMessage(ChatColor.GRAY + "Health: " + ChatColor.WHITE
             + String.format("%.0f/%.0f", gate.getHealthCurrent(), gate.getHealthMax()));
         sender.sendMessage(ChatColor.GRAY + "Invincible: " + ChatColor.WHITE + (gate.isEffectivelyInvincible() ? "✓" : "✗"));
+        // PandiO/knk-workspace#167: the pass-through styles this door offers (effective, after structure overrides).
+        sender.sendMessage(ChatColor.GRAY + "Pass-through: " + ChatColor.WHITE + (gate.isEffectivelyAllowPassThrough()
+            ? String.join(", ", gate.getEffectiveAllowedPassThroughMethods().stream().map(m -> m.toWireValue()).toList())
+                + ChatColor.GRAY + ", default " + ChatColor.WHITE + gate.getEffectiveDefaultPassThroughMethod().toWireValue()
+                + ChatColor.GRAY + ", " + gate.getEffectivePassThroughDurationSeconds() + " s"
+            : "✗"));
         sender.sendMessage(ChatColor.GRAY + "Blocks: " + ChatColor.WHITE + gate.getBlocks().size());
         sender.sendMessage(ChatColor.GRAY + "Motion Type: " + ChatColor.WHITE + gate.getMotionType());
         sender.sendMessage(ChatColor.GRAY + "Face Direction: " + ChatColor.WHITE + gate.getFaceDirection());

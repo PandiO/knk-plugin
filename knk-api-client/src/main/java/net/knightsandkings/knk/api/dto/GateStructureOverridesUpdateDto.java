@@ -46,6 +46,32 @@ public class GateStructureOverridesUpdateDto {
     @JsonProperty("clearPassThroughDurationSecondsOverride")
     private boolean clearPassThroughDurationSecondsOverride;
 
+    // PandiO/knk-workspace#167
+    @JsonProperty("allowAnimatedPassThroughOverride")
+    private Boolean allowAnimatedPassThroughOverride;
+    @JsonProperty("clearAllowAnimatedPassThroughOverride")
+    private boolean clearAllowAnimatedPassThroughOverride;
+
+    @JsonProperty("allowSnapPassThroughOverride")
+    private Boolean allowSnapPassThroughOverride;
+    @JsonProperty("clearAllowSnapPassThroughOverride")
+    private boolean clearAllowSnapPassThroughOverride;
+
+    @JsonProperty("allowWalkPathPassThroughOverride")
+    private Boolean allowWalkPathPassThroughOverride;
+    @JsonProperty("clearAllowWalkPathPassThroughOverride")
+    private boolean clearAllowWalkPathPassThroughOverride;
+
+    @JsonProperty("allowTeleportPassThroughOverride")
+    private Boolean allowTeleportPassThroughOverride;
+    @JsonProperty("clearAllowTeleportPassThroughOverride")
+    private boolean clearAllowTeleportPassThroughOverride;
+
+    @JsonProperty("defaultPassThroughMethodOverride")
+    private String defaultPassThroughMethodOverride;
+    @JsonProperty("clearDefaultPassThroughMethodOverride")
+    private boolean clearDefaultPassThroughMethodOverride;
+
     @JsonProperty("showHealthDisplayOverride")
     private Boolean showHealthDisplayOverride;
     @JsonProperty("clearShowHealthDisplayOverride")
@@ -303,5 +329,85 @@ public class GateStructureOverridesUpdateDto {
 
     public void setClearContinuousDamageMultiplierOverride(boolean clearContinuousDamageMultiplierOverride) {
         this.clearContinuousDamageMultiplierOverride = clearContinuousDamageMultiplierOverride;
+    }
+
+    public Boolean getAllowAnimatedPassThroughOverride() {
+        return allowAnimatedPassThroughOverride;
+    }
+
+    public void setAllowAnimatedPassThroughOverride(Boolean allowAnimatedPassThroughOverride) {
+        this.allowAnimatedPassThroughOverride = allowAnimatedPassThroughOverride;
+    }
+
+    public Boolean getAllowSnapPassThroughOverride() {
+        return allowSnapPassThroughOverride;
+    }
+
+    public void setAllowSnapPassThroughOverride(Boolean allowSnapPassThroughOverride) {
+        this.allowSnapPassThroughOverride = allowSnapPassThroughOverride;
+    }
+
+    public Boolean getAllowWalkPathPassThroughOverride() {
+        return allowWalkPathPassThroughOverride;
+    }
+
+    public void setAllowWalkPathPassThroughOverride(Boolean allowWalkPathPassThroughOverride) {
+        this.allowWalkPathPassThroughOverride = allowWalkPathPassThroughOverride;
+    }
+
+    public Boolean getAllowTeleportPassThroughOverride() {
+        return allowTeleportPassThroughOverride;
+    }
+
+    public void setAllowTeleportPassThroughOverride(Boolean allowTeleportPassThroughOverride) {
+        this.allowTeleportPassThroughOverride = allowTeleportPassThroughOverride;
+    }
+
+    public String getDefaultPassThroughMethodOverride() {
+        return defaultPassThroughMethodOverride;
+    }
+
+    public void setDefaultPassThroughMethodOverride(String defaultPassThroughMethodOverride) {
+        this.defaultPassThroughMethodOverride = defaultPassThroughMethodOverride;
+    }
+
+    public boolean isClearAllowAnimatedPassThroughOverride() {
+        return clearAllowAnimatedPassThroughOverride;
+    }
+
+    public void setClearAllowAnimatedPassThroughOverride(boolean clearAllowAnimatedPassThroughOverride) {
+        this.clearAllowAnimatedPassThroughOverride = clearAllowAnimatedPassThroughOverride;
+    }
+
+    public boolean isClearAllowSnapPassThroughOverride() {
+        return clearAllowSnapPassThroughOverride;
+    }
+
+    public void setClearAllowSnapPassThroughOverride(boolean clearAllowSnapPassThroughOverride) {
+        this.clearAllowSnapPassThroughOverride = clearAllowSnapPassThroughOverride;
+    }
+
+    public boolean isClearAllowWalkPathPassThroughOverride() {
+        return clearAllowWalkPathPassThroughOverride;
+    }
+
+    public void setClearAllowWalkPathPassThroughOverride(boolean clearAllowWalkPathPassThroughOverride) {
+        this.clearAllowWalkPathPassThroughOverride = clearAllowWalkPathPassThroughOverride;
+    }
+
+    public boolean isClearAllowTeleportPassThroughOverride() {
+        return clearAllowTeleportPassThroughOverride;
+    }
+
+    public void setClearAllowTeleportPassThroughOverride(boolean clearAllowTeleportPassThroughOverride) {
+        this.clearAllowTeleportPassThroughOverride = clearAllowTeleportPassThroughOverride;
+    }
+
+    public boolean isClearDefaultPassThroughMethodOverride() {
+        return clearDefaultPassThroughMethodOverride;
+    }
+
+    public void setClearDefaultPassThroughMethodOverride(boolean clearDefaultPassThroughMethodOverride) {
+        this.clearDefaultPassThroughMethodOverride = clearDefaultPassThroughMethodOverride;
     }
 }

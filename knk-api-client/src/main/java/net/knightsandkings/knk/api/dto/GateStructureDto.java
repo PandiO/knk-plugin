@@ -78,6 +78,22 @@ public class GateStructureDto {
     @JsonProperty("passThroughDurationSecondsOverride")
     private Integer passThroughDurationSecondsOverride;
 
+    // PandiO/knk-workspace#167: structure-level overrides of the doors' pass-through styles (null = no override).
+    @JsonProperty("allowAnimatedPassThroughOverride")
+    private Boolean allowAnimatedPassThroughOverride;
+
+    @JsonProperty("allowSnapPassThroughOverride")
+    private Boolean allowSnapPassThroughOverride;
+
+    @JsonProperty("allowWalkPathPassThroughOverride")
+    private Boolean allowWalkPathPassThroughOverride;
+
+    @JsonProperty("allowTeleportPassThroughOverride")
+    private Boolean allowTeleportPassThroughOverride;
+
+    @JsonProperty("defaultPassThroughMethodOverride")
+    private String defaultPassThroughMethodOverride;
+
     @JsonProperty("showHealthDisplayOverride")
     private Boolean showHealthDisplayOverride;
 
@@ -239,6 +255,46 @@ public class GateStructureDto {
 
     public void setPassThroughDurationSecondsOverride(Integer passThroughDurationSecondsOverride) {
         this.passThroughDurationSecondsOverride = passThroughDurationSecondsOverride;
+    }
+
+    public Boolean getAllowAnimatedPassThroughOverride() {
+        return allowAnimatedPassThroughOverride;
+    }
+
+    public void setAllowAnimatedPassThroughOverride(Boolean allowAnimatedPassThroughOverride) {
+        this.allowAnimatedPassThroughOverride = allowAnimatedPassThroughOverride;
+    }
+
+    public Boolean getAllowSnapPassThroughOverride() {
+        return allowSnapPassThroughOverride;
+    }
+
+    public void setAllowSnapPassThroughOverride(Boolean allowSnapPassThroughOverride) {
+        this.allowSnapPassThroughOverride = allowSnapPassThroughOverride;
+    }
+
+    public Boolean getAllowWalkPathPassThroughOverride() {
+        return allowWalkPathPassThroughOverride;
+    }
+
+    public void setAllowWalkPathPassThroughOverride(Boolean allowWalkPathPassThroughOverride) {
+        this.allowWalkPathPassThroughOverride = allowWalkPathPassThroughOverride;
+    }
+
+    public Boolean getAllowTeleportPassThroughOverride() {
+        return allowTeleportPassThroughOverride;
+    }
+
+    public void setAllowTeleportPassThroughOverride(Boolean allowTeleportPassThroughOverride) {
+        this.allowTeleportPassThroughOverride = allowTeleportPassThroughOverride;
+    }
+
+    public String getDefaultPassThroughMethodOverride() {
+        return defaultPassThroughMethodOverride;
+    }
+
+    public void setDefaultPassThroughMethodOverride(String defaultPassThroughMethodOverride) {
+        this.defaultPassThroughMethodOverride = defaultPassThroughMethodOverride;
     }
 
     public Boolean getShowHealthDisplayOverride() {
