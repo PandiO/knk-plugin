@@ -9,6 +9,7 @@ import net.knightsandkings.knk.core.menu.MenuRefreshSchedule;
 import net.knightsandkings.knk.core.menu.MenuSession;
 import net.knightsandkings.knk.core.menu.MenuSessionRegistry;
 import net.knightsandkings.knk.core.menu.MenuTemplateAssembler;
+import net.knightsandkings.knk.core.menu.MenuTextPrompt;
 import net.knightsandkings.knk.core.menu.MenuTransitionTracker;
 import net.knightsandkings.knk.core.menu.RuntimeMenu;
 import net.knightsandkings.knk.core.menu.RuntimeMenuSection;
@@ -527,27 +528,72 @@ public final class MenuService {
      * IMPLEMENTATION_PLAN.md Phase 7 / DESIGN_REVIEW.md §2.1 §2.5: prompts via
      * the in-house {@link AnvilCaptureManager}. Opening the anvil closes the
      * menu Inventory, so - like {@link #nextPage} - this re-fetches and reopens
-     * the menu once the query is captured.
+     * the menu once the query is captured. PandiO/knk-workspace#128: the rename
+     * field starts with the current search, and Cancel or Escape reopens the menu
+     * the prompt came from, with its search and page as they were.
      */
     public void promptSearch(Player player, String sectionName) {
+        Optional<OpenMenuContext> from = openMenuContextRegistry.get(player.getUniqueId());
+        String current = currentContentQuery(player, from, sectionName).map(MenuContentQuery::searchText).orElse(null);
         anvilCaptureManager.startTextCapture(
                 player,
-                ChatColor.YELLOW + "Type a search query for '" + sectionName
-                        + "', then click the left paper to cancel or the right paper to confirm:",
+                MenuTextPrompt.search(sectionName, current),
                 query -> search(player, sectionName, query),
-                () -> player.sendMessage(ChatColor.YELLOW + "Search cancelled.")
+                () -> reopenAfterPrompt(player, from.orElse(null))
         );
     }
 
     /** IMPLEMENTATION_PLAN.md Phase 7: same as {@link #promptSearch}, for one FilterBar facet. */
     public void promptFilter(Player player, String sectionName, String facetKey) {
+        Optional<OpenMenuContext> from = openMenuContextRegistry.get(player.getUniqueId());
+        String current = currentContentQuery(player, from, sectionName)
+                .map(query -> query.filterValues().get(facetKey)).orElse(null);
         anvilCaptureManager.startTextCapture(
                 player,
-                ChatColor.YELLOW + "Type a value for filter '" + facetKey + "' on '" + sectionName
-                        + "', then click the left paper to cancel or the right paper to confirm:",
+                MenuTextPrompt.filter(sectionName, facetKey, current),
                 value -> filter(player, sectionName, facetKey, value),
-                () -> player.sendMessage(ChatColor.YELLOW + "Filter cancelled.")
+                () -> reopenAfterPrompt(player, from.orElse(null))
         );
+    }
+
+    /** The search/filter state of {@code sectionName} in the menu the player is looking at. */
+    private Optional<MenuContentQuery> currentContentQuery(Player player, Optional<OpenMenuContext> from, String sectionName) {
+        Optional<MenuSession> session = sessionRegistry.get(player.getUniqueId());
+        if (session.isEmpty()) {
+            return Optional.empty();
+        }
+        return from.flatMap(context -> context.menu().findSection(sectionName))
+                .map(section -> session.get().getContentQuery(section.id()));
+    }
+
+    /**
+     * PandiO/knk-workspace#128: a cancelled prompt shows the player's current menu again,
+     * unchanged (the session kept its page and search while the anvil was open). It re-renders
+     * the menu the prompt was opened from when that is still the current one, else loads it.
+     */
+    void reopenAfterPrompt(Player player, OpenMenuContext from) {
+        if (!player.isOnline()) {
+            return;
+        }
+        Optional<MenuSession> sessionOpt = sessionRegistry.get(player.getUniqueId());
+        Optional<String> currentKey = sessionOpt.flatMap(MenuSession::currentMenuKey);
+        if (sessionOpt.isEmpty() || currentKey.isEmpty()) {
+            return;
+        }
+        MenuSession session = sessionOpt.get();
+        if (from != null && from.menuKey().equals(currentKey.get())) {
+            renderAndShow(player, from.menu(), session, from.materialNamespaceKeys());
+            return;
+        }
+        String key = currentKey.get();
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            RuntimeMenu menu = loadAndAssemble(player, key);
+            if (menu == null) {
+                return;
+            }
+            Map<Integer, String> materialKeys = renderer.resolveTemplateMaterialKeys(menu).join();
+            mainThread.execute(() -> renderAndShow(player, menu, session, materialKeys));
+        });
     }
 
     public void search(Player player, String sectionName, String queryText) {

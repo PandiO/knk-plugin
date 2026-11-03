@@ -421,6 +421,13 @@ world-analytics:
   excluded-game-modes: [CREATIVE, SPECTATOR]
   max-pending-batches: 12
 
+# Item and menu lore (PandiO/knk-workspace#212, docs/architecture/item-render-pipeline.md in knk-workspace).
+lore:
+  # A lore line wider than this many visible characters (colour codes not counted) continues on the next line,
+  # breaking between words and keeping its colour; only a single word longer than this is split. Used for blueprint
+  # item descriptions and origin lines, and for every menu item's lore. Minimum 10. Read at startup.
+  max-width: 40
+
 # InventoryMenu engine (docs/specs/inventory-menu/ in knk-workspace).
 menus:
   # Bedrock players (Geyser + Floodgate, alpha cross-play finding 2026-10-24): when a menu click opens

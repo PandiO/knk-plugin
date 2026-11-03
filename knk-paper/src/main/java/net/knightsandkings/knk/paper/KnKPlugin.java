@@ -341,6 +341,9 @@ public class KnKPlugin extends JavaPlugin {
             saveDefaultConfig();
             config = ConfigLoader.load(getConfig());
             getLogger().info("Configuration loaded successfully");
+            // PandiO/knk-workspace#212: one maximum lore line width for blueprint items and every menu.
+            net.knightsandkings.knk.core.util.LoreWrap.setMaxWidth(
+                getConfig().getInt("lore.max-width", net.knightsandkings.knk.core.util.LoreWrap.DEFAULT_MAX_WIDTH));
             // First, so the API calls of the rest of startup are timed as well (KNG-232).
             metricsService = new net.knightsandkings.knk.paper.metrics.MetricsService(this, config.metrics());
             metricsService.start();
@@ -1181,6 +1184,8 @@ public class KnKPlugin extends JavaPlugin {
             try {
                 enchantmentRuntime.nameTagBlackout().showAll();
                 enchantmentRuntime.effectBossBars().hideAll();
+                // #211: everyone sees invisible ability users' armour and items again (and they turn visible).
+                enchantmentRuntime.invisibleEquipment().revealAll();
             } catch (RuntimeException e) {
                 getLogger().log(java.util.logging.Level.SEVERE, "Clearing effect displays failed", e);
             }
@@ -3789,6 +3794,8 @@ public class KnKPlugin extends JavaPlugin {
         // #170: effect boss bars count down every 5 ticks; #169: blackouts end on time, mirrors follow each second.
         getServer().getScheduler().runTaskTimer(this, enchantmentRuntime.effectBossBars()::tick, 5L, 5L);
         getServer().getScheduler().runTaskTimer(this, enchantmentRuntime.nameTagBlackout()::tick, 20L, 20L);
+        // #211: the invisible ability users' equipment mask is sent again every 10 ticks as a safety net.
+        getServer().getScheduler().runTaskTimer(this, enchantmentRuntime.invisibleEquipment()::tick, 10L, 10L);
         if (freezeFlightGuard != null) {
             var guard = freezeFlightGuard;
             var source = net.knightsandkings.knk.core.freeze.FreezeFlightLedger.Source.ENCHANTMENT;
