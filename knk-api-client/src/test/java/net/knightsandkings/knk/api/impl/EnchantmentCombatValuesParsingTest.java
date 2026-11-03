@@ -28,7 +28,10 @@ class EnchantmentCombatValuesParsingTest {
                "abilityDefinition":{"id":3,"enchantmentDefinitionId":7,"abilityKey":"freeze","runtimeConfigJson":"{}"},
                "procChancePercent":10,"procChancePerLevelPercent":5,"cooldownEnabled":true,"cooldownSeconds":20,
                "effectDurationSeconds":1.5,"levelMultiplier":0.5},
-              {"id":8,"key":"poison","displayName":"Poison","isCustom":true,"maxLevel":3}
+              {"id":8,"key":"poison","displayName":"Poison","isCustom":true,"maxLevel":3},
+              {"id":9,"key":"flash_chaos","displayName":"Flash Chaos","isCustom":true,"maxLevel":1,
+               "procChancePercent":null,"procChancePerLevelPercent":null,"cooldownEnabled":true,"cooldownSeconds":90,
+               "effectDurationSeconds":5,"levelMultiplier":0,"effectLevel":2,"secondaryEffectDurationSeconds":12.5}
             ]
             """;
 
@@ -39,7 +42,7 @@ class EnchantmentCombatValuesParsingTest {
 
         List<EnchantmentTuningOverride> overrides = EnchantmentDefinitionsQueryApiImpl.toOverrides(dtos);
 
-        assertEquals(2, overrides.size());
+        assertEquals(3, overrides.size());
         EnchantmentTuningOverride freeze = overrides.get(0);
         assertEquals("freeze", freeze.key());
         assertEquals(10.0d, freeze.procChancePercent());
@@ -53,6 +56,14 @@ class EnchantmentCombatValuesParsingTest {
         assertEquals("poison", poison.key());
         assertNull(poison.procChancePercent());
         assertTrue(poison.isEmpty());
+        assertNull(freeze.effectLevel());
+        assertNull(freeze.secondaryEffectDurationSeconds());
+
+        // PandiO/knk-workspace#201: Flash Chaos's Slowness level and Nausea duration.
+        EnchantmentTuningOverride flash = overrides.get(2);
+        assertEquals(2, flash.effectLevel());
+        assertEquals(12.5d, flash.secondaryEffectDurationSeconds());
+        assertEquals(5.0d, flash.effectDurationSeconds());
     }
 
     @Test

@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.enchantment.effects.impl;
 
+import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuning;
 import net.knightsandkings.knk.paper.enchantment.GateAreaDamage;
 import net.knightsandkings.knk.paper.enchantment.effects.SupportEnchantmentEffect;
 import net.knightsandkings.knk.paper.regions.CombatSafezoneCheck;
@@ -23,8 +24,6 @@ public class FlashChaosEffect extends SupportEnchantmentEffect {
     private static final double DAMAGE_RADIUS = 3.0d;
     private static final double EFFECT_RADIUS = 5.0d;
     private static final double DAMAGE_AMOUNT = 60.0d;
-    static final int SLOWNESS_TICKS = 100;
-    static final int NAUSEA_TICKS = 250;
 
     private final CombatSafezoneCheck safezones;
     private final Supplier<GateAreaDamage> gateAreaDamage;
@@ -50,6 +49,9 @@ public class FlashChaosEffect extends SupportEnchantmentEffect {
 
     @Override
     protected void applyEffect(ItemStack item, Player player, int level) {
+        // #201: the Slowness (duration + effect level) and Nausea (second duration) are combat values (#151), read per
+        // activation; built-in Slowness I 5 s and Nausea 12.5 s. The bars below follow the same numbers.
+        Debuffs debuffs = Debuffs.of(tuning(), level);
         Location playerLocation = player.getLocation();
         player.setFireTicks(0);
         playSound(playerLocation, Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 1.0f, 1.0f);
@@ -72,15 +74,33 @@ public class FlashChaosEffect extends SupportEnchantmentEffect {
 
             applyKnockback(player, livingEntity);
             if (livingEntity instanceof Player targetPlayer) {
-                targetPlayer.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, SLOWNESS_TICKS, 0));
-                targetPlayer.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, NAUSEA_TICKS, 1));
-                display().debuff(targetPlayer, "slowness", "Slowness", PotionEffectType.SLOWNESS, SLOWNESS_TICKS);
-                display().debuff(targetPlayer, "nausea", "Nausea", PotionEffectType.NAUSEA, NAUSEA_TICKS);
+                if (debuffs.slownessTicks() > 0) {
+                    targetPlayer.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, debuffs.slownessTicks(),
+                            debuffs.slownessAmplifier()));
+                    display().debuff(targetPlayer, "slowness", "Slowness", PotionEffectType.SLOWNESS, debuffs.slownessTicks());
+                }
+                if (debuffs.nauseaTicks() > 0) {
+                    targetPlayer.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, debuffs.nauseaTicks(),
+                            NAUSEA_AMPLIFIER));
+                    display().debuff(targetPlayer, "nausea", "Nausea", PotionEffectType.NAUSEA, debuffs.nauseaTicks());
+                }
                 // #169 round 2 (developer, 2026-10-27): no name-tag blackout here any more; only blindness hides tags.
             }
         }
 
         gateAreaDamage.get().damageGatesAround(player, playerLocation, DAMAGE_AMOUNT);
+    }
+
+    /**
+     * Nausea II, as before #201. The amplifier isn't a combat value: the game draws Nausea the same at every level.
+     */
+    static final int NAUSEA_AMPLIFIER = 1;
+
+    /** The debuffs one activation puts on players in range; a duration of 0 leaves that debuff out. */
+    record Debuffs(int slownessTicks, int slownessAmplifier, int nauseaTicks) {
+        static Debuffs of(EnchantmentTuning tuning, int level) {
+            return new Debuffs(tuning.durationTicksAt(level), tuning.effectAmplifier(), tuning.secondaryDurationTicksAt(level));
+        }
     }
 
     private boolean callDamageEventAndApply(Player attacker, LivingEntity target, double damage) {

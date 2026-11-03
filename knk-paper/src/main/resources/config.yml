@@ -786,6 +786,8 @@ custom-enchantments:
     cmd-info-line: "&7- &f%name% %level% &8(id: %id%) &7cooldown: %cooldown%s"
     cmd-info-none: "&7No custom enchantments found on held item."
     cmd-info-tuning: "&8   chance %chance%%, duration %duration%s, cooldown %cooldownSetting%"
+    # PandiO/knk-workspace#201: only for an enchantment with an effect level or a second effect (Flash Chaos: Slowness level, Nausea).
+    cmd-info-tuning-effects: "&8   effect level %effectLevel%, second effect %secondDuration%s"
     ench-use: "&cYou cannot use %enchantment%."
 
 # Cache configuration

@@ -1746,6 +1746,12 @@ public class KnKPlugin extends JavaPlugin {
             new net.knightsandkings.knk.core.roads.route.EtaEstimator(navigation.sessionParameters().sprintSpeed()));
         // KNG-74: the arrow keeps off the action bar while a domain-access refusal there is fresh.
         hud.yieldActionBarWhile(uuid -> domainAccess != null && domainAccess.holdsActionBar(uuid));
+        // #202: the navigation bar stays on top of the effect and cooldown bars (the enchantments start later).
+        hud.afterBarShown(player -> {
+            if (enchantmentRuntime != null) {
+                enchantmentRuntime.effectBossBars().reshowBelow(player);
+            }
+        });
         // KNG-76: the route trail keeps to the middle of the road (road cells = the profiles' floor materials);
         // KNG-110: of its free part, where a region the player may not enter covers part of the road
         var trailRegions = regionTracker.regionIds();
