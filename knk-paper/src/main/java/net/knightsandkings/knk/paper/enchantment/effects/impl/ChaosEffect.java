@@ -99,7 +99,7 @@ public class ChaosEffect extends SupportEnchantmentEffect {
             return false;
         }
 
-        target.damage(damageEvent.getFinalDamage(), attacker);
+        damageAsAbility(target, damageEvent.getFinalDamage(), attacker); // #222: names the ability in a death message
         return true;
     }
 

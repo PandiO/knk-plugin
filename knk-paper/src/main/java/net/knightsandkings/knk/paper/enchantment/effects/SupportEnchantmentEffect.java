@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.enchantment.effects;
 
+import net.knightsandkings.knk.core.domain.enchantment.AreaKillAttribution;
 import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuning;
 import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuningTable;
 import net.knightsandkings.knk.paper.enchantment.display.EffectDisplay;
@@ -48,6 +49,16 @@ public abstract class SupportEnchantmentEffect implements EnchantmentEffect {
     /** This ability's current combat values (PandiO/knk-workspace#151); right-click abilities don't roll a chance. */
     protected final EnchantmentTuning tuning() {
         return EnchantmentTuningTable.getInstance().get(enchantmentId);
+    }
+
+    /**
+     * Damages {@code target} with {@code attacker} as the source, recorded as this ability's hit
+     * (PandiO/knk-workspace#222): if the target dies of it, the death message names the ability and the attacker.
+     */
+    protected final void damageAsAbility(LivingEntity target, double damage, Player attacker) {
+        AreaKillAttribution.getInstance().during(target.getUniqueId(),
+                new AreaKillAttribution.Hit(enchantmentId, attacker.getUniqueId(), attacker.getName()),
+                () -> target.damage(damage, attacker));
     }
 
     protected final void runOnMainThread(Runnable runnable) {
