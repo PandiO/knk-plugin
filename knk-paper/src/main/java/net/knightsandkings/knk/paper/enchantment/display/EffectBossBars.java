@@ -16,6 +16,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -25,6 +26,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
+import java.util.function.ToLongBiFunction;
 import java.util.function.ToLongFunction;
 
 /**
@@ -37,6 +39,9 @@ import java.util.function.ToLongFunction;
  * stronger copy from elsewhere moves or ends it), the freeze bar reads {@code FrozenPlayerTracker}. Timed bars go on
  * death; every bar goes on quit (a staff freeze comes back on the next join through {@code AdminFreezeManager}).
  * Also forwards {@link #hideNameTags} to the {@link NameTagBlackout}. Main thread.
+ * <p>
+ * Also the grey ability cooldown bars of PandiO/knk-workspace#202 ({@code Flash Chaos cooldown · 1:28}) for the
+ * player who used the ability, fed by {@link net.knightsandkings.knk.paper.enchantment.CooldownBarCooldownManager}.
  */
 public final class EffectBossBars implements EffectDisplay, Listener {
 
@@ -45,6 +50,11 @@ public final class EffectBossBars implements EffectDisplay, Listener {
     public static final String FROZEN_LABEL = "Frozen";
     /** Who froze the player when it isn't known (console, vanished staff, a restart, the web app). */
     public static final String UNKNOWN_FREEZER = "staff";
+    /**
+     * Key prefix of an ability cooldown bar (PandiO/knk-workspace#202): {@code cooldown:flash_chaos}. These bars stay
+     * through death (the cooldown keeps running) and follow the cooldown store, see {@link #cooldownsFrom}.
+     */
+    public static final String COOLDOWN_PREFIX = "cooldown:";
     /** Longest reason shown on the staff freeze bar before it is cut with an ellipsis. */
     static final int MAX_REASON_LENGTH = 60;
 
@@ -52,8 +62,10 @@ public final class EffectBossBars implements EffectDisplay, Listener {
     private final Map<UUID, Map<String, BossBar>> bars = new ConcurrentHashMap<>();
     private final Map<UUID, Map<String, Function<Player, PotionEffect>>> potions = new ConcurrentHashMap<>();
     private final Map<String, ToLongFunction<UUID>> remainingSources = new ConcurrentHashMap<>();
+    private volatile ToLongBiFunction<UUID, String> cooldownRemaining;
     private final NameTagBlackout blackout;
     private volatile InvisibleNameTag invisibleNameTag;
+    private volatile InvisibleEquipment invisibleEquipment;
     private final Function<UUID, Player> players;
     private final LongSupplier clock;
 
@@ -75,6 +87,46 @@ public final class EffectBossBars implements EffectDisplay, Listener {
         if (key != null && source != null) {
             remainingSources.put(key, source);
         }
+    }
+
+    /**
+     * Where the cooldown bars read the real remaining cooldown (ms, 0 = ready) of a player and ability, so a cleared or
+     * re-applied cooldown moves or ends the bar on the next {@link #tick} (#202).
+     */
+    public void cooldownsFrom(ToLongBiFunction<UUID, String> remaining) {
+        this.cooldownRemaining = remaining;
+    }
+
+    /**
+     * #202: the player used an ability that is now on cooldown for {@code durationMs}: a bar {@code label · 1:30}
+     * counting down. The same ability again restarts its bar. Main thread.
+     */
+    public void cooldown(UUID playerId, String abilityId, String label, long durationMs) {
+        if (playerId == null || abilityId == null || durationMs <= 0L) {
+            return;
+        }
+        long now = clock.getAsLong();
+        board.startTimed(playerId, COOLDOWN_PREFIX + abilityId, label, durationMs, now);
+        Player player = players.apply(playerId);
+        if (player != null) {
+            render(player, now);
+        }
+    }
+
+    /** #202: every cooldown bar of the player goes ({@code /ce cooldown clear}). Main thread. */
+    public void clearCooldowns(UUID playerId) {
+        if (playerId == null) {
+            return;
+        }
+        board.endWhere(playerId, EffectBossBars::isCooldown);
+        Player player = players.apply(playerId);
+        if (player != null) {
+            render(player, clock.getAsLong());
+        }
+    }
+
+    public static boolean isCooldown(String key) {
+        return key != null && key.startsWith(COOLDOWN_PREFIX);
     }
 
     @Override
@@ -120,11 +172,23 @@ public final class EffectBossBars implements EffectDisplay, Listener {
         this.invisibleNameTag = invisibleNameTag;
     }
 
+    /** Where {@link #invisible} hides armour and held items (#211); none until set. */
+    public void setInvisibleEquipment(InvisibleEquipment invisibleEquipment) {
+        this.invisibleEquipment = invisibleEquipment;
+    }
+
     @Override
     public void invisible(LivingEntity invoker, int durationTicks) {
+        if (!(invoker instanceof Player player) || durationTicks <= 0) {
+            return;
+        }
         InvisibleNameTag target = invisibleNameTag;
-        if (target != null && invoker instanceof Player player && durationTicks > 0) {
+        if (target != null) {
             target.invisible(player);
+        }
+        InvisibleEquipment equipment = invisibleEquipment;
+        if (equipment != null) {
+            equipment.hide(player);
         }
     }
 
@@ -181,6 +245,27 @@ public final class EffectBossBars implements EffectDisplay, Listener {
         return board.has(playerId, key);
     }
 
+    /**
+     * Moves the player's bars below a bar shown after them (#202, developer 2026-11-03: the navigation bar stays on
+     * top). The client stacks boss bars in the order they were shown, so hiding and showing them again puts them at
+     * the bottom, in board order. Main thread.
+     */
+    public void reshowBelow(Player player) {
+        Map<String, BossBar> own = bars.get(player.getUniqueId());
+        if (own == null || own.isEmpty()) {
+            return;
+        }
+        List<BossBar> ordered = new ArrayList<>();
+        for (View view : board.views(player.getUniqueId(), clock.getAsLong())) {
+            BossBar bar = own.get(view.key());
+            if (bar != null) {
+                ordered.add(bar);
+            }
+        }
+        ordered.forEach(player::hideBossBar);
+        ordered.forEach(player::showBossBar);
+    }
+
     /** Plugin disable: hide every bar. */
     public void hideAll() {
         for (UUID id : Set.copyOf(bars.keySet())) {
@@ -199,7 +284,8 @@ public final class EffectBossBars implements EffectDisplay, Listener {
     @EventHandler(priority = EventPriority.MONITOR)
     public void onDeath(PlayerDeathEvent event) {
         Player player = event.getEntity();
-        board.endTimed(player.getUniqueId());
+        // #202: the ability cooldowns keep running through death, so their bars stay.
+        board.endTimed(player.getUniqueId(), key -> !isCooldown(key));
         potions.remove(player.getUniqueId());
         render(player, clock.getAsLong());
     }
@@ -232,6 +318,11 @@ public final class EffectBossBars implements EffectDisplay, Listener {
             ToLongFunction<UUID> source = remainingSources.get(key);
             if (source != null) {
                 board.sync(id, key, source.applyAsLong(id), now);
+                continue;
+            }
+            ToLongBiFunction<UUID, String> cooldowns = cooldownRemaining;
+            if (cooldowns != null && isCooldown(key)) {
+                board.sync(id, key, cooldowns.applyAsLong(id, key.substring(COOLDOWN_PREFIX.length())), now);
             }
         }
     }
@@ -298,6 +389,10 @@ public final class EffectBossBars implements EffectDisplay, Listener {
     }
 
     static BossBar.Color barColor(String key) {
+        if (isCooldown(key)) {
+            // #202 (developer, 2026-11-03): grey cooldown bars; WHITE is the closest boss-bar colour to grey.
+            return BossBar.Color.WHITE;
+        }
         return switch (key) {
             case STAFF_FREEZE -> BossBar.Color.RED;
             case "freeze" -> BossBar.Color.BLUE;
@@ -309,6 +404,9 @@ public final class EffectBossBars implements EffectDisplay, Listener {
     }
 
     static NamedTextColor textColor(String key) {
+        if (isCooldown(key)) {
+            return NamedTextColor.GRAY;
+        }
         return switch (key) {
             case STAFF_FREEZE -> NamedTextColor.RED;
             case "freeze" -> NamedTextColor.AQUA;

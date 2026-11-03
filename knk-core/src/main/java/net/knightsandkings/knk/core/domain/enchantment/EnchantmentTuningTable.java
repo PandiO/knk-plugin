@@ -51,7 +51,8 @@ public final class EnchantmentTuningTable {
         map.put("strength", new EnchantmentTuning(0.15d, 0.15d, true, 120_000L, 300, 0.0d));
         // Right-click abilities, unchanged: always go off, cooldown per player.
         map.put("chaos", new EnchantmentTuning(1.0d, 0.0d, true, 90_000L, 0, 0.0d));
-        map.put("flash_chaos", new EnchantmentTuning(1.0d, 0.0d, true, 90_000L, 0, 0.0d));
+        // #201: Slowness I for 5 s (duration + effect level) and Nausea for 12.5 s (second duration), as before.
+        map.put("flash_chaos", new EnchantmentTuning(1.0d, 0.0d, true, 90_000L, 100, 0.0d, 1, 250));
         map.put("health_boost", new EnchantmentTuning(1.0d, 0.0d, true, 120_000L, 0, 0.0d));
         map.put("armor_repair", new EnchantmentTuning(1.0d, 0.0d, true, 120_000L, 0, 0.0d));
         map.put("resistance", new EnchantmentTuning(1.0d, 0.0d, true, 120_000L, 200, 0.5d));
@@ -145,7 +146,9 @@ public final class EnchantmentTuningTable {
                 o.cooldownEnabled(),
                 o.cooldownSeconds() == null ? null : Math.max(0, Math.min(86_400, o.cooldownSeconds())),
                 clamp(o.effectDurationSeconds(), 0.0d, 3_600.0d),
-                clamp(o.levelMultiplier(), 0.0d, 10.0d)
+                clamp(o.levelMultiplier(), 0.0d, 10.0d),
+                o.effectLevel() == null ? null : Math.max(1, Math.min(EnchantmentTuning.MAX_EFFECT_LEVEL, o.effectLevel())),
+                clamp(o.secondaryEffectDurationSeconds(), 0.0d, 3_600.0d)
         );
     }
 

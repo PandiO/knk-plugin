@@ -51,6 +51,19 @@ class NavigationHudTest {
     }
 
     @Test
+    void afterTheBarIsFirstShownTheOtherBarsMoveBelowIt_OnceOnly() {
+        Player player = mock(Player.class);
+        when(player.getUniqueId()).thenReturn(UUID.randomUUID());
+        java.util.List<Player> moved = new java.util.ArrayList<>();
+        hud.afterBarShown(moved::add);
+
+        hud.update(player, "Kardenna", 340, 0.2);
+        hud.update(player, "Kardenna", 300, 0.3);
+
+        assertEquals(java.util.List.of(player), moved);
+    }
+
+    @Test
     void theBossBarIsShownOnceUpdatedInPlaceAndHiddenOnEnd() {
         Player player = mock(Player.class);
         UUID id = UUID.randomUUID();
