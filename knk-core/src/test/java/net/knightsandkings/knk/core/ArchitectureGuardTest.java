@@ -26,6 +26,7 @@ class ArchitectureGuardTest {
 
     /** Packages that must stay Bukkit-free as a whole (scanned recursively; absent until built). */
     private static final List<String> BUKKIT_FREE_PACKAGES = List.of(
+        "npc",
         "roads",
         "navigation",
         "domain/roads",
