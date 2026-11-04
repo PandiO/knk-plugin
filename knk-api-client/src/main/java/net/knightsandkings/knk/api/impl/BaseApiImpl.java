@@ -132,9 +132,10 @@ public class BaseApiImpl {
      * they never go to the log: the code in a {@code validate-link-code/{code}} URL is replaced, and the
      * bodies of link-code calls (a generated code comes back in the response) are not logged. The same holds for
      * admission checks ({@code Admission/{uuid}}), whose answer carries a claim code (invitations, KNG-214).
+     * World-task codes in a {@code WorldTasks/by-link-code/{code}} URL are replaced too (PandiO/knk-workspace#180).
      */
     private static final Pattern LINK_CODE_IN_PATH =
-        Pattern.compile("(?i)(/validate-link-code/)[^/?#]+");
+        Pattern.compile("(?i)(/validate-link-code/|/WorldTasks/by-link-code/)[^/?#]+");
     private static final Pattern LINK_CODE_CALL =
         Pattern.compile("(?i)/(generate|validate)-link-code(/|\\?|$)|/Admission/");
 

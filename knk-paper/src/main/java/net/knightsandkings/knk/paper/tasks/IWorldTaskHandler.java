@@ -43,4 +43,17 @@ public interface IWorldTaskHandler {
      * @return The task ID, or null if not handling a task
      */
     Integer getTaskId(Player player);
+
+    /**
+     * PandiO/knk-workspace#180: whether this player (by UUID) holds a task here. Thread-safe: the chat listener asks it on
+     * the async chat thread before it hops to the main thread. Handlers whose session lives only inside
+     * {@link #startTask} (ItemScan, KitScan) hold nothing.
+     */
+    default boolean isHandling(java.util.UUID playerId) {
+        return false;
+    }
+
+    /** #180: where an in-game {@code cancel} (hand back) or {@code discard} is reported. Set by the registry. */
+    default void setLifecycle(WorldTaskLifecycle lifecycle) {
+    }
 }
