@@ -5,6 +5,7 @@ import net.knightsandkings.knk.api.dto.ClaimTaskDto;
 import net.knightsandkings.knk.api.dto.WorldTaskDto;
 import net.knightsandkings.knk.api.realtime.RealtimeEnvelope;
 import net.knightsandkings.knk.api.realtime.WorldTaskEvents;
+import net.knightsandkings.knk.core.domain.permissions.PermissionDecision;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
 import net.knightsandkings.knk.paper.tasks.WorldTaskHandlerRegistry;
@@ -32,6 +33,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
@@ -299,5 +302,75 @@ class WorldTaskRealtimeSyncTest {
         assertEquals("was handed back.", WorldTaskRealtimeSync.stopMessage("Pending", null));
         assertEquals("2 min", WorldTaskRealtimeSync.formatDuration(120));
         assertEquals("45 s", WorldTaskRealtimeSync.formatDuration(45));
+    }
+
+    // ---- PandiO/knk-workspace#239: knk.tasks through the knk permission model ----
+
+    @Test
+    void nonOpStaff_WithTheNodeFromTheirGroup_GetsTheAcceptDeclineOffer() {
+        when(steve.hasPermission("knk.tasks")).thenReturn(false); // Bukkit doesn't see group grants
+        sync.setAccessCheck(player -> CompletableFuture.completedFuture(PermissionDecision.ALLOWED));
+
+        send(WorldTaskEvents.WORLD_TASK_OFFERED, offer(21, "accept"));
+
+        assertTrue(answers.isEmpty());
+        assertTrue(sync.openOffers().containsKey(21));
+    }
+
+    @Test
+    void nonOpStaff_WithTheNodeFromTheirGroup_IsAutoClaimed() {
+        when(steve.hasPermission("knk.tasks")).thenReturn(false);
+        sync.setAccessCheck(player -> CompletableFuture.completedFuture(PermissionDecision.ALLOWED));
+        when(api.claim(eq(22), any(ClaimTaskDto.class))).thenReturn(CompletableFuture.completedFuture(claimed(22)));
+
+        send(WorldTaskEvents.WORLD_TASK_OFFERED, offer(22, "auto-claim"));
+
+        verify(api).claim(eq(22), any(ClaimTaskDto.class));
+        assertEquals(1, started.size());
+    }
+
+    @Test
+    void refused_AnswersNoPermission_AndTellsThePlayerWhy() {
+        sync.setAccessCheck(player -> CompletableFuture.completedFuture(PermissionDecision.DENIED));
+
+        send(WorldTaskEvents.WORLD_TASK_OFFERED, offer(23, "accept"));
+
+        assertEquals("no-permission", lastResult());
+        verify(steve).sendMessage(argThat((String text) -> text.contains("Alice tried to send you a task")
+            && text.contains("knk.tasks")));
+        assertFalse(sync.openOffers().containsKey(23));
+    }
+
+    @Test
+    void checkUnavailable_AnswersUnavailable_NotNoPermission() {
+        sync.setAccessCheck(player -> CompletableFuture.completedFuture(PermissionDecision.UNAVAILABLE));
+
+        send(WorldTaskEvents.WORLD_TASK_OFFERED, offer(24, "auto-claim"));
+
+        assertEquals("unavailable", lastResult());
+        verify(steve).sendMessage(argThat((String text) -> text.contains("can't be checked right now")));
+        verify(api, never()).claim(anyInt(), any(ClaimTaskDto.class));
+    }
+
+    @Test
+    void checkThatFails_CountsAsUnavailable() {
+        sync.setAccessCheck(player -> CompletableFuture.failedFuture(new IllegalStateException("boom")));
+
+        send(WorldTaskEvents.WORLD_TASK_OFFERED, offer(25, "accept"));
+
+        assertEquals("unavailable", lastResult());
+    }
+
+    @Test
+    void playerWhoLeftWhileTheCheckRan_IsOffline() {
+        CompletableFuture<PermissionDecision> pending = new CompletableFuture<>();
+        sync.setAccessCheck(player -> pending);
+        send(WorldTaskEvents.WORLD_TASK_OFFERED, offer(26, "accept"));
+        assertTrue(answers.isEmpty());
+
+        when(steve.isOnline()).thenReturn(false);
+        pending.complete(PermissionDecision.ALLOWED);
+
+        assertEquals("offline", lastResult());
     }
 }

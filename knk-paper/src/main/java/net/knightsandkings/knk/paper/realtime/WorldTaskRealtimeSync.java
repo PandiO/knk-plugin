@@ -8,6 +8,7 @@ import net.knightsandkings.knk.api.dto.ClaimTaskDto;
 import net.knightsandkings.knk.api.dto.WorldTaskDto;
 import net.knightsandkings.knk.api.realtime.RealtimeEnvelope;
 import net.knightsandkings.knk.api.realtime.WorldTaskEvents;
+import net.knightsandkings.knk.core.domain.permissions.PermissionDecision;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
 import net.knightsandkings.knk.paper.tasks.WorldTaskApiErrors;
 import net.knightsandkings.knk.paper.tasks.WorldTaskHandlerRegistry;
@@ -21,6 +22,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.function.BiPredicate;
@@ -34,8 +36,10 @@ import java.util.logging.Logger;
  * <ul>
  *   <li>{@code WorldTaskOffered}, mode {@code auto-claim} (the player pressed "Send to Minecraft"): checks the player is
  *       here, holds {@value #TASKS_PERMISSION} and has no task open; then claims it (claim mode {@code offer}) and starts
- *       its handler. Otherwise it answers {@code offline}, {@code no-permission} or {@code busy}
- *       ({@code WorldTaskOfferResult}); the web app shows the task code or the busy choices.</li>
+ *       its handler. Otherwise it answers {@code offline}, {@code no-permission}, {@code unavailable} or {@code busy}
+ *       ({@code WorldTaskOfferResult}); the web app shows the task code or the busy choices. PandiO/knk-workspace#239:
+ *       {@value #TASKS_PERMISSION} is checked like a command's node ({@link AccessCheck}: Bukkit or the knk permission
+ *       model), and a refused player is told why in chat.</li>
  *   <li>mode {@code accept} ("Hand off to…" from someone else): a clickable {@code [Accept] [Decline]} line
  *       ({@code /knk task accept|decline <id>}); no answer within the offer's timeout (2 min) is {@code timed-out}.</li>
  *   <li>{@code WorldTaskCancelled}: the handler of a task this server holds stops at once (cancelled in the web app,
@@ -47,6 +51,18 @@ import java.util.logging.Logger;
  */
 public final class WorldTaskRealtimeSync implements WorldTaskHandlerRegistry.OfferResponder {
     public static final String TASKS_PERMISSION = "knk.tasks";
+
+    /**
+     * PandiO/knk-workspace#239: whether a player may take world tasks ({@value #TASKS_PERMISSION}). The plugin wires Bukkit
+     * <em>or</em> {@code KnkPermissible.checkAsync} (group grants made in the web app, as for commands); the default is
+     * Bukkit only. Never completes exceptionally; {@link PermissionDecision#UNAVAILABLE} when it can't be asked.
+     */
+    public interface AccessCheck {
+        CompletableFuture<PermissionDecision> check(Player player);
+
+        AccessCheck BUKKIT_ONLY = player -> CompletableFuture.completedFuture(
+            player.hasPermission(TASKS_PERMISSION) ? PermissionDecision.ALLOWED : PermissionDecision.DENIED);
+    }
 
     /** Schedules work on the main thread after a delay. */
     public interface Scheduler {
@@ -75,6 +91,7 @@ public final class WorldTaskRealtimeSync implements WorldTaskHandlerRegistry.Off
     private final Clock clock;
     private final Logger logger;
     private final Map<Integer, Offer> offers = new ConcurrentHashMap<>();
+    private volatile AccessCheck access = AccessCheck.BUKKIT_ONLY;
 
     /**
      * @param worldTasksApi the lease-tracking API (a claim is held and heartbeated)
@@ -98,6 +115,11 @@ public final class WorldTaskRealtimeSync implements WorldTaskHandlerRegistry.Off
         this.logger = logger;
     }
 
+    /** #239: how {@value #TASKS_PERMISSION} is checked (default: Bukkit only). */
+    public void setAccessCheck(AccessCheck access) {
+        this.access = access == null ? AccessCheck.BUKKIT_ONLY : access;
+    }
+
     /** Registers the handlers (before the client starts) and the Accept/Decline responder. */
     public void register(RealtimeDispatcher dispatcher) {
         dispatcher.register(WorldTaskEvents.WORLD_TASK_OFFERED, 1, mainThread, this::onOffered);
@@ -116,14 +138,41 @@ public final class WorldTaskRealtimeSync implements WorldTaskHandlerRegistry.Off
         }
         int taskId = event.taskId();
         UUID uuid = event.uuid();
+        Player player = players.apply(uuid);
+        if (player == null || !player.isOnline()) {
+            answer(taskId, uuid, "offline");
+            return;
+        }
+        CompletableFuture<PermissionDecision> decision;
+        try {
+            decision = access.check(player);
+        } catch (RuntimeException error) {
+            decision = CompletableFuture.failedFuture(error);
+        }
+        decision.whenComplete((answer, error) -> mainThread.execute(() ->
+            onOfferChecked(event, error == null && answer != null ? answer : PermissionDecision.UNAVAILABLE)));
+    }
+
+    /** The rest of {@link #onOffered} once {@value #TASKS_PERMISSION} is known (main thread). */
+    private void onOfferChecked(WorldTaskEvents.Offered event, PermissionDecision decision) {
+        int taskId = event.taskId();
+        UUID uuid = event.uuid();
         String label = event.label();
         Player player = players.apply(uuid);
         if (player == null || !player.isOnline()) {
             answer(taskId, uuid, "offline");
             return;
         }
-        if (!player.hasPermission(TASKS_PERMISSION)) {
+        if (decision == PermissionDecision.DENIED) {
+            player.sendMessage(ChatColor.YELLOW + "[WorldTask] " + sender(event) + " tried to send you a task (" + label
+                + "), but you don't have world-task access in game (" + TASKS_PERMISSION + "). Ask an admin for it.");
             answer(taskId, uuid, "no-permission");
+            return;
+        }
+        if (decision != PermissionDecision.ALLOWED) {
+            player.sendMessage(ChatColor.YELLOW + "[WorldTask] A task from the web app (" + label + ") could not start: "
+                + "your world-task access can't be checked right now. The web app shows its task code.");
+            answer(taskId, uuid, "unavailable");
             return;
         }
         if (registry.isHandling(uuid) || hasOtherOffer(uuid, taskId)) {
@@ -144,6 +193,11 @@ public final class WorldTaskRealtimeSync implements WorldTaskHandlerRegistry.Off
 
         player.sendMessage(ChatColor.AQUA + "[WorldTask] Task from the web app: " + ChatColor.WHITE + label);
         claim(player, taskId, label);
+    }
+
+    private static String sender(WorldTaskEvents.Offered event) {
+        String from = event.fromUsername();
+        return from == null || from.isBlank() || event.autoClaim() ? "The web app" : from;
     }
 
     void onCancelled(RealtimeEnvelope envelope) {

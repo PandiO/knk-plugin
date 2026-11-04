@@ -2297,6 +2297,15 @@ public class KnKPlugin extends JavaPlugin {
                 this, worldTasksApi, worldTaskHandlerRegistry, player, claimed),
             (delay, task) -> org.bukkit.Bukkit.getScheduler().runTaskLater(this, task, Math.max(1L, delay.toMillis() / 50L)),
             java.time.Clock.systemUTC(), getLogger());
+        // PandiO/knk-workspace#239: knk.tasks like a command's node: Bukkit (ops, default: op) or the knk permission model
+        // (group grants made in the web app), so non-op staff get offers too.
+        sync.setAccessCheck(player -> {
+            if (player.hasPermission(net.knightsandkings.knk.paper.realtime.WorldTaskRealtimeSync.TASKS_PERMISSION)
+                || knkPermissible == null) {
+                return net.knightsandkings.knk.paper.realtime.WorldTaskRealtimeSync.AccessCheck.BUKKIT_ONLY.check(player);
+            }
+            return knkPermissible.checkAsync(player, net.knightsandkings.knk.paper.realtime.WorldTaskRealtimeSync.TASKS_PERMISSION);
+        });
         sync.register(service.dispatcher());
         if (headlessWorldTaskPoller != null) {
             headlessWorldTaskPoller.setHubConnected(service::isConnected);
