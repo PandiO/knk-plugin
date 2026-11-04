@@ -40,6 +40,30 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
+// PandiO/knk-workspace#136: plugin.yml's version is "<base>+<commit>" (for example "0.1.0+c8232607"), so /plugins,
+// /version KnightsAndKings and the startup log show which build a server runs. The commit is the Gradle property
+// gitCommit when given (CI: -PgitCommit=<short sha>), else `git rev-parse --short HEAD`; without either (no git,
+// a source export) the version is "dev".
+val pluginBaseVersion = project.version.toString().removeSuffix("-SNAPSHOT")
+val gitShortSha: String? = providers.gradleProperty("gitCommit").orNull?.trim()?.ifEmpty { null }
+    ?: try {
+        providers.exec {
+            commandLine("git", "rev-parse", "--short", "HEAD")
+            workingDir = rootDir
+            isIgnoreExitValue = true
+        }.standardOutput.asText.get().trim().ifEmpty { null }
+    } catch (e: Exception) {
+        null // git not installed
+    }
+val pluginVersion: String = gitShortSha?.let { "$pluginBaseVersion+$it" } ?: "dev"
+
+tasks.processResources {
+    inputs.property("pluginVersion", pluginVersion)
+    filesMatching("plugin.yml") {
+        expand("pluginVersion" to pluginVersion)
+    }
+}
+
 tasks.test {
     useJUnitPlatform {
         // Skip integration tests by default during build

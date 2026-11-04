@@ -336,6 +336,9 @@ public class KnKPlugin extends JavaPlugin {
 
     @Override
     public void onEnable() {
+        // PandiO/knk-workspace#136: which build this server runs (plugin.yml version, stamped at build time).
+        getLogger().info(net.knightsandkings.knk.paper.bootstrap.PluginBuildInfo
+            .fromVersion(getPluginMeta().getVersion()).startupLine(getPluginMeta().getName()));
         try {
             // Load and validate config
             saveDefaultConfig();
