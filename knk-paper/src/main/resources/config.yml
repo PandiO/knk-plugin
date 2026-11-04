@@ -763,6 +763,17 @@ custom-enchantments:
   # in the web app (enchantment form, step "Combat values"); empty there = the plugin's built-in value. The plugin
   # re-reads them from the API this often (and at /ce reload); while the API is down the last values stay.
   tuning-refresh-minutes: 5
+  # PandiO/knk-workspace#222: the death message of a player killed by Chaos or Flash Chaos (only a death inside the
+  # ability's own hit; every other death keeps the vanilla message; a siege match still shows none). Placeholders:
+  # %victim%, %player% (who used the ability), %enchantment% (its name), %item% (the item it was used with, shown like
+  # vanilla's "using [Sword]" with its hover; " using %item%" is left out when unknown); & colour codes. Read per death.
+  death-messages:
+    enabled: true
+    default: "%victim% was killed with %enchantment% by %player% using %item%"
+    # Optional pattern per enchantment id, e.g.:
+    # overrides:
+    #   chaos: "%victim% was blown apart by %player%'s %enchantment% using %item%"
+    overrides: {}
   messages:
     cmd-help-header: "&6Custom Enchantments Commands:"
     cmd-unknown: "&cUnknown subcommand."
