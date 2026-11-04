@@ -262,7 +262,11 @@ public class EnchantmentDefinitionsQueryApiImpl implements EnchantmentDefinition
                         dto.effectDurationSeconds(),
                         dto.levelMultiplier(),
                         dto.effectLevel(),
-                        dto.secondaryEffectDurationSeconds()))
+                        dto.secondaryEffectDurationSeconds(),
+                        dto.areaDamage(),
+                        dto.gateDamage(),
+                        dto.damageRadiusBlocks(),
+                        dto.effectRadiusBlocks()))
                 .toList();
     }
 }

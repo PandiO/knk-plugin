@@ -1,5 +1,7 @@
 package net.knightsandkings.knk.paper.enchantment.effects.impl;
 
+import net.knightsandkings.knk.core.domain.enchantment.AreaBlast;
+import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuning;
 import net.knightsandkings.knk.paper.enchantment.GateAreaDamage;
 import net.knightsandkings.knk.paper.enchantment.effects.SupportEnchantmentEffect;
 import net.knightsandkings.knk.paper.regions.CombatSafezoneCheck;
@@ -20,9 +22,8 @@ import java.util.Set;
 import java.util.function.Supplier;
 
 public class ChaosEffect extends SupportEnchantmentEffect {
-    private static final double DAMAGE_RADIUS = 3.0d;
-    private static final double KNOCKBACK_RADIUS = 5.0d;
-    private static final double DAMAGE_AMOUNT = 40.0d;
+    // PandiO/knk-workspace#223: damage, gate damage and both radii are combat values (EnchantmentTuning.area()), read
+    // per activation; built-in 40 damage within 3 blocks, 40 to gates, knockback within 5.
 
     private final CombatSafezoneCheck safezones;
     private final Supplier<GateAreaDamage> gateAreaDamage;
@@ -37,7 +38,7 @@ public class ChaosEffect extends SupportEnchantmentEffect {
     }
 
     /**
-     * @param gateAreaDamage how the blast reaches gate doors in range, with this enchantment's damage; read per
+     * @param gateAreaDamage how the blast reaches gate doors in range, with this enchantment's gate damage; read per
      *                       activation because the gates start after the enchantments
      */
     public ChaosEffect(Plugin plugin, CombatSafezoneCheck safezones, Supplier<GateAreaDamage> gateAreaDamage) {
@@ -52,17 +53,27 @@ public class ChaosEffect extends SupportEnchantmentEffect {
         player.setFireTicks(0);
         playSound(playerLocation, Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 1.0f, 1.0f);
         playEffect(playerLocation.clone().add(0.0d, 1.0d, 0.0d), Effect.FIREWORK_SHOOT, 0);
+        blast(player, level);
+    }
+
+    /** The blast itself, without sound and particles: damage, knockback and gate damage around the user (#223). */
+    void blast(Player player, int level) {
+        EnchantmentTuning tuning = tuning();
+        AreaBlast blast = tuning.area();
+        double damage = tuning.areaDamageAt(level);
+        double reach = blast.reach();
+        Location playerLocation = player.getLocation();
 
         Set<LivingEntity> knockedBackEntities = new HashSet<>();
-        for (Entity nearby : player.getNearbyEntities(KNOCKBACK_RADIUS, KNOCKBACK_RADIUS, KNOCKBACK_RADIUS)) {
+        for (Entity nearby : player.getNearbyEntities(reach, reach, reach)) {
             if (!(nearby instanceof LivingEntity livingEntity) || livingEntity.getUniqueId().equals(player.getUniqueId())
                     || safezones.isProtected(player, livingEntity)) {
                 continue;
             }
 
             double distance = livingEntity.getLocation().distance(playerLocation);
-            if (distance <= DAMAGE_RADIUS) {
-                boolean damageApplied = callDamageEventAndApply(player, livingEntity, DAMAGE_AMOUNT);
+            if (damage > 0.0d && distance <= blast.damageRadius()) {
+                boolean damageApplied = callDamageEventAndApply(player, livingEntity, damage);
                 if (!damageApplied) {
                     continue;
                 }
@@ -72,7 +83,7 @@ public class ChaosEffect extends SupportEnchantmentEffect {
             knockedBackEntities.add(livingEntity);
         }
 
-        for (Entity nearby : player.getNearbyEntities(KNOCKBACK_RADIUS, KNOCKBACK_RADIUS, KNOCKBACK_RADIUS)) {
+        for (Entity nearby : player.getNearbyEntities(reach, reach, reach)) {
             if (!(nearby instanceof LivingEntity livingEntity)
                     || livingEntity.getUniqueId().equals(player.getUniqueId())
                     || knockedBackEntities.contains(livingEntity)
@@ -83,7 +94,7 @@ public class ChaosEffect extends SupportEnchantmentEffect {
             applyKnockback(player, livingEntity);
         }
 
-        gateAreaDamage.get().damageGatesAround(player, playerLocation, DAMAGE_AMOUNT);
+        gateAreaDamage.get().damageGatesAround(player, playerLocation, tuning.gateDamageAt(level));
     }
 
     protected boolean callDamageEventAndApply(Player attacker, LivingEntity target, double damage) {

@@ -122,6 +122,13 @@ public class InfoEnchantmentCommand implements EnchantmentSubcommand {
                         "&8   effect level %effectLevel%, second effect %secondDuration%s",
                         effectPlaceholders(tuning, level))));
             }
+            if (tuning.area().reach() > 0.0d) {
+                // #223: Chaos / Flash Chaos area damage, gate damage and radii.
+                sender.sendMessage(handler.colorize(handler.message(
+                        "messages.cmd-info-tuning-area",
+                        AREA_LINE_DEFAULT,
+                        areaPlaceholders(tuning, level))));
+            }
         }
 
         return true;
@@ -148,6 +155,18 @@ public class InfoEnchantmentCommand implements EnchantmentSubcommand {
         return Map.of(
                 "%effectLevel%", Integer.toString(tuning.effectLevel()),
                 "%secondDuration%", formatNumber(tuning.secondaryDurationTicksAt(level) / 20.0d));
+    }
+
+    static final String AREA_LINE_DEFAULT =
+            "&8   area damage %areaDamage% within %damageRadius% blocks, gates %gateDamage%, knockback within %effectRadius% blocks";
+
+    /** PandiO/knk-workspace#223: a blast's damage and gate damage at this level, and its radii. */
+    static Map<String, String> areaPlaceholders(EnchantmentTuning tuning, int level) {
+        return Map.of(
+                "%areaDamage%", formatNumber(tuning.areaDamageAt(level)),
+                "%gateDamage%", formatNumber(tuning.gateDamageAt(level)),
+                "%damageRadius%", formatNumber(tuning.area().damageRadius()),
+                "%effectRadius%", formatNumber(tuning.area().reach()));
     }
 
     private static String formatNumber(double value) {
