@@ -81,6 +81,15 @@ public final class RoadNetworkCache {
     private BukkitTask tileTimer;
     private BukkitTask metaTimer;
 
+    // Realtime S3 (PandiO/knk-workspace#182): the event that replaces this re-sync is pushed while the hub is connected,
+    // so the timer then runs realtime.fallback-poll-multiplier times less often (decision Q4); set before start().
+    private volatile net.knightsandkings.knk.core.realtime.FallbackPolling fallbackPolling =
+        net.knightsandkings.knk.core.realtime.FallbackPolling.never();
+
+    public void setFallbackPolling(net.knightsandkings.knk.core.realtime.FallbackPolling polling) {
+        this.fallbackPolling = polling == null ? net.knightsandkings.knk.core.realtime.FallbackPolling.never() : polling;
+    }
+
     public RoadNetworkCache(Plugin plugin, RoadNetworkQueryApi queryApi, Path roadsDirectory,
                             RegionDomainResolver regionResolver, Executor mainThread) {
         this(plugin, queryApi, new RoadTileCache(roadsDirectory), regionResolver, mainThread,
@@ -102,8 +111,8 @@ public final class RoadNetworkCache {
     /** Refreshes every loaded world now and starts the two timers. */
     public void start() {
         refreshAll();
-        tileTimer = Bukkit.getScheduler().runTaskTimer(plugin, this::refreshAllTiles, TILE_REFRESH_TICKS, TILE_REFRESH_TICKS);
-        metaTimer = Bukkit.getScheduler().runTaskTimer(plugin, this::refreshAllMeta, META_REFRESH_TICKS, META_REFRESH_TICKS);
+        tileTimer = Bukkit.getScheduler().runTaskTimer(plugin, fallbackPolling.throttle(this::refreshAllTiles), TILE_REFRESH_TICKS, TILE_REFRESH_TICKS);
+        metaTimer = Bukkit.getScheduler().runTaskTimer(plugin, fallbackPolling.throttle(this::refreshAllMeta), META_REFRESH_TICKS, META_REFRESH_TICKS);
     }
 
     public void stop() {

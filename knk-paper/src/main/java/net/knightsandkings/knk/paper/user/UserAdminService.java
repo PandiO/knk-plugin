@@ -536,10 +536,15 @@ public final class UserAdminService {
             CompletableFuture<Void> call = freezing ? api.freezeById(target.id(), reason) : api.unfreezeById(target.id());
             call.thenAccept(v -> mainThread.execute(() -> {
                 Player targetPlayer = Bukkit.getPlayerExact(target.username());
+                // The realtime UserFrozenChanged echo of this change (#179) may have applied it first: tell the
+                // player only once.
                 if (freezing) {
                     if (targetPlayer != null) {
+                        boolean wasFrozen = freezeManager.isFrozen(targetPlayer.getUniqueId());
                         freezeManager.freeze(targetPlayer.getUniqueId(), reason, freezerName(sender));
-                        targetPlayer.sendMessage(ChatColor.RED + "You have been frozen: " + reason);
+                        if (!wasFrozen) {
+                            targetPlayer.sendMessage(ChatColor.RED + "You have been frozen: " + reason);
+                        }
                     }
                     if (targetPlayer == null && target.uuid() != null) {
                         // #170: their boss bar names the freezer when they join on this server run.
@@ -548,8 +553,11 @@ public final class UserAdminService {
                     sender.sendMessage(ChatColor.GREEN + "Froze " + target.username() + (targetPlayer == null ? " (offline - takes effect on next join)." : "."));
                 } else {
                     if (targetPlayer != null) {
+                        boolean wasFrozen = freezeManager.isFrozen(targetPlayer.getUniqueId());
                         freezeManager.unfreeze(targetPlayer.getUniqueId());
-                        targetPlayer.sendMessage(ChatColor.GREEN + "You have been unfrozen.");
+                        if (wasFrozen) {
+                            targetPlayer.sendMessage(ChatColor.GREEN + "You have been unfrozen.");
+                        }
                     } else if (target.uuid() != null) {
                         freezeManager.rememberFreezer(target.uuid(), null, null);
                     }

@@ -69,6 +69,15 @@ public class WorldTaskLeases implements WorldTaskLifecycle {
         return held.containsKey(taskId);
     }
 
+    /**
+     * #181: forgets one claim the API took back and says which it was (the hub's {@code WorldTaskCancelled}: cancelled in
+     * the web app, expired, or released by the web app's "Replace"). Empty when this server didn't hold it. The caller
+     * stops the handler; {@code onLost} is not called.
+     */
+    public Optional<Held> take(int taskId) {
+        return Optional.ofNullable(held.remove(taskId));
+    }
+
     public List<Held> held() {
         return List.copyOf(held.values());
     }
@@ -114,7 +123,8 @@ public class WorldTaskLeases implements WorldTaskLifecycle {
 
     @Override
     public void handedBack(org.bukkit.entity.Player player, int taskId) {
-        release(taskId, "Handed back in game by " + player.getName());
+        // #181: on purpose, so the API doesn't offer it to them again and the web app shows the task code.
+        release(taskId, "Handed back in game by " + player.getName(), true);
     }
 
     @Override
@@ -128,8 +138,16 @@ public class WorldTaskLeases implements WorldTaskLifecycle {
 
     /** Hands one task back to Pending (it keeps its task code). */
     public CompletableFuture<Void> release(int taskId, String reason) {
+        return release(taskId, reason, false);
+    }
+
+    /** @param handBack #181: the player handed it back on purpose (in-game {@code cancel}) */
+    public CompletableFuture<Void> release(int taskId, String reason, boolean handBack) {
         held.remove(taskId);
-        return api.release(taskId, serverId, reason).handle((ok, error) -> {
+        CompletableFuture<WorldTaskDto> call = handBack
+            ? api.release(taskId, serverId, reason, true)
+            : api.release(taskId, serverId, reason);
+        return call.handle((ok, error) -> {
             if (error != null && !WorldTaskApiErrors.taskMovedOn(error)) {
                 LOGGER.warning("Releasing world task " + taskId + " failed: " + error.getMessage()
                     + " (the API releases it once its lease runs out)");

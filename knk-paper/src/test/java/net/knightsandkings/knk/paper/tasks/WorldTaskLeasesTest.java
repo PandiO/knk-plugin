@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -38,6 +39,7 @@ class WorldTaskLeasesTest {
         leases = new WorldTaskLeases(api, "survival-1");
         leases.setOnLost((held, status) -> lost.add(held.taskId() + ":" + status));
         when(api.release(anyInt(), anyString(), anyString())).thenReturn(CompletableFuture.completedFuture(null));
+        when(api.release(anyInt(), anyString(), anyString(), anyBoolean())).thenReturn(CompletableFuture.completedFuture(null));
         when(api.cancel(anyInt(), anyString())).thenReturn(CompletableFuture.completedFuture(null));
     }
 
@@ -85,9 +87,20 @@ class WorldTaskLeasesTest {
         leases.handedBack(player, 4);
         leases.discarded(player, 5);
 
-        verify(api).release(eq(4), eq("survival-1"), anyString());
+        // #181: a hand-back on purpose, so the API doesn't offer it to them again.
+        verify(api).release(eq(4), eq("survival-1"), anyString(), eq(true));
         verify(api).cancel(eq(5), anyString());
         assertTrue(leases.held().isEmpty());
+    }
+
+    @Test
+    void takeForgetsAClaimTheApiTookBack_WithoutCallingOnLost() {
+        leases.hold(20, steve, "LocationSelection");
+
+        assertEquals(steve, leases.take(20).orElseThrow().playerId());
+        assertTrue(leases.take(20).isEmpty());
+        assertFalse(leases.holds(20));
+        assertTrue(lost.isEmpty());
     }
 
     @Test

@@ -36,6 +36,11 @@ public record ClaimTaskDto(
         return new ClaimTaskDto(null, serverId, username, uuid, MODE_ID);
     }
 
+    /** #181: the player the API offered the task to (auto-claim, or Accept on a hand-off); no code needed. */
+    public static ClaimTaskDto byOffer(String serverId, String username, String uuid) {
+        return new ClaimTaskDto(null, serverId, username, uuid, MODE_OFFER);
+    }
+
     public static ClaimTaskDto headless(String serverId) {
         return new ClaimTaskDto(null, serverId, null, null, MODE_HEADLESS);
     }

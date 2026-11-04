@@ -559,7 +559,7 @@ permissions:
     default: false
 
   knk.tasks:
-    description: Access to /knk tasks, /knk task <task code> (alias task-claim), /knk task-status (world task management)
+    description: Access to /knk tasks, /knk task <task code> (alias task-claim), /knk task accept|decline <id>, /knk task-status (world task management); with the realtime channel, tasks sent from the web app are offered to holders
     default: op
 
   # PandiO/knk-workspace#180: claiming a world task by its numeric id instead of its task code (owner/rescue only;

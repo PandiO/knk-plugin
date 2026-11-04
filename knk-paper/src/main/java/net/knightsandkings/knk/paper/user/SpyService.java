@@ -50,8 +50,17 @@ public class SpyService {
      * after enable (covers players already online after a reload).
      */
     public BukkitTask start(Plugin plugin, int refreshSeconds) {
+        return start(plugin, refreshSeconds, net.knightsandkings.knk.core.realtime.FallbackPolling.never());
+    }
+
+    /**
+     * As {@link #start(Plugin, int)}, slowed by {@code polling} while the realtime hub is connected: a permission change
+     * made in the web app then reaches this audience through {@code UserPermissionsChanged} (which calls
+     * {@link #refresh}), so the timer is only the safety net (PandiO/knk-workspace#179, DESIGN §7.2).
+     */
+    public BukkitTask start(Plugin plugin, int refreshSeconds, net.knightsandkings.knk.core.realtime.FallbackPolling polling) {
         long period = Math.max(1, refreshSeconds) * 20L;
-        return plugin.getServer().getScheduler().runTaskTimer(plugin, this::refreshAll, 20L, period);
+        return plugin.getServer().getScheduler().runTaskTimer(plugin, polling.throttle(this::refreshAll), 20L, period);
     }
 
     public void refreshAll() {

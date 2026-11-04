@@ -274,6 +274,8 @@ public class KnKPlugin extends JavaPlugin {
     private final net.knightsandkings.knk.paper.worlds.KnkWorlds knkWorlds = new net.knightsandkings.knk.paper.worlds.KnkWorlds();
     private GateDisplayManager gateDisplayManager;
     private DistrictGateLoader districtGateLoader;
+    /** Realtime S3 (#182): reloads one gate structure on GateChanged. */
+    private GateLoaderAdapter gateLoaderAdapter;
     private WorldTaskHandlerRegistry worldTaskHandlerRegistry;
     private HeadlessWorldTaskPoller headlessWorldTaskPoller;
     // PandiO/knk-workspace#180: the claims this server holds (heartbeat, release on cancel/quit/disable/restart)
@@ -314,12 +316,29 @@ public class KnKPlugin extends JavaPlugin {
     /** The siege gate lockdowns (Phase 7a); read-only for road navigation (KNG-27 plan R24). Null without the gate system. */
     private net.knightsandkings.knk.paper.siege.SiegeGateController siegeGates;
     private net.knightsandkings.knk.core.siege.SiegeMatchRecorder siegeMatchRecorder;
+    /**
+     * PandiO/knk-workspace#31 / #182: the siege's startup-only API work; a step that failed at startup runs again on the
+     * next realtime (re)connect (resync step "siege startup work") until it got through.
+     */
+    private final net.knightsandkings.knk.core.realtime.PendingStartupWork siegeStartupWork =
+        new net.knightsandkings.knk.core.realtime.PendingStartupWork();
+    private net.knightsandkings.knk.paper.realtime.UserStateSync userStateSync;
+    private net.knightsandkings.knk.paper.realtime.GateRealtimeSync gateRealtimeSync;
     /** Kept for the siege gate controller (Phase 7a), which respawns doors a match destroyed. */
     private HealthSystem gateHealthSystem;
     // How area enchantments (chaos, flash_chaos) damage gate doors in range; NONE until the gates start.
     private volatile net.knightsandkings.knk.paper.enchantment.GateAreaDamage gateAreaDamage =
         net.knightsandkings.knk.paper.enchantment.GateAreaDamage.NONE;
     private net.knightsandkings.knk.paper.connectivity.ApiConnectivityMonitor apiConnectivityMonitor;
+    // Realtime channel (PandiO/knk-workspace#178): off unless realtime.enabled; counters always kept for /knk health.
+    private final net.knightsandkings.knk.core.realtime.RealtimeStats realtimeStats = new net.knightsandkings.knk.core.realtime.RealtimeStats();
+    private net.knightsandkings.knk.paper.realtime.RealtimeService realtimeService;
+    // Realtime S2 (#179): realtime.fallback-poll-multiplier, read in initializeRealtime; the periodic re-syncs the hub's
+    // events cover run this many times slower while it is connected (DESIGN §7.2, Q4).
+    private volatile int realtimePollMultiplier = net.knightsandkings.knk.core.realtime.FallbackPolling.DEFAULT_MULTIPLIER;
+    private final net.knightsandkings.knk.core.realtime.FallbackPolling fallbackPolling =
+        new net.knightsandkings.knk.core.realtime.FallbackPolling(
+            () -> realtimeService != null && realtimeService.isConnected(), () -> realtimePollMultiplier);
     private volatile boolean skipApiWhileDown = true;
     /** Kept for the siege non-member pass-through (Phase 7b, TELEPORT mode only). */
     private net.knightsandkings.knk.paper.gates.GatePassThroughService gatePassThroughService;
@@ -475,6 +494,7 @@ public class KnKPlugin extends JavaPlugin {
                 () -> getServer().getWorlds().isEmpty() ? null : getServer().getWorlds().get(0).getName(),
                 rotationKeyframesEnabled);
             gateManager.setReloadAction(() -> gateLoader.loadAll(gateStructuresApi));
+            this.gateLoaderAdapter = gateLoader;
             this.districtGateLoader = new DistrictGateLoader(gateLoader, gateStructuresApi, gateStateSyncTask);
 
             this.gateDisplayManager = new GateDisplayManager(this);
@@ -581,6 +601,7 @@ public class KnKPlugin extends JavaPlugin {
             wgRegionIdHandler.setSubRegionFinalizer((subRegionId, mainRegionId, world) ->
                 getServer().getScheduler().runTaskLater(this, () -> domainAccessSync.syncNow().exceptionally(error -> null), 100L));
             managedRegions.scheduleStartupRepair();
+            domainAccessSync.setFallbackPolling(fallbackPolling); // S3 (#182): DomainAccessChanged is pushed
             domainAccessSync.schedule();
             // KNG-112: domains from before the API stored worlds get theirs from where their regions are.
             new net.knightsandkings.knk.paper.regions.DomainWorldBackfillReporter(this, apiClient.getDomainWorldBackfillApi())
@@ -655,6 +676,8 @@ public class KnKPlugin extends JavaPlugin {
             // Promotion effects etc. for writes made through the web app (not a plugin command)
             playerNotificationPoller = new PlayerNotificationPoller(
                 apiClient.getPlayerNotificationsApi(), this);
+            // Realtime S2 (#179): no HTTP poll while the hub pushes; a drain on every (re)connect instead.
+            playerNotificationPoller.setHubConnected(fallbackPolling::connected);
             playerNotificationPoller.start();
             
             getLogger().info("WorldTaskHandlerRegistry initialized with handlers");
@@ -1191,6 +1214,9 @@ public class KnKPlugin extends JavaPlugin {
             initializeRoads();
             initializeNavigation();
 
+            // Last, so every refresh path the resync calls exists (PandiO/knk-workspace#178).
+            initializeRealtime();
+
             getLogger().info("KnightsAndKings Plugin Enabled!");
             
         } catch (Exception e) {
@@ -1218,6 +1244,10 @@ public class KnKPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (realtimeService != null) {
+            realtimeService.stop();
+            realtimeService = null;
+        }
         if (apiConnectivityMonitor != null) {
             apiConnectivityMonitor.stop();
         }
@@ -1448,6 +1478,7 @@ public class KnKPlugin extends JavaPlugin {
             telemetryEmitter, () -> getServer().getOnlinePlayers())), sampleTicks, sampleTicks);
         this.telemetryFlushTask = new net.knightsandkings.knk.paper.telemetry.TelemetryFlushTask(
             telemetryEmitter, apiClient.getTelemetryApi());
+        telemetryFlushTask.setFallbackPolling(fallbackPolling); // S3 (#182): TelemetryConfigChanged is pushed
         telemetryFlushTask.start(this, telemetryConfig.flushIntervalSeconds(), telemetryConfig.configPollSeconds());
         getLogger().info("Diagnostic telemetry started (flush every " + telemetryConfig.flushIntervalSeconds()
             + " s, buffer " + telemetryConfig.maxBufferEvents() + " events)");
@@ -1749,6 +1780,7 @@ public class KnKPlugin extends JavaPlugin {
                 .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null));
         roadSurveyService.setGateCells(world -> net.knightsandkings.knk.paper.roads.GateCellsIndex.of(gateManager, world));
 
+        roadNetworkCache.setFallbackPolling(fallbackPolling); // S3 (#182): RoadNetworkChanged is pushed
         roadNetworkCache.start();
         roadDirtyTracker.start();
         roadBuildQueue.start();
@@ -2026,7 +2058,8 @@ public class KnKPlugin extends JavaPlugin {
         this.visiblePlayers = net.knightsandkings.knk.paper.commands.support.VisiblePlayers.bukkit();
         this.spyService = new net.knightsandkings.knk.paper.user.SpyService(
             knkPermissible, new org.bukkit.NamespacedKey(this, "socialspy"), org.bukkit.Bukkit::getOnlinePlayers);
-        spyService.start(this, pmConfig.spyRefreshSeconds());
+        // Realtime S2 (#179): permission changes reach the audience as events; the timer slows down while connected.
+        spyService.start(this, pmConfig.spyRefreshSeconds(), fallbackPolling);
         this.ignoreService = new net.knightsandkings.knk.paper.user.IgnoreService(
             apiClient.getUserIgnoresApi(),
             uuid -> cacheManager.getUserCache().getStale(uuid)
@@ -2156,6 +2189,296 @@ public class KnKPlugin extends JavaPlugin {
     /** {@code api.connectivity.skip-api-while-down} (KNG-171). */
     public boolean isSkipApiWhileDownEnabled() {
         return skipApiWhileDown;
+    }
+
+    /**
+     * The realtime channel to knk-web-api's game hub (PandiO/knk-workspace#178, DESIGN §4.4). With
+     * {@code realtime.enabled: false} (the default) it only logs that it is off. On every (re)connect it sends the
+     * roster and runs these existing refresh paths, in order (P3): the {@code /knk cache refresh} hooks (permissions,
+     * item blueprints, game settings, teleport, navigation, region domains, ...), the domain access flag sync, the
+     * lootbox runtime refresh, then (S2, #179) a re-read of every online player and one drain of the notification queue.
+     */
+    private void initializeRealtime() {
+        try {
+            var settings = net.knightsandkings.knk.paper.realtime.RealtimeSettings.fromConfig(getConfig());
+            var hooks = new net.knightsandkings.knk.core.realtime.ResyncHooks();
+            if (cacheManager != null) {
+                hooks.register("cache refresh hooks", cacheManager::runRefreshHooks);
+            }
+            if (domainAccessSync != null) {
+                hooks.register("domain access flags", () -> domainAccessSync.syncNow().exceptionally(error -> null));
+            }
+            if (lootboxRuntime != null) {
+                hooks.register("lootbox runtime", () -> lootboxRuntime.refresh().exceptionally(error -> null));
+            }
+            realtimePollMultiplier = settings.fallbackPollMultiplier();
+            realtimeService = new net.knightsandkings.knk.paper.realtime.RealtimeService(this, settings,
+                config.api().baseUrl(), createAuthProvider(config.api().auth()), hooks, realtimeStats,
+                uuid -> cacheManager == null ? null
+                    : cacheManager.getUserCache().getStale(uuid).map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null));
+            registerUserStateSync(hooks);
+            registerWorldTaskSync(hooks);
+            registerConfigSync(hooks);
+            if (metricsService != null) {
+                metricsService.register(realtimeStats);
+            }
+            realtimeService.start();
+        } catch (RuntimeException e) {
+            // The channel is optional: polls and TTLs keep working without it (P5).
+            getLogger().log(java.util.logging.Level.SEVERE, "Realtime channel failed to start; polls and TTLs as before", e);
+        }
+    }
+
+    /**
+     * Realtime S2 (PandiO/knk-workspace#179, DESIGN §6.1): the user-state handlers (permissions, groups, balances,
+     * freeze, mode, user, pushed notifications) on the dispatcher, before the client starts; and two resync steps
+     * after the S1 ones: re-read every online player, then drain the notification queue once.
+     */
+    private void registerUserStateSync(net.knightsandkings.knk.core.realtime.ResyncHooks hooks) {
+        if (cacheManager == null || usersDataAccess == null) {
+            getLogger().warning("Realtime: user-state events not handled (user cache not ready)");
+            return;
+        }
+        java.util.concurrent.Executor main = runnable -> {
+            if (!isEnabled()) {
+                return;
+            }
+            if (org.bukkit.Bukkit.isPrimaryThread()) {
+                runnable.run();
+            } else {
+                org.bukkit.Bukkit.getScheduler().runTask(this, runnable);
+            }
+        };
+        var display = new net.knightsandkings.knk.paper.realtime.BukkitUserStateDisplay(
+            (player, summary) -> net.knightsandkings.knk.paper.utils.ScoreboardUtil.setScoreboard(List.of(player), knkPermissible, summary),
+            modeService, spyService, getLogger());
+        var sync = new net.knightsandkings.knk.paper.realtime.UserStateSync(main, org.bukkit.Bukkit::getPlayer,
+            org.bukkit.Bukkit::getOnlinePlayers, cacheManager.getUserCache(), usersDataAccess, permissionsDataAccess,
+            permissionGroupsDataAccess, offlineSecurity, adminFreezeManager, display,
+            playerNotificationPoller == null ? null : playerNotificationPoller::deliverPushed, getLogger());
+        sync.register(realtimeService.dispatcher());
+        this.userStateSync = sync;
+        hooks.register("online users", sync::resyncOnlinePlayers);
+        if (playerNotificationPoller != null) {
+            hooks.register("player notifications", playerNotificationPoller::drainNow);
+        }
+    }
+
+    /**
+     * WT2 (PandiO/knk-workspace#181, DESIGN §8.3–§8.4): world tasks over the hub (offers with auto-claim or Accept/Decline,
+     * cancel/withdraw, headless scans started by a push), before the client starts; the headless poll drops to its 60 s
+     * safety net while connected; and a resync step that hands back what this server held before a restart (the API
+     * offers waiting tasks again when the roster arrives).
+     */
+    private void registerWorldTaskSync(net.knightsandkings.knk.core.realtime.ResyncHooks hooks) {
+        if (worldTaskHandlerRegistry == null || worldTaskLeases == null || worldTasksApi == null) {
+            getLogger().warning("Realtime: world-task events not handled (world tasks not ready)");
+            return;
+        }
+        java.util.concurrent.Executor main = runnable -> {
+            if (!isEnabled()) {
+                return;
+            }
+            if (org.bukkit.Bukkit.isPrimaryThread()) {
+                runnable.run();
+            } else {
+                org.bukkit.Bukkit.getScheduler().runTask(this, runnable);
+            }
+        };
+        var service = realtimeService;
+        var sync = new net.knightsandkings.knk.paper.realtime.WorldTaskRealtimeSync(main, org.bukkit.Bukkit::getPlayer,
+            worldTaskHandlerRegistry, worldTasksApi, worldTaskLeases, worldTaskLeases.serverId(), service::send,
+            () -> {
+                if (headlessWorldTaskPoller != null) {
+                    headlessWorldTaskPoller.pollNow();
+                }
+            },
+            (player, claimed) -> net.knightsandkings.knk.paper.commands.KnkTaskClaimCommand.startClaimed(
+                this, worldTasksApi, worldTaskHandlerRegistry, player, claimed),
+            (delay, task) -> org.bukkit.Bukkit.getScheduler().runTaskLater(this, task, Math.max(1L, delay.toMillis() / 50L)),
+            java.time.Clock.systemUTC(), getLogger());
+        sync.register(service.dispatcher());
+        if (headlessWorldTaskPoller != null) {
+            headlessWorldTaskPoller.setHubConnected(service::isConnected);
+        }
+        hooks.register("world tasks", () -> worldTaskLeases.releaseOrphans().exceptionally(error -> 0));
+    }
+
+    /**
+     * Realtime S3 (PandiO/knk-workspace#182, DESIGN §6.2–§6.4): config and entity changes pushed from the web app call the
+     * refresh paths that exist already (gates one structure at a time, after a running match; domain access; game, siege,
+     * lootbox, teleport, navigation, road and telemetry settings; the entity caches by type); the worlds report goes over
+     * the hub while connected; and a resync step re-runs the siege's startup-only work that failed at start (#31).
+     */
+    private void registerConfigSync(net.knightsandkings.knk.core.realtime.ResyncHooks hooks) {
+        var service = realtimeService;
+        var coalescer = new net.knightsandkings.knk.core.realtime.Coalescer(
+            (delay, task) -> {
+                if (isEnabled()) {
+                    getServer().getScheduler().runTaskLater(this, task, Math.max(1L, delay.toMillis() / 50L));
+                }
+            }, java.time.Duration.ofMillis(500));
+
+        if (gateManager != null && gateLoaderAdapter != null && gateStructuresApi != null) {
+            var siegeGateLocks = siegeGates;
+            this.gateRealtimeSync = new net.knightsandkings.knk.paper.realtime.GateRealtimeSync(coalescer,
+                id -> siegeGateLocks != null && siegeGateLocks.isLocked(id),
+                this::reloadGateStructure,
+                id -> gateManager.removeStructure(id),
+                getLogger());
+        }
+
+        var cache = cacheManager;
+        var targets = new net.knightsandkings.knk.paper.realtime.ConfigRealtimeSync.Targets(
+            domainAccessSync == null ? null : () -> domainAccessSync.syncNow().exceptionally(error -> null),
+            gameSettingsManager == null ? null : gameSettingsManager::refreshNow,
+            siegeService == null ? null : siegeService::refreshFromApi,
+            lootboxRuntime == null ? null : () -> lootboxRuntime.refresh().exceptionally(error -> null),
+            cache == null ? null : () -> cache.runRefreshHooks("warp destinations", "spawn destination", "navigation destinations"),
+            cache == null ? null : () -> cache.runRefreshHooks("navigation compass settings", "navigation destinations",
+                "navigation routes"),
+            roadNetworkCache == null ? null : world -> {
+                if (world == null) {
+                    roadNetworkCache.refreshAll();
+                } else {
+                    roadNetworkCache.refreshTiles(world);
+                    roadNetworkCache.refreshMeta(world);
+                }
+            },
+            telemetryFlushTask == null ? null
+                : () -> getServer().getScheduler().runTaskAsynchronously(this, () -> telemetryFlushTask.pollConfig()));
+        new net.knightsandkings.knk.paper.realtime.ConfigRealtimeSync(coalescer, targets, entityChangeRouter(coalescer),
+            gateRealtimeSync, getLogger()).register(service.dispatcher());
+
+        if (gameSettingsManager != null) {
+            gameSettingsManager.setHubWorldsReporter((serverId, worlds) -> service.isConnected()
+                && service.send(net.knightsandkings.knk.api.realtime.ConfigEvents.REPORT_WORLDS,
+                    net.knightsandkings.knk.api.realtime.ConfigEvents.worldsReport(serverId, worlds.stream()
+                        .map(w -> net.knightsandkings.knk.api.realtime.ConfigEvents.world(w.worldName(), w.folderName(),
+                            w.environment(), w.loaded(), w.playerCount(), w.primary()))
+                        .toList())));
+        }
+        hooks.register("siege startup work", () -> siegeStartupWork.runPending().thenAccept(pending -> {
+            if (!pending.isEmpty()) {
+                getLogger().warning("Realtime: siege startup work still pending after the reconnect: " + pending);
+            }
+        }));
+    }
+
+    /** {@code EntityChanged} → the caches of that type (DESIGN §6.3). Cheap and thread-safe invalidations only. */
+    private net.knightsandkings.knk.core.realtime.EntityChangeRouter entityChangeRouter(
+            net.knightsandkings.knk.core.realtime.Coalescer coalescer) {
+        var router = new net.knightsandkings.knk.core.realtime.EntityChangeRouter();
+        if (userStateSync != null) {
+            router.on("User", (id, key, op) -> {
+                try {
+                    if (key != null) userStateSync.userEntityChanged(java.util.UUID.fromString(key));
+                } catch (IllegalArgumentException ignored) {
+                    // not a UUID: nothing cached under it
+                }
+            });
+        }
+        byId(router, "Town", townsDataAccess == null ? null : townsDataAccess::invalidate,
+            townsDataAccess == null ? null : townsDataAccess::invalidateAll);
+        byId(router, "District", districtsDataAccess == null ? null : districtsDataAccess::invalidate,
+            districtsDataAccess == null ? null : districtsDataAccess::invalidateAll);
+        byId(router, "Structure", structuresDataAccess == null ? null : structuresDataAccess::invalidate,
+            structuresDataAccess == null ? null : structuresDataAccess::invalidateAll);
+        for (String domainType : List.of("Town", "District", "Structure")) {
+            byId(router, domainType, domainCatalogDataAccess == null ? null : domainCatalogDataAccess::invalidate,
+                domainCatalogDataAccess == null ? null : domainCatalogDataAccess::invalidateAll);
+        }
+        if (regionDomainResolver != null) {
+            for (String domainType : List.of("Town", "District", "Structure", "DomainSubRegion")) {
+                router.on(domainType, (id, key, op) -> regionDomainResolver.clearRegionCache());
+            }
+        }
+        byId(router, "ItemBlueprint", itemBlueprintsDataAccess == null ? null : itemBlueprintsDataAccess::invalidate,
+            itemBlueprintsDataAccess == null ? null : itemBlueprintsDataAccess::invalidateAll);
+        byId(router, "EnchantmentDefinition", enchantmentDefinitionsDataAccess == null ? null : enchantmentDefinitionsDataAccess::invalidate,
+            enchantmentDefinitionsDataAccess == null ? null : enchantmentDefinitionsDataAccess::invalidateAll);
+        byId(router, "Kit", kitsDataAccess == null ? null : kitsDataAccess::invalidate,
+            kitsDataAccess == null ? null : kitsDataAccess::invalidateAll);
+        byId(router, "MinecraftMaterialRef", minecraftMaterialRefsDataAccess == null ? null : minecraftMaterialRefsDataAccess::invalidate,
+            minecraftMaterialRefsDataAccess == null ? null : minecraftMaterialRefsDataAccess::invalidateAll);
+        byId(router, "Grade", gradesDataAccess == null ? null : gradesDataAccess::invalidate,
+            gradesDataAccess == null ? null : gradesDataAccess::invalidateAll);
+        if (gradesDataAccess != null) {
+            router.on("Grade", (id, key, op) -> coalescer.request("grade catalog",
+                () -> getServer().getScheduler().runTaskAsynchronously(this, this::refreshGradeCatalog)));
+        }
+        byId(router, "Tag", tagsDataAccess == null ? null : tagsDataAccess::invalidate,
+            tagsDataAccess == null ? null : tagsDataAccess::invalidateAll);
+        if (menuTemplatesDataAccess != null) {
+            router.on("MenuTemplate", (id, key, op) -> {
+                if (key != null) menuTemplatesDataAccess.invalidate(key);
+                else menuTemplatesDataAccess.invalidateAll();
+            });
+        }
+        if (titleBracketsDataAccess != null) {
+            router.on("TitleBracket", (id, key, op) -> titleBracketsDataAccess.invalidate());
+        }
+        if (siegeService != null) {
+            router.on("TitleBracket", (id, key, op) -> coalescer.request("siege config", siegeService::refreshFromApi));
+        }
+        if (permissionGroupsDataAccess != null) {
+            router.on("PermissionGroup", (id, key, op) -> permissionGroupsDataAccess.invalidate());
+        }
+        return router;
+    }
+
+    /** One id (or, without an id, everything of the type) out of a data-access cache. */
+    private static void byId(net.knightsandkings.knk.core.realtime.EntityChangeRouter router, String type,
+                             java.util.function.IntConsumer invalidate, Runnable invalidateAll) {
+        if (invalidate == null || invalidateAll == null) {
+            return;
+        }
+        router.on(type, (id, key, op) -> {
+            if (id == null) invalidateAll.run();
+            else invalidate.accept(id);
+        });
+    }
+
+    /**
+     * #182: {@code GateChanged} for one structure - the {@code /gate reload} path for that structure only: re-read it with
+     * its doors and snapshots, replace the cached one, drop doors the API no longer has, then the world/DB sync check of
+     * the reloaded doors (as a district reload does). A structure the API no longer has is removed.
+     */
+    private java.util.concurrent.CompletableFuture<Void> reloadGateStructure(int gateStructureId) {
+        return gateStructuresApi.getByIdWithSnapshots(gateStructureId).thenAccept(dto -> {
+            if (dto == null || dto.getId() == null) {
+                gateManager.removeStructure(gateStructureId);
+                return;
+            }
+            List<Integer> doorIds = gateLoaderAdapter.loadAndCacheStructure(dto);
+            gateManager.retainDoorsOfStructure(gateStructureId, doorIds);
+            if (gateStateSyncTask != null) {
+                gateStateSyncTask.checkAndFixGates(doorIds);
+            }
+            getLogger().info("Realtime: reloaded gate structure " + gateStructureId + " (" + doorIds.size() + " door(s))");
+        });
+    }
+
+    /** A startup step's body on the main thread (the steps chain on API callback threads). */
+    private <T> java.util.function.Supplier<java.util.concurrent.CompletableFuture<T>> onMainThread(
+            java.util.function.Supplier<java.util.concurrent.CompletableFuture<T>> body) {
+        return () -> {
+            if (org.bukkit.Bukkit.isPrimaryThread()) {
+                return body.get();
+            }
+            var result = new java.util.concurrent.CompletableFuture<T>();
+            getServer().getScheduler().runTask(this, () -> body.get().whenComplete((value, error) -> {
+                if (error != null) result.completeExceptionally(error);
+                else result.complete(value);
+            }));
+            return result;
+        };
+    }
+
+    /** {@code /knk health}: the realtime channel's state (PandiO/knk-workspace#178). */
+    public String realtimeStatusLine() {
+        var service = realtimeService;
+        return service != null ? service.statusLine() : "realtime: off";
     }
 
     /** Private messages waiting for knk-web-api's PM log (/knk health); -1 when that sink is off. */
@@ -2651,6 +2974,7 @@ public class KnKPlugin extends JavaPlugin {
             // Hub DESIGN §16.4 decision 7: the snapshot lives in the KNG-58 offline store (null when it is disabled)
             new net.knightsandkings.knk.paper.settings.GameSettingsStore(getDataFolder().toPath(), settingsConfig.backupHistoryLimit(),
                 offlineSecurity));
+        gameSettingsManager.setFallbackPolling(fallbackPolling); // S3 (#182): GameSettingsChanged is pushed
         gameSettingsManager.start();
         if (cacheManager != null) {
             cacheManager.registerRefreshHook("game settings", gameSettingsManager::refreshNow);
@@ -3409,6 +3733,7 @@ public class KnKPlugin extends JavaPlugin {
                 runtime::config, queryApi, permission, mainThread);
             this.lootboxCommand.setFreshPermission(freshPermission);
 
+            runtime.setFallbackPolling(fallbackPolling); // S3 (#182): LootboxConfigChanged is pushed
             runtime.start();
             scheduler.start();
             this.lootboxRuntime = runtime;
@@ -3708,6 +4033,9 @@ public class KnKPlugin extends JavaPlugin {
             getLogger());
         // Before the runtime can draw: createMatch waits for this recovery.
         siegeMatchRecorder.recoverOnStartup();
+        // #31 / #182, in this order: abort unfinished matches, restore stale gates, then the config and its lobbies.
+        var recorderForRetry = siegeMatchRecorder;
+        siegeStartupWork.register("abort unfinished matches", onMainThread(recorderForRetry::retryRecovery));
         this.siegeService = new SiegeService(
             this,
             siegeDataAccess,
@@ -3800,6 +4128,11 @@ public class KnKPlugin extends JavaPlugin {
             siegeService.setGateLobbySource(siegeGates::lobbyIdOf); // #165: gate damage counts for the gate's own match
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeGateListener(siegeGates, gateManager), this);
             siegeGates.recoverOnStartup();
+            siegeStartupWork.register("restore stale gates", onMainThread(siegeGates::retryRecovery));
+            // #182: gate edits made in the web app during a match apply once its gates were restored (Q12).
+            siegeGates.setAfterRelease(() -> {
+                if (gateRealtimeSync != null) gateRealtimeSync.matchReleased();
+            });
             // Phase 7b: non-members see the locked gates removed and walk through them (degrade
             // switch: NonMemberGateView = PassThroughOnly).
             if (gatePassThroughService != null) siegeGates.setPassThrough(gatePassThroughService);
@@ -3823,6 +4156,8 @@ public class KnKPlugin extends JavaPlugin {
         registerBackDeathExclusion(siegeTeleports.backDeathExclusion());
 
         siegeService.start();
+        var siegeForRetry = siegeService;
+        siegeStartupWork.register("siege config and title brackets", onMainThread(siegeForRetry::retryStartup));
         getLogger().info("Siege runtime initialized");
     }
 
@@ -3843,7 +4178,17 @@ public class KnKPlugin extends JavaPlugin {
     private void startGradeCatalogRefresh() {
         int minutes = Math.max(1, getConfig().getInt("enchant-books.grade-cap.grade-refresh-minutes", 10));
         long ticks = minutes * 60L * 20L;
-        getServer().getScheduler().runTaskTimerAsynchronously(this, this::refreshGradeCatalog, 0L, ticks);
+        // S3 (#182): EntityChanged(Grade) re-reads at once; while connected this timer runs ×multiplier less often.
+        Runnable throttled = fallbackPolling.throttle(this::refreshGradeCatalog);
+        boolean[] first = {true};
+        getServer().getScheduler().runTaskTimerAsynchronously(this, () -> {
+            if (first[0]) {
+                first[0] = false;
+                refreshGradeCatalog();
+            } else {
+                throttled.run();
+            }
+        }, 0L, ticks);
     }
 
     private void refreshGradeCatalog() {
