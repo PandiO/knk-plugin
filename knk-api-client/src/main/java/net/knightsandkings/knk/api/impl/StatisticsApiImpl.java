@@ -104,6 +104,18 @@ public class StatisticsApiImpl extends BaseApiImpl implements StatisticsApi {
     }
 
     @Override
+    public CompletableFuture<PlayerStatistics> getPublicStatistics(int userId, Integer actingUserId) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + STATISTICS_ENDPOINT + "/users/" + userId + "?period=lifetime&audience=public";
+            try {
+                return StatisticsMapper.fromDto(parse(getActing(url, actingUserId), StatisticsDtos.PlayerStatistics.class, url));
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to load the public statistics of user " + userId, e);
+            }
+        }, executor);
+    }
+
+    @Override
     public CompletableFuture<Page<TitleChange>> getTitleHistory(int userId, Integer actingUserId, int page, int pageSize) {
         return CompletableFuture.supplyAsync(() -> {
             String url = baseUrl + STATISTICS_ENDPOINT + "/users/" + userId + "/title-history?page=" + Math.max(1, page)

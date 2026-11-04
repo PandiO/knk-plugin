@@ -406,8 +406,10 @@ public class PlayerListener implements Listener {
 		ChatLineFormat.Rank rank = knkPermissible.hasPermission(player, ModeService.OWNER_NODE) ? ChatLineFormat.Rank.OWNER
 				: knkPermissible.hasPermission(player, ModeService.STAFF_NODE) ? ChatLineFormat.Rank.STAFF
 				: ChatLineFormat.Rank.MEMBER;
-		Component finalMessage = ChatLineFormat.render(rank, dn, user, messageComponent);
-		e.renderer((source, sourceDisplayName, message, viewer) -> finalMessage);
+		// The renderer uses the event's final message, so ChatTokenListener (HIGH) can swap #hand, #kills, ...
+		// for hoverable values after this (PandiO/knk-workspace#233).
+		e.message(messageComponent);
+		e.renderer((source, sourceDisplayName, message, viewer) -> ChatLineFormat.render(rank, dn, user, message));
 
 		/**
 		 * Player mention
