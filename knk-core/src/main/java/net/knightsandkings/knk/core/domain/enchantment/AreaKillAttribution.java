@@ -30,10 +30,17 @@ public final class AreaKillAttribution {
      * @param enchantmentId the ability's enchantment id ({@code chaos}, {@code flash_chaos})
      * @param attackerId    the player who used it
      * @param attackerName  that player's name, as the death message shows it
+     * @param item          the item the ability was used with (the plugin's {@code ItemStack}), or null when unknown;
+     *                      shown as {@code using <item>} in the death message
      */
-    public record Hit(String enchantmentId, UUID attackerId, String attackerName) {
+    public record Hit(String enchantmentId, UUID attackerId, String attackerName, Object item) {
         public Hit {
             Objects.requireNonNull(enchantmentId, "enchantmentId");
+        }
+
+        /** A hit without a known item. */
+        public Hit(String enchantmentId, UUID attackerId, String attackerName) {
+            this(enchantmentId, attackerId, attackerName, null);
         }
     }
 

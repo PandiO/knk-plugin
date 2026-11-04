@@ -59,17 +59,45 @@ class AbilityDeathMessageListenerTest {
     }
 
     private String messageFor(String enchantmentId, ConfigurationSection section) {
+        return messageFor(enchantmentId, section, null);
+    }
+
+    private String messageFor(String enchantmentId, ConfigurationSection section, Object item) {
         AbilityDeathMessageListener listener = new AbilityDeathMessageListener(() -> section, attribution);
-        attribution.during(victimId, new AreaKillAttribution.Hit(enchantmentId, attackerId, "Alex"),
+        attribution.during(victimId, new AreaKillAttribution.Hit(enchantmentId, attackerId, "Alex", item),
                 () -> listener.onDeath(event));
         ArgumentCaptor<Component> message = ArgumentCaptor.forClass(Component.class);
         verify(event).deathMessage(message.capture());
         return PlainTextComponentSerializer.plainText().serialize(message.getValue());
     }
 
+    private static ItemStack namedItem(String name) {
+        ItemStack item = mock(ItemStack.class);
+        when(item.isEmpty()).thenReturn(false);
+        when(item.displayName()).thenReturn(Component.text("[" + name + "]"));
+        when(item.clone()).thenReturn(item);
+        return item;
+    }
+
     @Test
-    void flashChaosAndChaosKillsNameTheAbilityAndTheUser() {
+    void flashChaosAndChaosKillsNameTheAbilityTheUserAndTheItem() {
+        assertEquals("Steve was killed with Flash Chaos by Alex using [Storm Blade]",
+                messageFor("flash_chaos", null, namedItem("Storm Blade")));
+    }
+
+    @Test
+    void withoutAKnownItemTheUsingPartIsLeftOut() {
         assertEquals("Steve was killed with Flash Chaos by Alex", messageFor("flash_chaos", null));
+        ItemStack air = mock(ItemStack.class);
+        when(air.isEmpty()).thenReturn(true);
+        assertEquals(null, AbilityDeathMessageListener.itemName(air));
+    }
+
+    @Test
+    void theItemKeepsItsOwnComponent_ForTheHover() {
+        Component name = Component.text("[Storm Blade]");
+        Component message = AbilityDeathMessageListener.message("&c%victim% using %item%!", name);
+        assertEquals("%victim% using [Storm Blade]!", PlainTextComponentSerializer.plainText().serialize(message));
     }
 
     @Test
@@ -78,9 +106,13 @@ class AbilityDeathMessageListenerTest {
                 custom-enchantments:
                   death-messages:
                     enabled: true
-                    default: "%victim% was killed with %enchantment% by %player%"
+                    default: "%victim% was killed with %enchantment% by %player% using %item%"
                     overrides: {}
                 """);
+        assertEquals("Steve was killed with Chaos by Alex using [Axe]", messageFor("chaos", section, namedItem("Axe")));
+        org.mockito.Mockito.reset(event);
+        when(event.getEntity()).thenReturn(victim);
+        when(event.deathMessage()).thenReturn(vanilla);
         assertEquals("Steve was killed with Chaos by Alex", messageFor("chaos", section));
     }
 
@@ -120,6 +152,22 @@ class AbilityDeathMessageListenerTest {
     }
 
     @Test
+    void theActivationsItemGoesWithTheHit() {
+        LivingEntity target = mock(LivingEntity.class);
+        when(target.getUniqueId()).thenReturn(victimId);
+        Player attacker = mock(Player.class);
+        when(attacker.getUniqueId()).thenReturn(attackerId);
+        when(attacker.getName()).thenReturn("Alex");
+        ItemStack blade = namedItem("Storm Blade");
+        List<Optional<AreaKillAttribution.Hit>> seen = new ArrayList<>();
+        doAnswer(invocation -> seen.add(attribution.current(victimId))).when(target).damage(anyDouble(), eq(attacker));
+
+        new TestAbility(target).tryExecute(blade, attacker, 1);
+
+        assertEquals(List.of(Optional.of(new AreaKillAttribution.Hit("chaos", attackerId, "Alex", blade))), seen);
+    }
+
+    @Test
     void anAbilitysDamageIsRecordedAsItsHitWhileItRuns() {
         LivingEntity target = mock(LivingEntity.class);
         when(target.getUniqueId()).thenReturn(victimId);
@@ -137,8 +185,16 @@ class AbilityDeathMessageListenerTest {
     }
 
     private static final class TestAbility extends SupportEnchantmentEffect {
+        private final LivingEntity target;
+
         TestAbility() {
+            this(null);
+        }
+
+        /** @param target hit for 7 on every activation (tryExecute) */
+        TestAbility(LivingEntity target) {
             super("chaos", mock(Plugin.class));
+            this.target = target;
         }
 
         void hit(LivingEntity target, double damage, Player attacker) {
@@ -147,6 +203,9 @@ class AbilityDeathMessageListenerTest {
 
         @Override
         protected void applyEffect(ItemStack item, Player player, int level) {
+            if (target != null) {
+                damageAsAbility(target, 7.0d, player);
+            }
         }
     }
 }

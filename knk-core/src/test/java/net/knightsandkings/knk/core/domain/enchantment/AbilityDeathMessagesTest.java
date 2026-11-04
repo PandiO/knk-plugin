@@ -16,10 +16,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AbilityDeathMessagesTest {
 
     @Test
-    void theDefaultPatternNamesTheVictimTheEnchantmentAndThePlayer() {
+    void theDefaultPatternNamesTheVictimTheEnchantmentThePlayerAndKeepsTheItemPlaceholder() {
         AbilityDeathMessages messages = new AbilityDeathMessages(null, null);
+        assertEquals("Steve was killed with Flash Chaos by Alex using %item%",
+                messages.format("flash_chaos", "Steve", "Alex", "Flash Chaos", true));
+    }
+
+    @Test
+    void withoutAnItemTheUsingPartIsLeftOut() {
+        AbilityDeathMessages messages = new AbilityDeathMessages(null,
+                Map.of("chaos", "%victim% fell to %item% (%enchantment%)"));
         assertEquals("Steve was killed with Flash Chaos by Alex",
                 messages.format("flash_chaos", "Steve", "Alex", "Flash Chaos"));
+        assertEquals("Steve fell to  (Chaos)", messages.format("chaos", "Steve", "Alex", "Chaos", false));
     }
 
     @Test

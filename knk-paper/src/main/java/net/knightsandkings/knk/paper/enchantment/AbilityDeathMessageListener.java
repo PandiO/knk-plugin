@@ -5,6 +5,7 @@ import net.knightsandkings.knk.core.domain.enchantment.AreaKillAttribution;
 import net.knightsandkings.knk.core.domain.enchantment.Enchantment;
 import net.knightsandkings.knk.core.domain.enchantment.EnchantmentRegistry;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.TextReplacementConfig;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
@@ -12,6 +13,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
 
 import java.util.HashMap;
@@ -21,7 +23,7 @@ import java.util.function.Supplier;
 
 /**
  * PandiO/knk-workspace#222: a player killed by Chaos or Flash Chaos gets a death message that names the ability and
- * the player who used it ({@code Steve was killed with Flash Chaos by Alex}), instead of vanilla's melee
+ * the player who used it and the item ({@code Steve was killed with Flash Chaos by Alex using [Storm Blade]}), instead of vanilla's melee
  * {@code was slain by}. Only a death inside the ability's own hit counts ({@link AreaKillAttribution}); every other
  * death keeps the vanilla message (developer decision 2026-11-03).
  * <p>
@@ -60,8 +62,21 @@ public final class AbilityDeathMessageListener implements Listener {
         String enchantmentName = EnchantmentRegistry.getInstance().getById(hit.enchantmentId())
                 .map(Enchantment::displayName)
                 .orElse(hit.enchantmentId());
-        String text = messages(section).format(hit.enchantmentId(), victim.getName(), hit.attackerName(), enchantmentName);
-        event.deathMessage(message(text));
+        Component item = itemName(hit.item());
+        String text = messages(section).format(hit.enchantmentId(), victim.getName(), hit.attackerName(), enchantmentName,
+                item != null);
+        event.deathMessage(message(text, item));
+    }
+
+    /**
+     * The item as vanilla shows it in {@code using [Sword]}: its name in brackets, hovering shows the item; null for
+     * no item or air.
+     */
+    static Component itemName(Object item) {
+        if (!(item instanceof ItemStack stack) || stack.isEmpty()) {
+            return null;
+        }
+        return stack.displayName();
     }
 
     /** The patterns of the {@code custom-enchantments.death-messages} section; the built-in default without one. */
@@ -82,8 +97,15 @@ public final class AbilityDeathMessageListener implements Listener {
         return new AbilityDeathMessages(section.getString("default"), overrides);
     }
 
-    /** {@code &} colour codes allowed, as in the plugin's other messages. */
-    static Component message(String text) {
-        return AMPERSAND.deserialize(text);
+    /** {@code &} colour codes allowed, as in the plugin's other messages; {@code %item%} becomes the item's name. */
+    static Component message(String text, Component item) {
+        Component message = AMPERSAND.deserialize(text);
+        if (item == null) {
+            return message;
+        }
+        return message.replaceText(TextReplacementConfig.builder()
+                .matchLiteral(AbilityDeathMessages.ITEM_PLACEHOLDER)
+                .replacement(item)
+                .build());
     }
 }

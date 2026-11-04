@@ -19,6 +19,8 @@ public abstract class SupportEnchantmentEffect implements EnchantmentEffect {
     private final String enchantmentId;
     private final Plugin plugin;
     private volatile EffectDisplay display = EffectDisplay.NONE;
+    /** The item of the activation that is running (main thread only), for the death message (#222). */
+    private ItemStack activationItem;
 
     protected SupportEnchantmentEffect(String enchantmentId, Plugin plugin) {
         this.enchantmentId = Objects.requireNonNull(enchantmentId, "enchantmentId must not be null");
@@ -35,7 +37,15 @@ public abstract class SupportEnchantmentEffect implements EnchantmentEffect {
             return false;
         }
 
-        runOnMainThread(() -> applyEffect(item, player, level));
+        runOnMainThread(() -> {
+            ItemStack previous = activationItem;
+            activationItem = item;
+            try {
+                applyEffect(item, player, level);
+            } finally {
+                activationItem = previous;
+            }
+        });
         return true;
     }
 
@@ -53,11 +63,13 @@ public abstract class SupportEnchantmentEffect implements EnchantmentEffect {
 
     /**
      * Damages {@code target} with {@code attacker} as the source, recorded as this ability's hit
-     * (PandiO/knk-workspace#222): if the target dies of it, the death message names the ability and the attacker.
+     * (PandiO/knk-workspace#222): if the target dies of it, the death message names the ability, the attacker and the
+     * item the ability was used with.
      */
     protected final void damageAsAbility(LivingEntity target, double damage, Player attacker) {
+        ItemStack item = activationItem != null ? activationItem.clone() : null;
         AreaKillAttribution.getInstance().during(target.getUniqueId(),
-                new AreaKillAttribution.Hit(enchantmentId, attacker.getUniqueId(), attacker.getName()),
+                new AreaKillAttribution.Hit(enchantmentId, attacker.getUniqueId(), attacker.getName(), item),
                 () -> target.damage(damage, attacker));
     }
 
