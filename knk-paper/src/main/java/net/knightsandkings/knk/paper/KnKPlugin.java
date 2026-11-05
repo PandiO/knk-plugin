@@ -324,11 +324,14 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.siege.SiegeGateController siegeGates;
     private net.knightsandkings.knk.core.siege.SiegeMatchRecorder siegeMatchRecorder;
     /**
-     * PandiO/knk-workspace#31 / #182: the siege's startup-only API work; a step that failed at startup runs again on the
-     * next realtime (re)connect (resync step "siege startup work") until it got through.
+     * PandiO/knk-workspace#31 / #182: the siege's startup-only API work; a step that failed at startup runs again when
+     * the API is back (connectivity UP, a fallback retry, or the realtime (re)connect's resync step "siege startup
+     * work"), all through {@link #siegeStartupRetry}, until it got through.
      */
     private final net.knightsandkings.knk.core.realtime.PendingStartupWork siegeStartupWork =
         new net.knightsandkings.knk.core.realtime.PendingStartupWork();
+    /** #31: when {@link #siegeStartupWork} runs again, with or without the hub; null until the siege started. */
+    private net.knightsandkings.knk.core.realtime.StartupWorkRetry siegeStartupRetry;
     private net.knightsandkings.knk.paper.realtime.UserStateSync userStateSync;
     private net.knightsandkings.knk.paper.realtime.GateRealtimeSync gateRealtimeSync;
     /** Kept for the siege gate controller (Phase 7a), which respawns doors a match destroyed. */
@@ -1216,6 +1219,7 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().info("Region transition service initialized with domain resolver and gate control");
 
             initializeSiege();
+            initializeSiegeStartupRetry();
 
             // Road navigation (KNG-27) Phase 3: the admin side (survey, build, review); Phase 4: /navigate.
             initializeRoads();
@@ -1251,6 +1255,10 @@ public class KnKPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (siegeStartupRetry != null) {
+            siegeStartupRetry.stop();
+            siegeStartupRetry = null;
+        }
         if (realtimeService != null) {
             realtimeService.stop();
             realtimeService = null;
@@ -2467,11 +2475,15 @@ public class KnKPlugin extends JavaPlugin {
                             w.environment(), w.loaded(), w.playerCount(), w.primary()))
                         .toList())));
         }
-        hooks.register("siege startup work", () -> siegeStartupWork.runPending().thenAccept(pending -> {
-            if (!pending.isEmpty()) {
-                getLogger().warning("Realtime: siege startup work still pending after the reconnect: " + pending);
-            }
-        }));
+        // #31: the same runner as the connectivity trigger, so a reconnect and an UP transition together run each step once.
+        var startupRetry = siegeStartupRetry;
+        hooks.register("siege startup work", () -> (startupRetry != null
+            ? startupRetry.runNow("realtime reconnect")
+            : siegeStartupWork.runPending()).thenAccept(pending -> {
+                if (!pending.isEmpty()) {
+                    getLogger().warning("Realtime: siege startup work still pending after the reconnect: " + pending);
+                }
+            }));
     }
 
     /** {@code EntityChanged} → the caches of that type (DESIGN §6.3). Cheap and thread-safe invalidations only. */
@@ -4279,6 +4291,35 @@ public class KnKPlugin extends JavaPlugin {
         var siegeForRetry = siegeService;
         siegeStartupWork.register("siege config and title brackets", onMainThread(siegeForRetry::retryStartup));
         getLogger().info("Siege runtime initialized");
+    }
+
+    /**
+     * PandiO/knk-workspace#31: the siege's startup steps that failed at start run again once the API is back, also with
+     * {@code realtime.enabled: false}: on any connectivity transition into UP (UNKNOWN to UP included) and on a fallback
+     * retry (30 s, 1 min, 2 min, then every 5 min while something is pending and the API is not DOWN). The realtime
+     * reconnect goes through the same runner. Nothing to do when every step got through at startup.
+     */
+    private void initializeSiegeStartupRetry() {
+        if (siegeService == null) {
+            return; // the siege did not start: no steps registered
+        }
+        var monitor = apiConnectivityMonitor;
+        siegeStartupRetry = new net.knightsandkings.knk.core.realtime.StartupWorkRetry(
+            siegeStartupWork,
+            () -> monitor == null
+                ? net.knightsandkings.knk.core.connectivity.ApiConnectivityState.UNKNOWN
+                : monitor.connectivity().state(),
+            (delay, task) -> {
+                if (isEnabled()) {
+                    getServer().getScheduler().runTaskLater(this, task, Math.max(1L, delay.toMillis() / 50L));
+                }
+            },
+            net.knightsandkings.knk.core.realtime.StartupWorkRetry.DEFAULT_DELAYS,
+            "[Siege] Startup work",
+            getLogger());
+        getServer().getPluginManager().registerEvents(
+            new net.knightsandkings.knk.paper.connectivity.StartupWorkRetryListener(siegeStartupRetry), this);
+        siegeStartupRetry.start();
     }
 
     public SiegeService getSiegeService() {
