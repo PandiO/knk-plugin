@@ -24,7 +24,7 @@ class TabListTeamTest {
     private static UserSummary summary(Integer fromGroup, String nameColor) {
         return new UserSummary(1, "alice", UUID.randomUUID(), null, 0, 0, 0, false, false,
             GatePassThroughMethod.DEFAULT, ActiveMode.NONE, null, null, 0,
-            null, null, null, false, null, null, null, null, nameColor, List.of(), fromGroup);
+            null, null, null, false, null, null, null, null, nameColor, List.of(), fromGroup, null, null);
     }
 
     @Test

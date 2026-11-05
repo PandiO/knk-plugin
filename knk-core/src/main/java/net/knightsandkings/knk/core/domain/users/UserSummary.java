@@ -41,7 +41,10 @@ public record UserSummary(
     // docs/specs/game-settings/DESIGN.md §3.8). Never null; empty when the API didn't send it.
     List<PermissionGroupRef> permissionGroups,
     // #260: the group whose nameColor won (its own tab-list team); null = the Default group's colour or none.
-    Integer nameColorGroupId
+    Integer nameColorGroupId,
+    // #260: the same for the two chat colours; owner/staff use a group's own chat colours over their fixed style.
+    Integer chatPrimaryColorGroupId,
+    Integer chatSecondaryColorGroupId
 ) {
     public UserSummary {
         if (activeMode == null) {
@@ -51,9 +54,9 @@ public record UserSummary(
             : permissionGroups.stream().filter(Objects::nonNull).toList();
     }
 
-    // Constructor without the #260 nameColorGroupId - null (the owner/staff/default teams, as before #260).
+    // Constructor without the #260 style group ids - null (the owner/staff/default teams, as before #260).
     public UserSummary(Integer id, String username, UUID uuid, String email, int coins, int gems, int experiencePoints, boolean isFullAccount, boolean isNewUser, GatePassThroughMethod gatePassThroughMethodDefault, ActiveMode activeMode, Integer titleBracketId, String titleName, int prestigeExperience, Integer premiumTierGroupId, String premiumTierName, OffsetDateTime premiumTierExpiresAt, boolean isFrozen, String frozenReason, String gender, String chatPrimaryColor, String chatSecondaryColor, String nameColor, List<PermissionGroupRef> permissionGroups) {
-        this(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience, premiumTierGroupId, premiumTierName, premiumTierExpiresAt, isFrozen, frozenReason, gender, chatPrimaryColor, chatSecondaryColor, nameColor, permissionGroups, null);
+        this(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience, premiumTierGroupId, premiumTierName, premiumTierExpiresAt, isFrozen, frozenReason, gender, chatPrimaryColor, chatSecondaryColor, nameColor, permissionGroups, null, null, null);
     }
 
     // Constructor without the KNG-52 group list - empty.
@@ -110,7 +113,7 @@ public record UserSummary(
      * Copy with an updated owner/staff mode (after /ownermode or /staffmode).
      */
     public UserSummary withActiveMode(ActiveMode activeMode) {
-        return new UserSummary(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience, premiumTierGroupId, premiumTierName, premiumTierExpiresAt, isFrozen, frozenReason, gender, chatPrimaryColor, chatSecondaryColor, nameColor, permissionGroups, nameColorGroupId);
+        return new UserSummary(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience, premiumTierGroupId, premiumTierName, premiumTierExpiresAt, isFrozen, frozenReason, gender, chatPrimaryColor, chatSecondaryColor, nameColor, permissionGroups, nameColorGroupId, chatPrimaryColorGroupId, chatSecondaryColorGroupId);
     }
 
     /**
@@ -118,7 +121,7 @@ public record UserSummary(
      * after a /pay, /balance or a received payment) - never a locally computed value.
      */
     public UserSummary withBalances(int coins, int gems) {
-        return new UserSummary(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience, premiumTierGroupId, premiumTierName, premiumTierExpiresAt, isFrozen, frozenReason, gender, chatPrimaryColor, chatSecondaryColor, nameColor, permissionGroups, nameColorGroupId);
+        return new UserSummary(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience, premiumTierGroupId, premiumTierName, premiumTierExpiresAt, isFrozen, frozenReason, gender, chatPrimaryColor, chatSecondaryColor, nameColor, permissionGroups, nameColorGroupId, chatPrimaryColorGroupId, chatSecondaryColorGroupId);
     }
 
     /**
@@ -126,7 +129,7 @@ public record UserSummary(
      * {@code UserBalancesChanged}, PandiO/knk-workspace#179) - committed values, never computed locally.
      */
     public UserSummary withBalances(int coins, int gems, int experiencePoints) {
-        return new UserSummary(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience, premiumTierGroupId, premiumTierName, premiumTierExpiresAt, isFrozen, frozenReason, gender, chatPrimaryColor, chatSecondaryColor, nameColor, permissionGroups, nameColorGroupId);
+        return new UserSummary(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience, premiumTierGroupId, premiumTierName, premiumTierExpiresAt, isFrozen, frozenReason, gender, chatPrimaryColor, chatSecondaryColor, nameColor, permissionGroups, nameColorGroupId, chatPrimaryColorGroupId, chatSecondaryColorGroupId);
     }
 
     /**
@@ -134,6 +137,6 @@ public record UserSummary(
      * AdminFreezeManager to keep the cached UserSummary consistent with the join-time restore.
      */
     public UserSummary withFrozen(boolean isFrozen, String frozenReason) {
-        return new UserSummary(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience, premiumTierGroupId, premiumTierName, premiumTierExpiresAt, isFrozen, frozenReason, gender, chatPrimaryColor, chatSecondaryColor, nameColor, permissionGroups, nameColorGroupId);
+        return new UserSummary(id, username, uuid, email, coins, gems, experiencePoints, isFullAccount, isNewUser, gatePassThroughMethodDefault, activeMode, titleBracketId, titleName, prestigeExperience, premiumTierGroupId, premiumTierName, premiumTierExpiresAt, isFrozen, frozenReason, gender, chatPrimaryColor, chatSecondaryColor, nameColor, permissionGroups, nameColorGroupId, chatPrimaryColorGroupId, chatSecondaryColorGroupId);
     }
 }
