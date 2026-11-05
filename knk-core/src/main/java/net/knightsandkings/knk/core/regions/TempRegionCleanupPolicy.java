@@ -16,6 +16,9 @@ import java.util.function.Predicate;
  *   <li>a fresh API lookup, made right before deleting, finds no domain using it. If the lookup fails the region is
  *       kept: a domain whose rename failed lives in a temp-named region, and an unreachable API must not cost it.</li>
  * </ol>
+ * PandiO/knk-workspace#34: lootbox spawn areas draw their regions through the same task and are renamed to
+ * {@code lootbox_area_<id>}; the fresh lookup asks them too ({@link #inUseByAny}), so an area whose rename failed keeps
+ * its region like a domain does.
  */
 public final class TempRegionCleanupPolicy {
 
@@ -46,6 +49,33 @@ public final class TempRegionCleanupPolicy {
     }
 
     private TempRegionCleanupPolicy() {
+    }
+
+    /**
+     * #34: one fresh lookup over several owners (domains, lootbox spawn areas): {@link Usage#IN_USE} as soon as one uses
+     * the region, {@link Usage#UNUSED} only when every one answered unused, else {@link Usage#UNKNOWN} (an owner that
+     * could not be asked, or threw, keeps the region). Owners after the first one that uses it are not asked.
+     */
+    @SafeVarargs
+    public static Function<String, Usage> inUseByAny(Function<String, Usage>... owners) {
+        return regionId -> {
+            boolean allUnused = true;
+            for (Function<String, Usage> owner : owners) {
+                Usage usage;
+                try {
+                    usage = owner == null ? Usage.UNKNOWN : owner.apply(regionId);
+                } catch (RuntimeException e) {
+                    usage = Usage.UNKNOWN;
+                }
+                if (usage == Usage.IN_USE) {
+                    return Usage.IN_USE;
+                }
+                if (usage != Usage.UNUSED) {
+                    allUnused = false;
+                }
+            }
+            return allUnused ? Usage.UNUSED : Usage.UNKNOWN;
+        };
     }
 
     /**

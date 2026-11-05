@@ -49,4 +49,12 @@ public interface LootboxRegions {
     static String areaRegionId(String areaName) {
         return AREA_REGION_PREFIX + areaName.toLowerCase(java.util.Locale.ROOT);
     }
+
+    /**
+     * PandiO/knk-workspace#34: a region drawn through the web form's region task becomes {@code lootbox_area_<id>}, so an
+     * area named {@code area_<number>} would take another area's region name; the API refuses those names too.
+     */
+    static boolean isReservedAreaName(String areaName) {
+        return areaName != null && areaName.toLowerCase(java.util.Locale.ROOT).matches("area_[0-9]+");
+    }
 }

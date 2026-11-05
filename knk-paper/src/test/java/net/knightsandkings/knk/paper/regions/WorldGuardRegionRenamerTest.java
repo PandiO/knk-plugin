@@ -229,4 +229,63 @@ class WorldGuardRegionRenamerTest {
         assertFalse(result.success());
         assertSame(district, regions.get(FINAL));
     }
+
+    // ===== PandiO/knk-workspace#34: a lootbox spawn area's drawn region, stretched to full build height =====
+
+    @Test
+    void aLootboxAreaRegionIsStretchedToTheGivenHeight() {
+        add(new ProtectedCuboidRegion("tempregion_worldtask_300", BlockVector3.at(5, 64, 5), BlockVector3.at(25, 70, 25)));
+
+        WorldGuardRegionRenamer.Result result = WorldGuardRegionRenamer.rename(manager, "tempregion_worldtask_300",
+                "lootbox_area_9", null, new WorldGuardRegionRenamer.Height(-64, 319));
+
+        assertTrue(result.success(), result.detail());
+        ProtectedRegion renamed = regions.get("lootbox_area_9");
+        assertEquals(BlockVector3.at(5, -64, 5), renamed.getMinimumPoint());
+        assertEquals(BlockVector3.at(25, 319, 25), renamed.getMaximumPoint());
+        assertNull(regions.get("tempregion_worldtask_300"));
+    }
+
+    @Test
+    void aDrawnPolygonKeepsItsOutline_atTheGivenHeight() {
+        var points = java.util.List.of(com.sk89q.worldedit.math.BlockVector2.at(0, 0), com.sk89q.worldedit.math.BlockVector2.at(10, 0),
+                com.sk89q.worldedit.math.BlockVector2.at(5, 8));
+        add(new com.sk89q.worldguard.protection.regions.ProtectedPolygonalRegion("tempregion_worldtask_301", points, 60, 62));
+
+        WorldGuardRegionRenamer.rename(manager, "tempregion_worldtask_301", "lootbox_area_9", null,
+                new WorldGuardRegionRenamer.Height(-64, 319));
+
+        ProtectedRegion renamed = regions.get("lootbox_area_9");
+        assertTrue(renamed instanceof com.sk89q.worldguard.protection.regions.ProtectedPolygonalRegion);
+        assertEquals(points, renamed.getPoints());
+        assertEquals(-64, renamed.getMinimumPoint().y());
+        assertEquals(319, renamed.getMaximumPoint().y());
+    }
+
+    @Test
+    void aReRunOfALootboxArea_RedefinesItsRegionInPlace_atFullHeight() throws Exception {
+        ProtectedRegion old = add(new ProtectedCuboidRegion("lootbox_area_9", BlockVector3.at(0, -64, 0), BlockVector3.at(10, 319, 10)));
+        old.setFlag(PVP, StateFlag.State.DENY);
+        add(new ProtectedCuboidRegion("tempregion_worldtask_302", BlockVector3.at(40, 64, 40), BlockVector3.at(50, 66, 50)));
+
+        WorldGuardRegionRenamer.Result result = WorldGuardRegionRenamer.rename(manager, "tempregion_worldtask_302",
+                "lootbox_area_9", "lootbox_area_9", new WorldGuardRegionRenamer.Height(-64, 319));
+
+        assertEquals(Action.REPLACE_TARGET, result.action());
+        ProtectedRegion renamed = regions.get("lootbox_area_9");
+        assertEquals(BlockVector3.at(40, -64, 40), renamed.getMinimumPoint());
+        assertEquals(BlockVector3.at(50, 319, 50), renamed.getMaximumPoint());
+        assertEquals(StateFlag.State.DENY, renamed.getFlag(PVP));
+        assertNull(regions.get("tempregion_worldtask_302"));
+    }
+
+    @Test
+    void withoutAHeight_theDrawnHeightIsKept() {
+        add(new ProtectedCuboidRegion("tempregion_worldtask_303", BlockVector3.at(5, 64, 5), BlockVector3.at(25, 70, 25)));
+
+        WorldGuardRegionRenamer.rename(manager, "tempregion_worldtask_303", "domain_77", null);
+
+        assertEquals(64, regions.get("domain_77").getMinimumPoint().y());
+        assertEquals(70, regions.get("domain_77").getMaximumPoint().y());
+    }
 }

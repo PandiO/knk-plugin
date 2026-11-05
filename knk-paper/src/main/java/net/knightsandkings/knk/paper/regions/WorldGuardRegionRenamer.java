@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.logging.Logger;
 
+import com.sk89q.worldedit.math.BlockVector3;
 import com.sk89q.worldguard.domains.DefaultDomain;
 import com.sk89q.worldguard.protection.flags.Flag;
 import com.sk89q.worldguard.protection.managers.RegionManager;
@@ -30,6 +31,9 @@ import net.knightsandkings.knk.core.regions.RegionRenamePlan.Plan;
  *
  * <p>All of it happens on the caller's (main) thread before WorldGuard saves; if any step throws, every region is put
  * back the way it was, so the world never ends up with neither region.
+ *
+ * <p>PandiO/knk-workspace#34: with a {@link Height} the new region spans those Y levels instead of the drawn ones (a
+ * lootbox spawn area reaches the world's full build height, as {@code /knk lootbox area create} makes it).
  */
 public final class WorldGuardRegionRenamer {
 
@@ -39,10 +43,25 @@ public final class WorldGuardRegionRenamer {
     public record Result(boolean success, Action action, String detail) {
     }
 
+    /** #34: the Y levels the renamed region spans (both inclusive), e.g. a world's min height to max height - 1. */
+    public record Height(int minY, int maxY) {
+        public Height {
+            if (maxY < minY) {
+                throw new IllegalArgumentException("maxY " + maxY + " is below minY " + minY);
+            }
+        }
+    }
+
     private WorldGuardRegionRenamer() {
     }
 
     public static Result rename(RegionManager regionManager, String oldRegionId, String newRegionId, String replaceRegionId) {
+        return rename(regionManager, oldRegionId, newRegionId, replaceRegionId, null);
+    }
+
+    /** @param height #34: the Y levels of the new region; null keeps the drawn region's */
+    public static Result rename(RegionManager regionManager, String oldRegionId, String newRegionId, String replaceRegionId,
+                                Height height) {
         ProtectedRegion source = regionManager.getRegion(oldRegionId);
         ProtectedRegion target = regionManager.getRegion(newRegionId);
         ProtectedRegion replaced = replaceRegionId == null || replaceRegionId.isBlank() ? null
@@ -61,7 +80,7 @@ public final class WorldGuardRegionRenamer {
 
         ProtectedRegion removed = plan.action() == Action.REPLACE_TARGET ? target
                 : plan.action() == Action.RENAME_AND_REMOVE_PREVIOUS ? replaced : null;
-        ProtectedRegion newRegion = withNewId(source, newRegionId);
+        ProtectedRegion newRegion = withNewId(source, newRegionId, height);
         if (newRegion == null) {
             return new Result(false, Action.REFUSE, "unsupported region type: " + source.getClass().getSimpleName());
         }
@@ -122,17 +141,30 @@ public final class WorldGuardRegionRenamer {
         if (!children.isEmpty()) {
             detail += " (" + children.size() + " child region(s) re-linked)";
         }
+        if (height != null) {
+            detail += " (Y " + height.minY() + " to " + height.maxY() + ")";
+        }
         return new Result(true, plan.action(), detail);
     }
 
-    /** The same shape under a new id, or null for a type WorldGuard regions here are never drawn as (e.g. global). */
-    private static ProtectedRegion withNewId(ProtectedRegion region, String newRegionId) {
+    /**
+     * The same shape under a new id (spanning {@code height} when given), or null for a type WorldGuard regions here are
+     * never drawn as (e.g. global).
+     */
+    private static ProtectedRegion withNewId(ProtectedRegion region, String newRegionId, Height height) {
         if (region instanceof ProtectedPolygonalRegion polygon) {
-            return new ProtectedPolygonalRegion(newRegionId, polygon.getPoints(),
-                    polygon.getMinimumPoint().getBlockY(), polygon.getMaximumPoint().getBlockY());
+            int minY = height != null ? height.minY() : polygon.getMinimumPoint().getBlockY();
+            int maxY = height != null ? height.maxY() : polygon.getMaximumPoint().getBlockY();
+            return new ProtectedPolygonalRegion(newRegionId, polygon.getPoints(), minY, maxY);
         }
         if (region instanceof ProtectedCuboidRegion cuboid) {
-            return new ProtectedCuboidRegion(newRegionId, cuboid.getMinimumPoint(), cuboid.getMaximumPoint());
+            BlockVector3 min = cuboid.getMinimumPoint();
+            BlockVector3 max = cuboid.getMaximumPoint();
+            if (height != null) {
+                min = min.withY(height.minY());
+                max = max.withY(height.maxY());
+            }
+            return new ProtectedCuboidRegion(newRegionId, min, max);
         }
         return null;
     }

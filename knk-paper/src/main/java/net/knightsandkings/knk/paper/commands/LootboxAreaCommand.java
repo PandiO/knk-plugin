@@ -114,6 +114,11 @@ public final class LootboxAreaCommand {
             sender.sendMessage(ChatColor.RED + "Area names are 1-32 letters, digits, _ or -.");
             return;
         }
+        if (LootboxRegions.isReservedAreaName(name)) {
+            sender.sendMessage(ChatColor.RED + "Names like area_<number> are reserved for regions drawn in the web form"
+                    + " (lootbox_area_<id>) - pick another name.");
+            return;
+        }
         if (config.get().areaByName(name).isPresent()) {
             sender.sendMessage(ChatColor.RED + "An area named " + name + " already exists.");
             return;
