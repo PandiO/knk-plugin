@@ -223,6 +223,115 @@ class EffectBossBarsTest {
         assertTrue(shown.isEmpty());
     }
 
+    // PandiO/knk-workspace#202: ability cooldown bars.
+
+    @Test
+    void reshowBelowMovesTheBarsUnderABarShownLater_InBoardOrder() {
+        potions.put("poison", effect(80));
+        bars.debuff(player, "poison", "Poison", poisonType, 80);
+        bars.cooldown(player.getUniqueId(), "chaos", "Chaos cooldown", 90_000L);
+        BossBar navigation = BossBar.bossBar(Component.text("→ Merchantstreet"), 0f, BossBar.Color.YELLOW,
+                BossBar.Overlay.PROGRESS);
+        player.showBossBar(navigation);
+
+        bars.reshowBelow(player);
+
+        assertEquals(navigation, shown.get(0));
+        assertEquals(List.of("→ Merchantstreet", "Poison · 4s", "Chaos cooldown · 1:30"), texts());
+    }
+
+    @Test
+    void reshowBelowWithoutBarsDoesNothing() {
+        bars.reshowBelow(player);
+        assertTrue(shown.isEmpty());
+    }
+
+    @Test
+    void cooldownBarCountsDownNextToTheDebuffBars_InGrey() {
+        potions.put("poison", effect(80));
+        bars.debuff(player, "poison", "Poison", poisonType, 80);
+        bars.cooldown(player.getUniqueId(), "flash_chaos", "Flash Chaos cooldown", 90_000L);
+
+        assertEquals(List.of("Poison · 4s", "Flash Chaos cooldown · 1:30"), texts());
+        assertEquals(BossBar.Color.WHITE, shown.get(1).color());
+        assertEquals(net.kyori.adventure.text.format.NamedTextColor.GRAY, shown.get(1).name().color());
+        assertTrue(bars.has(player.getUniqueId(), "cooldown:flash_chaos"));
+
+        now.set(2_000L);
+        potions.put("poison", effect(40));
+        bars.tick();
+        assertEquals(List.of("Poison · 2s", "Flash Chaos cooldown · 1:28"), texts());
+
+        now.set(90_000L);
+        potions.remove("poison");
+        bars.tick();
+        assertTrue(shown.isEmpty());
+    }
+
+    @Test
+    void cooldownBarFollowsTheCooldownStore_ClearedEndsIt() {
+        long[] remaining = {20_000L};
+        bars.cooldownsFrom((id, ability) -> "freeze".equals(ability) ? remaining[0] : 0L);
+        bars.cooldown(player.getUniqueId(), "freeze", "Freeze cooldown", 20_000L);
+        assertEquals(List.of("Freeze cooldown · 20s"), texts());
+
+        remaining[0] = 5_000L;
+        bars.tick();
+        assertEquals(List.of("Freeze cooldown · 5s"), texts());
+
+        remaining[0] = 0L; // /ce cooldown clear, or the store forgot it
+        bars.tick();
+        assertTrue(shown.isEmpty());
+    }
+
+    @Test
+    void clearCooldownsRemovesOnlyTheCooldownBars() {
+        potions.put("poison", effect(80));
+        bars.debuff(player, "poison", "Poison", poisonType, 80);
+        bars.staffFrozen(player.getUniqueId(), true);
+        bars.cooldown(player.getUniqueId(), "chaos", "Chaos cooldown", 90_000L);
+        bars.cooldown(player.getUniqueId(), "cleaving", "Cleaving strike cooldown", 60_000L);
+        assertEquals(4, shown.size());
+
+        bars.clearCooldowns(player.getUniqueId());
+        assertEquals(List.of("Poison · 4s", "Frozen by staff"), texts());
+    }
+
+    @Test
+    void cooldownBarsStayThroughDeath_AndGoOnQuit() {
+        potions.put("poison", effect(80));
+        bars.debuff(player, "poison", "Poison", poisonType, 80);
+        bars.cooldown(player.getUniqueId(), "resistance", "Resistance cooldown", 120_000L);
+
+        PlayerDeathEvent death = mock(PlayerDeathEvent.class);
+        when(death.getEntity()).thenReturn(player);
+        bars.onDeath(death);
+        assertEquals(List.of("Resistance cooldown · 2:00"), texts());
+
+        PlayerQuitEvent quit = mock(PlayerQuitEvent.class);
+        when(quit.getPlayer()).thenReturn(player);
+        bars.onQuit(quit);
+        assertTrue(shown.isEmpty());
+        assertFalse(bars.has(player.getUniqueId(), "cooldown:resistance"));
+    }
+
+    @Test
+    void theSameAbilityAgainRestartsItsCooldownBar() {
+        bars.cooldown(player.getUniqueId(), "chaos", "Chaos cooldown", 90_000L);
+        now.set(30_000L);
+        bars.cooldown(player.getUniqueId(), "chaos", "Chaos cooldown", 90_000L);
+        assertEquals(List.of("Chaos cooldown · 1:30"), texts());
+        assertEquals(1.0f, shown.get(0).progress(), 0.0001f);
+    }
+
+    @Test
+    void noCooldownBarForAnOfflinePlayerOrZeroLength() {
+        bars.cooldown(UUID.randomUUID(), "chaos", "Chaos cooldown", 90_000L);
+        bars.cooldown(player.getUniqueId(), "chaos", "Chaos cooldown", 0L);
+        assertTrue(shown.isEmpty());
+        assertFalse(bars.has(player.getUniqueId(), "cooldown:chaos"));
+    }
+
     private static PotionEffect effect(int ticks) {
         PotionEffect effect = mock(PotionEffect.class);
         when(effect.getDuration()).thenReturn(ticks);

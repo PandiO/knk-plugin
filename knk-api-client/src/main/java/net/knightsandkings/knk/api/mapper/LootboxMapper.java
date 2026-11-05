@@ -90,7 +90,9 @@ public final class LootboxMapper {
                 dto.boxStars(), dto.boxLabel(), dto.itemInstanceId(), dto.itemBlueprintId(), dto.itemName(), dto.itemGradeId(),
                 dto.itemGradeStars(), dto.quantity(), dto.isSpecial(),
                 map(dto.enchantments(), e -> new KnkLootboxClaimEnchantment(e.definitionId(), e.key(), e.isCustom(), e.level())),
-                dto.announce(), instant(dto.claimedAt()), instant(dto.deliveredAt()));
+                dto.announce(), instant(dto.claimedAt()), instant(dto.deliveredAt()),
+                ItemAppearanceMapper.toShieldBanner(dto.shieldBannerBaseColor(), dto.shieldBannerLayers()),
+                ItemAppearanceMapper.toArmorTrim(dto.armorTrimPattern(), dto.armorTrimMaterial()));
     }
 
     public static List<KnkLootboxClaimResult> toClaims(List<LootboxDtos.ClaimResultDto> dtos) {

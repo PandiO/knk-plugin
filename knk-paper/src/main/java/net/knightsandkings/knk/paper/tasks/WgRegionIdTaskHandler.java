@@ -53,7 +53,9 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
     private final Plugin plugin;
     
     // Track active tasks: player -> TaskContext
-    private final Map<Player, TaskContext> activeTasksByPlayer = new HashMap<>();
+    // #180: keyed by UUID (a rejoining player is a new Player object) and read from the async chat thread
+    private final Map<java.util.UUID, TaskContext> activeTasksByPlayer = new java.util.concurrent.ConcurrentHashMap<>();
+    private volatile WorldTaskLifecycle lifecycle = WorldTaskLifecycle.NONE;
 
     /**
      * Told when a temporary region became its final name, so the category's parent, priority and flags can be applied
@@ -134,7 +136,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
             }
         }
         
-        activeTasksByPlayer.put(player, context);
+        activeTasksByPlayer.put(player.getUniqueId(), context);
         
         // Enable CUI selection for WorldEdit (must run on main thread)
         plugin.getServer().getScheduler().runTask(plugin, () -> {
@@ -146,7 +148,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 player.sendMessage("§7[WorldTask] Task ID: " + taskId);
                 player.sendMessage("§eOption 1 - Create new region: Use '//sel poly' or '//sel cuboid', then type 'save'");
                 player.sendMessage("§eOption 2 - Select existing: Type 'select {regionname}'");
-                player.sendMessage("§7Or type 'cancel' to abort.");
+                player.sendMessage("§7Type 'cancel' to hand the task back, or 'discard' to cancel it for good.");
                 if (context.parentRegionId != null) {
                     player.sendMessage("§7Note: Region must be inside parent region: " + context.parentRegionId);
                 }
@@ -161,12 +163,37 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
 
     @Override
     public boolean isHandling(Player player) {
-        return activeTasksByPlayer.containsKey(player);
+        return activeTasksByPlayer.containsKey(player.getUniqueId());
+    }
+
+    @Override
+    public boolean isHandling(java.util.UUID playerId) {
+        return playerId != null && activeTasksByPlayer.containsKey(playerId);
+    }
+
+    @Override
+    public void setLifecycle(WorldTaskLifecycle lifecycle) {
+        this.lifecycle = lifecycle != null ? lifecycle : WorldTaskLifecycle.NONE;
+    }
+
+    /**
+     * PandiO/knk-workspace#180: the player ends the task in chat. {@code cancel} hands it back (Pending again, its task
+     * code works for anyone), {@code discard} cancels it for good; either way the API is told.
+     */
+    private void endInChat(Player player, int taskId, boolean discard) {
+        cancel(player);
+        if (discard) {
+            lifecycle.discarded(player, taskId);
+            player.sendMessage("§7[WorldTask] Task " + taskId + " discarded; the web app shows it as cancelled.");
+        } else {
+            lifecycle.handedBack(player, taskId);
+            player.sendMessage("§7[WorldTask] Task " + taskId + " handed back; its task code works again.");
+        }
     }
 
     @Override
     public void cancel(Player player) {
-        TaskContext context = activeTasksByPlayer.remove(player);
+        TaskContext context = activeTasksByPlayer.remove(player.getUniqueId());
         if (context != null) {
             // Cleanup: remove temp region if created
             if (context.createdRegionId != null) {
@@ -178,14 +205,14 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
             // Clear WorldEdit session
             WorldEdit.getInstance().getSessionManager().remove(BukkitAdapter.adapt(player));
             
-            player.sendMessage("§c[WorldTask] Task cancelled.");
+            player.sendMessage("§c[WorldTask] Task stopped.");
             LOGGER.info("Cancelled WgRegionId task for player " + player.getName() + " (task " + context.taskId + ")");
         }
     }
 
     @Override
     public Integer getTaskId(Player player) {
-        TaskContext context = activeTasksByPlayer.get(player);
+        TaskContext context = activeTasksByPlayer.get(player.getUniqueId());
         return context != null ? context.taskId : null;
     }
 
@@ -198,7 +225,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      * @return true if the message was handled and should be cancelled
      */
     public boolean onPlayerChat(Player player, String message) {
-        TaskContext context = activeTasksByPlayer.get(player);
+        TaskContext context = activeTasksByPlayer.get(player.getUniqueId());
         if (context == null) return false;
 
         String cmd = message.trim().toLowerCase();
@@ -206,8 +233,8 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
         if (cmd.equals("save")) {
             handleSave(player, context);
             return true;
-        } else if (cmd.equals("cancel")) {
-            cancel(player);
+        } else if (cmd.equals("cancel") || cmd.equals("discard")) {
+            endInChat(player, context.taskId, cmd.equals("discard"));
             return true;
         } else if (cmd.equals("pause") || cmd.equals("suspend")) {
             handlePause(player, context);
@@ -407,7 +434,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
     private void handlePause(Player player, TaskContext context) {
         context.paused = true;
         player.sendMessage("§e[WorldTask] Task paused. Your selection is preserved.");
-        player.sendMessage("§7Type 'resume' to continue, or 'cancel' to abort.");
+        player.sendMessage("§7Type 'resume' to continue, 'cancel' to hand the task back, or 'discard' to cancel it.");
         LOGGER.info("Paused WgRegionId task " + context.taskId + " for player " + player.getName());
     }
 
@@ -447,7 +474,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
         worldTasksApi.complete(context.taskId, outputJson)
             .thenAccept(completedTask -> {
                 plugin.getServer().getScheduler().runTask(plugin, () -> {
-                    activeTasksByPlayer.remove(player);
+                    activeTasksByPlayer.remove(player.getUniqueId());
                     player.sendMessage("§a[WorldTask] ✓ Task completed! Region " + regionId + " has been created.");
                     LOGGER.info("Completed WgRegionId task for player " + player.getName() 
                         + " (task " + context.taskId + ") with region: " + regionId);
@@ -458,6 +485,13 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                     player.sendMessage("§c[WorldTask] Failed to complete task: " + ex.getMessage());
                     player.sendMessage("§7The region was created but not saved. Cleaning up...");
                     cleanupTempRegion(player.getWorld(), regionId);
+                    if (WorldTaskApiErrors.taskMovedOn(ex)) {
+                        // #180: cancelled in the web app, released or taken over meanwhile: end the session too.
+                        TaskContext gone = activeTasksByPlayer.remove(player.getUniqueId());
+                        if (gone != null) {
+                            WorldEdit.getInstance().getSessionManager().remove(BukkitAdapter.adapt(player));
+                        }
+                    }
                     LOGGER.warning("Failed to complete WgRegionId task " + context.taskId + ": " + ex.getMessage());
                 });
                 return null;
@@ -563,7 +597,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      */
     @Deprecated
     public void onRegionEnter(Player player, String regionId) {
-        // TaskContext context = activeTasksByPlayer.get(player);
+        // TaskContext context = activeTasksByPlayer.get(player.getUniqueId());
         // if (context == null) return;
 
         // // Build output JSON
@@ -577,7 +611,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
         // worldTasksApi.complete(context.taskId, outputJson)
         //     .thenAccept(completedTask -> {
         //         plugin.getServer().getScheduler().runTask(plugin, () -> {
-        //             activeTasksByPlayer.remove(player);
+        //             activeTasksByPlayer.remove(player.getUniqueId());
         //             player.sendMessage("§a[WorldTask] ✓ Task completed! Region " + regionId + " has been claimed.");
         //             LOGGER.info("Completed WgRegionId task for player " + player.getName() 
         //                 + " (task " + context.taskId + ") with region: " + regionId);
@@ -891,7 +925,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
 
     private static final List<String> BLOCKED_ADVICE = List.of(
         "Region not saved. Please adjust your selection and type 'save' again, or 'select' another region.",
-        "Or type 'cancel' to abort the task.",
+        "Or type 'cancel' to hand the task back ('discard' cancels it for good).",
         "If you believe this is an error, contact a developer.");
 
     /**

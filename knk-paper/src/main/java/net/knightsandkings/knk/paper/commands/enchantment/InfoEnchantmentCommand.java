@@ -114,6 +114,21 @@ public class InfoEnchantmentCommand implements EnchantmentSubcommand {
                     "messages.cmd-info-tuning",
                     "&8   chance %chance%%, duration %duration%s, cooldown %cooldownSetting%",
                     tuningPlaceholders(EnchantmentTuningTable.getInstance().get(enchantmentId), level))));
+            EnchantmentTuning tuning = EnchantmentTuningTable.getInstance().get(enchantmentId);
+            if (tuning.effectLevel() > 0 || tuning.secondaryDurationTicks() > 0) {
+                // #201: Flash Chaos's Slowness level and Nausea duration.
+                sender.sendMessage(handler.colorize(handler.message(
+                        "messages.cmd-info-tuning-effects",
+                        "&8   effect level %effectLevel%, second effect %secondDuration%s",
+                        effectPlaceholders(tuning, level))));
+            }
+            if (tuning.area().reach() > 0.0d) {
+                // #223: Chaos / Flash Chaos area damage, gate damage and radii.
+                sender.sendMessage(handler.colorize(handler.message(
+                        "messages.cmd-info-tuning-area",
+                        AREA_LINE_DEFAULT,
+                        areaPlaceholders(tuning, level))));
+            }
         }
 
         return true;
@@ -133,6 +148,25 @@ public class InfoEnchantmentCommand implements EnchantmentSubcommand {
         String duration = formatNumber(tuning.durationTicksAt(level) / 20.0d);
         String cooldown = tuning.cooldownEnabled() ? formatNumber(tuning.cooldownMs() / 1000.0d) + "s" : "off";
         return Map.of("%chance%", chance, "%duration%", duration, "%cooldownSetting%", cooldown);
+    }
+
+    /** PandiO/knk-workspace#201: the effect level and the second effect's duration at this level. */
+    static Map<String, String> effectPlaceholders(EnchantmentTuning tuning, int level) {
+        return Map.of(
+                "%effectLevel%", Integer.toString(tuning.effectLevel()),
+                "%secondDuration%", formatNumber(tuning.secondaryDurationTicksAt(level) / 20.0d));
+    }
+
+    static final String AREA_LINE_DEFAULT =
+            "&8   area damage %areaDamage% within %damageRadius% blocks, gates %gateDamage%, knockback within %effectRadius% blocks";
+
+    /** PandiO/knk-workspace#223: a blast's damage and gate damage at this level, and its radii. */
+    static Map<String, String> areaPlaceholders(EnchantmentTuning tuning, int level) {
+        return Map.of(
+                "%areaDamage%", formatNumber(tuning.areaDamageAt(level)),
+                "%gateDamage%", formatNumber(tuning.gateDamageAt(level)),
+                "%damageRadius%", formatNumber(tuning.area().damageRadius()),
+                "%effectRadius%", formatNumber(tuning.area().reach()));
     }
 
     private static String formatNumber(double value) {

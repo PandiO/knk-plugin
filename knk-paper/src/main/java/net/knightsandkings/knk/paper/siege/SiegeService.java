@@ -182,6 +182,10 @@ public final class SiegeService {
     private boolean refreshInFlight;
     private final List<CommandSender> refreshWaiters = new ArrayList<>();
     private boolean shuttingDown;
+    // PandiO/knk-workspace#31: the startup reads that never retried by themselves (retried on the realtime reconnect).
+    private volatile boolean configLoaded;
+    private volatile boolean titleRanksLoaded;
+    private volatile CompletableFuture<Boolean> startupConfigFetch;
     private MenuHooks menuHooks;
     /** Command label -> primary command name, over the server's command map (for the command filter). */
     private final java.util.function.UnaryOperator<String> commandAliases;
@@ -294,10 +298,16 @@ public final class SiegeService {
     /** Bootstrap (DESIGN §6.1): fetch the runtime config off-thread, then build lobbies on the main thread. */
     public void start() {
         refreshTitleBrackets();
+        CompletableFuture<Boolean> fetched = new CompletableFuture<>();
+        startupConfigFetch = fetched;
         dataAccess.getRuntimeConfigAsync().whenComplete((result, error) ->
                 Bukkit.getScheduler().runTask(plugin, () -> {
-                    if (shuttingDown) return;
-                    onRuntimeConfig(result, error, true);
+                    try {
+                        if (shuttingDown) return;
+                        onRuntimeConfig(result, error, true);
+                    } finally {
+                        fetched.complete(configLoaded);
+                    }
                 }));
         ticker = Bukkit.getScheduler().runTaskTimer(plugin, net.knightsandkings.knk.core.metrics.PluginMetrics.timed("siege.tick", this::tick), 20L, 20L);
         logger.info("[Siege] Runtime started (1 s ticker); fetching runtime config");
@@ -2021,6 +2031,52 @@ public final class SiegeService {
 
     // ==================== Configuration ====================
 
+    /**
+     * Realtime S3 (PandiO/knk-workspace#182): {@code SiegeConfigChanged} or a title bracket change from the web app - the
+     * {@code /siege admin reload} path: lobbies between matches take the new config now, running matches at their next
+     * cooldown (as {@code RefreshConfigEffect} does).
+     */
+    public void refreshFromApi() {
+        refreshTitleBrackets();
+        refreshConfig(null);
+    }
+
+    /**
+     * PandiO/knk-workspace#31 / #182: the startup-only reads again when they failed at start (the API was down) - the
+     * runtime config that builds the lobbies and the title brackets - as a pending startup step on the realtime
+     * reconnect. Main thread. Completes with whether both are loaded now.
+     */
+    public CompletableFuture<Boolean> retryStartup() {
+        CompletableFuture<Boolean> brackets = titleRanksLoaded ? CompletableFuture.completedFuture(true) : refreshTitleBrackets();
+        CompletableFuture<Boolean> config;
+        CompletableFuture<Boolean> running = startupConfigFetch;
+        if (configLoaded) {
+            config = CompletableFuture.completedFuture(true);
+        } else if (running != null && !running.isDone()) {
+            config = running;
+        } else {
+            CompletableFuture<Boolean> fetched = new CompletableFuture<>();
+            startupConfigFetch = fetched;
+            boolean bootstrap = lobbies.isEmpty();
+            dataAccess.refreshRuntimeConfigAsync().whenComplete((result, error) ->
+                    Bukkit.getScheduler().runTask(plugin, () -> {
+                        try {
+                            if (shuttingDown) return;
+                            onRuntimeConfig(result, error, bootstrap);
+                        } finally {
+                            fetched.complete(configLoaded);
+                        }
+                    }));
+            config = fetched;
+        }
+        return brackets.thenCombine(config, (a, b) -> Boolean.TRUE.equals(a) && Boolean.TRUE.equals(b));
+    }
+
+    /** #31: whether the runtime config was applied at least once this run. */
+    public boolean configLoaded() {
+        return configLoaded;
+    }
+
     private void refreshConfig(CommandSender replyTo) {
         if (replyTo != null) refreshWaiters.add(replyTo);
         if (refreshInFlight) return;
@@ -2033,16 +2089,25 @@ public final class SiegeService {
                 }));
     }
 
-    private void refreshTitleBrackets() {
-        if (titleBracketsApi == null) return;
+    private CompletableFuture<Boolean> refreshTitleBrackets() {
+        CompletableFuture<Boolean> done = new CompletableFuture<>();
+        if (titleBracketsApi == null) {
+            titleRanksLoaded = true;
+            done.complete(true);
+            return done;
+        }
         titleBracketsApi.getAll().whenComplete((brackets, error) -> Bukkit.getScheduler().runTask(plugin, () -> {
             if (error != null || brackets == null) {
                 logger.warning("[Siege] Could not fetch title brackets (" + (error == null ? "no data" : error.getMessage())
                         + "); join denials show the XP number and the team split ranks by raw XP");
+                done.complete(false);
                 return;
             }
             titleRanks = new SiegeTitleRanks(brackets);
+            titleRanksLoaded = true;
+            done.complete(true);
         }));
+        return done;
     }
 
     private void onRuntimeConfig(FetchResult<KnkSiegeRuntimeConfig> result, Throwable error, boolean bootstrap) {
@@ -2058,6 +2123,7 @@ public final class SiegeService {
             return;
         }
         applyRuntimeConfig(config.get(), bootstrap);
+        configLoaded = true;
         String summary = "Siege configuration refreshed: " + lobbies.size() + " lobby(ies) - " + lobbyKeys() + "."
                 + (result.isStale() ? " (API unreachable: served the last cached copy)" : "");
         waiters.forEach(w -> w.sendMessage(SiegeMessages.good(summary)));

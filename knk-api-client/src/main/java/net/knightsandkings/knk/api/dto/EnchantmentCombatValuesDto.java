@@ -16,5 +16,13 @@ public record EnchantmentCombatValuesDto(
         @JsonProperty("cooldownEnabled") Boolean cooldownEnabled,
         @JsonProperty("cooldownSeconds") Integer cooldownSeconds,
         @JsonProperty("effectDurationSeconds") Double effectDurationSeconds,
-        @JsonProperty("levelMultiplier") Double levelMultiplier
+        @JsonProperty("levelMultiplier") Double levelMultiplier,
+        // PandiO/knk-workspace#201: Flash Chaos's Slowness level and Nausea duration.
+        @JsonProperty("effectLevel") Integer effectLevel,
+        @JsonProperty("secondaryEffectDurationSeconds") Double secondaryEffectDurationSeconds,
+        // PandiO/knk-workspace#223: Chaos / Flash Chaos area damage, gate damage and radii.
+        @JsonProperty("areaDamage") Double areaDamage,
+        @JsonProperty("gateDamage") Double gateDamage,
+        @JsonProperty("damageRadiusBlocks") Double damageRadiusBlocks,
+        @JsonProperty("effectRadiusBlocks") Double effectRadiusBlocks
 ) {}

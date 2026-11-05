@@ -1,6 +1,7 @@
 name: KnightsAndKings
 api: "1.21"
-version: 0.1.0
+# Set at build time (knk-paper/build.gradle.kts): "0.1.0+<git short sha>", or "dev" without git.
+version: "${pluginVersion}"
 main: net.knightsandkings.knk.paper.KnKPlugin
 api-version: "26.3"
 depend:
@@ -558,7 +559,13 @@ permissions:
     default: false
 
   knk.tasks:
-    description: Access to /knk tasks, /knk task-claim, /knk task-status (world task management)
+    description: Access to /knk tasks, /knk task <task code> (alias task-claim), /knk task accept|decline <id>, /knk task-status (world task management); with the realtime channel, tasks sent from the web app are offered to holders
+    default: op
+
+  # PandiO/knk-workspace#180: claiming a world task by its numeric id instead of its task code (owner/rescue only;
+  # not given to any rank by a seed, so in practice only holders of * have it).
+  knk.tasks.any:
+    description: Claim any world task by numeric id with /knk task <id>
     default: op
 
   knk.mode.owner:

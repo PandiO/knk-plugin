@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.paper.bootstrap;
 
 import net.knightsandkings.knk.api.impl.enchantment.LocalEnchantmentRepositoryImpl;
+import net.knightsandkings.knk.core.domain.enchantment.EnchantmentRegistry;
 import net.knightsandkings.knk.core.domain.item.GradeCatalog;
 import net.knightsandkings.knk.core.ports.enchantment.CooldownManager;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentExecutor;
@@ -8,6 +9,8 @@ import net.knightsandkings.knk.core.ports.enchantment.EnchantmentRepository;
 import net.knightsandkings.knk.paper.commands.enchantment.EnchantmentCommandHandler;
 import net.knightsandkings.knk.paper.config.EnchantmentConfigManager;
 import net.knightsandkings.knk.paper.enchantbook.EnchantBooks;
+import net.knightsandkings.knk.paper.enchantment.CooldownBarCooldownManager;
+import net.knightsandkings.knk.paper.enchantment.AbilityDeathMessageListener;
 import net.knightsandkings.knk.paper.enchantment.EnchantmentPermissions;
 import net.knightsandkings.knk.paper.enchantment.ExecutorImpl;
 import net.knightsandkings.knk.paper.enchantment.GateAreaDamage;
@@ -24,9 +27,11 @@ import net.knightsandkings.knk.paper.listeners.EnchantmentEnchantTableListener;
 import net.knightsandkings.knk.paper.listeners.EnchantmentInteractListener;
 import net.knightsandkings.knk.paper.listeners.FreezeMovementListener;
 import net.knightsandkings.knk.paper.regions.CombatSafezoneCheck;
+import org.bukkit.Bukkit;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.Plugin;
 
+import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
 
@@ -62,13 +67,19 @@ public class EnchantmentBootstrap {
     public EnchantmentRuntime initialize() {
         EnchantmentConfigManager configManager = new EnchantmentConfigManager(plugin);
         EnchantmentRepository enchantmentRepository = new LocalEnchantmentRepositoryImpl();
-        CooldownManager cooldownManager = new InMemoryCooldownManager();
-        FrozenPlayerTracker frozenPlayerTracker = new FrozenPlayerTracker(plugin);
-        ExecutorImpl enchantmentExecutor = new ExecutorImpl(plugin, cooldownManager, frozenPlayerTracker, safezones, gateAreaDamage);
         // #169: blindness hides name tags in the victim's own view, invisibility hides the invoker's own tag;
         // #170: a boss bar per timed debuff.
         NameTagBlackout nameTagBlackout = new NameTagBlackout();
         EffectBossBars effectBossBars = new EffectBossBars(nameTagBlackout);
+        // #202: the cooldown store also shows a cooldown bar for the abilities that have one (also Cleaving's charged
+        // strike, which gets this store through EnchantmentRuntime.cooldownManager()).
+        CooldownBarCooldownManager cooldownManager = new CooldownBarCooldownManager(
+                new InMemoryCooldownManager(),
+                effectBossBars,
+                CooldownBarCooldownManager.defaultLabels(EnchantmentRegistry.getInstance()),
+                mainThreadExecutor(plugin));
+        FrozenPlayerTracker frozenPlayerTracker = new FrozenPlayerTracker(plugin);
+        ExecutorImpl enchantmentExecutor = new ExecutorImpl(plugin, cooldownManager, frozenPlayerTracker, safezones, gateAreaDamage);
         effectBossBars.setInvisibleNameTag(new InvisibleNameTag(ScoreboardUtil::getScoreboard));
         // #211: invisibility also hides armour and held items from everyone who doesn't see through it.
         InvisibleEquipment invisibleEquipment = new InvisibleEquipment(plugin);
@@ -108,7 +119,10 @@ public class EnchantmentBootstrap {
         pluginManager.registerEvents(new FreezeMovementListener(frozenPlayerTracker), plugin);
         pluginManager.registerEvents(nameTagBlackout, plugin);
         pluginManager.registerEvents(effectBossBars, plugin);
+        pluginManager.registerEvents(cooldownManager, plugin);
         pluginManager.registerEvents(invisibleEquipment, plugin);
+        // #222: Chaos / Flash Chaos kills get a death message naming the ability and its user.
+        pluginManager.registerEvents(new AbilityDeathMessageListener(plugin), plugin);
         // Permanent enchantment books (KNG-5), capped by the target's grade (KNG-6).
         EnchantBooks enchantBooks = new EnchantBooks(
                 enchantmentRepository,
@@ -137,6 +151,17 @@ public class EnchantmentBootstrap {
                 nameTagBlackout,
                 invisibleEquipment
         );
+    }
+
+    /** Runs a task on the server thread: at once when already there, else on the next tick. */
+    static Executor mainThreadExecutor(Plugin plugin) {
+        return task -> {
+            if (Bukkit.isPrimaryThread()) {
+                task.run();
+            } else {
+                Bukkit.getScheduler().runTask(plugin, task);
+            }
+        };
     }
 
     public record EnchantmentRuntime(

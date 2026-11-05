@@ -37,6 +37,15 @@ public final class LootboxRuntime {
     private final Supplier<ConfigurationSection> configSection;
     private final Clock clock;
     private final ActiveLootboxCache cache = new ActiveLootboxCache();
+
+    // Realtime S3 (PandiO/knk-workspace#182): the event that replaces this re-sync is pushed while the hub is connected,
+    // so the timer then runs realtime.fallback-poll-multiplier times less often (decision Q4); set before start().
+    private volatile net.knightsandkings.knk.core.realtime.FallbackPolling fallbackPolling =
+        net.knightsandkings.knk.core.realtime.FallbackPolling.never();
+
+    public void setFallbackPolling(net.knightsandkings.knk.core.realtime.FallbackPolling polling) {
+        this.fallbackPolling = polling == null ? net.knightsandkings.knk.core.realtime.FallbackPolling.never() : polling;
+    }
     private final LootboxPresenter presenter;
 
     private record Snapshot(KnkLootboxRuntimeConfig config, List<KnkLootboxSpawn> active) {
@@ -59,7 +68,7 @@ public final class LootboxRuntime {
     public void start() {
         stop();
         long refreshTicks = settings.runtimeRefreshSeconds() * 20L;
-        tasks.add(Bukkit.getScheduler().runTaskTimer(plugin, () -> refresh(), 20L, refreshTicks));
+        tasks.add(Bukkit.getScheduler().runTaskTimer(plugin, fallbackPolling.throttle(() -> refresh()), 20L, refreshTicks));
         tasks.add(Bukkit.getScheduler().runTaskTimer(plugin, net.knightsandkings.knk.core.metrics.PluginMetrics.timed("lootbox.tick", () -> tick()), 20L, 20L));
     }
 

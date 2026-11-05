@@ -31,7 +31,8 @@ class ArchitectureGuardTest {
         "navigation",
         "domain/roads",
         "catalog",
-        "survival"
+        "survival",
+        "realtime"
     );
 
     /** Individual files that must stay Bukkit-free (must exist - they are Phase 2a's extractions). */

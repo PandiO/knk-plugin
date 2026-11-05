@@ -50,8 +50,13 @@ public final class EnchantmentTuningTable {
         // Self-buff on hit, unchanged: 15 % per level, 15 s, 120 s cooldown.
         map.put("strength", new EnchantmentTuning(0.15d, 0.15d, true, 120_000L, 300, 0.0d));
         // Right-click abilities, unchanged: always go off, cooldown per player.
-        map.put("chaos", new EnchantmentTuning(1.0d, 0.0d, true, 90_000L, 0, 0.0d));
-        map.put("flash_chaos", new EnchantmentTuning(1.0d, 0.0d, true, 90_000L, 0, 0.0d));
+        // #223: Chaos's blast, 40 damage to entities within 3 blocks and to gates in reach, knockback within 5.
+        map.put("chaos", new EnchantmentTuning(1.0d, 0.0d, true, 90_000L, 0, 0.0d, 0, 0,
+                new AreaBlast(40.0d, 40.0d, 3.0d, 5.0d)));
+        // #201: Slowness I for 5 s (duration + effect level) and Nausea for 12.5 s (second duration), as before.
+        // #223: 60 damage within 3 blocks and to gates in reach, knockback and the debuffs within 5.
+        map.put("flash_chaos", new EnchantmentTuning(1.0d, 0.0d, true, 90_000L, 100, 0.0d, 1, 250,
+                new AreaBlast(60.0d, 60.0d, 3.0d, 5.0d)));
         map.put("health_boost", new EnchantmentTuning(1.0d, 0.0d, true, 120_000L, 0, 0.0d));
         map.put("armor_repair", new EnchantmentTuning(1.0d, 0.0d, true, 120_000L, 0, 0.0d));
         map.put("resistance", new EnchantmentTuning(1.0d, 0.0d, true, 120_000L, 200, 0.5d));
@@ -136,6 +141,11 @@ public final class EnchantmentTuningTable {
         return builder.toString();
     }
 
+    /** Highest area damage, gate damage and radius (blocks) of a blast, as in knk-web-api (#223). */
+    public static final double MAX_AREA_DAMAGE = 1_000.0d;
+    public static final double MAX_GATE_DAMAGE = 10_000.0d;
+    public static final double MAX_RADIUS_BLOCKS = 32.0d;
+
     /** The API refuses these ranges already; clamped here too so a bad row can't break combat. */
     static EnchantmentTuningOverride clamp(EnchantmentTuningOverride o) {
         return new EnchantmentTuningOverride(
@@ -145,7 +155,13 @@ public final class EnchantmentTuningTable {
                 o.cooldownEnabled(),
                 o.cooldownSeconds() == null ? null : Math.max(0, Math.min(86_400, o.cooldownSeconds())),
                 clamp(o.effectDurationSeconds(), 0.0d, 3_600.0d),
-                clamp(o.levelMultiplier(), 0.0d, 10.0d)
+                clamp(o.levelMultiplier(), 0.0d, 10.0d),
+                o.effectLevel() == null ? null : Math.max(1, Math.min(EnchantmentTuning.MAX_EFFECT_LEVEL, o.effectLevel())),
+                clamp(o.secondaryEffectDurationSeconds(), 0.0d, 3_600.0d),
+                clamp(o.areaDamage(), 0.0d, MAX_AREA_DAMAGE),
+                clamp(o.gateDamage(), 0.0d, MAX_GATE_DAMAGE),
+                clamp(o.damageRadiusBlocks(), 0.0d, MAX_RADIUS_BLOCKS),
+                clamp(o.effectRadiusBlocks(), 0.0d, MAX_RADIUS_BLOCKS)
         );
     }
 

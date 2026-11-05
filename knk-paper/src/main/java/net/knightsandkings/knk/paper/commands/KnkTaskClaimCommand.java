@@ -1,7 +1,9 @@
 package net.knightsandkings.knk.paper.commands;
 
+import net.knightsandkings.knk.api.dto.ClaimTaskDto;
 import net.knightsandkings.knk.api.dto.WorldTaskDto;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
+import net.knightsandkings.knk.paper.tasks.WorldTaskApiErrors;
 import net.knightsandkings.knk.paper.tasks.WorldTaskHandlerRegistry;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
@@ -11,26 +13,39 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+
 /**
- * Command: /knk task claim <linkCode>
- * Claims a world task and starts the handler for the current player.
- * 
- * Best practice: Use the claim code displayed in the web app.
- * Example: /knk task claim ABC123
- * 
- * Note: Task IDs are also supported for backwards compatibility.
+ * Command: {@code /knk task <task code>} (alias {@code /knk task-claim}; {@code /knk itemscan claim} and
+ * {@code /knk kitscan claim} land here too). Claims a world task and starts its handler for the player.
+ *
+ * <p>PandiO/knk-workspace#180: the API checks the task code and refuses a task that is no longer Pending (409, e.g.
+ * someone else claimed it a moment earlier). Claiming by numeric task id needs {@value #CLAIM_BY_ID_PERMISSION}
+ * (owner/rescue only). A claimed task whose type has no handler on this server is failed with the reason, instead of
+ * staying InProgress.
  */
 public class KnkTaskClaimCommand implements CommandExecutor {
+    public static final String CLAIM_BY_ID_PERMISSION = "knk.tasks.any";
+
     private final Plugin plugin;
     private final WorldTasksApi worldTasksApi;
     private final WorldTaskHandlerRegistry handlerRegistry;
     private final String serverId;
+    private final Executor mainThread;
 
     public KnkTaskClaimCommand(Plugin plugin, WorldTasksApi worldTasksApi, WorldTaskHandlerRegistry handlerRegistry, String serverId) {
+        this(plugin, worldTasksApi, handlerRegistry, serverId, task -> Bukkit.getScheduler().runTask(plugin, task));
+    }
+
+    /** @param mainThread runs the follow-up (messages, handler start) on the server's main thread */
+    public KnkTaskClaimCommand(Plugin plugin, WorldTasksApi worldTasksApi, WorldTaskHandlerRegistry handlerRegistry,
+                               String serverId, Executor mainThread) {
         this.plugin = plugin;
         this.worldTasksApi = worldTasksApi;
         this.handlerRegistry = handlerRegistry;
         this.serverId = serverId;
+        this.mainThread = mainThread;
     }
 
     @Override
@@ -40,9 +55,24 @@ public class KnkTaskClaimCommand implements CommandExecutor {
             return true;
         }
 
+        // #181: the clickable [Accept] / [Decline] of an offer from the web app ("Hand off to…").
+        if (args.length == 2 && (args[0].equalsIgnoreCase("accept") || args[0].equalsIgnoreCase("decline"))) {
+            if (!args[1].matches("\\d{1,9}")) {
+                sender.sendMessage(ChatColor.RED + "Usage: /knk task " + args[0].toLowerCase(java.util.Locale.ROOT) + " <task id>");
+                return true;
+            }
+            var responder = handlerRegistry.offerResponder();
+            if (responder.isEmpty()) {
+                sender.sendMessage(ChatColor.RED + "There is no open offer (offers need the realtime channel).");
+                return true;
+            }
+            responder.get().respond(player, Integer.parseInt(args[1]), args[0].equalsIgnoreCase("accept"));
+            return true;
+        }
+
         if (args.length == 0) {
-            sender.sendMessage(ChatColor.RED + "Usage: /knk task claim <linkCode>");
-            sender.sendMessage(ChatColor.GRAY + "Tip: Use the claim code from the web app (e.g., /knk task claim ABC123)");
+            sender.sendMessage(ChatColor.RED + "Usage: /knk task <task code>");
+            sender.sendMessage(ChatColor.GRAY + "Tip: use the task code from the web app (e.g. /knk task ABC123)");
             return true;
         }
 
@@ -53,35 +83,33 @@ public class KnkTaskClaimCommand implements CommandExecutor {
             return true;
         }
 
-        String idOrLinkCode = args[0];
-        
-        // Determine if it's an ID or link code
-        boolean isNumeric = idOrLinkCode.matches("\\d+");
-        
-        if (isNumeric) {
-            sender.sendMessage(ChatColor.YELLOW + "⚠ You're using a task ID. For better security, use the claim code from the web app.");
+        String input = args[0].trim();
+        boolean byId = input.matches("\\d+");
+        if (byId && !player.hasPermission(CLAIM_BY_ID_PERMISSION)) {
+            sender.sendMessage(ChatColor.RED + "Claim tasks with their task code from the web app (e.g. /knk task ABC123).");
+            sender.sendMessage(ChatColor.GRAY + "Claiming by task id needs " + CLAIM_BY_ID_PERMISSION + ".");
+            return true;
         }
-        
-        sender.sendMessage(ChatColor.GRAY + "Claiming task: " + idOrLinkCode + "...");
 
-        var taskFuture = isNumeric 
-            ? worldTasksApi.getById(Integer.parseInt(idOrLinkCode))
-            : worldTasksApi.getByLinkCode(idOrLinkCode);
+        sender.sendMessage(ChatColor.GRAY + "Claiming task" + (byId ? " #" + input : "") + "...");
+
+        CompletableFuture<WorldTaskDto> taskFuture = byId
+            ? worldTasksApi.getById(Integer.parseInt(input))
+            : worldTasksApi.getByLinkCode(input);
 
         taskFuture.thenAccept(task -> {
-            if (task == null) {
-                Bukkit.getScheduler().runTask(plugin, () -> {
-                    sender.sendMessage(ChatColor.RED + "Task not found: " + idOrLinkCode);
-                    if (!isNumeric) {
-                        sender.sendMessage(ChatColor.GRAY + "Make sure you copied the claim code correctly from the web app.");
+            if (task == null || task.id() == null) {
+                mainThread.execute(() -> {
+                    sender.sendMessage(ChatColor.RED + (byId ? "Task #" + input + " not found." : "No open task has this task code."));
+                    if (!byId) {
+                        sender.sendMessage(ChatColor.GRAY + "Check the code in the web app; a code stops working once its task is closed.");
                     }
                 });
                 return;
             }
 
-            // Check if task is already claimed or completed
-            if (!"Pending".equals(task.status())) {
-                Bukkit.getScheduler().runTask(plugin, () -> {
+            if (!task.isPending()) {
+                mainThread.execute(() -> {
                     sender.sendMessage(ChatColor.RED + "Task is not available (status: " + task.status() + ")");
                     if (task.claimedByMinecraftUsername() != null) {
                         sender.sendMessage(ChatColor.GRAY + "Already claimed by: " + task.claimedByMinecraftUsername());
@@ -90,38 +118,20 @@ public class KnkTaskClaimCommand implements CommandExecutor {
                 return;
             }
 
-            // Claim the task (pass linkCode for verification on backend)
-            worldTasksApi.claim(task.id(), task.linkCode(), serverId, player.getName()).thenAccept(claimedTask -> {
-                Bukkit.getScheduler().runTask(plugin, () -> {
-                    sender.sendMessage(ChatColor.GREEN + "✓ Successfully claimed task!");
-                    sender.sendMessage(ChatColor.GRAY + "Task: " + ChatColor.WHITE
-                        + taskLabel(claimedTask.entityType(), claimedTask.fieldName()));
-
-                    // Start the handler if available
-                    boolean started = handlerRegistry.startTask(
-                        player, 
-                        claimedTask.taskType(),
-                        claimedTask.fieldName(),
-                        claimedTask.id(), 
-                        claimedTask.inputJson()
-                    );
-
-                    if (started) {
-                        sender.sendMessage(ChatColor.YELLOW + "Handler started. Follow the prompts to complete the task.");
-                    } else {
-                        sender.sendMessage(ChatColor.YELLOW + "⚠ No handler registered for task type: " + claimedTask.taskType());
-                        sender.sendMessage(ChatColor.GRAY + "You may need to complete this task manually.");
-                    }
+            String uuid = player.getUniqueId().toString();
+            ClaimTaskDto claim = byId
+                ? ClaimTaskDto.byId(serverId, player.getName(), uuid)
+                : ClaimTaskDto.byCode(input, serverId, player.getName(), uuid);
+            worldTasksApi.claim(task.id(), claim).thenAccept(claimedTask -> mainThread.execute(() -> started(player, claimedTask)))
+                .exceptionally(ex -> {
+                    mainThread.execute(() -> {
+                        sender.sendMessage(ChatColor.RED + claimRefusal(ex));
+                        plugin.getLogger().warning("Failed to claim task " + task.id() + ": " + ex.getMessage());
+                    });
+                    return null;
                 });
-            }).exceptionally(ex -> {
-                Bukkit.getScheduler().runTask(plugin, () -> {
-                    sender.sendMessage(ChatColor.RED + "Failed to claim task: " + ex.getMessage());
-                    plugin.getLogger().warning("Failed to claim task " + task.id() + ": " + ex.getMessage());
-                });
-                return null;
-            });
         }).exceptionally(ex -> {
-            Bukkit.getScheduler().runTask(plugin, () -> {
+            mainThread.execute(() -> {
                 sender.sendMessage(ChatColor.RED + "Failed to fetch task: " + ex.getMessage());
                 plugin.getLogger().warning("Failed to fetch task: " + ex.getMessage());
             });
@@ -129,6 +139,57 @@ public class KnkTaskClaimCommand implements CommandExecutor {
         });
 
         return true;
+    }
+
+    private void started(Player player, WorldTaskDto claimedTask) {
+        player.sendMessage(ChatColor.GREEN + "✓ Successfully claimed task!");
+        player.sendMessage(ChatColor.GRAY + "Task: " + ChatColor.WHITE
+            + taskLabel(claimedTask.entityType(), claimedTask.fieldName()));
+        startClaimed(plugin, worldTasksApi, handlerRegistry, player, claimedTask);
+    }
+
+    /**
+     * Starts the handler of a task this player just claimed (main thread); a task whose type has no handler here is failed
+     * with the reason (#180). Shared with the realtime offer path (#181). Returns whether a handler started.
+     */
+    public static boolean startClaimed(Plugin plugin, WorldTasksApi worldTasksApi, WorldTaskHandlerRegistry handlerRegistry,
+                                       Player player, WorldTaskDto claimedTask) {
+        boolean started = handlerRegistry.startTask(
+            player,
+            claimedTask.taskType(),
+            claimedTask.fieldName(),
+            claimedTask.id(),
+            claimedTask.inputJson()
+        );
+
+        if (started) {
+            player.sendMessage(ChatColor.YELLOW + "Handler started. Follow the prompts to complete the task.");
+            return true;
+        }
+
+        // #180: no handler here means nobody can ever finish it in this state; fail it with the reason (the web app
+        // shows it and offers "Start again") instead of leaving it InProgress.
+        String reason = "This game server has no handler for task type '" + claimedTask.taskType() + "'"
+            + (claimedTask.fieldName() != null ? " (field " + claimedTask.fieldName() + ")" : "") + ".";
+        player.sendMessage(ChatColor.RED + "⚠ " + reason + " The task was marked as failed.");
+        worldTasksApi.fail(claimedTask.id(), reason).exceptionally(ex -> {
+            plugin.getLogger().warning("Failing task " + claimedTask.id() + " without a handler failed: " + ex.getMessage());
+            return null;
+        });
+        return false;
+    }
+
+    /** The player's message for a refused claim. */
+    static String claimRefusal(Throwable error) {
+        int status = WorldTaskApiErrors.status(error);
+        String apiMessage = WorldTaskApiErrors.message(error).orElse(null);
+        if (status == 409) {
+            return apiMessage != null ? apiMessage : "Someone else claimed this task just now.";
+        }
+        if (status == 400) {
+            return apiMessage != null ? apiMessage : "The task code does not match this task.";
+        }
+        return "Failed to claim task: " + (apiMessage != null ? apiMessage : error.getMessage());
     }
 
     /**

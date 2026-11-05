@@ -37,7 +37,11 @@ import net.knightsandkings.knk.paper.commands.support.PromotionEffects;
  * in the queue, so they show on the player's next join (the API expires them after 24h). Skips
  * the HTTP call entirely while nobody is online.
  *
- * TODO: like HeadlessWorldTaskPoller, replace with an API push (e.g. SignalR) once one exists.
+ * <p>
+ * Realtime S2 (PandiO/knk-workspace#179): while the realtime hub is connected the API pushes each notification
+ * ({@link #deliverPushed}) and this poll makes no HTTP call; it drains the queue once on every (re)connect
+ * ({@link #drainNow}) and polls as before while the hub is down or the channel is off. Shown notifications are
+ * acknowledged over REST either way.
  */
 public class PlayerNotificationPoller {
     private static final Logger LOGGER = Logger.getLogger(PlayerNotificationPoller.class.getName());
@@ -50,9 +54,20 @@ public class PlayerNotificationPoller {
     // twice if an acknowledge call fails and the next poll still lists it; the id is re-sent
     // for acknowledgement on that poll instead.
     private final Set<Long> shownIds = ConcurrentHashMap.newKeySet();
+    // Realtime S2: recently acknowledged ids, so a push and a drain (or poll) that overlap never show one twice.
+    private static final int ACKNOWLEDGED_MEMORY = 512;
+    private final java.util.Map<Long, Boolean> acknowledgedIds = java.util.Collections.synchronizedMap(
+        new java.util.LinkedHashMap<>(64, 0.75f, false) {
+            @Override
+            protected boolean removeEldestEntry(java.util.Map.Entry<Long, Boolean> eldest) {
+                return size() > ACKNOWLEDGED_MEMORY;
+            }
+        });
 
     private volatile boolean running;
     private BukkitTask task;
+    // Realtime S2: true while the hub delivers notifications; the poll loop then skips its HTTP call.
+    private volatile java.util.function.BooleanSupplier hubConnected = () -> false;
     // Set once UserAdminService exists (it's built after this poller in KnKPlugin).
     private volatile Consumer<Player> rankChangedHandler;
     // Set once lootboxes are initialized (Phase 5 token items the API issued itself).
@@ -133,6 +148,47 @@ public class PlayerNotificationPoller {
         }
     }
 
+    /** While this says true, the poll loop makes no HTTP call (the API pushes instead). */
+    public void setHubConnected(java.util.function.BooleanSupplier hubConnected) {
+        this.hubConnected = hubConnected != null ? hubConnected : () -> false;
+    }
+
+    /**
+     * One poll right away, outside the loop (realtime resync after a (re)connect): picks up what was queued while the
+     * hub was down, and anything a lost push left pending.
+     */
+    public void drainNow() {
+        if (Bukkit.getOnlinePlayers().isEmpty()) {
+            return;
+        }
+        notificationsApi.listPending()
+            .thenAccept(pending -> {
+                if (!pending.isEmpty()) {
+                    Bukkit.getScheduler().runTask(plugin, () -> deliver(pending, () -> { }));
+                }
+            })
+            .exceptionally(ex -> {
+                LOGGER.fine("PlayerNotificationPoller drain failed: " + ex.getMessage());
+                return null;
+            });
+    }
+
+    /**
+     * A notification the API pushed over the realtime hub (any thread). Shown on the main thread like a polled one
+     * and acknowledged over REST; while nobody is online it is left in the API's queue (the next join or drain shows
+     * it), as the poll does.
+     */
+    public void deliverPushed(PlayerNotification notification) {
+        if (notification == null) {
+            return;
+        }
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (!Bukkit.getOnlinePlayers().isEmpty()) {
+                deliver(List.of(notification), () -> { });
+            }
+        });
+    }
+
     public void start() {
         running = true;
         scheduleNextPoll();
@@ -154,7 +210,7 @@ public class PlayerNotificationPoller {
     }
 
     private void pollOnce() {
-        if (Bukkit.getOnlinePlayers().isEmpty()) {
+        if (Bukkit.getOnlinePlayers().isEmpty() || hubConnected.getAsBoolean()) {
             scheduleNextPoll();
             return;
         }
@@ -164,7 +220,7 @@ public class PlayerNotificationPoller {
                     scheduleNextPoll();
                     return;
                 }
-                Bukkit.getScheduler().runTask(plugin, () -> deliver(pending));
+                Bukkit.getScheduler().runTask(plugin, () -> deliver(pending, this::scheduleNextPoll));
             })
             .exceptionally(ex -> {
                 LOGGER.fine("PlayerNotificationPoller failed to list pending notifications: " + ex.getMessage());
@@ -173,10 +229,13 @@ public class PlayerNotificationPoller {
             });
     }
 
-    /** Main thread. Schedules the next poll once the acknowledgement settles. */
-    private void deliver(List<PlayerNotification> pending) {
+    /** Main thread. Runs {@code afterAcknowledged} (the poll loop: schedule the next poll) once the acknowledgement settles. */
+    private void deliver(List<PlayerNotification> pending, Runnable afterAcknowledged) {
         List<Long> toAcknowledge = new ArrayList<>();
         for (PlayerNotification notification : pending) {
+            if (acknowledgedIds.containsKey(notification.id())) {
+                continue; // shown and acknowledged already (pushed, then listed by an overlapping poll)
+            }
             if (shownIds.contains(notification.id())) {
                 toAcknowledge.add(notification.id());
                 continue;
@@ -234,17 +293,20 @@ public class PlayerNotificationPoller {
         }
 
         if (toAcknowledge.isEmpty()) {
-            scheduleNextPoll();
+            afterAcknowledged.run();
             return;
         }
         notificationsApi.acknowledge(toAcknowledge)
             .thenRun(() -> {
-                toAcknowledge.forEach(shownIds::remove);
-                scheduleNextPoll();
+                toAcknowledge.forEach(id -> {
+                    acknowledgedIds.put(id, Boolean.TRUE);
+                    shownIds.remove(id);
+                });
+                afterAcknowledged.run();
             })
             .exceptionally(ex -> {
                 LOGGER.warning("PlayerNotificationPoller failed to acknowledge " + toAcknowledge + ": " + ex.getMessage());
-                scheduleNextPoll();
+                afterAcknowledged.run();
                 return null;
             });
     }

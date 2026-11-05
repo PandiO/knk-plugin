@@ -20,7 +20,6 @@ import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -39,11 +38,13 @@ public class LocationTaskHandler implements IWorldTaskHandler {
     private final Plugin plugin;
     
     // Track active tasks: player -> TaskContext
-    private final Map<Player, TaskContext> activeTasksByPlayer = new HashMap<>();
+    // #180: keyed by UUID (a rejoining player is a new Player object) and read from the async chat thread
+    private final Map<java.util.UUID, TaskContext> activeTasksByPlayer = new java.util.concurrent.ConcurrentHashMap<>();
+    private volatile WorldTaskLifecycle lifecycle = WorldTaskLifecycle.NONE;
 
     private static final List<String> BLOCKED_ADVICE = List.of(
         "Task not completed. Please move to a valid location and type 'save' again.",
-        "Or type 'cancel' to abort the task.",
+        "Or type 'cancel' to hand the task back ('discard' cancels it for good).",
         "If you believe this is an error, contact a developer.");
 
     /**
@@ -76,7 +77,7 @@ public class LocationTaskHandler implements IWorldTaskHandler {
     @Override
     public void startTask(Player player, int taskId, String inputJson) {
         TaskContext context = new TaskContext(taskId, inputJson);
-        activeTasksByPlayer.put(player, context);
+        activeTasksByPlayer.put(player.getUniqueId(), context);
 
         player.sendMessage("§6[WorldTask] Capture your current location.");
         player.sendMessage("§7[WorldTask] Task ID: " + taskId);
@@ -85,28 +86,53 @@ public class LocationTaskHandler implements IWorldTaskHandler {
         player.sendMessage("§eOr right-click a block to capture that block's location");
         player.sendMessage("§eType 'pause' to build and interact with blocks normally");
         player.sendMessage("§eType 'resume' to continue after pausing");
-        player.sendMessage("§7Or type 'cancel' to abort.");
+        player.sendMessage("§7Type 'cancel' to hand the task back, or 'discard' to cancel it for good.");
 
         LOGGER.info("Started Location task for player " + player.getName() + " (task " + taskId + ")");
     }
 
     @Override
     public boolean isHandling(Player player) {
-        return activeTasksByPlayer.containsKey(player);
+        return activeTasksByPlayer.containsKey(player.getUniqueId());
+    }
+
+    @Override
+    public boolean isHandling(java.util.UUID playerId) {
+        return playerId != null && activeTasksByPlayer.containsKey(playerId);
+    }
+
+    @Override
+    public void setLifecycle(WorldTaskLifecycle lifecycle) {
+        this.lifecycle = lifecycle != null ? lifecycle : WorldTaskLifecycle.NONE;
+    }
+
+    /**
+     * PandiO/knk-workspace#180: the player ends the task in chat. {@code cancel} hands it back (Pending again, its task
+     * code works for anyone), {@code discard} cancels it for good; either way the API is told.
+     */
+    private void endInChat(Player player, int taskId, boolean discard) {
+        cancel(player);
+        if (discard) {
+            lifecycle.discarded(player, taskId);
+            player.sendMessage("§7[WorldTask] Task " + taskId + " discarded; the web app shows it as cancelled.");
+        } else {
+            lifecycle.handedBack(player, taskId);
+            player.sendMessage("§7[WorldTask] Task " + taskId + " handed back; its task code works again.");
+        }
     }
 
     @Override
     public void cancel(Player player) {
-        TaskContext context = activeTasksByPlayer.remove(player);
+        TaskContext context = activeTasksByPlayer.remove(player.getUniqueId());
         if (context != null) {
-            player.sendMessage("§c[WorldTask] Task cancelled.");
+            player.sendMessage("§c[WorldTask] Task stopped.");
             LOGGER.info("Cancelled Location task for player " + player.getName() + " (task " + context.taskId + ")");
         }
     }
 
     @Override
     public Integer getTaskId(Player player) {
-        TaskContext context = activeTasksByPlayer.get(player);
+        TaskContext context = activeTasksByPlayer.get(player.getUniqueId());
         return context != null ? context.taskId : null;
     }
 
@@ -119,7 +145,7 @@ public class LocationTaskHandler implements IWorldTaskHandler {
      * @return true if the message was handled and should be cancelled
      */
     public boolean onPlayerChat(Player player, String message) {
-        TaskContext context = activeTasksByPlayer.get(player);
+        TaskContext context = activeTasksByPlayer.get(player.getUniqueId());
         if (context == null) return false;
 
         String trimmedMessage = message == null ? "" : message.trim();
@@ -134,8 +160,8 @@ public class LocationTaskHandler implements IWorldTaskHandler {
             String locationName = parts.length > 1 ? parts[1].trim() : null;
             handleSave(player, context, locationName);
             return true;
-        } else if (cmd.equals("cancel")) {
-            cancel(player);
+        } else if (cmd.equals("cancel") || cmd.equals("discard")) {
+            endInChat(player, context.taskId, cmd.equals("discard"));
             return true;
         } else if (cmd.equals("pause") || cmd.equals("suspend")) {
             handlePause(player, context);
@@ -161,7 +187,7 @@ public class LocationTaskHandler implements IWorldTaskHandler {
      * @return true if the block selection was handled
      */
     public boolean onBlockRightClick(Player player, Block clickedBlock) {
-        TaskContext context = activeTasksByPlayer.get(player);
+        TaskContext context = activeTasksByPlayer.get(player.getUniqueId());
         if (context == null || context.paused || clickedBlock == null) {
             return false;
         }
@@ -233,7 +259,7 @@ public class LocationTaskHandler implements IWorldTaskHandler {
         context.paused = true;
         player.sendMessage("§e[WorldTask] Task paused.");
         player.sendMessage("§7You can now place and interact with blocks normally.");
-        player.sendMessage("§7Type 'resume' to continue, or 'cancel' to abort.");
+        player.sendMessage("§7Type 'resume' to continue, 'cancel' to hand the task back, or 'discard' to cancel it.");
         LOGGER.info("Paused Location task " + context.taskId + " for player " + player.getName());
     }
 
@@ -313,7 +339,7 @@ public class LocationTaskHandler implements IWorldTaskHandler {
         worldTasksApi.complete(context.taskId, outputJson)
             .thenAccept(completedTask -> {
                 plugin.getServer().getScheduler().runTask(plugin, () -> {
-                    activeTasksByPlayer.remove(player);
+                    activeTasksByPlayer.remove(player.getUniqueId());
                     player.sendMessage("§a[WorldTask] ✓ Task completed! Location captured.");
                     LOGGER.info("Completed Location task for player " + player.getName() 
                         + " (task " + context.taskId + ") named '" + locationName + "' at position: (" + x + ", " + y + ", " + z + ")");
@@ -321,7 +347,14 @@ public class LocationTaskHandler implements IWorldTaskHandler {
             })
             .exceptionally(ex -> {
                 plugin.getServer().getScheduler().runTask(plugin, () -> {
-                    player.sendMessage("§c[WorldTask] Failed to complete task: " + ex.getMessage());
+                    if (WorldTaskApiErrors.taskMovedOn(ex)) {
+                        // #180: cancelled in the web app, released or taken over meanwhile: nothing left to save.
+                        activeTasksByPlayer.remove(player.getUniqueId());
+                        player.sendMessage("§c[WorldTask] Task " + context.taskId + " is no longer yours to complete"
+                            + WorldTaskApiErrors.currentStatus(ex).map(status -> " (" + status + ")").orElse("") + ".");
+                    } else {
+                        player.sendMessage("§c[WorldTask] Failed to complete task: " + ex.getMessage());
+                    }
                     LOGGER.warning("Failed to complete Location task " + context.taskId + ": " + ex.getMessage());
                 });
                 return null;
