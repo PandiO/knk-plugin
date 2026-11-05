@@ -666,18 +666,12 @@ gates:
   # starts, for fire-duration-seconds. 0 turns it off. A defender's hits never burn their own gate.
   fire-aspect:
     ignite-chance-per-level: 0.15
-  # Cleaving (custom enchantment, levels I-IV, lore line "Cleaving II"): melee hits on a door block do
-  # (1 + damage-bonus-per-level x level) times the weapon's gate damage (netherite sword 8 -> 10/12/14/16), and a
-  # right-click on a door block with the strike ready is a charged strike of charged-hit-multiplier[level] times
-  # that boosted hit (50/72/98/128 of a default 500 HP gate), then cools down charged-cooldown-seconds[level]
-  # (per player). A missing level in either list uses the last entry.
-  cleaving:
-    damage-bonus-per-level: 0.25
-    charged-hit-multiplier: [5, 6, 7, 8]
-    charged-cooldown-seconds: [60, 50, 40, 30]
+  # Cleaving (custom enchantment, levels I-IV): its gate bonus, charged strike and strike cooldown are combat values
+  # since PandiO/knk-workspace#259 (web app: Enchantment definitions -> Cleaving -> Combat values); the former
+  # gates.cleaving keys here are no longer read.
   # chaos / flash_chaos hurt every gate with a door block within this many blocks (measured to the nearest
-  # edge of the block) of whoever used them, with the enchantment's own damage. Entities are still only
-  # hurt within 3 blocks.
+  # edge of the block) of whoever used them, with the enchantment's gate damage (a combat value, #223). Entities are
+  # hurt within the enchantment's own damage radius.
   area-enchantment-radius-blocks: 5.0
   # Pass-through system: InstantOpen mode removes only the door blocks within
   # passthrough-instant-open-radius-blocks of the triggering player's position (sideways, across
@@ -830,6 +824,8 @@ custom-enchantments:
     # PandiO/knk-workspace#201: only for an enchantment with an effect level or a second effect (Flash Chaos: Slowness level, Nausea).
     cmd-info-tuning-effects: "&8   effect level %effectLevel%, second effect %secondDuration%s"
     # PandiO/knk-workspace#223: only for Chaos / Flash Chaos (area damage and gate damage at the item's level, radii in blocks).
+    # PandiO/knk-workspace#259: only for Cleaving (gate bonus, charged strike and its cooldown at the item's level).
+    cmd-info-tuning-gate: "&8   gate hits +%gateBonus%%, charged strike %strike%x, strike cooldown %strikeCooldown%"
     cmd-info-tuning-area: "&8   area damage %areaDamage% within %damageRadius% blocks, gates %gateDamage%, knockback within %effectRadius% blocks"
     ench-use: "&cYou cannot use %enchantment%."
 

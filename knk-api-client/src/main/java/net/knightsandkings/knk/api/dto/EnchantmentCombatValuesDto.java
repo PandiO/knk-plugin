@@ -24,5 +24,10 @@ public record EnchantmentCombatValuesDto(
         @JsonProperty("areaDamage") Double areaDamage,
         @JsonProperty("gateDamage") Double gateDamage,
         @JsonProperty("damageRadiusBlocks") Double damageRadiusBlocks,
-        @JsonProperty("effectRadiusBlocks") Double effectRadiusBlocks
+        @JsonProperty("effectRadiusBlocks") Double effectRadiusBlocks,
+        // PandiO/knk-workspace#259: Cleaving's gate bonus and charged strike.
+        @JsonProperty("gateDamageBonusPerLevel") Double gateDamageBonusPerLevel,
+        @JsonProperty("strikeMultiplier") Double strikeMultiplier,
+        @JsonProperty("strikeMultiplierPerLevel") Double strikeMultiplierPerLevel,
+        @JsonProperty("cooldownPerLevelSeconds") Integer cooldownPerLevelSeconds
 ) {}

@@ -266,7 +266,11 @@ public class EnchantmentDefinitionsQueryApiImpl implements EnchantmentDefinition
                         dto.areaDamage(),
                         dto.gateDamage(),
                         dto.damageRadiusBlocks(),
-                        dto.effectRadiusBlocks()))
+                        dto.effectRadiusBlocks(),
+                        dto.gateDamageBonusPerLevel(),
+                        dto.strikeMultiplier(),
+                        dto.strikeMultiplierPerLevel(),
+                        dto.cooldownPerLevelSeconds()))
                 .toList();
     }
 }

@@ -1,5 +1,7 @@
 package net.knightsandkings.knk.paper.gates;
 
+import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuning;
+import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuningTable;
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.ports.enchantment.CooldownManager;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentRepository;
@@ -20,20 +22,24 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.logging.Level;
+import java.util.function.Supplier;
 import java.util.logging.Logger;
 
 /**
  * Siege playtest 2026-10-24: the <b>Cleaving</b> custom enchantment (knk-core {@code EnchantmentRegistry},
  * levels I-IV) is the gate breaker's enchantment. Two effects, both only against gate doors:
  * <ul>
- *   <li>every melee hit on a door block does {@code 1 + damageBonusPerLevel × level} times the weapon's gate
+ *   <li>every melee hit on a door block does {@code 1 + gate damage bonus × level} times the weapon's gate
  *       damage ({@link GateMeleeDamage}): ×1.25 / ×1.5 / ×1.75 / ×2 with the default, so a netherite sword's
  *       8 becomes 10 / 12 / 14 / 16 per hit;</li>
  *   <li>a right-click on a door block with the strike ready is a <b>charged strike</b>: one hit of
- *       {@code chargedHitMultiplier[level]} times that boosted hit (5 / 6 / 7 / 8 by default: 50 / 72 / 98 / 128
+ *       the strike multiplier at its level times that boosted hit (5 / 6 / 7 / 8 by default: 50 / 72 / 98 / 128
  *       of a default 500 HP gate), with wood splinters and breaking sounds, after which the strike cools down
- *       for {@code chargedCooldownSeconds[level]} (60 / 50 / 40 / 30 s).</li>
+ *       for its cooldown at that level (60 / 50 / 40 / 30 s).</li>
  * </ul>
+ * PandiO/knk-workspace#259: the numbers are Cleaving's combat values ({@link EnchantmentTuning#gateStrike()}, the
+ * strike's level-I cooldown is the enchantment's cooldown), read per hit, so an admin's change in the web app applies
+ * after {@code /ce reload} or the periodic refresh; config.yml {@code gates.cleaving} is gone.
  * The strike goes through {@link GateDoorHitService#handleDamage} like every other hit, so only a closed,
  * active, standing gate is hurt, the siege listener can veto it (a defender can't cleave their own gate) and
  * the statistics see the loss; the cooldown starts only when the hit counted. The cooldown is per player
@@ -65,27 +71,21 @@ public class GateCleaving {
     private final EnchantmentRepository enchantments;
     private final CooldownManager cooldowns;
     private final GateDoorHitService hitService;
-    private final double damageBonusPerLevel;
-    private final List<Double> chargedHitMultipliers;
-    private final List<Integer> chargedCooldownSeconds;
+    private final Supplier<EnchantmentTuning> tuning;
     private Effects effects = new BukkitEffects();
 
-    /**
-     * @param damageBonusPerLevel    extra share of the weapon's gate damage per level (0.25 = ×1.25 at level I)
-     * @param chargedHitMultipliers  the charged strike as a multiple of the boosted melee hit, per level (index 0 = I);
-     *                               a missing level uses the last entry
-     * @param chargedCooldownSeconds seconds the strike cools down, per level (index 0 = I); a missing level uses the last entry
-     */
-    public GateCleaving(EnchantmentRepository enchantments, CooldownManager cooldowns, GateDoorHitService hitService,
-                        double damageBonusPerLevel, List<Double> chargedHitMultipliers, List<Integer> chargedCooldownSeconds) {
+    /** Reads Cleaving's combat values from {@link EnchantmentTuningTable} per hit (#259). */
+    public GateCleaving(EnchantmentRepository enchantments, CooldownManager cooldowns, GateDoorHitService hitService) {
+        this(enchantments, cooldowns, hitService, () -> EnchantmentTuningTable.getInstance().get(CLEAVING_ID));
+    }
+
+    /** @param tuning Cleaving's current combat values, read per hit */
+    GateCleaving(EnchantmentRepository enchantments, CooldownManager cooldowns, GateDoorHitService hitService,
+                 Supplier<EnchantmentTuning> tuning) {
         this.enchantments = enchantments;
         this.cooldowns = cooldowns;
         this.hitService = hitService;
-        this.damageBonusPerLevel = Math.max(0.0, damageBonusPerLevel);
-        this.chargedHitMultipliers = chargedHitMultipliers == null || chargedHitMultipliers.isEmpty()
-            ? List.of(5.0, 6.0, 7.0, 8.0) : List.copyOf(chargedHitMultipliers);
-        this.chargedCooldownSeconds = chargedCooldownSeconds == null || chargedCooldownSeconds.isEmpty()
-            ? List.of(60, 50, 40, 30) : List.copyOf(chargedCooldownSeconds);
+        this.tuning = tuning;
     }
 
     void setEffects(Effects effects) {
@@ -118,7 +118,7 @@ public class GateCleaving {
 
     /** The factor a melee hit on a gate is multiplied by at {@code level} (1 for none). */
     public double damageMultiplier(int level) {
-        return level <= 0 ? 1.0 : 1.0 + damageBonusPerLevel * level;
+        return tuning.get().gateStrike().damageMultiplierAt(level);
     }
 
     /** {@link #damageMultiplier(int)} for the player's held weapon. */
@@ -128,12 +128,12 @@ public class GateCleaving {
 
     /** The charged strike as a multiple of the boosted melee hit at {@code level}. */
     public double chargedHitMultiplier(int level) {
-        return perLevel(chargedHitMultipliers, level);
+        return tuning.get().gateStrike().strikeMultiplierAt(level);
     }
 
     /** The cooldown of the charged strike at {@code level}, in milliseconds. */
     public long chargedCooldownMillis(int level) {
-        return Math.max(0L, perLevel(chargedCooldownSeconds, level)) * 1000L;
+        return tuning.get().strikeCooldownMsAt(level);
     }
 
     /** The damage of a charged strike for a weapon whose regular (un-boosted) gate hit is {@code meleeDamage}. */
@@ -168,11 +168,6 @@ public class GateCleaving {
         cooldowns.applyCooldown(id, CLEAVING_ID, chargedCooldownMillis(level)).join();
         effects.strike(player, block, level);
         return Strike.STRUCK;
-    }
-
-    private static <T extends Number> T perLevel(List<T> values, int level) {
-        int index = Math.max(0, Math.min(values.size() - 1, level - 1));
-        return values.get(index);
     }
 
     /** Wood splinters off the struck block and the sounds of a plank giving way. */
