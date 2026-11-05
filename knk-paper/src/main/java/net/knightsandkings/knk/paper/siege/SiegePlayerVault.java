@@ -129,6 +129,22 @@ public final class SiegePlayerVault {
         return true;
     }
 
+    /**
+     * Account erasure (PandiO/knk-workspace#184): forgets the player's saved state (inventory, position, effects) in
+     * memory and on disk without restoring it; the account no longer exists. Main thread.
+     *
+     * @return 1 when there was anything, else 0
+     */
+    public int discard(UUID playerId) {
+        if (playerId == null) {
+            return 0;
+        }
+        boolean had = has(playerId) || pendingRespawn.containsKey(playerId);
+        pendingRespawn.remove(playerId);
+        forget(playerId);
+        return had ? 1 : 0;
+    }
+
     public boolean has(UUID playerId) {
         return snapshots.containsKey(playerId) || file(playerId).isFile();
     }

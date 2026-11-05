@@ -85,4 +85,31 @@ class StatisticsSpoolTest {
         assertTrue(spool.isEmpty());
         assertEquals(List.of(), spool.list());
     }
+
+    // ---- account erasure (PandiO/knk-workspace#184) ----
+
+    @Test
+    void removeUser_DropsTheirEntriesAndKillsEitherWay_DeletesEmptiedBatches() {
+        StatisticsSpool spool = new StatisticsSpool(dir, Logger.getAnonymousLogger());
+        UUID onlyUser7 = UUID.randomUUID();
+        spool.write(sample(onlyUser7, T0));
+        UUID mixed = UUID.randomUUID();
+        UUID session = UUID.randomUUID();
+        spool.write(new StatisticsBatch(mixed, T0.plusSeconds(5),
+                List.of(StatisticsBatch.SessionEntry.start(session, 9, T0)),
+                List.of(),
+                List.of(new StatisticsBatch.ValueEntry(7, "distance.foot", "", 1, T0), new StatisticsBatch.ValueEntry(9, "distance.foot", "", 2, T0)),
+                List.of(),
+                List.of(new StatisticsBatch.PvpKillEntry(9, 7, "open_world", T0), new StatisticsBatch.PvpKillEntry(9, 8, "open_world", T0))));
+
+        assertEquals(6 + 2, spool.removeUser(7));
+
+        assertFalse(spool.contains(onlyUser7));
+        StatisticsBatch kept = spool.list().get(0);
+        assertEquals(mixed, kept.batchId());
+        assertEquals(List.of(9), kept.counters().stream().map(StatisticsBatch.ValueEntry::userId).toList());
+        assertEquals(List.of(8), kept.pvpKills().stream().map(StatisticsBatch.PvpKillEntry::victimUserId).toList());
+        assertEquals(1, kept.sessions().size());
+        assertEquals(0, spool.removeUser(7));
+    }
 }
