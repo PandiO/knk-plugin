@@ -185,6 +185,8 @@ public final class SiegeService {
     // PandiO/knk-workspace#31: the startup reads that never retried by themselves (retried on the realtime reconnect).
     private volatile boolean configLoaded;
     private volatile boolean titleRanksLoaded;
+    /** #31: the title bracket fetch running now (startup or a retry), joined instead of sending a second one. */
+    private volatile CompletableFuture<Boolean> titleBracketsFetch;
     private volatile CompletableFuture<Boolean> startupConfigFetch;
     private MenuHooks menuHooks;
     /** Command label -> primary command name, over the server's command map (for the command filter). */
@@ -2043,11 +2045,15 @@ public final class SiegeService {
 
     /**
      * PandiO/knk-workspace#31 / #182: the startup-only reads again when they failed at start (the API was down) - the
-     * runtime config that builds the lobbies and the title brackets - as a pending startup step on the realtime
-     * reconnect. Main thread. Completes with whether both are loaded now.
+     * runtime config that builds the lobbies and the title brackets - as a pending startup step, run when the API is
+     * back (connectivity UP, a fallback retry or the realtime reconnect). Main thread. A fetch still running (the
+     * startup one) is joined, not sent again. Completes with whether both are loaded now.
      */
     public CompletableFuture<Boolean> retryStartup() {
-        CompletableFuture<Boolean> brackets = titleRanksLoaded ? CompletableFuture.completedFuture(true) : refreshTitleBrackets();
+        CompletableFuture<Boolean> runningBrackets = titleBracketsFetch;
+        CompletableFuture<Boolean> brackets = titleRanksLoaded ? CompletableFuture.completedFuture(true)
+                : runningBrackets != null && !runningBrackets.isDone() ? runningBrackets
+                : refreshTitleBrackets();
         CompletableFuture<Boolean> config;
         CompletableFuture<Boolean> running = startupConfigFetch;
         if (configLoaded) {
@@ -2091,6 +2097,7 @@ public final class SiegeService {
 
     private CompletableFuture<Boolean> refreshTitleBrackets() {
         CompletableFuture<Boolean> done = new CompletableFuture<>();
+        titleBracketsFetch = done;
         if (titleBracketsApi == null) {
             titleRanksLoaded = true;
             done.complete(true);
@@ -2118,7 +2125,7 @@ public final class SiegeService {
             String why = error != null ? error.getMessage()
                     : result != null ? result.error().map(Throwable::getMessage).orElse(String.valueOf(result.status())) : "no result";
             logger.warning("[Siege] Runtime config unavailable (" + why + "); "
-                    + (bootstrap ? "no lobbies started - use /siege admin reload once the API is up" : "keeping the current configuration"));
+                    + (bootstrap ? "no lobbies started - retried when the API is back (or /siege admin reload)" : "keeping the current configuration"));
             waiters.forEach(w -> w.sendMessage(SiegeMessages.bad("Siege configuration refresh failed: " + why)));
             return;
         }

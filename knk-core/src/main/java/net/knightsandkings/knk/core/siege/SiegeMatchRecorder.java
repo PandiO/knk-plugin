@@ -105,7 +105,8 @@ public final class SiegeMatchRecorder implements SiegeMatchesCommandApi {
 
     /**
      * PandiO/knk-workspace#31 / #182: the startup recovery again when it did not get through at startup (the API was
-     * down), as a pending startup step run on the realtime reconnect. Never aborts once this run has created a match:
+     * down), as a pending startup step run when the API is back (connectivity UP, a fallback retry or the realtime
+     * reconnect). Never aborts once this run has created a match:
      * {@code abortUnfinished} ends every open match, the live one included. Completes with whether nothing is left to do.
      */
     public synchronized CompletableFuture<Boolean> retryRecovery() {

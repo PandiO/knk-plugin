@@ -152,6 +152,13 @@ public class KnKPlugin extends JavaPlugin {
     private CacheManager cacheManager;
     /** KNG-58: last-known account, freeze, mode and permission answers on disk, for when the API is down. */
     private net.knightsandkings.knk.core.offline.OfflineSecurityStore offlineSecurity;
+    /**
+     * Realtime S5 (PandiO/knk-workspace#184): what each feature deletes about an erased account. Features add their step
+     * while they start; only the realtime erasure sync runs them (realtime.enabled), so with the hub off nothing changes.
+     */
+    private final net.knightsandkings.knk.core.privacy.LocalDataEraser localDataEraser =
+        new net.knightsandkings.knk.core.privacy.LocalDataEraser();
+    private net.knightsandkings.knk.core.privacy.AccountErasureService accountErasureService;
     private net.knightsandkings.knk.paper.hub.HubService hubService;
     private DataAccessFactory dataAccessFactory;
     private TownsQueryApi townsQueryApi;
@@ -317,11 +324,14 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.siege.SiegeGateController siegeGates;
     private net.knightsandkings.knk.core.siege.SiegeMatchRecorder siegeMatchRecorder;
     /**
-     * PandiO/knk-workspace#31 / #182: the siege's startup-only API work; a step that failed at startup runs again on the
-     * next realtime (re)connect (resync step "siege startup work") until it got through.
+     * PandiO/knk-workspace#31 / #182: the siege's startup-only API work; a step that failed at startup runs again when
+     * the API is back (connectivity UP, a fallback retry, or the realtime (re)connect's resync step "siege startup
+     * work"), all through {@link #siegeStartupRetry}, until it got through.
      */
     private final net.knightsandkings.knk.core.realtime.PendingStartupWork siegeStartupWork =
         new net.knightsandkings.knk.core.realtime.PendingStartupWork();
+    /** #31: when {@link #siegeStartupWork} runs again, with or without the hub; null until the siege started. */
+    private net.knightsandkings.knk.core.realtime.StartupWorkRetry siegeStartupRetry;
     private net.knightsandkings.knk.paper.realtime.UserStateSync userStateSync;
     private net.knightsandkings.knk.paper.realtime.GateRealtimeSync gateRealtimeSync;
     /** Kept for the siege gate controller (Phase 7a), which respawns doors a match destroyed. */
@@ -1209,6 +1219,7 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().info("Region transition service initialized with domain resolver and gate control");
 
             initializeSiege();
+            initializeSiegeStartupRetry();
 
             // Road navigation (KNG-27) Phase 3: the admin side (survey, build, review); Phase 4: /navigate.
             initializeRoads();
@@ -1244,9 +1255,17 @@ public class KnKPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (siegeStartupRetry != null) {
+            siegeStartupRetry.stop();
+            siegeStartupRetry = null;
+        }
         if (realtimeService != null) {
             realtimeService.stop();
             realtimeService = null;
+        }
+        if (accountErasureService != null) {
+            accountErasureService.close();
+            accountErasureService = null;
         }
         if (apiConnectivityMonitor != null) {
             apiConnectivityMonitor.stop();
@@ -1538,6 +1557,7 @@ public class KnKPlugin extends JavaPlugin {
             new java.io.File(getDataFolder(), statisticsConfig.spoolDirectory()).toPath(), getLogger()
         );
         outageBacklogChecks.add(statisticsSpool::isEmpty);
+        localDataEraser.register("statistics spool", net.knightsandkings.knk.core.privacy.LocalDataEraser.Where.WORKER, account -> statisticsSpool.removeUser(account.userId()));
         net.knightsandkings.knk.core.statistics.StatisticsRecorder statisticsRecorder = new net.knightsandkings.knk.core.statistics.StatisticsRecorder(
             apiClient.getStatisticsApi(), net.knightsandkings.knk.core.dataaccess.RetryPolicy.defaultPolicy(), statisticsSpool, getLogger()
         );
@@ -1628,6 +1648,9 @@ public class KnKPlugin extends JavaPlugin {
             new java.io.File(getDataFolder(), discoveryConfig.spoolDirectory()).toPath(), getLogger()
         );
         outageBacklogChecks.add(discoverySpool::isEmpty);
+        var erasureDiscoverySpool = discoverySpool;
+        localDataEraser.register("discovery spool", net.knightsandkings.knk.core.privacy.LocalDataEraser.Where.WORKER,
+            account -> erasureDiscoverySpool.deleteAccount(account.formerUuid(), account.userId()));
         // A player who joined while the API was down has no user id: the recorder looks it up by UUID
         // before sending (null = no such user, a failure = still unreachable).
         net.knightsandkings.knk.core.discovery.DiscoveryRecorder discoveryRecorder = new net.knightsandkings.knk.core.discovery.DiscoveryRecorder(
@@ -2078,6 +2101,7 @@ public class KnKPlugin extends JavaPlugin {
                 getDataFolder().toPath().resolve("logs"), pmConfig.log().localRetentionDays(), clock);
             localLog.start();
             pmLogSinks.add(localLog);
+            localDataEraser.register("private message log file", net.knightsandkings.knk.core.privacy.LocalDataEraser.Where.WORKER, account -> localLog.purge(account.formerUuid()));
         }
         // Phase 3: knk-web-api's PM log (POST api/private-message-log/batch needs the service key).
         if (pmConfig.log().apiEnabled()) {
@@ -2091,6 +2115,8 @@ public class KnKPlugin extends JavaPlugin {
                     clock));
             apiPrivateMessageLog.start();
             pmLogSinks.add(apiPrivateMessageLog);
+            var erasurePmQueue = apiPrivateMessageLog;
+            localDataEraser.register("private message queue", net.knightsandkings.knk.core.privacy.LocalDataEraser.Where.WORKER, account -> erasurePmQueue.purge(account.formerUuid()));
             if (!"apikey".equalsIgnoreCase(config.api().auth().type())) {
                 getLogger().warning("private-messages.log.api-enabled is on but api.auth.type is not apikey: knk-web-api "
                     + "will refuse the PM log (401) and messages will pile up in the queue.");
@@ -2219,6 +2245,7 @@ public class KnKPlugin extends JavaPlugin {
             registerUserStateSync(hooks);
             registerWorldTaskSync(hooks);
             registerConfigSync(hooks);
+            registerErasureSync(hooks);
             if (metricsService != null) {
                 metricsService.register(realtimeStats);
             }
@@ -2262,6 +2289,87 @@ public class KnKPlugin extends JavaPlugin {
         if (playerNotificationPoller != null) {
             hooks.register("player notifications", playerNotificationPoller::drainNow);
         }
+    }
+
+    /**
+     * Realtime S5 (PandiO/knk-workspace#184, DESIGN §7.4): {@code AccountErased} kicks an online player with a neutral
+     * message and then deletes what this server keeps about the account (the {@link #localDataEraser} steps the features
+     * registered, plus the user caches and the list of Minecraft's own player files for the owner); every (re)connect
+     * catches up through {@code GET api/privacy/erasures?since={lastId}} with the position in {@code erasure-feed.json}.
+     * The hourly offline-identity check (KNG-58) stays as the backstop, and is the only path with the hub off.
+     */
+    private void registerErasureSync(net.knightsandkings.knk.core.realtime.ResyncHooks hooks) {
+        var settings = net.knightsandkings.knk.paper.privacy.ErasureSettings.fromConfig(getConfig());
+        java.util.concurrent.Executor main = runnable -> {
+            if (!isEnabled()) {
+                return;
+            }
+            if (org.bukkit.Bukkit.isPrimaryThread()) {
+                runnable.run();
+            } else {
+                org.bukkit.Bukkit.getScheduler().runTask(this, runnable);
+            }
+        };
+        if (cacheManager != null) {
+            var userCache = cacheManager.getUserCache();
+            var users = usersDataAccess;
+            var permissions = permissionsDataAccess;
+            var accounts = userManager;
+            localDataEraser.register("user caches", net.knightsandkings.knk.core.privacy.LocalDataEraser.Where.WORKER, account -> {
+                int dropped = 0;
+                if (account.formerUuid() != null) {
+                    dropped += userCache.getStale(account.formerUuid()).isPresent() ? 1 : 0;
+                    userCache.invalidate(account.formerUuid());
+                    if (users != null) {
+                        users.invalidate(account.formerUuid());
+                    }
+                    if (accounts != null && accounts.getCachedUser(account.formerUuid()) != null) {
+                        accounts.clearCachedUser(account.formerUuid());
+                        dropped++;
+                    }
+                }
+                if (permissions != null) {
+                    permissions.forget(account.userId());
+                }
+                return dropped;
+            });
+        }
+        java.nio.file.Path levelDirectory = org.bukkit.Bukkit.getServer().getLevelDirectory();
+        java.nio.file.Path minecraftList = getDataFolder().toPath().resolve(settings.minecraftList());
+        localDataEraser.register("Minecraft player files listed", net.knightsandkings.knk.core.privacy.LocalDataEraser.Where.WORKER, account -> {
+            if (account.formerUuid() == null) {
+                return 0;
+            }
+            var files = net.knightsandkings.knk.core.privacy.MinecraftPlayerFiles.existing(levelDirectory, account.formerUuid());
+            int listed = net.knightsandkings.knk.core.privacy.MinecraftPlayerFiles.appendToList(minecraftList,
+                account.erasureId(), java.time.Instant.now(), files);
+            if (listed > 0) {
+                getLogger().info("[KnK Privacy] Erasure #" + account.erasureId() + ": " + listed + " Minecraft player file(s)"
+                    + " kept, listed in " + minecraftList.getFileName() + " (deleting them is the owner's decision)");
+            }
+            return listed;
+        });
+        var service = new net.knightsandkings.knk.core.privacy.AccountErasureService(localDataEraser,
+            apiClient.getPrivacyErasuresApi(),
+            new net.knightsandkings.knk.core.privacy.ErasureCursorStore(getDataFolder().toPath().resolve(settings.feedFile()), getLogger()),
+            new net.knightsandkings.knk.paper.privacy.BukkitErasureKicker(main, org.bukkit.Bukkit::getPlayer, settings.kickMessage()),
+            main, null, settings.settle(), null, getLogger());
+        // A returning player has a fresh account under the same UUID: never kick or wipe that one.
+        var knownUsers = cacheManager == null ? null : cacheManager.getUserCache();
+        var offlineStore = offlineSecurity;
+        service.setKnownUserIds(uuid -> {
+            Integer cached = knownUsers == null ? null
+                : knownUsers.getStale(uuid).map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null);
+            if (cached != null) {
+                return cached;
+            }
+            return offlineStore == null ? null
+                : offlineStore.identity(uuid).map(net.knightsandkings.knk.core.offline.OfflineSecurityStore.Identity::userId).orElse(null);
+        });
+        this.accountErasureService = service;
+        var sync = new net.knightsandkings.knk.paper.realtime.ErasureRealtimeSync(service, getLogger());
+        sync.register(realtimeService.dispatcher());
+        hooks.register("account erasures", sync::resync);
     }
 
     /**
@@ -2367,11 +2475,15 @@ public class KnKPlugin extends JavaPlugin {
                             w.environment(), w.loaded(), w.playerCount(), w.primary()))
                         .toList())));
         }
-        hooks.register("siege startup work", () -> siegeStartupWork.runPending().thenAccept(pending -> {
-            if (!pending.isEmpty()) {
-                getLogger().warning("Realtime: siege startup work still pending after the reconnect: " + pending);
-            }
-        }));
+        // #31: the same runner as the connectivity trigger, so a reconnect and an UP transition together run each step once.
+        var startupRetry = siegeStartupRetry;
+        hooks.register("siege startup work", () -> (startupRetry != null
+            ? startupRetry.runNow("realtime reconnect")
+            : siegeStartupWork.runPending()).thenAccept(pending -> {
+                if (!pending.isEmpty()) {
+                    getLogger().warning("Realtime: siege startup work still pending after the reconnect: " + pending);
+                }
+            }));
     }
 
     /** {@code EntityChanged} → the caches of that type (DESIGN §6.3). Cheap and thread-safe invalidations only. */
@@ -3141,6 +3253,14 @@ public class KnKPlugin extends JavaPlugin {
                 store.forgetUser(uuid);
             }
         });
+        // #184: the erasure push deletes the account at once (the hourly re-check below stays the backstop).
+        localDataEraser.register("offline security store", net.knightsandkings.knk.core.privacy.LocalDataEraser.Where.WORKER, account -> {
+            int before = store.identityCount() + store.permissionCount() + store.ignoreListCount();
+            store.forgetUser(account.formerUuid());
+            store.forgetUserId(account.userId());
+            store.flushIfDirty();
+            return Math.max(0, before - (store.identityCount() + store.permissionCount() + store.ignoreListCount()));
+        });
         permissionsDataAccess.setAnswerListener((userId, node, result) -> {
             if (result == null) {
                 store.forgetUserId(userId);
@@ -3314,6 +3434,8 @@ public class KnKPlugin extends JavaPlugin {
      */
     private void initializeHubOutage(net.knightsandkings.knk.paper.hub.HubAdmissionListener hubAdmission) {
         var store = new net.knightsandkings.knk.core.hub.HubOutageStore(getDataFolder().toPath().resolve("hub-outage.json"));
+        localDataEraser.register("hub outage return point", net.knightsandkings.knk.core.privacy.LocalDataEraser.Where.WORKER,
+            account -> account.formerUuid() != null && store.remove(account.formerUuid()).isPresent() ? 1 : 0);
         this.hubOutageService = new net.knightsandkings.knk.paper.hub.HubOutageService(hubService,
             () -> gameSettingsManager != null ? gameSettingsManager.current() : null,
             this::hubGroupsOf,
@@ -4030,6 +4152,7 @@ public class KnKPlugin extends JavaPlugin {
         );
         java.io.File siegeVaultDirectory = new java.io.File(getDataFolder(), "siege-vault");
         SiegePlayerVault siegeVault = new SiegePlayerVault(siegeVaultDirectory, getLogger());
+        localDataEraser.register("siege vault", net.knightsandkings.knk.core.privacy.LocalDataEraser.Where.MAIN_THREAD, account -> siegeVault.discard(account.formerUuid()));
         // One long-lived generator for draws, splits and book drops (a new Random per draw correlates draws).
         java.util.random.RandomGenerator siegeRandom = new java.util.SplittableRandom();
         var siegeResultSpool = new net.knightsandkings.knk.core.siege.SiegeResultSpool(
@@ -4168,6 +4291,35 @@ public class KnKPlugin extends JavaPlugin {
         var siegeForRetry = siegeService;
         siegeStartupWork.register("siege config and title brackets", onMainThread(siegeForRetry::retryStartup));
         getLogger().info("Siege runtime initialized");
+    }
+
+    /**
+     * PandiO/knk-workspace#31: the siege's startup steps that failed at start run again once the API is back, also with
+     * {@code realtime.enabled: false}: on any connectivity transition into UP (UNKNOWN to UP included) and on a fallback
+     * retry (30 s, 1 min, 2 min, then every 5 min while something is pending and the API is not DOWN). The realtime
+     * reconnect goes through the same runner. Nothing to do when every step got through at startup.
+     */
+    private void initializeSiegeStartupRetry() {
+        if (siegeService == null) {
+            return; // the siege did not start: no steps registered
+        }
+        var monitor = apiConnectivityMonitor;
+        siegeStartupRetry = new net.knightsandkings.knk.core.realtime.StartupWorkRetry(
+            siegeStartupWork,
+            () -> monitor == null
+                ? net.knightsandkings.knk.core.connectivity.ApiConnectivityState.UNKNOWN
+                : monitor.connectivity().state(),
+            (delay, task) -> {
+                if (isEnabled()) {
+                    getServer().getScheduler().runTaskLater(this, task, Math.max(1L, delay.toMillis() / 50L));
+                }
+            },
+            net.knightsandkings.knk.core.realtime.StartupWorkRetry.DEFAULT_DELAYS,
+            "[Siege] Startup work",
+            getLogger());
+        getServer().getPluginManager().registerEvents(
+            new net.knightsandkings.knk.paper.connectivity.StartupWorkRetryListener(siegeStartupRetry), this);
+        siegeStartupRetry.start();
     }
 
     public SiegeService getSiegeService() {
