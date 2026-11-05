@@ -42,7 +42,8 @@ public class UsersMapper {
             dto.permissionGroups() == null ? java.util.List.of() : dto.permissionGroups().stream()
                 .filter(java.util.Objects::nonNull)
                 .map(g -> new net.knightsandkings.knk.core.domain.users.PermissionGroupRef(g.id(), g.name()))
-                .toList()
+                .toList(),
+            dto.nameColorGroupId()
         );
     }
 
@@ -72,7 +73,8 @@ public class UsersMapper {
             domain.nameColor(),
             domain.permissionGroups().stream()
                 .map(g -> new net.knightsandkings.knk.api.dto.PermissionGroupRefDto(g.id(), g.name()))
-                .toList()
+                .toList(),
+            domain.nameColorGroupId()
         );
     }
 

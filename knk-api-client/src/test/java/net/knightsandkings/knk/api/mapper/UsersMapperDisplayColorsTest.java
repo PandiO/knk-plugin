@@ -54,4 +54,17 @@ class UsersMapperDisplayColorsTest {
         assertEquals("&6", copied.chatSecondaryColor());
         assertEquals("&e", copied.nameColor());
     }
+
+    @Test
+    void nameColorGroupId_comesThroughAndSurvivesCopies() throws Exception {
+        // PandiO/knk-workspace#260: the group whose name color won.
+        UserSummary summary = UsersMapper.mapUserSummary(mapper.readValue(
+                "{\"id\":1,\"nameColor\":\"&9\",\"nameColorGroupId\":50}", UserSummaryDto.class));
+
+        assertEquals(50, summary.nameColorGroupId());
+        assertEquals(50, summary.withBalances(1, 2, 3).withFrozen(true, "x").withActiveMode(
+                net.knightsandkings.knk.core.domain.users.ActiveMode.STAFF).nameColorGroupId());
+        assertEquals(50, UsersMapper.mapUserSummary(summary).nameColorGroupId());
+        assertNull(UsersMapper.mapUserSummary(mapper.readValue("{\"id\":1}", UserSummaryDto.class)).nameColorGroupId());
+    }
 }
