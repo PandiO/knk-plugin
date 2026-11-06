@@ -227,6 +227,16 @@ public final class SiegeService {
     }
 
     /**
+     * Link S3: members who are present but take no part in capture - the Survival ghosts (DESIGN §3b: "no capturezone
+     * contribution"; {@code PlayerVisibilityArbiter::isGhost}). Nobody by default, so PvP presence is unchanged.
+     */
+    private java.util.function.Predicate<UUID> presenceExcluded = playerId -> false;
+
+    public void setPresenceExclusion(java.util.function.Predicate<UUID> presenceExcluded) {
+        this.presenceExcluded = presenceExcluded == null ? playerId -> false : presenceExcluded;
+    }
+
+    /**
      * #165: effective gate HP a player took off a gate structure. Credited to the player's running match when that
      * match's lockdown holds the gate (the siege gate rules already refused damage by anyone else). A member keeps
      * what they did when they leave and rejoin. Main thread.
@@ -416,7 +426,7 @@ public final class SiegeService {
         List<Player> living = new ArrayList<>();
         for (UUID id : match.roster().playerIds()) {
             Player p = Bukkit.getPlayer(id);
-            if (p != null && !p.isDead() && p.getGameMode() != GameMode.SPECTATOR) living.add(p);
+            if (p != null && !p.isDead() && p.getGameMode() != GameMode.SPECTATOR && !presenceExcluded.test(id)) living.add(p);
         }
         for (KnkSiegeObjective objective : match.scenario().objectives()) {
             // Measured from the floor under the capture point, like the ring is drawn (playtest 2026-09-26).
