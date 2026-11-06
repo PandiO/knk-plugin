@@ -95,9 +95,9 @@ realtime:
   # 1 = no slowdown. Hub down = every interval as configured.
   fallback-poll-multiplier: 4
   # GDPR account erasure (PandiO/knk-workspace#184), only while enabled: when the API erases an account it pushes
-  # AccountErased; an online player is kicked with kick-message, then everything this server keeps about the account
-  # is deleted (offline security store, user/permission caches, discovery and statistics spools, the PM-log queue and
-  # local log lines, siege vault, hub-outage return point). Minecraft's own player files are not deleted: they are
+  # AccountErased; an online player is kicked with kick-message (a siege vault they hold is given back to them first),
+  # then everything this server keeps about the account is deleted (offline security store, user/permission caches,
+  # discovery and statistics spools, the PM-log queue and local log lines, offline siege vaults, hub-outage return point). Minecraft's own player files are not deleted: they are
   # listed in minecraft-files-list for the owner. Every (re)connect catches up from the API's erasure feed; the
   # position is kept in feed-file. With realtime off, the hourly offline-cache re-check stays the only path.
   erasure:

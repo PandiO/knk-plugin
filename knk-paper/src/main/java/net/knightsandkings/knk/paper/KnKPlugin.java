@@ -2352,7 +2352,8 @@ public class KnKPlugin extends JavaPlugin {
         var service = new net.knightsandkings.knk.core.privacy.AccountErasureService(localDataEraser,
             apiClient.getPrivacyErasuresApi(),
             new net.knightsandkings.knk.core.privacy.ErasureCursorStore(getDataFolder().toPath().resolve(settings.feedFile()), getLogger()),
-            new net.knightsandkings.knk.paper.privacy.BukkitErasureKicker(main, org.bukkit.Bukkit::getPlayer, settings.kickMessage()),
+            new net.knightsandkings.knk.paper.privacy.BukkitErasureKicker(main, org.bukkit.Bukkit::getPlayer, settings.kickMessage(),
+                localDataEraser),
             main, null, settings.settle(), null, getLogger());
         // A returning player has a fresh account under the same UUID: never kick or wipe that one.
         var knownUsers = cacheManager == null ? null : cacheManager.getUserCache();
@@ -4152,6 +4153,13 @@ public class KnKPlugin extends JavaPlugin {
         );
         java.io.File siegeVaultDirectory = new java.io.File(getDataFolder(), "siege-vault");
         SiegePlayerVault siegeVault = new SiegePlayerVault(siegeVaultDirectory, getLogger());
+        // #184, developer decision 2026-11-06 (LR1-8): an online player gets their vault back before the erasure kick;
+        // an offline vault (and anything left after the return) is discarded.
+        localDataEraser.register("siege vault items", net.knightsandkings.knk.core.privacy.LocalDataEraser.Where.BEFORE_KICK, account -> {
+            org.bukkit.entity.Player online = account.formerUuid() == null ? null : org.bukkit.Bukkit.getPlayer(account.formerUuid());
+            SiegeService siege = this.siegeService;
+            return online == null || !online.isOnline() || siege == null ? 0 : siege.returnVaultBeforeErasure(online);
+        });
         localDataEraser.register("siege vault", net.knightsandkings.knk.core.privacy.LocalDataEraser.Where.MAIN_THREAD, account -> siegeVault.discard(account.formerUuid()));
         // One long-lived generator for draws, splits and book drops (a new Random per draw correlates draws).
         java.util.random.RandomGenerator siegeRandom = new java.util.SplittableRandom();

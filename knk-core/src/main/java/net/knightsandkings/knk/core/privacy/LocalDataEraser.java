@@ -19,13 +19,20 @@ import java.util.logging.Logger;
  * <p>Steps run either on the server's main thread ({@link Where#MAIN_THREAD}: state that only the main thread touches)
  * or on the erasure worker ({@link Where#WORKER}: thread-safe stores and file I/O). Every step is idempotent: the same
  * account may be erased twice (a push and the catch-up after it, or a feed applied again from the start).
+ * {@link Where#BEFORE_KICK} steps are not deletions: the kicker runs them with the player still online, right before
+ * the kick (see {@link AccountErasureService.Kicker#returnAndKick}).
  */
 public final class LocalDataEraser {
 
     private static final Logger LOGGER = Logger.getLogger(LocalDataEraser.class.getName());
 
-    /** The thread a step needs. */
-    public enum Where { MAIN_THREAD, WORKER }
+    /**
+     * The thread a step needs. {@link #BEFORE_KICK} steps hand something back instead of deleting it: they run on the
+     * main thread, in the same task as the kick and only while the player is online (the kicker runs them; developer
+     * decision 2026-11-06 on LR1-8: the siege vault goes back to an online player before the kick). Their counts are
+     * what was given back.
+     */
+    public enum Where { BEFORE_KICK, MAIN_THREAD, WORKER }
 
     /** Deletes what one feature keeps about {@code account}; returns how many records/files/entries went. */
     @FunctionalInterface
