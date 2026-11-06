@@ -317,6 +317,7 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.siege.SiegeGateController siegeGates;
     /** Siege Survival link S3 (PandiO/knk-workspace#41): the match NPC actors (capture presence, gate damage, statistics). */
     private net.knightsandkings.knk.paper.siege.npc.MatchActorRegistry matchActors;
+    private net.knightsandkings.knk.paper.siege.survival.SurvivalMatchRuntime siegeSurvival;
     private net.knightsandkings.knk.core.siege.SiegeMatchRecorder siegeMatchRecorder;
     /**
      * PandiO/knk-workspace#31 / #182: the siege's startup-only API work; a step that failed at startup runs again on the
@@ -1292,6 +1293,13 @@ public class KnKPlugin extends JavaPlugin {
                 siegeService.shutdown();
             } catch (RuntimeException e) {
                 getLogger().log(java.util.logging.Level.SEVERE, "Siege shutdown failed", e);
+            }
+        }
+        if (siegeSurvival != null) {
+            try {
+                siegeSurvival.shutdown(); // S61: no survival mob survives a restart
+            } catch (RuntimeException e) {
+                getLogger().log(java.util.logging.Level.SEVERE, "Siege Survival shutdown failed", e);
             }
         }
         // Phase 6: match results still being sent (incl. the shutdown aborts above) go to the spool,
@@ -2598,6 +2606,12 @@ public class KnKPlugin extends JavaPlugin {
                     regionsCommand::execute,
                     regionsCommand::complete);
             }
+            // Siege Survival link S5: /knk siege survival status (the siege runtime starts later, so it is read lazily).
+            var siegeAdmin = new net.knightsandkings.knk.paper.siege.survival.SurvivalAdminCommand(() -> siegeSurvival);
+            knkAdminCommand.registerSubcommand(
+                net.knightsandkings.knk.paper.siege.survival.SurvivalAdminCommand.metadata(),
+                siegeAdmin::execute,
+                siegeAdmin::complete);
             if (lootboxAdminCommand != null) {
                 var lootboxAdmin = lootboxAdminCommand;
                 knkAdminCommand.registerSubcommand(
@@ -4171,6 +4185,10 @@ public class KnKPlugin extends JavaPlugin {
         registerTeleportRestriction(siegeTeleports);
         registerBackDeathExclusion(siegeTeleports.backDeathExclusion());
 
+        // Siege Survival link S5 (PandiO/knk-workspace#41): the survival runtime on top of the Siege lifecycle. Inert for
+        // lobbies whose scenario has no survival configuration on the API.
+        initializeSiegeSurvival();
+
         siegeService.start();
         var siegeForRetry = siegeService;
         siegeStartupWork.register("siege config and title brackets", onMainThread(siegeForRetry::retryStartup));
@@ -4189,6 +4207,39 @@ public class KnKPlugin extends JavaPlugin {
     /** Siege Survival link S3: the match NPC actor registry the Survival runtime registers its mobs with; null without siege. */
     public net.knightsandkings.knk.paper.siege.npc.MatchActorRegistry getMatchActors() {
         return matchActors;
+    }
+
+    /** Siege Survival link S5: the survival runtime (observer, ticker, ghost rules); null without siege. */
+    public net.knightsandkings.knk.paper.siege.survival.SurvivalMatchRuntime getSiegeSurvival() {
+        return siegeSurvival;
+    }
+
+    private void initializeSiegeSurvival() {
+        var settings = net.knightsandkings.knk.paper.siege.survival.SurvivalSettings.fromConfig(getConfig());
+        var npcPlatform = new net.knightsandkings.knk.paper.npc.NpcPlatform(this,
+            net.knightsandkings.knk.core.npc.NpcStatPipeline.vanilla(), net.knightsandkings.knk.paper.npc.MobAttributes.bukkit(),
+            getServer().getMobGoals(), () -> getServer().getCurrentTick(), settings.followRange());
+        getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.npc.NpcProjectileDamageListener(npcPlatform), this);
+        net.knightsandkings.knk.paper.siege.npc.NpcGateDamage gateDamage = gateManager != null
+            ? new net.knightsandkings.knk.paper.siege.npc.NpcGateDamage(new GateDoorHitService(gateManager), matchActors) : null;
+        var cache = new net.knightsandkings.knk.paper.siege.survival.SurvivalConfigurationCache(
+            apiClient.getSiegeSurvivalQueryApi(), MenuService.mainThreadExecutor(this), getLogger());
+        java.util.function.Supplier<WorldGuardIntegration> worldGuard = () -> {
+            try {
+                return new WorldGuardIntegration(this);
+            } catch (Throwable t) {
+                return null;
+            }
+        };
+        this.siegeSurvival = new net.knightsandkings.knk.paper.siege.survival.SurvivalMatchRuntime(this, siegeService, cache, npcPlatform,
+            matchActors, gateManager, gateDamage, modeService.visibility(), worldGuard, settings, new java.util.SplittableRandom(), getLogger());
+        siegeService.setModeHooks(siegeSurvival.hooks());
+        siegeService.setPresenceExclusion(id -> modeService.visibility().isGhost(id)); // DESIGN §3b: ghosts never count in capture
+        siegeService.addObserver(siegeSurvival);
+        getServer().getPluginManager().registerEvents(siegeSurvival, this);
+        getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.siege.survival.SurvivalGhostListener(siegeSurvival), this);
+        siegeSurvival.start();
+        getLogger().info("Siege Survival runtime initialized (inert until a lobby draws a scenario with survival settings)");
     }
 
     /**

@@ -413,6 +413,41 @@ siege:
   # present at the end (rewards). Their leave is reported only when the window passes. 0 = the old rule:
   # a disconnect is a leave (PandiO/knk-workspace#150).
   rejoin-window-seconds: 300
+  # Siege Survival (docs/specs/siege-survival/DESIGN.md, PandiO/knk-workspace#41): plugin-side knobs of the survival
+  # runtime. The scenario, difficulty, waves, spawnzones and end conditions are authored in the API (survival settings
+  # on a Siege scenario); these are the values the design leaves to balance tests. A lobby plays survival only when its
+  # drawn scenario has survival settings; nothing here affects ordinary PvP sieges.
+  survival:
+    targeting:
+      # NPC target preference per kind (DESIGN §4 / NPC platform §5a); score = preference / (1 + distance / proximity-scale).
+      preference:
+        player: 1.0
+        gate: 0.9
+        objective: 1.0
+      proximity-scale-blocks: 16.0
+      # Minimum commitment to a target and the relative margin a better target needs afterwards (0.25 = 25 % higher).
+      min-commitment-millis: 4000
+      switch-margin: 0.25
+      # Players are targets within this radius of the mob; a chased player farther than the leash from the mob's
+      # structural target (gate/objective) is dropped. A difficulty profile's own aggroRadius/leashDistance win when set.
+      aggro-radius: 12.0
+      leash-distance: 24.0
+    # How often each mob re-decides its target (ticks), reports progress to the stuck monitor (ticks), hits a door while
+    # breaching (ticks) and re-issues its path (ticks).
+    behaviour-ticks: 10
+    stuck-sample-ticks: 20
+    breach-hit-ticks: 20
+    repath-ticks: 10
+    # Arrival distances (blocks) at a gate's stand point and at a lane point.
+    gate-arrive-distance: 2.5
+    lane-arrive-distance: 2.5
+    # FOLLOW_RANGE given to survival mobs: the search radius of their own pathfinder (castle-scale routes).
+    follow-range: 96.0
+    # Failed path attempts toward one destination before it counts as blocked, and how long a blocked target stays aside.
+    blocked-retries: 3
+    blocked-cooldown-millis: 20000
+    # Random spread (blocks) around an authored spawn point.
+    spawn-spread-radius: 1.5
 
 # Diagnostic telemetry (KNG-34 link 6, docs/specs/player-statistics DESIGN.md §F.12): a timeline of
 # meaningful actions and outcomes (joins, menus, command labels, Siege lobby/match steps, failed API

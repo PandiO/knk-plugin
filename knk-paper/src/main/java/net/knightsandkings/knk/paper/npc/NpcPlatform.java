@@ -10,7 +10,6 @@ import net.knightsandkings.knk.core.npc.resolve.ResolvedCombat;
 import net.knightsandkings.knk.core.npc.resolve.ResolvedSpeed;
 import net.knightsandkings.knk.core.npc.resolve.VanillaBases;
 import org.bukkit.NamespacedKey;
-import org.bukkit.attribute.Attribute;
 import org.bukkit.entity.Mob;
 import org.bukkit.plugin.Plugin;
 
@@ -109,8 +108,8 @@ public final class NpcPlatform {
         String id = profileId == null || profileId.isBlank() ? profileIdOf(mob) : profileId;
         Adopted state = adopted.computeIfAbsent(mob.getUniqueId(), k -> new Adopted(id));
         installGoals(mob);
-        attributes.setAddModifier(mob, Attribute.FOLLOW_RANGE, new NamespacedKey(plugin, "npc_follow_range"),
-            Math.max(0, followRange - attributes.base(mob, Attribute.FOLLOW_RANGE, 16)));
+        attributes.setAddModifier(mob, NpcAttribute.FOLLOW_RANGE, new NamespacedKey(plugin, "npc_follow_range"),
+            Math.max(0, followRange - attributes.base(mob, NpcAttribute.FOLLOW_RANGE, 16)));
         applySpeed(mob, state, true);
         return state;
     }
@@ -168,13 +167,13 @@ public final class NpcPlatform {
      * knockback, enchantments and effects): a transient ADD_NUMBER modifier of (resolved − base).
      */
     public void applyMeleeDamage(Mob mob, ResolvedCombat combat) {
-        double base = attributes.base(mob, Attribute.ATTACK_DAMAGE, 0);
-        attributes.setAddModifier(mob, Attribute.ATTACK_DAMAGE, meleeKey, combat.meleeDamageValue() - base);
+        double base = attributes.base(mob, NpcAttribute.ATTACK_DAMAGE, 0);
+        attributes.setAddModifier(mob, NpcAttribute.ATTACK_DAMAGE, meleeKey, combat.meleeDamageValue() - base);
     }
 
     /** The vanilla melee damage base of a mob (its ATTACK_DAMAGE base, 0 when it has none). */
     public double vanillaMeleeDamage(Mob mob) {
-        return attributes.base(mob, Attribute.ATTACK_DAMAGE, 0);
+        return attributes.base(mob, NpcAttribute.ATTACK_DAMAGE, 0);
     }
 
     /**
@@ -188,8 +187,8 @@ public final class NpcPlatform {
         long revision = pipeline.revision(mob.getUniqueId());
         if (!force && revision == state.appliedRevision) return null;
         ResolvedSpeed speed = pipeline.resolveSpeed(mob.getUniqueId(), state.profileId);
-        double base = attributes.base(mob, Attribute.MOVEMENT_SPEED, speed.value());
-        attributes.setAddModifier(mob, Attribute.MOVEMENT_SPEED, speedKey, speed.value() - base);
+        double base = attributes.base(mob, NpcAttribute.MOVEMENT_SPEED, speed.value());
+        attributes.setAddModifier(mob, NpcAttribute.MOVEMENT_SPEED, speedKey, speed.value() - base);
         state.appliedRevision = revision;
         reportOnce(mob, state, speed.reports());
         return speed;
