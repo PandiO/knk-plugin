@@ -6,6 +6,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -21,6 +22,7 @@ import net.knightsandkings.knk.core.offline.OfflineSecurityStore;
 import net.knightsandkings.knk.core.ports.api.UsersCommandApi;
 import net.knightsandkings.knk.paper.permissions.KnkPermissible;
 import net.knightsandkings.knk.paper.utils.ColorOptions;
+import net.knightsandkings.knk.paper.visibility.PlayerVisibilityArbiter;
 import net.kyori.adventure.text.Component;
 
 /**
@@ -44,6 +46,11 @@ import net.kyori.adventure.text.Component;
  * resolution, not a cache-only snapshot that fails closed on a cold cache); visibility is always
  * hidden first, then revealed to viewers once their check resolves, so a vanished player is
  * never briefly visible to someone who shouldn't see them.
+ * <p>
+ * Siege Survival link S3 (PandiO/knk-workspace#41): show/hide no longer happens here. Every refresh goes through the
+ * plugin's one {@link PlayerVisibilityArbiter} ({@link #visibility()}), which combines this mode's vanish with the
+ * Survival ghost state, so a join or permission refresh can't un-hide a ghost. With no ghosts the outcomes are the
+ * ones this class always produced.
  */
 public class ModeService {
 
@@ -62,12 +69,33 @@ public class ModeService {
     // In-session mode per online player. The persisted value (UserCache/API) can differ from
     // this while an "onquit" change is pending - see ModeCommand.
     private final Map<UUID, ActiveMode> activeModes = new ConcurrentHashMap<>();
+    /** Link S3: the one place that shows and hides players. */
+    private final PlayerVisibilityArbiter visibility;
 
     public ModeService(Plugin plugin, KnkPermissible knkPermissible, UserCache userCache, UsersCommandApi usersCommandApi) {
+        this(plugin, knkPermissible, userCache, usersCommandApi,
+                service -> PlayerVisibilityArbiter.bukkit(plugin, service::isVanished, service::canSeeVanished));
+    }
+
+    /** @param arbiter builds the visibility arbiter around this service (tests inject one without a server) */
+    ModeService(Plugin plugin, KnkPermissible knkPermissible, UserCache userCache, UsersCommandApi usersCommandApi,
+                Function<ModeService, PlayerVisibilityArbiter> arbiter) {
         this.plugin = Objects.requireNonNull(plugin, "plugin must not be null");
         this.knkPermissible = Objects.requireNonNull(knkPermissible, "knkPermissible must not be null");
         this.userCache = Objects.requireNonNull(userCache, "userCache must not be null");
         this.usersCommandApi = usersCommandApi; // null when the API client isn't wired - persistence then no-ops
+        this.visibility = Objects.requireNonNull(arbiter.apply(this), "arbiter");
+    }
+
+    /** The plugin's one player-visibility arbiter (link S3): ghosts are marked and cleared through it. */
+    public PlayerVisibilityArbiter visibility() {
+        return visibility;
+    }
+
+    /** Whether this viewer may see vanished players: a holder of the staff or owner node (ops always). */
+    CompletableFuture<Boolean> canSeeVanished(Player viewer) {
+        return knkPermissible.hasPermissionAsync(viewer, STAFF_NODE)
+            .thenCombine(knkPermissible.hasPermissionAsync(viewer, OWNER_NODE), (staff, owner) -> staff || owner);
     }
 
     public void setOfflineStore(OfflineSecurityStore offline) {
@@ -183,11 +211,7 @@ public class ModeService {
      * whose staff/owner visibility check resolves true.
      */
     public void refreshVisibilityOf(Player target) {
-        for (Player viewer : Bukkit.getOnlinePlayers()) {
-            if (!viewer.equals(target)) {
-                applyVisibility(viewer, target);
-            }
-        }
+        visibility.refreshVisibilityOf(target);
     }
 
     /**
@@ -195,11 +219,7 @@ public class ModeService {
      * used when a player joins, so they don't see anyone already vanished.
      */
     public void refreshVisibilityFor(Player viewer) {
-        for (Player target : Bukkit.getOnlinePlayers()) {
-            if (!target.equals(viewer)) {
-                applyVisibility(viewer, target);
-            }
-        }
+        visibility.refreshVisibilityFor(viewer);
     }
 
     /**
@@ -223,23 +243,7 @@ public class ModeService {
 
     public void forget(Player player) {
         activeModes.remove(player.getUniqueId());
-    }
-
-    private void applyVisibility(Player viewer, Player target) {
-        if (!isVanished(target)) {
-            viewer.showPlayer(plugin, target);
-            return;
-        }
-
-        viewer.hidePlayer(plugin, target);
-        CompletableFuture<Boolean> canSee = knkPermissible.hasPermissionAsync(viewer, STAFF_NODE)
-            .thenCombine(knkPermissible.hasPermissionAsync(viewer, OWNER_NODE), (staff, owner) -> staff || owner);
-        onMain(canSee, allowed -> {
-            // Re-check: either player may have left, or the target left their mode, meanwhile.
-            if (allowed && viewer.isOnline() && target.isOnline() && isVanished(target)) {
-                viewer.showPlayer(plugin, target);
-            }
-        });
+        visibility.forget(player);
     }
 
     private void onMain(CompletableFuture<Boolean> future, Consumer<Boolean> consumer) {
