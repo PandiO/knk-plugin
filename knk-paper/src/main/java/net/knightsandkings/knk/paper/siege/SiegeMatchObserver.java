@@ -27,6 +27,9 @@ public interface SiegeMatchObserver {
      */
     default void areaLockdownStarted(SiegeLobbyRuntime lobby, KnkSiegeScenario scenario) { }
 
+    /** The scenario was drawn for the lobby's next round (before the hub); the match may still cancel. */
+    default void scenarioDrawn(SiegeLobbyRuntime lobby, KnkSiegeScenario scenario) { }
+
     /**
      * A member's inventory was saved and they were prepared for the match, just before the hub teleport
      * (KNG-234: the navigation compass is given here, so it never enters the saved inventory and goes away

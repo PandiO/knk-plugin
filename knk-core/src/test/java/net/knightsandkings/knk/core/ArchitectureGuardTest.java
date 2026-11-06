@@ -32,6 +32,7 @@ class ArchitectureGuardTest {
         "domain/roads",
         "catalog",
         "survival",
+        "targeting",
         "realtime",
         "visibility"
     );

@@ -93,6 +93,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -231,6 +232,19 @@ public final class SiegeService {
      * contribution"; {@code PlayerVisibilityArbiter::isGhost}). Nobody by default, so PvP presence is unchanged.
      */
     private java.util.function.Predicate<UUID> presenceExcluded = playerId -> false;
+
+    /** Game-mode hooks (Siege Survival, #41 S5); {@link SiegeModeHooks#NONE} = ordinary PvP for every lobby. */
+    private SiegeModeHooks modeHooks = SiegeModeHooks.NONE;
+
+    public void setModeHooks(SiegeModeHooks hooks) {
+        this.modeHooks = hooks == null ? SiegeModeHooks.NONE : hooks;
+        lobbies.values().forEach(rt -> rt.machine().setScenarioRules(modeHooks.scenarioRules(rt.id())));
+    }
+
+    /** Ends the lobby's running match with {@code reason} (a game mode's own end condition); no-op outside IN_PROGRESS. */
+    public void endMatch(SiegeLobbyRuntime rt, SiegeEndReason reason) {
+        apply(rt, rt.machine().endMatch(reason));
+    }
 
     public void setPresenceExclusion(java.util.function.Predicate<UUID> presenceExcluded) {
         this.presenceExcluded = presenceExcluded == null ? playerId -> false : presenceExcluded;
@@ -532,6 +546,7 @@ public final class SiegeService {
         KnkSiegeScenario scenario = e.scenario();
         String token = UUID.randomUUID().toString();
         rt.startRound(token, guarded("createMatch", matchApi.createMatch(rt.id(), scenario.id())));
+        observers.forEach(o -> safely("scenarioDrawn", () -> o.scenarioDrawn(rt, scenario)));
 
         // DESIGN §6.2: remove members the drawn scenario excludes by title, then the latest joiners over capacity.
         int minXp = scenario.minTitleExperience() == null ? 0 : scenario.minTitleExperience();
@@ -614,7 +629,8 @@ public final class SiegeService {
     private void onSplit(SiegeLobbyRuntime rt, KnkSiegeScenario scenario) {
         rt.setSplit(partition(rt, scenario, rt.mutableMembers()));
         // Playtest 2026-10-24: spawn options are known from here on (the scenario's initial holdings).
-        rt.setPreMatchBoard(new SiegeObjectiveBoard(scenario, new CaptureCalculator(rt.machine().configuration()),
+        rt.setPreMatchBoard(new SiegeObjectiveBoard(scenario,
+                new CaptureCalculator(modeHooks.matchConfiguration(rt, scenario, rt.machine().configuration())),
                 AllianceResolver.of(scenario)));
         rt.split().ifPresent(split -> split.forEach((teamId, players) -> {
             KnkSiegeTeam team = scenario.team(teamId).orElse(null);
@@ -647,6 +663,8 @@ public final class SiegeService {
             entries.add(new TeamPartitioner.Entry(id, rank));
         }
         List<Integer> teamIds = scenario.teams().stream().map(KnkSiegeTeam::id).toList();
+        OptionalInt singleTeam = modeHooks.singleTeam(rt, scenario);
+        if (singleTeam.isPresent()) teamIds = List.of(singleTeam.getAsInt());
         return TeamPartitioner.partition(entries, teamIds, random);
     }
 
@@ -658,7 +676,8 @@ public final class SiegeService {
         String token = rt.matchToken().orElseGet(() -> UUID.randomUUID().toString());
         // Playtest 2026-10-24: the spawn choices made at the hub (the picker opened at the team split) travel into
         // the roster, and everyone starts at their choice - no picker at the start any more.
-        SiegeMatch match = new SiegeMatch(scenario, rt.machine().configuration(), token, teams, Map.copyOf(rt.preMatchSpawnChoices()));
+        SiegeMatch match = new SiegeMatch(scenario, modeHooks.matchConfiguration(rt, scenario, rt.machine().configuration()),
+                token, teams, Map.copyOf(rt.preMatchSpawnChoices()));
         rt.setMatch(match);
         // #166: every member's match window starts now.
         Instant joinedAt = Instant.now();
@@ -704,9 +723,11 @@ public final class SiegeService {
                     teams.computeIfAbsent(teamId, k -> new ArrayList<>()).add(p);
                     placed.add(p);
                 }));
+        OptionalInt singleTeam = modeHooks.singleTeam(rt, scenario);
         for (UUID member : rt.mutableMembers()) {
             if (placed.contains(member)) continue;
-            teams.values().stream().min(Comparator.comparingInt(List::size)).ifPresent(l -> l.add(member));
+            if (singleTeam.isPresent()) teams.computeIfAbsent(singleTeam.getAsInt(), k -> new ArrayList<>()).add(member);
+            else teams.values().stream().min(Comparator.comparingInt(List::size)).ifPresent(l -> l.add(member));
         }
         return teams;
     }
@@ -733,7 +754,8 @@ public final class SiegeService {
             return;
         }
         Set<Integer> alliancesLeft = match.alliances().alliancesWithMembers(match.roster().membersPerTeam());
-        WinResolver.Result result = match.winResolver().resolve(reason, match.board(), alliancesLeft);
+        WinResolver.Result result = modeHooks.resolveResult(rt, match, reason)
+                .orElseGet(() -> match.winResolver().resolve(reason, match.board(), alliancesLeft));
         announceResult(rt, match, result);
 
         match.contributions().close(Instant.now(), this::safeAfkSince);
@@ -1059,7 +1081,7 @@ public final class SiegeService {
         if (!rt.mutableMembers().contains(id)) return;
         Instant leftAt = Instant.now();
         // #150: read before the split/roster forget them.
-        Optional<Slot> slot = cause == LeaveCause.QUIT ? rejoinSlotFor(rt, id, leftAt) : Optional.empty();
+        Optional<Slot> slot = cause == LeaveCause.QUIT && modeHooks.allowRejoin(rt) ? rejoinSlotFor(rt, id, leftAt) : Optional.empty();
         rt.mutableMembers().remove(id);
         Integer userId = rt.userIds().remove(id);
         locks.releasePlayer(id);
@@ -1104,7 +1126,8 @@ public final class SiegeService {
 
         slot.ifPresent(rejoinSlots::hold);
 
-        if (checkMembership && match != null && rt.phase() == SiegePhase.IN_PROGRESS) {
+        if (checkMembership && match != null && rt.phase() == SiegePhase.IN_PROGRESS
+                && !modeHooks.suppressMembershipEnd(rt, match)) {
             match.winResolver().membershipEnd(match.roster().membersPerTeam(), match.scenario().playersMin())
                     .ifPresent(reason -> apply(rt, rt.machine().endMatch(reason)));
         }
@@ -1212,6 +1235,9 @@ public final class SiegeService {
             return Reply.fail(SiegeMessages.bad(name + " is already in " + lobbyOf(id).get().displayName() + "."));
         }
         KnkSiegeTeam team = teamId == null ? null : scenario.team(teamId).orElse(null);
+        if (team == null && modeHooks.singleTeam(rt, scenario).isPresent()) {
+            team = scenario.team(modeHooks.singleTeam(rt, scenario).getAsInt()).orElse(null);
+        }
         if (team == null && match != null) {
             team = match.roster().smallestTeam().stream().boxed().findFirst().flatMap(scenario::team).orElse(null);
             if (team == null) return Reply.fail(SiegeMessages.bad(scenarioName(scenario) + " has no teams."));
@@ -2212,6 +2238,7 @@ public final class SiegeService {
             logger.warning("[Siege] Lobby " + lobby.key() + " skipped: " + e.getMessage());
             return;
         }
+        machine.setScenarioRules(modeHooks.scenarioRules(lobby.id()));
         SiegeLobbyRuntime rt = new SiegeLobbyRuntime(machine);
         lobbies.put(lobby.id(), rt);
         logger.info("[Siege] Lobby " + lobby.key() + " loaded (" + lobby.rotation().size() + " ready scenario(s), "

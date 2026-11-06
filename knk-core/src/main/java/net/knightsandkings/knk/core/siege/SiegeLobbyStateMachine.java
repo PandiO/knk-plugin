@@ -116,6 +116,8 @@ public final class SiegeLobbyStateMachine {
     private VoteTally tally;
     private KnkSiegeScenario drawnScenario;
     private int matchDurationSeconds;
+    /** Mode overrides (Siege Survival, #41 S5); {@link SiegeScenarioRules#PVP} = ordinary Siege. */
+    private SiegeScenarioRules rules = SiegeScenarioRules.PVP;
 
     /**
      * Starts DISABLED; call {@link #start()} to begin matchmaking (bootstrap, DESIGN §6.1).
@@ -132,6 +134,15 @@ public final class SiegeLobbyStateMachine {
         this.random = Objects.requireNonNull(random, "random");
         apply(Objects.requireNonNull(lobby, "lobby"), Objects.requireNonNull(configuration, "configuration"),
                 validTimeline(lobby, configuration));
+    }
+
+    /** The game-mode rules for this lobby's scenarios (null = ordinary PvP Siege). */
+    public void setScenarioRules(SiegeScenarioRules rules) {
+        this.rules = rules == null ? SiegeScenarioRules.PVP : rules;
+    }
+
+    public SiegeScenarioRules scenarioRules() {
+        return rules;
     }
 
     // ==================== Commands ====================
@@ -159,15 +170,16 @@ public final class SiegeLobbyStateMachine {
                 matchmakingStep(memberCount, effects);
             }
             case IN_PROGRESS -> {
-                secondsRemaining--;
+                boolean timed = rules.timed(drawnScenario);
+                if (timed) secondsRemaining--;
                 secondsElapsed++;
-                if (secondsRemaining <= 0) {
+                if (timed && secondsRemaining <= 0) {
                     endMatch(SiegeEndReason.TIME_EXPIRED, effects);
                 } else {
                     if (secondsElapsed == START_MESSAGE_DELAY_SECONDS) {
                         effects.add(new StartMessageEffect(drawnScenario));
                     }
-                    if (secondsRemaining <= FINAL_COUNTDOWN_SECONDS) {
+                    if (timed && secondsRemaining <= FINAL_COUNTDOWN_SECONDS) {
                         effects.add(new FinalCountdownEffect(secondsRemaining));
                     }
                 }
@@ -413,11 +425,11 @@ public final class SiegeLobbyStateMachine {
             return false;
         }
         KnkSiegeScenario scenario = lobby.scenario(draw.get().scenarioId()).orElseThrow();
-        if (memberCount < scenario.playersMin()) {
+        if (memberCount < rules.playersMin(scenario)) {
             cancel(CancelReason.NOT_ENOUGH_PLAYERS, effects);
             return false;
         }
-        if (!locks.tryLock(lobby.id(), scenario)) {
+        if (!rules.startable(scenario) || !locks.tryLock(lobby.id(), scenario)) {
             cancel(CancelReason.NO_SCENARIO_AVAILABLE, effects);
             return false;
         }
@@ -431,7 +443,7 @@ public final class SiegeLobbyStateMachine {
             cancel(CancelReason.NO_SCENARIO_AVAILABLE, effects);
             return;
         }
-        if (memberCount < drawnScenario.playersMin()) {
+        if (memberCount < rules.playersMin(drawnScenario)) {
             cancel(CancelReason.NOT_ENOUGH_PLAYERS, effects);
             return;
         }
