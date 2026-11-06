@@ -233,4 +233,67 @@ class AccountErasureServiceTest {
         assertTrue(service.apply(new ErasedAccount(12, 42, ONLINE)).kicked());
         assertEquals(2, service.apply(new ErasedAccount(13, 43, OFFLINE)).erased().get("offline store"));
     }
+
+    /** Decision 2026-11-06 on LR1-8: what the kicker gave back before the kick is in the report and the log, as counts. */
+    @Test
+    void whatWasGivenBackBeforeTheKick_IsReported_AsCountsOnly() {
+        AccountErasureService.Kicker kicker = new AccountErasureService.Kicker() {
+            @Override
+            public CompletableFuture<Boolean> kick(ErasedAccount account) {
+                throw new AssertionError("the service asks for returnAndKick");
+            }
+
+            @Override
+            public CompletableFuture<AccountErasureService.Kick> returnAndKick(ErasedAccount account) {
+                events.add("return+kick " + account.erasureId());
+                return CompletableFuture.completedFuture(
+                    new AccountErasureService.Kick(true, Map.of("siege vault items", 12), List.of()));
+            }
+        };
+        AccountErasureService service = new AccountErasureService(eraser, feed, cursor, kicker, main, Runnable::run,
+            Duration.ofSeconds(2), slept::add, Logger.getAnonymousLogger());
+
+        AccountErasureService.Report report = service.apply(new ErasedAccount(14, 42, ONLINE));
+
+        assertEquals(List.of("return+kick 14", "vault 14", "offline 14"), events);
+        assertTrue(report.kicked());
+        assertEquals(Map.of("siege vault items", 12), report.returned());
+        assertEquals(3, report.total()); // deletions only
+        String line = AccountErasureService.describe(report);
+        assertTrue(line.contains("given back before the kick: siege vault items 12") && line.contains("player kicked"), line);
+        assertFalse(line.contains(ONLINE.toString()), line);
+    }
+
+    @Test
+    void aReturnThatFailed_IsListedWithTheFailedSteps_AndTheDeletionStillRuns() {
+        AccountErasureService.Kicker kicker = new AccountErasureService.Kicker() {
+            @Override
+            public CompletableFuture<Boolean> kick(ErasedAccount account) {
+                return CompletableFuture.completedFuture(true);
+            }
+
+            @Override
+            public CompletableFuture<AccountErasureService.Kick> returnAndKick(ErasedAccount account) {
+                return CompletableFuture.completedFuture(
+                    new AccountErasureService.Kick(true, Map.of(), List.of("siege vault items")));
+            }
+        };
+        AccountErasureService service = new AccountErasureService(eraser, feed, cursor, kicker, main, Runnable::run,
+            Duration.ofSeconds(2), slept::add, Logger.getAnonymousLogger());
+
+        AccountErasureService.Report report = service.apply(new ErasedAccount(15, 42, ONLINE));
+
+        assertEquals(List.of("siege vault items"), report.failed());
+        assertEquals(List.of("vault 15", "offline 15"), events);
+    }
+
+    @Test
+    void aKickerWithoutReturns_KicksOnly() {
+        AccountErasureService.Kicker kicker = account -> CompletableFuture.completedFuture(true);
+
+        AccountErasureService.Kick kick = kicker.returnAndKick(new ErasedAccount(16, 42, ONLINE)).join();
+
+        assertTrue(kick.kicked());
+        assertTrue(kick.returned().isEmpty() && kick.failed().isEmpty());
+    }
 }
