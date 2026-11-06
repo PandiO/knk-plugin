@@ -2,6 +2,7 @@ package net.knightsandkings.knk.paper.statistics;
 
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import org.bukkit.entity.AbstractArrow;
@@ -26,6 +27,7 @@ import org.bukkit.projectiles.ProjectileSource;
 
 import net.knightsandkings.knk.core.siege.SiegeCombatRules;
 import net.knightsandkings.knk.core.statistics.CombatStatisticsRules;
+import net.knightsandkings.knk.core.statistics.CreatureClass;
 import net.knightsandkings.knk.core.statistics.DeathCauseClassifier;
 import net.knightsandkings.knk.core.statistics.KillstreakTracker;
 import net.knightsandkings.knk.core.statistics.StatisticsContext;
@@ -49,6 +51,10 @@ import net.knightsandkings.knk.paper.siege.SiegeService;
  * </ul>
  * Players in an excluded game mode record nothing here. Registered only with
  * {@code statistics.enabled} and {@code statistics.combat.enabled}.
+ * <p>
+ * Siege Survival link S3 (PandiO/knk-workspace#41): a Survival match NPC (a mob the {@code MatchActorRegistry} knows,
+ * directly or as a projectile's shooter) is a match event, not PvE: its kill is no PvE kill, damage dealt to it or
+ * received from it isn't counted, and a death to it has no ordinary death cause. Without match NPCs nothing changes.
  */
 public final class CombatStatisticsListener implements Listener {
 
@@ -62,14 +68,22 @@ public final class CombatStatisticsListener implements Listener {
     private final boolean countCustomDamage;
     private final Set<String> pveExcludedSpawnReasons;
     private final HeadshotMultiplier headshots;
+    private final Predicate<Entity> matchNpc;
     private final KillstreakTracker streaks = new KillstreakTracker();
 
     public CombatStatisticsListener(StatisticsService service, KnkConfig.StatisticsConfig.CombatConfig config,
                                     HeadshotMultiplier headshots) {
+        this(service, config, headshots, entity -> false);
+    }
+
+    /** @param matchNpc whether an entity is a Survival match NPC, or a match NPC's projectile (link S3); null = none */
+    public CombatStatisticsListener(StatisticsService service, KnkConfig.StatisticsConfig.CombatConfig config,
+                                    HeadshotMultiplier headshots, Predicate<Entity> matchNpc) {
         this.service = service;
         this.countCustomDamage = config.countCustomDamage();
         this.pveExcludedSpawnReasons = config.pveExcludedSpawnReasons();
         this.headshots = headshots == null ? (attacker, victim) -> 1.0 : headshots;
+        this.matchNpc = matchNpc == null ? entity -> false : matchNpc;
     }
 
     /**
@@ -111,6 +125,11 @@ public final class CombatStatisticsListener implements Listener {
         if (attacker == null && !byMob) {
             return;
         }
+        // Link S3: damage dealt to or received from a Survival match NPC is a match event, not PvE.
+        Entity creature = byMob ? damager : (victim instanceof Player ? null : victim);
+        if (creature != null && !CombatStatisticsRules.countsCreatureDamage(creatureClass(creature))) {
+            return;
+        }
         double amount = CombatStatisticsRules.cappedDamage(event.getFinalDamage(), victim.getHealth(), victim.getAbsorptionAmount());
         if (!(amount > 0)) {
             return;
@@ -147,7 +166,9 @@ public final class CombatStatisticsListener implements Listener {
         boolean victimInMatch = StatisticsContext.SIEGE.equals(service.contextOf(victim));
 
         DeathCauseClassifier.Cause cause = DeathCauseClassifier.classify(otherKiller, lastDamager(victim));
-        service.addCounter(victim, cause.metric(), 1);
+        if (cause.recorded()) {
+            service.addCounter(victim, cause.metric(), 1);
+        }
         if (!victimInMatch) {
             service.addCounter(victim, StatisticsMetric.DEATHS, 1);
         }
@@ -174,7 +195,11 @@ public final class CombatStatisticsListener implements Listener {
             return player.getUniqueId().equals(victim.getUniqueId())
                     ? DeathCauseClassifier.LastDamager.NONE : DeathCauseClassifier.LastDamager.PLAYER;
         }
-        return mobBehind(byEntity.getDamager()) ? DeathCauseClassifier.LastDamager.MOB : DeathCauseClassifier.LastDamager.NONE;
+        if (!mobBehind(byEntity.getDamager())) {
+            return DeathCauseClassifier.LastDamager.NONE;
+        }
+        return creatureClass(byEntity.getDamager()) == CreatureClass.MATCH_NPC
+                ? DeathCauseClassifier.LastDamager.MATCH_NPC : DeathCauseClassifier.LastDamager.MOB;
     }
 
     // ===== PvE kills and arrows =====
@@ -190,7 +215,7 @@ public final class CombatStatisticsListener implements Listener {
             return;
         }
         CreatureSpawnEvent.SpawnReason reason = entity.getEntitySpawnReason();
-        if (CombatStatisticsRules.countsPveKill(reason == null ? null : reason.name(), pveExcludedSpawnReasons)) {
+        if (CombatStatisticsRules.countsPveKill(reason == null ? null : reason.name(), pveExcludedSpawnReasons, creatureClass(entity))) {
             service.addCounter(killer, StatisticsMetric.PVE_KILLS, 1);
         }
     }
@@ -207,6 +232,11 @@ public final class CombatStatisticsListener implements Listener {
     }
 
     // ===== attribution =====
+
+    /** Link S3: a Survival match NPC (also behind its projectile) or an ordinary creature. */
+    private CreatureClass creatureClass(Entity creature) {
+        return CreatureClass.of(creature != null && matchNpc.test(creature));
+    }
 
     /** The player behind a damager: itself, a projectile's shooter or a primed TNT's source. Null otherwise. */
     static Player playerBehind(Entity damager) {

@@ -315,6 +315,8 @@ public class KnKPlugin extends JavaPlugin {
     private SiegeService siegeService;
     /** The siege gate lockdowns (Phase 7a); read-only for road navigation (KNG-27 plan R24). Null without the gate system. */
     private net.knightsandkings.knk.paper.siege.SiegeGateController siegeGates;
+    /** Siege Survival link S3 (PandiO/knk-workspace#41): the match NPC actors (capture presence, gate damage, statistics). */
+    private net.knightsandkings.knk.paper.siege.npc.MatchActorRegistry matchActors;
     private net.knightsandkings.knk.core.siege.SiegeMatchRecorder siegeMatchRecorder;
     /**
      * PandiO/knk-workspace#31 / #182: the siege's startup-only API work; a step that failed at startup runs again on the
@@ -1576,7 +1578,8 @@ public class KnKPlugin extends JavaPlugin {
         if (statisticsConfig.combat().enabled()) {
             getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.statistics.CombatStatisticsListener(
                 statisticsService, statisticsConfig.combat(),
-                net.knightsandkings.knk.paper.statistics.CombatStatisticsListener.siegeHeadshots(() -> siegeService)), this);
+                net.knightsandkings.knk.paper.statistics.CombatStatisticsListener.siegeHeadshots(() -> siegeService),
+                entity -> matchActors != null && matchActors.isActor(entity)), this); // link S3: match NPCs are no PvE
         }
         if (statisticsConfig.gates().enabled()) {
             // Installed into the gate fire system and consequence listener when the gates start (below).
@@ -4070,6 +4073,9 @@ public class KnKPlugin extends JavaPlugin {
         // as the API's App:PublicBaseUrl. Empty: no links.
         siegeService.setPublicWebUrl(config.web().publicUrl());
         siegeService.setHistoryApi(apiClient.getSiegeMatchHistoryApi());
+        // Siege Survival link S3 (PandiO/knk-workspace#41): match NPC actors count towards capture with their weight.
+        this.matchActors = new net.knightsandkings.knk.paper.siege.npc.MatchActorRegistry(this);
+        siegeService.setActorPresence(matchActors::presences);
 
         PluginCommand siegeCommand = getCommand("siege");
         if (siegeCommand != null) {
@@ -4136,6 +4142,7 @@ public class KnKPlugin extends JavaPlugin {
             if (statisticsGateSink != null) statisticsGateSink.setLockedByMatch(siegeGates::isLocked);
             siegeService.setGateLobbySource(siegeGates::lobbyIdOf); // #165: gate damage counts for the gate's own match
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.SiegeGateListener(siegeGates, gateManager), this);
+            siegeGates.setMatchActors(matchActors::actorOf); // link S3: match NPCs damage enemy-owned gates by team
             siegeGates.recoverOnStartup();
             siegeStartupWork.register("restore stale gates", onMainThread(siegeGates::retryRecovery));
             // #182: gate edits made in the web app during a match apply once its gates were restored (Q12).
@@ -4177,6 +4184,11 @@ public class KnKPlugin extends JavaPlugin {
     /** The siege gate controller (read-only use: locked gates, non-member carry rule); null when siege or gates didn't start. */
     public net.knightsandkings.knk.paper.siege.SiegeGateController getSiegeGates() {
         return siegeGates;
+    }
+
+    /** Siege Survival link S3: the match NPC actor registry the Survival runtime registers its mobs with; null without siege. */
+    public net.knightsandkings.knk.paper.siege.npc.MatchActorRegistry getMatchActors() {
+        return matchActors;
     }
 
     /**

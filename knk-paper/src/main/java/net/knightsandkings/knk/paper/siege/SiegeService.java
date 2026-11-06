@@ -212,6 +212,21 @@ public final class SiegeService {
     }
 
     /**
+     * Siege Survival link S3 (PandiO/knk-workspace#41): the match NPC actors inside an objective's capture radius, as
+     * weighted NPC presences ({@code MatchActorRegistry::presences}). None by default, so PvP matches see players only.
+     */
+    @FunctionalInterface
+    public interface ActorPresenceSource {
+        List<Presence> within(int lobbyId, Location center, double radius);
+    }
+
+    private ActorPresenceSource actorPresence = (lobbyId, center, radius) -> List.of();
+
+    public void setActorPresence(ActorPresenceSource actorPresence) {
+        this.actorPresence = actorPresence == null ? (lobbyId, center, radius) -> List.of() : actorPresence;
+    }
+
+    /**
      * #165: effective gate HP a player took off a gate structure. Credited to the player's running match when that
      * match's lockdown holds the gate (the siege gate rules already refused damage by anyone else). A member keeps
      * what they did when they leave and rejoin. Main thread.
@@ -357,11 +372,11 @@ public final class SiegeService {
         for (UUID member : match.roster().playerIds()) {
             match.contributions().observe(member, observedAt, safeAfkSince(member));
         }
-        Map<Integer, List<Presence>> presence = presence(match);
+        Map<Integer, List<Presence>> presence = presence(rt, match);
         BoardStep step = match.board().step(presence);
         Instant now = Instant.now();
         for (CaptureEvent capture : step.captures()) {
-            match.roster().recordCapture(capture.capturerId());
+            if (!capture.capturedByNpc()) match.roster().recordCapture(capture.capturerId()); // link S3: an NPC credits nobody
             match.recordCaptureTime(capture.objectiveId(), capture.captureNumber(), now);
             announceCapture(rt, match, capture);
             resetLostObjectiveChoices(match, capture);
@@ -392,8 +407,11 @@ public final class SiegeService {
         }
     }
 
-    /** Living, non-spectating members within each objective's capture radius (DESIGN §7.2). */
-    private Map<Integer, List<Presence>> presence(SiegeMatch match) {
+    /**
+     * Living, non-spectating members within each objective's capture radius (DESIGN §7.2), plus the lobby's living
+     * match NPC actors with their weight (link S3; none in a PvP match).
+     */
+    private Map<Integer, List<Presence>> presence(SiegeLobbyRuntime rt, SiegeMatch match) {
         Map<Integer, List<Presence>> result = new HashMap<>();
         List<Player> living = new ArrayList<>();
         for (UUID id : match.roster().playerIds()) {
@@ -413,6 +431,11 @@ public final class SiegeService {
                     int teamId = match.roster().teamOf(p.getUniqueId()).orElse(-1);
                     present.add(new Presence(p.getUniqueId(), teamId, distance));
                 }
+            }
+            try {
+                present.addAll(actorPresence.within(rt.id(), center.get(), radius));
+            } catch (RuntimeException e) {
+                logger.log(Level.WARNING, "[Siege] NPC actor presence failed for lobby " + rt.key(), e);
             }
             if (!present.isEmpty()) result.put(objective.id(), present);
         }
@@ -891,7 +914,8 @@ public final class SiegeService {
             }
             for (CaptureEvent c : state.captures()) {
                 objectives.add(new ObjectiveResult(state.objectiveId(), c.newHolderTeamId(),
-                        rt.userIds().get(c.capturerId()), match.captureTime(c.objectiveId(), c.captureNumber())));
+                        c.capturerId() == null ? null : rt.userIds().get(c.capturerId()), // link S3: no user for an NPC capture
+                        match.captureTime(c.objectiveId(), c.captureNumber())));
             }
         }
         return new Completion(result.reason(), result.winnerOrNull(), participants, objectives);
@@ -2293,8 +2317,9 @@ public final class SiegeService {
         KnkSiegeScenario scenario = match.scenario();
         String objective = scenario.objective(capture.objectiveId()).map(o -> SiegeDisplayText.clean(o.name(), "#" + o.id())).orElse("?");
         KnkSiegeTeam newHolder = scenario.team(capture.newHolderTeamId()).orElse(null);
-        Player capturer = Bukkit.getPlayer(capture.capturerId());
-        String capturerName = capturer != null ? capturer.getName() : "Someone";
+        Player capturer = capture.capturerId() == null ? null : Bukkit.getPlayer(capture.capturerId());
+        String capturerName = capturer != null ? capturer.getName()
+                : capture.capturedByNpc() ? SiegeBukkit.teamName(newHolder) : "Someone"; // link S3: the NPC team captured
         int winnerAlliance = match.alliances().allianceOf(capture.newHolderTeamId());
         int loserAlliance = match.alliances().knows(capture.previousHolderTeamId())
                 ? match.alliances().allianceOf(capture.previousHolderTeamId()) : Integer.MIN_VALUE;
