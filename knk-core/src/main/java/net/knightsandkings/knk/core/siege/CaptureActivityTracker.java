@@ -44,7 +44,7 @@ public final class CaptureActivityTracker {
      * A side began working an objective this second.
      *
      * @param holderTeamId the objective's holder (the defending side)
-     * @param actors       the players doing it, closest to the capture point first
+     * @param actors       the players doing it, closest to the capture point first (NPC actors are left out)
      * @param actorTeamIds their teams, in the same order, without duplicates
      * @param retake       attacking only: the attackers' alliance held this objective earlier in the match
      * @param capturePercent how far the objective is captured, 0-100
@@ -112,7 +112,8 @@ public final class CaptureActivityTracker {
                     .filter(p -> (alliances.allianceOf(p.teamId()) == holderAlliance) == (activity == Activity.DEFENDING))
                     .sorted(CLOSEST_FIRST)
                     .toList();
-            List<UUID> actors = actorsPresent.stream().map(Presence::playerId).toList();
+            // Players only: NPC actors (link S3) have no player to name; their team still shows in the teams below.
+            List<UUID> actors = actorsPresent.stream().filter(Presence::isPlayer).map(Presence::playerId).toList();
             int percent = state.capturePercent();
             ongoing.add(new Ongoing(id, activity, actors, percent));
 

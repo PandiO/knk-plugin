@@ -46,6 +46,26 @@ public final class CombatStatisticsRules {
         return !excludedSpawnReasons.contains(spawnReason.toUpperCase(Locale.ROOT));
     }
 
+    /**
+     * As {@link #countsPveKill(String, Set)}, with the creature's {@link CreatureClass}: a Survival match NPC
+     * (Siege Survival link S3, PandiO/knk-workspace#41) never counts as an ordinary PvE kill, whatever its spawn
+     * reason - the match keeps its own kill counters.
+     */
+    public static boolean countsPveKill(String spawnReason, Set<String> excludedSpawnReasons, CreatureClass creature) {
+        if (creature == CreatureClass.MATCH_NPC) {
+            return false;
+        }
+        return countsPveKill(spawnReason, excludedSpawnReasons);
+    }
+
+    /**
+     * Whether damage between a player and a creature counts for the ordinary {@code damage_dealt.mob} /
+     * {@code damage_received.mob} counters: not when the creature is a Survival match NPC (link S3).
+     */
+    public static boolean countsCreatureDamage(CreatureClass creature) {
+        return creature != CreatureClass.MATCH_NPC;
+    }
+
     /** Arrows fired: arrow projectiles (incl. spectral and tipped), never tridents or fireworks. */
     public static boolean isArrow(boolean isArrowProjectile, boolean isTrident) {
         return isArrowProjectile && !isTrident;

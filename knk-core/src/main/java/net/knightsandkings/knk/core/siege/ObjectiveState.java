@@ -14,6 +14,11 @@ import java.util.UUID;
 /**
  * One objective's live state in a match (DESIGN §7.1–7.3): points and holder.
  * <p>
+ * <b>Actor-aware (Siege Survival link S3):</b> a {@link Presence} is a player or an NPC actor with a weight; the
+ * pressure of a side is the sum of its actors' weights fed into the same formula, so weight 1 for every player
+ * leaves PvP capture identical. An NPC can capture (the closest contributing attacker); the event then carries no
+ * player id.
+ * <p>
  * <b>Holder-relative:</b> defenders of the objective are the holder team's alliance, attackers every
  * other alliance, whatever the teams are called or which role they have. With recapture enabled the
  * sides swap on every capture.
@@ -26,20 +31,63 @@ import java.util.UUID;
  */
 public final class ObjectiveState {
 
-    /** A living match member inside the capture radius, with their distance to the capture point. */
-    public record Presence(UUID playerId, int teamId, double distance) {
+    /**
+     * A living match actor inside the capture radius, with its distance to the capture point (DESIGN §7.2; actor-aware
+     * since Siege Survival link S3, PandiO/knk-workspace#41). A player is one actor of weight 1; an NPC actor carries the
+     * capture contribution weight of its difficulty. The capture formula sums weights per side, so with every weight 1
+     * it counts heads exactly as before.
+     *
+     * @param actorId  the player's UUID, or the NPC entity's UUID
+     * @param teamId   the actor's team
+     * @param distance distance to the capture point
+     * @param kind     player or NPC
+     * @param weight   the actor's share of one capturing player (1 = one player); 0 or negative: present but no pressure
+     */
+    public record Presence(UUID actorId, int teamId, double distance, SiegeActorKind kind, double weight) {
         public Presence {
-            Objects.requireNonNull(playerId, "playerId");
+            Objects.requireNonNull(actorId, "actorId");
+            Objects.requireNonNull(kind, "kind");
+            if (Double.isNaN(weight) || Double.isInfinite(weight)) {
+                throw new IllegalArgumentException("weight must be finite: " + weight);
+            }
+        }
+
+        /** A player of weight 1: the PvP presence as it always was. */
+        public Presence(UUID playerId, int teamId, double distance) {
+            this(playerId, teamId, distance, SiegeActorKind.PLAYER, 1.0);
+        }
+
+        /** An NPC actor with the difficulty's capture contribution weight (1 = one player). */
+        public static Presence npc(UUID entityId, int teamId, double distance, double weight) {
+            return new Presence(entityId, teamId, distance, SiegeActorKind.NPC, weight);
+        }
+
+        /** The player behind this presence, or null for an NPC actor. */
+        public UUID playerId() {
+            return kind == SiegeActorKind.PLAYER ? actorId : null;
+        }
+
+        public boolean isPlayer() {
+            return kind == SiegeActorKind.PLAYER;
+        }
+
+        /** Whether this actor adds pressure: a positive weight. */
+        public boolean contributes() {
+            return weight > 0;
         }
     }
 
     /**
      * A capture: the holder changed to the capturer's team.
      *
+     * @param capturerId     the capturing player, or null when an NPC actor captured (link S3): roster credit,
+     *                       the reward, the result's capturer and the announcement all treat null as "nobody"
      * @param captureNumber  1 for the objective's first capture in this match, 2 for the next, ...
      * @param rewardEligible the capturer's first capture of this objective: the capture reward
-     *                       counts once per participant per objective (DESIGN §7.6)
+     *                       counts once per participant per objective (DESIGN §7.6); never for an NPC
      * @param objectiveFinal the objective is now captured for good (recapture off, or instant victory)
+     * @param capturerKind   player or NPC
+     * @param capturerActorId the capturing actor (the player, or the NPC entity); never null
      */
     public record CaptureEvent(
             int objectiveId,
@@ -49,10 +97,24 @@ public final class ObjectiveState {
             UUID capturerId,
             int captureNumber,
             boolean rewardEligible,
-            boolean objectiveFinal
+            boolean objectiveFinal,
+            SiegeActorKind capturerKind,
+            UUID capturerActorId
     ) {
+        /** A capture by a player (the pre-S3 shape). */
+        public CaptureEvent(int objectiveId, boolean instantVictory, int previousHolderTeamId, int newHolderTeamId,
+                            UUID capturerId, int captureNumber, boolean rewardEligible, boolean objectiveFinal) {
+            this(objectiveId, instantVictory, previousHolderTeamId, newHolderTeamId, capturerId, captureNumber,
+                    rewardEligible, objectiveFinal, SiegeActorKind.PLAYER, capturerId);
+        }
+
         public boolean firstCapture() {
             return captureNumber == 1;
+        }
+
+        /** Captured by an NPC actor: there is no player to credit. */
+        public boolean capturedByNpc() {
+            return capturerKind == SiegeActorKind.NPC;
         }
     }
 
@@ -100,14 +162,22 @@ public final class ObjectiveState {
         int holderAlliance = alliances.allianceOf(holderTeamId);
         List<Presence> attackers = new ArrayList<>();
         int defenders = 0;
+        double attackWeight = 0;
+        double defendWeight = 0;
         for (Presence p : present) {
-            if (!alliances.knows(p.teamId())) continue;
-            if (alliances.allianceOf(p.teamId()) == holderAlliance) defenders++;
-            else attackers.add(p);
+            if (!alliances.knows(p.teamId()) || !p.contributes()) continue;
+            if (alliances.allianceOf(p.teamId()) == holderAlliance) {
+                defenders++;
+                defendWeight += p.weight();
+            } else {
+                attackers.add(p);
+                attackWeight += p.weight();
+            }
         }
 
         boolean iv = objective.instantVictory();
-        int delta = calculator.delta(attackers.size(), defenders, iv);
+        // Weighted sums (link S3): every player weighs 1, so a PvP match steps exactly as before.
+        int delta = calculator.delta(attackWeight, defendWeight, iv);
         points = calculator.applyStep(points, objective.capturePoints(), delta);
         contested = !attackers.isEmpty();
 
@@ -122,7 +192,8 @@ public final class ObjectiveState {
     private CaptureEvent capture(Presence capturer) {
         int previousHolder = holderTeamId;
         holderTeamId = capturer.teamId();
-        boolean rewardEligible = rewardedCapturers.add(capturer.playerId());
+        // An NPC capturer earns nothing (DESIGN §3b/§4: Survival keeps its own counters).
+        boolean rewardEligible = capturer.isPlayer() && rewardedCapturers.add(capturer.playerId());
         boolean isFinal = objective.instantVictory() || !allowRecapture;
         if (isFinal) {
             capturedFinal = true;
@@ -131,7 +202,8 @@ public final class ObjectiveState {
             points = objective.capturePoints();
         }
         CaptureEvent event = new CaptureEvent(objective.id(), objective.instantVictory(), previousHolder,
-                holderTeamId, capturer.playerId(), captures.size() + 1, rewardEligible, isFinal);
+                holderTeamId, capturer.playerId(), captures.size() + 1, rewardEligible, isFinal,
+                capturer.kind(), capturer.actorId());
         captures.add(event);
         return event;
     }

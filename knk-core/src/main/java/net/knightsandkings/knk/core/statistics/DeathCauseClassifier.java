@@ -18,13 +18,20 @@ public final class DeathCauseClassifier {
         /** Another player, directly or by projectile, without Bukkit crediting them as killer. */
         PLAYER,
         /** A non-player living entity, directly or by projectile. */
-        MOB
+        MOB,
+        /** A Survival match NPC (a mob tagged as a match actor), directly or by projectile (link S3). */
+        MATCH_NPC
     }
 
     public enum Cause {
         PLAYER(StatisticsMetric.DEATHS_BY_CAUSE_PLAYER),
         MOB(StatisticsMetric.DEATHS_BY_CAUSE_MOB),
-        ENVIRONMENT(StatisticsMetric.DEATHS_BY_CAUSE_ENVIRONMENT);
+        ENVIRONMENT(StatisticsMetric.DEATHS_BY_CAUSE_ENVIRONMENT),
+        /**
+         * Killed by a Survival match NPC (Siege Survival link S3, PandiO/knk-workspace#41): a match event, not an
+         * ordinary death cause, so it has no {@code deaths_by_cause.*} metric and {@link #recorded()} is false.
+         */
+        MATCH_NPC(null);
 
         private final StatisticsMetric metric;
 
@@ -32,8 +39,14 @@ public final class DeathCauseClassifier {
             this.metric = metric;
         }
 
+        /** The {@code deaths_by_cause.*} metric; null for a cause the ordinary statistics leave out. */
         public StatisticsMetric metric() {
             return metric;
+        }
+
+        /** Whether the ordinary statistics record this cause at all. */
+        public boolean recorded() {
+            return metric != null;
         }
     }
 
@@ -48,6 +61,9 @@ public final class DeathCauseClassifier {
         }
         if (lastDamager == LastDamager.MOB) {
             return Cause.MOB;
+        }
+        if (lastDamager == LastDamager.MATCH_NPC) {
+            return Cause.MATCH_NPC;
         }
         return Cause.ENVIRONMENT;
     }

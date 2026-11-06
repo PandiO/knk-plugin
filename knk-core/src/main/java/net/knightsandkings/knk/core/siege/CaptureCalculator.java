@@ -13,6 +13,9 @@ import java.math.RoundingMode;
  * {@code delta = attack − defend}, {@code points = clamp(points − delta, 0, capturePoints)}.
  * A2/D2 have separate instant-victory values. This is the v1 {@code Objective.calculateCapturePoints}
  * / v2 {@code SiegeObjective.calculateCapturePoints} loop in closed form (legacy: 5/2(5), 6/3(6)).
+ * <p>
+ * Since Siege Survival link S3 the counts may be weight sums ({@link #delta(double, double, boolean)}): an NPC actor
+ * weighs its difficulty's capture contribution, a player always 1, so PvP matches are unchanged.
  */
 public final class CaptureCalculator {
 
@@ -52,6 +55,36 @@ public final class CaptureCalculator {
     /** {@code attack − defend}: positive moves the objective towards capture. */
     public int delta(int attackers, int defenders, boolean instantVictory) {
         return attackPressure(attackers, instantVictory) - defensePressure(defenders, instantVictory);
+    }
+
+    // ==================== Weighted (actor-aware) presence, Siege Survival link S3 ====================
+
+    /**
+     * Points removed per second by attackers whose weights sum to {@code attackerWeight}: the same formula with the
+     * weight sum in place of the head count, {@code A1 + (w − 1)·A2} for {@code w > 0}, never below 0 (a lone actor
+     * lighter than one player presses less than one player). A whole-number weight gives exactly
+     * {@link #attackPressure(int, boolean)}.
+     */
+    public double attackPressure(double attackerWeight, boolean instantVictory) {
+        if (!(attackerWeight > 0)) return 0;
+        int perExtra = instantVictory ? attackPerExtraInstantVictory : attackPerExtra;
+        return Math.max(0, attackBase + (attackerWeight - 1) * perExtra);
+    }
+
+    /** Points restored per second by defenders whose weights sum to {@code defenderWeight}; see {@link #attackPressure(double, boolean)}. */
+    public double defensePressure(double defenderWeight, boolean instantVictory) {
+        if (!(defenderWeight > 0)) return 0;
+        int perExtra = instantVictory ? defendPerExtraInstantVictory : defendPerExtra;
+        return Math.max(0, defendBase + (defenderWeight - 1) * perExtra);
+    }
+
+    /**
+     * Weighted {@code attack − defend}, truncated towards zero to the whole points a step moves (a fraction of a
+     * point is dropped, never carried). With whole-number weights this is {@link #delta(int, int, boolean)} exactly.
+     */
+    public int delta(double attackWeight, double defendWeight, boolean instantVictory) {
+        double delta = attackPressure(attackWeight, instantVictory) - defensePressure(defendWeight, instantVictory);
+        return (int) delta;
     }
 
     /** One capture step: {@code clamp(points − delta, 0, capturePoints)}. */
