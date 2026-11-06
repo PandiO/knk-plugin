@@ -12,7 +12,6 @@ import net.knightsandkings.knk.paper.siege.SiegeMessages;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
-import org.bukkit.entity.Projectile;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -66,10 +65,14 @@ public final class SiegeGateListener implements Listener {
         respond(event.getPlayer(), structureId, gates.clickOpenGate(event.getPlayer(), structureId));
     }
 
+    /**
+     * Players (also behind a projectile) as before; a Survival match NPC (link S3) by its team through
+     * {@link SiegeGateController#mayDamage(Entity, int)}; anything else unattributed, so refused on a locked gate.
+     */
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onGateDamage(GateDoorDamageEvent event) {
         int structureId = event.getGate().getGateStructureId();
-        if (gates.isLocked(structureId) && !gates.mayDamage(attacker(event.getCausingEntity()), structureId)) {
+        if (gates.isLocked(structureId) && !gates.mayDamage(event.getCausingEntity(), structureId)) {
             event.setCancelled(true);
         }
     }
@@ -77,7 +80,7 @@ public final class SiegeGateListener implements Listener {
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onGateIgnite(GateDoorIgniteEvent event) {
         int structureId = event.getGate().getGateStructureId();
-        if (gates.isLocked(structureId) && !gates.mayDamage(attacker(event.getCausingEntity()), structureId)) {
+        if (gates.isLocked(structureId) && !gates.mayDamage(event.getCausingEntity(), structureId)) {
             event.setCancelled(true);
         }
     }
@@ -90,12 +93,5 @@ public final class SiegeGateListener implements Listener {
             case NOT_IN_MATCH -> player.sendActionBar(SiegeMessages.bad("This gate is part of the siege " + siege + "."));
             case FORCED_OPEN -> player.sendActionBar(SiegeMessages.bad("This gate is held open during the siege " + siege + "."));
         }
-    }
-
-    /** The player behind a hit: the player, or the shooter of a projectile; null otherwise. */
-    private static Player attacker(Entity entity) {
-        if (entity instanceof Player player) return player;
-        if (entity instanceof Projectile projectile && projectile.getShooter() instanceof Player shooter) return shooter;
-        return null;
     }
 }

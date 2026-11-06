@@ -370,6 +370,72 @@ public class HealthSystem {
         );
     }
 
+    // ==================== Repairs (Siege Survival link S3 for S6; implementation checks report §7) ====================
+
+    /**
+     * Heals a standing (not destroyed) door to full health: the repair of a damaged door completes (Survival
+     * DESIGN §5, S49). Cracks and the info display follow, the health is persisted and the state listeners are
+     * told. Does not open or close the door - whether a repaired door is closed is the caller's decision.
+     *
+     * @return the HP restored; 0 for a destroyed, missing or already-full door
+     */
+    public double repairToFull(CachedGateDoor gate) {
+        if (gate == null || gate.isDestroyed()) {
+            return 0;
+        }
+        double before = gate.getHealthCurrent();
+        double max = gate.getHealthMax();
+        if (!(max > before)) {
+            return 0;
+        }
+        gate.setHealthCurrent(max);
+        LOGGER.info("Gate '" + gate.getName() + "' repaired to full health (" + String.format("%.1f", before) + " -> " + max + ")");
+        if (crackVisuals != null) {
+            crackVisuals.sync(gate, false);
+        }
+        if (displayManager != null) {
+            displayManager.syncDisplay(gate);
+        }
+        persistHealthChange(gate);
+        fireStateChanged(gate);
+        return max - before;
+    }
+
+    /**
+     * Brings a destroyed door back as a standing, active door at full health that stands <b>OPEN at the last
+     * frame</b> with no blocks placed, so that the caller's {@code gateManager.closeGate(id)} rebuilds it through
+     * the normal closing animation - with its entity handling, jam reporting and spatial-index updates - instead of
+     * {@link #respawnGate}'s instant placement and server-wide broadcast (Survival repairs of destroyed doors,
+     * DESIGN §5; gate Decision 6 adds the crack heal and return animation on top of this later). Persists state and
+     * health and tells the state listeners. Nothing happens for a door that isn't destroyed.
+     *
+     * @return true when the door was rebuilt and now waits for {@code closeGate}
+     */
+    public boolean rebuildForClosing(CachedGateDoor gate) {
+        if (gate == null || !gate.isDestroyed()) {
+            return false;
+        }
+        LOGGER.info("Rebuilding gate '" + gate.getName() + "' for an animated close");
+        gate.setIsDestroyed(false);
+        gate.setIsActive(true);
+        gate.setIsJammed(false);
+        gate.setCurrentState(AnimationState.OPEN);
+        gate.setCurrentFrame(Math.max(0, gate.getAnimationDurationTicks()));
+        gate.setAnimationStartTime(0);
+        gate.setHealthCurrent(gate.getHealthMax());
+        gate.setRespawnScheduledTime(0);
+        if (crackVisuals != null) {
+            crackVisuals.sync(gate, false); // full health: no cracks
+        }
+        if (displayManager != null) {
+            displayManager.syncDisplay(gate);
+        }
+        persistGateState(gate);
+        persistHealthChange(gate);
+        fireStateChanged(gate);
+        return true;
+    }
+
     /** Tells the GateManager's state listeners (navigation, plan §2 R4) that this door changed outside its state machine. */
     private void fireStateChanged(CachedGateDoor gate) {
         if (gateManager != null) {

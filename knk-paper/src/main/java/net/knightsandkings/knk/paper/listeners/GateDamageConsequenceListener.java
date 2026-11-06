@@ -23,7 +23,8 @@ public class GateDamageConsequenceListener implements Listener {
         GateDoorDamageEvent.Cause.LEFT_CLICK, 10.0,
         GateDoorDamageEvent.Cause.PROJECTILE, 10.0,
         GateDoorDamageEvent.Cause.EXPLOSION, 10.0,
-        GateDoorDamageEvent.Cause.BLOCK_BREAK, 10.0
+        GateDoorDamageEvent.Cause.BLOCK_BREAK, 10.0,
+        GateDoorDamageEvent.Cause.NPC_MELEE, 10.0 // the base; NpcGateDamage passes the factored amount itself
     );
 
     private static final Logger LOGGER = Logger.getLogger(GateDamageConsequenceListener.class.getName());

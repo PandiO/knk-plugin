@@ -18,8 +18,11 @@ import net.knightsandkings.knk.core.siege.SiegeDefenderPassThrough.OpenGateClick
 import net.knightsandkings.knk.core.siege.SiegeGatePlan.Control;
 import net.knightsandkings.knk.paper.gates.GatePassThroughService;
 import net.knightsandkings.knk.paper.gates.HealthSystem;
+import net.knightsandkings.knk.paper.siege.npc.MatchActor;
 import org.bukkit.Bukkit;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Projectile;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;
 
@@ -31,6 +34,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -380,6 +384,34 @@ public final class SiegeGateController implements SiegeMatchObserver {
         Lockdown lockdown = byGate.get(gateStructureId);
         if (lockdown == null) return true;
         Integer team = attacker == null ? null : teamOf(lockdown, attacker);
+        return lockdown.plan.canDamage(gateStructureId, team, lockdown.alliances);
+    }
+
+    // ---- Siege Survival link S3 (PandiO/knk-workspace#41): match NPCs damage gates by team ----
+
+    /** Resolves a mob (or a mob's projectile) to the match actor it is registered as; none by default. */
+    private Function<Entity, Optional<MatchActor>> matchActors = entity -> Optional.empty();
+
+    /** The match actor registry (link S3): tagged mobs of a match's NPC team; set once Siege is up. */
+    public void setMatchActors(Function<Entity, Optional<MatchActor>> matchActors) {
+        this.matchActors = matchActors == null ? entity -> Optional.empty() : matchActors;
+    }
+
+    /**
+     * May the entity behind a hit damage the locked gate? A player, or a projectile's player shooter, as
+     * {@link #mayDamage(Player, int)}; a registered match actor (a mob, or a mob's projectile) of the lobby whose
+     * lockdown holds the gate by its team - an enemy of the gate's current owner, never its own alliance's gate
+     * ({@code SiegeGatePlan.canDamage}); anything else is unattributed and refused. True for unlocked gates.
+     */
+    public boolean mayDamage(Entity causingEntity, int gateStructureId) {
+        Lockdown lockdown = byGate.get(gateStructureId);
+        if (lockdown == null) return true;
+        Entity source = causingEntity instanceof Projectile projectile && projectile.getShooter() instanceof Entity shooter
+                ? shooter : causingEntity;
+        if (source instanceof Player player) return mayDamage(player, gateStructureId);
+        Integer team = source == null ? null : matchActors.apply(source)
+                .filter(actor -> actor.lobbyId() == lockdown.runtime.id())
+                .map(MatchActor::teamId).orElse(null);
         return lockdown.plan.canDamage(gateStructureId, team, lockdown.alliances);
     }
 

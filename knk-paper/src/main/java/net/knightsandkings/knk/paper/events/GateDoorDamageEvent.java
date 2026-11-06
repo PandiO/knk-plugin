@@ -23,7 +23,13 @@ public class GateDoorDamageEvent extends Event implements Cancellable {
         EXPLOSION,
         BLOCK_BREAK,
         /** An area custom enchantment (chaos, flash_chaos) that reached the door; it brings its own damage. */
-        ENCHANTMENT
+        ENCHANTMENT,
+        /**
+         * A Survival match NPC's melee hit on a door of the opposing team (Siege Survival link S3,
+         * PandiO/knk-workspace#41). The causing entity is the mob (a registered match actor); the caller brings
+         * the damage with the difficulty's gate damage factor applied ({@code NpcGateDamage}).
+         */
+        NPC_MELEE
     }
 
     private final CachedGateDoor gate;
