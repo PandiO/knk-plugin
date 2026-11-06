@@ -25,9 +25,10 @@ import net.knightsandkings.knk.core.ports.api.PrivacyErasuresApi;
 
 /**
  * The game server's side of a GDPR erasure (realtime S5, PandiO/knk-workspace#184, DESIGN §7.4). For every erased
- * account it (1) kicks the player with a neutral message if they are online, (2) waits a moment so the quit handlers
- * have run and Minecraft has saved the player, then (3) runs the {@link LocalDataEraser} steps: main-thread ones on the
- * main thread, the rest on its own worker thread.
+ * account it (1) kicks the player with a neutral message if they are online, after handing back what the server held
+ * for them (the {@link LocalDataEraser.Where#BEFORE_KICK} steps: the siege vault, decision 2026-11-06 on LR1-8), (2)
+ * waits a moment so the quit handlers have run and Minecraft has saved the player, then (3) runs the
+ * {@link LocalDataEraser} steps: main-thread ones on the main thread, the rest on its own worker thread.
  * <ul>
  *   <li><b>Push</b> ({@link #pushed}): the {@code AccountErased} hub event is applied at once. It does not move the
  *       stored position (an earlier one may have been missed), but it starts a catch-up, which does.</li>
@@ -51,6 +52,26 @@ public final class AccountErasureService implements AutoCloseable {
     @FunctionalInterface
     public interface Kicker {
         CompletableFuture<Boolean> kick(ErasedAccount account);
+
+        /**
+         * Hands back what the server holds for an online player ({@link LocalDataEraser.Where#BEFORE_KICK} steps, e.g.
+         * the siege vault), then kicks, in one main-thread task so nothing runs in between. The default only kicks.
+         */
+        default CompletableFuture<Kick> returnAndKick(ErasedAccount account) {
+            return kick(account).thenApply(kicked -> Kick.of(Boolean.TRUE.equals(kicked)));
+        }
+    }
+
+    /** What the kick did: whether the player was online and kicked, and what was given back to them first (counts). */
+    public record Kick(boolean kicked, Map<String, Integer> returned, List<String> failed) {
+        public Kick {
+            returned = Map.copyOf(returned);
+            failed = List.copyOf(failed);
+        }
+
+        public static Kick of(boolean kicked) {
+            return new Kick(kicked, Map.of(), List.of());
+        }
     }
 
     @FunctionalInterface
@@ -58,11 +79,17 @@ public final class AccountErasureService implements AutoCloseable {
         void sleep(Duration duration) throws InterruptedException;
     }
 
-    /** What one erasure did. */
-    public record Report(long erasureId, boolean kicked, Map<String, Integer> erased, List<String> failed) {
+    /** What one erasure did: what was given back before the kick, what was deleted, which steps failed (counts only). */
+    public record Report(long erasureId, boolean kicked, Map<String, Integer> returned, Map<String, Integer> erased,
+                         List<String> failed) {
         public Report {
+            returned = Map.copyOf(returned);
             erased = Map.copyOf(erased);
             failed = List.copyOf(failed);
+        }
+
+        public Report(long erasureId, boolean kicked, Map<String, Integer> erased, List<String> failed) {
+            this(erasureId, kicked, Map.of(), erased, failed);
         }
 
         public int total() {
@@ -230,15 +257,19 @@ public final class AccountErasureService implements AutoCloseable {
             }
         }
         ErasedAccount account = withoutReusedUuid(pushedOrRead);
-        boolean kicked = false;
+        Kick kick = Kick.of(false);
         try {
-            kicked = Boolean.TRUE.equals(kicker.kick(account).get(MAIN_THREAD_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS));
+            Kick done = kicker.returnAndKick(account).get(MAIN_THREAD_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            if (done != null) {
+                kick = done;
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return null;
         } catch (Exception e) {
             logger.log(Level.WARNING, "[KnK Privacy] Erasure #" + account.erasureId() + ": the kick failed", e);
         }
+        boolean kicked = kick.kicked();
         if (kicked && !settle.isZero()) {
             try {
                 sleeper.sleep(settle);
@@ -248,7 +279,7 @@ public final class AccountErasureService implements AutoCloseable {
             }
         }
         Map<String, Integer> erased = new LinkedHashMap<>();
-        List<String> failed = new ArrayList<>();
+        List<String> failed = new ArrayList<>(kick.failed());
         try {
             LocalDataEraser.Outcome main = CompletableFuture
                 .supplyAsync(() -> eraser.run(LocalDataEraser.Where.MAIN_THREAD, account), mainThread)
@@ -273,7 +304,7 @@ public final class AccountErasureService implements AutoCloseable {
             }
         }
         applied.incrementAndGet();
-        Report report = new Report(account.erasureId(), kicked, erased, failed);
+        Report report = new Report(account.erasureId(), kicked, kick.returned(), erased, failed);
         logger.info(describe(report));
         return report;
     }
@@ -298,11 +329,17 @@ public final class AccountErasureService implements AutoCloseable {
     }
 
     static String describe(Report report) {
-        String what = report.erased().entrySet().stream().filter(e -> e.getValue() > 0)
-            .map(e -> e.getKey() + " " + e.getValue()).collect(Collectors.joining(", "));
+        String what = counts(report.erased());
+        String returned = counts(report.returned());
         return "[KnK Privacy] Erasure #" + report.erasureId() + " applied: "
+            + (returned.isEmpty() ? "" : "given back before the kick: " + returned + ", ")
             + (report.kicked() ? "player kicked, " : "")
             + (what.isEmpty() ? "nothing kept locally" : what)
             + (report.failed().isEmpty() ? "" : "; failed: " + String.join(", ", report.failed()));
+    }
+
+    private static String counts(Map<String, Integer> counts) {
+        return counts.entrySet().stream().filter(e -> e.getValue() > 0)
+            .map(e -> e.getKey() + " " + e.getValue()).collect(Collectors.joining(", "));
     }
 }

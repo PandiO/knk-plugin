@@ -51,4 +51,20 @@ class LocalDataEraserTest {
         assertThrows(IllegalArgumentException.class, () -> eraser.register("x", null, a -> 0));
         assertThrows(IllegalArgumentException.class, () -> eraser.register("x", Where.WORKER, null));
     }
+
+    /** Decision 2026-11-06 on LR1-8: BEFORE_KICK steps (given back to an online player) are only run by the kicker. */
+    @Test
+    void beforeKickSteps_AreNotRunWithTheDeletions() {
+        List<String> ran = new ArrayList<>();
+        LocalDataEraser eraser = new LocalDataEraser();
+        eraser.register("siege vault items", Where.BEFORE_KICK, a -> { ran.add("return"); return 4; });
+        eraser.register("siege vault", Where.MAIN_THREAD, a -> { ran.add("discard"); return 0; });
+        eraser.register("offline store", Where.WORKER, a -> { ran.add("offline"); return 1; });
+
+        eraser.run(Where.MAIN_THREAD, ACCOUNT);
+        eraser.run(Where.WORKER, ACCOUNT);
+        assertEquals(List.of("discard", "offline"), ran);
+
+        assertEquals(Map.of("siege vault items", 4), eraser.run(Where.BEFORE_KICK, ACCOUNT).erased());
+    }
 }

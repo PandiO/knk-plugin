@@ -2009,6 +2009,31 @@ public final class SiegeService {
         outageStopped.clear();
     }
 
+    /**
+     * Account erasure of an online player (PandiO/knk-workspace#184, developer decision 2026-11-06 on LR1-8), on the main
+     * thread right before the erasure kick: the siege vault goes back like {@code /siege admin kick} (a member leaves
+     * with cause KICK, so no rejoin place is kept) or, without a membership, like the join restore of a leftover vault.
+     * The restore replaces the inventory and forgets the vault in memory and on disk, so the quit handler, a later join
+     * and the erasure's "siege vault" discard step find nothing: nothing is given twice. A vault whose inventory the
+     * quit already gave back only sends the player home. Offline vaults are still discarded by that step.
+     *
+     * @return how many item stacks were given back (0: no vault, or nothing left to give)
+     */
+    public int returnVaultBeforeErasure(Player player) {
+        if (player == null) return 0;
+        UUID id = player.getUniqueId();
+        if (!vault.has(id)) return 0;
+        int stacks = vault.heldItemStacks(id);
+        Optional<SiegeLobbyRuntime> lobby = lobbyOf(id);
+        if (lobby.isPresent()) {
+            removeMember(lobby.get(), id, LeaveCause.KICK, true); // restores once, like an admin kick
+        } else if (!vault.restore(player)) {
+            return 0; // unreadable file: the discard step removes it
+        }
+        // Never a second restore here, even if the file could not be deleted: the discard step after the kick deletes it.
+        return stacks;
+    }
+
     /** {@code /siege admin kick <player>}: remove a member (restore applies). */
     public Reply adminKick(CommandSender sender, Player target) {
         Optional<SiegeLobbyRuntime> found = lobbyOf(target.getUniqueId());
