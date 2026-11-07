@@ -4,6 +4,14 @@ import net.knightsandkings.knk.api.dto.LocationDto;
 import net.knightsandkings.knk.api.dto.SiegeDtos.ReadinessIssueDto;
 import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.ConfigurationDto;
 import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.DifficultyDto;
+import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.EquipmentDto;
+import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.MysteryBoxEntryDto;
+import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.MysteryBoxEntryEnchantmentDto;
+import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.MysteryBoxPointDto;
+import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.MysteryBoxPoolDto;
+import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.PurchaseOfferDto;
+import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.PurchasePointDto;
+import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.SelectedKitDto;
 import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.GateDto;
 import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.MonsterTypeDto;
 import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.ObjectiveDto;
@@ -18,6 +26,14 @@ import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.StatWeightsDto;
 import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.StuckDto;
 import net.knightsandkings.knk.core.survival.SurvivalPoint;
 import net.knightsandkings.knk.core.survival.economy.KillRewardSettings;
+import net.knightsandkings.knk.core.survival.kits.KitSelection.KitOption;
+import net.knightsandkings.knk.core.survival.mysterybox.BasisPoints;
+import net.knightsandkings.knk.core.survival.mysterybox.EnchantmentChance;
+import net.knightsandkings.knk.core.survival.mysterybox.MysteryBoxEntry;
+import net.knightsandkings.knk.core.survival.mysterybox.MysteryBoxPool;
+import net.knightsandkings.knk.core.survival.mysterybox.MysteryBoxSettings;
+import net.knightsandkings.knk.core.survival.mysterybox.MysteryBoxVariant;
+import net.knightsandkings.knk.core.survival.purchase.PurchaseRules;
 import net.knightsandkings.knk.core.survival.end.AllCapturedOverride;
 import net.knightsandkings.knk.core.survival.end.EndConditionSettings;
 import net.knightsandkings.knk.core.survival.scaling.PerPlayerScaling;
@@ -34,7 +50,14 @@ import net.knightsandkings.knk.core.survival.spawn.SpecialWaveEntry;
 import net.knightsandkings.knk.core.survival.spawn.SpecialWaveProfile;
 import net.knightsandkings.knk.core.survival.spawn.SpecialWaveSchedule;
 import net.knightsandkings.knk.core.survival.stuck.StuckSettings;
+import net.knightsandkings.knk.paper.siege.survival.SurvivalConfiguration.BoxEnchantmentSpec;
+import net.knightsandkings.knk.paper.siege.survival.SurvivalConfiguration.BoxEntrySpec;
 import net.knightsandkings.knk.paper.siege.survival.SurvivalConfiguration.DifficultySpec;
+import net.knightsandkings.knk.paper.siege.survival.SurvivalConfiguration.EquipmentMode;
+import net.knightsandkings.knk.paper.siege.survival.SurvivalConfiguration.EquipmentSpec;
+import net.knightsandkings.knk.paper.siege.survival.SurvivalConfiguration.MysteryBoxPointSpec;
+import net.knightsandkings.knk.paper.siege.survival.SurvivalConfiguration.OfferSpec;
+import net.knightsandkings.knk.paper.siege.survival.SurvivalConfiguration.PurchasePointSpec;
 import net.knightsandkings.knk.paper.siege.survival.SurvivalConfiguration.GateSpec;
 import net.knightsandkings.knk.paper.siege.survival.SurvivalConfiguration.ObjectiveSpec;
 import net.knightsandkings.knk.paper.siege.survival.SurvivalConfiguration.Readiness;
@@ -99,6 +122,9 @@ public final class SurvivalConfigurationMapper {
             dto.spawn() == null ? 0 : clamp(orDefault(dto.spawn().favorNearPlayersPercent(), 0), 0, 100),
             dto.spawn() == null ? 1 : Math.max(1, orDefault(dto.spawn().nearZoneCount(), 1)),
             killRewards(dto),
+            equipment(dto.equipment()),
+            purchasePoints(dto.purchasePoints()),
+            mysteryBoxPoints(dto.mysteryBoxPoints()),
             readiness(dto.readiness()),
             dto.generatedAt() == null ? "" : dto.generatedAt().toString());
     }
@@ -334,6 +360,127 @@ public final class SurvivalConfigurationMapper {
             return new KillRewardSettings(coins, xp, currency, bonus);
         } catch (IllegalArgumentException e) {
             return d;
+        }
+    }
+
+    // ---- phase 4 (link S7b): equipment, purchase points, Mystery Box points ----
+
+    static EquipmentSpec equipment(EquipmentDto dto) {
+        if (dto == null) return EquipmentSpec.ownInventory();
+        List<KitOption> kits = new ArrayList<>();
+        if (dto.selectedKits() != null) {
+            List<SelectedKitDto> sorted = new ArrayList<>(dto.selectedKits());
+            sorted.sort(Comparator.comparingInt(k -> orDefault(k.sortOrder(), 0)));
+            for (SelectedKitDto k : sorted) {
+                if (k == null || k.kitId() == null) continue;
+                kits.add(new KitOption(k.kitId(), k.kitName(), orDefault(k.sortOrder(), 0)));
+            }
+        }
+        return new EquipmentSpec(parseEquipmentMode(dto.mode()), kits,
+            dto.defaultKitId() == null ? OptionalInt.empty() : OptionalInt.of(dto.defaultKitId()),
+            dto.baselineLoadoutKitId() == null ? OptionalInt.empty() : OptionalInt.of(dto.baselineLoadoutKitId()));
+    }
+
+    static EquipmentMode parseEquipmentMode(String value) {
+        if (value == null) return EquipmentMode.OWN_INVENTORY;
+        String v = value.replace("_", "").replace("-", "").toLowerCase(Locale.ROOT);
+        return switch (v) {
+            case "kits", "kit" -> EquipmentMode.KITS;
+            case "matchprogression", "progression" -> EquipmentMode.MATCH_PROGRESSION;
+            default -> EquipmentMode.OWN_INVENTORY;
+        };
+    }
+
+    static List<PurchasePointSpec> purchasePoints(List<PurchasePointDto> dtos) {
+        if (dtos == null) return List.of();
+        List<PurchasePointSpec> out = new ArrayList<>();
+        List<PurchasePointDto> sorted = new ArrayList<>(dtos);
+        sorted.removeIf(Objects::isNull);
+        sorted.sort(Comparator.comparingInt(p -> orDefault(p.sortOrder(), 0)));
+        for (PurchasePointDto p : sorted) {
+            List<OfferSpec> offers = new ArrayList<>();
+            if (p.offers() != null) {
+                List<PurchaseOfferDto> sortedOffers = new ArrayList<>(p.offers());
+                sortedOffers.removeIf(Objects::isNull);
+                sortedOffers.sort(Comparator.comparingInt(o -> orDefault(o.sortOrder(), 0)));
+                for (PurchaseOfferDto o : sortedOffers) {
+                    if (o.itemBlueprintId() == null) continue;
+                    offers.add(new OfferSpec(orDefault(o.id(), 0), o.itemBlueprintId(), o.itemBlueprintName(),
+                        orDefault(o.quantity(), 1), orDefault(o.price(), 0)));
+                }
+            }
+            out.add(new PurchasePointSpec(orDefault(p.id(), 0), p.name(), point(p.location()),
+                orDefault(p.interactionRange(), PurchaseRules.DEFAULT_INTERACTION_RANGE), offers));
+        }
+        return out;
+    }
+
+    static List<MysteryBoxPointSpec> mysteryBoxPoints(List<MysteryBoxPointDto> dtos) {
+        if (dtos == null) return List.of();
+        List<MysteryBoxPointSpec> out = new ArrayList<>();
+        for (MysteryBoxPointDto p : dtos) {
+            if (p == null) continue;
+            MysteryBoxPoolDto poolDto = p.pool();
+            MysteryBoxVariant variant = parseVariant(poolDto == null ? null : poolDto.variant());
+            List<BoxEntrySpec> entries = new ArrayList<>();
+            List<MysteryBoxEntry> coreEntries = new ArrayList<>();
+            if (poolDto != null && poolDto.entries() != null) {
+                List<MysteryBoxEntryDto> sorted = new ArrayList<>(poolDto.entries());
+                sorted.removeIf(Objects::isNull);
+                sorted.sort(Comparator.comparingInt(e -> orDefault(e.sortOrder(), 0)));
+                for (MysteryBoxEntryDto e : sorted) {
+                    int bp = basisPoints(e.chanceBasisPoints(), e.chancePercent());
+                    List<BoxEnchantmentSpec> chances = new ArrayList<>();
+                    List<EnchantmentChance> coreChances = new ArrayList<>();
+                    if (e.enchantments() != null) {
+                        for (MysteryBoxEntryEnchantmentDto c : e.enchantments()) {
+                            if (c == null || c.enchantmentDefinitionId() == null) continue;
+                            int cbp = basisPoints(c.chanceBasisPoints(), c.chancePercent());
+                            chances.add(new BoxEnchantmentSpec(c.enchantmentDefinitionId(), c.enchantmentKey(), orDefault(c.level(), 1), cbp));
+                            if (cbp > 0) {
+                                coreChances.add(new EnchantmentChance(String.valueOf(c.enchantmentDefinitionId()), Math.max(1, orDefault(c.level(), 1)),
+                                    Math.min(BasisPoints.WHOLE, cbp)));
+                            }
+                        }
+                    }
+                    entries.add(new BoxEntrySpec(orDefault(e.id(), 0),
+                        e.itemBlueprintId() == null ? OptionalInt.empty() : OptionalInt.of(e.itemBlueprintId()), e.itemBlueprintName(),
+                        e.enchantmentDefinitionId() == null ? OptionalInt.empty() : OptionalInt.of(e.enchantmentDefinitionId()),
+                        e.enchantmentKey(), orDefault(e.enchantmentLevel(), 1), bp, chances));
+                    if (bp > 0) {
+                        if (variant == MysteryBoxVariant.ENCHANTED_BOOKS && e.enchantmentDefinitionId() != null) {
+                            coreEntries.add(new MysteryBoxEntry.BookEntry(String.valueOf(e.enchantmentDefinitionId()),
+                                Math.max(1, orDefault(e.enchantmentLevel(), 1)), bp));
+                        } else if (e.itemBlueprintId() != null) {
+                            coreEntries.add(new MysteryBoxEntry.ItemEntry(String.valueOf(e.itemBlueprintId()), bp, coreChances));
+                        }
+                    }
+                }
+            }
+            MysteryBoxPool pool = new MysteryBoxPool(variant, coreEntries);
+            out.add(new MysteryBoxPointSpec(orDefault(p.id(), 0), p.name(), point(p.location()),
+                orDefault(p.interactionRange(), PurchaseRules.DEFAULT_INTERACTION_RANGE), p.blockType(),
+                p.rollPrice() == null ? MysteryBoxSettings.DEFAULT_ROLL_PRICE : p.rollPrice(),
+                p.claimTimeoutMillis() == null ? MysteryBoxSettings.DEFAULT_CLAIM_TIMEOUT_MILLIS : p.claimTimeoutMillis(),
+                variant, entries, pool));
+        }
+        return out;
+    }
+
+    static MysteryBoxVariant parseVariant(String value) {
+        if (value == null) return MysteryBoxVariant.ITEMS;
+        String v = value.replace("_", "").replace("-", "").toLowerCase(Locale.ROOT);
+        return v.startsWith("enchant") || v.equals("books") ? MysteryBoxVariant.ENCHANTED_BOOKS : MysteryBoxVariant.ITEMS;
+    }
+
+    /** The served basis points win (S4-11); a percent-only entry is converted (S1-15), an unconvertible one counts 0. */
+    static int basisPoints(Integer basisPoints, BigDecimal percent) {
+        if (basisPoints != null) return Math.max(0, basisPoints);
+        if (percent == null) return 0;
+        try {
+            return BasisPoints.fromPercent(percent.doubleValue());
+        } catch (IllegalArgumentException e) {
+            return 0;
         }
     }
 

@@ -2,6 +2,12 @@ package net.knightsandkings.knk.paper.siege.survival;
 
 import net.knightsandkings.knk.core.survival.SurvivalPoint;
 import net.knightsandkings.knk.core.survival.economy.KillRewardSettings;
+import net.knightsandkings.knk.core.survival.kits.KitSelection;
+import net.knightsandkings.knk.core.survival.kits.KitSelection.KitOption;
+import net.knightsandkings.knk.core.survival.mysterybox.MysteryBoxPool;
+import net.knightsandkings.knk.core.survival.mysterybox.MysteryBoxSettings;
+import net.knightsandkings.knk.core.survival.mysterybox.MysteryBoxVariant;
+import net.knightsandkings.knk.core.survival.purchase.PurchaseRules;
 import net.knightsandkings.knk.core.survival.end.EndConditionSettings;
 import net.knightsandkings.knk.core.survival.scaling.WaveScalingSettings;
 import net.knightsandkings.knk.core.survival.spawn.MonsterMix;
@@ -46,6 +52,9 @@ public record SurvivalConfiguration(
         int favorNearPlayersPercent,
         int nearZoneCount,
         KillRewardSettings killRewards,
+        EquipmentSpec equipment,
+        List<PurchasePointSpec> purchasePoints,
+        List<MysteryBoxPointSpec> mysteryBoxPoints,
         Readiness readiness,
         String generatedAt
 ) {
@@ -64,6 +73,9 @@ public record SurvivalConfiguration(
         specialSchedule = specialSchedule == null ? SpecialWaveSchedule.none() : specialSchedule;
         zones = zones == null ? List.of() : List.copyOf(zones);
         killRewards = killRewards == null ? KillRewardSettings.defaults() : killRewards;
+        equipment = equipment == null ? EquipmentSpec.ownInventory() : equipment;
+        purchasePoints = purchasePoints == null ? List.of() : List.copyOf(purchasePoints);
+        mysteryBoxPoints = mysteryBoxPoints == null ? List.of() : List.copyOf(mysteryBoxPoints);
         generatedAt = generatedAt == null ? "" : generatedAt;
         if (minPlayers < 1) minPlayers = 1;
         if (intermissionMillis < 0) intermissionMillis = 0;
@@ -155,6 +167,112 @@ public record SurvivalConfiguration(
         }
     }
 
+    /** The scenario's equipment mode (DESIGN §8; S23, S36, S38; S4-12), link S7b. */
+    public enum EquipmentMode { OWN_INVENTORY, KITS, MATCH_PROGRESSION }
+
+    /**
+     * Equipment settings: the mode, the selected kits with the default (kits mode) and the baseline loadout kit
+     * (match-progression mode; empty = empty inventory).
+     */
+    public record EquipmentSpec(EquipmentMode mode, List<KitOption> kits, OptionalInt defaultKitId, OptionalInt baselineKitId) {
+        public EquipmentSpec {
+            mode = mode == null ? EquipmentMode.OWN_INVENTORY : mode;
+            kits = kits == null ? List.of() : List.copyOf(kits);
+            defaultKitId = defaultKitId == null ? OptionalInt.empty() : defaultKitId;
+            baselineKitId = baselineKitId == null ? OptionalInt.empty() : baselineKitId;
+        }
+
+        public static EquipmentSpec ownInventory() {
+            return new EquipmentSpec(EquipmentMode.OWN_INVENTORY, List.of(), OptionalInt.empty(), OptionalInt.empty());
+        }
+
+        /** A fresh kit selection for a lobby (kits mode). */
+        public KitSelection newSelection() {
+            return new KitSelection(kits, defaultKitId);
+        }
+    }
+
+    /** A purchase point (DESIGN §8, S4-16): a location, its interaction range and its offers. */
+    public record PurchasePointSpec(int id, String name, Optional<WorldPoint> location, double interactionRange, List<OfferSpec> offers) {
+        public PurchasePointSpec {
+            name = name == null || name.isBlank() ? ("purchase point " + id) : name;
+            location = location == null ? Optional.empty() : location;
+            if (!(interactionRange > 0) || Double.isNaN(interactionRange)) interactionRange = PurchaseRules.DEFAULT_INTERACTION_RANGE;
+            offers = offers == null ? List.of() : List.copyOf(offers);
+        }
+    }
+
+    /** One offer: a blueprint × quantity at a match-currency price. */
+    public record OfferSpec(int id, int itemBlueprintId, String itemBlueprintName, int quantity, long price) {
+        public OfferSpec {
+            itemBlueprintName = itemBlueprintName == null || itemBlueprintName.isBlank() ? ("blueprint " + itemBlueprintId) : itemBlueprintName;
+            if (quantity < 1) quantity = 1;
+            if (price < 0) price = 0;
+        }
+    }
+
+    /**
+     * A Mystery Box point (DESIGN §8a; S24, S34, S35): the block at {@code location} (default end portal frame), the roll
+     * price, the claim timeout and the pool as served (entries by id for the reel) plus the core pool for its validation.
+     */
+    public record MysteryBoxPointSpec(int id, String name, Optional<WorldPoint> location, double interactionRange, String blockType,
+                                      long rollPrice, long claimTimeoutMillis, MysteryBoxVariant variant,
+                                      List<BoxEntrySpec> entries, MysteryBoxPool pool) {
+        public static final String DEFAULT_BLOCK_TYPE = "minecraft:end_portal_frame";
+
+        public MysteryBoxPointSpec {
+            name = name == null || name.isBlank() ? ("mystery box " + id) : name;
+            location = location == null ? Optional.empty() : location;
+            if (!(interactionRange > 0) || Double.isNaN(interactionRange)) interactionRange = PurchaseRules.DEFAULT_INTERACTION_RANGE;
+            blockType = blockType == null || blockType.isBlank() ? DEFAULT_BLOCK_TYPE : blockType.trim().toLowerCase(java.util.Locale.ROOT);
+            if (rollPrice < 0) rollPrice = MysteryBoxSettings.DEFAULT_ROLL_PRICE;
+            if (claimTimeoutMillis <= 0) claimTimeoutMillis = MysteryBoxSettings.DEFAULT_CLAIM_TIMEOUT_MILLIS;
+            variant = variant == null ? MysteryBoxVariant.ITEMS : variant;
+            entries = entries == null ? List.of() : List.copyOf(entries);
+            Objects.requireNonNull(pool, "pool");
+        }
+
+        public Optional<BoxEntrySpec> entry(int entryId) {
+            return entries.stream().filter(e -> e.id() == entryId).findFirst();
+        }
+    }
+
+    /**
+     * A pool entry as served (S7a snapshots the same shape on a roll): an item blueprint with optional enchantment chances,
+     * or an enchanted book's enchantment and level. {@code basisPoints} is the entry's own chance (S1-15).
+     */
+    public record BoxEntrySpec(int id, OptionalInt itemBlueprintId, String itemBlueprintName, OptionalInt enchantmentDefinitionId,
+                               String enchantmentKey, int enchantmentLevel, int basisPoints, List<BoxEnchantmentSpec> enchantments) {
+        public BoxEntrySpec {
+            itemBlueprintId = itemBlueprintId == null ? OptionalInt.empty() : itemBlueprintId;
+            enchantmentDefinitionId = enchantmentDefinitionId == null ? OptionalInt.empty() : enchantmentDefinitionId;
+            itemBlueprintName = itemBlueprintName == null ? "" : itemBlueprintName;
+            enchantmentKey = enchantmentKey == null ? "" : enchantmentKey;
+            if (enchantmentLevel < 1) enchantmentLevel = 1;
+            if (basisPoints < 0) basisPoints = 0;
+            enchantments = enchantments == null ? List.of() : List.copyOf(enchantments);
+        }
+
+        public boolean isBook() {
+            return itemBlueprintId.isEmpty() && enchantmentDefinitionId.isPresent();
+        }
+
+        /** What the reel and the status show. */
+        public String describe() {
+            if (isBook()) return "book " + (enchantmentKey.isBlank() ? "#" + enchantmentDefinitionId.getAsInt() : enchantmentKey) + " " + enchantmentLevel;
+            return itemBlueprintName.isBlank() ? "blueprint #" + itemBlueprintId.orElse(-1) : itemBlueprintName;
+        }
+    }
+
+    /** An item entry's enchantment chance (independent hit, S1-15). */
+    public record BoxEnchantmentSpec(int enchantmentDefinitionId, String enchantmentKey, int level, int basisPoints) {
+        public BoxEnchantmentSpec {
+            enchantmentKey = enchantmentKey == null ? "" : enchantmentKey;
+            if (level < 1) level = 1;
+            if (basisPoints < 0) basisPoints = 0;
+        }
+    }
+
     /** The API's readiness verdict for this configuration. */
     public record Readiness(boolean ready, List<String> errors, List<String> warnings) {
         public Readiness {
@@ -183,5 +301,13 @@ public record SurvivalConfiguration(
 
     public Optional<ZoneSpec> zone(String zoneId) {
         return zones.stream().filter(z -> z.zone().id().equals(zoneId)).findFirst();
+    }
+
+    public Optional<PurchasePointSpec> purchasePoint(int id) {
+        return purchasePoints.stream().filter(p -> p.id() == id).findFirst();
+    }
+
+    public Optional<MysteryBoxPointSpec> mysteryBoxPoint(int id) {
+        return mysteryBoxPoints.stream().filter(p -> p.id() == id).findFirst();
     }
 }

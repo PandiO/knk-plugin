@@ -5,6 +5,9 @@ import net.knightsandkings.knk.core.domain.siege.KnkSiegeObjective;
 import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.core.siege.ObjectiveState.CaptureEvent;
 import net.knightsandkings.knk.core.survival.SurvivalPoint;
+import net.knightsandkings.knk.core.survival.economy.KillBlow;
+import net.knightsandkings.knk.core.survival.economy.MatchEconomy;
+import net.knightsandkings.knk.paper.siege.survival.economy.KillBlows;
 import net.knightsandkings.knk.core.survival.SurvivalSubstate;
 import net.knightsandkings.knk.core.survival.end.EndConditionEvaluator;
 import net.knightsandkings.knk.core.survival.end.EndConditionSnapshot;
@@ -108,6 +111,10 @@ public final class SurvivalMatch {
 
     private final Map<UUID, SurvivalEnemy> enemiesByMob = new LinkedHashMap<>();
     private final Map<Long, SurvivalEnemy> enemiesById = new LinkedHashMap<>();
+    // Phase 4 (link S7b): the match economy (one ledger per match, S44), the last player hits and the feature hooks.
+    private final MatchEconomy economy;
+    private final KillBlows killBlows = new KillBlows();
+    private final List<MatchHook> hooks = new ArrayList<>();
 
     private StuckMonitor stuck;
     private Map<ScaledStat, Double> roundMultipliers = Map.of();
@@ -139,6 +146,36 @@ public final class SurvivalMatch {
         this.selector = new SpawnZoneSelector(config.favorNearPlayersPercent(), config.nearZoneCount());
         this.evaluator = new EndConditionEvaluator(config.endConditions());
         this.npcAllianceGroup = siege.alliances().knows(config.npcTeamId()) ? siege.alliances().allianceOf(config.npcTeamId()) : -1;
+        this.economy = new MatchEconomy(siege.matchToken() == null ? ("lobby-" + lobby.id()) : siege.matchToken(), config.killRewards());
+        for (UUID id : siege.roster().playerIds()) economy.join(id);
+    }
+
+    /** The match clock (milliseconds). */
+    public long now() {
+        return services.clockMillis().getAsLong();
+    }
+
+    /** The match's id for ledgers and item tags: the Siege match token. */
+    public String matchKey() {
+        return economy.matchId();
+    }
+
+    public MatchEconomy economy() {
+        return economy;
+    }
+
+    public KillBlows killBlows() {
+        return killBlows;
+    }
+
+    /** Registers a phase 4 feature (shops, boxes, kits) for this match's events. */
+    public void addHook(MatchHook hook) {
+        hooks.add(Objects.requireNonNull(hook, "hook"));
+    }
+
+    /** A member joined the running match (rejoin/admin join): a balance from 0. */
+    public void memberJoined(UUID playerId) {
+        economy.join(playerId);
     }
 
     // ---- accessors ----
@@ -208,6 +245,9 @@ public final class SurvivalMatch {
 
     /** One server tick. */
     public void tick() {
+        long tickNow = services.clockMillis().getAsLong();
+        killBlows.prune(tickNow);
+        for (MatchHook hook : hooks) hook.ticked(tickNow);
         if (ending) return;
         long now = services.clockMillis().getAsLong();
         switch (rounds.substate()) {
@@ -242,7 +282,8 @@ public final class SurvivalMatch {
         nextSpawnAtMillis = now;
         lastAnnouncedSecond = -1;
         boolean special = planned.stream().anyMatch(PlannedEnemy::special);
-        ghosts.onTransition(SurvivalSubstate.WAVE_ACTIVE, services.onlinePlayer());
+        List<UUID> releasedAtWave = ghosts.onTransition(SurvivalSubstate.WAVE_ACTIVE, services.onlinePlayer());
+        ghostsReleased(releasedAtWave);
         Title title = Title.title(Component.text("Round " + round, NamedTextColor.DARK_RED),
             Component.text(queue.plannedCount() + (special ? " enemies (special wave)" : " enemies"), SiegeMessages.INFO));
         members().forEach(p -> p.showTitle(title));
@@ -295,6 +336,7 @@ public final class SurvivalMatch {
         int completed = rounds.record().completed();
         lastAnnouncedSecond = -1;
         List<UUID> released = ghosts.onTransition(SurvivalSubstate.INTERMISSION, services.onlinePlayer());
+        ghostsReleased(released);
         broadcast(SiegeMessages.prefixed(Component.text("Round " + completed + " cleared! ", SiegeMessages.GOOD)
             .append(Component.text("Next round in " + intermission.get().remainingSecondsCeil(now) + " s.", SiegeMessages.INFO))));
         log("round " + completed + " completed; " + released.size() + " ghosts respawned; record " + rounds.record());
@@ -499,10 +541,38 @@ public final class SurvivalMatch {
         if (enemy == null) return;
         RoundSpawnQueue queue = rounds.currentQueue().orElse(null);
         KillCause cause = killer != null ? KillCause.PLAYER : KillCause.ENVIRONMENT;
+        long now = services.clockMillis().getAsLong();
+        if (killer != null) {
+            KillBlow blow = killBlows.consume(mob.getUniqueId(), killer.getUniqueId(), now);
+            creditKill(enemy, blow, killer);
+        } else {
+            killBlows.forget(mob.getUniqueId());
+        }
         forgetMob(enemy);
         if (queue != null) queue.recordDeath(enemy.id(), cause);
         if (stuck != null) stuck.forget(enemy.id());
         completeWaveIfDone(services.clockMillis().getAsLong());
+    }
+
+    /** A player hit a match actor: remembered as the possible killing blow (headshot/critical bonus, S33). */
+    public void onMobHitByPlayer(Mob mob, KillBlow blow) {
+        if (enemiesByMob.containsKey(mob.getUniqueId())) killBlows.record(mob.getUniqueId(), blow, services.clockMillis().getAsLong());
+    }
+
+    private void creditKill(SurvivalEnemy enemy, KillBlow blow, Player killer) {
+        economy.creditKill(enemy.id(), blow).ifPresent(credit -> {
+            String bonus = credit.bonus() ? (blow.headshot() ? " (headshot)" : " (critical)") : "";
+            killer.sendActionBar(Component.text("+" + credit.reward().matchCurrency() + " match coins" + bonus
+                + " · balance " + credit.balanceAfter(), SiegeMessages.HIGHLIGHT));
+            log("kill: enemy " + enemy.id() + " by " + killer.getName() + bonus + " +" + credit.reward().matchCurrency()
+                + " (balance " + credit.balanceAfter() + "), permanent +" + credit.reward().coins() + " coins / +" + credit.reward().xp() + " xp accrued");
+        });
+    }
+
+    private void ghostsReleased(List<UUID> released) {
+        if (released == null || released.isEmpty()) return;
+        for (UUID id : released) economy.setGhost(id, false);
+        for (MatchHook hook : hooks) hook.ghostsReleased(released);
     }
 
     /** A match actor hurt something (progress for the stuck check). */
@@ -515,6 +585,8 @@ public final class SurvivalMatch {
     public void onPlayerDeath(Player player) {
         boolean ghost = ghosts.onDeath(player, rounds.substate());
         if (ghost) {
+            economy.setGhost(player.getUniqueId(), true);
+            for (MatchHook hook : hooks) hook.playerBecameGhost(player.getUniqueId());
             player.sendMessage(SiegeMessages.prefixed(Component.text("You died. You are a ghost until the next round"
                 + (rounds.substate() == SurvivalSubstate.INTERMISSION ? " starts" : " break") + ": invulnerable, unseen by the enemy, no interaction.", SiegeMessages.INFO)));
             // Every NPC targeting this player drops it (§3b "invalidates every current NPC target on that player").
@@ -536,6 +608,8 @@ public final class SurvivalMatch {
     /** A member left the match (leave, quit, kick): ghost state ends; the end conditions are re-evaluated. */
     public void onMemberLeft(UUID playerId) {
         ghosts.release(playerId, services.onlinePlayer().apply(playerId), false);
+        economy.leave(playerId);
+        for (MatchHook hook : hooks) hook.memberLeft(playerId);
         evaluateEnd();
     }
 
@@ -583,6 +657,7 @@ public final class SurvivalMatch {
         endReason = reason;
         List<PlannedEnemy> cancelled = rounds.end();
         removeAllMobs();
+        endEconomy();
         log("ending: " + reason + ", record " + rounds.record() + ", " + cancelled.size() + " spawns cancelled");
         broadcast(SiegeMessages.prefixed(Component.text(endMessage(reason), reason.settlesRewards() ? SiegeMessages.BAD : SiegeMessages.INFO)
             .append(Component.text(" Waves reached " + rounds.record().reached() + ", completed " + rounds.record().completed() + ".", SiegeMessages.INFO))));
@@ -599,6 +674,7 @@ public final class SurvivalMatch {
         endRequested = true;
         rounds.end();
         removeAllMobs();
+        endEconomy();
         log("ended by the Siege lifecycle: " + reason + ", record " + rounds.record());
     }
 
@@ -606,8 +682,33 @@ public final class SurvivalMatch {
     public void cleanup() {
         ending = true;
         removeAllMobs();
+        endEconomy();
         ghosts.releaseAll(services.onlinePlayer());
         services.actors().clear(lobby.id());
+    }
+
+    /** The ledger closes and every feature removes its entities/items (idempotent). */
+    private void endEconomy() {
+        if (!economy.ended()) {
+            economy.end();
+            log("economy closed: balances " + describeBalances() + ", accrued kills " + economy.accrual().earnedKills() + " (settlement is S8)");
+        }
+        for (MatchHook hook : hooks) {
+            try {
+                hook.ended();
+            } catch (RuntimeException e) {
+                services.logger().log(java.util.logging.Level.WARNING, "[Survival] Lobby " + lobby.key() + ": feature cleanup failed", e);
+            }
+        }
+    }
+
+    private String describeBalances() {
+        List<String> out = new ArrayList<>();
+        economy.balances().forEach((id, balance) -> {
+            Player p = services.onlinePlayer().apply(id);
+            out.add((p == null ? id.toString().substring(0, 8) : p.getName()) + "=" + balance);
+        });
+        return out.toString();
     }
 
     private void removeAllMobs() {
@@ -722,6 +823,11 @@ public final class SurvivalMatch {
                 Player p = services.onlinePlayer().apply(id);
                 return p == null ? id.toString().substring(0, 8) : p.getName();
             }).toList());
+        lines.add("Economy: balances " + describeBalances() + ", kill reward " + economy.settings().matchCurrencyPerKill()
+            + " ×" + economy.settings().bonusMultiplier() + " bonus, ghosts " + economy.ledger().balances().keySet().stream()
+                .filter(economy::isGhost).count() + ", accrued kills " + economy.accrual().earnedKills()
+            + ", equipment " + config.equipment().mode());
+        for (MatchHook hook : hooks) lines.addAll(hook.statusLines());
         EndConditionSnapshot snapshot = snapshot();
         lines.add("End conditions: all-captured " + config.endConditions().allCapturedEnabled() + ", objectives "
             + snapshot.objectives().stream().map(o -> o.id() + (o.instaLose() ? "!" : "") + (o.npcHeld() ? ":NPC" : ":def")).toList()
