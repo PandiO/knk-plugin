@@ -42,6 +42,7 @@ import net.knightsandkings.knk.api.impl.SiegeMatchesCommandApiImpl;
 import net.knightsandkings.knk.api.impl.SiegeMatchHistoryApiImpl;
 import net.knightsandkings.knk.api.impl.SiegeGatesCommandApiImpl;
 import net.knightsandkings.knk.api.impl.SiegeScenariosQueryApiImpl;
+import net.knightsandkings.knk.api.impl.SiegeSurvivalMatchApiImpl;
 import net.knightsandkings.knk.api.impl.SiegeSurvivalQueryApiImpl;
 import net.knightsandkings.knk.api.impl.TitleBracketsQueryApiImpl;
 import net.knightsandkings.knk.api.impl.KitsQueryApiImpl;
@@ -141,6 +142,7 @@ public class KnkApiClient {
     private final SiegeLobbiesQueryApi siegeLobbiesQueryApi;
     private final SiegeScenariosQueryApi siegeScenariosQueryApi;
     private final SiegeSurvivalQueryApiImpl siegeSurvivalQueryApi;
+    private final SiegeSurvivalMatchApiImpl siegeSurvivalMatchApi;
     private final SiegeMatchesCommandApi siegeMatchesCommandApi;
     private final net.knightsandkings.knk.core.ports.api.SiegeMatchHistoryApi siegeMatchHistoryApi;
     private final SiegeGatesCommandApi siegeGatesCommandApi;
@@ -220,6 +222,7 @@ public class KnkApiClient {
         this.siegeLobbiesQueryApi = new SiegeLobbiesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeScenariosQueryApi = new SiegeScenariosQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeSurvivalQueryApi = new SiegeSurvivalQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.siegeSurvivalMatchApi = new SiegeSurvivalMatchApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeMatchesCommandApi = new SiegeMatchesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeMatchHistoryApi = new SiegeMatchHistoryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeGatesCommandApi = new SiegeGatesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -487,6 +490,11 @@ public class KnkApiClient {
     /** Siege Survival phase 1 (PandiO/knk-workspace#41): the frozen survival configuration, readiness and preview reads. */
     public SiegeSurvivalQueryApiImpl getSiegeSurvivalQueryApi() {
         return siegeSurvivalQueryApi;
+    }
+
+    /** Siege Survival phase 4 (PandiO/knk-workspace#41, link S7a): the match-scoped Mystery Box roll, claim, forfeit and roll list. */
+    public SiegeSurvivalMatchApiImpl getSiegeSurvivalMatchApi() {
+        return siegeSurvivalMatchApi;
     }
 
     /** Siege Phase 6: match lifecycle checkpoints (wrap it in knk-core's SiegeMatchRecorder). */

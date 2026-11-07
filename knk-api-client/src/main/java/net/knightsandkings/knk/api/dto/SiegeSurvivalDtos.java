@@ -327,6 +327,58 @@ public final class SiegeSurvivalDtos {
             @JsonProperty("chanceBasisPoints") Integer chanceBasisPoints
     ) {}
 
+    // ---- Match-scoped Mystery Box rolls (DESIGN §8a; link S7a, Dtos/SiegeSurvivalMysteryBoxDtos.cs) ----
+    // POST api/siege-survival/matches/{matchId}/mystery-box/{pointId}/roll { rollId, userId, priceCharged } -> 201 (200 on a
+    // repeat of the same rollId and body), .../mystery-box/rolls/{rollId}/claim { deliveryKind }, .../forfeit { reason },
+    // GET .../mystery-box/rolls. Every answer is a MysteryBoxRollDto; a 409 carries { code, message } with the codes of
+    // SiegeSurvivalMatchApiImpl. Enum strings: variant "Items" | "EnchantedBooks"; state "Rolled" | "Claimed" | "Forfeited";
+    // deliveryKind "Inventory" | "Drop"; reason "Timeout" | "RollerDied" | "RollerLeft" | "MatchEnded".
+
+    public record MysteryBoxRollRequestDto(
+            @JsonProperty("rollId") String rollId,
+            @JsonProperty("userId") Integer userId,
+            @JsonProperty("priceCharged") Integer priceCharged
+    ) {}
+
+    public record MysteryBoxClaimRequestDto(
+            @JsonProperty("deliveryKind") String deliveryKind
+    ) {}
+
+    public record MysteryBoxForfeitRequestDto(
+            @JsonProperty("reason") String reason
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record MysteryBoxRolledEnchantmentDto(
+            @JsonProperty("enchantmentDefinitionId") Integer enchantmentDefinitionId,
+            @JsonProperty("level") Integer level
+    ) {}
+
+    /**
+     * One stored roll: {@code entry} is the picked pool entry as served at roll time (a snapshot), {@code rolledEnchantments}
+     * the item entry's enchantments that passed their own chance (empty for a book: the book's enchantment is the entry's
+     * {@code enchantmentDefinitionId}/{@code enchantmentLevel}), {@code reel} the carousel's entry ids drawn with the real
+     * odds, the last one being the result.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record MysteryBoxRollDto(
+            @JsonProperty("rollId") String rollId,
+            @JsonProperty("siegeMatchId") Integer siegeMatchId,
+            @JsonProperty("pointId") Integer pointId,
+            @JsonProperty("userId") Integer userId,
+            @JsonProperty("variant") String variant,
+            @JsonProperty("entry") MysteryBoxEntryDto entry,
+            @JsonProperty("rolledEnchantments") List<MysteryBoxRolledEnchantmentDto> rolledEnchantments,
+            @JsonProperty("reel") List<Integer> reel,
+            @JsonProperty("priceCharged") Integer priceCharged,
+            @JsonProperty("state") String state,
+            @JsonProperty("rolledAt") @JsonDeserialize(using = LenientOffsetDateTimeDeserializer.class) OffsetDateTime rolledAt,
+            @JsonProperty("claimedAt") @JsonDeserialize(using = LenientOffsetDateTimeDeserializer.class) OffsetDateTime claimedAt,
+            @JsonProperty("deliveryKind") String deliveryKind,
+            @JsonProperty("forfeitedAt") @JsonDeserialize(using = LenientOffsetDateTimeDeserializer.class) OffsetDateTime forfeitedAt,
+            @JsonProperty("forfeitReason") String forfeitReason
+    ) {}
+
     // ---- Editor preview (DESIGN §11) ----
 
     @JsonIgnoreProperties(ignoreUnknown = true)

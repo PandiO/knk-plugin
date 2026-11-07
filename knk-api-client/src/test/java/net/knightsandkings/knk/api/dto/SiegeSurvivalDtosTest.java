@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.ConfigurationDto;
 import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.MatchCheckpointDto;
 import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.MatchResultDto;
+import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.MysteryBoxRollDto;
 import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.PreviewDto;
 import org.junit.jupiter.api.Test;
 
@@ -22,6 +23,15 @@ public class SiegeSurvivalDtosTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+
+    /** A stored roll as POST api/siege-survival/matches/900/mystery-box/50/roll answers it (link S7a). */
+    public static final String ROLL_JSON = """
+            {"rollId":"match-900-box-50-7","siegeMatchId":900,"pointId":50,"userId":1,"variant":"Items",
+             "entry":{"id":401,"survivalMysteryBoxPoolId":40,"sortOrder":0,"itemBlueprintId":80,"itemBlueprintName":"Iron sword","enchantmentDefinitionId":null,"enchantmentKey":null,"enchantmentLevel":null,
+                      "chancePercent":60.5,"chanceBasisPoints":6050,"enchantments":[{"id":4001,"enchantmentDefinitionId":90,"enchantmentKey":"minecraft:sharpness","level":2,"chancePercent":25,"chanceBasisPoints":2500}]},
+             "rolledEnchantments":[{"enchantmentDefinitionId":90,"level":2}],"reel":[402,401,401],"priceCharged":1000,"state":"Rolled",
+             "rolledAt":"2026-11-07T10:00:00Z","claimedAt":null,"deliveryKind":null,"forfeitedAt":null,"forfeitReason":null,"somethingNew":1}
+            """;
 
     /** A frozen configuration as GET api/siege-survival/scenarios/100/configuration?lobbyId=7 returns it. */
     public static final String CONFIGURATION_JSON = """
@@ -179,5 +189,34 @@ public class SiegeSurvivalDtosTest {
         assertTrue(checkpoint.doorRepairs().get(0).destroyed());
         assertTrue(checkpoint.players().get(0).ghost());
         assertEquals("roll-1", checkpoint.players().get(0).pendingMysteryBoxRollId());
+    }
+
+    @Test
+    void mysteryBoxRoll_ReadsTheSnapshotEntry_TheRolledEnchantments_AndTheReel() throws Exception {
+        MysteryBoxRollDto roll = objectMapper.readValue(ROLL_JSON, MysteryBoxRollDto.class);
+
+        assertEquals("match-900-box-50-7", roll.rollId());
+        assertEquals(900, roll.siegeMatchId());
+        assertEquals(50, roll.pointId());
+        assertEquals(1, roll.userId());
+        assertEquals("Items", roll.variant());
+        assertEquals(401, roll.entry().id());
+        assertEquals(80, roll.entry().itemBlueprintId());
+        assertEquals("Iron sword", roll.entry().itemBlueprintName());
+        assertEquals(6050, roll.entry().chanceBasisPoints());
+        assertEquals(new BigDecimal("60.5"), roll.entry().chancePercent());
+        assertEquals("minecraft:sharpness", roll.entry().enchantments().get(0).enchantmentKey());
+        assertEquals(1, roll.rolledEnchantments().size());
+        assertEquals(90, roll.rolledEnchantments().get(0).enchantmentDefinitionId());
+        assertEquals(2, roll.rolledEnchantments().get(0).level());
+        assertEquals(List.of(402, 401, 401), roll.reel());
+        assertEquals(roll.entry().id(), roll.reel().get(roll.reel().size() - 1));
+        assertEquals(1000, roll.priceCharged());
+        assertEquals("Rolled", roll.state());
+        assertEquals(OffsetDateTime.parse("2026-11-07T10:00:00Z"), roll.rolledAt());
+        assertNull(roll.claimedAt());
+        assertNull(roll.deliveryKind());
+        assertNull(roll.forfeitedAt());
+        assertNull(roll.forfeitReason());
     }
 }
