@@ -54,6 +54,13 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
         this.service = service;
     }
 
+    /** Siege Survival link S7b: balance/pay/kit/shop; null until the survival runtime installs them. */
+    private net.knightsandkings.knk.paper.siege.survival.SurvivalPlayerCommands survival;
+
+    public void setSurvival(net.knightsandkings.knk.paper.siege.survival.SurvivalPlayerCommands survival) {
+        this.survival = survival;
+    }
+
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         String sub = args.length == 0 ? "" : args[0].toLowerCase(Locale.ROOT);
@@ -77,6 +84,24 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
             }
             case "admin" -> admin(sender, rest);
             case "help" -> help(sender);
+            // Siege Survival link S7b (DESIGN §8): match balance, teammate transfers, the kit picker, the purchase menu.
+            case "balance", "pay", "kit", "shop" -> {
+                if (survival == null) {
+                    sender.sendMessage(SiegeMessages.bad("Siege Survival is not available."));
+                } else if (!(sender instanceof Player player)) {
+                    sender.sendMessage(SiegeMessages.bad("Only players can use this subcommand."));
+                } else if (!allowed(sender, SiegeService.PERMISSION_PLAY)) {
+                    return true;
+                } else {
+                    Component reply = switch (sub) {
+                        case "balance" -> survival.balance(player);
+                        case "pay" -> survival.pay(player, arg(rest, 0), arg(rest, 1));
+                        case "kit" -> survival.kit(player, joined(rest));
+                        default -> survival.shop(player);
+                    };
+                    if (reply != null) player.sendMessage(reply);
+                }
+            }
             default -> {
                 sender.sendMessage(SiegeMessages.bad("Unknown subcommand '" + args[0] + "'."));
                 help(sender);
@@ -355,7 +380,7 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
             Stream<String> player = canSuggest(sender, SiegeService.PERMISSION_PLAY)
-                    ? Stream.of("join", "leave", "menu", "info", "vote", "spawn", "history") : Stream.empty();
+                    ? Stream.of("join", "leave", "menu", "info", "vote", "spawn", "history", "balance", "pay", "kit", "shop") : Stream.empty();
             Stream<String> skip = canSuggest(sender, SiegeService.PERMISSION_SKIP) ? Stream.of("skip") : Stream.empty();
             Stream<String> admin = canSuggestAnyAdmin(sender) ? Stream.of("admin") : Stream.empty();
             return filter(Stream.of(player, skip, admin, Stream.of("help")).flatMap(s -> s), args[0]);

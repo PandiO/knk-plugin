@@ -318,6 +318,8 @@ public class KnKPlugin extends JavaPlugin {
     /** Siege Survival link S3 (PandiO/knk-workspace#41): the match NPC actors (capture presence, gate damage, statistics). */
     private net.knightsandkings.knk.paper.siege.npc.MatchActorRegistry matchActors;
     private net.knightsandkings.knk.paper.siege.survival.SurvivalMatchRuntime siegeSurvival;
+    /** Siege Survival link S7b: the /siege executor, so the survival subcommands can be installed after the runtime exists. */
+    private SiegeCommand siegeCommandExecutor;
     private net.knightsandkings.knk.core.siege.SiegeMatchRecorder siegeMatchRecorder;
     /**
      * PandiO/knk-workspace#31 / #182: the siege's startup-only API work; a step that failed at startup runs again on the
@@ -4094,6 +4096,7 @@ public class KnKPlugin extends JavaPlugin {
         PluginCommand siegeCommand = getCommand("siege");
         if (siegeCommand != null) {
             SiegeCommand executor = new SiegeCommand(siegeService);
+            this.siegeCommandExecutor = executor;
             siegeCommand.setExecutor(executor);
             siegeCommand.setTabCompleter(executor);
             getLogger().info("Registered /siege command");
@@ -4238,6 +4241,24 @@ public class KnKPlugin extends JavaPlugin {
         siegeService.addObserver(siegeSurvival);
         getServer().getPluginManager().registerEvents(siegeSurvival, this);
         getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.siege.survival.SurvivalGhostListener(siegeSurvival), this);
+        // Phase 4 (link S7b): equipment modes, match currency, purchase points, Mystery Box, match item guards.
+        if (itemBlueprintsDataAccess != null && minecraftMaterialRefsDataAccess != null) {
+            var matchItems = new net.knightsandkings.knk.paper.siege.survival.items.MatchItems(this);
+            var assembler = new net.knightsandkings.knk.paper.item.BlueprintItemAssembler(
+                new net.knightsandkings.knk.api.impl.enchantment.LocalEnchantmentRepositoryImpl());
+            siegeSurvival.setEconomyServices(net.knightsandkings.knk.paper.siege.survival.SurvivalEconomyServices.create(
+                apiClient.getSiegeSurvivalMatchApi(), matchItems, kitsDataAccess, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess,
+                enchantmentDefinitionsDataAccess, assembler, MenuService.mainThreadExecutor(this),
+                net.knightsandkings.knk.paper.siege.survival.SurvivalSettings.reelMaxStepTicks(getConfig()), getLogger()));
+            getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.siege.survival.items.MatchItemListener(matchItems,
+                id -> siegeSurvival.matchOfPlayer(id).map(net.knightsandkings.knk.paper.siege.survival.SurvivalMatch::matchKey).orElse(null)), this);
+            getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.siege.survival.SurvivalInteractionListener(siegeSurvival), this);
+            if (siegeCommandExecutor != null) {
+                siegeCommandExecutor.setSurvival(new net.knightsandkings.knk.paper.siege.survival.SurvivalPlayerCommands(() -> siegeSurvival));
+            }
+        } else {
+            getLogger().warning("Siege Survival phase 4 (kits, shops, Mystery Box) is off: the item blueprint/material data access is not available");
+        }
         siegeSurvival.start();
         getLogger().info("Siege Survival runtime initialized (inert until a lobby draws a scenario with survival settings)");
     }

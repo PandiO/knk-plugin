@@ -10,7 +10,14 @@ import net.knightsandkings.knk.paper.npc.NpcPlatform;
 import net.knightsandkings.knk.paper.siege.SiegeLobbyRuntime;
 import net.knightsandkings.knk.paper.siege.SiegeMatch;
 import net.knightsandkings.knk.paper.siege.SiegeMatchObserver;
+import net.knightsandkings.knk.paper.siege.SiegeMessages;
 import net.knightsandkings.knk.paper.siege.SiegeService;
+import net.knightsandkings.knk.paper.siege.survival.SurvivalConfiguration.EquipmentMode;
+import net.knightsandkings.knk.paper.siege.survival.SurvivalConfiguration.EquipmentSpec;
+import net.knightsandkings.knk.paper.siege.survival.kits.SurvivalKitPicker;
+import net.knightsandkings.knk.paper.siege.survival.mysterybox.MysteryBoxAnimation;
+import net.knightsandkings.knk.paper.siege.survival.mysterybox.MysteryBoxStations;
+import net.knightsandkings.knk.paper.siege.survival.purchase.PurchaseShop;
 import net.knightsandkings.knk.paper.siege.npc.MatchActorRegistry;
 import net.knightsandkings.knk.paper.siege.npc.NpcGateDamage;
 import net.knightsandkings.knk.paper.visibility.PlayerVisibilityArbiter;
@@ -38,6 +45,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.logging.Level;
@@ -73,6 +81,10 @@ public final class SurvivalMatchRuntime implements SiegeMatchObserver, Listener,
     private final Map<Integer, SurvivalMatch> matches = new LinkedHashMap<>();
     private final Map<Integer, SurvivalConfiguration> frozenByLobby = new LinkedHashMap<>();
     private final Map<Integer, ScenarioArea> areaByLobby = new LinkedHashMap<>();
+    // Phase 4 (link S7b): optional services; the per-match shops and Mystery Box stations by lobby id.
+    private SurvivalEconomyServices economy;
+    private final Map<Integer, PurchaseShop> shopByLobby = new LinkedHashMap<>();
+    private final Map<Integer, MysteryBoxStations> boxesByLobby = new LinkedHashMap<>();
     private BukkitTask ticker;
     private BukkitTask refresher;
     private boolean shuttingDown;
@@ -94,6 +106,37 @@ public final class SurvivalMatchRuntime implements SiegeMatchObserver, Listener,
         this.logger = logger;
         this.spawner = new SurvivalSpawner(platform, actors, SurvivalSpawner.Worlds.bukkit(), random, settings, logger);
         this.hooks = new SurvivalModeHooks(cache, this::matchOf, id -> Optional.ofNullable(frozenByLobby.get(id)), logger);
+    }
+
+    /** Phase 4 (link S7b): installs the economy services (kits, shops, Mystery Box, match items). Null = features off. */
+    public void setEconomyServices(SurvivalEconomyServices services) {
+        this.economy = services;
+    }
+
+    public Optional<SurvivalEconomyServices> economyServices() {
+        return Optional.ofNullable(economy);
+    }
+
+    public Optional<SurvivalKitPicker> kitPicker() {
+        return economyServices().map(SurvivalEconomyServices::kitPicker);
+    }
+
+    public Optional<PurchaseShop> shopOf(SurvivalMatch match) {
+        return Optional.ofNullable(shopByLobby.get(match.lobby().id()));
+    }
+
+    public Optional<MysteryBoxStations> boxesOf(SurvivalMatch match) {
+        return Optional.ofNullable(boxesByLobby.get(match.lobby().id()));
+    }
+
+    /** The running survival match of a match actor (mob). */
+    public Optional<SurvivalMatch> matchOfActor(Entity entity) {
+        return actors.actorOf(entity).flatMap(actor -> matchOf(actor.lobbyId()));
+    }
+
+    /** The lobby a player is a member of (any phase), for the kit picker before the match starts. */
+    public Optional<SiegeLobbyRuntime> lobbyOfMember(UUID playerId) {
+        return siegeService.lobbyOf(playerId);
     }
 
     /** The hooks to install on the Siege service. */
@@ -128,6 +171,15 @@ public final class SurvivalMatchRuntime implements SiegeMatchObserver, Listener,
             swept += sweep(world.getEntities());
         }
         if (swept > 0) logger.info("[Survival] Removed " + swept + " leftover match mobs from the loaded worlds");
+        if (economy != null) {
+            int entities = 0;
+            int items = 0;
+            for (World world : Bukkit.getWorlds()) {
+                entities += MysteryBoxAnimation.sweep(world.getEntities(), MysteryBoxAnimation.key(plugin));
+                items += economy.items().sweep(world.getEntities());
+            }
+            if (entities + items > 0) logger.info("[Survival] Removed " + entities + " leftover Mystery Box entities and " + items + " match items");
+        }
     }
 
     /**
@@ -149,6 +201,11 @@ public final class SurvivalMatchRuntime implements SiegeMatchObserver, Listener,
         matches.clear();
         frozenByLobby.clear();
         areaByLobby.clear();
+        shopByLobby.clear();
+        boxesByLobby.clear();
+        if (economy != null) {
+            for (String key : economy.items().trackedMatches()) economy.items().removeGround(key, Bukkit.getWorlds());
+        }
     }
 
     private void tick() {
@@ -198,6 +255,139 @@ public final class SurvivalMatchRuntime implements SiegeMatchObserver, Listener,
         } catch (RuntimeException e) {
             logger.log(Level.SEVERE, "[Survival] Lobby " + lobby.key() + " could not start the survival match", e);
         }
+        try {
+            startPhase4(lobby, match, survival);
+        } catch (RuntimeException e) {
+            logger.log(Level.SEVERE, "[Survival] Lobby " + lobby.key() + ": equipment/economy setup failed", e);
+        }
+    }
+
+    // ---- phase 4 (link S7b): equipment at the start, shops, Mystery Boxes, match items ----
+
+    private void startPhase4(SiegeLobbyRuntime lobby, SiegeMatch match, SurvivalMatch survival) {
+        if (economy == null) {
+            logger.info("[Survival] Lobby " + lobby.key() + ": economy services not installed; equipment modes, shops and Mystery Boxes are off");
+            return;
+        }
+        SurvivalConfiguration c = survival.config();
+        if (!c.purchasePoints().isEmpty()) {
+            PurchaseShop shop = new PurchaseShop(survival, economy.itemFactory(), economy.mainThread(), logger);
+            shopByLobby.put(lobby.id(), shop);
+            survival.addHook(shop);
+            shop.prepare();
+        }
+        if (!c.mysteryBoxPoints().isEmpty()) {
+            MysteryBoxStations boxes = new MysteryBoxStations(survival, economy.matchApi(), lobby::apiMatchId, lobby::userIdOf,
+                economy.itemFactory(), plugin, economy.mainThread(), economy.reelMaxStepTicks(), logger);
+            boxesByLobby.put(lobby.id(), boxes);
+            survival.addHook(boxes);
+            boxes.start();
+        }
+        economy.kitPicker().lock(lobby.id());
+        for (UUID id : match.roster().playerIds()) {
+            Player player = Bukkit.getPlayer(id);
+            if (player != null) grantEquipment(lobby, survival, player);
+        }
+        logger.info("[Survival] Lobby " + lobby.key() + ": equipment mode " + c.equipment().mode() + ", " + c.purchasePoints().size()
+            + " purchase points, " + c.mysteryBoxPoints().size() + " Mystery Box points, match key " + survival.matchKey());
+    }
+
+    /** The entry loadout (DESIGN §8 table): kits mode grants the picked/default kit once; match progression the baseline. */
+    private void grantEquipment(SiegeLobbyRuntime lobby, SurvivalMatch survival, Player player) {
+        EquipmentSpec equipment = survival.config().equipment();
+        OptionalInt kitId;
+        boolean defaulted = false;
+        switch (equipment.mode()) {
+            case OWN_INVENTORY -> {
+                return;
+            }
+            case KITS -> {
+                var selection = economy.kitPicker().selection(lobby.id()).orElseGet(() -> economy.kitPicker().begin(lobby.id(), equipment.newSelection()));
+                var resolved = selection.resolve(player.getUniqueId());
+                if (resolved.isEmpty()) {
+                    logger.warning("[Survival] Lobby " + lobby.key() + ": kits mode without a kit for " + player.getName() + "; empty inventory");
+                    economy.kitGrants().clear(player);
+                    return;
+                }
+                kitId = OptionalInt.of(resolved.get().kitId());
+                defaulted = resolved.get().defaulted();
+            }
+            case MATCH_PROGRESSION -> kitId = equipment.baselineKitId();
+            default -> {
+                return;
+            }
+        }
+        final boolean usedDefault = defaulted;
+        String kitLabel = kitId.isPresent() ? "kit " + kitId.getAsInt() + (usedDefault ? " (default)" : "") : "empty inventory";
+        economy.kitGrants().grant(player, kitId, survival.matchKey()).whenComplete((outcome, ex) -> {
+            if (ex != null) {
+                logger.log(Level.WARNING, "[Survival] Lobby " + lobby.key() + ": " + kitLabel + " for " + player.getName() + " failed", ex);
+                return;
+            }
+            logger.info("[Survival] Lobby " + lobby.key() + ": " + equipment.mode() + " → " + kitLabel + " for " + player.getName()
+                + (outcome.kitFound() ? ": " + outcome.placed() + " placed, " + outcome.dropped() + " dropped" : ": KIT MISSING, empty inventory"));
+            if (outcome.kitFound() && kitId.isPresent()) {
+                player.sendMessage(SiegeMessages.info(equipment.mode() == EquipmentMode.KITS
+                    ? "Your kit is in your inventory" + (usedDefault ? " (the default kit)" : "") + "; it stays with you on death and goes away after the match."
+                    : "Your baseline gear is in your inventory; it goes away after the match."));
+            } else if (!outcome.kitFound()) {
+                player.sendMessage(SiegeMessages.bad("Your kit could not be granted (it no longer exists); you start empty-handed. Tell an admin."));
+            }
+        });
+    }
+
+    @Override
+    public void memberReadiedAtHub(SiegeLobbyRuntime lobby, KnkSiegeScenario scenario, Player player) {
+        if (economy == null) return;
+        Optional<SurvivalConfiguration> config = hooks.configurationFor(lobby.id(), scenario);
+        if (config.isEmpty() || config.get().equipment().mode() != EquipmentMode.KITS) return;
+        EquipmentSpec equipment = config.get().equipment();
+        var selection = economy.kitPicker().selection(lobby.id()).orElseGet(() -> economy.kitPicker().begin(lobby.id(), equipment.newSelection()));
+        if (selection.locked()) return;
+        if (!selection.worthAsking()) {
+            player.sendMessage(SiegeMessages.info("Kits mode: you play with " + selection.options().stream().findFirst().map(o -> o.name()).orElse("the scenario kit") + "."));
+            return;
+        }
+        player.sendMessage(SiegeMessages.info("Kits mode: pick your kit before the match starts (" + String.join(", ", SurvivalKitPicker.names(selection))
+            + "); no pick = " + selection.defaultKitId().stream().mapToObj(id -> selection.option(id).map(o -> o.name()).orElse("#" + id)).findFirst().orElse("the first kit")
+            + ". Use /siege kit [name] to open the picker again."));
+        if (plugin.isEnabled()) {
+            // After the hub teleport (the service teleports right after this callback; a menu opened now would close).
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                if (player.isOnline() && lobby.isMember(player.getUniqueId()) && !selection.locked()) economy.kitPicker().open(player, lobby.id());
+            }, 5L);
+        }
+    }
+
+    @Override
+    public void memberJoinedMatch(SiegeLobbyRuntime lobby, SiegeMatch match, Player player) {
+        matchOf(lobby.id()).ifPresent(m -> {
+            m.memberJoined(player.getUniqueId());
+            if (economy != null) grantEquipment(lobby, m, player);
+        });
+    }
+
+    @Override
+    public void memberRemoved(SiegeLobbyRuntime lobby, SiegeMatch match, Player player) {
+        if (economy == null) return;
+        matchOf(lobby.id()).ifPresent(m -> {
+            int stripped = economy.items().stripFromPlayer(player, m.matchKey());
+            if (stripped > 0) logger.info("[Survival] Lobby " + lobby.key() + ": removed " + stripped + " match item stacks from " + player.getName() + " before the restore");
+        });
+    }
+
+    private void endPhase4(SiegeLobbyRuntime lobby, SurvivalMatch survival) {
+        shopByLobby.remove(lobby.id());
+        boxesByLobby.remove(lobby.id());
+        if (economy == null) return;
+        economy.kitPicker().forget(lobby.id());
+        if (survival == null) return;
+        int ground = economy.items().removeGround(survival.matchKey(), Bukkit.getWorlds());
+        for (UUID id : survival.siege().roster().playerIds()) {
+            Player p = Bukkit.getPlayer(id);
+            if (p != null) economy.items().stripFromPlayer(p, survival.matchKey());
+        }
+        if (ground > 0) logger.info("[Survival] Lobby " + lobby.key() + ": removed " + ground + " match ground items");
     }
 
     /** The survival side ended: the Siege match ends next tick (never re-entrantly from inside a Siege callback). */
@@ -227,12 +417,16 @@ public final class SurvivalMatchRuntime implements SiegeMatchObserver, Listener,
         SurvivalMatch survival = matches.remove(lobby.id());
         areaByLobby.remove(lobby.id());
         frozenByLobby.remove(lobby.id());
-        if (survival == null) return;
+        if (survival == null) {
+            endPhase4(lobby, null);
+            return;
+        }
         try {
             survival.cleanup();
         } catch (RuntimeException e) {
             logger.log(Level.WARNING, "[Survival] Cleanup of lobby " + lobby.key() + " failed", e);
         }
+        endPhase4(lobby, survival);
         logger.info("[Survival] Lobby " + lobby.key() + " survival match over: " + survival.endReason().map(Enum::name).orElse("?")
             + ", waves " + survival.record());
     }
@@ -244,6 +438,7 @@ public final class SurvivalMatchRuntime implements SiegeMatchObserver, Listener,
         frozenByLobby.remove(lobby.id());
         if (survival != null) survival.cleanup();
         actors.clear(lobby.id());
+        endPhase4(lobby, survival);
     }
 
     // ---- Bukkit events ----
@@ -283,6 +478,7 @@ public final class SurvivalMatchRuntime implements SiegeMatchObserver, Listener,
     @EventHandler(priority = EventPriority.MONITOR)
     public void onEntitiesLoad(EntitiesLoadEvent event) {
         sweep(event.getEntities());
+        if (economy != null) MysteryBoxAnimation.sweep(event.getEntities(), MysteryBoxAnimation.key(plugin));
     }
 
     int sweep(Collection<? extends Entity> entities) {
@@ -296,7 +492,8 @@ public final class SurvivalMatchRuntime implements SiegeMatchObserver, Listener,
         return removed;
     }
 
-    private Optional<SurvivalMatch> matchOfPlayer(UUID playerId) {
+    /** The running survival match a player plays in. */
+    public Optional<SurvivalMatch> matchOfPlayer(UUID playerId) {
         return siegeService.activeLobbyOf(playerId).flatMap(rt -> matchOf(rt.id()));
     }
 
@@ -325,7 +522,8 @@ public final class SurvivalMatchRuntime implements SiegeMatchObserver, Listener,
     public List<String> statusLines(String lobbyKey) {
         List<String> lines = new ArrayList<>();
         lines.add("Survival scenarios known: " + cache.survivalScenarioIds() + "; running survival matches: " + matches.size()
-            + "; adopted mobs " + platform.adoptedCount() + "; match actors " + actors.size());
+            + "; adopted mobs " + platform.adoptedCount() + "; match actors " + actors.size()
+            + (economy == null ? "; economy services off" : "; match ground items tracked for " + economy.items().trackedMatches()));
         for (SurvivalMatch m : matches.values()) {
             if (lobbyKey != null && !lobbyKey.isBlank() && !m.lobby().key().equalsIgnoreCase(lobbyKey)) continue;
             lines.addAll(m.statusLines());

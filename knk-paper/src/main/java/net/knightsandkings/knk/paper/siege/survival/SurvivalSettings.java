@@ -27,6 +27,9 @@ public record SurvivalSettings(TargetPolicy targeting, int behaviourTicks, int s
 
     public static final String SECTION = "siege.survival";
 
+    /** Default slowest Mystery Box reel step (ticks), link S7b (the lootbox reel's {@code slowestStepTicks} default). */
+    public static final int DEFAULT_REEL_MAX_STEP_TICKS = 8;
+
     public SurvivalSettings {
         if (targeting == null) targeting = TargetPolicy.defaults();
         behaviourTicks = Math.max(1, behaviourTicks);
@@ -43,6 +46,12 @@ public record SurvivalSettings(TargetPolicy targeting, int behaviourTicks, int s
 
     public static SurvivalSettings defaults() {
         return new SurvivalSettings(TargetPolicy.defaults(), 10, 20, 20, 10, 2.5, 2.5, 96, 3, 20_000L, 1.5);
+    }
+
+    /** {@code siege.survival.mystery-box.reel-max-step-ticks}: the slowest reel step (ticks), link S7b. */
+    public static int reelMaxStepTicks(ConfigurationSection root) {
+        ConfigurationSection s = root == null ? null : root.getConfigurationSection(SECTION);
+        return s == null ? DEFAULT_REEL_MAX_STEP_TICKS : Math.max(1, s.getInt("mystery-box.reel-max-step-ticks", DEFAULT_REEL_MAX_STEP_TICKS));
     }
 
     /** Reads {@code siege.survival} (missing keys = the defaults). */

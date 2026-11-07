@@ -448,6 +448,9 @@ siege:
     blocked-cooldown-millis: 20000
     # Random spread (blocks) around an authored spawn point.
     spawn-spread-radius: 1.5
+    # Phase 4 (link S7b): the in-world Mystery Box reel slows down to this many ticks per step (the lootbox reel's default).
+    mystery-box:
+      reel-max-step-ticks: 8
 
 # Diagnostic telemetry (KNG-34 link 6, docs/specs/player-statistics DESIGN.md §F.12): a timeline of
 # meaningful actions and outcomes (joins, menus, command labels, Siege lobby/match steps, failed API

@@ -109,6 +109,19 @@ public final class SiegeLobbyRuntime {
         return Optional.ofNullable(matchToken);
     }
 
+    /** The API's match id once {@code createMatch} answered (Siege Survival link S7b: the Mystery Box roll needs it). */
+    public java.util.OptionalLong apiMatchId() {
+        if (matchId == null || !matchId.isDone() || matchId.isCompletedExceptionally()) return java.util.OptionalLong.empty();
+        Long id = matchId.getNow(null);
+        return id == null ? java.util.OptionalLong.empty() : java.util.OptionalLong.of(id);
+    }
+
+    /** The API user id of a member, when the join resolved it (link S7b). */
+    public java.util.OptionalInt userIdOf(UUID playerId) {
+        Integer id = userIds.get(playerId);
+        return id == null ? java.util.OptionalInt.empty() : java.util.OptionalInt.of(id);
+    }
+
     /** The member's team from the split (HUB, after the team split), else empty. */
     public Optional<KnkSiegeTeam> splitTeamOf(UUID playerId) {
         if (split == null) return Optional.empty();
