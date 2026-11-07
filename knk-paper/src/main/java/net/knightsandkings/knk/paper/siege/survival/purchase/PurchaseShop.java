@@ -9,6 +9,7 @@ import net.knightsandkings.knk.paper.siege.survival.SurvivalConfiguration.OfferS
 import net.knightsandkings.knk.paper.siege.survival.SurvivalConfiguration.PurchasePointSpec;
 import net.knightsandkings.knk.paper.siege.survival.SurvivalConfiguration.WorldPoint;
 import net.knightsandkings.knk.paper.siege.survival.SurvivalMatch;
+import net.knightsandkings.knk.paper.siege.survival.SurvivalSpawner;
 import net.knightsandkings.knk.paper.siege.survival.items.MatchItems;
 import net.knightsandkings.knk.paper.siege.survival.items.SurvivalItemFactory;
 import net.kyori.adventure.text.Component;
@@ -73,6 +74,7 @@ public final class PurchaseShop implements MatchHook {
     private final SurvivalMatch match;
     private final SurvivalItemFactory factory;
     private final MatchItems items;
+    private final SurvivalSpawner.Worlds worlds;
     private final Executor mainThread;
     private final Logger logger;
     private final Map<String, Prepared> prepared = new LinkedHashMap<>();
@@ -81,14 +83,15 @@ public final class PurchaseShop implements MatchHook {
     private long spent;
     private boolean ended;
 
-    public PurchaseShop(SurvivalMatch match, SurvivalItemFactory factory, Executor mainThread, Logger logger) {
+    public PurchaseShop(SurvivalMatch match, SurvivalItemFactory factory, SurvivalSpawner.Worlds worlds, Executor mainThread, Logger logger) {
         this.match = match;
         this.factory = factory;
         this.items = factory.items();
+        this.worlds = worlds;
         this.mainThread = mainThread;
         this.logger = logger;
         for (PurchasePointSpec point : match.config().purchasePoints()) {
-            point.location().flatMap(PurchaseShop::toLocation).ifPresent(at -> blocks.put(point.id(), at));
+            point.location().flatMap(p -> toLocation(p, worlds)).ifPresent(at -> blocks.put(point.id(), at));
         }
     }
 
@@ -258,9 +261,9 @@ public final class PurchaseShop implements MatchHook {
         return pointId + ":" + offerId;
     }
 
-    static Optional<Location> toLocation(WorldPoint point) {
+    static Optional<Location> toLocation(WorldPoint point, SurvivalSpawner.Worlds worlds) {
         if (point == null || point.world().isBlank()) return Optional.empty();
-        var world = Bukkit.getWorld(point.world());
+        var world = worlds.byName(point.world());
         return world == null ? Optional.empty() : Optional.of(new Location(world, point.x(), point.y(), point.z()));
     }
 

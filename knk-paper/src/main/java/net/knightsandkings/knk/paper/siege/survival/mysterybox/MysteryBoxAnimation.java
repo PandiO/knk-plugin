@@ -36,7 +36,60 @@ public final class MysteryBoxAnimation {
 
     public static final String TAG = "survival_box";
 
-    private final Plugin plugin;
+    /** The tick scheduler (Bukkit in production, a manual one in tests). */
+    public interface TickScheduler {
+        interface Cancellable {
+            void cancel();
+        }
+
+        Cancellable later(long ticks, Runnable task);
+
+        static TickScheduler bukkit(Plugin plugin) {
+            return (ticks, task) -> {
+                BukkitTask scheduled = Bukkit.getScheduler().runTaskLater(plugin, task, ticks);
+                return scheduled::cancel;
+            };
+        }
+    }
+
+    /** The sounds and particles of a step and of the finale (Bukkit in production; silent in tests). */
+    public interface Effects {
+        void step(World world, Location at, float pitch);
+
+        void finale(World world, Location at);
+
+        static Effects bukkit() {
+            return new Effects() {
+                @Override
+                public void step(World world, Location at, float pitch) {
+                    world.playSound(at, Sound.BLOCK_NOTE_BLOCK_HAT, 0.7f, Math.min(2.0f, pitch));
+                    world.spawnParticle(Particle.ENCHANT, at, 12, 0.3, 0.4, 0.3, 0.4);
+                }
+
+                @Override
+                public void finale(World world, Location at) {
+                    world.playSound(at, Sound.ENTITY_PLAYER_LEVELUP, 0.9f, 1.2f);
+                    world.spawnParticle(Particle.TOTEM_OF_UNDYING, at, 40, 0.4, 0.5, 0.4, 0.25);
+                    world.spawnParticle(Particle.END_ROD, at, 20, 0.3, 0.5, 0.3, 0.05);
+                }
+            };
+        }
+
+        static Effects none() {
+            return new Effects() {
+                @Override
+                public void step(World world, Location at, float pitch) {
+                }
+
+                @Override
+                public void finale(World world, Location at) {
+                }
+            };
+        }
+    }
+
+    private final TickScheduler scheduler;
+    private final Effects effects;
     private final NamespacedKey tag;
     private final Location base;
     private final MysteryBoxReelPlan plan;
@@ -46,7 +99,7 @@ public final class MysteryBoxAnimation {
     private ItemDisplay item;
     private TextDisplay label;
     private Interaction hitbox;
-    private BukkitTask task;
+    private TickScheduler.Cancellable task;
     private int step = -1;
     private boolean finished;
     private boolean removed;
@@ -57,9 +110,10 @@ public final class MysteryBoxAnimation {
      * @param nameOf     the name to show for an entry id
      * @param onFinished called once on the main thread when the reel stopped on the result
      */
-    public MysteryBoxAnimation(Plugin plugin, NamespacedKey tag, Location base, MysteryBoxReelPlan plan,
+    public MysteryBoxAnimation(TickScheduler scheduler, Effects effects, NamespacedKey tag, Location base, MysteryBoxReelPlan plan,
                                IntFunction<ItemStack> faceOf, IntFunction<Component> nameOf, Runnable onFinished) {
-        this.plugin = plugin;
+        this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
+        this.effects = Objects.requireNonNull(effects, "effects");
         this.tag = Objects.requireNonNull(tag, "tag");
         this.base = base.clone();
         this.plan = Objects.requireNonNull(plan, "plan");
@@ -107,11 +161,11 @@ public final class MysteryBoxAnimation {
             return;
         }
         int delay = Math.max(1, plan.delayTicks().get(Math.min(step + 1, plan.steps() - 1)));
-        task = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+        task = scheduler.later(delay, () -> {
             if (removed) return;
             show(step + 1);
             schedule();
-        }, delay);
+        });
     }
 
     private void show(int next) {
@@ -127,13 +181,9 @@ public final class MysteryBoxAnimation {
         if (world == null) return;
         Location at = base.clone().add(0.5, 1.4, 0.5);
         if (plan.isLast(step)) {
-            world.playSound(at, Sound.ENTITY_PLAYER_LEVELUP, 0.9f, 1.2f);
-            world.spawnParticle(Particle.TOTEM_OF_UNDYING, at, 40, 0.4, 0.5, 0.4, 0.25);
-            world.spawnParticle(Particle.END_ROD, at, 20, 0.3, 0.5, 0.3, 0.05);
+            effects.finale(world, at);
         } else {
-            float pitch = 0.8f + 1.2f * (step + 1) / Math.max(1, plan.steps());
-            world.playSound(at, Sound.BLOCK_NOTE_BLOCK_HAT, 0.7f, Math.min(2.0f, pitch));
-            world.spawnParticle(Particle.ENCHANT, at, 12, 0.3, 0.4, 0.3, 0.4);
+            effects.step(world, at, 0.8f + 1.2f * (step + 1) / Math.max(1, plan.steps()));
         }
     }
 

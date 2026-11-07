@@ -271,14 +271,16 @@ public final class SurvivalMatchRuntime implements SiegeMatchObserver, Listener,
         }
         SurvivalConfiguration c = survival.config();
         if (!c.purchasePoints().isEmpty()) {
-            PurchaseShop shop = new PurchaseShop(survival, economy.itemFactory(), economy.mainThread(), logger);
+            PurchaseShop shop = new PurchaseShop(survival, economy.itemFactory(), SurvivalSpawner.Worlds.bukkit(), economy.mainThread(), logger);
             shopByLobby.put(lobby.id(), shop);
             survival.addHook(shop);
             shop.prepare();
         }
         if (!c.mysteryBoxPoints().isEmpty()) {
             MysteryBoxStations boxes = new MysteryBoxStations(survival, economy.matchApi(), lobby::apiMatchId, lobby::userIdOf,
-                economy.itemFactory(), plugin, economy.mainThread(), economy.reelMaxStepTicks(), logger);
+                economy.itemFactory(), MysteryBoxAnimation.key(plugin), SurvivalSpawner.Worlds.bukkit(),
+                MysteryBoxAnimation.TickScheduler.bukkit(plugin), MysteryBoxAnimation.Effects.bukkit(), economy.mainThread(),
+                economy.reelMaxStepTicks(), logger);
             boxesByLobby.put(lobby.id(), boxes);
             survival.addHook(boxes);
             boxes.start();

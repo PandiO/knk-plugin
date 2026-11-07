@@ -125,6 +125,7 @@ public final class SurvivalMatch {
     private SurvivalEndReason endReason;
     private boolean ending;
     private boolean endRequested;
+    private boolean hooksEnded;
     private int spawnFailures;
     private long startedAtMillis;
 
@@ -148,6 +149,11 @@ public final class SurvivalMatch {
         this.npcAllianceGroup = siege.alliances().knows(config.npcTeamId()) ? siege.alliances().allianceOf(config.npcTeamId()) : -1;
         this.economy = new MatchEconomy(siege.matchToken() == null ? ("lobby-" + lobby.id()) : siege.matchToken(), config.killRewards());
         for (UUID id : siege.roster().playerIds()) economy.join(id);
+    }
+
+    /** The online-player lookup the match was built with (features avoid Bukkit statics through it). */
+    public Function<UUID, Player> onlinePlayer() {
+        return services.onlinePlayer();
     }
 
     /** The match clock (milliseconds). */
@@ -693,6 +699,8 @@ public final class SurvivalMatch {
             economy.end();
             log("economy closed: balances " + describeBalances() + ", accrued kills " + economy.accrual().earnedKills() + " (settlement is S8)");
         }
+        if (hooksEnded) return;
+        hooksEnded = true;
         for (MatchHook hook : hooks) {
             try {
                 hook.ended();

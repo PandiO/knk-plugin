@@ -18,11 +18,11 @@ import net.knightsandkings.knk.paper.siege.survival.SurvivalConfiguration.BoxEnt
 import net.knightsandkings.knk.paper.siege.survival.SurvivalConfiguration.MysteryBoxPointSpec;
 import net.knightsandkings.knk.paper.siege.survival.SurvivalConfiguration.WorldPoint;
 import net.knightsandkings.knk.paper.siege.survival.SurvivalMatch;
+import net.knightsandkings.knk.paper.siege.survival.SurvivalSpawner;
 import net.knightsandkings.knk.paper.siege.survival.items.MatchItems;
 import net.knightsandkings.knk.paper.siege.survival.items.SurvivalItemFactory;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
-import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
@@ -31,7 +31,6 @@ import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.plugin.Plugin;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -104,8 +103,10 @@ public final class MysteryBoxStations implements MatchHook {
     private final Function<UUID, OptionalInt> userIdOf;
     private final SurvivalItemFactory factory;
     private final MatchItems items;
-    private final Plugin plugin;
     private final NamespacedKey entityTag;
+    private final SurvivalSpawner.Worlds worlds;
+    private final MysteryBoxAnimation.TickScheduler scheduler;
+    private final MysteryBoxAnimation.Effects effects;
     private final Executor mainThread;
     private final int maxStepTicks;
     private final Logger logger;
@@ -114,21 +115,24 @@ public final class MysteryBoxStations implements MatchHook {
     private boolean ended;
 
     public MysteryBoxStations(SurvivalMatch match, SiegeSurvivalMatchApiImpl api, Supplier<OptionalLong> apiMatchId,
-                              Function<UUID, OptionalInt> userIdOf, SurvivalItemFactory factory, Plugin plugin, Executor mainThread,
-                              int maxStepTicks, Logger logger) {
+                              Function<UUID, OptionalInt> userIdOf, SurvivalItemFactory factory, NamespacedKey entityTag,
+                              SurvivalSpawner.Worlds worlds, MysteryBoxAnimation.TickScheduler scheduler, MysteryBoxAnimation.Effects effects,
+                              Executor mainThread, int maxStepTicks, Logger logger) {
         this.match = Objects.requireNonNull(match, "match");
         this.api = api;
         this.apiMatchId = apiMatchId;
         this.userIdOf = userIdOf;
         this.factory = factory;
         this.items = factory.items();
-        this.plugin = plugin;
-        this.entityTag = MysteryBoxAnimation.key(plugin);
+        this.entityTag = Objects.requireNonNull(entityTag, "entityTag");
+        this.worlds = Objects.requireNonNull(worlds, "worlds");
+        this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
+        this.effects = Objects.requireNonNull(effects, "effects");
         this.mainThread = mainThread;
         this.maxStepTicks = Math.max(1, maxStepTicks);
         this.logger = logger;
         for (MysteryBoxPointSpec spec : match.config().mysteryBoxPoints()) {
-            stations.add(new Station(spec, spec.location().flatMap(MysteryBoxStations::toLocation).orElse(null)));
+            stations.add(new Station(spec, spec.location().flatMap(p -> toLocation(p, worlds)).orElse(null)));
         }
     }
 
@@ -284,16 +288,16 @@ public final class MysteryBoxStations implements MatchHook {
         int resultId = dto.entry() == null || dto.entry().id() == null ? -1 : dto.entry().id();
         MysteryBoxReelPlan plan = MysteryBoxReelPlan.of(dto.reel(), resultId, maxStepTicks);
         station.prize = prize(station, dto);
-        Player roller = Bukkit.getPlayer(state.roller());
+        Player roller = match.onlinePlayer().apply(state.roller());
         if (station.block == null || station.block.getWorld() == null) {
             warn("roll " + state.rollId() + ": the box has no world; forfeited");
             forfeit(station, state, ForfeitReason.MATCH_ENDED, matchId);
             return;
         }
-        MysteryBoxAnimation animation = new MysteryBoxAnimation(plugin, entityTag, station.block, plan, this::face, this::faceName, () -> {
+        MysteryBoxAnimation animation = new MysteryBoxAnimation(scheduler, effects, entityTag, station.block, plan, this::face, this::faceName, () -> {
             if (station.roll != state || state.over()) return;
             state.animationDone(now());
-            Player p = Bukkit.getPlayer(state.roller());
+            Player p = match.onlinePlayer().apply(state.roller());
             if (p != null) {
                 p.sendActionBar(Component.text("You rolled " + plainName(resultId) + "! Right-click it within "
                     + (state.claimTimeoutMillis() / 1000) + " s to claim.", SiegeMessages.GOOD));
@@ -365,7 +369,7 @@ public final class MysteryBoxStations implements MatchHook {
         station.animation = null;
         CompletableFuture<Optional<ItemStack>> prize = station.prize != null ? station.prize : CompletableFuture.completedFuture(Optional.empty());
         prize.whenComplete((stack, ex) -> mainThread.execute(() -> {
-            Player p = Bukkit.getPlayer(player.getUniqueId());
+            Player p = match.onlinePlayer().apply(player.getUniqueId());
             String kind;
             if (ex != null || stack == null || stack.isEmpty()) {
                 warn("roll " + state.rollId() + " claimed but its item could not be assembled; nothing given (flag S7b)");
@@ -391,7 +395,7 @@ public final class MysteryBoxStations implements MatchHook {
         if (!state.forfeit(reason)) return;
         finishForfeit(station, state);
         log("roll " + state.rollId() + " forfeited: " + reason + " (no refund, S59)");
-        Player roller = Bukkit.getPlayer(state.roller());
+        Player roller = match.onlinePlayer().apply(state.roller());
         if (roller != null && reason == ForfeitReason.TIMEOUT) roller.sendActionBar(Component.text("The Mystery Box item was not claimed in time.", SiegeMessages.BAD));
         if (api != null) callForfeit(matchId, state.rollId(), apiReason(reason), 0);
     }
@@ -409,7 +413,7 @@ public final class MysteryBoxStations implements MatchHook {
         station.animation = null;
         station.prize = null;
         station.forfeits++;
-        Player roller = Bukkit.getPlayer(state.roller());
+        Player roller = match.onlinePlayer().apply(state.roller());
         if (roller != null) roller.sendActionBar(Component.text("The Mystery Box could not roll (" + why + "); tell an admin.", SiegeMessages.BAD));
     }
 
@@ -433,7 +437,7 @@ public final class MysteryBoxStations implements MatchHook {
                 if (matchId == null) matchId = apiMatchId.get();
                 finishForfeit(s, s.roll);
                 log("roll " + s.roll.rollId() + " forfeited: TIMEOUT (no refund, S59)");
-                Player roller = Bukkit.getPlayer(s.roll.roller());
+                Player roller = match.onlinePlayer().apply(s.roll.roller());
                 if (roller != null) roller.sendActionBar(Component.text("The Mystery Box item was not claimed in time.", SiegeMessages.BAD));
                 if (api != null) callForfeit(matchId.orElse(-1), s.roll.rollId(), SiegeSurvivalMatchApiImpl.FORFEIT_TIMEOUT, 0);
             }
@@ -575,7 +579,7 @@ public final class MysteryBoxStations implements MatchHook {
     }
 
     private String rollerName(MysteryBoxRollState state) {
-        Player p = Bukkit.getPlayer(state.roller());
+        Player p = match.onlinePlayer().apply(state.roller());
         return p == null ? state.roller().toString().substring(0, 8) : p.getName();
     }
 
@@ -590,9 +594,9 @@ public final class MysteryBoxStations implements MatchHook {
         return match.now();
     }
 
-    static Optional<Location> toLocation(WorldPoint point) {
+    static Optional<Location> toLocation(WorldPoint point, SurvivalSpawner.Worlds worlds) {
         if (point == null || point.world().isBlank()) return Optional.empty();
-        var world = Bukkit.getWorld(point.world());
+        var world = worlds.byName(point.world());
         return world == null ? Optional.empty() : Optional.of(new Location(world, Math.floor(point.x()), Math.floor(point.y()), Math.floor(point.z())));
     }
 

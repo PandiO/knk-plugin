@@ -13,6 +13,7 @@ import net.knightsandkings.knk.core.siege.SiegeActorKind;
 import net.knightsandkings.knk.core.siege.SiegeMatchRoster;
 import net.knightsandkings.knk.core.siege.SiegeObjectiveBoard;
 import net.knightsandkings.knk.core.survival.SurvivalSubstate;
+import net.knightsandkings.knk.core.survival.economy.KillBlow;
 import net.knightsandkings.knk.core.survival.end.SurvivalEndReason;
 import net.knightsandkings.knk.core.survival.scaling.ScaledStat;
 import net.knightsandkings.knk.core.survival.wave.PlannedEnemy;
@@ -250,5 +251,76 @@ class SurvivalMatchTest {
         assertEquals(2, siege.board().objective(1).holderTeamId());
         m.onCapture(siege.board().objective(1).captures().get(0));
         assertEquals(List.of(SurvivalEndReason.INSTA_LOSE_OBJECTIVE_CAPTURED), ended);
+    }
+
+    // ---- phase 4 (link S7b): the economy wiring ----
+
+    @Test
+    void aPlayerKillCreditsTheLedgerWithTheRecordedBonus() {
+        match.start();
+        advance(2_100);
+        advance(500);
+        assertEquals(2, spawned.size());
+        match.onMobHitByPlayer(spawned.get(0), new KillBlow(player.getUniqueId(), false, true));
+        match.onMobDeath(spawned.get(0), player);
+        assertEquals(77, match.economy().balance(player.getUniqueId()), "headshot ×1.1");
+        match.onMobDeath(spawned.get(1), player);
+        assertEquals(147, match.economy().balance(player.getUniqueId()));
+        assertEquals(2, match.economy().kills(player.getUniqueId()));
+        assertEquals(0, new java.math.BigDecimal("63.0").compareTo(match.economy().accrual().coins(player.getUniqueId())), "33 + 30, not settled");
+        assertTrue(match.statusLines().stream().anyMatch(l -> l.startsWith("Economy: balances")));
+        assertEquals("lobby-1", match.matchKey(), "no Siege token on the mock: the lobby id stands in");
+    }
+
+    @Test
+    void ghostStateLeavesAndTheEndReachTheLedgerAndTheHooks() {
+        List<String> events = new ArrayList<>();
+        match.addHook(new MatchHook() {
+            @Override
+            public void playerBecameGhost(UUID playerId) {
+                events.add("ghost");
+            }
+
+            @Override
+            public void ghostsReleased(List<UUID> playerIds) {
+                events.add("released " + playerIds.size());
+            }
+
+            @Override
+            public void memberLeft(UUID playerId) {
+                events.add("left");
+            }
+
+            @Override
+            public void ended() {
+                events.add("ended");
+            }
+
+            @Override
+            public List<String> statusLines() {
+                return List.of("hook line");
+            }
+        });
+        match.start();
+        advance(2_100);
+        advance(500);
+        match.onMobDeath(spawned.get(0), player);
+        match.onMobDeath(spawned.get(1), player);
+        assertEquals(SurvivalSubstate.INTERMISSION, match.rounds().substate());
+        match.onPlayerDeath(player);
+        assertTrue(match.economy().isGhost(player.getUniqueId()));
+        assertEquals(List.of("ghost"), events);
+        assertTrue(match.statusLines().contains("hook line"));
+        advance(2_100); // next wave: ghosts respawn
+        assertFalse(match.economy().isGhost(player.getUniqueId()));
+        assertEquals(List.of("ghost", "released 1"), events);
+        siege.roster().remove(player.getUniqueId()); // the service drops the member around this callback
+        match.onMemberLeft(player.getUniqueId());
+        assertFalse(match.economy().isMember(player.getUniqueId()));
+        assertTrue(events.contains("left"));
+        assertTrue(events.contains("ended"), "nobody left ends the match and closes the economy");
+        assertTrue(match.economy().ended());
+        match.cleanup();
+        assertEquals(1, events.stream().filter("ended"::equals).count(), "idempotent");
     }
 }

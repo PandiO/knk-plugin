@@ -40,7 +40,7 @@ public final class MatchItems {
         this(new NamespacedKey(plugin, "survival_match"));
     }
 
-    MatchItems(NamespacedKey key) {
+    public MatchItems(NamespacedKey key) {
         this.key = Objects.requireNonNull(key, "key");
     }
 
@@ -50,9 +50,16 @@ public final class MatchItems {
 
     // ---- tags ----
 
+    /** Air without the registry ({@code Material#isAir} needs a server). */
+    static boolean isAir(ItemStack item) {
+        if (item == null) return true;
+        org.bukkit.Material type = item.getType();
+        return type == null || type == org.bukkit.Material.AIR || type == org.bukkit.Material.CAVE_AIR || type == org.bukkit.Material.VOID_AIR;
+    }
+
     /** The match id on an item, or null. */
     public String matchIdOf(ItemStack item) {
-        if (item == null || item.getType().isAir() || !item.hasItemMeta()) return null;
+        if (isAir(item) || !item.hasItemMeta()) return null;
         ItemMeta meta = item.getItemMeta();
         return meta == null ? null : meta.getPersistentDataContainer().get(key, PersistentDataType.STRING);
     }
@@ -63,7 +70,7 @@ public final class MatchItems {
 
     /** Tags the stack in place (no-op for air or a stack without meta). */
     public ItemStack tag(ItemStack item, String matchId) {
-        if (item == null || item.getType().isAir()) return item;
+        if (isAir(item)) return item;
         ItemMeta meta = item.getItemMeta();
         if (meta == null) return item;
         stamp(matchId).accept(meta);

@@ -26,9 +26,15 @@ public final class SurvivalPlayerCommands {
     public static final List<String> SUBCOMMANDS = List.of("balance", "pay", "kit", "shop");
 
     private final Supplier<SurvivalMatchRuntime> runtime;
+    private final java.util.function.Function<String, Player> playerByName;
 
     public SurvivalPlayerCommands(Supplier<SurvivalMatchRuntime> runtime) {
+        this(runtime, Bukkit::getPlayerExact);
+    }
+
+    SurvivalPlayerCommands(Supplier<SurvivalMatchRuntime> runtime, java.util.function.Function<String, Player> playerByName) {
         this.runtime = runtime;
+        this.playerByName = playerByName;
     }
 
     public Component balance(Player player) {
@@ -51,7 +57,7 @@ public final class SurvivalPlayerCommands {
         } catch (NumberFormatException e) {
             return SiegeMessages.bad("The amount must be a whole number of match coins.");
         }
-        Player target = Bukkit.getPlayerExact(targetName);
+        Player target = playerByName.apply(targetName);
         if (target == null) return SiegeMessages.bad("No online player named '" + targetName + "'.");
         SurvivalMatch m = match.get();
         LedgerResult result = m.economy().transfer("pay-" + UUID.randomUUID(), player.getUniqueId(), target.getUniqueId(), amount);
