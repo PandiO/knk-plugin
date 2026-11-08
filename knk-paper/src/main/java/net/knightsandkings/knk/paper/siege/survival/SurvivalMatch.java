@@ -19,6 +19,7 @@ import net.knightsandkings.knk.core.survival.spawn.EnemyIdSequence;
 import net.knightsandkings.knk.core.survival.spawn.SpawnFrontier;
 import net.knightsandkings.knk.core.survival.spawn.SpawnZone;
 import net.knightsandkings.knk.core.survival.spawn.SpawnZoneSelector;
+import net.knightsandkings.knk.core.survival.spawn.SpecialWaveProfile;
 import net.knightsandkings.knk.core.survival.spawn.WavePopulationPlanner;
 import net.knightsandkings.knk.core.survival.stuck.ProgressSample;
 import net.knightsandkings.knk.core.survival.stuck.StuckDecision;
@@ -128,6 +129,11 @@ public final class SurvivalMatch {
     private boolean hooksEnded;
     private int spawnFailures;
     private long startedAtMillis;
+    // Link S8b: kill totals of the rounds already counted (the current queue is added on read) and the current special.
+    private int closedEarnedKills;
+    private int closedSystemKills;
+    private int closedKillsRound;
+    private String specialProfileId;
 
     public SurvivalMatch(SiegeLobbyRuntime lobby, SiegeMatch siege, SurvivalConfiguration config, SurvivalSettings settings,
                          Services services, SurvivalGhosts ghosts, Consumer<SurvivalEndReason> onEnd) {
@@ -234,6 +240,38 @@ public final class SurvivalMatch {
         return rounds.record();
     }
 
+    /** The match clock at {@link #start} (0 before). */
+    public long startedAtMillis() {
+        return startedAtMillis;
+    }
+
+    /** Player kills over the whole match (every round; DESIGN §3c: system kills are not kills). */
+    public int earnedKills() {
+        return closedEarnedKills + rounds.currentQueue().filter(q -> q.round() != closedKillsRound).map(RoundSpawnQueue::earnedKills).orElse(0);
+    }
+
+    /** Enemies the stuck-enemy rules killed over the whole match (dead for completion, no reward). */
+    public int systemKills() {
+        return closedSystemKills + rounds.currentQueue().filter(q -> q.round() != closedKillsRound).map(RoundSpawnQueue::systemKills).orElse(0);
+    }
+
+    /** The configuration id of the special profile the current round plays (DESIGN §7, S53), when it is special. */
+    public Optional<String> specialProfileId() {
+        return rounds.substate() == SurvivalSubstate.WAVE_ACTIVE ? Optional.ofNullable(specialProfileId) : Optional.empty();
+    }
+
+    /** The current round's special profile key for the checkpoint and the status line. */
+    public Optional<String> specialProfileKey() {
+        return specialProfileId().map(config::specialProfileKey);
+    }
+
+    private void closeKillCount(RoundSpawnQueue queue) {
+        if (queue == null || queue.round() == closedKillsRound) return;
+        closedEarnedKills += queue.earnedKills();
+        closedSystemKills += queue.systemKills();
+        closedKillsRound = queue.round();
+    }
+
     // ---- lifecycle ----
 
     /** The Siege match started: PREPARING for one intermission length, then wave 1 (DESIGN §3 step 3). */
@@ -288,13 +326,23 @@ public final class SurvivalMatch {
         nextSpawnAtMillis = now;
         lastAnnouncedSecond = -1;
         boolean special = planned.stream().anyMatch(PlannedEnemy::special);
+        specialProfileId = special ? planner.specialProfileFor(round).map(SpecialWaveProfile::id).orElse(null) : null;
         List<UUID> releasedAtWave = ghosts.onTransition(SurvivalSubstate.WAVE_ACTIVE, services.onlinePlayer());
         ghostsReleased(releasedAtWave);
+        // Link S8b (DESIGN §7, S53): a special round is announced with the profile's name; the DTO has no description.
+        String specialName = specialProfileId == null ? null : config.specialProfileName(specialProfileId);
         Title title = Title.title(Component.text("Round " + round, NamedTextColor.DARK_RED),
-            Component.text(queue.plannedCount() + (special ? " enemies (special wave)" : " enemies"), SiegeMessages.INFO));
+            Component.text(special ? "Special round" + (specialName == null ? "" : ": " + specialName) + " · " + queue.plannedCount() + " enemies"
+                : queue.plannedCount() + " enemies", SiegeMessages.INFO));
         members().forEach(p -> p.showTitle(title));
+        if (special) {
+            broadcast(SiegeMessages.prefixed(Component.text("Special round" + (specialName == null ? "" : ": " + specialName), SiegeMessages.HIGHLIGHT)
+                .append(Component.text(" - " + queue.plannedCount() + " enemies this round.", SiegeMessages.INFO))));
+        }
         log("round " + round + " started: " + queue.plannedCount() + " planned, max alive " + config.difficulty().scaling().maxAlive()
-            + ", stats " + describe(roundMultipliers) + ", players " + playersAtRoundStart);
+            + ", stats " + describe(roundMultipliers) + ", players " + playersAtRoundStart
+            + (special ? ", special profile " + specialProfileId + " (" + specialName + ")" : ""));
+        for (MatchHook hook : hooks) hook.roundStarted(round, Optional.ofNullable(specialProfileId));
         evaluateEnd();
     }
 
@@ -341,11 +389,14 @@ public final class SurvivalMatch {
         if (intermission.isEmpty()) return;
         int completed = rounds.record().completed();
         lastAnnouncedSecond = -1;
+        rounds.currentQueue().ifPresent(this::closeKillCount);
         List<UUID> released = ghosts.onTransition(SurvivalSubstate.INTERMISSION, services.onlinePlayer());
         ghostsReleased(released);
         broadcast(SiegeMessages.prefixed(Component.text("Round " + completed + " cleared! ", SiegeMessages.GOOD)
             .append(Component.text("Next round in " + intermission.get().remainingSecondsCeil(now) + " s.", SiegeMessages.INFO))));
-        log("round " + completed + " completed; " + released.size() + " ghosts respawned; record " + rounds.record());
+        log("round " + completed + " completed; " + released.size() + " ghosts respawned; record " + rounds.record()
+            + (specialProfileId != null ? "; special profile " + specialProfileId + " cleared (no special reward, DESIGN §7)" : ""));
+        for (MatchHook hook : hooks) hook.roundCompleted(completed);
         evaluateEnd();
     }
 
@@ -613,10 +664,18 @@ public final class SurvivalMatch {
 
     /** A member left the match (leave, quit, kick): ghost state ends; the end conditions are re-evaluated. */
     public void onMemberLeft(UUID playerId) {
+        onMemberLeft(playerId, true);
+    }
+
+    /**
+     * As {@link #onMemberLeft(UUID)}; {@code evaluateNow} false leaves the end check to the caller (the runtime hears
+     * the leave while the roster still holds the member and evaluates on the next tick, link S8b).
+     */
+    public void onMemberLeft(UUID playerId, boolean evaluateNow) {
         ghosts.release(playerId, services.onlinePlayer().apply(playerId), false);
         economy.leave(playerId);
         for (MatchHook hook : hooks) hook.memberLeft(playerId);
-        evaluateEnd();
+        if (evaluateNow) evaluateEnd();
     }
 
     /** An objective changed hands: the spawn frontier follows ownership (§6, S10, S63); the end conditions follow. */
@@ -629,6 +688,7 @@ public final class SurvivalMatch {
                 broadcast(SiegeMessages.prefixed(Component.text("The enemy pushes forward: new spawn zones are active.", SiegeMessages.BAD)));
             }
         }
+        for (MatchHook hook : hooks) hook.objectiveCaptured(capture.objectiveId());
         evaluateEnd();
     }
 
@@ -661,6 +721,7 @@ public final class SurvivalMatch {
         if (ending) return;
         ending = true;
         endReason = reason;
+        rounds.currentQueue().ifPresent(this::closeKillCount);
         List<PlannedEnemy> cancelled = rounds.end();
         removeAllMobs();
         endEconomy();
@@ -678,6 +739,7 @@ public final class SurvivalMatch {
         if (endReason == null) endReason = reason;
         ending = true;
         endRequested = true;
+        rounds.currentQueue().ifPresent(this::closeKillCount);
         rounds.end();
         removeAllMobs();
         endEconomy();
@@ -794,7 +856,8 @@ public final class SurvivalMatch {
         if (services.logger() != null) services.logger().info("[Survival] Lobby " + lobby.key() + ": " + message);
     }
 
-    static String endMessage(SurvivalEndReason reason) {
+    /** The one-line explanation of an end reason (shared with the result screen, link S8b). */
+    public static String endMessage(SurvivalEndReason reason) {
         return switch (reason) {
             case TEAM_WIPE -> "Your team was wiped out.";
             case INSTA_LOSE_OBJECTIVE_CAPTURED -> "The enemy captured a decisive objective.";
@@ -823,6 +886,8 @@ public final class SurvivalMatch {
         lines.add("Waves: reached " + rounds.record().reached() + ", completed " + rounds.record().completed()
             + rounds.currentQueue().map(q -> "; round " + q.round() + " queue " + q.queuedCount() + " alive " + q.aliveCount()
                 + " earned " + q.earnedKills() + " system " + q.systemKills() + " other " + q.otherDeaths()).orElse("")
+            + specialProfileKey().map(k -> "; special " + k).orElse("")
+            + "; match kills earned " + earnedKills() + " system " + systemKills()
             + rounds.intermission().map(i -> "; intermission " + i.remainingSecondsCeil(now) + " s left").orElse(""));
         lines.add("Stats this round: " + describe(roundMultipliers) + "; players at round start " + playersAtRoundStart);
         lines.add("Frontier: active zones " + frontier.activeZoneIds() + " (recapture " + frontier.recaptureEnabled() + ")");

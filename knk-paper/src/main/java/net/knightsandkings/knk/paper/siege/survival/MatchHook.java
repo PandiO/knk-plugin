@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.paper.siege.survival;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -23,6 +24,15 @@ public interface MatchHook {
 
     /** The match is over (any reason) or is being cleaned up: remove everything, forfeit pending rolls. Idempotent. */
     default void ended() { }
+
+    /** A round started (link S8b); {@code specialProfileId} is the special profile's configuration id when the round is special. */
+    default void roundStarted(int round, Optional<String> specialProfileId) { }
+
+    /** A round completed: its queue is exhausted and no enemy is alive (link S8b). */
+    default void roundCompleted(int round) { }
+
+    /** An objective changed hands during the match (link S8b: checkpoint trigger). */
+    default void objectiveCaptured(int objectiveId) { }
 
     /** Lines for {@code /knk siege survival status}. */
     default List<String> statusLines() {

@@ -27,6 +27,10 @@ public final class MatchEconomy {
     private final KillRewardCalculator calculator;
     private final PermanentRewardAccrual accrual = new PermanentRewardAccrual();
     private final Map<UUID, Integer> kills = new LinkedHashMap<>();
+    // Link S8b (DESIGN §9, §11): per-player tallies for the result row; leavers keep theirs (kills stay history).
+    private final Map<UUID, Integer> bonusKills = new LinkedHashMap<>();
+    private final Map<UUID, Long> matchCurrencyEarned = new LinkedHashMap<>();
+    private final Map<UUID, Long> matchCurrencySpent = new LinkedHashMap<>();
     private boolean ended;
 
     public MatchEconomy(String matchId, KillRewardSettings settings) {
@@ -102,11 +106,28 @@ public final class MatchEconomy {
         ledger.credit(killer, reward.matchCurrency());
         accrual.add(killer, reward);
         kills.merge(killer, 1, Integer::sum);
+        if (kill.bonus()) bonusKills.merge(killer, 1, Integer::sum);
+        if (reward.matchCurrency() > 0) matchCurrencyEarned.merge(killer, reward.matchCurrency(), Long::sum);
         return Optional.of(new KillCredit(killer, reward, ledger.balance(killer), kill.bonus()));
     }
 
     public int kills(UUID player) {
         return kills.getOrDefault(player, 0);
+    }
+
+    /** Kills of the player that earned the headshot/critical bonus (S33); never more than {@link #kills}. */
+    public int bonusKills(UUID player) {
+        return bonusKills.getOrDefault(player, 0);
+    }
+
+    /** Match currency the player received: kill credits and transfers from teammates (for the result row, §11). */
+    public long matchCurrencyEarned(UUID player) {
+        return matchCurrencyEarned.getOrDefault(player, 0L);
+    }
+
+    /** Match currency the player paid: purchases, Mystery Box rolls and transfers to teammates. */
+    public long matchCurrencySpent(UUID player) {
+        return matchCurrencySpent.getOrDefault(player, 0L);
     }
 
     // ---- balances ----
@@ -125,12 +146,21 @@ public final class MatchEconomy {
 
     /** A teammate transfer (atomic, no overdraft, idempotent by request id; ghosts on neither side). */
     public LedgerResult transfer(String requestId, UUID from, UUID to, long amount) {
-        return ledger.transfer(new MatchLedger.TransferRequest(requestId, ledger.matchId(), from, to, amount));
+        LedgerResult result = ledger.transfer(new MatchLedger.TransferRequest(requestId, ledger.matchId(), from, to, amount));
+        if (result instanceof LedgerResult.Accepted accepted && !accepted.replayed()) {
+            matchCurrencySpent.merge(from, amount, Long::sum);
+            matchCurrencyEarned.merge(to, amount, Long::sum);
+        }
+        return result;
     }
 
     /** A fixed-price charge (a purchase or a Mystery Box roll), idempotent by the charge id. */
     public LedgerResult charge(String chargeId, UUID player, long price, String product) {
-        return ledger.charge(new MatchLedger.ChargeRequest(chargeId, ledger.matchId(), player, price, product));
+        LedgerResult result = ledger.charge(new MatchLedger.ChargeRequest(chargeId, ledger.matchId(), player, price, product));
+        if (result instanceof LedgerResult.Accepted accepted && !accepted.replayed()) {
+            matchCurrencySpent.merge(player, price, Long::sum);
+        }
+        return result;
     }
 
     /** The members with a balance or a kill, for the status lines. */
