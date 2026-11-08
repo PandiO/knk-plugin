@@ -116,7 +116,7 @@ class SurvivalCheckpointsTest {
         assertEquals(140L, end.players().get(0).matchBalance());
         answers.get(1).complete(stored(end, 2));
         assertEquals(2, checkpoints.revision());
-        assertTrue(checkpoints.statusLines().get(0).contains("revision 2"), checkpoints.statusLines().toString());
+        assertTrue(checkpoints.statusLines().get(0).contains("API match 42, revision 2"), checkpoints.statusLines().toString());
     }
 
     @Test

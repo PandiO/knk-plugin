@@ -230,7 +230,9 @@ public final class SurvivalCheckpoints implements MatchHook {
 
     @Override
     public List<String> statusLines() {
-        return List.of("Checkpoint: revision " + revision + ", sent " + sent + ", failures " + cadence.failures()
+        OptionalLong id = apiMatchId.get();
+        return List.of("Checkpoint: API match " + (id.isPresent() ? String.valueOf(id.getAsLong()) : "id unknown") + ", revision " + revision
+            + ", sent " + sent + ", failures " + cadence.failures()
             + (skippedWithoutId > 0 ? ", skipped without match id " + skippedWithoutId : "")
             + ", interval " + (cadence.intervalMillis() <= 0 ? "off" : (cadence.intervalMillis() / 1000) + " s")
             + ", last trigger " + lastTrigger + (lastStoredAt == null ? "" : ", stored at " + lastStoredAt)
