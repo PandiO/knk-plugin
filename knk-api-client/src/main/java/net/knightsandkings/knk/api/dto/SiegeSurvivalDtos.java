@@ -400,7 +400,11 @@ public final class SiegeSurvivalDtos {
             @JsonProperty("attackSpeed") Double attackSpeed
     ) {}
 
-    // ---- Result and checkpoint contracts (phases 2–5; no endpoint accepts them yet) ----
+    // ---- Result and checkpoint contracts (phase 5, link S8a: POST/GET .../matches/{id}/result, PUT/GET .../checkpoint) ----
+    // Fields marked "API-filled" come back in the answer and are ignored in a request (null is fine): equipmentMode,
+    // rewardPolicyVersion, source, recordedAt, the Mystery Box counts, settledAt / ledgerPostingId / playersSettled,
+    // the checkpoint's updatedAt / revision. The plugin fills every other field; the API recomputes the settled
+    // integers (floor of the accruals, present players only) and answers 409 SettlementMismatch when they differ.
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record MatchResultDto(
@@ -417,7 +421,11 @@ public final class SiegeSurvivalDtos {
             @JsonProperty("earnedKills") Integer earnedKills,
             @JsonProperty("systemKills") Integer systemKills,
             @JsonProperty("players") List<PlayerResultDto> players,
-            @JsonProperty("settlement") SettlementDto settlement
+            @JsonProperty("settlement") SettlementDto settlement,
+            @JsonProperty("equipmentMode") String equipmentMode,
+            @JsonProperty("rewardPolicyVersion") String rewardPolicyVersion,
+            @JsonProperty("source") String source,
+            @JsonProperty("recordedAt") @JsonDeserialize(using = LenientOffsetDateTimeDeserializer.class) OffsetDateTime recordedAt
     ) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -436,7 +444,10 @@ public final class SiegeSurvivalDtos {
             @JsonProperty("coinsAccrued") BigDecimal coinsAccrued,
             @JsonProperty("xpAccrued") BigDecimal xpAccrued,
             @JsonProperty("coinsSettled") Integer coinsSettled,
-            @JsonProperty("xpSettled") Integer xpSettled
+            @JsonProperty("xpSettled") Integer xpSettled,
+            @JsonProperty("mysteryBoxRolls") Integer mysteryBoxRolls,
+            @JsonProperty("mysteryBoxClaims") Integer mysteryBoxClaims,
+            @JsonProperty("mysteryBoxForfeits") Integer mysteryBoxForfeits
     ) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -444,7 +455,10 @@ public final class SiegeSurvivalDtos {
             @JsonProperty("settlesRewards") Boolean settlesRewards,
             @JsonProperty("totalCoins") Integer totalCoins,
             @JsonProperty("totalXp") Integer totalXp,
-            @JsonProperty("ledgerKey") String ledgerKey
+            @JsonProperty("ledgerKey") String ledgerKey,
+            @JsonProperty("settledAt") @JsonDeserialize(using = LenientOffsetDateTimeDeserializer.class) OffsetDateTime settledAt,
+            @JsonProperty("ledgerPostingId") String ledgerPostingId,
+            @JsonProperty("playersSettled") Integer playersSettled
     ) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -462,7 +476,9 @@ public final class SiegeSurvivalDtos {
             @JsonProperty("npcHeldObjectiveIds") List<Integer> npcHeldObjectiveIds,
             @JsonProperty("activeSpawnZoneIds") List<Integer> activeSpawnZoneIds,
             @JsonProperty("doorRepairs") List<DoorRepairCheckpointDto> doorRepairs,
-            @JsonProperty("players") List<PlayerCheckpointDto> players
+            @JsonProperty("players") List<PlayerCheckpointDto> players,
+            @JsonProperty("updatedAt") @JsonDeserialize(using = LenientOffsetDateTimeDeserializer.class) OffsetDateTime updatedAt,
+            @JsonProperty("revision") Integer revision
     ) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)

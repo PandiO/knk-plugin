@@ -10,8 +10,12 @@ import java.util.concurrent.ExecutorService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectWriter;
+import com.fasterxml.jackson.databind.SerializationFeature;
 
 import net.knightsandkings.knk.api.auth.AuthProvider;
+import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.MatchCheckpointDto;
+import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.MatchResultDto;
 import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.MysteryBoxClaimRequestDto;
 import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.MysteryBoxForfeitRequestDto;
 import net.knightsandkings.knk.api.dto.SiegeSurvivalDtos.MysteryBoxRollDto;
@@ -32,6 +36,15 @@ import okhttp3.OkHttpClient;
  * {@link #ROLL_ID_REUSED} (same roll id, different body), {@link #MATCH_NOT_IN_PROGRESS}, {@link #PARTICIPANT_LEFT},
  * {@link #POOL_INVALID}, {@link #ROLL_FORFEITED} (claim after forfeit), {@link #ROLL_CLAIMED} (forfeit after claim).
  * A 404 (unknown match, point of another scenario, user not a participant, unknown roll) completes with {@code null}.
+ *
+ * <p>Phase 5 (link S8a; DESIGN §9 S32/S62, §10, §11): {@link #postResult} stores the match's durable result once and
+ * settles the per-kill rewards on the API (one ledger posting keyed {@link #ledgerKey siege-survival:{matchId}}, the
+ * settled integers recomputed from the exact accruals); the same body again answers the stored result (201 and 200
+ * are the same to the caller), a different body is {@link #RESULT_ALREADY_STORED}, integers/totals/flag/key the API
+ * recomputes differently are {@link #SETTLEMENT_MISMATCH}, a match that never started {@link #MATCH_NOT_IN_PROGRESS},
+ * an aborted one without a row {@link #MATCH_ABORTED}. {@link #putCheckpoint} upserts the latest checkpoint (an older
+ * {@code capturedAt} is ignored); {@link #getResult} / {@link #getCheckpoint} read them back, null on 404. Dates go as
+ * ISO-8601 strings whatever the client mapper's timestamp setting.
  */
 public class SiegeSurvivalMatchApiImpl extends BaseApiImpl {
 
@@ -43,6 +56,18 @@ public class SiegeSurvivalMatchApiImpl extends BaseApiImpl {
     public static final String POOL_INVALID = "PoolInvalid";
     public static final String ROLL_FORFEITED = "RollForfeited";
     public static final String ROLL_CLAIMED = "RollClaimed";
+    public static final String RESULT_ALREADY_STORED = "ResultAlreadyStored";
+    public static final String SETTLEMENT_MISMATCH = "SettlementMismatch";
+    public static final String MATCH_ABORTED = "MatchAborted";
+
+    /** {@code endReason} values of {@link MatchResultDto}; the first three settle rewards (S62). */
+    public static final String END_TEAM_WIPE = "TeamWipe";
+    public static final String END_INSTA_LOSE_OBJECTIVE_CAPTURED = "InstaLoseObjectiveCaptured";
+    public static final String END_ALL_OBJECTIVES_CAPTURED = "AllObjectivesCaptured";
+    public static final String END_NO_PLAYERS_LEFT = "NoPlayersLeft";
+    public static final String END_ADMIN_ABORT = "AdminAbort";
+    public static final String END_SERVER_RESTART = "ServerRestart";
+    public static final String END_TECHNICAL_LIMIT = "TechnicalLimit";
 
     /** {@code deliveryKind} values of {@link #claim}. */
     public static final String DELIVERY_INVENTORY = "Inventory";
@@ -101,6 +126,67 @@ public class SiegeSurvivalMatchApiImpl extends BaseApiImpl {
             String url = baseUrl + MATCHES_ENDPOINT + "/" + matchId + "/mystery-box/rolls";
             return nullOn404(url, () -> parse(get(url), new TypeReference<List<MysteryBoxRollDto>>() { }, url));
         }, executor);
+    }
+
+    // ---- Phase 5: result and checkpoint (link S8a) ----
+
+    /** The ledger idempotency key the API uses for the match's settlement; send it as {@code settlement.ledgerKey} or null. */
+    public static String ledgerKey(long matchId) {
+        return "siege-survival:" + matchId;
+    }
+
+    /** True when the end reason settles the per-kill rewards (team wipe, insta-lose objective, all captured; S62). */
+    public static boolean settlesRewards(String endReason) {
+        return END_TEAM_WIPE.equals(endReason) || END_INSTA_LOSE_OBJECTIVE_CAPTURED.equals(endReason) || END_ALL_OBJECTIVES_CAPTURED.equals(endReason);
+    }
+
+    /**
+     * Posts the match's result once: 201 on the first call, 200 with the stored result on a retry with the same body
+     * (both answer the stored {@link MatchResultDto} with the API-filled fields). 409 codes: {@link #RESULT_ALREADY_STORED},
+     * {@link #SETTLEMENT_MISMATCH}, {@link #MATCH_NOT_IN_PROGRESS}, {@link #MATCH_ABORTED}. Null on a 404 (unknown match).
+     */
+    public CompletableFuture<MatchResultDto> postResult(long matchId, MatchResultDto result) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + MATCHES_ENDPOINT + "/" + matchId + "/result";
+            return nullOn404(url, () -> parse(postJson(url, json(url, result)), MatchResultDto.class, url));
+        }, executor);
+    }
+
+    /** The match's stored result; null on a 404 (none stored yet or unknown match). */
+    public CompletableFuture<MatchResultDto> getResult(long matchId) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + MATCHES_ENDPOINT + "/" + matchId + "/result";
+            return nullOn404(url, () -> parse(get(url), MatchResultDto.class, url));
+        }, executor);
+    }
+
+    /** Upserts the match's latest checkpoint (201 first, 200 afterwards; an older {@code capturedAt} is ignored). Null on a 404. */
+    public CompletableFuture<MatchCheckpointDto> putCheckpoint(long matchId, MatchCheckpointDto checkpoint) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + MATCHES_ENDPOINT + "/" + matchId + "/checkpoint";
+            return nullOn404(url, () -> parse(putJson(url, json(url, checkpoint)), MatchCheckpointDto.class, url));
+        }, executor);
+    }
+
+    /** The match's latest checkpoint; null on a 404 (none put yet or unknown match). */
+    public CompletableFuture<MatchCheckpointDto> getCheckpoint(long matchId) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + MATCHES_ENDPOINT + "/" + matchId + "/checkpoint";
+            return nullOn404(url, () -> parse(get(url), MatchCheckpointDto.class, url));
+        }, executor);
+    }
+
+    /** Serializes a result/checkpoint body with ISO-8601 dates (the API's DateTime binding rejects numeric timestamps). */
+    private String json(String url, Object body) {
+        try {
+            return isoWriter().writeValueAsString(body);
+        } catch (IOException e) {
+            throw new ApiException(url, "Could not serialize the survival result/checkpoint body", e);
+        }
+    }
+
+    private ObjectWriter isoWriter() {
+        return objectMapper.writer().without(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     }
 
     /**
