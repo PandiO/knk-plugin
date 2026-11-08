@@ -10,6 +10,8 @@ import net.knightsandkings.knk.paper.npc.NpcPlatform;
 import net.knightsandkings.knk.paper.siege.SiegeLobbyRuntime;
 import net.knightsandkings.knk.paper.siege.SiegeMatch;
 import net.knightsandkings.knk.paper.siege.SiegeMatchObserver;
+import net.knightsandkings.knk.paper.siege.survival.results.SurvivalResultService;
+import net.knightsandkings.knk.paper.siege.survival.results.SurvivalResultServices;
 import net.knightsandkings.knk.paper.siege.SiegeMessages;
 import net.knightsandkings.knk.paper.siege.SiegeService;
 import net.knightsandkings.knk.paper.siege.survival.SurvivalConfiguration.EquipmentMode;
@@ -83,6 +85,8 @@ public final class SurvivalMatchRuntime implements SiegeMatchObserver, Listener,
     private final Map<Integer, ScenarioArea> areaByLobby = new LinkedHashMap<>();
     // Phase 4 (link S7b): optional services; the per-match shops and Mystery Box stations by lobby id.
     private SurvivalEconomyServices economy;
+    // Phase 5 (link S8b): results, settlement, checkpoints, recovery; null = off (no API client).
+    private SurvivalResultService results;
     private final Map<Integer, PurchaseShop> shopByLobby = new LinkedHashMap<>();
     private final Map<Integer, MysteryBoxStations> boxesByLobby = new LinkedHashMap<>();
     private BukkitTask ticker;
@@ -115,6 +119,16 @@ public final class SurvivalMatchRuntime implements SiegeMatchObserver, Listener,
 
     public Optional<SurvivalEconomyServices> economyServices() {
         return Optional.ofNullable(economy);
+    }
+
+    /** Phase 5 (link S8b): installs result posting, checkpoints and recovery; call before {@link #start()}. Null = off. */
+    public void setResultServices(SurvivalResultServices services) {
+        this.results = services == null ? null : new SurvivalResultService(services, SurvivalResultService.Players.bukkit(), null, logger);
+        hooks.setResultPresenter(results == null ? null : (lobby, match, result, survival) -> results.present(lobby, survival));
+    }
+
+    public Optional<SurvivalResultService> resultService() {
+        return Optional.ofNullable(results);
     }
 
     public Optional<SurvivalKitPicker> kitPicker() {
@@ -163,6 +177,14 @@ public final class SurvivalMatchRuntime implements SiegeMatchObserver, Listener,
     /** Starts the ticker, the cache refresh and the leftover sweep of the loaded worlds (S61: a restart leaves no mobs). */
     public void start() {
         cache.refreshAll();
+        if (results != null) {
+            try {
+                int replayed = results.recoverOnStartup();
+                if (replayed > 0) logger.info("[Survival] Recovery: " + replayed + " survival result file(s) replayed to the API");
+            } catch (RuntimeException e) {
+                logger.log(Level.WARNING, "[Survival] Replaying the survival recovery files failed", e);
+            }
+        }
         ticker = Bukkit.getScheduler().runTaskTimer(plugin,
             net.knightsandkings.knk.core.metrics.PluginMetrics.timed("siege.survival.tick", this::tick), 1L, 1L);
         refresher = Bukkit.getScheduler().runTaskTimer(plugin, cache::refreshAll, CACHE_REFRESH_TICKS, CACHE_REFRESH_TICKS);
@@ -217,6 +239,13 @@ public final class SurvivalMatchRuntime implements SiegeMatchObserver, Listener,
                 logger.log(Level.SEVERE, "[Survival] Tick of lobby " + match.lobby().key() + " failed", e);
             }
         }
+        if (results != null) {
+            try {
+                results.tick(System.currentTimeMillis());
+            } catch (RuntimeException e) {
+                logger.log(Level.SEVERE, "[Survival] Result bookkeeping tick failed", e);
+            }
+        }
     }
 
     // ---- Siege observer ----
@@ -260,6 +289,19 @@ public final class SurvivalMatchRuntime implements SiegeMatchObserver, Listener,
         } catch (RuntimeException e) {
             logger.log(Level.SEVERE, "[Survival] Lobby " + lobby.key() + ": equipment/economy setup failed", e);
         }
+        if (results != null) {
+            try {
+                results.matchStarted(lobby, survival, kitResolver(lobby, survival), id -> boxesOf(survival).flatMap(b -> b.pendingRollOf(id)));
+            } catch (RuntimeException e) {
+                logger.log(Level.SEVERE, "[Survival] Lobby " + lobby.key() + ": result/checkpoint setup failed", e);
+            }
+        }
+    }
+
+    /** Phase 5 (link S8b): the kit a player plays in kits mode (the S7b picker's resolution), empty otherwise. */
+    private java.util.function.Function<UUID, OptionalInt> kitResolver(SiegeLobbyRuntime lobby, SurvivalMatch survival) {
+        if (economy == null || survival.config().equipment().mode() != EquipmentMode.KITS) return id -> OptionalInt.empty();
+        return id -> economy.kitPicker().selection(lobby.id()).flatMap(s -> s.resolve(id)).map(r -> OptionalInt.of(r.kitId())).orElse(OptionalInt.empty());
     }
 
     // ---- phase 4 (link S7b): equipment at the start, shops, Mystery Boxes, match items ----
@@ -408,7 +450,12 @@ public final class SurvivalMatchRuntime implements SiegeMatchObserver, Listener,
     @Override
     public void memberLeft(SiegeLobbyRuntime lobby, UUID playerId, Integer userId, String cause, boolean duringMatch) {
         matchOf(lobby.id()).ifPresent(m -> {
-            m.ghosts().release(playerId, Bukkit.getPlayer(playerId), false);
+            if (results != null) {
+                // Link S8b: the leaver is remembered for the result (S62) and the economy forfeits (S37, S44).
+                results.memberLeft(lobby, playerId, userId, duringMatch);
+            } else {
+                m.onMemberLeft(playerId, false);
+            }
             // The roster drops the member after this callback: evaluate on the next tick.
             if (plugin.isEnabled()) Bukkit.getScheduler().runTask(plugin, () -> matchOf(lobby.id()).ifPresent(SurvivalMatch::evaluateEnd));
         });
@@ -419,6 +466,7 @@ public final class SurvivalMatchRuntime implements SiegeMatchObserver, Listener,
         SurvivalMatch survival = matches.remove(lobby.id());
         areaByLobby.remove(lobby.id());
         frozenByLobby.remove(lobby.id());
+        if (results != null) results.matchEnded(lobby.id());
         if (survival == null) {
             endPhase4(lobby, null);
             return;
@@ -438,6 +486,7 @@ public final class SurvivalMatchRuntime implements SiegeMatchObserver, Listener,
         SurvivalMatch survival = matches.remove(lobby.id());
         areaByLobby.remove(lobby.id());
         frozenByLobby.remove(lobby.id());
+        if (results != null) results.matchEnded(lobby.id());
         if (survival != null) survival.cleanup();
         actors.clear(lobby.id());
         endPhase4(lobby, survival);
@@ -529,6 +578,11 @@ public final class SurvivalMatchRuntime implements SiegeMatchObserver, Listener,
         for (SurvivalMatch m : matches.values()) {
             if (lobbyKey != null && !lobbyKey.isBlank() && !m.lobby().key().equalsIgnoreCase(lobbyKey)) continue;
             lines.addAll(m.statusLines());
+        }
+        if (results == null) {
+            lines.add("Results: result posting and checkpoints are off (no API client)");
+        } else {
+            lines.addAll(results.statusLines());
         }
         return lines;
     }

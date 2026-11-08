@@ -4259,6 +4259,13 @@ public class KnKPlugin extends JavaPlugin {
         } else {
             getLogger().warning("Siege Survival phase 4 (kits, shops, Mystery Box) is off: the item blueprint/material data access is not available");
         }
+        // Phase 5 (link S8b): result posting and settlement, checkpoints, restart recovery files under siege-survival/matches.
+        siegeSurvival.setResultServices(net.knightsandkings.knk.paper.siege.survival.results.SurvivalResultServices.create(
+            apiClient.getSiegeSurvivalMatchApi(),
+            new net.knightsandkings.knk.paper.siege.survival.recovery.SurvivalRecoveryStore(
+                new java.io.File(new java.io.File(getDataFolder(), "siege-survival"), "matches"), getLogger()),
+            MenuService.mainThreadExecutor(this),
+            net.knightsandkings.knk.paper.siege.survival.SurvivalSettings.checkpointIntervalSeconds(getConfig()), getLogger()));
         siegeSurvival.start();
         getLogger().info("Siege Survival runtime initialized (inert until a lobby draws a scenario with survival settings)");
     }

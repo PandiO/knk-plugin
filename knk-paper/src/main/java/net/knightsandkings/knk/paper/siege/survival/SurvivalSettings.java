@@ -49,6 +49,15 @@ public record SurvivalSettings(TargetPolicy targeting, int behaviourTicks, int s
     }
 
     /** {@code siege.survival.mystery-box.reel-max-step-ticks}: the slowest reel step (ticks), link S7b. */
+    /** Default of {@code siege.survival.checkpoint-interval-seconds} (link S8b, DESIGN §10): 30 s; 0 turns the interval off. */
+    public static final int DEFAULT_CHECKPOINT_INTERVAL_SECONDS = 30;
+
+    /** {@code siege.survival.checkpoint-interval-seconds}: seconds between two periodic checkpoints (0 = state changes only). */
+    public static int checkpointIntervalSeconds(ConfigurationSection root) {
+        ConfigurationSection s = root == null ? null : root.getConfigurationSection(SECTION);
+        return s == null ? DEFAULT_CHECKPOINT_INTERVAL_SECONDS : Math.max(0, s.getInt("checkpoint-interval-seconds", DEFAULT_CHECKPOINT_INTERVAL_SECONDS));
+    }
+
     public static int reelMaxStepTicks(ConfigurationSection root) {
         ConfigurationSection s = root == null ? null : root.getConfigurationSection(SECTION);
         return s == null ? DEFAULT_REEL_MAX_STEP_TICKS : Math.max(1, s.getInt("mystery-box.reel-max-step-ticks", DEFAULT_REEL_MAX_STEP_TICKS));

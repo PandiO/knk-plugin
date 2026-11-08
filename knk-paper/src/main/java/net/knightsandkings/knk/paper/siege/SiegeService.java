@@ -756,13 +756,14 @@ public final class SiegeService {
         Set<Integer> alliancesLeft = match.alliances().alliancesWithMembers(match.roster().membersPerTeam());
         WinResolver.Result result = modeHooks.resolveResult(rt, match, reason)
                 .orElseGet(() -> match.winResolver().resolve(reason, match.board(), alliancesLeft));
-        announceResult(rt, match, result);
+        boolean presentedByMode = modeHooks.presentResult(rt, match, result); // link S8b: survival shows its own result
+        if (!presentedByMode) announceResult(rt, match, result);
 
         match.contributions().close(Instant.now(), this::safeAfkSince);
         Completion completion = completion(rt, match, result);
         // Alpha run 1 (PandiO/knk-workspace#164): each member present at the end gets a compact result with every stat
         // and reward in its hover, once the server answered complete (or after a short wait without the rewards).
-        SiegeResultDelivery delivery = result.isAborted() ? null : resultDelivery(rt, match, result);
+        SiegeResultDelivery delivery = result.isAborted() || presentedByMode ? null : resultDelivery(rt, match, result);
         withMatchId(rt, id -> result.isAborted()
                 ? guarded("abortMatch", matchApi.abortMatch(id, reason))
                 : guarded("completeMatch", matchApi.completeMatch(id, completion))

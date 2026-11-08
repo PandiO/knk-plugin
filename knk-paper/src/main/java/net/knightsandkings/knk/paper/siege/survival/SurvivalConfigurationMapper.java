@@ -118,6 +118,7 @@ public final class SurvivalConfigurationMapper {
             monsterMix(dto.monsterTypes()),
             specialProfiles(dto),
             specialSchedule(dto),
+            specialProfileLabels(dto),
             zones(dto),
             dto.spawn() == null ? 0 : clamp(orDefault(dto.spawn().favorNearPlayersPercent(), 0), 0, 100),
             dto.spawn() == null ? 1 : Math.max(1, orDefault(dto.spawn().nearZoneCount(), 1)),
@@ -286,6 +287,17 @@ public final class SurvivalConfigurationMapper {
             } catch (IllegalArgumentException ignored) {
                 // an unusable profile is left out; the schedule's readiness names it (special.unknown-profile)
             }
+        }
+        return out;
+    }
+
+    /** Link S8b: the key and name of every special profile, by its configuration id (the planner's profile id). */
+    static Map<String, SurvivalConfiguration.SpecialProfileLabel> specialProfileLabels(ConfigurationDto dto) {
+        Map<String, SurvivalConfiguration.SpecialProfileLabel> out = new LinkedHashMap<>();
+        if (dto.specialWaves() == null || dto.specialWaves().profiles() == null) return out;
+        for (SpecialWaveProfileDto p : dto.specialWaves().profiles()) {
+            if (p == null || p.id() == null) continue;
+            out.put(String.valueOf(p.id()), new SurvivalConfiguration.SpecialProfileLabel(p.key(), p.name()));
         }
         return out;
     }

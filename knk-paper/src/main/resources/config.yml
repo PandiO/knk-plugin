@@ -451,6 +451,9 @@ siege:
     # Phase 4 (link S7b): the in-world Mystery Box reel slows down to this many ticks per step (the lootbox reel's default).
     mystery-box:
       reel-max-step-ticks: 8
+    # Link S8b (DESIGN §10): seconds between two periodic checkpoints of a running survival match (the state
+    # changes - round start/end, captures, deaths, respawns - always write one); 0 turns the interval off.
+    checkpoint-interval-seconds: 30
 
 # Diagnostic telemetry (KNG-34 link 6, docs/specs/player-statistics DESIGN.md §F.12): a timeline of
 # meaningful actions and outcomes (joins, menus, command labels, Siege lobby/match steps, failed API

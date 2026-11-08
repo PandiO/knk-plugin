@@ -47,6 +47,15 @@ public interface SiegeModeHooks {
         return Optional.empty();
     }
 
+    /**
+     * True: the mode showed the match's result itself (announcement and per-member lines; Siege Survival link S8b),
+     * so the PvP announcement, result lines and reward follow-up are skipped. The match API complete/abort call is
+     * still made. False (the default): the ordinary PvP presentation.
+     */
+    default boolean presentResult(SiegeLobbyRuntime lobby, SiegeMatch match, WinResolver.Result result) {
+        return false;
+    }
+
     /** The capture configuration a match of this lobby plays with (side-capture reduction and the like). */
     default KnkSiegeConfiguration matchConfiguration(SiegeLobbyRuntime lobby, KnkSiegeScenario scenario,
                                                      KnkSiegeConfiguration configuration) {

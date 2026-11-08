@@ -48,6 +48,7 @@ public record SurvivalConfiguration(
         MonsterMix monsterMix,
         Map<String, SpecialWaveProfile> specialProfiles,
         SpecialWaveSchedule specialSchedule,
+        Map<String, SpecialProfileLabel> specialProfileLabels,
         List<ZoneSpec> zones,
         int favorNearPlayersPercent,
         int nearZoneCount,
@@ -71,6 +72,7 @@ public record SurvivalConfiguration(
         gates = gates == null ? List.of() : List.copyOf(gates);
         specialProfiles = specialProfiles == null ? Map.of() : Map.copyOf(specialProfiles);
         specialSchedule = specialSchedule == null ? SpecialWaveSchedule.none() : specialSchedule;
+        specialProfileLabels = specialProfileLabels == null ? Map.of() : Map.copyOf(specialProfileLabels);
         zones = zones == null ? List.of() : List.copyOf(zones);
         killRewards = killRewards == null ? KillRewardSettings.defaults() : killRewards;
         equipment = equipment == null ? EquipmentSpec.ownInventory() : equipment;
@@ -82,6 +84,17 @@ public record SurvivalConfiguration(
     }
 
     /** An objective of the scenario as survival sees it. */
+    /**
+     * What a special profile is called (link S8b, DESIGN §7): the API's {@code key} (checkpoint {@code specialProfileKey})
+     * and display {@code name} ("Special round: <name>"); the profile DTO carries no description.
+     */
+    public record SpecialProfileLabel(String key, String name) {
+        public SpecialProfileLabel {
+            key = key == null ? "" : key;
+            name = name == null ? "" : name;
+        }
+    }
+
     public record ObjectiveSpec(int id, String name, boolean instaLose, OptionalInt gateStructureId,
                                 Optional<WorldPoint> capture, TargetOverrideMode override) {
         public ObjectiveSpec {
@@ -295,6 +308,20 @@ public record SurvivalConfiguration(
     }
 
     /** The core spawn zones (for the frontier). */
+    /** The special profile's key for the checkpoint: the API key, else the configuration id. */
+    public String specialProfileKey(String profileId) {
+        SpecialProfileLabel label = specialProfileLabels.get(profileId);
+        return label == null || label.key().isBlank() ? profileId : label.key();
+    }
+
+    /** The special profile's display name: the API name, else its key, else the id. */
+    public String specialProfileName(String profileId) {
+        SpecialProfileLabel label = specialProfileLabels.get(profileId);
+        if (label == null) return profileId;
+        if (!label.name().isBlank()) return label.name();
+        return label.key().isBlank() ? profileId : label.key();
+    }
+
     public List<SpawnZone> spawnZones() {
         return zones.stream().map(ZoneSpec::zone).toList();
     }

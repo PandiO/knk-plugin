@@ -25,10 +25,16 @@ import java.util.logging.Logger;
  */
 public final class SurvivalModeHooks implements SiegeModeHooks {
 
+    /** Link S8b: who shows (and posts) the result of a survival match instead of the PvP result pipeline. */
+    public interface ResultPresenter {
+        boolean present(SiegeLobbyRuntime lobby, SiegeMatch match, WinResolver.Result result, SurvivalMatch survival);
+    }
+
     private final SurvivalConfigurationCache cache;
     private final Function<Integer, Optional<SurvivalMatch>> matchOfLobby;
     private final Function<Integer, Optional<SurvivalConfiguration>> frozenOfLobby;
     private final Logger logger;
+    private ResultPresenter resultPresenter;
 
     public SurvivalModeHooks(SurvivalConfigurationCache cache, Function<Integer, Optional<SurvivalMatch>> matchOfLobby,
                              Function<Integer, Optional<SurvivalConfiguration>> frozenOfLobby, Logger logger) {
@@ -36,6 +42,11 @@ public final class SurvivalModeHooks implements SiegeModeHooks {
         this.matchOfLobby = matchOfLobby;
         this.frozenOfLobby = frozenOfLobby;
         this.logger = logger;
+    }
+
+    /** Installs the result presenter (null = the PvP presentation stays, as before link S8b). */
+    public void setResultPresenter(ResultPresenter presenter) {
+        this.resultPresenter = presenter;
     }
 
     /** The configuration a lobby's scenario would play: the lobby-level one when fetched, else the scenario-level one. */
@@ -106,6 +117,20 @@ public final class SurvivalModeHooks implements SiegeModeHooks {
             .orElseGet(() -> SurvivalEndMapping.survivalReason(reason, match.roster().size() > 0));
         if (m.endReason().isEmpty()) m.endedExternally(survivalReason);
         return Optional.of(SurvivalEndMapping.result(survivalReason, reason, m.npcAllianceGroup()));
+    }
+
+    /** Link S8b: a survival match's result is shown by the result service (flag S5-5); PvP lobbies keep the PvP screen. */
+    @Override
+    public boolean presentResult(SiegeLobbyRuntime lobby, SiegeMatch match, WinResolver.Result result) {
+        if (resultPresenter == null) return false;
+        Optional<SurvivalMatch> survival = matchOfLobby.apply(lobby.id());
+        if (survival.isEmpty()) return false;
+        try {
+            return resultPresenter.present(lobby, match, result, survival.get());
+        } catch (RuntimeException e) {
+            if (logger != null) logger.log(java.util.logging.Level.SEVERE, "[Survival] Lobby " + lobby.key() + ": presenting the result failed; the PvP result is shown", e);
+            return false;
+        }
     }
 
     /** S51: the side-capture reduction is off in survival. */
