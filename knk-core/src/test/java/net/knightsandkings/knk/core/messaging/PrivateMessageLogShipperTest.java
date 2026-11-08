@@ -233,4 +233,23 @@ class PrivateMessageLogShipperTest {
         assertEquals(List.of("last words"), api.sentTexts());
         assertFalse(Files.exists(spool));
     }
+
+    // ---- account erasure (PandiO/knk-workspace#184) ----
+
+    @Test
+    void purge_DropsWhatTheErasedPlayerSentOrReceived() throws Exception {
+        UUID carol = UUID.fromString("00000000-0000-0000-0000-00000000000c");
+        PrivateMessageLogShipper shipper = shipper(1000, null);
+        shipper.submit(pm("keep"));
+        shipper.submit(new PrivateMessageLogEntry(UUID.randomUUID(), Instant.parse("2026-09-26T11:59:00Z"), carol, "Carol",
+                BOB, "Bob", "from carol", Outcome.DELIVERED, false));
+        shipper.submit(new PrivateMessageLogEntry(UUID.randomUUID(), Instant.parse("2026-09-26T11:59:00Z"), ALICE, "Alice",
+                carol, "Carol", "to carol", Outcome.DELIVERED, false));
+
+        assertEquals(2, shipper.purge(carol));
+        assertEquals(0, shipper.purge(null));
+        shipper.flushNow();
+
+        assertEquals(List.of("keep"), api.sentTexts());
+    }
 }

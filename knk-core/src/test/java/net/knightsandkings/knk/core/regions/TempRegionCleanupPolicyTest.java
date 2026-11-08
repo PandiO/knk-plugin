@@ -74,4 +74,45 @@ class TempRegionCleanupPolicyTest {
         assertEquals(Decision.NOT_TEMPORARY, decide("town_1", OLD, false, lookup(Usage.UNUSED)));
         assertTrue(lookups.isEmpty());
     }
+
+    // ===== PandiO/knk-workspace#34: the fresh lookup asks domains and lootbox spawn areas =====
+
+    @Test
+    void inUseByAny_keepsARegionALootboxAreaUses() {
+        Function<String, Usage> usage = TempRegionCleanupPolicy.inUseByAny(id -> Usage.UNUSED, id -> Usage.IN_USE);
+
+        assertEquals(Usage.IN_USE, usage.apply("tempregion_worldtask_1"));
+        assertEquals(Decision.KEEP_IN_USE,
+                TempRegionCleanupPolicy.decide("tempregion_worldtask_1", "1000", 2000, id -> false, usage));
+    }
+
+    @Test
+    void inUseByAny_isUnusedOnlyWhenEveryOwnerSaysSo() {
+        assertEquals(Usage.UNUSED, TempRegionCleanupPolicy.inUseByAny(id -> Usage.UNUSED, id -> Usage.UNUSED).apply("r"));
+        assertEquals(Usage.UNKNOWN, TempRegionCleanupPolicy.inUseByAny(id -> Usage.UNUSED, id -> Usage.UNKNOWN).apply("r"));
+        assertEquals(Usage.UNKNOWN, TempRegionCleanupPolicy.inUseByAny(id -> Usage.UNKNOWN, id -> Usage.UNUSED).apply("r"));
+        assertEquals(Usage.UNKNOWN, TempRegionCleanupPolicy.inUseByAny(id -> Usage.UNUSED, id -> null).apply("r"));
+        assertEquals(Usage.UNKNOWN, TempRegionCleanupPolicy.inUseByAny(id -> Usage.UNUSED, null).apply("r"));
+    }
+
+    @Test
+    void inUseByAny_anOwnerThatThrows_keepsTheRegion_andTheOthersAreStillAsked() {
+        List<String> asked = new ArrayList<>();
+        Function<String, Usage> usage = TempRegionCleanupPolicy.inUseByAny(
+                id -> { throw new IllegalStateException("API down"); },
+                id -> { asked.add(id); return Usage.IN_USE; });
+
+        assertEquals(Usage.IN_USE, usage.apply("r"));
+        assertEquals(List.of("r"), asked);
+        assertEquals(Usage.UNKNOWN, TempRegionCleanupPolicy.inUseByAny(
+                id -> { throw new IllegalStateException("API down"); }, id -> Usage.UNUSED).apply("r"));
+    }
+
+    @Test
+    void inUseByAny_stopsAtTheFirstOwnerThatUsesIt() {
+        List<String> asked = new ArrayList<>();
+        TempRegionCleanupPolicy.inUseByAny(id -> Usage.IN_USE, id -> { asked.add(id); return Usage.UNUSED; }).apply("r");
+
+        assertTrue(asked.isEmpty());
+    }
 }

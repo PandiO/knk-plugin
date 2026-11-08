@@ -23,7 +23,9 @@ import java.util.logging.Logger;
  * - POST /Regions/rename?oldRegionId=...&newRegionId=...[&domainType=...][&parentRegionId=...][&world=...][&replaceRegionId=...]
  *   (domainType/parentRegionId are optional: when given, the renamed region also gets its managed-region parent,
  *   priority and flags - see {@code regions.managed}; replaceRegionId (KNG-103) is the domain's region before its
- *   region step was run again, replaced by the renamed one - see {@code WorldGuardRegionRenamer})
+ *   region step was run again, replaced by the renamed one - see {@code WorldGuardRegionRenamer}; [&subRegionOf=...]
+ *   (KNG-255) and [&fullHeight=true] (PandiO/knk-workspace#34, a lootbox spawn area's region stretched to the world's
+ *   full build height) are optional too)
  * - GET /api/regions/{regionId}/contains-location?x=...&z=...&allowBoundary=false
  * - GET /api/regions/{parentRegionId}/contains-region/{childRegionId}?requireFullContainment=true
  *
@@ -106,6 +108,8 @@ public class RegionHttpServer {
             String replaceRegionId = query.get("replaceRegionId");
             // KNG-255: the domain's main region when the renamed region is one of its sub-regions (optional).
             String subRegionOf = query.get("subRegionOf");
+            // PandiO/knk-workspace#34: a lootbox spawn area's drawn region, stretched to full build height (optional).
+            boolean fullHeight = "true".equalsIgnoreCase(query.get("fullHeight"));
 
             if (oldRegionId == null || newRegionId == null || oldRegionId.isBlank() || newRegionId.isBlank()) {
                 send(exchange, 400, "oldRegionId and newRegionId are required");
@@ -115,7 +119,7 @@ public class RegionHttpServer {
             // Run rename on main thread to keep WorldGuard safe
             plugin.getServer().getScheduler().callSyncMethod(plugin, () -> {
                 boolean result = handler.renameRegion(oldRegionId, newRegionId, domainType, parentRegionId, world,
-                    replaceRegionId, subRegionOf);
+                    replaceRegionId, subRegionOf, fullHeight);
                 try {
                     send(exchange, 200, Boolean.toString(result));
                 } catch (IOException e) {

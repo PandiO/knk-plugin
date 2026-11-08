@@ -159,6 +159,7 @@ public class KnkApiClient {
     private final net.knightsandkings.knk.core.ports.api.NavigationCompassSettingsApi navigationCompassSettingsApi;
     private final RoadNetworkCommandApi roadNetworkCommandApi;
     private final net.knightsandkings.knk.core.ports.api.LocationRetentionApi locationRetentionApi;
+    private final net.knightsandkings.knk.core.ports.api.PrivacyErasuresApi privacyErasuresApi;
 
     private KnkApiClient(
         String baseUrl,
@@ -237,6 +238,7 @@ public class KnkApiClient {
         this.navigationCompassSettingsApi = new net.knightsandkings.knk.api.impl.NavigationCompassSettingsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.roadNetworkCommandApi = new RoadNetworkCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.locationRetentionApi = new net.knightsandkings.knk.api.impl.LocationRetentionApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.privacyErasuresApi = new net.knightsandkings.knk.api.impl.PrivacyErasuresApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
     }
     
     public HealthApi getHealthApi() {
@@ -417,6 +419,11 @@ public class KnkApiClient {
     /** Location retention (KNG-80): the orphan list and teleport targets. */
     public net.knightsandkings.knk.core.ports.api.LocationRetentionApi getLocationRetentionApi() {
         return locationRetentionApi;
+    }
+
+    /** Realtime S5 (PandiO/knk-workspace#184): the GDPR erasure feed the game server catches up from. */
+    public net.knightsandkings.knk.core.ports.api.PrivacyErasuresApi getPrivacyErasuresApi() {
+        return privacyErasuresApi;
     }
 
     /** KNG-18 Phase 2: players' ignore lists. */
