@@ -80,4 +80,27 @@ class MatchEconomyTest {
         assertFalse(economy.isMember(alice));
         assertEquals(0, BigDecimal.ZERO.compareTo(economy.accrual().coins(alice)));
     }
+
+    @Test
+    void bonusKillsAndMatchCurrencyEarnedSpentAreTalliedPerPlayer() {
+        economy.creditKill(1, new KillBlow(alice, false, false));
+        economy.creditKill(2, new KillBlow(alice, true, false));
+        economy.creditKill(3, new KillBlow(alice, false, true));
+        assertEquals(3, economy.kills(alice));
+        assertEquals(2, economy.bonusKills(alice), "headshot and critical kills count once each (S33)");
+        assertEquals(70 + 77 + 77, economy.matchCurrencyEarned(alice));
+        assertEquals(0, economy.matchCurrencySpent(alice));
+
+        assertTrue(economy.transfer("t1", alice, bob, 50).accepted());
+        assertTrue(economy.transfer("t1", alice, bob, 50).accepted(), "the replay is accepted but not counted twice");
+        assertEquals(50, economy.matchCurrencySpent(alice));
+        assertEquals(50, economy.matchCurrencyEarned(bob));
+        assertTrue(economy.charge("c1", alice, 100, "purchase:1").accepted());
+        economy.charge("c1", alice, 100, "purchase:1");
+        assertEquals(150, economy.matchCurrencySpent(alice));
+        assertFalse(economy.charge("c2", alice, 10_000, "purchase:2").accepted());
+        assertEquals(150, economy.matchCurrencySpent(alice), "a rejected charge is not spent");
+        assertEquals(74, economy.balance(alice));
+        assertEquals(0, economy.bonusKills(bob));
+    }
 }
