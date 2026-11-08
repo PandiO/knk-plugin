@@ -66,6 +66,12 @@ public record PlayerNotification(
      */
     public static final String TYPE_LOOTBOX_TOKENS_ISSUED = "LootboxTokensIssued";
     /**
+     * A staff member granted the player a kit outside the game server ("Grant" on the web app's player profile,
+     * PandiO/knk-workspace#261). No payload: fetch the player's pending kit deliveries and hand them over. The API's
+     * claim row is the record, so a lost nudge only waits for the player's next join.
+     */
+    public static final String TYPE_KIT_DELIVERY_PENDING = "KitDeliveryPending";
+    /**
      * Another player paid this one (/pay, currency ledger KNG-21 Phase 3). Payload in
      * {@link #payment()}. Queued for every completed payment, so an offline recipient hears
      * about it on their next join.

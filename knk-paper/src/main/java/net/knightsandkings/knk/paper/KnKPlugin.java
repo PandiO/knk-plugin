@@ -187,6 +187,8 @@ public class KnKPlugin extends JavaPlugin {
     private KitsDataAccess kitsDataAccess;
     private MenuTemplatesDataAccess menuTemplatesDataAccess;
     private net.knightsandkings.knk.paper.kit.KitGrantFlow kitGrantFlow;
+    // #261: hands over kits staff granted from the web app (join, notification, after a siege).
+    private net.knightsandkings.knk.paper.kit.KitGrantDelivery kitGrantDelivery;
     private net.knightsandkings.knk.core.dataaccess.TitleBracketsDataAccess titleBracketsDataAccess;
     private net.knightsandkings.knk.core.dataaccess.PermissionGroupsDataAccess permissionGroupsDataAccess;
     private net.knightsandkings.knk.paper.user.UserAdminService userAdminService;
@@ -837,6 +839,7 @@ public class KnKPlugin extends JavaPlugin {
                 MenuService.mainThreadExecutor(this), kitsCommandApi, itemBlueprintsDataAccess,
                 minecraftMaterialRefsDataAccess, knkPermissible, cacheManager.getUserCache()
             );
+            initializeKitGrantDelivery();
             // Content port CP3/CP8: title brackets are seeded data - cache the list for 10 minutes.
             this.titleBracketsDataAccess = new net.knightsandkings.knk.core.dataaccess.TitleBracketsDataAccess(
                 apiClient.getTitleBracketsQueryApi(), java.time.Duration.ofMinutes(10)
@@ -3896,6 +3899,44 @@ public class KnKPlugin extends JavaPlugin {
     }
 
     /**
+     * PandiO/knk-workspace#261: "Grant" on the web app's player profile only wrote the claim, because items are only
+     * placed by the plugin's own flows. The API now keeps such a grant pending; this hands it over on the player's
+     * join, on a KitDeliveryPending notification (realtime push, or the poll with realtime off) and after a siege.
+     */
+    private void initializeKitGrantDelivery() {
+        java.util.function.Function<org.bukkit.entity.Player, Integer> userIdOf = kitGrantFlow::resolveUserId;
+        var items = itemBlueprintsDataAccess;
+        var materials = minecraftMaterialRefsDataAccess;
+        // In a siege (hub or match) the inventory is the siege one and is replaced afterwards: held back until then.
+        // siegeService is created later (initializeSiege), so it's read per call.
+        kitGrantDelivery = new net.knightsandkings.knk.paper.kit.KitGrantDelivery(
+            MenuService.mainThreadExecutor(this), kitsCommandApi, userIdOf,
+            uuid -> siegeService != null && siegeService.activeLobbyOf(uuid).isPresent(),
+            loadout -> net.knightsandkings.knk.paper.kit.KitGrantPlacer.resolveAsync(loadout, items, materials),
+            net.knightsandkings.knk.paper.kit.KitGrantPlacer::place);
+        getServer().getPluginManager().registerEvents(
+            new net.knightsandkings.knk.paper.listeners.KitDeliveryJoinListener(this, kitGrantDelivery, userIdOf), this);
+        if (playerNotificationPoller != null) {
+            playerNotificationPoller.setKitDeliveryHandler(kitGrantDelivery::deliverPending);
+        }
+    }
+
+    /** #261: kits granted from the web app during a siege, once it gave the player's own inventory back. */
+    private void deliverKitsAfterSiege(org.bukkit.entity.Player player) {
+        var delivery = kitGrantDelivery;
+        if (delivery == null || !isEnabled()) {
+            return;
+        }
+        java.util.UUID uuid = player.getUniqueId();
+        getServer().getScheduler().runTaskLater(this, () -> {
+            org.bukkit.entity.Player online = getServer().getPlayer(uuid);
+            if (online != null && online.isOnline()) {
+                delivery.deliverPending(online); // skips a player who already joined another siege
+            }
+        }, 20L);
+    }
+
+    /**
      * After a siege restored a player's own inventory: hand over the lootbox tokens held back during the siege and any
      * reel item that came up during it, so they don't have to rejoin. A second later, so a quitting player is gone
      * (their next join delivers them) and a player who immediately joined another siege is skipped.
@@ -4236,6 +4277,7 @@ public class KnKPlugin extends JavaPlugin {
         siegeVault.setAfterRestore(player -> {
             siegeBooks.sweep(player);
             deliverLootboxItemsAfterSiege(player);
+            deliverKitsAfterSiege(player);
         });
 
         var pluginManager = getServer().getPluginManager();
