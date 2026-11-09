@@ -146,6 +146,8 @@ public class KnkApiClient {
     private final KitsQueryApi kitsQueryApi;
     private final net.knightsandkings.knk.core.ports.api.CategoriesQueryApi categoriesQueryApi;
     private final KitsCommandApi kitsCommandApi;
+    /** PandiO/knk-workspace#269: temp regions the API released for removal. */
+    private final net.knightsandkings.knk.core.ports.api.TempRegionReleasesApi tempRegionReleasesApi;
     private final net.knightsandkings.knk.core.ports.api.GameSettingsQueryApi gameSettingsQueryApi;
     private final net.knightsandkings.knk.core.ports.api.GameSettingsCommandApi gameSettingsCommandApi;
     private final net.knightsandkings.knk.core.ports.api.DomainAccessRulesApi domainAccessRulesApi;
@@ -224,6 +226,8 @@ public class KnkApiClient {
         this.titleBracketsQueryApi = new TitleBracketsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.kitsQueryApi = new KitsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.kitsCommandApi = new KitsCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.tempRegionReleasesApi = new net.knightsandkings.knk.api.impl.TempRegionReleasesApiImpl(baseUrl, httpClient,
+                objectMapper, authProvider, executor, debugLogging);
         this.currencyApi = new net.knightsandkings.knk.api.impl.CurrencyApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.categoriesQueryApi = new net.knightsandkings.knk.api.impl.CategoriesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.gameSettingsQueryApi = new net.knightsandkings.knk.api.impl.GameSettingsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -268,6 +272,11 @@ public class KnkApiClient {
     /** Player currency routes: balances, /baltop, /pay and history (currency ledger, KNG-21 Phase 3). */
     public CurrencyApi getCurrencyApi() {
         return currencyApi;
+    }
+
+    /** PandiO/knk-workspace#269. */
+    public net.knightsandkings.knk.core.ports.api.TempRegionReleasesApi getTempRegionReleasesApi() {
+        return tempRegionReleasesApi;
     }
 
     public KitsCommandApi getKitsCommandApi() {

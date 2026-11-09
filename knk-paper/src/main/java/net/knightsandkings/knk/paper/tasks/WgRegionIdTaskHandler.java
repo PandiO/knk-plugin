@@ -171,6 +171,11 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
         return playerId != null && activeTasksByPlayer.containsKey(playerId);
     }
 
+    /** PandiO/knk-workspace#269: whether a player on this server is running task {@code taskId} (its temp region stays). */
+    public boolean isHandlingTask(int taskId) {
+        return activeTasksByPlayer.values().stream().anyMatch(context -> context.taskId == taskId);
+    }
+
     @Override
     public void setLifecycle(WorldTaskLifecycle lifecycle) {
         this.lifecycle = lifecycle != null ? lifecycle : WorldTaskLifecycle.NONE;

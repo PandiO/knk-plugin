@@ -662,6 +662,13 @@ public class KnKPlugin extends JavaPlugin {
                     Math.max(1, getConfig().getLong("regions.temp-retention.days", 14)), managedRegions::protectsFromCleanup,
                     TempRegionRetentionTask.regionUsageVia(domainsQueryApi, apiClient.getLootboxesQueryApi()),
                     domainAccessSync::listsSubRegion);
+            // PandiO/knk-workspace#269: temp regions the API released (abandoned drafts) go without the 14-day wait.
+            tempRegionRetentionTask.setReleasePass(new net.knightsandkings.knk.paper.tasks.TempRegionReleasePass(
+                    apiClient.getTempRegionReleasesApi(), worldTaskLeases.serverId(),
+                    net.knightsandkings.knk.paper.tasks.TempRegionReleasePass.worldGuard(this), managedRegions::protectsFromCleanup,
+                    TempRegionRetentionTask.regionUsageVia(domainsQueryApi, apiClient.getLootboxesQueryApi()),
+                    wgRegionIdHandler::isHandlingTask),
+                    getConfig().getLong("regions.temp-retention.release-interval-minutes", 5));
             tempRegionRetentionTask.start();
 
             // Start headless WorldTask poller (webapp-initiated tasks that need no player)

@@ -42,6 +42,10 @@ import java.util.logging.Logger;
  *
  * PandiO/knk-workspace#34: the fresh lookup also asks the lootbox spawn areas ({@link #regionUsageVia}), so an area
  * whose drawn region could not be renamed to {@code lootbox_area_<id>} keeps it.
+ *
+ * PandiO/knk-workspace#269: with {@link #setReleasePass} it also runs {@link TempRegionReleasePass} every few minutes,
+ * which removes the temp regions the API released (abandoned drafts, tasks closed without a result) without waiting for
+ * the retention period. This daily pass stays the backstop.
  */
 public class TempRegionRetentionTask {
     private static final Logger LOGGER = Logger.getLogger(TempRegionRetentionTask.class.getName());
@@ -58,6 +62,9 @@ public class TempRegionRetentionTask {
     private final Function<String, Usage> domainUsage;
     private final Predicate<String> listedSubRegion;
     private BukkitTask task;
+    private TempRegionReleasePass releasePass;
+    private long releaseIntervalMinutes;
+    private BukkitTask releaseTask;
 
     /**
      * @param knownDomainRegion regions the last managed-region repair saw a domain use (true for everything until it has
@@ -156,6 +163,14 @@ public class TempRegionRetentionTask {
     }
 
     /**
+     * #269: also run {@code pass} every {@code intervalMinutes} (0 or less: never), from {@link #start()}. Call before it.
+     */
+    public void setReleasePass(TempRegionReleasePass pass, long intervalMinutes) {
+        this.releasePass = pass;
+        this.releaseIntervalMinutes = intervalMinutes;
+    }
+
+    /**
      * Start the retention task, running once per day.
      */
     public void start() {
@@ -167,6 +182,27 @@ public class TempRegionRetentionTask {
             24 * 60 * 60 * 20 // 24 hours
         );
         LOGGER.info("TempRegionRetentionTask started. Will clean up unused temp regions older than " + (retentionMillis / (24 * 60 * 60 * 1000)) + " days");
+        if (releasePass != null && releaseIntervalMinutes > 0) {
+            long period = releaseIntervalMinutes * 60 * 20;
+            releaseTask = plugin.getServer().getScheduler().runTaskTimerAsynchronously(plugin, this::runReleasePass,
+                    2 * 60 * 20, period);
+            LOGGER.info("Temp regions of abandoned drafts are removed every " + releaseIntervalMinutes
+                    + " minutes once the API releases them (regions.temp-retention.release-interval-minutes)");
+        }
+    }
+
+    private void runReleasePass() {
+        try {
+            TempRegionReleasePass.Result result = releasePass.run();
+            if (result.any()) {
+                LOGGER.info("Released temp regions: removed " + result.removed().size() + ", already gone "
+                        + result.missing().size() + ", kept " + result.kept().size()
+                        + (result.failed().isEmpty() ? "" : ", failed " + result.failed().size())
+                        + (result.waiting().isEmpty() ? "" : ", waiting " + result.waiting().size()));
+            }
+        } catch (Exception e) {
+            LOGGER.warning("Error removing released temp regions: " + e.getMessage());
+        }
     }
 
     /**
@@ -176,6 +212,10 @@ public class TempRegionRetentionTask {
         if (task != null) {
             task.cancel();
             task = null;
+        }
+        if (releaseTask != null) {
+            releaseTask.cancel();
+            releaseTask = null;
         }
         LOGGER.info("TempRegionRetentionTask stopped");
     }
