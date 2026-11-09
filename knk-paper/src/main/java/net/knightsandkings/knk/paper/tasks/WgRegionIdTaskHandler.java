@@ -702,7 +702,17 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      */
     public boolean renameRegion(String oldRegionId, String newRegionId, String domainType, String parentRegionId,
                                 String world, String replaceRegionId, String subRegionOf) {
-        boolean renamed = renameRegionInternal(oldRegionId, newRegionId, world, replaceRegionId);
+        return renameRegion(oldRegionId, newRegionId, domainType, parentRegionId, world, replaceRegionId, subRegionOf, false);
+    }
+
+    /**
+     * PandiO/knk-workspace#34: as above; with {@code fullHeight} the renamed region spans the world's full build height
+     * (a lootbox spawn area drawn through its form, like {@code /knk lootbox area create}). The rename plan, the KNG-103
+     * replace and the rollback are the same.
+     */
+    public boolean renameRegion(String oldRegionId, String newRegionId, String domainType, String parentRegionId,
+                                String world, String replaceRegionId, String subRegionOf, boolean fullHeight) {
+        boolean renamed = renameRegionInternal(oldRegionId, newRegionId, world, replaceRegionId, fullHeight);
         if (renamed && subRegionOf != null && !subRegionOf.isBlank()) {
             finalizeSubRegion(newRegionId, subRegionOf.trim(), world);
             return true;
@@ -752,7 +762,8 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
         }
     }
 
-    private boolean renameRegionInternal(String oldRegionId, String newRegionId, String worldName, String replaceRegionId) {
+    private boolean renameRegionInternal(String oldRegionId, String newRegionId, String worldName, String replaceRegionId,
+                                         boolean fullHeight) {
         if (oldRegionId == null || oldRegionId.trim().isEmpty() || 
             newRegionId == null || newRegionId.trim().isEmpty()) {
             LOGGER.warning("Cannot rename region: oldRegionId or newRegionId is null/empty");
@@ -780,8 +791,10 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 return false;
             }
 
+            WorldGuardRegionRenamer.Height height = fullHeight
+                ? new WorldGuardRegionRenamer.Height(world.getMinHeight(), world.getMaxHeight() - 1) : null;
             WorldGuardRegionRenamer.Result result =
-                WorldGuardRegionRenamer.rename(regionManager, oldRegionId, newRegionId, replaceRegionId);
+                WorldGuardRegionRenamer.rename(regionManager, oldRegionId, newRegionId, replaceRegionId, height);
             if (!result.success()) {
                 LOGGER.warning("Failed to rename region " + oldRegionId + " to " + newRegionId + " in " + world.getName()
                     + ": " + result.detail());

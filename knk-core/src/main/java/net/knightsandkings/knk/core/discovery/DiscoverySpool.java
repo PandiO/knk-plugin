@@ -161,6 +161,29 @@ public final class DiscoverySpool {
         }
     }
 
+    /**
+     * Account erasure (PandiO/knk-workspace#184): deletes the spooled discoveries of the erased account, its file by UUID
+     * and any file filed under its user id (a UUID the feed no longer carries). The API refuses discoveries for an erased
+     * account anyway, so nothing is replayed first.
+     *
+     * @param playerId the former UUID, or null when unknown
+     * @return how many spooled entries were deleted
+     */
+    public synchronized int deleteAccount(UUID playerId, int userId) {
+        int deleted = 0;
+        for (Pending pending : list()) {
+            boolean match = pending.playerId().equals(playerId) || (userId > 0 && pending.userId() == userId);
+            if (match) {
+                deleted += pending.entries().size();
+                delete(pending.playerId());
+            }
+        }
+        if (playerId != null && Files.exists(file(playerId))) {
+            delete(playerId); // unreadable file of that player
+        }
+        return deleted;
+    }
+
     public synchronized boolean isEmpty() {
         return list().isEmpty();
     }

@@ -28,6 +28,11 @@ public final class ApiPrivateMessageLog implements PrivateMessageLogger {
         shipper.submit(toLogEntry(UUID.randomUUID(), entry));
     }
 
+    /** Account erasure (PandiO/knk-workspace#184): drops the queued messages the player sent or received. */
+    public int purge(UUID playerId) {
+        return shipper.purge(playerId);
+    }
+
     /** Messages waiting to be sent (/knk health). */
     public int queueDepth() {
         return shipper.queueDepth();
