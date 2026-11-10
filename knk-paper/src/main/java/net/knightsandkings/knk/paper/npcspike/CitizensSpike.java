@@ -204,6 +204,9 @@ public final class CitizensSpike implements Listener {
                 .stuckAction(stuckAction)
                 // no teleport shortcuts: a teleport to the target would skip a closed gate or a denied domain
                 .destinationTeleportMargin(-1)
+                // Citizens' A* only finishes on the exact target block by default (path-distance-margin 0); a hop
+                // target is a point on a road or a snapped floor, so accept arriving within 1.5 blocks of it
+                .pathDistanceMargin(1.5)
                 .range((float) Math.max(params.range(), hopSpacing + captureMargin + 8));
             SpikeNpc s = new SpikeNpc(npc, mode);
             s.tripStartNanos = System.nanoTime();
@@ -461,6 +464,11 @@ public final class CitizensSpike implements Listener {
         return hop;
     }
 
+    /** Citizens' own cost-only examiner from AStarPlanner (an anonymous class). */
+    static boolean isCitizensCostOnly(BlockExaminer e) {
+        return e.getClass().getName().startsWith("net.citizensnpcs.npc.ai.AStarNavigationStrategy$");
+    }
+
     /** Why the walk preparer had no capture: the same two checks as WalkSnapshotService.capture. */
     private static String captureReason(World world, WalkBox box) {
         int chunks = box.chunkCount();
@@ -496,7 +504,11 @@ public final class CitizensSpike implements Listener {
                     s.hops.add(snapToFloor(world, hop));
                 }
             } else {
-                s.hops.addAll(resample(road.line(), hopSpacing));
+                // resampled points between road vertices have an interpolated height (wrong on stairs and slopes)
+                World roadWorld = feet.getWorld();
+                for (double[] hop : resample(road.line(), hopSpacing)) {
+                    s.hops.add(snapToFloor(roadWorld, hop));
+                }
                 // the off-road stretch from the road's end to the goal: short floor-snapped hops as well
                 double[] roadEnd = road.line().get(road.line().size() - 1);
                 World world = feet.getWorld();
@@ -558,16 +570,27 @@ public final class CitizensSpike implements Listener {
             s.npc.getNavigator().setTarget(dest);
             NavigatorParameters local = s.npc.getNavigator().getLocalParameters();
             BlockExaminer[] used = local.examiners();
-            if (used.length != 1 || !(used[0] instanceof SpikeExaminer)) {
+            boolean leak = false;
+            for (BlockExaminer e : used) {
+                // AStarPlanner adds an anonymous avoid-water cost examiner (isPassable IGNORE, canStandAt IGNORE):
+                // it cannot overrule the K&K veto, so it is not a leak and stays
+                if (!(e instanceof SpikeExaminer) && !isCitizensCostOnly(e)) {
+                    leak = true;
+                }
+            }
+            if (leak) {
                 // Citizens added an examiner after ours (doors, falling, bounding boxes, swimming): "first PASSABLE
                 // wins" would let it overrule the K&K veto. Name it, then strip it: the sync planner reads the
                 // examiners when it searches (on the next ticks), so this still takes effect.
                 metrics.examinerLeaks++;
                 StringBuilder names = new StringBuilder();
                 SpikeExaminer ours = null;
+                List<BlockExaminer> keep = new ArrayList<>();
                 for (BlockExaminer e : used) {
                     if (e instanceof SpikeExaminer spike) {
                         ours = spike;
+                    } else if (isCitizensCostOnly(e)) {
+                        keep.add(e);
                     } else {
                         names.append(names.length() == 0 ? "" : "+").append(e.getClass().getSimpleName());
                     }
@@ -577,6 +600,7 @@ public final class CitizensSpike implements Listener {
                 if (ours != null) {
                     local.examiner(ours);
                 }
+                keep.forEach(local::examiner);
             }
             s.targetSetNanos = System.nanoTime();
             s.citizensPathSeen = false;
