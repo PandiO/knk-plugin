@@ -77,6 +77,7 @@ public final class CitizensSpike implements Listener {
 
     static final String REGISTRY = "knk-npc-spike";
     static final int MAX_RETRIES = 3;
+    static final int MAX_CAPTURE_FAILURES = 5;
 
     static final class SpikeNpc {
         final NPC npc;
@@ -90,6 +91,7 @@ public final class CitizensSpike implements Listener {
         long targetSetNanos;
         boolean citizensPathSeen;
         int retries;
+        int captureFailures;
         long lastPlanTick;
         final Deque<double[]> hops = new ArrayDeque<>();
 
@@ -136,6 +138,8 @@ public final class CitizensSpike implements Listener {
         this.walk = navigation.spikeWalk();
         this.captureMargin = captureMargin;
         this.logger = plugin.getLogger();
+        // tick sampling starts at once, so /knk npcspike baseline has data before the first spawn
+        ensureStarted();
     }
 
     /** True when the Citizens plugin is present and enabled (the spike is a no-op otherwise). */
@@ -334,10 +338,19 @@ public final class CitizensSpike implements Listener {
             }
             if (error != null || supplier == null) {
                 done(s);
-                metrics.fail(error != null ? "capture error" : "capture not ready (unloaded chunk or box too large)");
-                waitTicks(s, 40);
+                metrics.fail(error != null ? "capture error" : captureReason(world, box));
+                if (++s.captureFailures >= MAX_CAPTURE_FAILURES) {
+                    // give the trip up instead of retrying the same leg for ever
+                    metrics.fail("trip given up after " + MAX_CAPTURE_FAILURES + " capture failures");
+                    s.captureFailures = 0;
+                    s.hops.clear();
+                    waitTicks(s, 100);
+                } else {
+                    waitTicks(s, 40);
+                }
                 return;
             }
+            s.captureFailures = 0;
             // the supplier may block on domain lookups: build the request on the walk executor
             CompletableFuture.supplyAsync(supplier::get, walk.searches()).whenComplete((request, buildError) ->
                 Bukkit.getScheduler().runTask(plugin, () -> {
@@ -388,19 +401,39 @@ public final class CitizensSpike implements Listener {
                 })));
     }
 
+    /** Why the walk preparer had no capture: the same two checks as WalkSnapshotService.capture. */
+    private static String captureReason(World world, WalkBox box) {
+        int chunks = box.chunkCount();
+        if (chunks > net.knightsandkings.knk.paper.navigation.walk.WalkSnapshotService.MAX_CHUNKS_PER_REQUEST) {
+            return "capture: box too large (" + chunks + " chunks > "
+                + net.knightsandkings.knk.paper.navigation.walk.WalkSnapshotService.MAX_CHUNKS_PER_REQUEST + ")";
+        }
+        for (int cx = box.minChunkX(); cx <= box.maxChunkX(); cx++) {
+            for (int cz = box.minChunkZ(); cz <= box.maxChunkZ(); cz++) {
+                if (!world.isChunkLoaded(cx, cz)) {
+                    return "capture: unloaded chunk in box";
+                }
+            }
+        }
+        return "capture: not ready (other)";
+    }
+
     private void planRoad(SpikeNpc s, Player player, int generation) {
         Location feet = s.npc.getEntity().getLocation();
+        double[] feetFloor = floorOf(feet);
         double[] goalFloor = floorOf(goal(s));
-        navigation.spikeRoadPolyline(player, feet.getWorld(), floorOf(feet), goalFloor).whenComplete((line, error) -> {
+        navigation.spikeRoadPolyline(player, feet.getWorld(), feetFloor, goalFloor).whenComplete((road, error) -> {
             if (!current(s, generation)) {
                 done(s);
                 return;
             }
             s.hops.clear();
-            if (error != null || line == null || line.isEmpty()) {
-                metrics.fail("no road route (one direct Citizens hop)");
+            if (error != null || road == null || !road.found()) {
+                // no road: straight-line hops, so each Citizens leg (and its capture box) stays short
+                metrics.fail("no road route: " + (road == null ? "error" : road.reason()) + " (straight-line hops)");
+                s.hops.addAll(resample(List.of(feetFloor, goalFloor), hopSpacing));
             } else {
-                s.hops.addAll(resample(line.get(), hopSpacing));
+                s.hops.addAll(resample(road.line(), hopSpacing));
             }
             s.hops.addLast(goalFloor);
             planHop(s, player, generation);
@@ -572,6 +605,10 @@ public final class CitizensSpike implements Listener {
         lines.add(String.format(Locale.ROOT, "examiner: %d calls, %.2f µs mean, %d blocked by K&K rules", calls,
             calls == 0 ? 0.0 : SpikeExaminer.NANOS.sum() / 1000.0 / calls, SpikeExaminer.BLOCKED.sum()));
         lines.add("failures: " + (metrics.failures.isEmpty() ? "none" : metrics.failures.toString()));
+        Player who = subject == null ? null : Bukkit.getPlayer(subject);
+        lines.add("access subject: " + (who == null ? (subject == null ? "none (run from/to)" : "offline")
+            : who.getName() + (who.hasPermission("knk.region.bypass")
+                ? " - HAS knk.region.bypass: domain rules are open, deop or negate it to test them" : "")));
         lines.add(String.format(Locale.ROOT, "settings: pathfinder %s, max-in-flight %d, hop %.0f, stationary %d, recheck %d, doors %s, collidable %s",
             pathfinderType, maxInFlight, hopSpacing, stationaryTicks, recheckTicks, openDoors, collidable));
         return lines;

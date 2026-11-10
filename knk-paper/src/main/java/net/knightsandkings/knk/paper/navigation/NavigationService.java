@@ -481,37 +481,46 @@ public final class NavigationService implements SiegeMatchObserver {
         return deps.walk();
     }
 
+    /** #243 spike: a road route as floor points, or empty with the reason. */
+    public record SpikeRoad(List<double[]> line, String reason) {
+        public boolean found() {
+            return line != null && !line.isEmpty();
+        }
+    }
+
     /**
      * #243 spike: the road route between two floor points as polyline points, with {@code subject}'s
-     * road access, computed on the routing executor. Completes on the main thread; empty when either end
-     * is too far from a road, the world has no network or no route exists (the reason in the logger).
+     * road access, computed on the routing executor. Completes on the main thread; without a route the
+     * result names the reason (no network in the world, an end too far from a road, the router's status).
      */
-    public CompletableFuture<Optional<List<double[]>>> spikeRoadPolyline(Player subject, World world,
-                                                                        double[] fromFloor, double[] toFloor) {
-        CompletableFuture<Optional<List<double[]>>> out = new CompletableFuture<>();
+    public CompletableFuture<SpikeRoad> spikeRoadPolyline(Player subject, World world, double[] fromFloor,
+                                                          double[] toFloor) {
+        CompletableFuture<SpikeRoad> out = new CompletableFuture<>();
         RoadNetworkSnapshot snapshot = deps.snapshots().apply(world.getName());
         if (snapshot == null) {
-            out.complete(Optional.empty());
+            out.complete(new SpikeRoad(null, "no road network for world " + world.getName()));
             return out;
         }
         Optional<SnapPoint> from = snapStart(snapshot, fromFloor[0], fromFloor[1], fromFloor[2], null);
         Optional<SnapPoint> to = snapStart(snapshot, toFloor[0], toFloor[1], toFloor[2], null);
         if (from.isEmpty() || to.isEmpty()) {
-            out.complete(Optional.empty());
+            out.complete(new SpikeRoad(null, (from.isEmpty() ? "start" : "end") + " too far from a road (limit "
+                + Math.round(walkEnabled() ? startLimit() : routerParameters.maxSnapDistance()) + " blocks)"));
             return out;
         }
         AccessPolicy policy = deps.policies().policyFor(subject, snapshot, null);
         RouteRequest request = RouteRequest.of(from.get(), to.get(), policy, routerParameters);
         deps.routing().execute(() -> {
-            Optional<List<double[]>> line;
+            SpikeRoad road;
             try {
                 RouteResult result = new AStarRouter(snapshot).route(request);
-                line = result.isFound() ? Optional.of(result.route().polyline()) : Optional.empty();
+                road = result.isFound() ? new SpikeRoad(result.route().polyline(), null)
+                    : new SpikeRoad(null, "router: " + result.status());
             } catch (RuntimeException e) {
                 deps.logger().log(Level.WARNING, "[NpcSpike] road routing failed", e);
-                line = Optional.empty();
+                road = new SpikeRoad(null, "router error: " + e.getClass().getSimpleName());
             }
-            Optional<List<double[]>> delivered = line;
+            SpikeRoad delivered = road;
             deps.mainThread().execute(() -> out.complete(delivered));
         });
         return out;
