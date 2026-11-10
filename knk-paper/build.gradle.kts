@@ -10,6 +10,8 @@ repositories {
     // EngineHub repo voor WorldGuard/WorldEdit
     maven("https://maven.enginehub.org/repo/")
     maven("https://jitpack.io")
+    // #243 Citizens spike (throwaway branch, never merged)
+    maven("https://maven.citizensnpcs.co/repo")
 }
 
 dependencies {
@@ -21,8 +23,12 @@ dependencies {
     compileOnly("com.sk89q.worldguard:worldguard-bukkit:7.0.20")
     // Log4j core (provided by the server) for the private-message command-log filter (KNG-18 Phase 3)
     compileOnly("org.apache.logging.log4j:log4j-core:2.24.1")
+    // #243 Citizens spike: compile-only, never shaded (Citizens is OSL-3.0; the server provides the jar).
+    // Pinned timestamped snapshot: Citizens publishes snapshots only. Non-transitive: Paper is already on the classpath.
+    compileOnly("net.citizensnpcs:citizensapi:${property("citizensApiVersion")}") { isTransitive = false }
     
     testImplementation("io.papermc.paper:paper-api:${property("paperApiVersion")}")
+    testImplementation("net.citizensnpcs:citizensapi:${property("citizensApiVersion")}") { isTransitive = false } // #243 spike
     // One JUnit version for every artifact (api, engine, platform). Without the BOM, a transitive
     // junit-jupiter-api (mockito-junit-jupiter brings 5.13.4) upgrades api/commons while the engine stays at
     // the explicit version, and the engine then fails test discovery with NoSuchMethodError.

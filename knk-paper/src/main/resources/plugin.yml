@@ -10,6 +10,8 @@ softdepend:
   - WorldEdit
   # Optional: Bedrock players (Geyser) get delayed menu switches - menus.bedrock-transition-delay-ticks.
   - floodgate
+  # #243 Citizens spike (throwaway branch): /knk npcspike only works when Citizens is installed.
+  - Citizens
   
 commands:
   knk:

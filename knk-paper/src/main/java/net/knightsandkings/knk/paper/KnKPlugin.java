@@ -265,6 +265,9 @@ public class KnKPlugin extends JavaPlugin {
     // KNG-51 walkable last-mile paths; null while navigation.walk.enabled is false.
     private net.knightsandkings.knk.paper.navigation.walk.WalkSnapshotService walkSnapshots;
     private java.util.concurrent.ExecutorService walkSearches;
+    // #243 Citizens spike (throwaway branch, never merged)
+    private int spikeCaptureMargin = 8;
+    private Runnable npcSpikeShutdown;
     private net.knightsandkings.knk.paper.roads.RoadDirtyTracker roadDirtyTracker;
     private net.knightsandkings.knk.paper.roads.RoadBuildQueue roadBuildQueue;
     private net.knightsandkings.knk.paper.roads.RoadSurveyService roadSurveyService;
@@ -1244,6 +1247,14 @@ public class KnKPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (npcSpikeShutdown != null) {
+            try {
+                npcSpikeShutdown.run();
+            } catch (RuntimeException e) {
+                getLogger().log(java.util.logging.Level.WARNING, "[NpcSpike] shutdown failed", e);
+            }
+            npcSpikeShutdown = null;
+        }
         if (realtimeService != null) {
             realtimeService.stop();
             realtimeService = null;
@@ -1994,6 +2005,7 @@ public class KnKPlugin extends JavaPlugin {
             navigation.passabilityRules(net.knightsandkings.knk.paper.roads.ChunkSnapshotSurfaceGrid.bukkitCollidable()),
             navigation.walk(), net.knightsandkings.knk.paper.utils.TickBudget.server(), System::currentTimeMillis);
         walkSnapshots.start(this);
+        this.spikeCaptureMargin = navigation.walk().captureMargin();
         java.util.concurrent.atomic.AtomicInteger walkThreads = new java.util.concurrent.atomic.AtomicInteger();
         this.walkSearches = Executors.newFixedThreadPool(navigation.walk().maxConcurrentSearches(), r -> {
             Thread t = new Thread(r, "knk-navigation-walk-" + walkThreads.incrementAndGet());
@@ -2587,6 +2599,11 @@ public class KnKPlugin extends JavaPlugin {
             knkAdminCommand.setGateSpawnLookup(gateSpawnLookup(), MenuService.mainThreadExecutor(this));
             registerKnkShortcut("gate", knkAdminCommand);
             registerKnkShortcut("gatedoor", knkAdminCommand);
+            // #243 Citizens spike (throwaway branch): only with Citizens installed; built on first use.
+            if (getServer().getPluginManager().isPluginEnabled("Citizens")) {
+                npcSpikeShutdown = net.knightsandkings.knk.paper.npcspike.NpcSpikeBootstrap.register(this,
+                    knkAdminCommand, () -> navigationService, () -> spikeCaptureMargin);
+            }
             if (managedRegions != null) {
                 var regionsCommand = new net.knightsandkings.knk.paper.commands.RegionsAdminCommand(managedRegions, domainAccessSync, this,
                     tempRegionRetentionTask);

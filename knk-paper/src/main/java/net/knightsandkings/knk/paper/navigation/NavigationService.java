@@ -474,6 +474,49 @@ public final class NavigationService implements SiegeMatchObserver {
         return eta;
     }
 
+    // ==================== #243 Citizens spike (throwaway branch, never merged) ====================
+
+    /** #243 spike: the walk-leg capture, search and executor, or null when walk paths are off. */
+    public Walk spikeWalk() {
+        return deps.walk();
+    }
+
+    /**
+     * #243 spike: the road route between two floor points as polyline points, with {@code subject}'s
+     * road access, computed on the routing executor. Completes on the main thread; empty when either end
+     * is too far from a road, the world has no network or no route exists (the reason in the logger).
+     */
+    public CompletableFuture<Optional<List<double[]>>> spikeRoadPolyline(Player subject, World world,
+                                                                        double[] fromFloor, double[] toFloor) {
+        CompletableFuture<Optional<List<double[]>>> out = new CompletableFuture<>();
+        RoadNetworkSnapshot snapshot = deps.snapshots().apply(world.getName());
+        if (snapshot == null) {
+            out.complete(Optional.empty());
+            return out;
+        }
+        Optional<SnapPoint> from = snapStart(snapshot, fromFloor[0], fromFloor[1], fromFloor[2], null);
+        Optional<SnapPoint> to = snapStart(snapshot, toFloor[0], toFloor[1], toFloor[2], null);
+        if (from.isEmpty() || to.isEmpty()) {
+            out.complete(Optional.empty());
+            return out;
+        }
+        AccessPolicy policy = deps.policies().policyFor(subject, snapshot, null);
+        RouteRequest request = RouteRequest.of(from.get(), to.get(), policy, routerParameters);
+        deps.routing().execute(() -> {
+            Optional<List<double[]>> line;
+            try {
+                RouteResult result = new AStarRouter(snapshot).route(request);
+                line = result.isFound() ? Optional.of(result.route().polyline()) : Optional.empty();
+            } catch (RuntimeException e) {
+                deps.logger().log(Level.WARNING, "[NpcSpike] road routing failed", e);
+                line = Optional.empty();
+            }
+            Optional<List<double[]>> delivered = line;
+            deps.mainThread().execute(() -> out.complete(delivered));
+        });
+        return out;
+    }
+
     // ==================== commands ====================
 
     /** {@code /navigate} with no arguments: where to and how far, or the usage. Main thread. */
