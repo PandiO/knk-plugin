@@ -101,7 +101,16 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
     /** As {@link #policyFor(Player, RoadNetworkSnapshot)}, knowing the destination's regions (KNG-110); null: unknown. */
     @Override
     public AccessPolicy policyFor(Player player, RoadNetworkSnapshot snapshot, Set<String> destinationRegions) {
-        Set<String> currentRegions = regionIds.at(player.getLocation());
+        return policyFor(player, snapshot, destinationRegions, regionIds.at(player.getLocation()));
+    }
+
+    /**
+     * #243 spike: as above, for a mover that is not at the player's position (an NPC using the player's access):
+     * {@code currentRegions} are the regions the mover stands in, for the exit and "no way out" rules.
+     */
+    @Override
+    public AccessPolicy policyFor(Player player, RoadNetworkSnapshot snapshot, Set<String> destinationRegions,
+                                  Set<String> currentRegions) {
         String world = snapshot.world() != null ? snapshot.world() : worldOf(player);
         Set<Integer> doorIds = new HashSet<>();
         for (RoadEdge edge : snapshot.edges()) {

@@ -118,6 +118,12 @@ public final class NavigationService implements SiegeMatchObserver {
             return policyFor(player, snapshot);
         }
 
+        /** #243 spike: the policy for a mover standing in {@code currentRegions} instead of where the player is. */
+        default AccessPolicy policyFor(Player player, RoadNetworkSnapshot snapshot, Set<String> destinationRegions,
+                                       Set<String> currentRegions) {
+            return policyFor(player, snapshot, destinationRegions);
+        }
+
         /**
          * KNG-110: the regions the player may stand in on a road, by the router's entry rule - the trail keeps off the
          * road cells of the others. Main thread, without blocking lookups. Every region by default.
@@ -476,6 +482,11 @@ public final class NavigationService implements SiegeMatchObserver {
 
     // ==================== #243 Citizens spike (throwaway branch, never merged) ====================
 
+    /** #243 spike: the WorldGuard regions at a floor point (the regions an NPC standing there is in). */
+    public Set<String> spikeRegionsAt(World world, double[] floorPoint) {
+        return deps.policies().regionsAt(world, floorPoint);
+    }
+
     /** #243 spike: the walk-leg capture, search and executor, or null when walk paths are off. */
     public Walk spikeWalk() {
         return deps.walk();
@@ -524,7 +535,9 @@ public final class NavigationService implements SiegeMatchObserver {
                     edgeIndex -> snapshot.componentOf(snapshot.edgeAt(edgeIndex)) == endComponent).orElse(start);
             }
         }
-        AccessPolicy policy = deps.policies().policyFor(subject, snapshot, null);
+        // the NPC is the mover: its own regions decide the exit rules, not where the subject player stands
+        AccessPolicy policy = deps.policies().policyFor(subject, snapshot, null,
+            deps.policies().regionsAt(world, fromFloor));
         RouteRequest request = RouteRequest.of(start, end, policy, routerParameters);
         deps.routing().execute(() -> {
             SpikeRoad road;

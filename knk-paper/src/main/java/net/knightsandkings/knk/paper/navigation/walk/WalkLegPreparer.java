@@ -67,6 +67,16 @@ public final class WalkLegPreparer implements NavigationService.WalkPreparer {
     @Override
     public CompletableFuture<Supplier<WalkRequest>> prepare(Player player, double[] feet, double[] target, WalkGoal goal,
                                                             Set<String> destinationRegions) {
+        return prepare(player, null, feet, target, goal, destinationRegions);
+    }
+
+    /**
+     * #243 spike: as above for a mover at {@code feet} that is not the player (an NPC using the player's access);
+     * {@code moverInside} are the regions the mover stands in (null: the player's own).
+     */
+    public CompletableFuture<Supplier<WalkRequest>> prepare(Player player, Set<String> moverInside, double[] feet,
+                                                            double[] target, WalkGoal goal,
+                                                            Set<String> destinationRegions) {
         Objects.requireNonNull(player, "player");
         Objects.requireNonNull(goal, "goal");
         double[] from = feet.clone();
@@ -81,7 +91,7 @@ public final class WalkLegPreparer implements NavigationService.WalkPreparer {
                 return null;
             }
             WalkAccessFactory.WalkAccess walkAccess = access.prepare(player, world, gates, captured, profile.headroom(),
-                destinationRegions);
+                destinationRegions, moverInside);
             WalkTerrain terrain = captured.terrain().terrain();
             return () -> new WalkRequest(terrain, walkAccess.resolve(), profile, from[0], from[1], from[2],
                 to[0], to[1], to[2], goal, budget);

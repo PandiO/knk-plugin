@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
@@ -229,6 +230,7 @@ public final class CitizensSpike implements Listener {
             for (int d = 0; d <= 3; d++) {
                 for (int floorY : d == 0 ? new int[] {fromFloor} : new int[] {fromFloor + d, fromFloor - d}) {
                     if (world.getBlockAt(x, floorY, z).getType().isSolid()
+                        && !org.bukkit.Tag.LEAVES.isTagged(world.getBlockAt(x, floorY, z).getType())
                         && world.getBlockAt(x, floorY + 1, z).isPassable()
                         && world.getBlockAt(x, floorY + 2, z).isPassable()) {
                         return new Location(world, x + 0.5, floorY + 1, z + 0.5);
@@ -356,7 +358,13 @@ public final class CitizensSpike implements Listener {
         World world = feetLoc.getWorld();
         WalkBox box = WalkBox.around(world.getName(), feet[0], feet[1], feet[2], target[0], target[1], target[2],
             captureMargin, world.getMinHeight(), world.getMaxHeight());
-        walk.preparer().prepare(player, feet, target, goal, null).whenComplete((supplier, error) -> {
+        // the NPC is the mover: the regions it stands in decide the domain exit rules, not where the subject is
+        Set<String> inside = navigation.spikeRegionsAt(world, floorOf(feetLoc));
+        CompletableFuture<Supplier<WalkRequest>> prepared =
+            walk.preparer() instanceof net.knightsandkings.knk.paper.navigation.walk.WalkLegPreparer leg
+                ? leg.prepare(player, inside, feet, target, goal, null)
+                : walk.preparer().prepare(player, feet, target, goal, null);
+        prepared.whenComplete((supplier, error) -> {
             if (!current(s, generation)) {
                 done(s);
                 return;
@@ -443,6 +451,7 @@ public final class CitizensSpike implements Listener {
                     continue;
                 }
                 if (world.getBlockAt(x, floorY, z).getType().isSolid()
+                        && !org.bukkit.Tag.LEAVES.isTagged(world.getBlockAt(x, floorY, z).getType())
                     && world.getBlockAt(x, floorY + 1, z).isPassable()
                     && world.getBlockAt(x, floorY + 2, z).isPassable()) {
                     return new double[] {hop[0], floorY, hop[2]};
@@ -539,6 +548,12 @@ public final class CitizensSpike implements Listener {
             }
             params.examiner(new SpikeExaminer(request.access(), box, inner));
             Location dest = new Location(s.npc.getEntity().getWorld(), target[0], target[1] + 1, target[2]);
+            // diagnostics: K&K blocking the NPC's own cell or the hop's target makes the A* fail before it starts
+            Location here = s.npc.getEntity().getLocation();
+            request.access().denyReason(here.getBlockX(), here.getBlockY(), here.getBlockZ())
+                .ifPresent(reason -> metrics.fail("K&K blocks the NPC's own cell: " + reason));
+            request.access().denyReason(dest.getBlockX(), dest.getBlockY(), dest.getBlockZ())
+                .ifPresent(reason -> metrics.fail("K&K blocks the hop target: " + reason));
             metrics.planMs.add((System.nanoTime() - s.queuedAtNanos) / 1e6);
             s.npc.getNavigator().setTarget(dest);
             NavigatorParameters local = s.npc.getNavigator().getLocalParameters();

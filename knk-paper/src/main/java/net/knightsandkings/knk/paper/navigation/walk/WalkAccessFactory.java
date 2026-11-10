@@ -160,6 +160,15 @@ public final class WalkAccessFactory {
      */
     public WalkAccess prepare(Player player, World world, GateCells gates, WalkSnapshotService.WalkCapture capture,
                               int headroom, Set<String> destinationRegions) {
+        return prepare(player, world, gates, capture, headroom, destinationRegions, null);
+    }
+
+    /**
+     * #243 spike: as above; {@code moverInside} (non-null) are the regions the mover stands in, for an NPC that uses
+     * the player's access but is not where the player is. Null: the player's own regions.
+     */
+    public WalkAccess prepare(Player player, World world, GateCells gates, WalkSnapshotService.WalkCapture capture,
+                              int headroom, Set<String> destinationRegions, Set<String> moverInside) {
         Objects.requireNonNull(player, "player");
         Objects.requireNonNull(capture, "capture");
         if (!capture.ready()) {
@@ -187,7 +196,7 @@ public final class WalkAccessFactory {
 
         List<DeniedRegionAccess.Candidate> candidates = new ArrayList<>();
         if (!bypasses) {
-            Set<String> inside = moverRegions.apply(player);
+            Set<String> inside = moverInside != null ? moverInside : moverRegions.apply(player);
             regionsInBox.regions(world, box).forEach((id, shape) ->
                 candidates.add(new DeniedRegionAccess.Candidate(id, shape, inside.contains(id))));
         }
