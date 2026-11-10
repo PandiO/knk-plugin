@@ -114,6 +114,7 @@ public final class CitizensSpike implements Listener {
     private final Map<Integer, SpikeNpc> npcs = new LinkedHashMap<>();
     private final Deque<SpikeNpc> queue = new ArrayDeque<>();
     private int inFlight;
+    private int loggedLegFailures;
 
     // settings (the command changes them)
     Location from;
@@ -401,6 +402,32 @@ public final class CitizensSpike implements Listener {
                 })));
     }
 
+    /**
+     * A straight-line hop's interpolated height can be in the air or inside the ground. Citizens only moves a
+     * target up 2 blocks, so search ±12 blocks (nearest first) for a floor with 2 free blocks above. Main thread.
+     */
+    static double[] snapToFloor(World world, double[] hop) {
+        int x = (int) Math.floor(hop[0]);
+        int z = (int) Math.floor(hop[2]);
+        int y0 = (int) Math.round(hop[1]);
+        if (!world.isChunkLoaded(x >> 4, z >> 4)) {
+            return hop;
+        }
+        for (int d = 0; d <= 12; d++) {
+            for (int floorY : d == 0 ? new int[] {y0} : new int[] {y0 + d, y0 - d}) {
+                if (floorY <= world.getMinHeight() || floorY + 2 >= world.getMaxHeight()) {
+                    continue;
+                }
+                if (world.getBlockAt(x, floorY, z).getType().isSolid()
+                    && world.getBlockAt(x, floorY + 1, z).isPassable()
+                    && world.getBlockAt(x, floorY + 2, z).isPassable()) {
+                    return new double[] {hop[0], floorY, hop[2]};
+                }
+            }
+        }
+        return hop;
+    }
+
     /** Why the walk preparer had no capture: the same two checks as WalkSnapshotService.capture. */
     private static String captureReason(World world, WalkBox box) {
         int chunks = box.chunkCount();
@@ -431,7 +458,10 @@ public final class CitizensSpike implements Listener {
             if (error != null || road == null || !road.found()) {
                 // no road: straight-line hops, so each Citizens leg (and its capture box) stays short
                 metrics.fail("no road route: " + (road == null ? "error" : road.reason()) + " (straight-line hops)");
-                s.hops.addAll(resample(List.of(feetFloor, goalFloor), hopSpacing));
+                World world = feet.getWorld();
+                for (double[] hop : resample(List.of(feetFloor, goalFloor), hopSpacing)) {
+                    s.hops.add(snapToFloor(world, hop));
+                }
             } else {
                 s.hops.addAll(resample(road.line(), hopSpacing));
             }
@@ -481,10 +511,27 @@ public final class CitizensSpike implements Listener {
             Location dest = new Location(s.npc.getEntity().getWorld(), target[0], target[1] + 1, target[2]);
             metrics.planMs.add((System.nanoTime() - s.queuedAtNanos) / 1e6);
             s.npc.getNavigator().setTarget(dest);
-            BlockExaminer[] used = s.npc.getNavigator().getLocalParameters().examiners();
+            NavigatorParameters local = s.npc.getNavigator().getLocalParameters();
+            BlockExaminer[] used = local.examiners();
             if (used.length != 1 || !(used[0] instanceof SpikeExaminer)) {
-                // Citizens added an examiner after ours (doors, falling, bounding boxes): K&K rules not binding
+                // Citizens added an examiner after ours (doors, falling, bounding boxes, swimming): "first PASSABLE
+                // wins" would let it overrule the K&K veto. Name it, then strip it: the sync planner reads the
+                // examiners when it searches (on the next ticks), so this still takes effect.
                 metrics.examinerLeaks++;
+                StringBuilder names = new StringBuilder();
+                SpikeExaminer ours = null;
+                for (BlockExaminer e : used) {
+                    if (e instanceof SpikeExaminer spike) {
+                        ours = spike;
+                    } else {
+                        names.append(names.length() == 0 ? "" : "+").append(e.getClass().getSimpleName());
+                    }
+                }
+                metrics.fail("examiner leak (stripped): " + names);
+                local.clearExaminers();
+                if (ours != null) {
+                    local.examiner(ours);
+                }
             }
             s.targetSetNanos = System.nanoTime();
             s.citizensPathSeen = false;
@@ -527,6 +574,21 @@ public final class CitizensSpike implements Listener {
         long start = System.nanoTime();
         SpikeNpc s = ours(event.getNPC());
         if (s != null && s.state == State.MOVING && event.getCancelReason() == CancelReason.STUCK) {
+            // a hop whose A* never produced a path is "no path", not "stuck while walking"
+            boolean noPath = s.mode == Mode.HOP && !s.citizensPathSeen;
+            if (noPath) {
+                metrics.fail("Citizens A*: no path to hop");
+            } else {
+                metrics.fail("stuck while walking");
+            }
+            if (loggedLegFailures < 20 && s.npc.isSpawned()) {
+                loggedLegFailures++;
+                Location at = s.npc.getEntity().getLocation();
+                double[] hop = s.hops.peekFirst();
+                logger.info(String.format(Locale.ROOT, "[NpcSpike] %s %s at %d %d %d -> hop floor %s",
+                    s.npc.getName(), noPath ? "no path" : "stuck", at.getBlockX(), at.getBlockY(), at.getBlockZ(),
+                    hop == null ? "-" : String.format(Locale.ROOT, "%.0f %.0f %.0f", hop[0], hop[1], hop[2])));
+            }
             if (++s.retries <= MAX_RETRIES) {
                 metrics.replans++;
                 enqueue(s); // HOP keeps its hops: retry towards the same hop from here (DESIGN §6 bounded retry)
