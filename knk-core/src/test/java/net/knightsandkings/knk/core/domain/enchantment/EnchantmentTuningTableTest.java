@@ -18,11 +18,10 @@ class EnchantmentTuningTableTest {
     }
 
     @Test
-    void everyEffectOfTheRegistryHasBuiltInValuesExceptCleaving() {
+    void everyEnchantmentOfTheRegistryHasBuiltInValues_CleavingToo() {
         EnchantmentTuningTable table = new EnchantmentTuningTable();
         for (Enchantment enchantment : EnchantmentRegistry.getInstance().getAll()) {
-            boolean expected = !"cleaving".equals(enchantment.id());
-            assertEquals(expected, table.builtIn(enchantment.id()).isPresent(), enchantment.id());
+            assertTrue(table.builtIn(enchantment.id()).isPresent(), enchantment.id());
         }
     }
 
@@ -290,6 +289,45 @@ class EnchantmentTuningTableTest {
         assertEquals(5.0d, new AreaBlast(1, 1, 3, 5).reach());
         assertEquals(6.0d, new AreaBlast(1, 1, 6, 2).reach());
         assertEquals(new AreaBlast(0, 0, 0, 0), new AreaBlast(-1, Double.NaN, Double.POSITIVE_INFINITY, -3));
+    }
+
+    // PandiO/knk-workspace#259: Cleaving's gate bonus and charged strike.
+
+    @Test
+    void cleavingBuiltInValuesAreTheOldConfigDefaults() {
+        EnchantmentTuning cleaving = new EnchantmentTuningTable().get("cleaving");
+        assertEquals(new GateStrike(0.25d, 5.0d, 1.0d, -10), cleaving.gateStrike());
+        assertEquals(List.of(1.25d, 1.5d, 1.75d, 2.0d),
+                List.of(1, 2, 3, 4).stream().map(l -> cleaving.gateStrike().damageMultiplierAt(l)).toList());
+        assertEquals(List.of(5.0d, 6.0d, 7.0d, 8.0d),
+                List.of(1, 2, 3, 4).stream().map(l -> cleaving.gateStrike().strikeMultiplierAt(l)).toList());
+        assertEquals(List.of(60_000L, 50_000L, 40_000L, 30_000L),
+                List.of(1, 2, 3, 4).stream().map(cleaving::strikeCooldownMsAt).toList());
+        assertEquals(1.0d, cleaving.gateStrike().damageMultiplierAt(0));
+        assertEquals(GateStrike.NONE, new EnchantmentTuningTable().get("chaos").gateStrike());
+    }
+
+    @Test
+    void aCleavingOverrideReplacesOnlyTheValuesItSets_AndIsClamped() {
+        EnchantmentTuningTable table = new EnchantmentTuningTable();
+        table.replaceOverrides(List.of(new EnchantmentTuningOverride("cleaving", null, null, null, null, null, null,
+                null, null, null, null, null, null, null, 4.0d, null, null)));
+        assertEquals(new GateStrike(0.25d, 4.0d, 1.0d, -10), table.get("cleaving").gateStrike());
+
+        table.replaceOverrides(List.of(new EnchantmentTuningOverride("cleaving", null, null, null, null, null, null,
+                null, null, null, null, null, null, 99d, 1_000d, -500d, -999_999)));
+        GateStrike clamped = table.get("cleaving").gateStrike();
+        assertEquals(EnchantmentTuningTable.MAX_GATE_DAMAGE_BONUS_PER_LEVEL, clamped.damageBonusPerLevel());
+        assertEquals(EnchantmentTuningTable.MAX_STRIKE_MULTIPLIER, clamped.strikeMultiplier());
+        assertEquals(-EnchantmentTuningTable.MAX_STRIKE_MULTIPLIER, clamped.strikeMultiplierPerLevel());
+        assertEquals(-86_400, clamped.cooldownPerLevelSeconds());
+        assertEquals(0.0d, clamped.strikeMultiplierAt(3), "never below 0");
+    }
+
+    @Test
+    void anOverrideWithOnlyGateStrikeValuesIsNotEmpty() {
+        assertFalse(new EnchantmentTuningOverride("cleaving", null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, -5).isEmpty());
     }
 
     @Test

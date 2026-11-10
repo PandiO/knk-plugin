@@ -21,6 +21,7 @@ package net.knightsandkings.knk.core.domain.enchantment;
  *                           its Nausea (#201)
  * @param area               the area damage and radii of a right-click blast at level I (Chaos, Flash Chaos; #223);
  *                           {@link AreaBlast#NONE} for the others. The damage grows per level like the durations
+ * @param gateStrike         Cleaving's gate bonus and charged strike (#259); {@link GateStrike#NONE} for the others
  */
 public record EnchantmentTuning(
         double procChance,
@@ -31,7 +32,8 @@ public record EnchantmentTuning(
         double levelMultiplier,
         int effectLevel,
         int secondaryDurationTicks,
-        AreaBlast area
+        AreaBlast area,
+        GateStrike gateStrike
 ) {
     /** Highest effect level, as in knk-web-api. */
     public static final int MAX_EFFECT_LEVEL = 10;
@@ -48,6 +50,15 @@ public record EnchantmentTuning(
         effectLevel = Math.max(0, Math.min(MAX_EFFECT_LEVEL, effectLevel));
         secondaryDurationTicks = Math.max(0, secondaryDurationTicks);
         area = area != null ? area : AreaBlast.NONE;
+        gateStrike = gateStrike != null ? gateStrike : GateStrike.NONE;
+    }
+
+    /** An enchantment without a gate strike (every one but Cleaving). */
+    public EnchantmentTuning(double procChance, double procChancePerLevel, boolean cooldownEnabled, long cooldownMs,
+                             int durationTicks, double levelMultiplier, int effectLevel, int secondaryDurationTicks,
+                             AreaBlast area) {
+        this(procChance, procChancePerLevel, cooldownEnabled, cooldownMs, durationTicks, levelMultiplier, effectLevel,
+                secondaryDurationTicks, area, GateStrike.NONE);
     }
 
     /** An enchantment without an area blast (every one but Chaos and Flash Chaos). */
@@ -94,6 +105,17 @@ public record EnchantmentTuning(
     }
 
     /**
+     * Cleaving's charged-strike cooldown at this level (#259): the cooldown plus {@code cooldownPerLevelSeconds} per level
+     * above I, never below 0; 0 when the cooldown is switched off.
+     */
+    public long strikeCooldownMsAt(int level) {
+        if (!cooldownEnabled) {
+            return 0L;
+        }
+        return Math.max(0L, cooldownMs + gateStrike.cooldownPerLevelSeconds() * 1000L * Math.max(0, level - 1));
+    }
+
+    /**
      * The potion amplifier of the effect level ({@code effectLevel - 1}), never below 0: Slowness I = amplifier 0.
      */
     public int effectAmplifier() {
@@ -129,7 +151,12 @@ public record EnchantmentTuning(
                         override.areaDamage() != null ? override.areaDamage() : area.damage(),
                         override.gateDamage() != null ? override.gateDamage() : area.gateDamage(),
                         override.damageRadiusBlocks() != null ? override.damageRadiusBlocks() : area.damageRadius(),
-                        override.effectRadiusBlocks() != null ? override.effectRadiusBlocks() : area.effectRadius())
+                        override.effectRadiusBlocks() != null ? override.effectRadiusBlocks() : area.effectRadius()),
+                new GateStrike(
+                        override.gateDamageBonusPerLevel() != null ? override.gateDamageBonusPerLevel() : gateStrike.damageBonusPerLevel(),
+                        override.strikeMultiplier() != null ? override.strikeMultiplier() : gateStrike.strikeMultiplier(),
+                        override.strikeMultiplierPerLevel() != null ? override.strikeMultiplierPerLevel() : gateStrike.strikeMultiplierPerLevel(),
+                        override.cooldownPerLevelSeconds() != null ? override.cooldownPerLevelSeconds() : gateStrike.cooldownPerLevelSeconds())
         );
     }
 

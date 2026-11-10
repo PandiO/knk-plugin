@@ -1127,10 +1127,7 @@ public class KnKPlugin extends JavaPlugin {
                 getConfig().getDouble("gates.fire-aspect.ignite-chance-per-level", 0.15));
             net.knightsandkings.knk.paper.gates.GateCleaving gateCleaving = enchantmentRuntime == null ? null
                 : new net.knightsandkings.knk.paper.gates.GateCleaving(enchantmentRuntime.enchantmentRepository(),
-                    enchantmentRuntime.cooldownManager(), gateDoorHitService,
-                    getConfig().getDouble("gates.cleaving.damage-bonus-per-level", 0.25),
-                    getConfig().getDoubleList("gates.cleaving.charged-hit-multiplier"),
-                    getConfig().getIntegerList("gates.cleaving.charged-cooldown-seconds"));
+                    enchantmentRuntime.cooldownManager(), gateDoorHitService); // #259: numbers are combat values
             getServer().getPluginManager().registerEvents(new GateEventListener(gateDoorHitService, freezeExtinguisher,
                 getConfig().getBoolean("gates.melee-damage.from-held-item", true)
                     ? new net.knightsandkings.knk.paper.gates.GateMeleeDamage(getConfig().getDouble("gates.melee-damage.multiplier", 1.0))

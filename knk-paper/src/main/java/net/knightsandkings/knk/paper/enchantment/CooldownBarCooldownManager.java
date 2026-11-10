@@ -23,7 +23,7 @@ import java.util.concurrent.Executor;
  * The custom-enchantment cooldown store, plus a boss bar with the remaining cooldown for the player who used an ability
  * (PandiO/knk-workspace#202): {@code Flash Chaos cooldown · 1:28}, counting down. Every ability cooldown goes through
  * here (the right-click abilities and the on-hit enchantments in {@link ExecutorImpl}, Cleaving's charged strike in
- * {@link GateCleaving}), so the lengths are exactly what was applied: the #151 combat values, or {@code gates.cleaving}.
+ * {@link GateCleaving}), so the lengths are exactly what was applied: the #151 combat values (Cleaving's strike: #259).
  * <p>
  * Bars are shown for the abilities in {@link #labels}: every SUPPORT ability, Freeze's per-attacker cooldown and
  * Cleaving's charged strike. The other on-hit enchantments (Poison, Wither, ...) keep their cooldown without a bar.

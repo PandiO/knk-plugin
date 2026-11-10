@@ -3,6 +3,7 @@ package net.knightsandkings.knk.paper.commands.enchantment;
 import net.knightsandkings.knk.core.domain.enchantment.Enchantment;
 import net.knightsandkings.knk.core.domain.enchantment.EnchantmentRegistry;
 import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuning;
+import net.knightsandkings.knk.core.domain.enchantment.GateStrike;
 import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuningTable;
 import net.knightsandkings.knk.core.ports.enchantment.CooldownManager;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentRepository;
@@ -129,6 +130,13 @@ public class InfoEnchantmentCommand implements EnchantmentSubcommand {
                         AREA_LINE_DEFAULT,
                         areaPlaceholders(tuning, level))));
             }
+            if (!tuning.gateStrike().equals(GateStrike.NONE)) {
+                // #259: Cleaving's gate bonus, charged strike and strike cooldown.
+                sender.sendMessage(handler.colorize(handler.message(
+                        "messages.cmd-info-tuning-gate",
+                        GATE_LINE_DEFAULT,
+                        gatePlaceholders(tuning, level))));
+            }
         }
 
         return true;
@@ -167,6 +175,18 @@ public class InfoEnchantmentCommand implements EnchantmentSubcommand {
                 "%gateDamage%", formatNumber(tuning.gateDamageAt(level)),
                 "%damageRadius%", formatNumber(tuning.area().damageRadius()),
                 "%effectRadius%", formatNumber(tuning.area().reach()));
+    }
+
+    static final String GATE_LINE_DEFAULT =
+            "&8   gate hits +%gateBonus%%, charged strike %strike%x, strike cooldown %strikeCooldown%";
+
+    /** PandiO/knk-workspace#259: Cleaving's gate bonus, strike multiplier and strike cooldown at this level. */
+    static Map<String, String> gatePlaceholders(EnchantmentTuning tuning, int level) {
+        long cooldownMs = tuning.strikeCooldownMsAt(level);
+        return Map.of(
+                "%gateBonus%", formatNumber((tuning.gateStrike().damageMultiplierAt(level) - 1.0d) * 100.0d),
+                "%strike%", formatNumber(tuning.gateStrike().strikeMultiplierAt(level)),
+                "%strikeCooldown%", cooldownMs > 0 ? formatNumber(cooldownMs / 1000.0d) + "s" : "off");
     }
 
     private static String formatNumber(double value) {

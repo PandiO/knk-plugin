@@ -32,7 +32,10 @@ class EnchantmentCombatValuesParsingTest {
               {"id":9,"key":"flash_chaos","displayName":"Flash Chaos","isCustom":true,"maxLevel":1,
                "procChancePercent":null,"procChancePerLevelPercent":null,"cooldownEnabled":true,"cooldownSeconds":90,
                "effectDurationSeconds":5,"levelMultiplier":0,"effectLevel":2,"secondaryEffectDurationSeconds":12.5,
-               "areaDamage":60,"gateDamage":45.5,"damageRadiusBlocks":3,"effectRadiusBlocks":5}
+               "areaDamage":60,"gateDamage":45.5,"damageRadiusBlocks":3,"effectRadiusBlocks":5},
+              {"id":10,"key":"cleaving","displayName":"Cleaving","isCustom":true,"maxLevel":4,"cooldownEnabled":true,
+               "cooldownSeconds":60,"gateDamageBonusPerLevel":0.25,"strikeMultiplier":5,"strikeMultiplierPerLevel":1,
+               "cooldownPerLevelSeconds":-10}
             ]
             """;
 
@@ -43,7 +46,7 @@ class EnchantmentCombatValuesParsingTest {
 
         List<EnchantmentTuningOverride> overrides = EnchantmentDefinitionsQueryApiImpl.toOverrides(dtos);
 
-        assertEquals(3, overrides.size());
+        assertEquals(4, overrides.size());
         EnchantmentTuningOverride freeze = overrides.get(0);
         assertEquals("freeze", freeze.key());
         assertEquals(10.0d, freeze.procChancePercent());
@@ -73,6 +76,14 @@ class EnchantmentCombatValuesParsingTest {
         assertEquals(5.0d, flash.effectRadiusBlocks());
         assertNull(freeze.areaDamage());
         assertNull(freeze.effectRadiusBlocks());
+
+        // PandiO/knk-workspace#259: Cleaving's gate bonus and charged strike.
+        EnchantmentTuningOverride cleaving = overrides.get(3);
+        assertEquals(0.25d, cleaving.gateDamageBonusPerLevel());
+        assertEquals(5.0d, cleaving.strikeMultiplier());
+        assertEquals(1.0d, cleaving.strikeMultiplierPerLevel());
+        assertEquals(-10, cleaving.cooldownPerLevelSeconds());
+        assertNull(flash.strikeMultiplier());
     }
 
     @Test

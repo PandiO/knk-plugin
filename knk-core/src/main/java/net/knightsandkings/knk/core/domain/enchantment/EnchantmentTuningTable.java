@@ -14,7 +14,7 @@ import java.util.Optional;
  * {@code enchantments.tuning-refresh-minutes} and on {@code /ce reload}; until the first load (or while the API is
  * down) the built-in values apply. Effects read the values per hit, so a change applies without a restart.
  * <p>
- * Cleaving has no entry: its gate numbers and cooldowns live in config.yml ({@code gates.cleaving}).
+ * Cleaving's gate numbers are combat values too since #259 (they were config.yml {@code gates.cleaving} before).
  */
 public final class EnchantmentTuningTable {
     private static final EnchantmentTuningTable INSTANCE = new EnchantmentTuningTable();
@@ -57,6 +57,11 @@ public final class EnchantmentTuningTable {
         // #223: 60 damage within 3 blocks and to gates in reach, knockback and the debuffs within 5.
         map.put("flash_chaos", new EnchantmentTuning(1.0d, 0.0d, true, 90_000L, 100, 0.0d, 1, 250,
                 new AreaBlast(60.0d, 60.0d, 3.0d, 5.0d)));
+        // #259: Cleaving, the old gates.cleaving defaults: +25 % gate damage per level, a charged strike of 5x + 1 per
+        // level (5/6/7/8) with a 60 s cooldown - 10 s per level (60/50/40/30). It has no on-hit effect, so the
+        // executor never starts this cooldown on a hit; only the charged strike uses it.
+        map.put("cleaving", new EnchantmentTuning(1.0d, 0.0d, true, 60_000L, 0, 0.0d, 0, 0, AreaBlast.NONE,
+                new GateStrike(0.25d, 5.0d, 1.0d, -10)));
         map.put("health_boost", new EnchantmentTuning(1.0d, 0.0d, true, 120_000L, 0, 0.0d));
         map.put("armor_repair", new EnchantmentTuning(1.0d, 0.0d, true, 120_000L, 0, 0.0d));
         map.put("resistance", new EnchantmentTuning(1.0d, 0.0d, true, 120_000L, 200, 0.5d));
@@ -145,6 +150,9 @@ public final class EnchantmentTuningTable {
     public static final double MAX_AREA_DAMAGE = 1_000.0d;
     public static final double MAX_GATE_DAMAGE = 10_000.0d;
     public static final double MAX_RADIUS_BLOCKS = 32.0d;
+    /** Highest Cleaving gate bonus per level and strike multiplier, as in knk-web-api (#259). */
+    public static final double MAX_GATE_DAMAGE_BONUS_PER_LEVEL = 10.0d;
+    public static final double MAX_STRIKE_MULTIPLIER = 100.0d;
 
     /** The API refuses these ranges already; clamped here too so a bad row can't break combat. */
     static EnchantmentTuningOverride clamp(EnchantmentTuningOverride o) {
@@ -161,7 +169,11 @@ public final class EnchantmentTuningTable {
                 clamp(o.areaDamage(), 0.0d, MAX_AREA_DAMAGE),
                 clamp(o.gateDamage(), 0.0d, MAX_GATE_DAMAGE),
                 clamp(o.damageRadiusBlocks(), 0.0d, MAX_RADIUS_BLOCKS),
-                clamp(o.effectRadiusBlocks(), 0.0d, MAX_RADIUS_BLOCKS)
+                clamp(o.effectRadiusBlocks(), 0.0d, MAX_RADIUS_BLOCKS),
+                clamp(o.gateDamageBonusPerLevel(), 0.0d, MAX_GATE_DAMAGE_BONUS_PER_LEVEL),
+                clamp(o.strikeMultiplier(), 0.0d, MAX_STRIKE_MULTIPLIER),
+                clamp(o.strikeMultiplierPerLevel(), -MAX_STRIKE_MULTIPLIER, MAX_STRIKE_MULTIPLIER),
+                o.cooldownPerLevelSeconds() == null ? null : Math.max(-86_400, Math.min(86_400, o.cooldownPerLevelSeconds()))
         );
     }
 

@@ -641,8 +641,9 @@ class GateEventListenerTest {
             mock(net.knightsandkings.knk.core.ports.enchantment.CooldownManager.class);
         when(cooldowns.getRemainingCooldown(any(), anyString())).thenReturn(java.util.concurrent.CompletableFuture.completedFuture(remainingCooldownMillis));
         when(cooldowns.applyCooldown(any(), anyString(), anyLong())).thenReturn(java.util.concurrent.CompletableFuture.completedFuture(null));
-        GateCleaving cleaving = new GateCleaving(enchantments, cooldowns, new GateDoorHitService(gateManager), 0.25,
-            List.of(5.0, 6.0, 7.0, 8.0), List.of(60, 50, 40, 30));
+        // #259: Cleaving's built-in combat values (+25 % per level, strike 5/6/7/8, 60/50/40/30 s).
+        GateCleaving cleaving = new GateCleaving(enchantments, cooldowns, new GateDoorHitService(gateManager),
+            () -> net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuningTable.getInstance().builtIn("cleaving").orElseThrow());
         cleaving.setEffects(mock(GateCleaving.Effects.class));
         return cleaving;
     }

@@ -17,6 +17,10 @@ package net.knightsandkings.knk.core.domain.enchantment;
  * @param gateDamage                damage to gate doors in reach at level I (Chaos, Flash Chaos; #223)
  * @param damageRadiusBlocks        radius of the area damage (#223)
  * @param effectRadiusBlocks        radius of the knockback (Flash Chaos: and its debuffs; #223)
+ * @param gateDamageBonusPerLevel   Cleaving: extra share of the gate damage per level (#259)
+ * @param strikeMultiplier          Cleaving: charged strike multiplier at level I (#259)
+ * @param strikeMultiplierPerLevel  Cleaving: added to the strike multiplier per level above I (#259)
+ * @param cooldownPerLevelSeconds   Cleaving: added to the strike's cooldown per level above I (#259)
  */
 public record EnchantmentTuningOverride(
         String key,
@@ -31,14 +35,29 @@ public record EnchantmentTuningOverride(
         Double areaDamage,
         Double gateDamage,
         Double damageRadiusBlocks,
-        Double effectRadiusBlocks
+        Double effectRadiusBlocks,
+        Double gateDamageBonusPerLevel,
+        Double strikeMultiplier,
+        Double strikeMultiplierPerLevel,
+        Integer cooldownPerLevelSeconds
 ) {
+    /** The #151, #201 and #223 values, without Cleaving's gate strike (#259). */
+    public EnchantmentTuningOverride(String key, Double procChancePercent, Double procChancePerLevelPercent,
+                                     Boolean cooldownEnabled, Integer cooldownSeconds, Double effectDurationSeconds,
+                                     Double levelMultiplier, Integer effectLevel, Double secondaryEffectDurationSeconds,
+                                     Double areaDamage, Double gateDamage, Double damageRadiusBlocks,
+                                     Double effectRadiusBlocks) {
+        this(key, procChancePercent, procChancePerLevelPercent, cooldownEnabled, cooldownSeconds, effectDurationSeconds,
+                levelMultiplier, effectLevel, secondaryEffectDurationSeconds, areaDamage, gateDamage, damageRadiusBlocks,
+                effectRadiusBlocks, null, null, null, null);
+    }
+
     /** The #151 and #201 values, without the area blast (#223). */
     public EnchantmentTuningOverride(String key, Double procChancePercent, Double procChancePerLevelPercent,
                                      Boolean cooldownEnabled, Integer cooldownSeconds, Double effectDurationSeconds,
                                      Double levelMultiplier, Integer effectLevel, Double secondaryEffectDurationSeconds) {
         this(key, procChancePercent, procChancePerLevelPercent, cooldownEnabled, cooldownSeconds, effectDurationSeconds,
-                levelMultiplier, effectLevel, secondaryEffectDurationSeconds, null, null, null, null);
+                levelMultiplier, effectLevel, secondaryEffectDurationSeconds, null, null, null, null, null, null, null, null);
     }
 
     /** The #151 values only, without an effect level or a second duration. */
@@ -54,6 +73,8 @@ public record EnchantmentTuningOverride(
         return procChancePercent == null && procChancePerLevelPercent == null && cooldownEnabled == null
                 && cooldownSeconds == null && effectDurationSeconds == null && levelMultiplier == null
                 && effectLevel == null && secondaryEffectDurationSeconds == null
-                && areaDamage == null && gateDamage == null && damageRadiusBlocks == null && effectRadiusBlocks == null;
+                && areaDamage == null && gateDamage == null && damageRadiusBlocks == null && effectRadiusBlocks == null
+                && gateDamageBonusPerLevel == null && strikeMultiplier == null && strikeMultiplierPerLevel == null
+                && cooldownPerLevelSeconds == null;
     }
 }

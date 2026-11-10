@@ -1,5 +1,7 @@
 package net.knightsandkings.knk.paper.gates;
 
+import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuningOverride;
+import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuningTable;
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.ports.enchantment.CooldownManager;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentRepository;
@@ -11,6 +13,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.util.Vector;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -50,7 +53,8 @@ class GateCleavingTest {
         cooldowns = mock(CooldownManager.class);
         hitService = mock(GateDoorHitService.class);
         effects = mock(GateCleaving.Effects.class);
-        cleaving = new GateCleaving(enchantments, cooldowns, hitService, 0.25, List.of(5.0, 6.0, 7.0, 8.0), List.of(60, 50, 40, 30));
+        EnchantmentTuningTable.getInstance().clearOverrides();
+        cleaving = new GateCleaving(enchantments, cooldowns, hitService);
         cleaving.setEffects(effects);
 
         gate = new CachedGateDoor(
@@ -106,22 +110,43 @@ class GateCleavingTest {
         assertEquals(128.0, cleaving.chargedDamage(8.0, 4), 1e-9);
     }
 
+    @AfterEach
+    void clearOverrides() {
+        EnchantmentTuningTable.getInstance().clearOverrides();
+    }
+
     @Test
-    void theCooldownShrinksPerLevelAndAMissingLevelUsesTheLastEntry() {
+    void theBuiltInCooldownShrinksPerLevel_AndBeyondLevelIvTheStepsGoOn() {
         assertEquals(60_000L, cleaving.chargedCooldownMillis(1));
         assertEquals(50_000L, cleaving.chargedCooldownMillis(2));
         assertEquals(40_000L, cleaving.chargedCooldownMillis(3));
         assertEquals(30_000L, cleaving.chargedCooldownMillis(4));
-        assertEquals(30_000L, cleaving.chargedCooldownMillis(9), "beyond the list: the last entry");
-        assertEquals(8.0, cleaving.chargedHitMultiplier(9), 1e-9);
+        assertEquals(0L, cleaving.chargedCooldownMillis(9), "never below 0");
+        assertEquals(13.0, cleaving.chargedHitMultiplier(9), 1e-9);
+    }
+
+    /** PandiO/knk-workspace#259: the admin's combat values, read per hit (no restart). */
+    @Test
+    void anAdminsCombatValuesApplyAtTheNextHit() {
+        EnchantmentTuningTable.getInstance().replaceOverrides(List.of(new EnchantmentTuningOverride("knk:cleaving",
+                null, null, null, 90, null, null, null, null, null, null, null, null, 0.5d, 3.0d, 2.0d, -20)));
+
+        assertEquals(1.5, cleaving.damageMultiplier(1), 1e-9);
+        assertEquals(3.0, cleaving.damageMultiplier(4), 1e-9);
+        assertEquals(3.0, cleaving.chargedHitMultiplier(1), 1e-9);
+        assertEquals(9.0, cleaving.chargedHitMultiplier(4), 1e-9);
+        assertEquals(90_000L, cleaving.chargedCooldownMillis(1));
+        assertEquals(30_000L, cleaving.chargedCooldownMillis(4));
+        assertEquals(8.0 * 1.5 * 3.0, cleaving.chargedDamage(8.0, 1), 1e-9);
     }
 
     @Test
-    void emptyListsFallBackToTheDefaults() {
-        GateCleaving defaults = new GateCleaving(enchantments, cooldowns, hitService, 0.25, List.of(), null);
+    void aSwitchedOffCooldownMeansNoStrikeCooldown() {
+        EnchantmentTuningTable.getInstance().replaceOverrides(List.of(new EnchantmentTuningOverride("cleaving",
+                null, null, false, null, null, null)));
 
-        assertEquals(60_000L, defaults.chargedCooldownMillis(1));
-        assertEquals(5.0, defaults.chargedHitMultiplier(1), 1e-9);
+        assertEquals(0L, cleaving.chargedCooldownMillis(1));
+        assertEquals(5.0, cleaving.chargedHitMultiplier(1), 1e-9);
     }
 
     // ===== the level on the weapon =====
