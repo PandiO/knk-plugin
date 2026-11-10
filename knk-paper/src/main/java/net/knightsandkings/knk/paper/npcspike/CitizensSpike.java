@@ -464,6 +464,12 @@ public final class CitizensSpike implements Listener {
                 }
             } else {
                 s.hops.addAll(resample(road.line(), hopSpacing));
+                // the off-road stretch from the road's end to the goal: short floor-snapped hops as well
+                double[] roadEnd = road.line().get(road.line().size() - 1);
+                World world = feet.getWorld();
+                for (double[] hop : resample(List.of(roadEnd, goalFloor), hopSpacing)) {
+                    s.hops.add(snapToFloor(world, hop));
+                }
             }
             s.hops.addLast(goalFloor);
             planHop(s, player, generation);

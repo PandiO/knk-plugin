@@ -508,8 +508,24 @@ public final class NavigationService implements SiegeMatchObserver {
                 + Math.round(walkEnabled() ? startLimit() : routerParameters.maxSnapDistance()) + " blocks)"));
             return out;
         }
+        // As player navigation does (connectedStart / connectedGoals): an end off the road may snap to a stray stretch
+        // in another network component; then snap it to the nearest road in the other end's component instead.
+        SnapPoint start = from.get();
+        SnapPoint end = to.get();
+        if (componentOf(snapshot, start) != componentOf(snapshot, end)) {
+            int startComponent = componentOf(snapshot, start);
+            Optional<SnapPoint> endInStart = snapStart(snapshot, toFloor[0], toFloor[1], toFloor[2],
+                edgeIndex -> snapshot.componentOf(snapshot.edgeAt(edgeIndex)) == startComponent);
+            if (endInStart.isPresent()) {
+                end = endInStart.get();
+            } else {
+                int endComponent = componentOf(snapshot, end);
+                start = snapStart(snapshot, fromFloor[0], fromFloor[1], fromFloor[2],
+                    edgeIndex -> snapshot.componentOf(snapshot.edgeAt(edgeIndex)) == endComponent).orElse(start);
+            }
+        }
         AccessPolicy policy = deps.policies().policyFor(subject, snapshot, null);
-        RouteRequest request = RouteRequest.of(from.get(), to.get(), policy, routerParameters);
+        RouteRequest request = RouteRequest.of(start, end, policy, routerParameters);
         deps.routing().execute(() -> {
             SpikeRoad road;
             try {
