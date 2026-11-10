@@ -273,6 +273,18 @@ class StatisticsApiImplTest {
     }
 
     @Test
+    void publicStatisticsAskForThePublicAudience_ActingAsTheSender() {
+        // PandiO/knk-workspace#233: chat tokens show what /stats <player> shows another player.
+        responseJson = STATISTICS_JSON;
+
+        var stats = api.getPublicStatistics(7, 7).join();
+
+        assertEquals("http://api.test/api/statistics/users/7?period=lifetime&audience=public", seen.get(0).url().toString());
+        assertEquals("7", seen.get(0).header("X-Acting-User-Id"));
+        assertEquals("Bob", stats.username());
+    }
+
+    @Test
     void titleHistoryIsMapped_AndAPrivateHistoryKeeps403() {
         responseJson = "{\"items\":[{\"changedAt\":\"2026-10-02T10:00:00Z\",\"fromTitleName\":\"Serf\",\"toTitleName\":\"Squire\","
                 + "\"direction\":\"Promotion\"},{\"changedAt\":\"2026-10-01T10:00:00\",\"fromTitleName\":null,\"toTitleName\":\"Serf\","

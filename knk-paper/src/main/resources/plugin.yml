@@ -76,6 +76,10 @@ commands:
     # No permission: here (KNG-24) - gated on knk.staffchat through KnkPermissible inside the executor
     # and hidden from players lacking it by GatedCommandVisibilityListener.
 
+  chattoken:
+    description: "Answers the chat-token share prompt (PandiO/knk-workspace#233): /chattoken <id> <public|plain|never>; clicked, not typed"
+    usage: "/chattoken <id> <public|plain|never>"
+
   msg:
     description: "Send a private message to another player (rebuild of v1's MessageCommands)"
     usage: "/msg <player> <message>"
@@ -633,6 +637,14 @@ permissions:
 
   # Lootboxes (docs/specs/lootboxes/DESIGN.md §3.4). Resolved through KnkPermissible, like knk.kit.*; the two player
   # nodes are granted to the Default permission group by knk-web-api's LootboxSeed, the admin nodes never are.
+  # Chat hashtag tokens (PandiO/knk-workspace#233). Checked through KnkPermissible: knk-web-api's SeedChatTokenNodes
+  # grants knk.chat.token.* to the Default group and knk.chat.tokens.bypass to Staff, Moderator and Admin.
+  knk.chat.token.*:
+    description: Every chat token (#hand, #stats, #kills, #deaths, #kd, #streak, #wins, #playtime, #balance, #title, #xp, #discoveries, #location, #tokens).
+    default: true
+  knk.chat.tokens.bypass:
+    description: Skips the Game Settings chat-token limits (tokens per message, statistics-token cooldown).
+    default: op
   knk.lootbox.open:
     description: Open (claim) a lootbox in the world by clicking it, or a lootbox token item by right-clicking it.
     default: true

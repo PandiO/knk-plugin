@@ -59,6 +59,11 @@ public final class PrivateMessageFormat {
 
     /** {@code [me -> Bob] hi} - the sender's echo. */
     public static Component toSender(Party recipient, String text) {
+        return toSender(recipient, Component.text(text, FRAME));
+    }
+
+    /** {@link #toSender(Party, String)} with a body that may hold chat tokens (PandiO/knk-workspace#233). */
+    public static Component toSender(Party recipient, Component body) {
         String hover = recipient.console() ? "Click to reply" : "Click to message " + recipient.name();
         return Component.text()
                 .append(Component.text("[", FRAME))
@@ -66,7 +71,7 @@ public final class PrivateMessageFormat {
                 .append(Component.text(" -> ", FRAME))
                 .append(recipient.nameComponent())
                 .append(Component.text("] ", FRAME))
-                .append(Component.text(text, FRAME))
+                .append(body.colorIfAbsent(FRAME))
                 .hoverEvent(HoverEvent.showText(Component.text(hover, NamedTextColor.GRAY)))
                 .clickEvent(ClickEvent.suggestCommand(recipient.replyCommand()))
                 .build();
@@ -74,6 +79,11 @@ public final class PrivateMessageFormat {
 
     /** {@code [Alice -> me] hi} - what the recipient sees. */
     public static Component toRecipient(Party sender, String text, LocalTime sentAt) {
+        return toRecipient(sender, Component.text(text, FRAME), sentAt);
+    }
+
+    /** {@link #toRecipient(Party, String, LocalTime)} with a body that may hold chat tokens. */
+    public static Component toRecipient(Party sender, Component body, LocalTime sentAt) {
         String hover = sender.console() ? "Click to reply" : "Click to reply to " + sender.name();
         return Component.text()
                 .append(Component.text("[", FRAME))
@@ -81,7 +91,7 @@ public final class PrivateMessageFormat {
                 .append(Component.text(" -> ", FRAME))
                 .append(Component.text("me", ME))
                 .append(Component.text("] ", FRAME))
-                .append(Component.text(text, FRAME))
+                .append(body.colorIfAbsent(FRAME))
                 .hoverEvent(HoverEvent.showText(Component.text(hover, NamedTextColor.GRAY)
                         .append(Component.newline())
                         .append(Component.text("Sent " + TIME.format(sentAt), NamedTextColor.DARK_GRAY))))
@@ -94,6 +104,11 @@ public final class PrivateMessageFormat {
      * list swallowed (Phase 2).
      */
     public static Component toSpy(Party sender, Party recipient, String text, LocalTime sentAt, boolean viaReply, boolean ignored) {
+        return toSpy(sender, recipient, Component.text(text, NamedTextColor.GRAY), sentAt, viaReply, ignored);
+    }
+
+    /** {@link #toSpy(Party, Party, String, LocalTime, boolean, boolean)} with a body that may hold chat tokens. */
+    public static Component toSpy(Party sender, Party recipient, Component body, LocalTime sentAt, boolean viaReply, boolean ignored) {
         Component hover = Component.text("Private message · " + TIME.format(sentAt), NamedTextColor.GRAY);
         if (viaReply) {
             hover = hover.append(Component.text(" (via /r)", NamedTextColor.DARK_GRAY));
@@ -104,7 +119,7 @@ public final class PrivateMessageFormat {
                 .append(Component.text(" -> ", NamedTextColor.DARK_GRAY))
                 .append(recipient.nameComponent())
                 .append(Component.text(": ", NamedTextColor.DARK_GRAY))
-                .append(Component.text(text, NamedTextColor.GRAY))
+                .append(body.colorIfAbsent(NamedTextColor.GRAY))
                 .hoverEvent(HoverEvent.showText(hover));
         return line.build();
     }

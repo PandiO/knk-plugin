@@ -23,14 +23,32 @@ public record GameSettingsDto(
         @JsonProperty("updatedAt") String updatedAt,
         @JsonProperty("motd") String motd,
         @JsonProperty("groupOverrides") List<GroupOverride> groupOverrides,
-        @JsonProperty("hub") Hub hub
+        @JsonProperty("hub") Hub hub,
+        @JsonProperty("chatTokens") ChatTokens chatTokens
 ) {
+    /** Without the chat-token limits (hub shape). */
+    public GameSettingsDto(String joinSpawnMode, LocationReference joinSpawnReference, String joinAnnouncement,
+                           String leaveAnnouncement, RespawnPolicy defaultRespawnPolicy, List<WorldSettings> worldSettings,
+                           List<RuntimeWorld> runtimeWorlds, String updatedAt, String motd, List<GroupOverride> groupOverrides,
+                           Hub hub) {
+        this(joinSpawnMode, joinSpawnReference, joinAnnouncement, leaveAnnouncement, defaultRespawnPolicy, worldSettings,
+            runtimeWorlds, updatedAt, motd, groupOverrides, hub, null);
+    }
+
+    /** knk-web-api {@code ChatTokenSettingsDto} (PandiO/knk-workspace#233); a missing field is 0 = off. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record ChatTokens(
+            @JsonProperty("maxTokensPerMessage") Integer maxTokensPerMessage,
+            @JsonProperty("statCooldownSeconds") Integer statCooldownSeconds
+    ) {
+    }
+
     /** Without the hub block (KNG-52 shape). */
     public GameSettingsDto(String joinSpawnMode, LocationReference joinSpawnReference, String joinAnnouncement,
                            String leaveAnnouncement, RespawnPolicy defaultRespawnPolicy, List<WorldSettings> worldSettings,
                            List<RuntimeWorld> runtimeWorlds, String updatedAt, String motd, List<GroupOverride> groupOverrides) {
         this(joinSpawnMode, joinSpawnReference, joinAnnouncement, leaveAnnouncement, defaultRespawnPolicy, worldSettings,
-            runtimeWorlds, updatedAt, motd, groupOverrides, null);
+            runtimeWorlds, updatedAt, motd, groupOverrides, null, null);
     }
 
     /** knk-web-api {@code HubSettingsDto} (hub DESIGN §16 Phase 4). */

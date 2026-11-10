@@ -303,6 +303,8 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.teleport.SpawnDestinationResolver spawnDestinationResolver;
     /** Global Game Settings (KNG-52); null without the API client. */
     private net.knightsandkings.knk.paper.settings.GameSettingsManager gameSettingsManager;
+    /** Chat hashtag tokens (PandiO/knk-workspace#233); null without the API. */
+    private net.knightsandkings.knk.paper.chat.tokens.ChatTokenService chatTokenService;
     private net.knightsandkings.knk.paper.commands.SpawnCommand spawnCommand;
     /** {@code /hub [<player>]} (KNG-188); null without the teleport engine. */
     private net.knightsandkings.knk.paper.commands.HubTeleportCommand hubTeleportCommand;
@@ -760,6 +762,7 @@ public class KnKPlugin extends JavaPlugin {
             });
             startOfflineSecurityTasks();
             initPrivateMessaging();
+            initChatTokens();
             this.rankHierarchy = new net.knightsandkings.knk.paper.commands.support.RankHierarchy(usersQueryApi);
             this.minecraftMaterialRefsDataAccess = dataAccessFactory.createMinecraftMaterialRefsDataAccess(
                 config.cache().ttl(),
@@ -2116,8 +2119,67 @@ public class KnKPlugin extends JavaPlugin {
         );
     }
 
+    /**
+     * Chat hashtag tokens (PandiO/knk-workspace#233): #hand, #kills, #kills@Steve, … in public chat, private
+     * messages and staff chat. Needs the API (statistics and the user lookup); the Game Settings limits are read per
+     * message because the settings manager starts later.
+     */
+    private void initChatTokens() {
+        if (apiClient == null || cacheManager == null || usersDataAccess == null || knkPermissible == null) {
+            getLogger().warning("Chat tokens not enabled - the API, user cache or permissions failed to initialize");
+            return;
+        }
+        var statisticsApi = apiClient.getStatisticsApi();
+        var consent = new net.knightsandkings.knk.core.chat.tokens.ShareConsent();
+        var consentFile = new net.knightsandkings.knk.paper.chat.tokens.ShareConsentFile(getDataFolder(), consent);
+        consentFile.load();
+        var userCache = cacheManager.getUserCache();
+        this.chatTokenService = new net.knightsandkings.knk.paper.chat.tokens.ChatTokenService(
+            MenuService.mainThreadExecutor(this),
+            knkPermissible::hasPermission,
+            () -> gameSettingsManager != null && gameSettingsManager.current() != null
+                ? gameSettingsManager.current().chatTokens()
+                : net.knightsandkings.knk.core.domain.settings.KnkChatTokenSettings.off(),
+            userCache::getStale,
+            name -> usersDataAccess.getByUsernameAsync(name)
+                .thenApply(result -> result != null && result.isSuccess() ? result.value() : java.util.Optional.<net.knightsandkings.knk.core.domain.users.UserSummary>empty()),
+            org.bukkit.Bukkit::getPlayerExact,
+            // #kills@Steve: Steve's name in his tab-list colour (KNG-7), also when he is offline.
+            user -> {
+                if (user.uuid() == null) {
+                    return net.knightsandkings.knk.paper.utils.TabListTeam.resolve(false, false, user).color();
+                }
+                org.bukkit.OfflinePlayer target = org.bukkit.Bukkit.getPlayer(user.uuid());
+                if (target == null) {
+                    target = org.bukkit.Bukkit.getOfflinePlayer(user.uuid());
+                }
+                return net.knightsandkings.knk.paper.utils.TabListTeam.resolve(
+                    knkPermissible.hasPermission(target, ModeService.OWNER_NODE),
+                    knkPermissible.hasPermission(target, ModeService.STAFF_NODE), user).color();
+            },
+            new net.knightsandkings.knk.paper.chat.tokens.ChatStatisticsCache(statisticsApi::getPublicStatistics, System::nanoTime),
+            statisticsApi, consent, consentFile::save, java.time.Clock.systemUTC());
+        if (messagingService != null) {
+            messagingService.setTokenExpander(chatTokenService);
+        }
+    }
+
     private void registerEvents(WorldGuardRegionTracker regionTracker) {
         var pluginManager = getServer().getPluginManager();
+        if (chatTokenService != null) {
+            var plugin = this;
+            pluginManager.registerEvents(new net.knightsandkings.knk.paper.chat.tokens.ChatTokenListener(chatTokenService,
+                MenuService.mainThreadExecutor(this),
+                task -> getServer().getScheduler().runTaskLaterAsynchronously(plugin, task, 100L)), this);
+            // #kills@ + Tab offers the players the viewer can see (staff/owner mode respected).
+            var completions = new net.knightsandkings.knk.paper.chat.tokens.ChatTokenCompletionSync(
+                knkPermissible::hasPermission, org.bukkit.Bukkit::getOnlinePlayers,
+                task -> getServer().getScheduler().runTask(plugin, task));
+            pluginManager.registerEvents(completions, this);
+            getServer().getScheduler().runTaskTimer(this, completions::refreshAll,
+                net.knightsandkings.knk.paper.chat.tokens.ChatTokenCompletionSync.REFRESH_TICKS,
+                net.knightsandkings.knk.paper.chat.tokens.ChatTokenCompletionSync.REFRESH_TICKS);
+        }
         // Event registration moved to onEnable after region transition service setup
 
         pluginManager.registerEvents(new WorldGuardRegionListener(regionTracker), this);
@@ -2738,10 +2800,15 @@ public class KnKPlugin extends JavaPlugin {
             commandPermissions, gatedCommandVisibility);
         registerGatedCommand("unfreeze", "knk.unfreeze", new net.knightsandkings.knk.paper.commands.FreezeCommand(userAdminService, false, visiblePlayers),
             commandPermissions, gatedCommandVisibility);
+        var staffChatCommand = new net.knightsandkings.knk.paper.commands.StaffChatCommand(commandPermissions::hasAsync,
+            MenuService.mainThreadExecutor(this), org.bukkit.Bukkit::getOnlinePlayers);
+        if (chatTokenService != null) {
+            staffChatCommand.setTokenExpander(chatTokenService);
+            registerTabCommand(net.knightsandkings.knk.paper.chat.tokens.ChatTokenService.COMMAND,
+                new net.knightsandkings.knk.paper.chat.tokens.ChatTokenCommand(chatTokenService));
+        }
         registerGatedCommand("staffchat", net.knightsandkings.knk.paper.commands.StaffChatCommand.NODE,
-            new net.knightsandkings.knk.paper.commands.StaffChatCommand(commandPermissions::hasAsync,
-                MenuService.mainThreadExecutor(this), org.bukkit.Bukkit::getOnlinePlayers),
-            commandPermissions, gatedCommandVisibility);
+            staffChatCommand, commandPermissions, gatedCommandVisibility);
         // KNG-107: every command whose forms all need a node is left out of "/" for players holding none.
         for (String gatedName : net.knightsandkings.knk.paper.commands.support.CommandNodes.commands()) {
             PluginCommand gatedCommand = getCommand(gatedName);
