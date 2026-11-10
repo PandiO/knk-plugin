@@ -44,41 +44,50 @@ public final class ChatTokenViews {
     private ChatTokenViews() {
     }
 
-    /**
-     * @param stats   the public view ({@code audience=public}); never null
-     * @param ofOther true for {@code #kills@Steve}: the label names the player
-     */
+    /** {@link #view(ChatToken, PlayerStatistics, boolean, String)} with the name in the default white. */
     public static View view(ChatToken token, PlayerStatistics stats, boolean ofOther) {
+        return view(token, stats, ofOther, VALUE);
+    }
+
+    /**
+     * @param stats     the public view ({@code audience=public}); never null
+     * @param ofOther   true for {@code #kills@Steve}: the label names the player
+     * @param nameColor the {@code &} colour code of the player's name in the label of {@code #kills@Steve} and
+     *                  {@code #stats@Steve} - the plugin passes their tab-list colour; null = white
+     */
+    public static View view(ChatToken token, PlayerStatistics stats, boolean ofOther, String nameColor) {
         String name = stats.username() == null ? "?" : stats.username();
+        String nameCode = nameColor == null || nameColor.isBlank() ? VALUE : nameColor;
         PlayerStatistics.Profile profile = stats.profile();
         return switch (token) {
-            case STATS -> new Shown(BRACKET + "[" + VALUE + possessive(name) + " stats" + BRACKET + "]", overview(stats, name));
-            case KILLS -> single(stats, "pvp_kills", name, ofOther, "kill", "kills", List.of("pve_kills"));
-            case DEATHS -> single(stats, "deaths", name, ofOther, "death", "deaths", List.of());
+            case STATS -> new Shown(BRACKET + "[" + (ofOther ? coloured(possessive(name), nameCode) : VALUE + possessive(name))
+                + " stats" + BRACKET + "]", overview(stats, name));
+            case KILLS -> single(stats, "pvp_kills", name, nameCode, ofOther, "kill", "kills", List.of("pve_kills"));
+            case DEATHS -> single(stats, "deaths", name, nameCode, ofOther, "death", "deaths", List.of());
             case STREAK -> metricValue(stats, "highest_killstreak")
-                .<View>map(v -> new Shown(label(name, ofOther, "best streak " + count(v)),
+                .<View>map(v -> new Shown(label(name, nameCode, ofOther, "best streak " + count(v)),
                     hover(name, "killstreak", List.of(StatisticsLines.metricLine(stats.metric("highest_killstreak").orElseThrow())))))
                 .orElse(new Private(List.of("highest_killstreak")));
-            case WINS -> single(stats, "wins", name, ofOther, "win", "wins", List.of("losses", "draws"));
-            case KD -> kd(stats, name, ofOther);
-            case PLAYTIME -> new Shown(label(name, ofOther, StatisticsLines.duration(profile == null ? 0 : profile.activePlaytimeSeconds()) + " played"),
+            case WINS -> single(stats, "wins", name, nameCode, ofOther, "win", "wins", List.of("losses", "draws"));
+            case KD -> kd(stats, name, nameCode, ofOther);
+            case PLAYTIME -> new Shown(label(name, nameCode, ofOther, StatisticsLines.duration(profile == null ? 0 : profile.activePlaytimeSeconds()) + " played"),
                 hover(name, "playtime", StatisticsLines.activityLines(profile)));
-            case BALANCE -> new Shown(label(name, ofOther, count(profile == null ? 0 : profile.coins()) + " coins"),
+            case BALANCE -> new Shown(label(name, nameCode, ofOther, count(profile == null ? 0 : profile.coins()) + " coins"),
                 hover(name, "balance", List.of("&7Coins: &6" + count(profile == null ? 0 : profile.coins()),
                     "&7Gems: &b" + count(profile == null ? 0 : profile.gems()))));
             case TITLE -> {
                 String title = profile == null || profile.titleName() == null || profile.titleName().isBlank() ? null : profile.titleName();
-                yield new Shown(label(name, ofOther, title == null ? "no title" : title),
+                yield new Shown(label(name, nameCode, ofOther, title == null ? "no title" : title),
                     hover(name, "title", List.of("&7Title: &f" + (title == null ? "-" : title))));
             }
-            case XP -> new Shown(label(name, ofOther, count(profile == null ? 0 : profile.experience()) + " XP"),
+            case XP -> new Shown(label(name, nameCode, ofOther, count(profile == null ? 0 : profile.experience()) + " XP"),
                 hover(name, "experience", List.of("&7Experience: &f" + count(profile == null ? 0 : profile.experience()))));
             case DISCOVERIES -> {
                 PlayerStatistics.Discoveries d = stats.discoveries();
                 if (d == null) {
                     yield new Private(List.of(DISCOVERIES_SETTING));
                 }
-                yield new Shown(label(name, ofOther, plural(d.total(), "discovery", "discoveries")),
+                yield new Shown(label(name, nameCode, ofOther, plural(d.total(), "discovery", "discoveries")),
                     hover(name, "discoveries", List.of("&7Towns: &f" + d.towns(), "&7Districts: &f" + d.districts(),
                         "&7Structures: &f" + d.structures())));
             }
@@ -91,8 +100,8 @@ public final class ChatTokenViews {
         return stats.metric(key).map(PlayerStatistics.Metric::value);
     }
 
-    private static View single(PlayerStatistics stats, String key, String name, boolean ofOther, String one, String many,
-                               List<String> extraKeys) {
+    private static View single(PlayerStatistics stats, String key, String name, String nameCode, boolean ofOther, String one,
+                               String many, List<String> extraKeys) {
         Optional<Double> value = metricValue(stats, key);
         if (value.isEmpty()) {
             return new Private(List.of(key));
@@ -102,10 +111,10 @@ public final class ChatTokenViews {
         for (String extra : extraKeys) {
             stats.metric(extra).ifPresent(m -> lines.add(StatisticsLines.metricLine(m)));
         }
-        return new Shown(label(name, ofOther, plural(Math.round(value.get()), one, many)), hover(name, many, lines));
+        return new Shown(label(name, nameCode, ofOther, plural(Math.round(value.get()), one, many)), hover(name, many, lines));
     }
 
-    private static View kd(PlayerStatistics stats, String name, boolean ofOther) {
+    private static View kd(PlayerStatistics stats, String name, String nameCode, boolean ofOther) {
         Optional<Double> kills = metricValue(stats, "pvp_kills");
         Optional<Double> deaths = metricValue(stats, "deaths");
         List<String> hidden = new ArrayList<>();
@@ -119,7 +128,7 @@ public final class ChatTokenViews {
             return new Private(hidden);
         }
         String ratio = ratio(kills.get(), deaths.get());
-        return new Shown(label(name, ofOther, "K/D " + ratio), hover(name, "K/D", List.of(
+        return new Shown(label(name, nameCode, ofOther, "K/D " + ratio), hover(name, "K/D", List.of(
             "&7K/D: &f" + ratio + " &8(player kills per death)",
             StatisticsLines.metricLine(stats.metric("pvp_kills").orElseThrow()),
             StatisticsLines.metricLine(stats.metric("deaths").orElseThrow()))));
@@ -163,8 +172,13 @@ public final class ChatTokenViews {
         return lines;
     }
 
-    private static String label(String name, boolean ofOther, String text) {
-        return BRACKET + "[" + VALUE + (ofOther ? name + ": " : "") + text + BRACKET + "]";
+    private static String label(String name, String nameCode, boolean ofOther, String text) {
+        return BRACKET + "[" + (ofOther ? coloured(name, nameCode) + ": " : VALUE) + text + BRACKET + "]";
+    }
+
+    /** The name in {@code nameCode}, then back to the value colour ({@code &f}); just {@code &fname} for white. */
+    private static String coloured(String name, String nameCode) {
+        return nameCode + name + (VALUE.equals(nameCode) ? "" : VALUE);
     }
 
     private static List<String> hover(String name, String what, List<String> lines) {

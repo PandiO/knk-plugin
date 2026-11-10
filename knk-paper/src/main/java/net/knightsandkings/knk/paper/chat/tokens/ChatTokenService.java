@@ -49,6 +49,7 @@ import net.kyori.adventure.text.TextReplacementConfig;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.event.HoverEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 
@@ -119,6 +120,7 @@ public final class ChatTokenService implements ChatTokenExpander {
     private final Function<UUID, Optional<UserSummary>> cachedUser;
     private final Function<String, CompletableFuture<Optional<UserSummary>>> userByName;
     private final Function<String, Player> onlineByName;
+    private final Function<UserSummary, TextColor> nameColor;
     private final ChatStatisticsCache statistics;
     private final StatisticsApi statisticsApi;
     private final ShareConsent consent;
@@ -136,11 +138,13 @@ public final class ChatTokenService implements ChatTokenExpander {
      * @param cachedUser    the user summary cache (stale is fine)
      * @param userByName    the API lookup for {@code #kills@Steve} when Steve is offline
      * @param onlineByName  an online player by exact name, or null
+     * @param nameColor     a player's tab-list colour (owner, staff, else the group's name colour); null = white
      */
     public ChatTokenService(Executor mainThread, BiPredicate<Player, String> permission, Supplier<KnkChatTokenSettings> limits,
                             Function<UUID, Optional<UserSummary>> cachedUser,
                             Function<String, CompletableFuture<Optional<UserSummary>>> userByName,
-                            Function<String, Player> onlineByName, ChatStatisticsCache statistics, StatisticsApi statisticsApi,
+                            Function<String, Player> onlineByName, Function<UserSummary, TextColor> nameColor,
+                            ChatStatisticsCache statistics, StatisticsApi statisticsApi,
                             ShareConsent consent, Runnable saveConsent, Clock clock) {
         this.mainThread = mainThread;
         this.permission = permission;
@@ -148,6 +152,7 @@ public final class ChatTokenService implements ChatTokenExpander {
         this.cachedUser = cachedUser;
         this.userByName = userByName;
         this.onlineByName = onlineByName;
+        this.nameColor = nameColor;
         this.statistics = statistics;
         this.statisticsApi = statisticsApi;
         this.consent = consent;
@@ -319,14 +324,15 @@ public final class ChatTokenService implements ChatTokenExpander {
             if (user.isEmpty() || user.get().id() == null) {
                 return CompletableFuture.completedFuture(Resolved.NONE);
             }
+            String nameCode = own ? null : legacyCode(nameColorOf(user.get()));
             return statistics.get(user.get().id(), actingId).thenApply(stats -> {
-                ChatTokenViews.View view = ChatTokenViews.view(ref.token(), stats, !own);
+                ChatTokenViews.View view = ChatTokenViews.view(ref.token(), stats, !own, nameCode);
                 if (view instanceof ChatTokenViews.Shown shown) {
                     return new Resolved(component(shown), List.of());
                 }
                 List<String> keys = ((ChatTokenViews.Private) view).settingKeys();
                 if (!own) {
-                    return new Resolved(privateLabel(stats.username(), keys), List.of());
+                    return new Resolved(privateLabel(stats.username(), nameColorOf(user.get()), keys), List.of());
                 }
                 if (sendPlain || consent.neverAskAll(sender.getUniqueId(), keys)) {
                     return Resolved.NONE;
@@ -352,9 +358,31 @@ public final class ChatTokenService implements ChatTokenExpander {
         return LEGACY.deserialize(shown.label()).hoverEvent(HoverEvent.showText(hover));
     }
 
-    private static Component privateLabel(String name, List<String> settingKeys) {
+    private TextColor nameColorOf(UserSummary user) {
+        try {
+            return nameColor.apply(user);
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.FINE, "tab-list colour of " + user.username() + " unavailable", e);
+            return null;
+        }
+    }
+
+    /** {@code &9} for a colour (hex is rounded to the nearest named one), null for none. */
+    static String legacyCode(TextColor color) {
+        if (color == null) {
+            return null;
+        }
+        String serialized = LEGACY.serialize(Component.text("x", color));
+        return serialized.endsWith("x") ? serialized.substring(0, serialized.length() - 1) : null;
+    }
+
+    private static Component privateLabel(String name, TextColor nameColor, List<String> settingKeys) {
         String what = settingKeys.stream().map(ChatTokenService::settingLabel).reduce((a, b) -> a + " and " + b).orElse("this");
-        return Component.text("[" + name + ": " + what + " private]", NamedTextColor.GRAY)
+        return Component.text()
+            .append(Component.text("[", NamedTextColor.GRAY))
+            .append(Component.text(name, nameColor != null ? nameColor : NamedTextColor.GRAY))
+            .append(Component.text(": " + what + " private]", NamedTextColor.GRAY))
+            .build()
             .hoverEvent(HoverEvent.showText(Component.text(name + " keeps this statistic private.", NamedTextColor.GRAY)));
     }
 

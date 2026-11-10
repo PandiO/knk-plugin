@@ -90,4 +90,18 @@ class ChatTokenViewsTest {
         assertEquals("&8/stats Steve for more", view.hover().get(view.hover().size() - 1));
         assertEquals("Chris'", ChatTokenViews.possessive("Chris"));
     }
+
+    @Test
+    void anotherPlayersNameTakesTheGivenColour_OwnTokensDoNot() {
+        var s = stats(List.of(metric("pvp_kills", 3d)), null);
+
+        assertEquals("&e[&9Steve&f: 3 kills&e]", shown(ChatToken.KILLS, s, true, "&9").label());
+        assertEquals("&e[&9Steve's&f stats&e]", shown(ChatToken.STATS, s, true, "&9").label());
+        assertEquals("&e[&f3 kills&e]", shown(ChatToken.KILLS, s, false, "&9").label());
+        assertEquals("&e[&fSteve: 3 kills&e]", shown(ChatToken.KILLS, s, true, null).label());
+    }
+
+    private static ChatTokenViews.Shown shown(ChatToken token, PlayerStatistics stats, boolean ofOther, String nameColor) {
+        return assertInstanceOf(ChatTokenViews.Shown.class, ChatTokenViews.view(token, stats, ofOther, nameColor));
+    }
 }

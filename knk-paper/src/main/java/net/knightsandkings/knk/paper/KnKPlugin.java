@@ -2053,6 +2053,19 @@ public class KnKPlugin extends JavaPlugin {
             name -> usersDataAccess.getByUsernameAsync(name)
                 .thenApply(result -> result != null && result.isSuccess() ? result.value() : java.util.Optional.<net.knightsandkings.knk.core.domain.users.UserSummary>empty()),
             org.bukkit.Bukkit::getPlayerExact,
+            // #kills@Steve: Steve's name in his tab-list colour (KNG-7), also when he is offline.
+            user -> {
+                if (user.uuid() == null) {
+                    return net.knightsandkings.knk.paper.utils.TabListTeam.resolve(false, false, user).color();
+                }
+                org.bukkit.OfflinePlayer target = org.bukkit.Bukkit.getPlayer(user.uuid());
+                if (target == null) {
+                    target = org.bukkit.Bukkit.getOfflinePlayer(user.uuid());
+                }
+                return net.knightsandkings.knk.paper.utils.TabListTeam.resolve(
+                    knkPermissible.hasPermission(target, ModeService.OWNER_NODE),
+                    knkPermissible.hasPermission(target, ModeService.STAFF_NODE), user).color();
+            },
             new net.knightsandkings.knk.paper.chat.tokens.ChatStatisticsCache(statisticsApi::getPublicStatistics, System::nanoTime),
             statisticsApi, consent, consentFile::save, java.time.Clock.systemUTC());
         if (messagingService != null) {
@@ -2067,6 +2080,14 @@ public class KnKPlugin extends JavaPlugin {
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.chat.tokens.ChatTokenListener(chatTokenService,
                 MenuService.mainThreadExecutor(this),
                 task -> getServer().getScheduler().runTaskLaterAsynchronously(plugin, task, 100L)), this);
+            // #kills@ + Tab offers the players the viewer can see (staff/owner mode respected).
+            var completions = new net.knightsandkings.knk.paper.chat.tokens.ChatTokenCompletionSync(
+                knkPermissible::hasPermission, org.bukkit.Bukkit::getOnlinePlayers,
+                task -> getServer().getScheduler().runTask(plugin, task));
+            pluginManager.registerEvents(completions, this);
+            getServer().getScheduler().runTaskTimer(this, completions::refreshAll,
+                net.knightsandkings.knk.paper.chat.tokens.ChatTokenCompletionSync.REFRESH_TICKS,
+                net.knightsandkings.knk.paper.chat.tokens.ChatTokenCompletionSync.REFRESH_TICKS);
         }
         // Event registration moved to onEnable after region transition service setup
 

@@ -40,6 +40,7 @@ import net.knightsandkings.knk.core.domain.statistics.StatisticsVisibilitySettin
 import net.knightsandkings.knk.core.domain.users.UserSummary;
 import net.knightsandkings.knk.core.ports.api.StatisticsApi;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 
@@ -89,7 +90,7 @@ class ChatTokenServiceTest {
         service = new ChatTokenService(Runnable::run, (player, node) -> !denied.contains(node), () -> limits,
             id -> id.equals(steveId) ? Optional.of(steveUser) : Optional.empty(),
             name -> CompletableFuture.completedFuture(name.equalsIgnoreCase("Alex") ? Optional.of(alexUser) : Optional.empty()),
-            name -> null, cache, api, consent, saves::incrementAndGet, Clock.fixed(Instant.parse("2026-11-04T12:00:00Z"), ZoneOffset.UTC));
+            name -> null, user -> "Alex".equals(user.username()) ? NamedTextColor.BLUE : null, cache, api, consent, saves::incrementAndGet, Clock.fixed(Instant.parse("2026-11-04T12:00:00Z"), ZoneOffset.UTC));
     }
 
     private ChatTokenService.Result expand(String legacyText, Runnable resend) {
@@ -271,5 +272,22 @@ class ChatTokenServiceTest {
         assertEquals("plain text", plain(service.expand(steve, "plain text", () -> { }).join()));
         assertEquals("[10 XP]", plain(service.expand(steve, "#xp", () -> { }).join()));
         assertEquals(null, service.expand(steve, "#kills", () -> { }).join());
+    }
+
+    @Test
+    void anotherPlayersNameIsInTheirTabListColour_InTheLabelAndThePrivateLabel() {
+        publicViews.put(8, stats(8, "Alex", metric("wins", 5d)));
+
+        Component wins = expand("#wins@alex", () -> { }).message();
+        assertEquals("&e[&9Alex&f: 5 wins&e]", LegacyComponentSerializer.legacyAmpersand().serialize(wins));
+
+        Component kills = expand("#kills@Alex", () -> { }).message();
+        assertEquals("&7[&9Alex&7: player kills private]", LegacyComponentSerializer.legacyAmpersand().serialize(kills));
+    }
+
+    @Test
+    void aColourBecomesItsLegacyCode() {
+        assertEquals("&9", ChatTokenService.legacyCode(NamedTextColor.BLUE));
+        assertEquals(null, ChatTokenService.legacyCode(null));
     }
 }
