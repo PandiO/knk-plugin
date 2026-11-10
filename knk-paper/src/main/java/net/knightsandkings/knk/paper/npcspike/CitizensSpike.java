@@ -185,10 +185,7 @@ public final class CitizensSpike implements Listener {
         ensureStarted();
         int made = 0;
         for (int i = 0; i < n; i++) {
-            double angle = ThreadLocalRandom.current().nextDouble(Math.PI * 2);
-            double radius = 1.5 + ThreadLocalRandom.current().nextDouble(2.5);
-            Location at = from.clone().add(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
-            at.setY(from.getY());
+            Location at = spawnSpot();
             NPC npc = registry.createNPC(type, "spike-" + (npcs.size() + 1));
             npc.data().set(NPC.Metadata.SHOULD_SAVE, false);
             // Citizens appends its own DoorExaminer after the defaults when this is on, and "first PASSABLE
@@ -214,6 +211,33 @@ public final class CitizensSpike implements Listener {
             made++;
         }
         return made;
+    }
+
+    /**
+     * A free standing spot near {@code from}: a random point 1.5–4 blocks away, moved to the nearest floor within
+     * 3 blocks up or down with 2 free blocks above; after 12 misses, {@code from} itself (inside a castle a fixed
+     * height around {@code from} is often in a wall or in the air, and Citizens cannot plan from there).
+     */
+    private Location spawnSpot() {
+        World world = from.getWorld();
+        int fromFloor = from.getBlockY() - 1;
+        for (int attempt = 0; attempt < 12; attempt++) {
+            double angle = ThreadLocalRandom.current().nextDouble(Math.PI * 2);
+            double radius = 1.5 + ThreadLocalRandom.current().nextDouble(2.5);
+            int x = (int) Math.floor(from.getX() + Math.cos(angle) * radius);
+            int z = (int) Math.floor(from.getZ() + Math.sin(angle) * radius);
+            for (int d = 0; d <= 3; d++) {
+                for (int floorY : d == 0 ? new int[] {fromFloor} : new int[] {fromFloor + d, fromFloor - d}) {
+                    if (world.getBlockAt(x, floorY, z).getType().isSolid()
+                        && world.getBlockAt(x, floorY + 1, z).isPassable()
+                        && world.getBlockAt(x, floorY + 2, z).isPassable()) {
+                        return new Location(world, x + 0.5, floorY + 1, z + 0.5);
+                    }
+                }
+            }
+        }
+        metrics.fail("spawn: no free spot near from (spawned at from)");
+        return from.clone();
     }
 
     void clear() {
