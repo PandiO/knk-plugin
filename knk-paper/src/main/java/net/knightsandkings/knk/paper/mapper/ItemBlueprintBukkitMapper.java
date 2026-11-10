@@ -66,6 +66,10 @@ public final class ItemBlueprintBukkitMapper {
             // Machine-readable grade for the enchant-book level cap (KNG-6); the star lore above is display only.
             ItemGradeTag.stamp(meta, blueprint);
 
+            // #232: a shield's banner (base colour + layers) and an armour piece's trim, as the blueprint (or the
+            // instance a lootbox claim carries) stores them. Nothing for other materials or a plain item.
+            ItemAppearanceBukkitMapper.apply(meta, blueprint.shieldBanner(), blueprint.armorTrim(), "blueprint " + blueprint.id());
+
             itemStack.setItemMeta(meta);
         }
 

@@ -137,7 +137,18 @@ public class GameSettingsManager {
             applyAll();
         });
         long refreshTicks = 20L * config.refreshIntervalSeconds();
-        refreshTask = Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, this::refresh, 0L, refreshTicks);
+        // Realtime S3 (#182): GameSettingsChanged pushes edits; while the hub is connected this re-read runs
+        // realtime.fallback-poll-multiplier times less often (the first run, at start, always goes through).
+        Runnable throttled = fallbackPolling.throttle(this::refresh);
+        boolean[] first = {true};
+        refreshTask = Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, () -> {
+            if (first[0]) {
+                first[0] = false;
+                refresh();
+            } else {
+                throttled.run();
+            }
+        }, 0L, refreshTicks);
         if (command != null) {
             long reportTicks = 20L * config.runtimeSyncIntervalSeconds();
             reportTask = Bukkit.getScheduler().runTaskTimer(plugin, this::reportWorlds, 40L, reportTicks);
@@ -661,6 +672,23 @@ public class GameSettingsManager {
 
     // ===== runtime worlds =====
 
+    private volatile java.util.function.BiPredicate<String, List<KnkWorldRuntime>> hubWorldsReporter;
+    private volatile net.knightsandkings.knk.core.realtime.FallbackPolling fallbackPolling =
+        net.knightsandkings.knk.core.realtime.FallbackPolling.never();
+
+    /**
+     * Realtime S3 (PandiO/knk-workspace#182): sends the worlds report over the hub; answers false when it could not
+     * (not connected), and the REST report runs instead.
+     */
+    public void setHubWorldsReporter(java.util.function.BiPredicate<String, List<KnkWorldRuntime>> reporter) {
+        this.hubWorldsReporter = reporter;
+    }
+
+    /** Realtime S3 (#182): slows the periodic re-read while the hub pushes GameSettingsChanged. Call before {@link #start()}. */
+    public void setFallbackPolling(net.knightsandkings.knk.core.realtime.FallbackPolling polling) {
+        this.fallbackPolling = polling == null ? net.knightsandkings.knk.core.realtime.FallbackPolling.never() : polling;
+    }
+
     /** Main thread timer (and on world load/unload): report the loaded worlds when they changed. */
     public void reportWorlds() {
         if (command == null || reporting.get()) {
@@ -669,6 +697,14 @@ public class GameSettingsManager {
         List<KnkWorldRuntime> worlds = collectWorlds();
         long now = System.currentTimeMillis();
         if (worlds.equals(lastReported) && now - lastReportAt < REPORT_HEARTBEAT_MILLIS) {
+            return;
+        }
+        // Realtime S3 (#182, DESIGN §6.4): over the hub while it is connected (no answer; a world that adds a world
+        // settings entry comes back as GameSettingsChanged); REST otherwise, as before.
+        java.util.function.BiPredicate<String, List<KnkWorldRuntime>> hub = hubWorldsReporter;
+        if (hub != null && hub.test(config.serverId(), worlds)) {
+            lastReported = worlds;
+            lastReportAt = now;
             return;
         }
         reporting.set(true);

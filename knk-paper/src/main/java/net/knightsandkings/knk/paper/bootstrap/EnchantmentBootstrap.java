@@ -10,6 +10,7 @@ import net.knightsandkings.knk.paper.commands.enchantment.EnchantmentCommandHand
 import net.knightsandkings.knk.paper.config.EnchantmentConfigManager;
 import net.knightsandkings.knk.paper.enchantbook.EnchantBooks;
 import net.knightsandkings.knk.paper.enchantment.CooldownBarCooldownManager;
+import net.knightsandkings.knk.paper.enchantment.AbilityDeathMessageListener;
 import net.knightsandkings.knk.paper.enchantment.EnchantmentPermissions;
 import net.knightsandkings.knk.paper.enchantment.ExecutorImpl;
 import net.knightsandkings.knk.paper.enchantment.GateAreaDamage;
@@ -120,6 +121,8 @@ public class EnchantmentBootstrap {
         pluginManager.registerEvents(effectBossBars, plugin);
         pluginManager.registerEvents(cooldownManager, plugin);
         pluginManager.registerEvents(invisibleEquipment, plugin);
+        // #222: Chaos / Flash Chaos kills get a death message naming the ability and its user.
+        pluginManager.registerEvents(new AbilityDeathMessageListener(plugin), plugin);
         // Permanent enchantment books (KNG-5), capped by the target's grade (KNG-6).
         EnchantBooks enchantBooks = new EnchantBooks(
                 enchantmentRepository,

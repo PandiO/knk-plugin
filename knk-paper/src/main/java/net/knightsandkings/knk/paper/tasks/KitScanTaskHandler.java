@@ -70,13 +70,27 @@ public class KitScanTaskHandler implements IWorldTaskHandler {
                     player.sendMessage("§c[WorldTask] Failed to complete task: " + ex.getMessage());
                     LOGGER.warning("Failed to complete KitScan task " + taskId + ": " + ex.getMessage());
                 });
+                handBackAfterFailure(taskId, ex);
                 return null;
             });
         } catch (Exception e) {
             player.sendMessage("§c[WorldTask] Error scanning inventory: " + e.getMessage());
             LOGGER.warning("Error scanning inventory for KitScan task " + taskId + ": " + e.getMessage());
             e.printStackTrace();
+            handBackAfterFailure(taskId, e);
         }
+    }
+
+    /**
+     * PandiO/knk-workspace#180: a scan that didn't complete goes back to Pending (same task code) instead of staying
+     * InProgress, so the player can fix it and claim again. Not when the API refused it for good (409/422: it moved on).
+     */
+    private void handBackAfterFailure(int taskId, Throwable error) {
+        int status = WorldTaskApiErrors.status(error);
+        if (status == 409 || status == 404 || status == 422) {
+            return;
+        }
+        worldTasksApi.release(taskId, null, "KitScan did not complete on the game server").exceptionally(ignored -> null);
     }
 
     @Override

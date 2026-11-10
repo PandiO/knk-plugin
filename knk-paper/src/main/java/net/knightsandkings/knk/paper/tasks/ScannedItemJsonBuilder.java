@@ -4,7 +4,10 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.knightsandkings.knk.api.impl.enchantment.LocalEnchantmentRepositoryImpl;
 import net.knightsandkings.knk.core.domain.item.ItemLoreLayout;
+import net.knightsandkings.knk.core.domain.item.KnkArmorTrim;
+import net.knightsandkings.knk.core.domain.item.KnkShieldBanner;
 import net.knightsandkings.knk.core.util.LoreWrap;
+import net.knightsandkings.knk.paper.mapper.ItemAppearanceBukkitMapper;
 import net.knightsandkings.knk.paper.mapper.ItemDescriptionTag;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentRepository;
 import org.bukkit.Material;
@@ -26,9 +29,11 @@ import java.util.logging.Logger;
  * ItemScanTaskHandler's original buildOutputJson, so ItemScan's own output is unchanged.
  *
  * {@link #build} emits, in this order: material, maxStackSize, displayName, lore, descriptionLore,
- * vanillaEnchantments, customEnchantments, persistentDataContainer. {@code lore} is the item's raw
- * lore; {@code descriptionLore} (PandiO/knk-workspace#40) is the part a blueprint's Display description
- * should hold - see {@link #descriptionLore}. Callers add their own
+ * vanillaEnchantments, customEnchantments, shieldBanner, armorTrim, persistentDataContainer. {@code lore} is the
+ * item's raw lore; {@code descriptionLore} (PandiO/knk-workspace#40) is the part a blueprint's Display description
+ * should hold - see {@link #descriptionLore}. {@code shieldBanner} (#232, a shield's base colour and pattern layers
+ * bottom to top) and {@code armorTrim} (#232, pattern + material) are only present when the item has them - see
+ * {@link #shieldBannerJson} and {@link #armorTrimJson}. Callers add their own
  * envelope (fieldName/status/warnings/capturedAt) and any extra per-item fields (KitScan adds
  * quantity and slot) - stack size is deliberately not part of this shared shape, since ItemScan
  * never emitted it.
@@ -123,8 +128,57 @@ public class ScannedItemJsonBuilder {
         }
         result.add("customEnchantments", customEnchantments);
 
+        // #232: what the web app's ItemBlueprint form stores as ShieldBannerBaseColor/ShieldBannerLayers and
+        // ArmorTrimPattern/ArmorTrimMaterial. Left out (not null) when the item has none, so an older form
+        // configuration without the fields sees the scan it always saw.
+        JsonObject shieldBanner = shieldBannerJson(ItemAppearanceBukkitMapper.readShieldBanner(meta));
+        if (shieldBanner != null) {
+            result.add("shieldBanner", shieldBanner);
+        }
+        JsonObject armorTrim = armorTrimJson(ItemAppearanceBukkitMapper.readArmorTrim(meta));
+        if (armorTrim != null) {
+            result.add("armorTrim", armorTrim);
+        }
+
         result.add("persistentDataContainer", readPersistentDataContainer(meta));
         return result;
+    }
+
+    /**
+     * {@code {"baseColor": "RED", "layers": [{"patternKey": "minecraft:stripe_top", "color": "YELLOW"}, ...]}},
+     * layers bottom to top; {@code baseColor} is null for a banner item (its colour is the material). Null for no
+     * banner.
+     */
+    public static JsonObject shieldBannerJson(KnkShieldBanner banner) {
+        if (banner == null || banner.isEmpty()) {
+            return null;
+        }
+        JsonObject json = new JsonObject();
+        if (banner.baseColor() != null) {
+            json.addProperty("baseColor", banner.baseColor());
+        } else {
+            json.add("baseColor", null);
+        }
+        JsonArray layers = new JsonArray();
+        for (KnkShieldBanner.Layer layer : banner.layers()) {
+            JsonObject layerJson = new JsonObject();
+            layerJson.addProperty("patternKey", layer.patternKey());
+            layerJson.addProperty("color", layer.color());
+            layers.add(layerJson);
+        }
+        json.add("layers", layers);
+        return json;
+    }
+
+    /** {@code {"pattern": "minecraft:silence", "material": "minecraft:netherite"}}; null for no trim. */
+    public static JsonObject armorTrimJson(KnkArmorTrim trim) {
+        if (trim == null || !trim.isComplete()) {
+            return null;
+        }
+        JsonObject json = new JsonObject();
+        json.addProperty("pattern", trim.pattern());
+        json.addProperty("material", trim.material());
+        return json;
     }
 
     /**

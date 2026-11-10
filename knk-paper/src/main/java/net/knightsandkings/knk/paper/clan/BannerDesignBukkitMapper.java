@@ -92,7 +92,7 @@ public final class BannerDesignBukkitMapper {
      * Generic over the pattern type only so the ordering/skip logic is testable without a server
      * (PatternType can't even be mocked outside one - its class init reads the registry).
      */
-    static <P, L> List<L> toLayers(BannerPatternSpec spec, Function<String, P> resolver,
+    public static <P, L> List<L> toLayers(BannerPatternSpec spec, Function<String, P> resolver,
                                    BiFunction<DyeColor, P, L> factory, Consumer<String> onUnknown) {
         List<L> result = new ArrayList<>(spec.layers().size());
         for (BannerPatternSpec.Layer layer : spec.layers()) {
@@ -106,7 +106,7 @@ public final class BannerDesignBukkitMapper {
         return result;
     }
 
-    private static PatternType resolvePatternType(String patternKey) {
+    public static PatternType resolvePatternType(String patternKey) {
         NamespacedKey key = NamespacedKey.fromString(patternKey);
         return key != null ? Registry.BANNER_PATTERN.get(key) : null;
     }

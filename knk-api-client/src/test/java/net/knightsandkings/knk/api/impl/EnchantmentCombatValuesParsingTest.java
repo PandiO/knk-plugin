@@ -31,7 +31,8 @@ class EnchantmentCombatValuesParsingTest {
               {"id":8,"key":"poison","displayName":"Poison","isCustom":true,"maxLevel":3},
               {"id":9,"key":"flash_chaos","displayName":"Flash Chaos","isCustom":true,"maxLevel":1,
                "procChancePercent":null,"procChancePerLevelPercent":null,"cooldownEnabled":true,"cooldownSeconds":90,
-               "effectDurationSeconds":5,"levelMultiplier":0,"effectLevel":2,"secondaryEffectDurationSeconds":12.5}
+               "effectDurationSeconds":5,"levelMultiplier":0,"effectLevel":2,"secondaryEffectDurationSeconds":12.5,
+               "areaDamage":60,"gateDamage":45.5,"damageRadiusBlocks":3,"effectRadiusBlocks":5}
             ]
             """;
 
@@ -64,6 +65,14 @@ class EnchantmentCombatValuesParsingTest {
         assertEquals(2, flash.effectLevel());
         assertEquals(12.5d, flash.secondaryEffectDurationSeconds());
         assertEquals(5.0d, flash.effectDurationSeconds());
+
+        // PandiO/knk-workspace#223: Chaos / Flash Chaos area damage, gate damage and radii.
+        assertEquals(60.0d, flash.areaDamage());
+        assertEquals(45.5d, flash.gateDamage());
+        assertEquals(3.0d, flash.damageRadiusBlocks());
+        assertEquals(5.0d, flash.effectRadiusBlocks());
+        assertNull(freeze.areaDamage());
+        assertNull(freeze.effectRadiusBlocks());
     }
 
     @Test

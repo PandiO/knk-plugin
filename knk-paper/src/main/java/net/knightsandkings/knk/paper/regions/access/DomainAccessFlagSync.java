@@ -56,6 +56,15 @@ public final class DomainAccessFlagSync {
     private final AccessFlagSync sync = new AccessFlagSync();
     private final WorldGuardAccessFlagStore store = new WorldGuardAccessFlagStore(DomainAccessFlagSync::loadedManagers);
     private final AtomicBoolean running = new AtomicBoolean();
+
+    // Realtime S3 (PandiO/knk-workspace#182): the event that replaces this re-sync is pushed while the hub is connected,
+    // so the timer then runs realtime.fallback-poll-multiplier times less often (decision Q4); set before start().
+    private volatile net.knightsandkings.knk.core.realtime.FallbackPolling fallbackPolling =
+        net.knightsandkings.knk.core.realtime.FallbackPolling.never();
+
+    public void setFallbackPolling(net.knightsandkings.knk.core.realtime.FallbackPolling polling) {
+        this.fallbackPolling = polling == null ? net.knightsandkings.knk.core.realtime.FallbackPolling.never() : polling;
+    }
     private final SubRegionMirror mirror = new SubRegionMirror();
     private final WorldGuardSubRegionMirrorStore mirrorStore = new WorldGuardSubRegionMirrorStore(DomainAccessFlagSync::loadedManagers);
     private volatile SubRegionMirror.Report lastSubRegionReport;
@@ -80,7 +89,7 @@ public final class DomainAccessFlagSync {
         Bukkit.getScheduler().runTaskLater(plugin, () -> attempt(1), settings.delayTicks());
         if (settings.intervalMinutes() > 0) {
             long period = settings.intervalMinutes() * 60L * 20L;
-            Bukkit.getScheduler().runTaskTimer(plugin, () -> syncNow().exceptionally(error -> null),
+            Bukkit.getScheduler().runTaskTimer(plugin, fallbackPolling.throttle(() -> syncNow().exceptionally(error -> null)),
                 settings.delayTicks() + period, period);
         }
     }

@@ -340,6 +340,52 @@ public class GateManager {
     }
 
     /**
+     * Realtime S3 (PandiO/knk-workspace#182): forget a door (deleted in the web app) - its cache entry and its cells in
+     * the spatial index. The blocks in the world stay as they are.
+     *
+     * @return true when the door was cached
+     */
+    public boolean removeGate(int gateId) {
+        CachedGateDoor previous = gateCache.remove(gateId);
+        if (previous == null) {
+            return false;
+        }
+        spatialIndex.removeAll(previous.getWorldName(), doorBlockPositions(previous, previous.getCurrentFrame()));
+        animationCompletionCallbacks.remove(gateId);
+        LOGGER.info("Removed gate door " + previous.getName() + " (ID: " + gateId + ") from the cache");
+        fireStateChanged(gateId);
+        return true;
+    }
+
+    /**
+     * Realtime S3 (#182): after one structure was reloaded, drop its cached doors the API no longer has.
+     *
+     * @return the ids of the doors removed
+     */
+    public List<Integer> retainDoorsOfStructure(int gateStructureId, java.util.Collection<Integer> keepDoorIds) {
+        List<Integer> removed = new ArrayList<>();
+        for (CachedGateDoor door : getDoorsForStructure(gateStructureId)) {
+            if (keepDoorIds == null || !keepDoorIds.contains(door.getId())) {
+                if (removeGate(door.getId())) {
+                    removed.add(door.getId());
+                }
+            }
+        }
+        return removed;
+    }
+
+    /**
+     * Realtime S3 (#182): forget a gate structure deleted in the web app, with every door of it.
+     *
+     * @return the ids of the doors removed
+     */
+    public List<Integer> removeStructure(int gateStructureId) {
+        List<Integer> removed = retainDoorsOfStructure(gateStructureId, List.of());
+        structureCache.remove(gateStructureId);
+        return removed;
+    }
+
+    /**
      * Reload gates from the API.
      * Clears the cache and reloads all gates.
      *

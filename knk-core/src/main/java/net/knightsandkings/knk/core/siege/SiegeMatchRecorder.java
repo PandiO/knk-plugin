@@ -54,6 +54,10 @@ public final class SiegeMatchRecorder implements SiegeMatchesCommandApi {
     private final Map<Long, PendingResult> inFlight = new ConcurrentHashMap<>();
     private final AtomicBoolean replaying = new AtomicBoolean();
     private volatile CompletableFuture<RecoveryReport> recovery = CompletableFuture.completedFuture(null);
+    /** #31: the startup recovery got through once (spool empty and the abort answered). */
+    private volatile boolean recovered;
+    /** #31: this run created a match row; from then on the abort must never run again (it would end that match). */
+    private volatile boolean createdMatch;
 
     public SiegeMatchRecorder(SiegeMatchesCommandApi api, RetryPolicy retryPolicy, SiegeResultSpool spool, Logger logger) {
         this.api = Objects.requireNonNull(api, "api");
@@ -91,7 +95,37 @@ public final class SiegeMatchRecorder implements SiegeMatchesCommandApi {
                     });
         });
         recovery = run;
+        run.thenAccept(report -> {
+            if (report != null && !report.abortSkipped() && report.stillPending() == 0) {
+                recovered = true;
+            }
+        });
         return run;
+    }
+
+    /**
+     * PandiO/knk-workspace#31 / #182: the startup recovery again when it did not get through at startup (the API was
+     * down), as a pending startup step run on the realtime reconnect. Never aborts once this run has created a match:
+     * {@code abortUnfinished} ends every open match, the live one included. Completes with whether nothing is left to do.
+     */
+    public synchronized CompletableFuture<Boolean> retryRecovery() {
+        if (recovered) {
+            return CompletableFuture.completedFuture(true);
+        }
+        if (createdMatch) {
+            logger.info("[Siege] Startup recovery not retried: this run already created a match (the next start aborts what is left)");
+            return CompletableFuture.completedFuture(true);
+        }
+        CompletableFuture<RecoveryReport> current = recovery;
+        if (current != null && !current.isDone()) {
+            return current.handle((report, error) -> recovered);
+        }
+        return recoverOnStartup().handle((report, error) -> recovered);
+    }
+
+    /** Whether the startup recovery got through (for /knk health and tests). */
+    public boolean recovered() {
+        return recovered;
     }
 
     /**
@@ -150,7 +184,10 @@ public final class SiegeMatchRecorder implements SiegeMatchesCommandApi {
         if (!spool.isEmpty()) {
             replaySpool(); // opportunistic, runs alongside; the new match doesn't depend on it
         }
-        return gate.thenCompose(ignored -> retryPolicy.executeAsync(() -> api.createMatch(siegeLobbyId, siegeScenarioId)))
+        return gate.thenCompose(ignored -> {
+                    createdMatch = true; // #31: from here a row may exist, so the startup abort is never retried
+                    return retryPolicy.executeAsync(() -> api.createMatch(siegeLobbyId, siegeScenarioId));
+                })
                 .handle((id, error) -> {
                     if (error != null || id == null) {
                         logger.log(Level.SEVERE, "[Siege] Could not create a match row for lobby " + siegeLobbyId + " / scenario "

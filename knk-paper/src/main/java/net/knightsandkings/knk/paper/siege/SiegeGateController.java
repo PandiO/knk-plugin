@@ -122,20 +122,58 @@ public final class SiegeGateController implements SiegeMatchObserver {
 
     // ==================== Startup recovery (DESIGN §8.4) ====================
 
+    /** #31: the stale-gate restore got through once. */
+    private volatile boolean recovered;
+    private CompletableFuture<Boolean> recoveryInFlight;
+    /** #182: runs on the main thread once a round's gates were restored (their API restore answered). */
+    private Runnable afterRelease = () -> { };
+
     /** Restores gates a crash left locked down (nothing runs yet), then reloads the gate cache. */
-    public void recoverOnStartup() {
+    public synchronized CompletableFuture<Boolean> recoverOnStartup() {
+        CompletableFuture<Boolean> done = new CompletableFuture<>();
+        recoveryInFlight = done;
         api.restoreStale().whenComplete((result, error) -> {
             if (error != null) {
                 logger.log(Level.WARNING, "[Siege] Gate recovery (restore-stale-gates) failed; gates a crash left "
-                        + "locked down stay so until the next start", error);
+                        + "locked down stay so until the next start (or the next realtime reconnect)", error);
+                done.complete(false);
                 return;
             }
+            recovered = true;
+            done.complete(true);
             if (result == null || result.isEmpty()) return;
             logger.warning("[Siege] Gate recovery restored " + result.restored().size() + " gate structure(s) and cleared "
                     + result.clearedGateStructureIds().size() + " stale siege marker(s); reloading gates");
             runOnMain(() -> gateManager.reloadGates().whenComplete((ignored, reloadError) -> {
                 if (reloadError != null) logger.log(Level.WARNING, "[Siege] Gate reload after recovery failed", reloadError);
             }));
+        });
+        return done;
+    }
+
+    /**
+     * PandiO/knk-workspace#31 / #182: the stale-gate restore again when it failed at startup, as a pending startup step
+     * on the realtime reconnect. Waits (stays pending) while a lockdown of this run holds gates.
+     */
+    public synchronized CompletableFuture<Boolean> retryRecovery() {
+        if (recovered) return CompletableFuture.completedFuture(true);
+        if (recoveryInFlight != null && !recoveryInFlight.isDone()) return recoveryInFlight;
+        if (!byLobby.isEmpty()) return CompletableFuture.completedFuture(false);
+        return recoverOnStartup();
+    }
+
+    /** #182: called on the main thread after a round's gates were restored (gate edits made during the match apply then). */
+    public void setAfterRelease(Runnable afterRelease) {
+        this.afterRelease = afterRelease == null ? () -> { } : afterRelease;
+    }
+
+    private void releasedOnMain() {
+        runOnMain(() -> {
+            try {
+                afterRelease.run();
+            } catch (RuntimeException e) {
+                logger.log(Level.WARNING, "[Siege] After-release hook failed", e);
+            }
         });
     }
 
@@ -236,7 +274,10 @@ public final class SiegeGateController implements SiegeMatchObserver {
                     logger.log(Level.WARNING, "[Siege] Restoring the persisted gate lockdown of match " + id
                             + " failed; the next start's recovery restores it", error);
                 }
+                if (plugin.isEnabled()) releasedOnMain();
             });
+        } else if (plugin.isEnabled()) {
+            releasedOnMain();
         }
     }
 
