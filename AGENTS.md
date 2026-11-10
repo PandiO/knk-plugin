@@ -15,3 +15,20 @@ This is the Paper plugin (Java 25, Minecraft 26.3, Gradle modules `knk-core`,
 `./gradlew build` depends on `deployToDevServer` and can copy a jar to the
 configured dev server; use `./gradlew build -x deployToDevServer` to build
 without that copy.
+
+## Shipping a change
+
+All documentation lives in `knk-workspace/docs/`; this repo keeps only its README, `AGENTS.md`,
+`CLAUDE.md` and `.github/`. Follow `knk-workspace/docs/ai-agents/GLOBAL_AGENT_INSTRUCTIONS.md` § Shipping a change
+([online](https://github.com/PandiO/knk-workspace/blob/main/docs/ai-agents/GLOBAL_AGENT_INSTRUCTIONS.md#shipping-a-change-documentation)):
+fill in the PR template's Docs impact and Admin steps sections, and ship the essential docs (deploy notes, changelog
+entry, status) before merge. At merge, close the feature issue, put the remaining docs in a `documentation`
+sub-issue and start a new docs session for it right away with
+[the docs-session prompt](https://github.com/PandiO/knk-workspace/blob/main/docs/ai-agents/docs-session-prompt.md).
+
+Docs triggers in this repo: every change to `knk-paper/src/main/resources/config.yml` (added, renamed or removed
+keys, changed defaults) goes into the PR's Admin steps with the YAML to paste, the changelog entry and the plugin
+configuration reference (`knk-workspace/docs/guides/admin/plugin-configuration.md`, PandiO/knk-workspace#295). The plugin calls `saveDefaultConfig()`, so an existing server's `config.yml` never gets new
+keys, and they must be merged by hand into the dev and alpha configs at each deploy. A command, permission node or
+message a player sees means `guides/users/commands.md`, `architecture/plugin-permission-checks.md` and the player or
+admin guide.
