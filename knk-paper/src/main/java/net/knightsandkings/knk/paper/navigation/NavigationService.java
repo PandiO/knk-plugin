@@ -141,6 +141,14 @@ public final class NavigationService implements SiegeMatchObserver {
         default Set<String> regionsAt(World world, double[] floorPoint) {
             return Set.of();
         }
+
+        /**
+         * #243 spike: the domain entry rule for a mover standing in {@code currentRegions} of {@code world}, for any
+         * road or off-road cell (no road rule, no destination trap). Main thread, domain cache only.
+         */
+        default Predicate<String> spikeMayEnter(Player player, String world, Set<String> currentRegions) {
+            return mayEnter(player);
+        }
     }
 
     /**
@@ -485,6 +493,32 @@ public final class NavigationService implements SiegeMatchObserver {
     /** #243 spike: the WorldGuard regions at a floor point (the regions an NPC standing there is in). */
     public Set<String> spikeRegionsAt(World world, double[] floorPoint) {
         return deps.policies().regionsAt(world, floorPoint);
+    }
+
+    /** #243 spike: whether a mover standing in {@code currentRegions} may enter a region (main thread). */
+    public Predicate<String> spikeMayEnter(Player subject, World world, Set<String> currentRegions) {
+        return deps.policies().spikeMayEnter(subject, world.getName(), currentRegions);
+    }
+
+    private final List<Consumer<String>> spikeRuleListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    /**
+     * #243 spike: {@code listener} hears what navigation re-checks routes on (a gate changed state, a domain or
+     * siege availability change); returns the unsubscribe. May be called off the main thread.
+     */
+    public Runnable spikeOnRulesChanged(Consumer<String> listener) {
+        spikeRuleListeners.add(listener);
+        return () -> spikeRuleListeners.remove(listener);
+    }
+
+    private void spikeRulesChanged(String why) {
+        for (Consumer<String> listener : spikeRuleListeners) {
+            try {
+                listener.accept(why);
+            } catch (RuntimeException e) {
+                deps.logger().log(Level.WARNING, "[NpcSpike] rules-changed listener failed", e);
+            }
+        }
     }
 
     /** #243 spike: the walk-leg capture, search and executor, or null when walk paths are off. */
@@ -1813,6 +1847,7 @@ public final class NavigationService implements SiegeMatchObserver {
 
     /** A gate changed state (R4 listener, hopped to the main thread by the caller). */
     public void onGateChanged(int doorId) {
+        spikeRulesChanged("gate door " + doorId);
         long now = deps.tick().getAsLong();
         for (Active a : new ArrayList<>(active.values())) {
             if (a.direct()) {
@@ -1838,6 +1873,7 @@ public final class NavigationService implements SiegeMatchObserver {
 
     /** Something may have opened anywhere (domain cache refresh, siege lockdown change): every session re-checks. */
     public void onAvailabilityChanged() {
+        spikeRulesChanged("availability");
         long now = deps.tick().getAsLong();
         for (Active a : new ArrayList<>(active.values())) {
             if (a.direct()) {

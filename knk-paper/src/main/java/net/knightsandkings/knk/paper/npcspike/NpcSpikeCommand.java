@@ -18,7 +18,10 @@ import net.knightsandkings.knk.paper.commands.CommandMetadata;
  * baseline                          store the current mean MSPT as the no-NPC baseline
  * spawn &lt;n&gt; [dense|hop] [player|mannequin]
  * set &lt;key&gt; &lt;value&gt;                pathfinder citizens|citizens_async, inflight N, hop N, stationary N,
- *                                   recheck N (dense: replan every N ticks, 0 = off), doors on|off, collide on|off
+ *                                   recheck N (every N ticks, 0 = off; hop: check the way ahead against the current
+ *                                   entry rules, replan when it enters a denied region; dense: replan; default 40),
+ *                                   noroute wait|line (no road route: wait and ask again, or straight-line hops),
+ *                                   doors on|off, collide on|off
  * stats [label]                     print the counters; with a label also log one CSV row
  * reset                             zero the counters (keeps the NPCs)
  * clear                             remove every spike NPC
@@ -77,7 +80,7 @@ public final class NpcSpikeCommand {
                 }
             }
             case "reset" -> {
-                spike.metrics.reset();
+                spike.resetCounters();
                 sender.sendMessage("Counters reset.");
             }
             case "clear" -> {
@@ -127,7 +130,7 @@ public final class NpcSpikeCommand {
 
     private void set(CommandSender sender, String[] args) {
         if (args.length < 3) {
-            sender.sendMessage("/knk npcspike set <pathfinder|inflight|hop|stationary|recheck|doors|collide> <value>");
+            sender.sendMessage("/knk npcspike set <pathfinder|inflight|hop|stationary|recheck|noroute|doors|collide> <value>");
             return;
         }
         String key = args[1].toLowerCase(Locale.ROOT);
@@ -139,6 +142,12 @@ public final class NpcSpikeCommand {
                 case "hop" -> spike.hopSpacing = Math.max(4, Double.parseDouble(value));
                 case "stationary" -> spike.stationaryTicks = Integer.parseInt(value);
                 case "recheck" -> spike.recheckTicks = Math.max(0, Integer.parseInt(value));
+                case "noroute" -> {
+                    if (!value.equals("wait") && !value.equals("line")) {
+                        throw new IllegalArgumentException(value);
+                    }
+                    spike.noRouteWait = value.equals("wait");
+                }
                 case "doors" -> spike.openDoors = value.equals("on");
                 case "collide" -> spike.collidable = value.equals("on");
                 default -> {
@@ -150,8 +159,8 @@ public final class NpcSpikeCommand {
             sender.sendMessage("Bad value " + value + " for " + key);
             return;
         }
-        sender.sendMessage("Set " + key + " = " + value + " (applies to NPCs spawned from now on; inflight, hop, recheck"
-            + " and doors apply at once)");
+        sender.sendMessage("Set " + key + " = " + value + " (applies to NPCs spawned from now on; inflight, hop, recheck,"
+            + " noroute and doors apply at once)");
     }
 
     public List<String> complete(CommandSender sender, String[] args) {
@@ -167,7 +176,7 @@ public final class NpcSpikeCommand {
             return List.of("player", "mannequin");
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("set")) {
-            return List.of("pathfinder", "inflight", "hop", "stationary", "recheck", "doors", "collide");
+            return List.of("pathfinder", "inflight", "hop", "stationary", "recheck", "noroute", "doors", "collide");
         }
         return List.of();
     }

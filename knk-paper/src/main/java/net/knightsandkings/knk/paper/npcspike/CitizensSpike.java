@@ -94,6 +94,9 @@ public final class CitizensSpike implements Listener {
         int retries;
         int captureFailures;
         long lastPlanTick;
+        long lastRecheckTick;
+        /** The regions the NPC stood in at the last trespass check (null before the first). */
+        Set<String> regions;
         final Deque<double[]> hops = new ArrayDeque<>();
 
         SpikeNpc(NPC npc, Mode mode) {
@@ -116,6 +119,13 @@ public final class CitizensSpike implements Listener {
     private final Deque<SpikeNpc> queue = new ArrayDeque<>();
     private int inFlight;
     private int loggedLegFailures;
+    private int loggedTrespasses;
+    private Runnable unsubscribeRules;
+
+    /** How often every spike NPC's position is checked against the current entry rules (ticks). */
+    static final int TRESPASS_CHECK_TICKS = 20;
+    /** How long an NPC with no road route waits before asking the router again (ticks). */
+    static final int NO_ROUTE_WAIT_TICKS = 100;
 
     // settings (the command changes them)
     Location from;
@@ -125,7 +135,14 @@ public final class CitizensSpike implements Listener {
     PathfinderType pathfinderType = PathfinderType.CITIZENS;
     double hopSpacing = 16;
     int stationaryTicks = 60;
-    int recheckTicks = 0;
+    /**
+     * Re-check interval (ticks, 0 = off). HOP: the path ahead is checked against the current entry rules and
+     * replanned only when it enters a region the NPC may no longer enter. DENSE: the whole leg is replanned.
+     * 40 is what player navigation uses ({@code NavigationService.RECHECK_TICKS}).
+     */
+    int recheckTicks = NavigationService.RECHECK_TICKS;
+    /** No road route: wait and ask again (true), or walk straight-line hops to the goal (false, the old fallback). */
+    boolean noRouteWait = true;
     boolean openDoors = true;
     boolean collidable = false;
 
@@ -160,6 +177,14 @@ public final class CitizensSpike implements Listener {
         registry = CitizensAPI.createInMemoryNPCRegistry(REGISTRY);
         Bukkit.getPluginManager().registerEvents(this, plugin);
         task = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 1L, 1L);
+        // what player navigation re-checks its routes on: a gate changed state, a domain cache refresh, a siege change
+        unsubscribeRules = navigation.spikeOnRulesChanged(why -> {
+            if (Bukkit.isPrimaryThread()) {
+                onRulesChanged(why);
+            } else {
+                Bukkit.getScheduler().runTask(plugin, () -> onRulesChanged(why));
+            }
+        });
         logger.info("[NpcSpike] in-memory Citizens registry '" + REGISTRY + "' created");
     }
 
@@ -170,6 +195,10 @@ public final class CitizensSpike implements Listener {
             task = null;
         }
         HandlerList.unregisterAll(this);
+        if (unsubscribeRules != null) {
+            unsubscribeRules.run();
+            unsubscribeRules = null;
+        }
         if (registry != null) {
             CitizensAPI.removeNamedNPCRegistry(REGISTRY);
             registry = null;
@@ -178,6 +207,13 @@ public final class CitizensSpike implements Listener {
 
     int count() {
         return npcs.size();
+    }
+
+    /** Zero the counters and re-arm the first-20 stuck and trespass log lines (keeps the NPCs). */
+    void resetCounters() {
+        metrics.reset();
+        loggedLegFailures = 0;
+        loggedTrespasses = 0;
     }
 
     // ==================== spawn / clear ====================
@@ -274,6 +310,9 @@ public final class CitizensSpike implements Listener {
                 default -> { }
             }
         }
+        if (tick % TRESPASS_CHECK_TICKS == 0) {
+            checkTrespass();
+        }
         while (inFlight < maxInFlight && !queue.isEmpty()) {
             SpikeNpc s = queue.pollFirst();
             if (s.state != State.QUEUED || !s.npc.isSpawned()) {
@@ -298,6 +337,132 @@ public final class CitizensSpike implements Listener {
             metrics.recheckReplans++;
             s.generation++;
             enqueue(s);
+            return;
+        }
+        if (s.mode == Mode.HOP && recheckTicks > 0 && tick - s.lastRecheckTick >= recheckTicks) {
+            // as player navigation's route re-check: the leg's access was decided when it was planned, so check the
+            // way ahead against the rules as they are now and replan only when it enters a region now denied
+            s.lastRecheckTick = tick;
+            Player player = subject == null ? null : Bukkit.getPlayer(subject);
+            if (player != null && s.npc.isSpawned()) {
+                deniedAhead(s, player).ifPresent(region -> {
+                    metrics.recheckReplans++;
+                    metrics.fail("recheck: way ahead enters " + region + " (replanned)");
+                    replan(s);
+                });
+            }
+        }
+    }
+
+    /**
+     * The first region on the NPC's way ahead (the rest of Citizens' path, then the hops still to walk) that it may
+     * not enter by the current rules, judged from the regions it stands in now. Main thread, domain cache only.
+     */
+    private Optional<String> deniedAhead(SpikeNpc s, Player player) {
+        World world = s.npc.getEntity().getWorld();
+        Location feet = s.npc.getEntity().getLocation();
+        Set<String> here = navigation.spikeRegionsAt(world, floorOf(feet));
+        java.util.function.Predicate<String> mayEnter = navigation.spikeMayEnter(player, world, here);
+        Map<String, Boolean> verdicts = new java.util.HashMap<>();
+        List<double[]> ahead = new ArrayList<>();
+        PathStrategy strategy = s.npc.getNavigator().getPathStrategy();
+        Iterable<Vector> path = strategy == null ? null : strategy.getPath();
+        if (path != null) {
+            // Citizens' path from its start: skip what lies behind the nearest point to the NPC
+            List<Vector> points = new ArrayList<>();
+            path.forEach(points::add);
+            int nearest = 0;
+            double best = Double.MAX_VALUE;
+            for (int i = 0; i < points.size(); i++) {
+                double d = points.get(i).distanceSquared(feet.toVector());
+                if (d < best) {
+                    best = d;
+                    nearest = i;
+                }
+            }
+            for (Vector p : points.subList(nearest, points.size())) {
+                ahead.add(new double[] {p.getX() + 0.5, p.getBlockY() - 1, p.getZ() + 0.5}); // feet → floor
+            }
+        }
+        ahead.addAll(s.hops);
+        for (double[] point : ahead) {
+            for (String region : navigation.spikeRegionsAt(world, point)) {
+                if (!here.contains(region) && !verdicts.computeIfAbsent(region, mayEnter::test)) {
+                    return Optional.of(region);
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** Drop the leg and the road route and plan again from where the NPC stands (the rules changed). */
+    private void replan(SpikeNpc s) {
+        s.generation++;
+        s.hops.clear();
+        s.retries = 0;
+        queue.remove(s);
+        enqueue(s); // QUEUED first, so the PLUGIN cancel below is not taken for a stuck NPC
+        if (s.npc.isSpawned() && s.npc.getNavigator().isNavigating()) {
+            s.npc.getNavigator().cancelNavigation();
+        }
+    }
+
+    /** A gate changed state or availability changed (player navigation's re-check triggers): every NPC replans. */
+    private void onRulesChanged(String why) {
+        int n = 0;
+        for (SpikeNpc s : npcs.values()) {
+            if (s.state == State.PAUSED || !s.npc.isSpawned()) {
+                continue;
+            }
+            replan(s);
+            n++;
+        }
+        if (n > 0) {
+            metrics.eventReplans += n;
+            logger.info("[NpcSpike] rules changed (" + why + "): " + n + " NPCs replan");
+        }
+    }
+
+    /**
+     * The trespass counter: every {@link #TRESPASS_CHECK_TICKS} ticks, each NPC that stands in a region it did not
+     * stand in at the last check has entered it; that entry is checked against the current entry rule, judged from
+     * the regions it came from. Independent of the planner and the examiner: it watches where NPCs really are.
+     */
+    private void checkTrespass() {
+        Player player = subject == null ? null : Bukkit.getPlayer(subject);
+        if (player == null) {
+            return;
+        }
+        for (SpikeNpc s : npcs.values()) {
+            if (!s.npc.isSpawned()) {
+                continue;
+            }
+            Location feet = s.npc.getEntity().getLocation();
+            World world = feet.getWorld();
+            Set<String> now = navigation.spikeRegionsAt(world, floorOf(feet));
+            Set<String> before = s.regions;
+            s.regions = now;
+            if (before == null) {
+                continue; // first look at this NPC: nothing to compare with
+            }
+            java.util.function.Predicate<String> mayEnter = null;
+            for (String region : now) {
+                if (before.contains(region)) {
+                    continue;
+                }
+                if (mayEnter == null) {
+                    mayEnter = navigation.spikeMayEnter(player, world, before);
+                }
+                if (!mayEnter.test(region)) {
+                    metrics.trespasses++;
+                    metrics.fail("TRESPASS into " + region);
+                    if (loggedTrespasses < 20) {
+                        loggedTrespasses++;
+                        logger.info(String.format(Locale.ROOT, "[NpcSpike] TRESPASS %s entered %s at %d %d %d (state %s)",
+                            s.npc.getName(), region, feet.getBlockX(), feet.getBlockY(), feet.getBlockZ(), s.state));
+                    }
+                }
+            }
         }
     }
 
@@ -496,6 +661,16 @@ public final class CitizensSpike implements Listener {
                 return;
             }
             s.hops.clear();
+            boolean routerSaysNo = error == null && road != null && !road.found() && road.reason() != null
+                && road.reason().startsWith("router:");
+            if (routerSaysNo && noRouteWait) {
+                // the router found no way the rules allow (a closed gate, a denied domain): wait where the NPC is and
+                // ask again later or when the rules change - no improvising across the terrain
+                done(s);
+                metrics.fail("no road route: " + road.reason() + " (waiting)");
+                waitTicks(s, NO_ROUTE_WAIT_TICKS);
+                return;
+            }
             if (error != null || road == null || !road.found()) {
                 // no road: straight-line hops, so each Citizens leg (and its capture box) stays short
                 metrics.fail("no road route: " + (road == null ? "error" : road.reason()) + " (straight-line hops)");
@@ -730,9 +905,12 @@ public final class CitizensSpike implements Listener {
         lines.add("trip: " + metrics.tripSeconds.describe("s"));
         long calls = SpikeExaminer.CALLS.sum();
         lines.add(String.format(Locale.ROOT,
-            "trips %d, hops %d, stuck %d, replans %d, recheck replans %d, chunk-unload pauses %d, resumes %d, examiner leaks %d",
-            metrics.trips, metrics.hops, metrics.stuck, metrics.replans, metrics.recheckReplans,
-            metrics.pausedChunkUnload, metrics.resumed, metrics.examinerLeaks));
+            "trips %d, hops %d, stuck %d, replans %d, recheck replans %d, event replans %d, chunk-unload pauses %d, resumes %d",
+            metrics.trips, metrics.hops, metrics.stuck, metrics.replans, metrics.recheckReplans, metrics.eventReplans,
+            metrics.pausedChunkUnload, metrics.resumed));
+        lines.add(String.format(Locale.ROOT,
+            "TRESPASSES %d (NPC entered a region the current rules deny) | foreign examiners stripped %d",
+            metrics.trespasses, metrics.examinerLeaks));
         lines.add(String.format(Locale.ROOT, "examiner: %d calls, %.2f µs mean, %d blocked by K&K rules", calls,
             calls == 0 ? 0.0 : SpikeExaminer.NANOS.sum() / 1000.0 / calls, SpikeExaminer.BLOCKED.sum()));
         lines.add("failures: " + (metrics.failures.isEmpty() ? "none" : metrics.failures.toString()));
@@ -740,20 +918,23 @@ public final class CitizensSpike implements Listener {
         lines.add("access subject: " + (who == null ? (subject == null ? "none (run from/to)" : "offline")
             : who.getName() + (who.hasPermission("knk.region.bypass")
                 ? " - HAS knk.region.bypass: domain rules are open, deop or negate it to test them" : "")));
-        lines.add(String.format(Locale.ROOT, "settings: pathfinder %s, max-in-flight %d, hop %.0f, stationary %d, recheck %d, doors %s, collidable %s",
-            pathfinderType, maxInFlight, hopSpacing, stationaryTicks, recheckTicks, openDoors, collidable));
+        lines.add(String.format(Locale.ROOT, "settings: pathfinder %s, max-in-flight %d, hop %.0f, stationary %d, recheck %d, noroute %s, doors %s, collidable %s",
+            pathfinderType, maxInFlight, hopSpacing, stationaryTicks, recheckTicks, noRouteWait ? "wait" : "line",
+            openDoors, collidable));
         return lines;
     }
 
     /** One CSV row for the benchmark issue. */
     String csv(String label) {
         int spawned = (int) npcs.values().stream().filter(s -> s.npc.isSpawned()).count();
-        return String.format(Locale.ROOT, "%s,%d,%.2f,%.2f,%.2f,%.2f,%.3f,%.1f,%.1f,%.1f,%.1f,%d,%d,%d,%d,%d",
+        return String.format(Locale.ROOT, "%s,%d,%.2f,%.2f,%.2f,%.2f,%.3f,%.1f,%.1f,%.1f,%.1f,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s",
             label, spawned, metrics.tickMs.mean(), metrics.tickMs.percentile(95), Bukkit.getTPS()[0], metrics.baselineMs,
             Double.isNaN(metrics.baselineMs) || spawned == 0 ? Double.NaN : (metrics.tickMs.mean() - metrics.baselineMs) / spawned,
             metrics.spikeMainUs.mean(), metrics.planMs.percentile(50), metrics.planMs.percentile(95),
             metrics.citizensPathMs.percentile(95), metrics.trips, metrics.stuck, metrics.replans,
-            metrics.failures.values().stream().mapToLong(Long::longValue).sum(), metrics.examinerLeaks);
+            metrics.failures.values().stream().mapToLong(Long::longValue).sum(), metrics.examinerLeaks,
+            metrics.trespasses, metrics.recheckReplans, metrics.eventReplans, (int) hopSpacing,
+            recheckTicks + "/" + (noRouteWait ? "wait" : "line"));
     }
 
     void metricsCsvLog(String label) {
@@ -762,5 +943,6 @@ public final class CitizensSpike implements Listener {
     }
 
     static final String CSV_HEADER = "label,npcs,mspt_mean,mspt_p95,tps,baseline_ms,ms_per_npc,spike_us_tick,"
-        + "plan_p50_ms,plan_p95_ms,citizens_path_p95_ms,trips,stuck,replans,failures,examiner_leaks";
+        + "plan_p50_ms,plan_p95_ms,citizens_path_p95_ms,trips,stuck,replans,failures,examiner_leaks,"
+        + "trespasses,recheck_replans,event_replans,hop,recheck/noroute";
 }

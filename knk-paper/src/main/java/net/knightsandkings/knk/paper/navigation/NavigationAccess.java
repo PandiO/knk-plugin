@@ -140,6 +140,15 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
         return rule::mayEnter;
     }
 
+    /** #243 spike: the plain entry rule (no road rule, no destination trap) for a mover in {@code currentRegions}. */
+    @Override
+    public Predicate<String> spikeMayEnter(Player player, String world, Set<String> currentRegions) {
+        DomainAvailability rule = new DomainAvailability(evaluator,
+            regionId -> resolver.getDomainByRegionIdNoRefresh(world, regionId), RoadRule.ALWAYS,
+            currentRegions, null, bypass.test(player));
+        return rule::mayEnter;
+    }
+
     /** KNG-110: the WorldGuard regions at a floor point, at feet level. */
     @Override
     public Set<String> regionsAt(org.bukkit.World world, double[] floorPoint) {

@@ -100,6 +100,10 @@ final class SpikeMetrics {
     long resumed;
     long recheckReplans;
     long examinerLeaks;
+    /** NPC entered a region the current entry rules deny it (the trespass counter). */
+    long trespasses;
+    /** NPCs replanned because a gate changed or availability changed. */
+    long eventReplans;
     final Map<String, Long> failures = new TreeMap<>();
 
     /** MSPT measured with no spike NPCs, set by {@code /knk npcspike baseline}. */
@@ -119,7 +123,7 @@ final class SpikeMetrics {
         citizensPathMs.clear();
         tripSeconds.clear();
         expansions.clear();
-        trips = hops = stuck = replans = pausedChunkUnload = resumed = recheckReplans = examinerLeaks = 0;
+        trips = hops = stuck = replans = pausedChunkUnload = resumed = recheckReplans = examinerLeaks = trespasses = eventReplans = 0;
         failures.clear();
         SpikeExaminer.CALLS.reset();
         SpikeExaminer.NANOS.reset();
