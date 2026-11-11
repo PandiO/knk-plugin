@@ -32,7 +32,7 @@ public final class NpcSpikeBootstrap {
                     return true;
                 }
                 spike[0] = new CitizensSpike(plugin, nav, captureMargin.getAsInt());
-                command[0] = new NpcSpikeCommand(spike[0]);
+                command[0] = new NpcSpikeCommand(spike[0], plugin);
             }
             return command[0].execute(sender, args);
         }, (sender, args) -> command[0] == null ? List.of() : command[0].complete(sender, args));

@@ -111,6 +111,7 @@ public final class CitizensSpike implements Listener {
     private final int captureMargin;
     private final Logger logger;
     final SpikeMetrics metrics = new SpikeMetrics();
+    final SpikeRouteStore routes;
 
     private NPCRegistry registry;
     private BukkitTask task;
@@ -157,6 +158,15 @@ public final class CitizensSpike implements Listener {
         this.walk = navigation.spikeWalk();
         this.captureMargin = captureMargin;
         this.logger = plugin.getLogger();
+        this.routes = new SpikeRouteStore(plugin.getDataFolder(), logger);
+        SpikeRouteStore.Route last = routes.current();
+        from = last.from();
+        to = last.to();
+        subject = last.subject();
+        if (from != null || to != null) {
+            logger.info("[NpcSpike] route restored: from " + SpikeRouteStore.describe(from) + " -> to "
+                + SpikeRouteStore.describe(to));
+        }
         // tick sampling starts at once, so /knk npcspike baseline has data before the first spawn
         ensureStarted();
     }
@@ -914,6 +924,7 @@ public final class CitizensSpike implements Listener {
         lines.add(String.format(Locale.ROOT, "examiner: %d calls, %.2f µs mean, %d blocked by K&K rules", calls,
             calls == 0 ? 0.0 : SpikeExaminer.NANOS.sum() / 1000.0 / calls, SpikeExaminer.BLOCKED.sum()));
         lines.add("failures: " + (metrics.failures.isEmpty() ? "none" : metrics.failures.toString()));
+        lines.add("route: from " + SpikeRouteStore.describe(from) + " -> to " + SpikeRouteStore.describe(to));
         Player who = subject == null ? null : Bukkit.getPlayer(subject);
         lines.add("access subject: " + (who == null ? (subject == null ? "none (run from/to)" : "offline")
             : who.getName() + (who.hasPermission("knk.region.bypass")
