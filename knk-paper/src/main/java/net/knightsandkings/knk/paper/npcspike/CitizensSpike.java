@@ -103,6 +103,9 @@ public final class CitizensSpike implements Listener {
         /** Trail: first point of the stretch last sent to Citizens, and its exclusive end. */
         int lineIndex;
         int stretchEnd;
+        /** Trail: the floor height of the last waypoint sent, and the line index after it (continuity snapping). */
+        int lastSnapY = Integer.MIN_VALUE;
+        int lastSnapEnd = -1;
         /** Progress watchdog: where the NPC was at the last progress check, and when it last moved. */
         double[] progressAt;
         long lastProgressTick;
@@ -772,6 +775,31 @@ public final class CitizensSpike implements Listener {
         return hop;
     }
 
+    /**
+     * The floor for a trail point within 2 blocks up or down of {@code refY} (the previous waypoint's floor), the one
+     * nearest the point's interpolated height; without one there, {@link #snapToFloor}. Main thread.
+     */
+    static double[] snapNear(World world, double[] p, int refY) {
+        int x = (int) Math.floor(p[0]);
+        int z = (int) Math.floor(p[2]);
+        if (!world.isChunkLoaded(x >> 4, z >> 4)) {
+            return p;
+        }
+        int best = Integer.MIN_VALUE;
+        for (int y = refY - 2; y <= refY + 2; y++) {
+            if (y <= world.getMinHeight() || y + 2 >= world.getMaxHeight()) {
+                continue;
+            }
+            if (world.getBlockAt(x, y, z).getType().isSolid()
+                && !org.bukkit.Tag.LEAVES.isTagged(world.getBlockAt(x, y, z).getType())
+                && world.getBlockAt(x, y + 1, z).isPassable() && world.getBlockAt(x, y + 2, z).isPassable()
+                && (best == Integer.MIN_VALUE || Math.abs(y - p[1]) < Math.abs(best - p[1]))) {
+                best = y;
+            }
+        }
+        return best == Integer.MIN_VALUE ? snapToFloor(world, p) : new double[] {p[0], best, p[2]};
+    }
+
     /** Citizens' own cost-only examiner from AStarPlanner (an anonymous class). */
     static boolean isCitizensCostOnly(BlockExaminer e) {
         return e.getClass().getName().startsWith("net.citizensnpcs.npc.ai.AStarNavigationStrategy$");
@@ -828,6 +856,7 @@ public final class CitizensSpike implements Listener {
                 s.line = resampleKeepingCorners(road.line(), TRAIL_STEP);
                 s.lineIndex = s.stretchEnd = 0;
                 s.bubbleFor = -1;
+                s.lastSnapEnd = -1;
                 double[] roadStart = road.line().get(0);
                 if (Math.hypot(roadStart[0] - feetFloor[0], roadStart[2] - feetFloor[2]) > 3) {
                     s.hops.add(snapToFloor(world, roadStart));
@@ -1012,8 +1041,13 @@ public final class CitizensSpike implements Listener {
         int lastX = Integer.MIN_VALUE;
         int lastY = Integer.MIN_VALUE;
         int lastZ = Integer.MIN_VALUE;
+        // continuity: each waypoint's floor is reachable from the previous one (at most 2 up or down), so on stacked
+        // floors (a U-turn staircase) the trail never jumps to the flight above or below the NPC
+        int refY = start == s.lastSnapEnd && s.lastSnapY != Integer.MIN_VALUE ? s.lastSnapY
+            : (int) Math.floor(s.npc.getEntity().getLocation().getY()) - 1;
         for (double[] p : s.line.subList(start, end)) {
-            double[] f = snapToFloor(world, p);
+            double[] f = snapNear(world, p, refY);
+            refY = (int) Math.round(f[1]);
             int bx = (int) Math.floor(f[0]);
             int by = (int) Math.round(f[1]);
             int bz = (int) Math.floor(f[2]);
@@ -1025,6 +1059,8 @@ public final class CitizensSpike implements Listener {
             lastY = by;
             lastZ = bz;
         }
+        s.lastSnapY = refY;
+        s.lastSnapEnd = end;
         if (points.isEmpty()) {
             s.lineIndex = s.stretchEnd = end;
             completeTrail(s);
