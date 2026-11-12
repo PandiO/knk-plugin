@@ -19,6 +19,7 @@ import net.knightsandkings.knk.paper.commands.CommandMetadata;
  * <pre>
  * from | to                         set the route ends at your feet (saved, restored after a restart)
  * route save|load|delete &lt;name&gt;     keep named routes in npcspike-routes.yml; route list
+ * run &lt;name&gt;                       start a new run log file (npcspike-logs/); a spawn with no NPCs starts one
  * baseline                          store the current mean MSPT as the no-NPC baseline
  * spawn &lt;n&gt; [dense|hop|trail] [player|mannequin]   trail: follow the K&K road line (NAV-15)
  * set &lt;key&gt; &lt;value&gt;                pathfinder citizens|citizens_async, inflight N, hop N, stationary N,
@@ -47,7 +48,7 @@ public final class NpcSpikeCommand {
     public static CommandMetadata metadata() {
         return new CommandMetadata("npcspike",
             "#243 Citizens spike: spawn player-shaped NPCs on K&K-planned routes and measure them (throwaway)",
-            "/knk npcspike <from|to|route|baseline|spawn|set|stats|reset|clear>", PERMISSION,
+            "/knk npcspike <from|to|route|run|baseline|spawn|set|stats|reset|clear>", PERMISSION,
             List.of("/knk npcspike from", "/knk npcspike to", "/knk npcspike baseline", "/knk npcspike spawn 10 trail",
                 "/knk npcspike stats 10-hop"));
     }
@@ -72,32 +73,46 @@ public final class NpcSpikeCommand {
                 spike.subject = player.getUniqueId();
                 spike.routes.saveCurrent(spike.from, spike.to, spike.subject);
                 Location set = sub.equals("from") ? spike.from : spike.to;
-                plugin.getLogger().info("[NpcSpike] " + player.getName() + " set " + sub + " at "
+                spike.runLog.log(player.getName() + " set " + sub + " at "
                     + SpikeRouteStore.describe(set));
                 sender.sendMessage("Route " + sub + " set at " + SpikeRouteStore.describe(set) + " (saved); access subject: "
                     + player.getName());
             }
             case "route" -> route(sender, args);
+            case "run" -> {
+                String name = args.length > 1 ? String.join("-", java.util.Arrays.copyOfRange(args, 1, args.length)) : "run";
+                spike.runLog.startRun(name, spike.setupLines());
+                sender.sendMessage("Run log: npcspike-logs/" + spike.runLog.runFile());
+            }
             case "baseline" -> {
                 spike.metrics.baselineMs = spike.metrics.tickMs.mean();
+                spike.runLog.log(String.format(Locale.ROOT, "baseline %.2f ms (%d spike NPCs present)",
+                    spike.metrics.baselineMs, spike.count()));
                 sender.sendMessage(String.format(Locale.ROOT, "Baseline %.2f ms (%d spike NPCs present)",
                     spike.metrics.baselineMs, spike.count()));
             }
             case "spawn" -> spawn(sender, args);
             case "set" -> set(sender, args);
             case "stats" -> {
-                spike.report().forEach(sender::sendMessage);
+                List<String> report = spike.report();
+                report.forEach(sender::sendMessage);
+                spike.runLog.report(args.length > 1 ? args[1] : null, report);
                 if (args.length > 1) {
                     spike.metricsCsvLog(args[1]);
-                    sender.sendMessage("CSV row logged to the server log.");
+                    sender.sendMessage("CSV row logged to the server log, npcspike-logs/results.csv and the run file.");
+                } else {
+                    sender.sendMessage("Stats written to npcspike-logs/" + (spike.runLog.runFile() == null
+                        ? "(session file)" : spike.runLog.runFile()) + ".");
                 }
             }
             case "reset" -> {
                 spike.resetCounters();
+                spike.runLog.log("counters reset");
                 sender.sendMessage("Counters reset.");
             }
             case "clear" -> {
                 int n = spike.count();
+                spike.runLog.log("clear: removing " + n + " spike NPCs");
                 spike.clear();
                 sender.sendMessage("Removed " + n + " spike NPCs.");
             }
@@ -155,6 +170,8 @@ public final class NpcSpikeCommand {
                 }
                 spike.routes.saveCurrent(spike.from, spike.to, spike.subject);
                 Player who = spike.subject == null ? null : Bukkit.getPlayer(spike.subject);
+                spike.runLog.log("loaded route " + name + ": " + SpikeRouteStore.describe(spike.from) + " -> "
+                    + SpikeRouteStore.describe(spike.to));
                 sender.sendMessage("Loaded route " + name + ": " + SpikeRouteStore.describe(spike.from) + " -> "
                     + SpikeRouteStore.describe(spike.to) + "; access subject: " + (who == null ? "offline" : who.getName())
                     + " (NPCs already out keep their trip; clear and spawn to use it)");
@@ -199,7 +216,12 @@ public final class NpcSpikeCommand {
                 return;
             }
         }
+        if (spike.count() == 0) {
+            // a spawn with no spike NPCs present starts a run: its own log file
+            spike.runLog.startRun(mode.name().toLowerCase(Locale.ROOT) + "-" + n, spike.setupLines());
+        }
         int made = spike.spawn(Math.max(0, Math.min(n, 500)), mode, type);
+        spike.runLog.log("spawned " + made + " " + type + " NPCs in " + mode + " mode (" + spike.count() + " total)");
         sender.sendMessage("Spawned " + made + " " + type + " NPCs in " + mode + " mode (" + spike.count() + " total).");
     }
 
@@ -241,6 +263,7 @@ public final class NpcSpikeCommand {
             sender.sendMessage("Bad value " + value + " for " + key);
             return;
         }
+        spike.runLog.log("set " + key + " = " + value);
         sender.sendMessage("Set " + key + " = " + value + " (applies to NPCs spawned from now on; inflight, hop, recheck,"
             + " noroute, keeploaded, stretch and doors apply at once)");
     }
@@ -248,7 +271,7 @@ public final class NpcSpikeCommand {
     public List<String> complete(CommandSender sender, String[] args) {
         if (args.length == 1) {
             String prefix = args[0].toLowerCase(Locale.ROOT);
-            return List.of("from", "to", "route", "baseline", "spawn", "set", "stats", "reset", "clear").stream()
+            return List.of("from", "to", "route", "run", "baseline", "spawn", "set", "stats", "reset", "clear").stream()
                 .filter(option -> option.startsWith(prefix)).toList();
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("route")) {

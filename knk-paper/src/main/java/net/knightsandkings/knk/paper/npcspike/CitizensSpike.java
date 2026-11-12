@@ -164,6 +164,9 @@ public final class CitizensSpike implements Listener {
     /** Trail: spacing of the waypoints along the K&K route. */
     static final double TRAIL_STEP = 1.5;
     final SpikeChunkBubble bubble;
+    final SpikeRunLog runLog;
+    /** Ticks between the status lines in the run file. */
+    static final int STATUS_TICKS = 1200;
 
     private final StuckAction stuckAction = (npc, navigator) -> {
         metrics.stuck++;
@@ -178,12 +181,13 @@ public final class CitizensSpike implements Listener {
         this.logger = plugin.getLogger();
         this.routes = new SpikeRouteStore(plugin.getDataFolder(), logger);
         this.bubble = new SpikeChunkBubble(plugin);
+        this.runLog = new SpikeRunLog(plugin);
         SpikeRouteStore.Route last = routes.current();
         from = last.from();
         to = last.to();
         subject = last.subject();
         if (from != null || to != null) {
-            logger.info("[NpcSpike] route restored: from " + SpikeRouteStore.describe(from) + " -> to "
+            runLog.log("route restored: from " + SpikeRouteStore.describe(from) + " -> to "
                 + SpikeRouteStore.describe(to));
         }
         // tick sampling starts at once, so /knk npcspike baseline has data before the first spawn
@@ -214,7 +218,7 @@ public final class CitizensSpike implements Listener {
                 Bukkit.getScheduler().runTask(plugin, () -> onRulesChanged(why));
             }
         });
-        logger.info("[NpcSpike] in-memory Citizens registry '" + REGISTRY + "' created");
+        runLog.log("in-memory Citizens registry '" + REGISTRY + "' created");
     }
 
     public void shutdown() {
@@ -329,6 +333,7 @@ public final class CitizensSpike implements Listener {
             s.npc.destroy();
         }
         bubble.releaseEverything(Bukkit::getWorld);
+        runLog.endRun("clear");
         npcs.clear();
         queue.clear();
         if (registry != null) {
@@ -356,6 +361,9 @@ public final class CitizensSpike implements Listener {
         if (tick % TRESPASS_CHECK_TICKS == 0) {
             checkTrespass();
             sampleStray();
+        }
+        if (tick % STATUS_TICKS == 0 && !npcs.isEmpty()) {
+            runLog.fileOnly(statusLine());
         }
         while (inFlight < maxInFlight && !queue.isEmpty()) {
             SpikeNpc s = queue.pollFirst();
@@ -481,7 +489,7 @@ public final class CitizensSpike implements Listener {
         }
         if (n > 0) {
             metrics.eventReplans += n;
-            logger.info("[NpcSpike] rules changed (" + why + "): " + n + " NPCs replan");
+            runLog.log("rules changed (" + why + "): " + n + " NPCs replan");
         }
     }
 
@@ -518,9 +526,9 @@ public final class CitizensSpike implements Listener {
                 if (!mayEnter.test(region)) {
                     metrics.trespasses++;
                     metrics.fail("TRESPASS into " + region);
-                    if (loggedTrespasses < 20) {
-                        loggedTrespasses++;
-                        logger.info(String.format(Locale.ROOT, "[NpcSpike] TRESPASS %s entered %s at %d %d %d (state %s)",
+                    {
+                        java.util.function.Consumer<String> out = loggedTrespasses++ < 20 ? runLog::log : runLog::fileOnly;
+                        out.accept(String.format(Locale.ROOT, "TRESPASS %s entered %s at %d %d %d (state %s)",
                             s.npc.getName(), region, feet.getBlockX(), feet.getBlockY(), feet.getBlockZ(), s.state));
                     }
                 }
@@ -1117,12 +1125,15 @@ public final class CitizensSpike implements Listener {
             } else {
                 metrics.fail("stuck while walking");
             }
-            if (loggedLegFailures < 20 && s.npc.isSpawned()) {
-                loggedLegFailures++;
+            if (s.npc.isSpawned()) {
+                // the first 20 also on the console; every one in the run file
+                java.util.function.Consumer<String> out = loggedLegFailures++ < 20 ? runLog::log : runLog::fileOnly;
                 Location at = s.npc.getEntity().getLocation();
-                double[] hop = s.hops.peekFirst();
-                logger.info(String.format(Locale.ROOT, "[NpcSpike] %s %s at %d %d %d -> hop floor %s",
+                double[] hop = s.mode == Mode.TRAIL && s.onTrail && s.line != null && s.stretchEnd > 0
+                    ? s.line.get(Math.min(s.line.size(), s.stretchEnd) - 1) : s.hops.peekFirst();
+                out.accept(String.format(Locale.ROOT, "%s %s at %d %d %d -> %s floor %s",
                     s.npc.getName(), noPath ? "no path" : "stuck", at.getBlockX(), at.getBlockY(), at.getBlockZ(),
+                    s.mode == Mode.TRAIL && s.onTrail ? "stretch end" : "hop",
                     hop == null ? "-" : String.format(Locale.ROOT, "%.0f %.0f %.0f", hop[0], hop[1], hop[2])));
             }
             if (s.mode == Mode.TRAIL && s.onTrail && ++s.retries <= MAX_RETRIES) {
@@ -1181,6 +1192,46 @@ public final class CitizensSpike implements Listener {
     }
 
     // ==================== report ====================
+
+    /** The lines that describe a run's setup (route, subject, settings), for the run file's header. */
+    List<String> setupLines() {
+        List<String> lines = new ArrayList<>();
+        lines.add("route: from " + SpikeRouteStore.describe(from) + " -> to " + SpikeRouteStore.describe(to));
+        Player who = subject == null ? null : Bukkit.getPlayer(subject);
+        lines.add("access subject: " + (who == null ? "offline/none" : who.getName()));
+        lines.add(String.format(Locale.ROOT, "settings: pathfinder %s, max-in-flight %d, hop %.0f, stretch %.0f, stationary %d, recheck %d, noroute %s, keeploaded %s, doors %s, collidable %s, baseline %.2f ms",
+            pathfinderType, maxInFlight, hopSpacing, stretchBlocks, stationaryTicks, recheckTicks,
+            noRouteWait ? "wait" : "line", keepLoaded ? "on" : "off", openDoors, collidable, metrics.baselineMs));
+        return lines;
+    }
+
+    /** One compact line for the run file every minute. */
+    private String statusLine() {
+        Map<State, Integer> states = new java.util.EnumMap<>(State.class);
+        int spawned = 0;
+        for (SpikeNpc s : npcs.values()) {
+            states.merge(s.state, 1, Integer::sum);
+            if (s.npc.isSpawned()) {
+                spawned++;
+            }
+        }
+        return String.format(Locale.ROOT,
+            "status: NPCs %d (spawned %d) %s | tick mean %.2f ms p95 %.2f | TPS %.2f | trips %d, hops %d, stuck %d, "
+                + "trespasses %d, pauses %d, resumes %d | stray p95 %.2f | bubble NPCs %d, chunks %d",
+            npcs.size(), spawned, states, metrics.tickMs.mean(), metrics.tickMs.percentile(95), Bukkit.getTPS()[0],
+            metrics.trips, metrics.hops, metrics.stuck, metrics.trespasses, metrics.pausedChunkUnload, metrics.resumed,
+            metrics.strayBlocks.percentile(95), bubble.npcsWithBubble(), bubble.chunksHeld());
+    }
+
+    /** Gate commands go into the run file, so their time sits next to the NPCs' reaction. */
+    @EventHandler(priority = org.bukkit.event.EventPriority.MONITOR)
+    public void onCommand(org.bukkit.event.player.PlayerCommandPreprocessEvent event) {
+        String message = event.getMessage();
+        String lower = message.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("/gate ") || lower.startsWith("/knk npcspike")) {
+            runLog.fileOnly(event.getPlayer().getName() + " issued " + message);
+        }
+    }
 
     List<String> report() {
         List<String> lines = new ArrayList<>();
@@ -1260,8 +1311,7 @@ public final class CitizensSpike implements Listener {
     }
 
     void metricsCsvLog(String label) {
-        logger.info("[NpcSpike] CSV " + CSV_HEADER);
-        logger.info("[NpcSpike] CSV " + csv(label));
+        runLog.csv(CSV_HEADER, csv(label));
     }
 
     static final String CSV_HEADER = "label,npcs,mspt_mean,mspt_p95,tps,baseline_ms,ms_per_npc,spike_us_tick,"
