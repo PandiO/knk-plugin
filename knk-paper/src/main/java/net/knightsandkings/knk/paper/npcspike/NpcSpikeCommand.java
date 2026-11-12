@@ -20,12 +20,13 @@ import net.knightsandkings.knk.paper.commands.CommandMetadata;
  * from | to                         set the route ends at your feet (saved, restored after a restart)
  * route save|load|delete &lt;name&gt;     keep named routes in npcspike-routes.yml; route list
  * baseline                          store the current mean MSPT as the no-NPC baseline
- * spawn &lt;n&gt; [dense|hop] [player|mannequin]
+ * spawn &lt;n&gt; [dense|hop|trail] [player|mannequin]   trail: follow the K&K road line (NAV-15)
  * set &lt;key&gt; &lt;value&gt;                pathfinder citizens|citizens_async, inflight N, hop N, stationary N,
  *                                   recheck N (every N ticks, 0 = off; hop: check the way ahead against the current
  *                                   entry rules, replan when it enters a denied region; dense: replan; default 40),
  *                                   noroute wait|line (no road route: wait and ask again, or straight-line hops),
- *                                   doors on|off, collide on|off
+ *                                   keeploaded on|off (NAV-12 travel bubble), stretch N (trail: blocks per
+ *                                   waypoint list, default 32), doors on|off, collide on|off
  * stats [label]                     print the counters; with a label also log one CSV row
  * reset                             zero the counters (keeps the NPCs)
  * clear                             remove every spike NPC
@@ -47,7 +48,7 @@ public final class NpcSpikeCommand {
         return new CommandMetadata("npcspike",
             "#243 Citizens spike: spawn player-shaped NPCs on K&K-planned routes and measure them (throwaway)",
             "/knk npcspike <from|to|route|baseline|spawn|set|stats|reset|clear>", PERMISSION,
-            List.of("/knk npcspike from", "/knk npcspike to", "/knk npcspike baseline", "/knk npcspike spawn 10 hop",
+            List.of("/knk npcspike from", "/knk npcspike to", "/knk npcspike baseline", "/knk npcspike spawn 10 trail",
                 "/knk npcspike stats 10-hop"));
     }
 
@@ -179,8 +180,12 @@ public final class NpcSpikeCommand {
             sender.sendMessage("Not a number: " + args[1]);
             return;
         }
-        CitizensSpike.Mode mode = args.length > 2 && args[2].equalsIgnoreCase("dense")
-            ? CitizensSpike.Mode.DENSE : CitizensSpike.Mode.HOP;
+        CitizensSpike.Mode mode = CitizensSpike.Mode.HOP;
+        if (args.length > 2 && args[2].equalsIgnoreCase("dense")) {
+            mode = CitizensSpike.Mode.DENSE;
+        } else if (args.length > 2 && args[2].equalsIgnoreCase("trail")) {
+            mode = CitizensSpike.Mode.TRAIL;
+        }
         if (!spike.walkAvailable()) {
             sender.sendMessage("The spike needs navigation.walk.enabled: true (its capture builds the access).");
             return;
@@ -200,7 +205,7 @@ public final class NpcSpikeCommand {
 
     private void set(CommandSender sender, String[] args) {
         if (args.length < 3) {
-            sender.sendMessage("/knk npcspike set <pathfinder|inflight|hop|stationary|recheck|noroute|doors|collide> <value>");
+            sender.sendMessage("/knk npcspike set <pathfinder|inflight|hop|stretch|stationary|recheck|noroute|keeploaded|doors|collide> <value>");
             return;
         }
         String key = args[1].toLowerCase(Locale.ROOT);
@@ -218,6 +223,13 @@ public final class NpcSpikeCommand {
                     }
                     spike.noRouteWait = value.equals("wait");
                 }
+                case "keeploaded" -> {
+                    if (!value.equals("on") && !value.equals("off")) {
+                        throw new IllegalArgumentException(value);
+                    }
+                    spike.setKeepLoaded(value.equals("on"));
+                }
+                case "stretch" -> spike.stretchBlocks = Math.max(8, Double.parseDouble(value));
                 case "doors" -> spike.openDoors = value.equals("on");
                 case "collide" -> spike.collidable = value.equals("on");
                 default -> {
@@ -230,7 +242,7 @@ public final class NpcSpikeCommand {
             return;
         }
         sender.sendMessage("Set " + key + " = " + value + " (applies to NPCs spawned from now on; inflight, hop, recheck,"
-            + " noroute and doors apply at once)");
+            + " noroute, keeploaded, stretch and doors apply at once)");
     }
 
     public List<String> complete(CommandSender sender, String[] args) {
@@ -247,13 +259,14 @@ public final class NpcSpikeCommand {
             return spike.routes.names();
         }
         if (args.length == 3 && args[0].equalsIgnoreCase("spawn")) {
-            return List.of("hop", "dense");
+            return List.of("hop", "trail", "dense");
         }
         if (args.length == 4 && args[0].equalsIgnoreCase("spawn")) {
             return List.of("player", "mannequin");
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("set")) {
-            return List.of("pathfinder", "inflight", "hop", "stationary", "recheck", "noroute", "doors", "collide");
+            return List.of("pathfinder", "inflight", "hop", "stretch", "stationary", "recheck", "noroute", "keeploaded",
+                "doors", "collide");
         }
         return List.of();
     }

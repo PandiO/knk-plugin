@@ -72,7 +72,7 @@ import net.knightsandkings.knk.paper.navigation.walk.WalkBox;
  */
 public final class CitizensSpike implements Listener {
 
-    public enum Mode { DENSE, HOP }
+    public enum Mode { DENSE, HOP, TRAIL }
 
     enum State { IDLE, QUEUED, PLANNING, MOVING, WAITING, PAUSED }
 
@@ -98,6 +98,17 @@ public final class CitizensSpike implements Listener {
         /** The regions the NPC stood in at the last trespass check (null before the first). */
         Set<String> regions;
         final Deque<double[]> hops = new ArrayDeque<>();
+        /** The K&K road route as floor points every {@link #TRAIL_STEP} blocks (trail: followed; hop: stray metric). */
+        List<double[]> line;
+        /** Trail: first point of the stretch last sent to Citizens, and its exclusive end. */
+        int lineIndex;
+        int stretchEnd;
+        /** Trail: the stretch start the bubble was last requested for (avoids re-requesting every tick). */
+        int bubbleFor = -1;
+        /** Trail: true while Citizens follows a stretch as a waypoint list, false during an A* leg. */
+        boolean onTrail;
+        /** Trail: the off-road stretch from the road's end to the goal, walked by A* after the trail. */
+        final Deque<double[]> tail = new ArrayDeque<>();
 
         SpikeNpc(NPC npc, Mode mode) {
             this.npc = npc;
@@ -146,6 +157,13 @@ public final class CitizensSpike implements Listener {
     boolean noRouteWait = true;
     boolean openDoors = true;
     boolean collidable = false;
+    /** NAV-12 travel bubble: NPCs keep the chunks they walk through loaded (Citizens KEEP_CHUNK_LOADED + K&K tickets). */
+    boolean keepLoaded = false;
+    /** Trail: blocks of the route handed to Citizens at once. */
+    double stretchBlocks = 32;
+    /** Trail: spacing of the waypoints along the K&K route. */
+    static final double TRAIL_STEP = 1.5;
+    final SpikeChunkBubble bubble;
 
     private final StuckAction stuckAction = (npc, navigator) -> {
         metrics.stuck++;
@@ -159,6 +177,7 @@ public final class CitizensSpike implements Listener {
         this.captureMargin = captureMargin;
         this.logger = plugin.getLogger();
         this.routes = new SpikeRouteStore(plugin.getDataFolder(), logger);
+        this.bubble = new SpikeChunkBubble(plugin);
         SpikeRouteStore.Route last = routes.current();
         from = last.from();
         to = last.to();
@@ -219,6 +238,17 @@ public final class CitizensSpike implements Listener {
         return npcs.size();
     }
 
+    /** Turn the travel bubble on or off for every spike NPC, at once. */
+    void setKeepLoaded(boolean on) {
+        keepLoaded = on;
+        for (SpikeNpc s : npcs.values()) {
+            s.npc.data().set(NPC.Metadata.KEEP_CHUNK_LOADED, on);
+            if (!on) {
+                bubble.releaseAll(s.npc.getId(), Bukkit::getWorld);
+            }
+        }
+    }
+
     /** Zero the counters and re-arm the first-20 stuck and trespass log lines (keeps the NPCs). */
     void resetCounters() {
         metrics.reset();
@@ -239,6 +269,8 @@ public final class CitizensSpike implements Listener {
             // wins" would let it open a door K&K denies: doors go through SpikeExaminer instead.
             npc.data().set(NPC.Metadata.PATHFINDER_OPEN_DOORS, false);
             npc.data().set(NPC.Metadata.COLLIDABLE, collidable);
+            // NAV-12: Citizens' ChunkTicketTrait force-loads the chunk the NPC stands in and moves it as it walks
+            npc.data().set(NPC.Metadata.KEEP_CHUNK_LOADED, keepLoaded);
             if (!npc.spawn(at)) {
                 metrics.fail("spawn refused");
                 registry.deregister(npc);
@@ -296,6 +328,7 @@ public final class CitizensSpike implements Listener {
             s.generation++;
             s.npc.destroy();
         }
+        bubble.releaseEverything(Bukkit::getWorld);
         npcs.clear();
         queue.clear();
         if (registry != null) {
@@ -322,6 +355,7 @@ public final class CitizensSpike implements Listener {
         }
         if (tick % TRESPASS_CHECK_TICKS == 0) {
             checkTrespass();
+            sampleStray();
         }
         while (inFlight < maxInFlight && !queue.isEmpty()) {
             SpikeNpc s = queue.pollFirst();
@@ -335,6 +369,15 @@ public final class CitizensSpike implements Listener {
 
     private void watchMoving(SpikeNpc s) {
         Navigator navigator = s.npc.getNavigator();
+        if (s.mode == Mode.TRAIL && s.onTrail && s.line != null && s.stretchEnd < s.line.size()
+            && s.npc.isSpawned()) {
+            // hand Citizens the next stretch shortly before the end of this one, so the NPC doesn't stop (NAV-14)
+            double[] end = s.line.get(s.stretchEnd - 1);
+            Location at = s.npc.getEntity().getLocation();
+            if (Math.hypot(at.getX() - end[0], at.getZ() - end[2]) < 4) {
+                sendStretch(s, s.stretchEnd, false);
+            }
+        }
         if (s.mode == Mode.HOP && !s.citizensPathSeen && navigator.isNavigating()) {
             PathStrategy strategy = navigator.getPathStrategy();
             if (strategy != null && strategy.getPath() != null) {
@@ -395,6 +438,11 @@ public final class CitizensSpike implements Listener {
             }
         }
         ahead.addAll(s.hops);
+        if (s.line != null && s.mode == Mode.TRAIL) {
+            ahead.addAll(s.line.subList(Math.min(s.lineIndex, s.line.size()),
+                Math.min(s.line.size(), s.lineIndex + 300)));
+        }
+        ahead.addAll(s.tail);
         for (double[] point : ahead) {
             for (String region : navigation.spikeRegionsAt(world, point)) {
                 if (!here.contains(region) && !verdicts.computeIfAbsent(region, mayEnter::test)) {
@@ -409,6 +457,10 @@ public final class CitizensSpike implements Listener {
     private void replan(SpikeNpc s) {
         s.generation++;
         s.hops.clear();
+        s.tail.clear();
+        s.line = null;
+        s.lineIndex = s.stretchEnd = 0;
+        s.onTrail = false;
         s.retries = 0;
         queue.remove(s);
         enqueue(s); // QUEUED first, so the PLUGIN cancel below is not taken for a stuck NPC
@@ -507,6 +559,8 @@ public final class CitizensSpike implements Listener {
         inFlight++;
         if (s.mode == Mode.DENSE) {
             planDense(s, player, generation);
+        } else if (s.mode == Mode.TRAIL) {
+            planTrail(s, player, generation);
         } else if (s.hops.isEmpty()) {
             planRoad(s, player, generation);
         } else {
@@ -527,9 +581,42 @@ public final class CitizensSpike implements Listener {
         return s.towardsTo ? to : from;
     }
 
-    /** The walk preparer's capture and access for one leg, then {@code then} on the main thread. */
+    /**
+     * The walk preparer's capture and access for one leg, then {@code then} on the main thread. With the travel
+     * bubble the box's chunks are loaded (and held) first, so the capture never meets an unloaded chunk.
+     */
     private void prepareLeg(SpikeNpc s, Player player, int generation, double[] target,
                             java.util.function.BiConsumer<WalkRequest, WalkBox> then) {
+        if (keepLoaded) {
+            Location feetLoc = s.npc.getEntity().getLocation();
+            World world = feetLoc.getWorld();
+            WalkBox box = WalkBox.around(world.getName(), feetLoc.getX(), feetLoc.getY(), feetLoc.getZ(), target[0],
+                target[1], target[2], captureMargin, world.getMinHeight(), world.getMaxHeight());
+            if (box.chunkCount() <= net.knightsandkings.knk.paper.navigation.walk.WalkSnapshotService.MAX_CHUNKS_PER_REQUEST) {
+                List<int[]> chunks = new ArrayList<>();
+                for (int cx = box.minChunkX(); cx <= box.maxChunkX(); cx++) {
+                    for (int cz = box.minChunkZ(); cz <= box.maxChunkZ(); cz++) {
+                        chunks.add(new int[] {cx, cz});
+                    }
+                }
+                bubble.holdOnly(s.npc.getId(), world, chunks).whenComplete((ok, error) -> {
+                    if (!current(s, generation)) {
+                        done(s);
+                        return;
+                    }
+                    if (error != null || !Boolean.TRUE.equals(ok)) {
+                        metrics.fail("bubble: a chunk of the leg is not generated");
+                    }
+                    capture(s, player, generation, target, then);
+                });
+                return;
+            }
+        }
+        capture(s, player, generation, target, then);
+    }
+
+    private void capture(SpikeNpc s, Player player, int generation, double[] target,
+                         java.util.function.BiConsumer<WalkRequest, WalkBox> then) {
         Location feetLoc = s.npc.getEntity().getLocation();
         double[] feet = {feetLoc.getX(), feetLoc.getY(), feetLoc.getZ()};
         WalkGoal goal = WalkGoal.within(target[0], target[1], target[2], 1.5);
@@ -684,11 +771,35 @@ public final class CitizensSpike implements Listener {
             if (error != null || road == null || !road.found()) {
                 // no road: straight-line hops, so each Citizens leg (and its capture box) stays short
                 metrics.fail("no road route: " + (road == null ? "error" : road.reason()) + " (straight-line hops)");
+                s.line = null;
                 World world = feet.getWorld();
                 for (double[] hop : resample(List.of(feetFloor, goalFloor), hopSpacing)) {
                     s.hops.add(snapToFloor(world, hop));
                 }
+            } else if (s.mode == Mode.TRAIL) {
+                // NAV-15: follow the K&K road line (the follow trail) as waypoints; A* only for the off-road ends
+                World world = feet.getWorld();
+                s.line = resample(road.line(), TRAIL_STEP);
+                s.lineIndex = s.stretchEnd = 0;
+                s.bubbleFor = -1;
+                double[] roadStart = road.line().get(0);
+                if (Math.hypot(roadStart[0] - feetFloor[0], roadStart[2] - feetFloor[2]) > 3) {
+                    s.hops.add(snapToFloor(world, roadStart));
+                }
+                double[] roadEnd = road.line().get(road.line().size() - 1);
+                s.tail.clear();
+                if (Math.hypot(roadEnd[0] - goalFloor[0], roadEnd[2] - goalFloor[2]) > 2) {
+                    s.tail.add(goalFloor);
+                }
+                if (s.hops.isEmpty()) {
+                    done(s);
+                    sendStretch(s, 0, true);
+                } else {
+                    planHop(s, player, generation);
+                }
+                return;
             } else {
+                s.line = resample(road.line(), TRAIL_STEP); // only for the stray-from-route metric
                 // resampled points between road vertices have an interpolated height (wrong on stairs and slopes)
                 World roadWorld = feet.getWorld();
                 for (double[] hop : resample(road.line(), hopSpacing)) {
@@ -793,6 +904,174 @@ public final class CitizensSpike implements Listener {
         });
     }
 
+    // ==================== trail (NAV-15) ====================
+
+    private void planTrail(SpikeNpc s, Player player, int generation) {
+        if (!s.hops.isEmpty()) {
+            planHop(s, player, generation); // an A* leg: to the road, a stuck recovery, or the tail
+        } else if (s.line != null && s.lineIndex < s.line.size()) {
+            done(s);
+            sendStretch(s, s.lineIndex, true);
+        } else if (!s.tail.isEmpty()) {
+            s.hops.addAll(s.tail);
+            s.tail.clear();
+            planHop(s, player, generation);
+        } else {
+            planRoad(s, player, generation);
+        }
+    }
+
+    /**
+     * Hand Citizens the trail from point {@code start} for {@link #stretchBlocks} blocks as a waypoint list (no A*:
+     * NAV-02's recheck keeps the rules binding). With the bubble, the next stretch's chunks are requested now.
+     * {@code required}: the NPC needs it now (else it is the early hand-over and may be skipped).
+     */
+    private void sendStretch(SpikeNpc s, int start, boolean required) {
+        if (s.line == null || start >= s.line.size() || !s.npc.isSpawned()) {
+            return;
+        }
+        World world = s.npc.getEntity().getWorld();
+        int perStretch = Math.max(4, (int) Math.round(stretchBlocks / TRAIL_STEP));
+        int end = Math.min(s.line.size(), start + perStretch);
+        if (keepLoaded && s.bubbleFor != start) {
+            s.bubbleFor = start;
+            int nextEnd = Math.min(s.line.size(), end + perStretch);
+            bubble.holdOnly(s.npc.getId(), world, chunksOf(s.line.subList(Math.max(0, start - 2), nextEnd)));
+        }
+        for (double[] p : s.line.subList(start, end)) {
+            if (!world.isChunkLoaded((int) Math.floor(p[0]) >> 4, (int) Math.floor(p[2]) >> 4)) {
+                if (required) {
+                    metrics.fail(keepLoaded ? "trail: stretch loading (bubble)" : "trail: stretch reaches an unloaded chunk");
+                    s.onTrail = false;
+                    s.lineIndex = start;
+                    waitTicks(s, keepLoaded ? 10 : 100);
+                }
+                return;
+            }
+        }
+        List<Vector> points = new ArrayList<>();
+        int lastX = Integer.MIN_VALUE;
+        int lastY = Integer.MIN_VALUE;
+        int lastZ = Integer.MIN_VALUE;
+        for (double[] p : s.line.subList(start, end)) {
+            double[] f = snapToFloor(world, p);
+            int bx = (int) Math.floor(f[0]);
+            int by = (int) Math.round(f[1]);
+            int bz = (int) Math.floor(f[2]);
+            if (bx == lastX && by == lastY && bz == lastZ) {
+                continue;
+            }
+            points.add(new Vector(bx + 0.5, by + 1, bz + 0.5)); // floor → feet, block centre
+            lastX = bx;
+            lastY = by;
+            lastZ = bz;
+        }
+        if (points.isEmpty()) {
+            s.lineIndex = s.stretchEnd = end;
+            completeTrail(s);
+            return;
+        }
+        s.lineIndex = start;
+        s.stretchEnd = end;
+        s.onTrail = true;
+        s.state = State.MOVING; // QUEUED first would make the replaced target's cancel look like a stuck NPC
+        s.npc.getNavigator().setTarget(points);
+        s.targetSetNanos = System.nanoTime();
+        metrics.hops++;
+    }
+
+    /** A trail stretch or an A* leg of a trail NPC is done: next stretch, the tail, or the trip's end. */
+    private void completeTrail(SpikeNpc s) {
+        if (!s.onTrail && !s.hops.isEmpty()) {
+            s.hops.pollFirst(); // the A* leg that just finished
+        }
+        if (!s.hops.isEmpty()) {
+            enqueue(s);
+        } else if (s.line != null && (s.onTrail ? s.stretchEnd : s.lineIndex) < s.line.size()) {
+            sendStretch(s, s.onTrail ? s.stretchEnd : s.lineIndex, true);
+        } else if (!s.tail.isEmpty()) {
+            s.onTrail = false;
+            s.line = null;
+            enqueue(s); // planTrail moves the tail into the hops
+        } else {
+            s.onTrail = false;
+            s.line = null;
+            metrics.trips++;
+            metrics.tripSeconds.add((System.nanoTime() - s.tripStartNanos) / 1e9);
+            s.tripStartNanos = System.nanoTime();
+            s.towardsTo = !s.towardsTo;
+            waitTicks(s, 20);
+        }
+    }
+
+    /** Stuck on the trail: one Citizens A* leg to a point a few blocks further along, then back on the line. */
+    private void recoverTrail(SpikeNpc s) {
+        Location at = s.npc.getEntity().getLocation();
+        int nearest = s.lineIndex;
+        double best = Double.MAX_VALUE;
+        for (int i = s.lineIndex; i < Math.min(s.line.size(), s.stretchEnd + 4); i++) {
+            double[] p = s.line.get(i);
+            double d = Math.hypot(p[0] - at.getX(), p[2] - at.getZ());
+            if (d < best) {
+                best = d;
+                nearest = i;
+            }
+        }
+        int target = Math.min(s.line.size() - 1, nearest + 4);
+        s.hops.clear();
+        s.hops.add(snapToFloor(at.getWorld(), s.line.get(target)));
+        s.lineIndex = s.stretchEnd = target + 1;
+        s.onTrail = false;
+        metrics.fail("trail: stuck, A* recovery leg");
+        enqueue(s);
+    }
+
+    private static List<int[]> chunksOf(List<double[]> points) {
+        Set<Long> seen = new java.util.HashSet<>();
+        List<int[]> out = new ArrayList<>();
+        for (double[] p : points) {
+            int cx = (int) Math.floor(p[0]) >> 4;
+            int cz = (int) Math.floor(p[2]) >> 4;
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    // the NPC's own chunk and its neighbours along the line, so it never walks into an unloaded one
+                    if (seen.add(SpikeChunkBubble.key(cx + dx, cz + dz))) {
+                        out.add(new int[] {cx + dx, cz + dz});
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    /** Every second: how far each moving NPC is from the K&K road line (horizontal blocks). */
+    private void sampleStray() {
+        for (SpikeNpc s : npcs.values()) {
+            if (s.state != State.MOVING || s.line == null || s.line.size() < 2 || !s.npc.isSpawned()
+                || s.mode == Mode.TRAIL && !s.onTrail) {
+                continue; // off-road legs (to and from the road) are not strays
+            }
+            Location at = s.npc.getEntity().getLocation();
+            double best = Double.MAX_VALUE;
+            for (int i = 1; i < s.line.size(); i++) {
+                best = Math.min(best, segmentDistance(s.line.get(i - 1), s.line.get(i), at.getX(), at.getZ()));
+            }
+            metrics.strayBlocks.add(best);
+            metrics.straySamples++;
+            if (best > 2) {
+                metrics.strayOver2++;
+            }
+        }
+    }
+
+    static double segmentDistance(double[] a, double[] b, double x, double z) {
+        double dx = b[0] - a[0];
+        double dz = b[2] - a[2];
+        double len2 = dx * dx + dz * dz;
+        double t = len2 == 0 ? 0 : Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[2]) * dz) / len2));
+        return Math.hypot(a[0] + t * dx - x, a[2] + t * dz - z);
+    }
+
     // ==================== events ====================
 
     private SpikeNpc ours(NPC npc) {
@@ -803,7 +1082,10 @@ public final class CitizensSpike implements Listener {
     public void onComplete(NavigationCompleteEvent event) {
         long start = System.nanoTime();
         SpikeNpc s = ours(event.getNPC());
-        if (s != null && s.state == State.MOVING) {
+        if (s != null && s.state == State.MOVING && s.mode == Mode.TRAIL) {
+            s.retries = 0;
+            completeTrail(s);
+        } else if (s != null && s.state == State.MOVING) {
             s.retries = 0;
             if (s.mode == Mode.HOP) {
                 s.hops.pollFirst();
@@ -843,13 +1125,26 @@ public final class CitizensSpike implements Listener {
                     s.npc.getName(), noPath ? "no path" : "stuck", at.getBlockX(), at.getBlockY(), at.getBlockZ(),
                     hop == null ? "-" : String.format(Locale.ROOT, "%.0f %.0f %.0f", hop[0], hop[1], hop[2])));
             }
-            if (++s.retries <= MAX_RETRIES) {
+            if (s.mode == Mode.TRAIL && s.onTrail && ++s.retries <= MAX_RETRIES) {
+                metrics.replans++;
+                recoverTrail(s);
+            } else if (s.mode == Mode.TRAIL && s.onTrail) {
+                metrics.fail("stuck: " + MAX_RETRIES + " retries used");
+                s.retries = 0;
+                s.line = null;
+                s.hops.clear();
+                s.tail.clear();
+                s.onTrail = false;
+                waitTicks(s, 100);
+            } else if (++s.retries <= MAX_RETRIES) {
                 metrics.replans++;
                 enqueue(s); // HOP keeps its hops: retry towards the same hop from here (DESIGN §6 bounded retry)
             } else {
                 metrics.fail("stuck: " + MAX_RETRIES + " retries used");
                 s.retries = 0;
                 s.hops.clear();
+                s.line = null;
+                s.tail.clear();
                 waitTicks(s, 100);
             }
         }
@@ -861,6 +1156,7 @@ public final class CitizensSpike implements Listener {
         SpikeNpc s = ours(event.getNPC());
         if (s != null && event.getReason() == DespawnReason.CHUNK_UNLOAD) {
             metrics.pausedChunkUnload++;
+            bubble.releaseAll(s.npc.getId(), Bukkit::getWorld);
             s.generation++;
             s.state = State.PAUSED;
             queue.remove(s);
@@ -924,28 +1220,43 @@ public final class CitizensSpike implements Listener {
         lines.add(String.format(Locale.ROOT, "examiner: %d calls, %.2f µs mean, %d blocked by K&K rules", calls,
             calls == 0 ? 0.0 : SpikeExaminer.NANOS.sum() / 1000.0 / calls, SpikeExaminer.BLOCKED.sum()));
         lines.add("failures: " + (metrics.failures.isEmpty() ? "none" : metrics.failures.toString()));
+        lines.add(String.format(Locale.ROOT, "stray from the K&K road line: %s | over 2 blocks %.1f%% of %d samples",
+            metrics.strayBlocks.describe("blocks"),
+            metrics.straySamples == 0 ? 0.0 : 100.0 * metrics.strayOver2 / metrics.straySamples, metrics.straySamples));
+        lines.add(String.format(Locale.ROOT,
+            "bubble: keeploaded %s, NPCs with bubble %d, chunks held %d, loads %d, not generated %d",
+            keepLoaded ? "on" : "off", bubble.npcsWithBubble(), bubble.chunksHeld(), bubble.loadsRequested,
+            bubble.notGenerated));
         lines.add("route: from " + SpikeRouteStore.describe(from) + " -> to " + SpikeRouteStore.describe(to));
         Player who = subject == null ? null : Bukkit.getPlayer(subject);
         lines.add("access subject: " + (who == null ? (subject == null ? "none (run from/to)" : "offline")
             : who.getName() + (who.hasPermission("knk.region.bypass")
                 ? " - HAS knk.region.bypass: domain rules are open, deop or negate it to test them" : "")));
-        lines.add(String.format(Locale.ROOT, "settings: pathfinder %s, max-in-flight %d, hop %.0f, stationary %d, recheck %d, noroute %s, doors %s, collidable %s",
-            pathfinderType, maxInFlight, hopSpacing, stationaryTicks, recheckTicks, noRouteWait ? "wait" : "line",
-            openDoors, collidable));
+        lines.add(String.format(Locale.ROOT, "settings: modes %s, pathfinder %s, max-in-flight %d, hop %.0f, stretch %.0f, stationary %d, recheck %d, noroute %s, keeploaded %s, doors %s, collidable %s",
+            modes(), pathfinderType, maxInFlight, hopSpacing, stretchBlocks, stationaryTicks, recheckTicks,
+            noRouteWait ? "wait" : "line", keepLoaded ? "on" : "off", openDoors, collidable));
         return lines;
     }
 
     /** One CSV row for the benchmark issue. */
     String csv(String label) {
         int spawned = (int) npcs.values().stream().filter(s -> s.npc.isSpawned()).count();
-        return String.format(Locale.ROOT, "%s,%d,%.2f,%.2f,%.2f,%.2f,%.3f,%.1f,%.1f,%.1f,%.1f,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s",
+        return String.format(Locale.ROOT, "%s,%d,%.2f,%.2f,%.2f,%.2f,%.3f,%.1f,%.1f,%.1f,%.1f,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s,%s,%s,%.2f,%.2f,%.1f,%d",
             label, spawned, metrics.tickMs.mean(), metrics.tickMs.percentile(95), Bukkit.getTPS()[0], metrics.baselineMs,
             Double.isNaN(metrics.baselineMs) || spawned == 0 ? Double.NaN : (metrics.tickMs.mean() - metrics.baselineMs) / spawned,
             metrics.spikeMainUs.mean(), metrics.planMs.percentile(50), metrics.planMs.percentile(95),
             metrics.citizensPathMs.percentile(95), metrics.trips, metrics.stuck, metrics.replans,
             metrics.failures.values().stream().mapToLong(Long::longValue).sum(), metrics.examinerLeaks,
             metrics.trespasses, metrics.recheckReplans, metrics.eventReplans, (int) hopSpacing,
-            recheckTicks + "/" + (noRouteWait ? "wait" : "line"));
+            recheckTicks + "/" + (noRouteWait ? "wait" : "line"), modes(), keepLoaded ? "on" : "off",
+            metrics.strayBlocks.percentile(50), metrics.strayBlocks.percentile(95),
+            metrics.straySamples == 0 ? 0.0 : 100.0 * metrics.strayOver2 / metrics.straySamples, bubble.chunksHeld());
+    }
+
+    /** The modes of the spike NPCs present ("hop", "trail", "hop+trail"). */
+    private String modes() {
+        return npcs.values().stream().map(s -> s.mode.name().toLowerCase(Locale.ROOT)).distinct().sorted()
+            .reduce((a, b) -> a + "+" + b).orElse("-");
     }
 
     void metricsCsvLog(String label) {
@@ -955,5 +1266,6 @@ public final class CitizensSpike implements Listener {
 
     static final String CSV_HEADER = "label,npcs,mspt_mean,mspt_p95,tps,baseline_ms,ms_per_npc,spike_us_tick,"
         + "plan_p50_ms,plan_p95_ms,citizens_path_p95_ms,trips,stuck,replans,failures,examiner_leaks,"
-        + "trespasses,recheck_replans,event_replans,hop,recheck/noroute";
+        + "trespasses,recheck_replans,event_replans,hop,recheck/noroute,mode,keeploaded,stray_p50,stray_p95,"
+        + "stray_over2_pct,chunks_held";
 }

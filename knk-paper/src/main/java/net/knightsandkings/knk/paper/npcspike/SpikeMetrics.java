@@ -104,6 +104,10 @@ final class SpikeMetrics {
     long trespasses;
     /** NPCs replanned because a gate changed or availability changed. */
     long eventReplans;
+    /** Horizontal distance of moving NPCs from the K&K road line, sampled every second (blocks). */
+    final Samples strayBlocks = new Samples(5000);
+    long straySamples;
+    long strayOver2;
     final Map<String, Long> failures = new TreeMap<>();
 
     /** MSPT measured with no spike NPCs, set by {@code /knk npcspike baseline}. */
@@ -123,7 +127,8 @@ final class SpikeMetrics {
         citizensPathMs.clear();
         tripSeconds.clear();
         expansions.clear();
-        trips = hops = stuck = replans = pausedChunkUnload = resumed = recheckReplans = examinerLeaks = trespasses = eventReplans = 0;
+        trips = hops = stuck = replans = pausedChunkUnload = resumed = recheckReplans = examinerLeaks = trespasses = eventReplans = straySamples = strayOver2 = 0;
+        strayBlocks.clear();
         failures.clear();
         SpikeExaminer.CALLS.reset();
         SpikeExaminer.NANOS.reset();
