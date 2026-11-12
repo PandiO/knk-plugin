@@ -108,6 +108,16 @@ final class SpikeRunLog {
             + (current == null ? "session" : current.getFileName()));
     }
 
+    /** A new file in the log folder for diagnostics (trace, dump): {@code <date>_<time>_<name>.log}. */
+    Path newFile(String name) {
+        return folder.resolve(LocalDateTime.now().format(FILE_TIME) + "_" + name.replaceAll("[^A-Za-z0-9_.-]", "-") + ".log");
+    }
+
+    /** Append a line to a diagnostics file. */
+    void append(Path file, String line) {
+        write(file, line);
+    }
+
     private Path target() {
         if (current == null) {
             return folder.resolve(LocalDateTime.now().toLocalDate() + "_session.log");

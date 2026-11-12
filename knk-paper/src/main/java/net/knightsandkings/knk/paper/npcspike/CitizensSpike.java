@@ -109,6 +109,11 @@ public final class CitizensSpike implements Listener {
         /** Progress watchdog: where the NPC was at the last progress check, and when it last moved. */
         double[] progressAt;
         long lastProgressTick;
+        /** Progress watchdog: the furthest trail point the NPC has been nearest to (progress along the route). */
+        int bestIndex = -1;
+        /** Diagnostics: the raw K&K road line of the current route, and the waypoints last handed to Citizens. */
+        List<double[]> roadLine;
+        List<Vector> lastSent = List.of();
         /** Trail: the stretch start the bubble was last requested for (avoids re-requesting every tick). */
         int bubbleFor = -1;
         /** Trail: true while Citizens follows a stretch as a waypoint list, false during an A* leg. */
@@ -370,6 +375,9 @@ public final class CitizensSpike implements Listener {
             checkTrespass();
             sampleStray();
         }
+        if (traceNpc >= 0) {
+            traceTick();
+        }
         if (tick % STATUS_TICKS == 0 && !npcs.isEmpty()) {
             runLog.fileOnly(statusLine());
         }
@@ -387,12 +395,13 @@ public final class CitizensSpike implements Listener {
         Navigator navigator = s.npc.getNavigator();
         if (s.mode == Mode.TRAIL && s.onTrail && s.npc.isSpawned() && tick % 20 == 0) {
             // Citizens reports no STUCK for waypoint lists: K&K watches progress itself
+            // progress = getting further ALONG the route, not just moving: an NPC jumping in circles moves a lot
             Location at = s.npc.getEntity().getLocation();
-            double[] now = {at.getX(), at.getY(), at.getZ()};
-            if (s.progressAt == null || Math.abs(now[0] - s.progressAt[0]) + Math.abs(now[1] - s.progressAt[1])
-                + Math.abs(now[2] - s.progressAt[2]) >= 1) {
-                s.progressAt = now;
+            int nearest = nearestIndex(s, at);
+            if (nearest > s.bestIndex) {
+                s.bestIndex = nearest;
                 s.lastProgressTick = tick;
+                s.progressAt = new double[] {at.getX(), at.getY(), at.getZ()};
             } else if (tick - s.lastProgressTick >= NO_PROGRESS_TICKS) {
                 s.progressAt = null;
                 metrics.stuck++;
@@ -857,6 +866,8 @@ public final class CitizensSpike implements Listener {
                 s.lineIndex = s.stretchEnd = 0;
                 s.bubbleFor = -1;
                 s.lastSnapEnd = -1;
+                s.bestIndex = -1;
+                s.roadLine = road.line();
                 double[] roadStart = road.line().get(0);
                 if (Math.hypot(roadStart[0] - feetFloor[0], roadStart[2] - feetFloor[2]) > 3) {
                     s.hops.add(snapToFloor(world, roadStart));
@@ -1069,9 +1080,10 @@ public final class CitizensSpike implements Listener {
         s.lineIndex = start;
         s.stretchEnd = end;
         s.onTrail = true;
-        if (s.progressAt == null) {
+        if (s.progressAt == null || s.bestIndex < 0) {
             s.lastProgressTick = tick;
         }
+        s.lastSent = points;
         s.state = State.MOVING; // QUEUED first would make the replaced target's cancel look like a stuck NPC
         s.npc.getNavigator().setTarget(points);
         s.targetSetNanos = System.nanoTime();
@@ -1102,6 +1114,26 @@ public final class CitizensSpike implements Listener {
         }
     }
 
+    /** The index of the trail point nearest the NPC, searched around the current stretch (3D, floor → feet). */
+    private static int nearestIndex(SpikeNpc s, Location at) {
+        if (s.line == null || s.line.isEmpty()) {
+            return -1;
+        }
+        int from = Math.max(0, Math.min(s.lineIndex, s.bestIndex < 0 ? s.lineIndex : s.bestIndex) - 4);
+        int to = Math.min(s.line.size(), Math.max(s.stretchEnd, s.lineIndex) + 6);
+        int best = from;
+        double bestD = Double.MAX_VALUE;
+        for (int i = from; i < to; i++) {
+            double[] p = s.line.get(i);
+            double d = Math.pow(p[0] - at.getX(), 2) + Math.pow(p[1] + 1 - at.getY(), 2) * 0.5 + Math.pow(p[2] - at.getZ(), 2);
+            if (d < bestD) {
+                bestD = d;
+                best = i;
+            }
+        }
+        return best;
+    }
+
     /** Stuck on the trail: one Citizens A* leg to a point a few blocks further along, then back on the line. */
     private void recoverTrail(SpikeNpc s) {
         Location at = s.npc.getEntity().getLocation();
@@ -1119,6 +1151,7 @@ public final class CitizensSpike implements Listener {
         s.hops.clear();
         s.hops.add(snapToFloor(at.getWorld(), s.line.get(target)));
         s.lineIndex = s.stretchEnd = target + 1;
+        s.bestIndex = Math.max(s.bestIndex, target);
         s.onTrail = false;
         metrics.fail("trail: stuck, A* recovery leg");
         enqueue(s);
@@ -1332,6 +1365,140 @@ public final class CitizensSpike implements Listener {
             npcs.size(), spawned, states, metrics.tickMs.mean(), metrics.tickMs.percentile(95), Bukkit.getTPS()[0],
             metrics.trips, metrics.hops, metrics.stuck, metrics.trespasses, metrics.pausedChunkUnload, metrics.resumed,
             metrics.strayBlocks.percentile(95), bubble.npcsWithBubble(), bubble.chunksHeld());
+    }
+
+    // ==================== diagnostics: trace and dump ====================
+
+    private int traceNpc = -1;
+    private long traceUntil;
+    private java.nio.file.Path traceFile;
+    private double[] tracePrev;
+
+    /** Trace one spike NPC every tick for {@code seconds}: position, ground, velocity, Citizens' target, jumps. */
+    String startTrace(Player near, String name, int seconds) {
+        SpikeNpc pick = null;
+        double best = Double.MAX_VALUE;
+        for (SpikeNpc s : npcs.values()) {
+            if (!s.npc.isSpawned()) {
+                continue;
+            }
+            if (name != null && s.npc.getName().equalsIgnoreCase(name)) {
+                pick = s;
+                break;
+            }
+            if (name == null && s.npc.getEntity().getWorld().equals(near.getWorld())) {
+                double d = s.npc.getEntity().getLocation().distanceSquared(near.getLocation());
+                if (d < best) {
+                    best = d;
+                    pick = s;
+                }
+            }
+        }
+        if (pick == null) {
+            return "No spike NPC " + (name == null ? "near you" : name);
+        }
+        traceNpc = pick.npc.getId();
+        traceUntil = tick + seconds * 20L;
+        tracePrev = null;
+        traceFile = runLog.newFile("trace_" + pick.npc.getName());
+        runLog.append(traceFile, "# trace " + pick.npc.getName() + " for " + seconds + " s; mode " + pick.mode
+            + "; columns: tick x y z onGround vx vy vz | state onTrail lineIndex stretchEnd nearestIndex bestIndex"
+            + " | citizensTarget | JUMP when vy rises from ground");
+        runLog.log("trace " + pick.npc.getName() + " -> npcspike-logs/" + traceFile.getFileName());
+        return "Tracing " + pick.npc.getName() + " for " + seconds + " s -> npcspike-logs/" + traceFile.getFileName();
+    }
+
+    private void traceTick() {
+        SpikeNpc s = npcs.get(traceNpc);
+        if (s == null || tick > traceUntil || !s.npc.isSpawned()) {
+            if (traceFile != null) {
+                runLog.append(traceFile, "# trace ended");
+            }
+            traceNpc = -1;
+            return;
+        }
+        org.bukkit.entity.Entity e = s.npc.getEntity();
+        Location at = e.getLocation();
+        Vector v = e.getVelocity();
+        boolean ground = e.isOnGround();
+        Location dest = null;
+        PathStrategy strategy = s.npc.getNavigator().getPathStrategy();
+        if (strategy != null) {
+            try {
+                dest = strategy.getCurrentDestination();
+            } catch (RuntimeException ignored) {
+                // some strategies have none
+            }
+        }
+        boolean jump = tracePrev != null && tracePrev[3] > 0.5 && v.getY() > 0.2;
+        runLog.append(traceFile, String.format(Locale.ROOT,
+            "%d %.2f %.2f %.2f %s %.3f %.3f %.3f | %s %s %d %d %d %d | %s%s",
+            tick, at.getX(), at.getY(), at.getZ(), ground ? "G" : "-", v.getX(), v.getY(), v.getZ(), s.state,
+            s.onTrail ? "trail" : "astar", s.lineIndex, s.stretchEnd, nearestIndex(s, at), s.bestIndex,
+            dest == null ? "-" : String.format(Locale.ROOT, "%.1f %.1f %.1f", dest.getX(), dest.getY(), dest.getZ()),
+            jump ? " JUMP" : ""));
+        tracePrev = new double[] {at.getX(), at.getY(), at.getZ(), ground ? 1 : 0};
+    }
+
+    /**
+     * Dump the blocks around {@code player} (every non-air block's data), the raw road line vertices, the trail
+     * points and the waypoints last handed to Citizens inside that box, for offline analysis of a hard spot.
+     */
+    String dump(Player player, int radius, int below, int above) {
+        Location c = player.getLocation();
+        World world = c.getWorld();
+        int cx = c.getBlockX();
+        int cy = c.getBlockY();
+        int cz = c.getBlockZ();
+        java.nio.file.Path file = runLog.newFile("dump_" + cx + "_" + cy + "_" + cz);
+        runLog.append(file, String.format(Locale.ROOT, "# dump around %s %d %d %d, radius %d, y %d..%d",
+            world.getName(), cx, cy, cz, radius, cy - below, cy + above));
+        runLog.append(file, "# BLOCKS x y z data (non-air only)");
+        for (int y = cy - below; y <= cy + above; y++) {
+            for (int x = cx - radius; x <= cx + radius; x++) {
+                for (int z = cz - radius; z <= cz + radius; z++) {
+                    org.bukkit.block.Block b = world.getBlockAt(x, y, z);
+                    if (!b.getType().isAir()) {
+                        runLog.append(file, x + " " + y + " " + z + " " + b.getBlockData().getAsString());
+                    }
+                }
+            }
+        }
+        java.util.function.Predicate<double[]> inside = p -> Math.abs(p[0] - cx) <= radius + 0.5
+            && Math.abs(p[2] - cz) <= radius + 0.5 && p[1] >= cy - below - 2 && p[1] <= cy + above + 2;
+        Set<String> roadSeen = new java.util.LinkedHashSet<>();
+        Set<String> lineSeen = new java.util.LinkedHashSet<>();
+        Map<String, Integer> sent = new java.util.TreeMap<>();
+        for (SpikeNpc s : npcs.values()) {
+            if (s.roadLine != null) {
+                for (double[] p : s.roadLine) {
+                    if (inside.test(p)) {
+                        roadSeen.add(String.format(Locale.ROOT, "%.2f %.2f %.2f", p[0], p[1], p[2]));
+                    }
+                }
+            }
+            if (s.line != null) {
+                for (double[] p : s.line) {
+                    if (inside.test(p)) {
+                        lineSeen.add(String.format(Locale.ROOT, "%.2f %.2f %.2f", p[0], p[1], p[2]));
+                    }
+                }
+            }
+            for (Vector v : s.lastSent) {
+                if (inside.test(new double[] {v.getX(), v.getY() - 1, v.getZ()})) {
+                    sent.merge(String.format(Locale.ROOT, "%.1f %.1f %.1f", v.getX(), v.getY(), v.getZ()), 1, Integer::sum);
+                }
+            }
+        }
+        runLog.append(file, "# ROAD raw road line vertices (floor points), in order");
+        roadSeen.forEach(line -> runLog.append(file, "ROAD " + line));
+        runLog.append(file, "# LINE trail points before snapping (floor points, every 1.5 blocks + corners), in order");
+        lineSeen.forEach(line -> runLog.append(file, "LINE " + line));
+        runLog.append(file, "# SENT waypoints last handed to Citizens (feet points) and how many NPCs had each");
+        sent.forEach((k, n) -> runLog.append(file, "SENT " + k + " x" + n));
+        runLog.log("dump -> npcspike-logs/" + file.getFileName());
+        return "Dump written: npcspike-logs/" + file.getFileName() + " (" + roadSeen.size() + " road vertices, "
+            + lineSeen.size() + " trail points, " + sent.size() + " waypoints)";
     }
 
     /** Gate commands go into the run file, so their time sits next to the NPCs' reaction. */

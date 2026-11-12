@@ -19,6 +19,8 @@ import net.knightsandkings.knk.paper.commands.CommandMetadata;
  * <pre>
  * from | to                         set the route ends at your feet (saved, restored after a restart)
  * route save|load|delete &lt;name&gt;     keep named routes in npcspike-routes.yml; route list
+ * trace [npc] [seconds]             per-tick trace of one NPC (nearest by default, 30 s) to npcspike-logs/
+ * dump [radius]                     blocks around you + road line, trail points and waypoints, to npcspike-logs/
  * run &lt;name&gt;                       start a new run log file (npcspike-logs/); a spawn with no NPCs starts one
  * baseline                          store the current mean MSPT as the no-NPC baseline
  * spawn &lt;n&gt; [dense|hop|trail] [player|mannequin]   trail: follow the K&K road line (NAV-15)
@@ -49,7 +51,7 @@ public final class NpcSpikeCommand {
     public static CommandMetadata metadata() {
         return new CommandMetadata("npcspike",
             "#243 Citizens spike: spawn player-shaped NPCs on K&K-planned routes and measure them (throwaway)",
-            "/knk npcspike <from|to|route|run|baseline|spawn|set|stats|reset|clear>", PERMISSION,
+            "/knk npcspike <from|to|route|run|trace|dump|baseline|spawn|set|stats|reset|clear>", PERMISSION,
             List.of("/knk npcspike from", "/knk npcspike to", "/knk npcspike baseline", "/knk npcspike spawn 10 trail",
                 "/knk npcspike stats 10-hop"));
     }
@@ -80,6 +82,28 @@ public final class NpcSpikeCommand {
                     + player.getName());
             }
             case "route" -> route(sender, args);
+            case "trace" -> {
+                if (!(sender instanceof Player player)) {
+                    sender.sendMessage("Players only.");
+                    return true;
+                }
+                String name = args.length > 1 && !args[1].matches("\\d+") ? args[1] : null;
+                int seconds = 30;
+                for (int i = 1; i < args.length; i++) {
+                    if (args[i].matches("\\d+")) {
+                        seconds = Math.min(300, Integer.parseInt(args[i]));
+                    }
+                }
+                sender.sendMessage(spike.startTrace(player, name, seconds));
+            }
+            case "dump" -> {
+                if (!(sender instanceof Player player)) {
+                    sender.sendMessage("Players only.");
+                    return true;
+                }
+                int radius = args.length > 1 ? Math.min(24, Integer.parseInt(args[1])) : 10;
+                sender.sendMessage(spike.dump(player, radius, 6, 16));
+            }
             case "run" -> {
                 String name = args.length > 1 ? String.join("-", java.util.Arrays.copyOfRange(args, 1, args.length)) : "run";
                 spike.resetCounters(); // a run is its own measurement
@@ -292,7 +316,7 @@ public final class NpcSpikeCommand {
     public List<String> complete(CommandSender sender, String[] args) {
         if (args.length == 1) {
             String prefix = args[0].toLowerCase(Locale.ROOT);
-            return List.of("from", "to", "route", "run", "baseline", "spawn", "set", "stats", "reset", "clear").stream()
+            return List.of("from", "to", "route", "run", "trace", "dump", "baseline", "spawn", "set", "stats", "reset", "clear").stream()
                 .filter(option -> option.startsWith(prefix)).toList();
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("route")) {
