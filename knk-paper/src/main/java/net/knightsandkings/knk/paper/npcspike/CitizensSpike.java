@@ -103,6 +103,9 @@ public final class CitizensSpike implements Listener {
         /** Trail: first point of the stretch last sent to Citizens, and its exclusive end. */
         int lineIndex;
         int stretchEnd;
+        /** Progress watchdog: where the NPC was at the last progress check, and when it last moved. */
+        double[] progressAt;
+        long lastProgressTick;
         /** Trail: the stretch start the bubble was last requested for (avoids re-requesting every tick). */
         int bubbleFor = -1;
         /** Trail: true while Citizens follows a stretch as a waypoint list, false during an A* leg. */
@@ -165,6 +168,8 @@ public final class CitizensSpike implements Listener {
     static final double TRAIL_STEP = 1.5;
     final SpikeChunkBubble bubble;
     final SpikeRunLog runLog;
+    /** Progress watchdog: an NPC on a trail stretch that moved less than 1 block in this many ticks is stuck. */
+    static final int NO_PROGRESS_TICKS = 60;
     /** Ticks between the status lines in the run file. */
     static final int STATUS_TICKS = 1200;
 
@@ -377,6 +382,39 @@ public final class CitizensSpike implements Listener {
 
     private void watchMoving(SpikeNpc s) {
         Navigator navigator = s.npc.getNavigator();
+        if (s.mode == Mode.TRAIL && s.onTrail && s.npc.isSpawned() && tick % 20 == 0) {
+            // Citizens reports no STUCK for waypoint lists: K&K watches progress itself
+            Location at = s.npc.getEntity().getLocation();
+            double[] now = {at.getX(), at.getY(), at.getZ()};
+            if (s.progressAt == null || Math.abs(now[0] - s.progressAt[0]) + Math.abs(now[1] - s.progressAt[1])
+                + Math.abs(now[2] - s.progressAt[2]) >= 1) {
+                s.progressAt = now;
+                s.lastProgressTick = tick;
+            } else if (tick - s.lastProgressTick >= NO_PROGRESS_TICKS) {
+                s.progressAt = null;
+                metrics.stuck++;
+                metrics.fail("trail: no progress for " + NO_PROGRESS_TICKS + " ticks");
+                java.util.function.Consumer<String> out = loggedLegFailures++ < 20 ? runLog::log : runLog::fileOnly;
+                double[] end = s.line != null && s.stretchEnd > 0 ? s.line.get(Math.min(s.line.size(), s.stretchEnd) - 1) : null;
+                out.accept(String.format(Locale.ROOT, "%s no progress at %d %d %d -> stretch end floor %s",
+                    s.npc.getName(), at.getBlockX(), at.getBlockY(), at.getBlockZ(),
+                    end == null ? "-" : String.format(Locale.ROOT, "%.0f %.0f %.0f", end[0], end[1], end[2])));
+                if (++s.retries <= MAX_RETRIES) {
+                    metrics.replans++;
+                    recoverTrail(s);
+                } else {
+                    metrics.fail("stuck: " + MAX_RETRIES + " retries used");
+                    s.retries = 0;
+                    s.line = null;
+                    s.hops.clear();
+                    s.tail.clear();
+                    s.onTrail = false;
+                    navigator.cancelNavigation();
+                    waitTicks(s, 100);
+                }
+                return;
+            }
+        }
         if (s.mode == Mode.TRAIL && s.onTrail && s.line != null && s.stretchEnd < s.line.size()
             && s.npc.isSpawned()) {
             // hand Citizens the next stretch shortly before the end of this one, so the NPC doesn't stop (NAV-14)
@@ -787,7 +825,7 @@ public final class CitizensSpike implements Listener {
             } else if (s.mode == Mode.TRAIL) {
                 // NAV-15: follow the K&K road line (the follow trail) as waypoints; A* only for the off-road ends
                 World world = feet.getWorld();
-                s.line = resample(road.line(), TRAIL_STEP);
+                s.line = resampleKeepingCorners(road.line(), TRAIL_STEP);
                 s.lineIndex = s.stretchEnd = 0;
                 s.bubbleFor = -1;
                 double[] roadStart = road.line().get(0);
@@ -823,6 +861,19 @@ public final class CitizensSpike implements Listener {
             s.hops.addLast(goalFloor);
             planHop(s, player, generation);
         });
+    }
+
+    /** As {@link #resample}, plus every vertex of the line, so the trail turns exactly at the road's corners. */
+    static List<double[]> resampleKeepingCorners(List<double[]> line, double spacing) {
+        List<double[]> out = new ArrayList<>();
+        for (int i = 1; i < line.size(); i++) {
+            List<double[]> piece = resample(List.of(line.get(i - 1), line.get(i)), spacing);
+            if (out.isEmpty()) {
+                out.add(line.get(0));
+            }
+            out.addAll(piece);
+        }
+        return out;
     }
 
     /** Points every {@code spacing} blocks along a floor polyline, its end included. */
@@ -982,6 +1033,9 @@ public final class CitizensSpike implements Listener {
         s.lineIndex = start;
         s.stretchEnd = end;
         s.onTrail = true;
+        if (s.progressAt == null) {
+            s.lastProgressTick = tick;
+        }
         s.state = State.MOVING; // QUEUED first would make the replaced target's cancel look like a stuck NPC
         s.npc.getNavigator().setTarget(points);
         s.targetSetNanos = System.nanoTime();
@@ -1193,12 +1247,33 @@ public final class CitizensSpike implements Listener {
 
     // ==================== report ====================
 
+    /**
+     * Why the access subject makes rule tests meaningless, or null: {@code knk.region.bypass} opens every domain,
+     * and a gate admin passes every closed gate (GatePassThroughRules), so the router plans through them.
+     */
+    String subjectWarning() {
+        Player who = subject == null ? null : Bukkit.getPlayer(subject);
+        if (who == null) {
+            return null;
+        }
+        List<String> why = new ArrayList<>();
+        if (who.hasPermission("knk.region.bypass")) {
+            why.add("knk.region.bypass (domain entry/exit rules are open)");
+        }
+        if (net.knightsandkings.knk.paper.gates.GatePassThroughRules.isAdmin(who)) {
+            why.add("gate admin (passes every closed gate)");
+        }
+        return why.isEmpty() ? null : "access subject " + who.getName() + " has " + String.join(" and ", why)
+            + ": gate and access tests are meaningless; /knk npcspike set subject <player>";
+    }
+
     /** The lines that describe a run's setup (route, subject, settings), for the run file's header. */
     List<String> setupLines() {
         List<String> lines = new ArrayList<>();
         lines.add("route: from " + SpikeRouteStore.describe(from) + " -> to " + SpikeRouteStore.describe(to));
         Player who = subject == null ? null : Bukkit.getPlayer(subject);
-        lines.add("access subject: " + (who == null ? "offline/none" : who.getName()));
+        lines.add("access subject: " + (who == null ? "offline/none" : who.getName())
+            + (subjectWarning() == null ? "" : " - WARNING " + subjectWarning()));
         lines.add(String.format(Locale.ROOT, "settings: pathfinder %s, max-in-flight %d, hop %.0f, stretch %.0f, stationary %d, recheck %d, noroute %s, keeploaded %s, doors %s, collidable %s, baseline %.2f ms",
             pathfinderType, maxInFlight, hopSpacing, stretchBlocks, stationaryTicks, recheckTicks,
             noRouteWait ? "wait" : "line", keepLoaded ? "on" : "off", openDoors, collidable, metrics.baselineMs));
@@ -1281,8 +1356,7 @@ public final class CitizensSpike implements Listener {
         lines.add("route: from " + SpikeRouteStore.describe(from) + " -> to " + SpikeRouteStore.describe(to));
         Player who = subject == null ? null : Bukkit.getPlayer(subject);
         lines.add("access subject: " + (who == null ? (subject == null ? "none (run from/to)" : "offline")
-            : who.getName() + (who.hasPermission("knk.region.bypass")
-                ? " - HAS knk.region.bypass: domain rules are open, deop or negate it to test them" : "")));
+            : who.getName() + (subjectWarning() == null ? "" : " - WARNING " + subjectWarning())));
         lines.add(String.format(Locale.ROOT, "settings: modes %s, pathfinder %s, max-in-flight %d, hop %.0f, stretch %.0f, stationary %d, recheck %d, noroute %s, keeploaded %s, doors %s, collidable %s",
             modes(), pathfinderType, maxInFlight, hopSpacing, stretchBlocks, stationaryTicks, recheckTicks,
             noRouteWait ? "wait" : "line", keepLoaded ? "on" : "off", openDoors, collidable));

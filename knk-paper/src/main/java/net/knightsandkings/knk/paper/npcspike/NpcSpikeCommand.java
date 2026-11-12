@@ -26,6 +26,7 @@ import net.knightsandkings.knk.paper.commands.CommandMetadata;
  *                                   recheck N (every N ticks, 0 = off; hop: check the way ahead against the current
  *                                   entry rules, replan when it enters a denied region; dense: replan; default 40),
  *                                   noroute wait|line (no road route: wait and ask again, or straight-line hops),
+ *                                   subject &lt;player&gt; (whose access the NPCs use: not an admin, no bypass),
  *                                   keeploaded on|off (NAV-12 travel bubble), stretch N (trail: blocks per
  *                                   waypoint list, default 32), doors on|off, collide on|off
  * stats [label]                     print the counters; with a label also log one CSV row
@@ -81,8 +82,9 @@ public final class NpcSpikeCommand {
             case "route" -> route(sender, args);
             case "run" -> {
                 String name = args.length > 1 ? String.join("-", java.util.Arrays.copyOfRange(args, 1, args.length)) : "run";
+                spike.resetCounters(); // a run is its own measurement
                 spike.runLog.startRun(name, spike.setupLines());
-                sender.sendMessage("Run log: npcspike-logs/" + spike.runLog.runFile());
+                sender.sendMessage("Run log: npcspike-logs/" + spike.runLog.runFile() + " (counters reset)");
             }
             case "baseline" -> {
                 spike.metrics.baselineMs = spike.metrics.tickMs.mean();
@@ -218,7 +220,13 @@ public final class NpcSpikeCommand {
         }
         if (spike.count() == 0) {
             // a spawn with no spike NPCs present starts a run: its own log file
+            spike.resetCounters(); // a run is its own measurement (clear does not reset)
             spike.runLog.startRun(mode.name().toLowerCase(Locale.ROOT) + "-" + n, spike.setupLines());
+        }
+        String warning = spike.subjectWarning();
+        if (warning != null) {
+            sender.sendMessage("WARNING: " + warning);
+            spike.runLog.log("WARNING " + warning);
         }
         int made = spike.spawn(Math.max(0, Math.min(n, 500)), mode, type);
         spike.runLog.log("spawned " + made + " " + type + " NPCs in " + mode + " mode (" + spike.count() + " total)");
@@ -227,7 +235,7 @@ public final class NpcSpikeCommand {
 
     private void set(CommandSender sender, String[] args) {
         if (args.length < 3) {
-            sender.sendMessage("/knk npcspike set <pathfinder|inflight|hop|stretch|stationary|recheck|noroute|keeploaded|doors|collide> <value>");
+            sender.sendMessage("/knk npcspike set <subject|pathfinder|inflight|hop|stretch|stationary|recheck|noroute|keeploaded|doors|collide> <value>");
             return;
         }
         String key = args[1].toLowerCase(Locale.ROOT);
@@ -239,6 +247,19 @@ public final class NpcSpikeCommand {
                 case "hop" -> spike.hopSpacing = Math.max(4, Double.parseDouble(value));
                 case "stationary" -> spike.stationaryTicks = Integer.parseInt(value);
                 case "recheck" -> spike.recheckTicks = Math.max(0, Integer.parseInt(value));
+                case "subject" -> {
+                    Player who = Bukkit.getPlayerExact(args[2]);
+                    if (who == null) {
+                        sender.sendMessage("No online player " + args[2]);
+                        return;
+                    }
+                    spike.subject = who.getUniqueId();
+                    spike.routes.saveCurrent(spike.from, spike.to, spike.subject);
+                    String warning = spike.subjectWarning();
+                    if (warning != null) {
+                        sender.sendMessage("WARNING: " + warning);
+                    }
+                }
                 case "noroute" -> {
                     if (!value.equals("wait") && !value.equals("line")) {
                         throw new IllegalArgumentException(value);
@@ -288,7 +309,7 @@ public final class NpcSpikeCommand {
             return List.of("player", "mannequin");
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("set")) {
-            return List.of("pathfinder", "inflight", "hop", "stretch", "stationary", "recheck", "noroute", "keeploaded",
+            return List.of("subject", "pathfinder", "inflight", "hop", "stretch", "stationary", "recheck", "noroute", "keeploaded",
                 "doors", "collide");
         }
         return List.of();
