@@ -42,6 +42,24 @@ public final class CitizensBootstrap {
         return Optional.of(new CitizensNpcRuntime(plugin));
     }
 
+    /**
+     * How often the K&K block examiner was asked about a cell and how often it blocked one, since the server
+     * started: {@code {asked, blocked}}. Zeros without Citizens.
+     */
+    public static long[] examinerStats() {
+        if (unavailableReason().isPresent()) {
+            return new long[] {0, 0};
+        }
+        return ExaminerStats.read();
+    }
+
+    /** Kept apart so {@link KnkBlockExaminer} (which names Citizens types) is only loaded with Citizens present. */
+    private static final class ExaminerStats {
+        static long[] read() {
+            return new long[] {KnkBlockExaminer.CALLS.sum(), KnkBlockExaminer.BLOCKED.sum()};
+        }
+    }
+
     /** Removes the runtime's NPCs and registry; safe with any factory or null. */
     public static void stop(NpcMoverFactory factory) {
         if (factory instanceof CitizensNpcRuntime runtime) {

@@ -29,8 +29,16 @@ public interface NpcMover {
      */
     void follow(List<NavPoint> waypoints);
 
-    /** Walk to {@code target} with the engine's own local path search (off-road legs, stuck recovery). */
+    /** Walk to {@code target} with the engine's own local path search and its own block rules only (test NPCs). */
     void walkTo(NavPoint target);
+
+    /**
+     * Walk to {@code target} with the engine's local path search under K&K's rules (off-road legs, stuck recovery):
+     * {@code leg}'s cell access is asked before the engine's own block rules, and cells outside the leg's box are
+     * blocked. A block rule the engine adds on its own is removed and reported
+     * ({@link MoverListener#engineRuleRemoved}).
+     */
+    void walkTo(NavPoint target, LocalLeg leg);
 
     /** Stop moving; fires no {@link MoverListener#stuck}. */
     void stop();
@@ -60,6 +68,10 @@ public interface NpcMover {
 
         /** The entity is back (its chunk loaded again). */
         default void respawned(NpcMover mover) {
+        }
+
+        /** The engine had added block rules of its own to a local search; they were removed. {@code names} for logs. */
+        default void engineRuleRemoved(NpcMover mover, String names) {
         }
     }
 }

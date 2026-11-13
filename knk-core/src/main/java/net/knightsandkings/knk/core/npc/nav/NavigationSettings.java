@@ -65,9 +65,26 @@ public final class NavigationSettings {
     public static final Key<String> CHUNK_LOADING = new Key<>("chunk-loading", "load", oneOf("load", "simulate"),
         "outside loaded areas: load chunks and walk, or simulate travel");
 
+    /** Blocks between the hops of an off-road or recovery leg, each walked with the engine's path search (NAV-01). */
+    public static final Key<Double> HOP_BLOCKS = new Key<>("hop-blocks", 16.0,
+        decimal(4, 48), "blocks between the hops of an off-road or recovery leg");
+    /** Recovery attempts per hop or stretch before the route is dropped and planned again (DESIGN §6). */
+    public static final Key<Integer> MAX_RETRIES = new Key<>("max-retries", 3,
+        integer(0, 10), "recovery attempts per hop or stretch before the route is planned again");
+    /** Ticks an NPC waits before asking again when the rules allow no route or the way ahead is not loaded (NAV-03). */
+    public static final Key<Integer> NO_ROUTE_WAIT_TICKS = new Key<>("no-route-wait-ticks", 100,
+        integer(20, 6000), "ticks between asks while no route is allowed or the way ahead is not loaded");
+    /**
+     * With an end too far from a road (or no road network): the longest trip, in blocks, walked as off-road hops
+     * only. Further, the order fails instead of crossing terrain in a straight line.
+     */
+    public static final Key<Double> WALK_ONLY_BLOCKS = new Key<>("walk-only-blocks", 64.0,
+        decimal(0, 256), "longest trip without a road, walked as off-road hops");
+
     /** Every per-NPC setting, in display order. */
-    public static final List<Key<?>> KEYS = List.of(PATHFINDER, STRETCH_BLOCKS, RECHECK_TICKS, STATIONARY_TICKS,
-        NO_PROGRESS_TICKS, COLLIDABLE, CHUNK_LOADING);
+    public static final List<Key<?>> KEYS = List.of(PATHFINDER, STRETCH_BLOCKS, HOP_BLOCKS, RECHECK_TICKS,
+        STATIONARY_TICKS, NO_PROGRESS_TICKS, MAX_RETRIES, NO_ROUTE_WAIT_TICKS, WALK_ONLY_BLOCKS, COLLIDABLE,
+        CHUNK_LOADING);
 
     /** A resolved value and its origin ({@code scope}: the world, region or template id; null for default/global). */
     public record Resolved<T>(T value, Layer layer, String scope) {

@@ -94,4 +94,35 @@ class NavigationSettingsTest {
         assertEquals("24.0 (world w)", all.get(NavigationSettings.STRETCH_BLOCKS).toString());
         assertEquals("40 (default)", all.get(NavigationSettings.RECHECK_TICKS).toString());
     }
+
+    @Test
+    void routeFollowingKeysHaveDefaultsLayersAndRanges() {
+        Scope scope = Scope.of("w");
+        NavigationSettings defaults = NavigationSettings.defaults();
+        assertEquals(16.0, defaults.value(NavigationSettings.HOP_BLOCKS, scope));
+        assertEquals(3, defaults.value(NavigationSettings.MAX_RETRIES, scope));
+        assertEquals(100, defaults.value(NavigationSettings.NO_ROUTE_WAIT_TICKS, scope));
+        assertEquals(64.0, defaults.value(NavigationSettings.WALK_ONLY_BLOCKS, scope));
+
+        NavigationSettings settings = NavigationSettings.builder()
+            .global(parse(Map.of("hop-blocks", 12, "max-retries", 5)))
+            .world("w", parse(Map.of("no-route-wait-ticks", 200, "walk-only-blocks", 0)))
+            .build();
+        assertEquals(new Resolved<>(12.0, Layer.GLOBAL, null), settings.resolve(NavigationSettings.HOP_BLOCKS, scope));
+        assertEquals(5, settings.value(NavigationSettings.MAX_RETRIES, scope));
+        assertEquals(new Resolved<>(200, Layer.WORLD, "w"), settings.resolve(NavigationSettings.NO_ROUTE_WAIT_TICKS, scope));
+        assertEquals(0.0, settings.value(NavigationSettings.WALK_ONLY_BLOCKS, scope), "0 turns walk-only trips off");
+
+        List<String> rejected = new ArrayList<>();
+        Overrides.parse(Map.of("hop-blocks", 2, "max-retries", 11, "no-route-wait-ticks", 5, "walk-only-blocks", 500),
+            "test", rejected);
+        assertEquals(4, rejected.size(), rejected.toString());
+
+        NpcNavigationService.Settings resolved = NpcNavigationService.Settings.of(settings, scope);
+        assertEquals(12.0, resolved.hopBlocks());
+        assertEquals(5, resolved.maxRetries());
+        assertEquals(200, resolved.noRouteWaitTicks());
+        assertEquals(32.0, resolved.stretchBlocks());
+        assertEquals(60, resolved.noProgressTicks());
+    }
 }

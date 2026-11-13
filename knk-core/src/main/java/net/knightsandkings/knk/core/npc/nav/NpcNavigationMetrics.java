@@ -34,7 +34,15 @@ public final class NpcNavigationMetrics implements MetricsCollector {
         /** No allowed route: the NPC waits (NAV-03). */
         NO_ROUTE_WAIT,
         /** Chunk unloaded / loaded again (NAV-11). */
-        PAUSED, RESUMED
+        PAUSED, RESUMED,
+        /** A stretch of the route was handed to the mover (NAV-14). */
+        STRETCH,
+        /** The way ahead reaches a chunk that is not loaded: the NPC waits at the edge (NAV-12). */
+        UNLOADED_WAIT,
+        /** The engine added a block rule of its own to a local search; it was removed (must stay 0). */
+        EXAMINER_LEAK,
+        /** An order ended as failed (no road connects, retries and replans used up). */
+        FAILED
     }
 
     /** Main-thread time per tick: 10 µs .. 50 ms. */

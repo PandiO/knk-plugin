@@ -48,4 +48,22 @@ class NpcNavigationMetricsTest {
         assertTrue(text.contains("knk_npc_nav_main_thread_seconds_count 1"), text);
         assertFalse(text.contains("knk_npc_nav_queue_wait_seconds_count"), "no samples, no series: " + text);
     }
+
+    @Test
+    void theRouteFollowingEventsHaveTheirOwnSeries() {
+        NpcNavigationMetrics metrics = new NpcNavigationMetrics();
+        metrics.setEnabled(true);
+        metrics.count(Event.STRETCH, 3);
+        metrics.count(Event.UNLOADED_WAIT);
+        metrics.count(Event.FAILED);
+
+        PrometheusWriter out = new PrometheusWriter();
+        metrics.collect(out);
+        String text = out.render();
+
+        assertTrue(text.contains("knk_npc_nav_events_total{event=\"stretch\"} 3"), text);
+        assertTrue(text.contains("knk_npc_nav_events_total{event=\"unloaded_wait\"} 1"), text);
+        assertTrue(text.contains("knk_npc_nav_events_total{event=\"failed\"} 1"), text);
+        assertTrue(text.contains("knk_npc_nav_events_total{event=\"examiner_leak\"} 0"), "must stay 0: " + text);
+    }
 }

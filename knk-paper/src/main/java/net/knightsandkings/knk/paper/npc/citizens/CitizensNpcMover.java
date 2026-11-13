@@ -11,7 +11,12 @@ import org.bukkit.World;
 import org.bukkit.entity.Entity;
 import org.bukkit.util.Vector;
 
+import net.citizensnpcs.api.ai.NavigatorParameters;
+import net.citizensnpcs.api.astar.pathfinder.BlockExaminer;
+import net.citizensnpcs.api.astar.pathfinder.DoorExaminer;
+import net.citizensnpcs.api.astar.pathfinder.MinecraftBlockExaminer;
 import net.citizensnpcs.api.npc.NPC;
+import net.knightsandkings.knk.core.npc.nav.LocalLeg;
 import net.knightsandkings.knk.core.npc.nav.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NpcMover;
 
@@ -92,6 +97,68 @@ final class CitizensNpcMover implements NpcMover {
             return;
         }
         npc.getNavigator().setTarget(new Location(world, target.x(), target.y(), target.z()));
+    }
+
+    /**
+     * Citizens' A* under K&K's rules: {@link KnkBlockExaminer} (the leg's access in front of Citizens' own block and,
+     * when the leg allows doors, door examiners) is the only examiner. Citizens may still append examiners of its own
+     * when the target is set; any but its cost-only one would overrule a K&K veto ("first PASSABLE wins"), so they are
+     * removed and reported. The search reads the examiners when it runs, after this method.
+     */
+    @Override
+    public void walkTo(NavPoint target, LocalLeg leg) {
+        if (!npc.isSpawned()) {
+            return;
+        }
+        World world = Bukkit.getWorld(target.world());
+        if (world == null) {
+            return;
+        }
+        NavigatorParameters params = npc.getNavigator().getDefaultParameters();
+        params.clearExaminers();
+        List<BlockExaminer> inner = new ArrayList<>();
+        inner.add(new MinecraftBlockExaminer(npc));
+        if (leg.allowDoors()) {
+            inner.add(new DoorExaminer());
+        }
+        KnkBlockExaminer ours = new KnkBlockExaminer(leg, inner);
+        params.examiner(ours);
+        npc.getNavigator().setTarget(new Location(world, target.x(), target.y(), target.z()));
+        String foreign = stripForeignExaminers(npc.getNavigator().getLocalParameters(), ours);
+        if (foreign != null) {
+            listener.engineRuleRemoved(this, foreign);
+        }
+    }
+
+    /**
+     * Leaves {@code ours} and Citizens' cost-only examiner in {@code local}; returns the names of the others, which
+     * were removed, or null when there were none.
+     */
+    static String stripForeignExaminers(NavigatorParameters local, BlockExaminer ours) {
+        BlockExaminer[] used = local.examiners();
+        StringBuilder names = new StringBuilder();
+        List<BlockExaminer> keep = new ArrayList<>();
+        for (BlockExaminer examiner : used) {
+            if (examiner == ours || isCitizensCostOnly(examiner)) {
+                keep.add(examiner);
+            } else {
+                names.append(names.length() == 0 ? "" : "+").append(examiner.getClass().getSimpleName());
+            }
+        }
+        if (names.length() == 0) {
+            return null;
+        }
+        local.clearExaminers();
+        keep.forEach(local::examiner);
+        return names.toString();
+    }
+
+    /**
+     * Citizens' own avoid-water cost examiner (an anonymous class of its A* strategy): it answers IGNORE to
+     * passable and standable, so it cannot overrule a K&K veto and stays.
+     */
+    static boolean isCitizensCostOnly(BlockExaminer examiner) {
+        return examiner.getClass().getName().startsWith("net.citizensnpcs.npc.ai.AStarNavigationStrategy$");
     }
 
     @Override
