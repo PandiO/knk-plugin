@@ -22,7 +22,9 @@ Package root: net.knightsandkings.knk
 - Any Bukkit/Paper world/state mutations must run on the main thread via the scheduler.
 
 ## Migration mode (critical)
-- Entity migrations MUST follow `docs/MIGRATION_MODE_READONLY.md` unless an ADR explicitly allows write/hybrid scope.
+- Entity migrations MUST follow the read-only migration mode, now in knk-workspace at
+  [`docs/archive/knk-plugin/MIGRATION_MODE_READONLY.md`](https://github.com/PandiO/knk-workspace/blob/main/docs/archive/knk-plugin/MIGRATION_MODE_READONLY.md)
+  (moved 2026-11-13; marked Superseded there, see PandiO/knk-workspace#304), unless an ADR explicitly allows write/hybrid scope.
 - Default: READ-ONLY (search/getById only, no create/update/delete, no world mutations).
 - Use `spec/api/swagger.json` as the source of truth for endpoints and DTO schemas.
 
