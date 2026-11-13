@@ -133,6 +133,30 @@ class KitGrantDeliveryTest {
     }
 
     @Test
+    void aSiegeEnteredWhileTheTakeIsInFlight_KeepsTheKit_AndPlacesItAfterTheSiege() {
+        pendingAre(pending(501, "Knight"));
+        CompletableFuture<Boolean> take = new CompletableFuture<>();
+        when(api.markDeliveredAsync(USER, 501)).thenReturn(take);
+        KitGrantDelivery delivery = delivery();
+
+        CompletableFuture<Integer> run = delivery.deliverPending(player);
+        inSiege.set(true); // joins a siege lobby while the API takes the delivery
+        take.complete(true);
+
+        assertEquals(0, run.join());
+        assertEquals(0, placed.size()); // not into the siege inventory, which the vault restore replaces
+        verify(player, never()).sendMessage(anyString());
+
+        inSiege.set(false); // the after-siege hook asks again; the API has nothing pending any more
+        pendingAre();
+
+        assertEquals(1, delivery.deliverPending(player).join());
+        assertEquals(1, placed.size());
+        verify(player).sendMessage("§aA staff member gave you the \"Knight\" kit.");
+        verify(api, times(1)).markDeliveredAsync(USER, 501);
+    }
+
+    @Test
     void droppedItemsAreMentioned() {
         pendingAre(pending(501, "Knight"));
         when(api.markDeliveredAsync(USER, 501)).thenReturn(CompletableFuture.completedFuture(true));

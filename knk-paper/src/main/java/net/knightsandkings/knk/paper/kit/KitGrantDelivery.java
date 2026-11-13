@@ -7,6 +7,7 @@ import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
@@ -33,7 +34,9 @@ import java.util.logging.Logger;
  * whose player left before it was taken, stays pending for the next join.
  * <p>
  * Held back while the player is in a siege (hub or match): their inventory is the siege one then and is replaced
- * afterwards, so the items would be lost. The after-siege hook asks again.
+ * afterwards, so the items would be lost. The after-siege hook asks again. A delivery taken in the moment the player
+ * entered a siege (the take was in flight) is kept here with its items and placed on the next call that isn't held
+ * back (after the siege, or the next join); only a server restart in between loses it, and the log names the claim.
  * <p>
  * Threading: {@link #deliverPending} is called on the main thread; API calls and item resolution run on their
  * futures and every Bukkit interaction hops back through {@code mainThread}.
@@ -57,6 +60,12 @@ public final class KitGrantDelivery {
 
     // Players with a run in flight -> whether another was asked for meanwhile (main thread only).
     private final Map<UUID, Boolean> running = new HashMap<>();
+
+    /** A delivery taken at the API whose items wait until the player is out of the siege (main thread only). */
+    private record Taken(KnkKitDelivery delivery, List<KitGrantPlacer.ResolvedItem> items) {
+    }
+
+    private final Map<UUID, List<Taken>> heldItems = new HashMap<>();
 
     public KitGrantDelivery(
             Executor mainThread,
@@ -95,15 +104,16 @@ public final class KitGrantDelivery {
         }
         running.put(id, false);
 
+        int heldGiven = placeTaken(player);
         CompletableFuture<Integer> done = new CompletableFuture<>();
         kitsCommandApi.pendingDeliveriesAsync(userId).whenComplete((pending, ex) -> mainThread.execute(() -> {
             if (ex != null) {
                 LOGGER.warning("Could not read pending kit deliveries for user " + userId + ": " + rootMessage(ex));
-                finish(player, id, 0, done);
+                finish(player, id, heldGiven, done);
                 return;
             }
             Deque<KnkKitDelivery> queue = new ArrayDeque<>(pending == null ? List.of() : pending);
-            next(player, userId, queue, 0, done);
+            next(player, userId, queue, heldGiven, done);
         }));
         return done;
     }
@@ -153,23 +163,52 @@ public final class KitGrantDelivery {
                     finish(player, id, given, done);
                     return;
                 }
-                int placedNow = given;
-                try {
-                    KitGrantPlacer.PlacementSummary summary = placer.apply(player, items);
-                    placedNow++;
-                    player.sendMessage(ChatColor.GREEN + "A staff member gave you the \"" + delivery.kitName() + "\" kit.");
-                    if (summary != null && summary.dropped() > 0) {
-                        player.sendMessage(ChatColor.GRAY + "Some of it didn't fit and was dropped at your feet.");
-                    }
-                    LOGGER.info("Kit claim " + delivery.claimId() + " (\"" + delivery.kitName() + "\") delivered to "
-                            + player.getName());
-                } catch (RuntimeException e) {
-                    LOGGER.log(Level.SEVERE, "Kit claim " + delivery.claimId() + ": placing the items failed after the"
-                            + " delivery was taken; grant it again if needed", e);
+                if (heldBack.test(id)) {
+                    // Entered a siege while the take was in flight: its inventory is replaced afterwards, so keep the
+                    // items here and place them after the siege (the next call that isn't held back).
+                    heldItems.computeIfAbsent(id, k -> new ArrayList<>()).add(new Taken(delivery, items));
+                    LOGGER.info("Kit claim " + delivery.claimId() + " (\"" + delivery.kitName() + "\") taken as "
+                            + player.getName() + " entered a siege; placed after the siege");
+                    finish(player, id, given, done);
+                    return;
                 }
+                int placedNow = place(player, delivery, items) ? given + 1 : given;
                 next(player, userId, queue, placedNow, done);
             }));
         }));
+    }
+
+    /** Main thread: places what was taken while the player was held back; returns how many kits that were. */
+    private int placeTaken(Player player) {
+        List<Taken> waiting = heldItems.remove(player.getUniqueId());
+        if (waiting == null) {
+            return 0;
+        }
+        int placedNow = 0;
+        for (Taken t : waiting) {
+            if (place(player, t.delivery(), t.items())) {
+                placedNow++;
+            }
+        }
+        return placedNow;
+    }
+
+    /** Main thread: places a taken delivery's items and tells the player; false when placing failed (logged). */
+    private boolean place(Player player, KnkKitDelivery delivery, List<KitGrantPlacer.ResolvedItem> items) {
+        try {
+            KitGrantPlacer.PlacementSummary summary = placer.apply(player, items);
+            player.sendMessage(ChatColor.GREEN + "A staff member gave you the \"" + delivery.kitName() + "\" kit.");
+            if (summary != null && summary.dropped() > 0) {
+                player.sendMessage(ChatColor.GRAY + "Some of it didn't fit and was dropped at your feet.");
+            }
+            LOGGER.info("Kit claim " + delivery.claimId() + " (\"" + delivery.kitName() + "\") delivered to "
+                    + player.getName());
+            return true;
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.SEVERE, "Kit claim " + delivery.claimId() + ": placing the items failed after the"
+                    + " delivery was taken; grant it again if needed", e);
+            return false;
+        }
     }
 
     private void finish(Player player, UUID id, int given, CompletableFuture<Integer> done) {
