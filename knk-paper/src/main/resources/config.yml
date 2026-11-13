@@ -547,6 +547,26 @@ npc:
     collidable: false
     # Outside player-loaded areas: load (keep the chunks ahead loaded, the NPC really walks; capped) | simulate.
     chunk-loading: load
+    # Groups (a leader plans the route once, the followers walk it in formation slots). These are per-NPC settings
+    # too: a group takes them once, for its leader, so a world, a region, a template or an assignment can give
+    # groups their own formation. /knk npc nav group <n> [formation] tries one.
+    # A group's formation: column (single file, the default) | ranks (rows behind the leader; pairs with
+    # group-ranks-width 2) | cluster (a loose crowd) | escort-ring (an octagon around the leader, then wider rings).
+    # Where the road is too narrow for the formation (a gate, stairs, a wall walk) a group folds into a column and
+    # takes up its formation again after.
+    group-formation: column
+    # Blocks between neighbouring formation slots.
+    group-spacing: 2.0
+    # NPCs per row in the ranks formation.
+    group-ranks-width: 2
+    # A follower further than this from its lane (pushed away, fallen off), or without progress for
+    # no-progress-ticks, plans its own leg back to the group's path: one local leg, never the whole route.
+    group-rejoin-blocks: 4.0
+    # The leader waits when a follower is this many blocks behind its slot, until the group has closed up to half
+    # of it (at most 30 seconds). 0 = the leader never waits.
+    group-regroup-blocks: 24.0
+    # Walking speed, as a factor, of a follower that is behind its slot (1 = followers never walk faster).
+    group-catch-up-speed: 1.3
     worlds: {}
     #   world_KNK-DEV:
     #     chunk-loading: simulate

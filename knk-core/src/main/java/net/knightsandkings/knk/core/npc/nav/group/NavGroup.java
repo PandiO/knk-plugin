@@ -213,7 +213,7 @@ public final class NavGroup {
         return ports.navigation().blockingOf(leader.id());
     }
 
-    /** Followers by state; {@code lost} ones are counted under {@link FollowerState#RETRY_WAIT} too. */
+    /** How many followers are in a state. */
     public int followers(FollowerState state) {
         int n = 0;
         for (Follower f : followers) {
@@ -273,9 +273,6 @@ public final class NavGroup {
         holding = false;
         blockedReported = false;
         reportedElement = null;
-        if (folded) {
-            folded = false;
-        }
         resetPath();
         for (Follower f : followers) {
             f.failures = 0;
