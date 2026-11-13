@@ -4,14 +4,17 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
+import java.util.function.Predicate;
 
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event;
 
@@ -34,6 +37,15 @@ import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event;
  * the caller hears {@link NavigationResult.Blocked} once. Roads that do not connect never clear by waiting: the order
  * fails. There is no straight-line fallback across terrain.
  *
+ * <p>Rules stay binding while an NPC walks (Phase 3; NAV-02, 03, 04, 13). A few NPCs per tick get a rule check: the
+ * trespass guard (did the NPC enter a region the current rules deny?) and the recheck of the way ahead (the rest of
+ * the engine's path, the hops, the route line, the route's gates) against {@link AccessRules} judged from the
+ * regions the NPC stands in; a denied region or a closed gate ahead plans the route again. Gate and availability
+ * events ({@link #onGateChanged}, {@link #onAvailabilityChanged}) only mark the NPCs they can concern - those whose
+ * route crosses the gate, those waiting at a blocking element - and the same time slice looks at them first. When
+ * the router answers BLOCKED, the NPC walks the partial route to the blocking element and waits there; the
+ * element's open event wakes it, a slow timer ({@code no-route-wait-ticks}) is the fallback.
+ *
  * <p>Main thread only. {@link #tick} runs once per server tick.
  */
 public final class NpcNavigationService {
@@ -54,10 +66,25 @@ public final class NpcNavigationService {
     static final double ARRIVAL_DISTANCE = 1.5;
     /** The road starts or ends further than this from the NPC or the goal: an off-road leg joins them. */
     static final double ROAD_JOIN_DISTANCE = 3;
+    /** Rule checks (recheck of the way ahead, trespass guard, event wake-ups) per tick unless told otherwise. */
+    public static final int DEFAULT_RULE_CHECKS_PER_TICK = 10;
+    /** With the recheck off ({@code recheck-ticks: 0}) the trespass guard still looks at a walking NPC this often. */
+    static final int TRESPASS_TICKS = 40;
+    /** The recheck looks this many route points ahead ({@link RouteFollower#STEP} blocks each: about 96 blocks). */
+    static final int RECHECK_AHEAD_POINTS = 64;
+    /** A gate is ahead until the NPC is this many route points past the end of the gate's road stretch. */
+    static final int GATE_PASSED_POINTS = 2;
 
     /** What the service needs from outside; {@code log} gets one line per stuck event, with the position. */
     public record Ports(RoadPlanner roads, LocalLegPreparer legs, NavWorld world, NpcNavigationMetrics metrics,
-                        LongSupplier nanoTime, Consumer<String> log) {
+                        LongSupplier nanoTime, Consumer<String> log, AccessRules rules) {
+
+        /** Without access rules of its own: everything is allowed while walking ({@link AccessRules#OPEN}). */
+        public Ports(RoadPlanner roads, LocalLegPreparer legs, NavWorld world, NpcNavigationMetrics metrics,
+                     LongSupplier nanoTime, Consumer<String> log) {
+            this(roads, legs, world, metrics, nanoTime, log, null);
+        }
+
         public Ports {
             Objects.requireNonNull(roads, "roads");
             Objects.requireNonNull(legs, "legs");
@@ -65,12 +92,20 @@ public final class NpcNavigationService {
             Objects.requireNonNull(metrics, "metrics");
             nanoTime = nanoTime == null ? System::nanoTime : nanoTime;
             log = log == null ? line -> { } : log;
+            rules = rules == null ? AccessRules.OPEN : rules;
         }
     }
 
     /** One NPC's resolved settings (see {@link NavigationSettings}). */
     public record Settings(double stretchBlocks, double hopBlocks, int noProgressTicks, int maxRetries,
-                           int noRouteWaitTicks, double walkOnlyBlocks) {
+                           int noRouteWaitTicks, double walkOnlyBlocks, int recheckTicks, boolean stopOnTrespass) {
+
+        /** With the code defaults for the Phase 3 settings ({@code recheck-ticks}, {@code stop-on-trespass}). */
+        public Settings(double stretchBlocks, double hopBlocks, int noProgressTicks, int maxRetries,
+                        int noRouteWaitTicks, double walkOnlyBlocks) {
+            this(stretchBlocks, hopBlocks, noProgressTicks, maxRetries, noRouteWaitTicks, walkOnlyBlocks,
+                NavigationSettings.RECHECK_TICKS.defaultValue(), NavigationSettings.STOP_ON_TRESPASS.defaultValue());
+        }
 
         public static Settings of(NavigationSettings settings, NavigationSettings.Scope scope) {
             return new Settings(settings.value(NavigationSettings.STRETCH_BLOCKS, scope),
@@ -78,7 +113,9 @@ public final class NpcNavigationService {
                 settings.value(NavigationSettings.NO_PROGRESS_TICKS, scope),
                 settings.value(NavigationSettings.MAX_RETRIES, scope),
                 settings.value(NavigationSettings.NO_ROUTE_WAIT_TICKS, scope),
-                settings.value(NavigationSettings.WALK_ONLY_BLOCKS, scope));
+                settings.value(NavigationSettings.WALK_ONLY_BLOCKS, scope),
+                settings.value(NavigationSettings.RECHECK_TICKS, scope),
+                settings.value(NavigationSettings.STOP_ON_TRESPASS, scope));
         }
 
         public static Settings defaults() {
@@ -111,6 +148,28 @@ public final class NpcNavigationService {
         boolean onTrail;
         boolean recovering;
         long lastProgressTick;
+        // ---- rules stay binding (Phase 3) ----
+        /** What blocks the order now: set while the NPC walks the partial route to it and while it waits there. */
+        BlockingElement blockedBy;
+        /** Whether {@link #blockedBy} still blocks a subject; null when unknown. */
+        Predicate<AccessSubject> stillBlocked;
+        /** The element the caller last heard {@link NavigationResult.Blocked} for. */
+        BlockingElement reportedElement;
+        /** Waiting at the blocking element (or where the NPC stood when nothing of the route was allowed). */
+        boolean atBlock;
+        /** The gate doors on the route in hand, with the line index where each one's road stretch ends. */
+        List<GateOnLine> gates = List.of();
+        long lastRuleTick;
+        /** The regions the NPC stood in at its last rule check (the trespass guard); null before the first. */
+        Set<String> regions;
+        /** Gate doors that changed state since the last rule check, when they can concern this NPC; null: none. */
+        Set<Integer> eventDoors;
+        /** Availability may have changed since the last rule check. */
+        boolean eventAvailability;
+        /** What the recheck saw ahead when it asked for the plan in flight; null for any other plan. */
+        String replanFor;
+        /** Elements the recheck saw ahead that the router then still routed through: not asked about again. */
+        final Set<String> tolerated = new HashSet<>();
 
         Nav(NpcMover mover, NpcAccessProfile profile, Settings settings, String world) {
             this.mover = mover;
@@ -149,6 +208,7 @@ public final class NpcNavigationService {
                     generation++;
                     queue.remove(this);
                     state = NpcNavState.PAUSED;
+                    atBlock = false;
                 } else {
                     end(this, new NavigationResult.Cancelled("despawned"));
                 }
@@ -162,6 +222,7 @@ public final class NpcNavigationService {
                     ports.metrics().count(Event.RESUMED);
                     // the entity is new and may stand somewhere else: plan again from where it is
                     dropRoute(this);
+                    regions = null;
                     waitTicks(this, 1);
                 }
             });
@@ -174,8 +235,13 @@ public final class NpcNavigationService {
         }
     }
 
+    private record GateOnLine(int doorId, int index) {
+    }
+
     private final Ports ports;
     private final int maxPlansInFlight;
+    private final int ruleChecksPerTick;
+    private int ruleCursor;
     private final Map<Integer, Nav> npcs = new LinkedHashMap<>();
     private final Deque<Nav> queue = new ArrayDeque<>();
     private int inFlight;
@@ -185,11 +251,20 @@ public final class NpcNavigationService {
     private int depth;
 
     public NpcNavigationService(Ports ports, int maxPlansInFlight) {
+        this(ports, maxPlansInFlight, DEFAULT_RULE_CHECKS_PER_TICK);
+    }
+
+    /** @param ruleChecksPerTick NPCs whose rules are checked per tick at most (NAV-13: never all at once) */
+    public NpcNavigationService(Ports ports, int maxPlansInFlight, int ruleChecksPerTick) {
         this.ports = Objects.requireNonNull(ports, "ports");
         if (maxPlansInFlight < 1) {
             throw new IllegalArgumentException("maxPlansInFlight must be at least 1");
         }
+        if (ruleChecksPerTick < 1) {
+            throw new IllegalArgumentException("ruleChecksPerTick must be at least 1");
+        }
         this.maxPlansInFlight = maxPlansInFlight;
+        this.ruleChecksPerTick = ruleChecksPerTick;
     }
 
     // ==================== callers ====================
@@ -229,6 +304,8 @@ public final class NpcNavigationService {
         nav.replans = 0;
         nav.prepareFailures = 0;
         nav.blockedReported = false;
+        nav.reportedElement = null;
+        nav.lastRuleTick = tick;
         if (nav.mover.isSpawned()) {
             enqueue(nav);
         } else {
@@ -285,6 +362,21 @@ public final class NpcNavigationService {
         return nav == null ? null : nav.follower;
     }
 
+    /**
+     * What blocks a mover's order now, while it walks the partial route to it and while it waits there; null when
+     * nothing blocks.
+     */
+    public BlockingElement blockingOf(int moverId) {
+        Nav nav = npcs.get(moverId);
+        return nav == null ? null : nav.blockedBy;
+    }
+
+    /** Whether a mover waits at its blocking element (woken by the element's open event). */
+    public boolean waitsAtBlock(int moverId) {
+        Nav nav = npcs.get(moverId);
+        return nav != null && nav.atBlock;
+    }
+
     /** NPC counts by world and state, for the metrics snapshot and status output. */
     public Map<String, Map<NpcNavState, Integer>> states() {
         Map<String, Map<NpcNavState, Integer>> out = new HashMap<>();
@@ -297,11 +389,12 @@ public final class NpcNavigationService {
 
     // ==================== tick ====================
 
-    /** Once per server tick: timers, the watchdog, stretch hand-overs and the planning queue. */
+    /** Once per server tick: timers, the watchdog, stretch hand-overs, the rule checks and the planning queue. */
     public void tick() {
         timed(() -> {
             tick++;
-            for (Nav nav : List.copyOf(npcs.values())) {
+            List<Nav> all = List.copyOf(npcs.values());
+            for (Nav nav : all) {
                 switch (nav.state) {
                     case WAITING -> {
                         if (tick >= nav.waitUntil) {
@@ -312,6 +405,7 @@ public final class NpcNavigationService {
                     default -> { }
                 }
             }
+            ruleChecks(all);
             while (inFlight < maxPlansInFlight && !queue.isEmpty()) {
                 Nav nav = queue.pollFirst();
                 if (nav.state == NpcNavState.QUEUED && npcs.get(nav.mover.id()) == nav) {
@@ -384,6 +478,7 @@ public final class NpcNavigationService {
         if (nav.state == NpcNavState.QUEUED) {
             return;
         }
+        nav.atBlock = false;
         nav.state = NpcNavState.QUEUED;
         nav.queuedAtNanos = ports.nanoTime().getAsLong();
         queue.addLast(nav);
@@ -452,6 +547,9 @@ public final class NpcNavigationService {
         double direct = from.horizontalDistance(to);
         if (direct <= nav.settings.hopBlocks()) {
             // a short trip: one local leg, no road
+            nav.replanFor = null;
+            nav.blockedBy = null;
+            nav.stillBlocked = null;
             nav.hops.add(HopPlanner.snapToFloor(ports.world(), to));
             planHop(nav, generation, at);
             return;
@@ -480,41 +578,50 @@ public final class NpcNavigationService {
             nav.state = NpcNavState.PAUSED;
             return;
         }
+        String replanFor = nav.replanFor;
+        nav.replanFor = null;
+        if (plan.status() != RoadPlanner.Status.BLOCKED) {
+            nav.blockedBy = null;
+            nav.stillBlocked = null;
+        }
         switch (plan.status()) {
             case FOUND -> {
                 if (plan.line().isEmpty()) {
                     end(nav, failed("the road route is empty"));
                     return;
                 }
+                if (replanFor != null) {
+                    // the recheck and the router disagree (the router is the authority): do not ask again for this
+                    // order, the trespass guard still watches
+                    nav.tolerated.add(replanFor);
+                    ports.log().accept(nav.mover.name() + " recheck saw " + replanFor
+                        + " ahead, the router still routes that way: not rechecked again until the rules change");
+                }
                 nav.blockedReported = false;
-                nav.follower = new RouteFollower(plan.line());
-                nav.onTrail = false;
-                NavPoint roadStart = plan.line().get(0);
-                NavPoint roadEnd = plan.line().get(plan.line().size() - 1);
-                nav.hops.clear();
-                nav.tail.clear();
-                if (roadStart.horizontalDistance(from) > ROAD_JOIN_DISTANCE) {
-                    nav.hops.addAll(HopPlanner.hops(ports.world(), List.of(from, roadStart), nav.settings.hopBlocks()));
-                }
-                if (roadEnd.horizontalDistance(to) > ARRIVAL_DISTANCE) {
-                    nav.tail.addAll(HopPlanner.hops(ports.world(), List.of(roadEnd, to), nav.settings.hopBlocks()));
-                }
-                if (nav.hops.isEmpty()) {
-                    sendStretch(nav, true);
-                } else {
-                    planHop(nav, generation, at);
-                }
+                nav.reportedElement = null;
+                startRoute(nav, generation, at, plan.line(), plan.gates(), from, to);
             }
-            case BLOCKED, NO_ROUTE -> {
-                // the rules allow no route now (a closed gate, a denied region): wait where the NPC is and ask again;
-                // never improvise across terrain (NAV-03)
+            case BLOCKED -> {
+                // a route exists without the current rules (a closed gate, a denied region): walk as far as the rules
+                // allow, wait at the blocking element, never improvise across terrain (NAV-03, NAV-04)
+                nav.blockedBy = plan.blocking() == null
+                    ? BlockingElement.unknown(plan.reason() == null ? "no allowed route" : plan.reason()) : plan.blocking();
+                nav.stillBlocked = plan.stillBlocked();
+                List<NavPoint> partial = allowedPart(nav, at, plan.line());
+                if (!partial.isEmpty()
+                    && partial.get(partial.size() - 1).horizontalDistance(from) > ROAD_JOIN_DISTANCE) {
+                    ports.metrics().count(Event.BLOCKED_WALK);
+                    startRoute(nav, generation, at, partial, plan.gates(), from, null);
+                } else {
+                    waitAtBlock(nav);
+                }
+                reportBlocked(nav, plan.reason());
+            }
+            case NO_ROUTE -> {
+                // no route even without the rules: wait where the NPC is and ask again on the slow timer
                 ports.metrics().count(Event.NO_ROUTE_WAIT);
                 waitTicks(nav, nav.settings.noRouteWaitTicks());
-                if (!nav.blockedReported) {
-                    nav.blockedReported = true;
-                    report(nav, new NavigationResult.Blocked(plan.reason() == null ? "no allowed route" : plan.reason(),
-                        plan.blockingElement()));
-                }
+                reportBlocked(nav, plan.reason());
             }
             case DIFFERENT_COMPONENTS -> end(nav, failed("no road connects"
                 + (plan.reason() == null ? "" : " (" + plan.reason() + ")")));
@@ -537,6 +644,86 @@ public final class NpcNavigationService {
             }
             default -> end(nav, failed("road planning: " + plan.status()));
         }
+    }
+
+    /**
+     * Takes a road line as the route in hand: an off-road leg to its start when the NPC is not on it, the line in
+     * stretches, and (with a goal) an off-road leg from its end. {@code to} null: the line is the partial route to
+     * a blocking element and ends there.
+     */
+    private void startRoute(Nav nav, int generation, NavPoint at, List<NavPoint> line,
+                            List<RoadPlanner.GateCrossing> gates, NavPoint from, NavPoint to) {
+        nav.follower = new RouteFollower(line);
+        nav.onTrail = false;
+        List<GateOnLine> onLine = new java.util.ArrayList<>();
+        for (RoadPlanner.GateCrossing gate : gates) {
+            onLine.add(new GateOnLine(gate.doorId(), nav.follower.indexNearest(gate.at())));
+        }
+        nav.gates = List.copyOf(onLine);
+        NavPoint roadStart = line.get(0);
+        NavPoint roadEnd = line.get(line.size() - 1);
+        nav.hops.clear();
+        nav.tail.clear();
+        if (roadStart.horizontalDistance(from) > ROAD_JOIN_DISTANCE) {
+            nav.hops.addAll(HopPlanner.hops(ports.world(), List.of(from, roadStart), nav.settings.hopBlocks()));
+        }
+        if (to != null && roadEnd.horizontalDistance(to) > ARRIVAL_DISTANCE) {
+            nav.tail.addAll(HopPlanner.hops(ports.world(), List.of(roadEnd, to), nav.settings.hopBlocks()));
+        }
+        if (nav.hops.isEmpty()) {
+            sendStretch(nav, true);
+        } else {
+            planHop(nav, generation, at);
+        }
+    }
+
+    /**
+     * The partial route of a BLOCKED plan as far as the NPC may walk it now: cut before the first point in a region
+     * the current rules deny it (the router's partial route ends at a road node, which may lie past a district's
+     * edge), so the NPC waits at the edge and the recheck has nothing to object to.
+     */
+    private List<NavPoint> allowedPart(Nav nav, NavPoint at, List<NavPoint> line) {
+        if (line.isEmpty()) {
+            return line;
+        }
+        Set<String> here = regionsAtFeet(at);
+        Predicate<String> mayEnter = null;
+        Map<String, Boolean> verdicts = new HashMap<>();
+        List<NavPoint> points = HopPlanner.resampleKeepingCorners(line, RouteFollower.STEP);
+        for (int i = 0; i < points.size(); i++) {
+            for (String region : regionsAtFloor(points.get(i))) {
+                if (here.contains(region)) {
+                    continue;
+                }
+                if (mayEnter == null) {
+                    mayEnter = ports.rules().mayEnter(subject(nav, at.world(), here));
+                }
+                if (!verdicts.computeIfAbsent(region, mayEnter::test)) {
+                    return i == 0 ? List.of() : points.subList(0, i);
+                }
+            }
+        }
+        return line;
+    }
+
+    private void waitAtBlock(Nav nav) {
+        dropRoute(nav);
+        ports.metrics().count(Event.NO_ROUTE_WAIT);
+        waitTicks(nav, nav.settings.noRouteWaitTicks()); // the safety timer; the element's open event comes first
+        nav.atBlock = true;
+    }
+
+    /**
+     * The caller hears Blocked once per blocked spell, and again when another element blocks (the callback may give
+     * another order: call it last).
+     */
+    private void reportBlocked(Nav nav, String reason) {
+        if (nav.blockedReported && (nav.blockedBy == null || nav.blockedBy.equals(nav.reportedElement))) {
+            return;
+        }
+        nav.blockedReported = true;
+        nav.reportedElement = nav.blockedBy;
+        report(nav, new NavigationResult.Blocked(reason == null ? "no allowed route" : reason, nav.blockedBy));
     }
 
     /** One local leg to the first hop: capture and access first (a planning slot), then the engine's path search. */
@@ -640,9 +827,289 @@ public final class NpcNavigationService {
         } else if (!nav.tail.isEmpty()) {
             startTail(nav);
             enqueue(nav);
+        } else if (nav.blockedBy != null) {
+            waitAtBlock(nav); // the partial route is walked: wait at the blocking element
         } else {
             end(nav, new NavigationResult.Arrived());
         }
+    }
+
+    // ==================== rules stay binding ====================
+
+    /**
+     * A gate door opened, closed, started moving, jammed or was destroyed. Marks only the NPCs it can concern: those
+     * whose route passes the gate, those blocked by it, and those waiting at another blocking element (the gate may
+     * open another way). They are looked at in the next rule checks, a few per tick.
+     */
+    public void onGateChanged(int doorId) {
+        timed(() -> {
+            for (Nav nav : npcs.values()) {
+                if (nav.goal == null) {
+                    continue;
+                }
+                nav.tolerated.clear();
+                boolean concerned = nav.atBlock || (nav.blockedBy != null && nav.blockedBy.hasGate(doorId));
+                for (int i = 0; !concerned && i < nav.gates.size(); i++) {
+                    concerned = nav.gates.get(i).doorId() == doorId;
+                }
+                if (concerned) {
+                    if (nav.eventDoors == null) {
+                        nav.eventDoors = new HashSet<>();
+                    }
+                    nav.eventDoors.add(doorId);
+                }
+            }
+        });
+    }
+
+    /**
+     * A region's entry or exit rule may have changed, which one is not known (the domain cache was refreshed, a
+     * siege lockdown changed). Nobody plans again for it: walking NPCs get their recheck early, NPCs at a blocking
+     * element are asked whether it still blocks; only those with something denied ahead, or whose element opened,
+     * plan again.
+     */
+    public void onAvailabilityChanged() {
+        timed(() -> {
+            for (Nav nav : npcs.values()) {
+                if (nav.goal != null) {
+                    nav.tolerated.clear();
+                    nav.eventAvailability = true;
+                }
+            }
+        });
+    }
+
+    private static boolean hasEvents(Nav nav) {
+        return nav.eventAvailability || nav.eventDoors != null;
+    }
+
+    private boolean ruleCheckDue(Nav nav, boolean eventsOnly) {
+        if (nav.goal == null || !nav.mover.isSpawned()) {
+            return false;
+        }
+        if (nav.atBlock) {
+            return hasEvents(nav);
+        }
+        if (nav.state != NpcNavState.MOVING) {
+            return false;
+        }
+        if (hasEvents(nav)) {
+            return true;
+        }
+        int every = nav.settings.recheckTicks() > 0 ? nav.settings.recheckTicks() : TRESPASS_TICKS;
+        return !eventsOnly && tick - nav.lastRuleTick >= every;
+    }
+
+    /** At most {@code ruleChecksPerTick} NPCs per tick: first those an event concerns, then those whose time is up. */
+    private void ruleChecks(List<Nav> all) {
+        int n = all.size();
+        if (n == 0) {
+            return;
+        }
+        int done = 0;
+        for (int i = 0; i < n && done < ruleChecksPerTick; i++) {
+            Nav nav = all.get(i);
+            if (npcs.get(nav.mover.id()) == nav && ruleCheckDue(nav, true)) {
+                done++;
+                ruleCheck(nav);
+            }
+        }
+        int start = ruleCursor % n;
+        for (int i = 0; i < n && done < ruleChecksPerTick; i++) {
+            int index = (start + i) % n;
+            Nav nav = all.get(index);
+            if (npcs.get(nav.mover.id()) == nav && ruleCheckDue(nav, false)) {
+                done++;
+                ruleCursor = index + 1;
+                ruleCheck(nav);
+            }
+        }
+    }
+
+    private void ruleCheck(Nav nav) {
+        NavPoint at = nav.mover.position().orElse(null);
+        if (at == null) {
+            return;
+        }
+        Set<Integer> doors = nav.eventDoors == null ? Set.of() : nav.eventDoors;
+        boolean availability = nav.eventAvailability;
+        boolean byEvent = hasEvents(nav);
+        nav.eventDoors = null;
+        nav.eventAvailability = false;
+        Set<String> here = regionsAtFeet(at);
+        AccessSubject subject = subject(nav, at.world(), here);
+        if (nav.atBlock) {
+            wakeIfOpen(nav, subject, doors, availability);
+            return;
+        }
+        ports.metrics().count(Event.RULE_CHECK);
+        boolean periodic = nav.settings.recheckTicks() > 0 && tick - nav.lastRuleTick >= nav.settings.recheckTicks();
+        nav.lastRuleTick = tick;
+        if (trespassed(nav, at, here) && nav.settings.stopOnTrespass()) {
+            replan(nav);
+            return;
+        }
+        if (nav.blockedBy != null && byEvent && (availability || doors.stream().anyMatch(nav.blockedBy::hasGate))
+            && !stillBlocked(nav, subject)) {
+            // on the way to a blocking element that opened meanwhile: the full route
+            ports.metrics().count(Event.REPLAN_EVENT);
+            ports.log().accept(nav.mover.name() + " " + nav.blockedBy.describe() + " opened: route planned again");
+            replan(nav);
+            return;
+        }
+        if (!byEvent && !periodic) {
+            return; // the recheck is off: only the trespass guard looks
+        }
+        String denied = deniedAhead(nav, at, here, subject, availability || periodic ? null : doors);
+        if (denied != null) {
+            ports.metrics().count(byEvent ? Event.REPLAN_EVENT : Event.REPLAN_RECHECK);
+            ports.log().accept(String.format(Locale.ROOT, "%s way ahead is closed by %s (%s) at %d %d %d: route planned again",
+                nav.mover.name(), denied, byEvent ? "event" : "recheck", at.blockX(), at.blockY(), at.blockZ()));
+            nav.replanFor = denied;
+            replan(nav);
+        }
+    }
+
+    /** An NPC waiting at its blocking element: plan again when the element, or a gate elsewhere, opened. */
+    private void wakeIfOpen(Nav nav, AccessSubject subject, Set<Integer> doors, boolean availability) {
+        boolean own = availability || nav.blockedBy == null || doors.stream().anyMatch(nav.blockedBy::hasGate);
+        boolean open = own && !stillBlocked(nav, subject);
+        for (int doorId : doors) {
+            if (open) {
+                break;
+            }
+            // another gate: when it lets the NPC through now, there may be another way
+            open = (nav.blockedBy == null || !nav.blockedBy.hasGate(doorId)) && !ports.rules().gateBlocks(subject, doorId);
+        }
+        if (open) {
+            ports.metrics().count(Event.WOKEN);
+            ports.metrics().count(Event.REPLAN_EVENT);
+            enqueue(nav);
+        }
+    }
+
+    private boolean stillBlocked(Nav nav, AccessSubject subject) {
+        if (nav.stillBlocked == null) {
+            return false; // unknown: plan again to find out
+        }
+        try {
+            return nav.stillBlocked.test(subject);
+        } catch (RuntimeException e) {
+            ports.log().accept(nav.mover.name() + " blocking element check failed: " + e);
+            return false;
+        }
+    }
+
+    /**
+     * The trespass guard: a region the NPC stands in now and did not stand in at its last check was entered; the
+     * entry is judged by the current rules from the regions it came from. Independent of the planner and of the
+     * engine's block rules: it watches where NPCs really are. Must stay 0.
+     */
+    private boolean trespassed(Nav nav, NavPoint at, Set<String> here) {
+        Set<String> before = nav.regions;
+        nav.regions = here;
+        if (before == null) {
+            return false; // the first look at this NPC: nothing to compare with
+        }
+        Predicate<String> mayEnter = null;
+        boolean trespassed = false;
+        for (String region : here) {
+            if (before.contains(region)) {
+                continue;
+            }
+            if (mayEnter == null) {
+                mayEnter = ports.rules().mayEnter(subject(nav, at.world(), before));
+            }
+            if (!mayEnter.test(region)) {
+                trespassed = true;
+                ports.metrics().count(Event.TRESPASS);
+                ports.log().accept(String.format(Locale.ROOT, "TRESPASS %s entered %s at %d %d %d (%s)",
+                    nav.mover.name(), region, at.blockX(), at.blockY(), at.blockZ(),
+                    nav.onTrail ? "on the road line" : "on a local leg"));
+            }
+        }
+        return trespassed;
+    }
+
+    /**
+     * The first thing on the NPC's way ahead that the current rules deny it, judged from the regions it stands in:
+     * a region ({@code region <id>}) on the rest of the engine's path, the hops, the route line or the tail, or a
+     * gate door ({@code gate <id>}) the route still has to pass. Null when the way is free. {@code onlyDoors}
+     * non-null: a gate event - only those doors are asked about.
+     */
+    private String deniedAhead(Nav nav, NavPoint at, Set<String> here, AccessSubject subject, Set<Integer> onlyDoors) {
+        int from = nav.follower == null ? 0 : nav.onTrail ? nav.follower.nearestIndex(at) : nav.follower.nextIndex();
+        for (GateOnLine gate : nav.gates) {
+            if (gate.index() + GATE_PASSED_POINTS < from || (onlyDoors != null && !onlyDoors.contains(gate.doorId()))) {
+                continue;
+            }
+            String key = "gate " + gate.doorId();
+            if (!nav.tolerated.contains(key) && ports.rules().gateBlocks(subject, gate.doorId())) {
+                return key;
+            }
+        }
+        if (onlyDoors != null) {
+            return null;
+        }
+        Predicate<String> mayEnter = null;
+        Map<String, Boolean> verdicts = new HashMap<>();
+        List<Set<String>> ahead = new java.util.ArrayList<>();
+        if (!nav.onTrail) {
+            for (NavPoint feet : nav.mover.pathAhead()) {
+                ahead.add(regionsAtFeet(feet));
+            }
+        }
+        for (NavPoint hop : nav.hops) {
+            ahead.add(regionsAtFloor(hop));
+        }
+        if (nav.follower != null) {
+            List<NavPoint> line = nav.follower.line();
+            for (int i = Math.max(0, from); i < Math.min(line.size(), from + RECHECK_AHEAD_POINTS); i++) {
+                ahead.add(regionsAtFloor(line.get(i)));
+            }
+        }
+        for (NavPoint hop : nav.tail) {
+            ahead.add(regionsAtFloor(hop));
+        }
+        for (Set<String> regions : ahead) {
+            for (String region : regions) {
+                if (here.contains(region)) {
+                    continue; // a region the NPC is in is not entered
+                }
+                if (mayEnter == null) {
+                    mayEnter = ports.rules().mayEnter(subject);
+                }
+                if (!verdicts.computeIfAbsent(region, mayEnter::test) && !nav.tolerated.contains("region " + region)) {
+                    return "region " + region;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** Drops the route and plans again from where the NPC stands, through the planning queue (the rules changed). */
+    private void replan(Nav nav) {
+        nav.generation++;
+        dropRoute(nav);
+        nav.retries = 0;
+        queue.remove(nav);
+        nav.state = NpcNavState.WAITING;
+        enqueue(nav); // QUEUED before the stop below, so the engine's cancel is not taken for a stuck NPC
+        if (nav.mover.isSpawned()) {
+            nav.mover.stop();
+        }
+    }
+
+    private Set<String> regionsAtFeet(NavPoint feet) {
+        return ports.world().regionsAt(feet.world(), feet.blockX(), feet.blockY(), feet.blockZ());
+    }
+
+    private Set<String> regionsAtFloor(NavPoint floor) {
+        return ports.world().regionsAt(floor.world(), floor.blockX(), floor.blockY() + 1, floor.blockZ());
+    }
+
+    private AccessSubject subject(Nav nav, String world, Set<String> regions) {
+        return new NpcAccessSubject(nav.mover.name(), nav.profile, world, regions);
     }
 
     // ==================== stuck ====================
@@ -686,6 +1153,7 @@ public final class NpcNavigationService {
         nav.follower = null;
         nav.onTrail = false;
         nav.recovering = false;
+        nav.gates = List.of();
     }
 
     // ==================== results ====================
@@ -709,6 +1177,13 @@ public final class NpcNavigationService {
         nav.goal = null;
         nav.onResult = null;
         nav.state = NpcNavState.IDLE;
+        nav.atBlock = false;
+        nav.blockedBy = null;
+        nav.stillBlocked = null;
+        nav.replanFor = null;
+        nav.eventDoors = null;
+        nav.eventAvailability = false;
+        nav.tolerated.clear();
         if (result instanceof NavigationResult.Arrived) {
             ports.metrics().count(Event.ARRIVED);
         } else {

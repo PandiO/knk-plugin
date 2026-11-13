@@ -123,6 +123,14 @@ class NpcNavigationServiceTest {
         }
 
         boolean lastWasFollow;
+
+        /** What the engine's own path search found for the running local leg (feet positions). */
+        List<NavPoint> pathAhead = List.of();
+
+        @Override
+        public List<NavPoint> pathAhead() {
+            return pathAhead;
+        }
     }
 
     record RoadAsk(AccessSubject subject, NavPoint from, NavPoint to, CompletableFuture<RoadPlan> answer) {
@@ -319,12 +327,13 @@ class NpcNavigationServiceTest {
     @Test
     void aRuleBlockWaitsReportsOnceAndAsksAgain() {
         goFar();
-        lastRoadAsk().answer().complete(new RoadPlan(RoadPlanner.Status.BLOCKED, List.of(), "the West Gate is closed",
-            "the West Gate"));
+        lastRoadAsk().answer().complete(RoadPlan.blocked(List.of(), "the West Gate is closed",
+            BlockingElement.gate(7, "the West Gate"), List.of(), null));
 
         assertEquals(NpcNavState.WAITING, service.state(mover.id()));
         NavigationResult.Blocked blocked = assertInstanceOf(NavigationResult.Blocked.class, lastResult());
-        assertEquals("the West Gate", blocked.blockingElement());
+        assertEquals("the West Gate", blocked.blockingElement().name());
+        assertEquals(BlockingElement.Kind.GATE, blocked.blockingElement().kind());
         assertTrue(mover.follows.isEmpty() && mover.walks.isEmpty(), "no improvising across terrain");
 
         ticks(Settings.defaults().noRouteWaitTicks() - 1);

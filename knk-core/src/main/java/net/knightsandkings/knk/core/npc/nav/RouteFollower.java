@@ -66,6 +66,26 @@ public final class RouteFollower {
         return sentEnd <= 0 ? null : line.get(Math.min(line.size(), sentEnd) - 1);
     }
 
+    /** The index in {@link #line} where the next stretch starts. */
+    public int nextIndex() {
+        return next;
+    }
+
+    /** The index of the line point nearest a floor point, over the whole line (for placing gates on the route). */
+    public int indexNearest(NavPoint floorPoint) {
+        int best = 0;
+        double bestD = Double.MAX_VALUE;
+        for (int i = 0; i < line.size(); i++) {
+            NavPoint p = line.get(i);
+            double d = sq(p.x() - floorPoint.x()) + sq(p.y() - floorPoint.y()) + sq(p.z() - floorPoint.z());
+            if (d < bestD) {
+                bestD = d;
+                best = i;
+            }
+        }
+        return best;
+    }
+
     /** The waypoints last handed out (diagnostics). */
     public List<NavPoint> lastSent() {
         return lastSent;

@@ -81,10 +81,17 @@ public final class NavigationSettings {
     public static final Key<Double> WALK_ONLY_BLOCKS = new Key<>("walk-only-blocks", 64.0,
         decimal(0, 256), "longest trip without a road, walked as off-road hops");
 
+    /**
+     * What happens to an NPC that entered a region its current rules deny (the trespass guard; it is always logged
+     * and counted): {@code true} also stops it and plans its route again. For dev servers.
+     */
+    public static final Key<Boolean> STOP_ON_TRESPASS = new Key<>("stop-on-trespass", false, bool(),
+        "stop and replan an NPC that entered a region its rules deny (dev servers)");
+
     /** Every per-NPC setting, in display order. */
     public static final List<Key<?>> KEYS = List.of(PATHFINDER, STRETCH_BLOCKS, HOP_BLOCKS, RECHECK_TICKS,
-        STATIONARY_TICKS, NO_PROGRESS_TICKS, MAX_RETRIES, NO_ROUTE_WAIT_TICKS, WALK_ONLY_BLOCKS, COLLIDABLE,
-        CHUNK_LOADING);
+        STATIONARY_TICKS, NO_PROGRESS_TICKS, MAX_RETRIES, NO_ROUTE_WAIT_TICKS, WALK_ONLY_BLOCKS, STOP_ON_TRESPASS,
+        COLLIDABLE, CHUNK_LOADING);
 
     /** A resolved value and its origin ({@code scope}: the world, region or template id; null for default/global). */
     public record Resolved<T>(T value, Layer layer, String scope) {
