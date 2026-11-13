@@ -1247,7 +1247,7 @@ permissions:
   knk.admin.npc:
     description: >-
       /knk npc - NPC navigation admin (PandiO/knk-workspace#358): status and settings with their layer, the NPC event
-      audit (which events reach K&K listeners for NPCs), test NPCs.
+      audit (which events reach K&K listeners for NPCs), test NPCs, and route following for testing (/knk npc nav).
     default: op
   knk.admin.road:
     description: >-

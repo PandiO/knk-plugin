@@ -2660,7 +2660,7 @@ public class KnKPlugin extends JavaPlugin {
             try {
                 npcNavigation = net.knightsandkings.knk.paper.npc.nav.NpcNavigationModule.start(this, knkAdminCommand,
                     metricsService == null ? null : metricsService::register,
-                    regionTracker == null ? null : regionTracker.regionIds());
+                    regionTracker == null ? null : regionTracker.regionIds(), () -> navigationService);
             } catch (RuntimeException | LinkageError e) {
                 getLogger().log(java.util.logging.Level.WARNING, "[NPC] navigation module failed to start", e);
             }

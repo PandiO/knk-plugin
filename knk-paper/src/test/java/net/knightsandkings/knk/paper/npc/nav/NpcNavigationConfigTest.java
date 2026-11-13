@@ -12,7 +12,9 @@ import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.junit.jupiter.api.Test;
 
+import net.knightsandkings.knk.core.npc.nav.AccessSubject;
 import net.knightsandkings.knk.core.npc.nav.NavigationSettings;
+import net.knightsandkings.knk.core.npc.nav.NpcAccessProfile;
 import net.knightsandkings.knk.core.npc.nav.NavigationSettings.Layer;
 import net.knightsandkings.knk.core.npc.nav.NavigationSettings.Scope;
 
@@ -84,5 +86,76 @@ class NpcNavigationConfigTest {
         assertTrue(config.rejected().isEmpty(), config.rejected().toString());
         assertFalse(config.enabled());
         assertEquals(Layer.GLOBAL, config.settings().resolve(NavigationSettings.CHUNK_LOADING, Scope.of("w")).layer());
+    }
+
+    @Test
+    void readsSpawnsPerTickAndAccessProfiles() throws Exception {
+        NpcNavigationConfig config = parse("""
+            npc:
+              navigation:
+                enabled: true
+                spawns-per-tick: 5
+                hop-blocks: 12
+                max-retries: 2
+                no-route-wait-ticks: 200
+                walk-only-blocks: 32
+                access-profiles:
+                  Guard:
+                    bypass-domain-rules: true
+                    open-doors: false
+                    allow-regions: [Castle_Yard]
+                    deny-regions: [throne_room]
+            """);
+        assertTrue(config.rejected().isEmpty(), config.rejected().toString());
+        assertEquals(5, config.spawnsPerTick());
+        Scope scope = Scope.of("w");
+        assertEquals(12.0, config.settings().value(NavigationSettings.HOP_BLOCKS, scope));
+        assertEquals(2, config.settings().value(NavigationSettings.MAX_RETRIES, scope));
+        assertEquals(200, config.settings().value(NavigationSettings.NO_ROUTE_WAIT_TICKS, scope));
+        assertEquals(32.0, config.settings().value(NavigationSettings.WALK_ONLY_BLOCKS, scope));
+
+        NpcAccessProfile guard = config.accessProfile("GUARD");
+        assertEquals("guard", guard.id());
+        assertTrue(guard.bypassDomainRules());
+        assertFalse(guard.openDoors());
+        assertEquals(AccessSubject.RegionOverride.ALLOW, guard.override("castle_yard"));
+        assertEquals(AccessSubject.RegionOverride.DENY, guard.override("Throne_Room"));
+        assertEquals(NpcAccessProfile.DEFAULT, config.accessProfile("default"), "always there");
+        assertEquals(null, config.accessProfile("nobody"));
+    }
+
+    @Test
+    void badGlobalSwitchesAndProfileKeysAreReported() throws Exception {
+        NpcNavigationConfig config = parse("""
+            npc:
+              navigation:
+                spawns-per-tick: 0
+                access-profiles:
+                  guard:
+                    open-door: false
+                  broken: 3
+            """);
+        assertEquals(3, config.rejected().size(), config.rejected().toString());
+        assertEquals(2, config.spawnsPerTick());
+        assertTrue(config.accessProfile("guard").openDoors(), "the misspelt key changed nothing");
+        assertEquals(2, NpcNavigationConfig.disabled().spawnsPerTick());
+        assertEquals(java.util.Set.of("default"), NpcNavigationConfig.disabled().accessProfiles().keySet());
+    }
+
+    @Test
+    void theShippedConfigSetsEveryPerNpcKeyAndTheDefaultProfile() throws Exception {
+        YamlConfiguration shipped = new YamlConfiguration();
+        try (var in = getClass().getResourceAsStream("/config.yml")) {
+            shipped.load(new InputStreamReader(in, StandardCharsets.UTF_8));
+        }
+        NpcNavigationConfig config = NpcNavigationConfig.from(shipped.getConfigurationSection(NpcNavigationConfig.PATH));
+        for (NavigationSettings.Key<?> key : NavigationSettings.KEYS) {
+            NavigationSettings.Resolved<?> resolved = config.settings().resolve(key, Scope.of("w"));
+            assertEquals(Layer.GLOBAL, resolved.layer(), key.name() + " is in the shipped config.yml");
+            assertEquals(key.defaultValue(), resolved.value(), key.name() + " ships with its code default");
+        }
+        assertEquals(2, config.spawnsPerTick());
+        assertEquals(4, config.maxPlansInFlight());
+        assertEquals(NpcAccessProfile.DEFAULT, config.accessProfile("default"));
     }
 }

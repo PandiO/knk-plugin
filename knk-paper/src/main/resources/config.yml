@@ -509,6 +509,8 @@ npc:
     enabled: false
     # Route plans running at once, server-wide.
     max-plans-in-flight: 4
+    # NPC spawns per tick at most (20 player-shaped NPCs spawned in one tick cost a 48.8 ms tick).
+    spawns-per-tick: 2
     # Per-NPC settings below are the global layer. A value comes from the most specific layer that sets it:
     # code default -> this global layer -> worlds.<world> -> regions.<WorldGuard region or domain id> (innermost wins)
     # -> NPC template -> assignment. /knk npc status shows each value with the layer it came from.
@@ -516,12 +518,21 @@ npc:
     pathfinder: citizens
     # Blocks of the route handed to the NPC at once.
     stretch-blocks: 32
+    # Blocks between the hops of an off-road or recovery leg (each hop is one Citizens path search).
+    hop-blocks: 16
     # Ticks between rechecks of the way ahead against the current gate and access rules (0 = off).
     recheck-ticks: 40
     # Ticks without movement before Citizens reports stuck.
     stationary-ticks: 60
     # Ticks without progress along the route before K&K's watchdog steps in.
     no-progress-ticks: 60
+    # Recovery attempts per hop or stretch before the route is dropped and planned again (then the order fails).
+    max-retries: 3
+    # Ticks an NPC waits before asking again while the rules allow no route or the way ahead is not loaded.
+    no-route-wait-ticks: 100
+    # With an end too far from a road (or no road network): the longest trip, in blocks, walked as off-road hops.
+    # Further than this the order fails; NPCs never cross terrain in a straight line.
+    walk-only-blocks: 64
     # Whether NPCs push and block each other.
     collidable: false
     # Outside player-loaded areas: load (keep the chunks ahead loaded, the NPC really walks; capped) | simulate.
@@ -532,6 +543,18 @@ npc:
     regions: {}
     #   district_1000006:
     #     recheck-ticks: 20
+    # NPC access profiles (until NPCs have their own permissions): what an NPC with that profile may enter. Region ids
+    # are WorldGuard region ids (domains are regions). NPCs never pass a closed gate. /knk npc nav spawn <n> <profile>.
+    access-profiles:
+      default:
+        # Ignore every domain's entry and exit rule.
+        bypass-domain-rules: false
+        # May open hand-openable doors on off-road legs.
+        open-doors: true
+        # Regions the NPC may enter and leave whatever the domain's rule says.
+        allow-regions: []
+        # Regions the NPC never enters (wins over allow-regions).
+        deny-regions: []
 
 navigation:
   enabled: true
