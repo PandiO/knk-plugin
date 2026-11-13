@@ -38,6 +38,9 @@ import net.knightsandkings.knk.core.ports.api.PrivacyErasuresApi;
  *       feed was reset: another database) starts again from 0.</li>
  *   <li>An erasure applied once in this run is not applied again (push then catch-up); after a restart the feed from
  *       the stored position is, and every step is idempotent.</li>
+ *   <li>An erasure with a failed step (a kick-time return, the main-thread steps or a worker step) is not counted as
+ *       applied: the catch-up stops before it, so the stored position stays and the next catch-up (hub connect or push)
+ *       runs it again. Later erasures wait behind it in the feed; a push still applies them at once.</li>
  *   <li>A returning player gets a fresh account under the same Minecraft UUID. When this server last knew that UUID
  *       under another user id ({@link #setKnownUserIds}), the erasure is applied without the UUID: no kick, only what
  *       is filed under the erased user id goes. (The API also serves such a row without the UUID.)</li>
@@ -228,16 +231,25 @@ public final class AccountErasureService implements AutoCloseable {
                 logger.warning("[KnK Privacy] The API's erasure feed ends at #" + page.latestId() + ", before this server's"
                     + " position #" + since + " (another database?): catching up from the start");
                 cursor.reset();
+                synchronized (handled) {
+                    handled.clear(); // the new feed's ids may repeat the old feed's
+                }
                 since = 0;
                 restarted = true;
                 continue;
             }
             for (ErasedAccount account : page.items()) {
-                if (apply(account) != null) {
+                Report report = apply(account);
+                if (report != null) {
                     count++;
                 }
                 if (Thread.currentThread().isInterrupted()) {
                     return count; // stopping: not applied, so the position stays before it
+                }
+                if (report != null && !report.failed().isEmpty()) {
+                    logger.warning("[KnK Privacy] Erasure #" + account.erasureId() + " is not complete; the position"
+                        + " stays before it and the next catch-up runs it again");
+                    return count;
                 }
                 cursor.advanceTo(account.erasureId());
             }
@@ -249,7 +261,10 @@ public final class AccountErasureService implements AutoCloseable {
         return count;
     }
 
-    /** Kick, settle, delete (worker thread; blocks). Null when this run already applied that erasure. */
+    /**
+     * Kick, settle, delete (worker thread; blocks). Null when this run already applied that erasure. Only an erasure
+     * without failed steps is remembered as applied; one with failures runs again when it comes by again.
+     */
     Report apply(ErasedAccount pushedOrRead) {
         synchronized (handled) {
             if (handled.contains(pushedOrRead.erasureId())) {
@@ -297,10 +312,12 @@ public final class AccountErasureService implements AutoCloseable {
         erased.putAll(rest.erased());
         failed.addAll(rest.failed());
 
-        synchronized (handled) {
-            handled.add(account.erasureId());
-            if (handled.size() > REMEMBERED) {
-                handled.remove(handled.iterator().next());
+        if (failed.isEmpty()) {
+            synchronized (handled) {
+                handled.add(account.erasureId());
+                if (handled.size() > REMEMBERED) {
+                    handled.remove(handled.iterator().next());
+                }
             }
         }
         applied.incrementAndGet();

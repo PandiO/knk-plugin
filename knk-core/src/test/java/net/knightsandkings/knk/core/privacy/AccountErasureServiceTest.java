@@ -182,6 +182,58 @@ class AccountErasureServiceTest {
     }
 
     @Test
+    void aFailedStep_KeepsThePosition_AndTheNextCatchUpRunsItAgain() {
+        int[] spoolCalls = {0};
+        eraser.register("statistics spool", Where.WORKER, a -> {
+            if (a.erasureId() == 1 && spoolCalls[0]++ == 0) {
+                throw new IllegalStateException("disk full");
+            }
+            return 1;
+        });
+        feed.rows.add(new ErasedAccount(1, 40, OFFLINE));
+        feed.rows.add(new ErasedAccount(2, 41, OFFLINE));
+        AccountErasureService service = service();
+
+        service.catchUpNow();
+
+        // #1 failed a step: the position stays before it and #2 waits behind it.
+        assertEquals(0, cursor.lastId());
+        assertEquals(List.of("vault 1", "offline 1"), events);
+
+        service.catchUpNow();
+
+        // The next catch-up runs #1 again (now complete), then #2.
+        assertEquals(2, cursor.lastId());
+        assertEquals(List.of("vault 1", "offline 1", "vault 1", "offline 1", "vault 2", "offline 2"), events);
+    }
+
+    @Test
+    void anErasureWithAFailedStep_IsNotRememberedAsApplied() {
+        eraser.register("statistics spool", Where.WORKER, a -> { throw new IllegalStateException("disk full"); });
+        AccountErasureService service = service();
+
+        AccountErasureService.Report first = service.apply(new ErasedAccount(3, 46, OFFLINE));
+        AccountErasureService.Report again = service.apply(new ErasedAccount(3, 46, OFFLINE));
+
+        assertEquals(List.of("statistics spool"), first.failed());
+        assertEquals(List.of("statistics spool"), again.failed());
+        assertEquals(List.of("vault 3", "offline 3", "vault 3", "offline 3"), events);
+    }
+
+    @Test
+    void aFeedReset_ForgetsWhatThisRunApplied_SoTheNewFeedsIdsAreApplied() {
+        AccountErasureService service = service();
+        service.apply(new ErasedAccount(1, 40, OFFLINE)); // the old feed's #1, applied in this run
+        cursor.advanceTo(500);
+        feed.rows.add(new ErasedAccount(1, 77, null)); // the new database's #1: another account
+
+        assertEquals(1, service.catchUpNow());
+
+        assertEquals(List.of("vault 1", "offline 1", "vault 1", "offline 1"), events);
+        assertEquals(1, cursor.lastId());
+    }
+
+    @Test
     void sameErasureTwiceInOneRun_IsAppliedOnce() {
         AccountErasureService service = service();
         service.apply(new ErasedAccount(8, 45, OFFLINE));
