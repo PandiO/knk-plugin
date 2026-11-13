@@ -10,6 +10,8 @@ softdepend:
   - WorldEdit
   # Optional: Bedrock players (Geyser) get delayed menu switches - menus.bedrock-transition-delay-ticks.
   - floodgate
+  # Optional: NPC navigation (npc.navigation.enabled) needs Citizens; without it NPC navigation reports unavailable.
+  - Citizens
   
 commands:
   knk:
