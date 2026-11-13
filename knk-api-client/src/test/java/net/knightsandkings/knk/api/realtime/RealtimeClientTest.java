@@ -22,6 +22,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -39,6 +40,9 @@ class RealtimeClientTest {
         final List<Object[]> sent = new CopyOnWriteArrayList<>();
         final CompletableFuture<Void> started = new CompletableFuture<>();
         Consumer<Throwable> closed;
+        /** Reads the client's state, so {@link #stop()} can record what a waiting caller could see at that moment. */
+        Supplier<RealtimeState> clientState = () -> null;
+        volatile RealtimeState stateWhenStopCalled;
         volatile boolean stopCalled;
         volatile boolean connected;
 
@@ -59,6 +63,7 @@ class RealtimeClientTest {
 
         @Override
         public CompletableFuture<Void> stop() {
+            stateWhenStopCalled = clientState.get();
             stopCalled = true;
             return CompletableFuture.completedFuture(null);
         }
@@ -108,6 +113,7 @@ class RealtimeClientTest {
         client = new RealtimeClient(
             () -> {
                 FakeTransport t = new FakeTransport();
+                t.clientState = () -> client.state();
                 transports.add(t);
                 return t;
             },
@@ -307,7 +313,10 @@ class RealtimeClientTest {
 
         client.stop();
         await(() -> client.state() == RealtimeState.STOPPED, "stopped");
+        // #264: STOPPED is published only after the close was requested, so this holds right away (no wait)...
         assertTrue(t.stopCalled);
+        // ...and, deterministically, the transport was closed while the client still said CONNECTED.
+        assertEquals(RealtimeState.CONNECTED, t.stateWhenStopCalled);
         t.drop();
         Thread.sleep(100);
         assertEquals(1, transports.size());
