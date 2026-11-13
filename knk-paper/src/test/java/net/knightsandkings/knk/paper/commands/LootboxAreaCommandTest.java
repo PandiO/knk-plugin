@@ -206,6 +206,40 @@ class LootboxAreaCommandTest {
     }
 
     @Test
+    void reservedName_isRefusedWithoutARegionOrApiCall() {
+        // PandiO/knk-workspace#34: lootbox_area_<id> is the name of a region drawn through the web form.
+        run(admin, "create", "area_7");
+        run(admin, "create", "AREA_12");
+
+        verify(admin, org.mockito.Mockito.times(2)).sendMessage(contains("reserved"));
+        verify(regions, never()).regionExists(any(), anyString());
+        verify(regions, never()).createFullHeightFromSelection(any(), anyString());
+        verify(api, never()).createAreaInGame(any(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void reservedNames_areOnlyAreaNumber() {
+        assertEquals(true, LootboxRegions.isReservedAreaName("area_7"));
+        assertEquals(true, LootboxRegions.isReservedAreaName("Area_70"));
+        assertEquals(false, LootboxRegions.isReservedAreaName("area_north"));
+        assertEquals(false, LootboxRegions.isReservedAreaName("area_7b"));
+        assertEquals(false, LootboxRegions.isReservedAreaName("my_area_7"));
+    }
+
+    @Test
+    void delete_removesTheRegionDrawnInTheWebForm() {
+        // #34: a drawn region renamed to lootbox_area_<id> belongs to its area like the in-game command's.
+        areas.add(area(9, "market", "lootbox_area_9"));
+        when(api.deleteAreaInGame(42, 9)).thenReturn(CompletableFuture.completedFuture(
+                new KnkLootboxAreaDeleteResult(9, "market", "world", "lootbox_area_9", List.of())));
+
+        run(admin, "delete", "market");
+        run(admin, "delete", "market");
+
+        verify(regions).removeRegion(world, "lootbox_area_9");
+    }
+
+    @Test
     void list_andInfo_readTheRuntimeConfig() {
         areas.add(area(1, "spawn", "lootbox_spawn"));
         when(regions.bounds(eq(world), eq("lootbox_spawn"))).thenReturn(java.util.Optional.empty());
