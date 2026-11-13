@@ -51,7 +51,17 @@ public final class NpcNavigationMetrics implements MetricsCollector {
         /** A blocked NPC set out on the partial route to its blocking element (NAV-04). */
         BLOCKED_WALK,
         /** An NPC waiting at a blocking element was woken by an event instead of its safety timer. */
-        WOKEN
+        WOKEN,
+        /** A group folded into a column where its path is too narrow for its formation (NAV-05). */
+        GROUP_FOLD,
+        /** A folded group took up its formation again. */
+        GROUP_REFORM,
+        /** A follower that fell off its lane or got stuck planned its own leg back to the group's path. */
+        GROUP_REJOIN,
+        /** A group's leader waited for followers that had fallen too far behind. */
+        GROUP_REGROUP,
+        /** A follower's own legs back failed repeatedly: the group goes on without it, it keeps trying slowly. */
+        GROUP_LOST
     }
 
     /** Main-thread time per tick: 10 µs .. 50 ms. */

@@ -199,6 +199,16 @@ final class CitizensNpcMover implements NpcMover {
         return ahead;
     }
 
+    /** Citizens' speed modifier: on the default parameters for the next orders and on the running one. */
+    @Override
+    public void setSpeedFactor(double factor) {
+        float modifier = (float) Math.max(0.1, Math.min(3, factor));
+        npc.getNavigator().getDefaultParameters().speedModifier(modifier);
+        if (npc.isSpawned() && npc.getNavigator().isNavigating()) {
+            npc.getNavigator().getLocalParameters().speedModifier(modifier);
+        }
+    }
+
     @Override
     public void stop() {
         if (npc.isSpawned() && npc.getNavigator().isNavigating()) {

@@ -320,4 +320,103 @@ class NpcNavRunnerTest {
             1e-9);
         assertFalse(runner.routes().current().from() == null, "the ends are saved as the current route");
     }
+
+    // ==================== groups (PandiO/knk-workspace#377) ====================
+
+    /** Lets every mover that has an order reach its target, tick by tick, until {@code done} or the ticks run out. */
+    private void walk(java.util.function.BooleanSupplier done, int maxTicks) {
+        for (int i = 0; i < maxTicks && !done.getAsBoolean(); i++) {
+            for (Mover mover : List.copyOf(movers)) {
+                if (mover.lastTarget != null && !mover.removed) {
+                    mover.arrive();
+                }
+            }
+            ticks(1);
+        }
+    }
+
+    @Test
+    void aGroupWalksTheRouteWithOneRoadPlanAndTurnsRound() {
+        runner.spawnGroup(5, NpcAccessProfile.DEFAULT, net.knightsandkings.knk.core.npc.nav.group.Formation.Type.RANKS);
+        assertEquals(0, runner.groupCount(), "the group forms when everybody is out");
+        ticks(3);
+
+        assertEquals(5, movers.size());
+        assertEquals(5, runner.count());
+        assertEquals(1, runner.groupCount());
+        ticks(1);
+        assertEquals(1, roadGoals.size(), "the leader's plan is the group's only one");
+        assertEquals(60.5, roadGoals.get(0).x(), 1e-9);
+        assertEquals(NpcNavState.MOVING, service.state(movers.get(0).id()));
+        for (Mover follower : movers.subList(1, 5)) {
+            assertEquals(NpcNavState.IDLE, service.state(follower.id()), "a follower has no order of its own");
+        }
+        String line = runner.report(0, 0).stream().filter(l -> l.startsWith("groups ")).findFirst().orElseThrow();
+        assertTrue(line.startsWith("groups 1 (5 NPCs, ranks): trips 0 | folds 0, reforms 0, folded now 0 | own legs back 0"),
+            line);
+        assertTrue(line.endsWith("most plans at once 0"), "this test's planner answers at once: " + line);
+
+        walk(() -> roadGoals.size() >= 2, 1500);
+
+        assertEquals(2, roadGoals.size(), "arrived, rested and sent back: one more plan");
+        assertEquals(0.5, roadGoals.get(1).x(), 1e-9);
+        assertTrue(runner.report(0, 0).stream().anyMatch(l -> l.startsWith("groups 1 (5 NPCs, ranks): trips 1 ")));
+        assertTrue(runner.report(0, 0).get(3).startsWith("trips 0 "), "a group's trip is not five NPC trips");
+        for (Mover follower : movers.subList(1, 5)) {
+            assertTrue(follower.position.x() > 50, "the followers came along: " + follower.position);
+        }
+    }
+
+    @Test
+    void aGroupTakesItsFormationFromTheSettingsUnlessTheCommandNamesOne() throws Exception {
+        runner.spawnGroup(3, NpcAccessProfile.DEFAULT, null);
+        runner.spawnGroup(3, NpcAccessProfile.DEFAULT, net.knightsandkings.knk.core.npc.nav.group.Formation.Type.ESCORT_RING);
+        ticks(4);
+
+        assertEquals(2, runner.groupCount());
+        assertTrue(runner.report(0, 0).stream().anyMatch(l -> l.startsWith("groups 2 (6 NPCs, column/escort-ring)")));
+        try (var files = Files.list(folder.resolve("npc-logs"))) {
+            String log = Files.readString(files.filter(f -> f.getFileName().toString().endsWith("_npc-nav.log"))
+                .findFirst().orElseThrow());
+            assertTrue(log.contains("column, spacing 2.0, group-formation from default"), log);
+            assertTrue(log.contains("escort-ring, spacing 2.0, group-formation from assignment"), log);
+        }
+    }
+
+    @Test
+    void gotoAndPatrolOrderTheGroupNotItsMembers() {
+        runner.spawnGroup(4, NpcAccessProfile.DEFAULT, null);
+        ticks(3);
+        roadGoals.clear();
+
+        assertEquals(4, runner.goTo(new NavPoint(WORLD, 30.5, 65, 30.5)));
+        ticks(1);
+        assertEquals(1, roadGoals.size(), "one plan for the group");
+        assertEquals(30.5, roadGoals.get(0).z(), 1e-9);
+
+        assertEquals(4, runner.patrol());
+        ticks(1);
+        assertEquals(2, roadGoals.size());
+        assertEquals(0.5, roadGoals.get(1).z(), 1e-9, "back on the route");
+    }
+
+    @Test
+    void clearDisbandsGroupsAlsoWhileTheyAreStillSpawning() {
+        runner.spawnGroup(4, NpcAccessProfile.DEFAULT, null);
+        ticks(3);
+        runner.spawnGroup(6, NpcAccessProfile.DEFAULT, null);
+        ticks(1);
+        assertEquals(1, runner.groupCount());
+        assertEquals(6, runner.count());
+
+        assertEquals(6, runner.clear());
+
+        assertEquals(0, runner.groupCount());
+        assertEquals(0, runner.count());
+        assertEquals(0, service.count());
+        assertTrue(movers.stream().allMatch(mover -> mover.removed));
+        ticks(5);
+        assertEquals(6, movers.size(), "the queued spawns are gone");
+        assertTrue(runner.report(0, 0).stream().anyMatch(l -> l.startsWith("groups 0 (0 NPCs): trips 0 ")));
+    }
 }

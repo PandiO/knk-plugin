@@ -85,6 +85,18 @@ class NpcNavigationModuleDisabledTest {
         // PandiO/knk-workspace#361: no rule-change listener, no access rules port, no rule checks
         org.mockito.Mockito.verifyNoInteractions(roadNavigation);
         assertEquals(0, module.metrics().total(net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event.RULE_CHECK));
+        // PandiO/knk-workspace#377: "group" is one of the actions refused above; no group service, no group event
+        assertTrue(NpcNavigationModule.NAV_ACTIONS.contains("group"));
+        for (String event : List.of("GROUP_FOLD", "GROUP_REFORM", "GROUP_REJOIN", "GROUP_REGROUP", "GROUP_LOST")) {
+            assertEquals(0, module.metrics().total(
+                net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event.valueOf(event)), event);
+        }
+        said.clear();
+        assertTrue(module.execute(sender, new String[] {"nav", "group", "50", "escort-ring"}));
+        assertEquals(List.of("NPC navigation unavailable: npc.navigation.enabled is false"), said);
+        assertEquals(List.of("column", "ranks", "cluster", "escort-ring"),
+            module.complete(sender, new String[] {"nav", "group", "50", ""}), "completion needs nothing running either");
+        assertTrue(module.status(sender).stream().noneMatch(line -> line.contains("groups")), "no route NPC line");
         assertFalse(new File(dataFolder.toFile(), NpcRouteStore.FILE).exists(), "no files");
         assertFalse(new File(dataFolder.toFile(), "npc-logs").exists());
         module.stop(); // and stopping it needs no server either

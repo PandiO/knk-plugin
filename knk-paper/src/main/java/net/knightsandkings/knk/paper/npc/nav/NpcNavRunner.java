@@ -24,13 +24,19 @@ import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event;
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationService;
 import net.knightsandkings.knk.core.npc.nav.NpcSpawnQueue;
 import net.knightsandkings.knk.core.npc.nav.RouteFollower;
+import net.knightsandkings.knk.core.npc.nav.group.Formation;
+import net.knightsandkings.knk.core.npc.nav.group.GroupSettings;
+import net.knightsandkings.knk.core.npc.nav.group.NavGroup;
+import net.knightsandkings.knk.core.npc.nav.group.NavGroupService;
 
 /**
  * The admin test driver behind {@code /knk npc nav} (PandiO/knk-workspace#360), in place of the Citizens spike's
  * command: it stands in for behavior. NPCs are spawned a few per tick (NAV-13) near the route's start and walk the
  * route back and forth through {@link NpcNavigationService}; a failed order is given again after a pause. It keeps
  * the numbers the spike reported (trips, stuck by kind, tick cost per NPC against a baseline, distance from the
- * road line) and can trace one NPC tick by tick. Not a gameplay feature. Main thread.
+ * road line) and can trace one NPC tick by tick. {@code /knk npc nav group} (PandiO/knk-workspace#377) spawns NPCs
+ * as one {@link NavGroup} that walks the route in a formation: the group is ordered, not its members. Not a gameplay
+ * feature. Main thread.
  */
 public final class NpcNavRunner {
 
@@ -50,10 +56,32 @@ public final class NpcNavRunner {
         long tripStartNanos = System.nanoTime();
         long nextOrderTick = -1;
         NavPoint goal;
+        /** A member of a group: the group gets the orders. */
+        boolean grouped;
 
         Walker(NpcMover mover, String profile) {
             this.mover = mover;
             this.profile = profile;
+        }
+    }
+
+    /** A group being spawned, or walking the route. */
+    private static final class GroupRun {
+        final int size;
+        final NpcAccessProfile profile;
+        /** The formation asked for with the command (the assignment layer), or null for the settings' own. */
+        final Formation.Type formation;
+        final List<Walker> members = new ArrayList<>();
+        NavGroup group;
+        boolean patrol = true;
+        boolean towardsTo = true;
+        long nextOrderTick = -1;
+        NavPoint goal;
+
+        GroupRun(int size, NpcAccessProfile profile, Formation.Type formation) {
+            this.size = size;
+            this.profile = profile;
+            this.formation = formation;
         }
     }
 
@@ -66,6 +94,8 @@ public final class NpcNavRunner {
     private final NpcNavLog log;
     private final NpcSpawnQueue spawns;
     private final Function<NavPoint, List<String>> regionsOuterToInner;
+    private final NavGroupService groups;
+    private final List<GroupRun> groupRuns = new ArrayList<>();
     private final Map<Integer, Walker> walkers = new LinkedHashMap<>();
     private final Map<String, Integer> failures = new TreeMap<>();
     private final Map<Event, Long> totalsAtReset = new EnumMap<>(Event.class);
@@ -83,6 +113,8 @@ public final class NpcNavRunner {
     private long trips;
     private double tripSecondsSum;
     private long blockedReports;
+    private long groupTrips;
+    private int mostPlansAtOnce;
     private long straySamples;
     private long strayOver2;
     private double strayMax;
@@ -102,8 +134,17 @@ public final class NpcNavRunner {
     public NpcNavRunner(NpcMoverFactory factory, NpcNavigationService service, NavigationSettings settings,
                         NpcNavigationMetrics metrics, NavWorld world, NpcRouteStore routes, NpcNavLog log,
                         int spawnsPerTick, Function<NavPoint, List<String>> regionsOuterToInner) {
+        this(factory, service, new NavGroupService(new NavGroupService.Ports(service, world, null, metrics, null,
+            log::event)), settings, metrics, world, routes, log, spawnsPerTick, regionsOuterToInner);
+    }
+
+    /** @param groups the group service over {@code service}; this driver ticks it, the caller tells it of rule changes */
+    public NpcNavRunner(NpcMoverFactory factory, NpcNavigationService service, NavGroupService groups,
+                        NavigationSettings settings, NpcNavigationMetrics metrics, NavWorld world, NpcRouteStore routes,
+                        NpcNavLog log, int spawnsPerTick, Function<NavPoint, List<String>> regionsOuterToInner) {
         this.factory = factory;
         this.service = service;
+        this.groups = groups;
         this.settings = settings;
         this.metrics = metrics;
         this.world = world;
@@ -127,6 +168,11 @@ public final class NpcNavRunner {
 
     public int count() {
         return walkers.size();
+    }
+
+    /** Groups walking the route (those still spawning not counted). */
+    public int groupCount() {
+        return (int) groupRuns.stream().filter(run -> run.group != null).count();
     }
 
     public int pendingSpawns() {
@@ -171,6 +217,10 @@ public final class NpcNavRunner {
     }
 
     private void spawnOne(NpcAccessProfile profile) {
+        order(spawnWalker(profile));
+    }
+
+    private Walker spawnWalker(NpcAccessProfile profile) {
         NavPoint at = spawnSpot();
         NavigationSettings.Scope scope = new NavigationSettings.Scope(at.world(), regionsOuterToInner.apply(at), null,
             null);
@@ -182,7 +232,90 @@ public final class NpcNavRunner {
         Walker walker = new Walker(mover, profile.id());
         walkers.put(mover.id(), walker);
         metrics.count(Event.SPAWNED);
-        order(walker);
+        return walker;
+    }
+
+    // ==================== groups ====================
+
+    /**
+     * Queues {@code n} NPCs that walk the route as one group (PandiO/knk-workspace#377): the first spawned leads,
+     * the others follow in the formation's slots. {@code formation} null: the one the settings give at the route's
+     * start ({@code group-formation}); else it is the group's own (the assignment layer, decision Q4).
+     */
+    public void spawnGroup(int n, NpcAccessProfile profile, Formation.Type formation) {
+        if (walkers.isEmpty() && spawns.pending() == 0) {
+            resetCounters();
+            log.rearm();
+        }
+        log.fileOnly("run: a group of " + n + " NPCs, formation " + (formation == null ? "from the settings"
+            : formation.configName()) + ", profile " + profile.id() + ", route from " + NpcRouteStore.describe(from)
+            + " -> to " + NpcRouteStore.describe(to));
+        GroupRun run = new GroupRun(n, profile, formation);
+        groupRuns.add(run);
+        for (int i = 0; i < n; i++) {
+            spawns.add(() -> spawnMember(run));
+        }
+    }
+
+    private void spawnMember(GroupRun run) {
+        Walker walker = spawnWalker(run.profile);
+        walker.grouped = true;
+        walker.patrol = false;
+        run.members.add(walker);
+        if (run.members.size() < run.size) {
+            return;
+        }
+        // everybody is out: the group's settings are resolved once, for its leader
+        NpcMover leader = run.members.get(0).mover;
+        NavPoint at = leader.position().orElse(from);
+        NavigationSettings.Scope scope = new NavigationSettings.Scope(at.world(), regionsOuterToInner.apply(at), null,
+            run.formation == null ? null : NavigationSettings.Overrides.of(NavigationSettings.GROUP_FORMATION,
+                run.formation.configName()));
+        GroupSettings groupSettings = GroupSettings.of(settings, scope);
+        List<NpcMover> followers = new ArrayList<>();
+        for (Walker member : run.members.subList(1, run.members.size())) {
+            followers.add(member.mover);
+        }
+        run.group = groups.create(leader, followers, run.profile, groupSettings);
+        log.fileOnly("group " + run.group.id() + ": leader " + leader.name() + ", " + followers.size() + " followers, "
+            + groupSettings.formation() + ", " + NavigationSettings.GROUP_FORMATION.name() + " from "
+            + settings.resolve(NavigationSettings.GROUP_FORMATION, scope).layer().name().toLowerCase(Locale.ROOT));
+        orderGroup(run);
+    }
+
+    private void orderGroup(GroupRun run) {
+        run.nextOrderTick = -1;
+        run.goal = run.patrol ? (run.towardsTo ? to : from) : run.goal;
+        if (run.goal == null || run.group == null) {
+            return;
+        }
+        run.group.navigate(run.goal, result -> onGroupResult(run, result));
+    }
+
+    private void onGroupResult(GroupRun run, NavigationResult result) {
+        String name = "group " + run.group.id() + " (" + run.group.leader().name() + ", " + run.group.size() + " NPCs)";
+        switch (result) {
+            case NavigationResult.Arrived arrived -> {
+                groupTrips++;
+                if (run.patrol) {
+                    run.towardsTo = !run.towardsTo;
+                    run.nextOrderTick = tick + TURN_TICKS;
+                }
+            }
+            case NavigationResult.Blocked blocked -> {
+                blockedReports++;
+                String what = "blocked: " + blocked.reason() + (blocked.blockingElement() == null ? ""
+                    : " [" + blocked.blockingElement().describe() + "]");
+                fail(what);
+                log.event(name + " " + what);
+            }
+            case NavigationResult.Failed failed -> {
+                fail("failed: " + failed.reason().replaceAll("-?\\d+ -?\\d+ -?\\d+", "<x y z>"));
+                log.event(name + " order failed: " + failed.reason());
+                run.nextOrderTick = tick + FAILED_RETRY_TICKS;
+            }
+            case NavigationResult.Cancelled cancelled -> { }
+        }
     }
 
     /**
@@ -211,6 +344,9 @@ public final class NpcNavRunner {
     }
 
     private void order(Walker walker) {
+        if (walker.grouped) {
+            return;
+        }
         walker.nextOrderTick = -1;
         walker.goal = walker.patrol ? (walker.towardsTo ? to : from) : walker.goal;
         if (walker.goal == null) {
@@ -253,10 +389,18 @@ public final class NpcNavRunner {
     /** Every NPC stops walking the route and goes to {@code feet} once; returns how many. */
     public int goTo(NavPoint feet) {
         for (Walker walker : walkers.values()) {
+            if (walker.grouped) {
+                continue;
+            }
             walker.patrol = false;
             walker.goal = feet;
             walker.tripStartNanos = System.nanoTime();
             order(walker);
+        }
+        for (GroupRun run : groupRuns) {
+            run.patrol = false;
+            run.goal = feet;
+            orderGroup(run);
         }
         return walkers.size();
     }
@@ -264,8 +408,14 @@ public final class NpcNavRunner {
     /** Every NPC walks the route back and forth again. */
     public int patrol() {
         for (Walker walker : walkers.values()) {
-            walker.patrol = true;
-            order(walker);
+            if (!walker.grouped) {
+                walker.patrol = true;
+                order(walker);
+            }
+        }
+        for (GroupRun run : groupRuns) {
+            run.patrol = true;
+            orderGroup(run);
         }
         return walkers.size();
     }
@@ -273,6 +423,10 @@ public final class NpcNavRunner {
     /** Removes every test NPC and drops the spawns still queued; returns how many NPCs were removed. */
     public int clear() {
         spawns.clear();
+        for (GroupRun run : groupRuns) {
+            groups.disband(run.group);
+        }
+        groupRuns.clear();
         int n = walkers.size();
         for (Walker walker : List.copyOf(walkers.values())) {
             service.unregister(walker.mover.id());
@@ -302,6 +456,12 @@ public final class NpcNavRunner {
                 order(walker);
             }
         }
+        for (GroupRun run : groupRuns) {
+            if (run.nextOrderTick >= 0 && tick >= run.nextOrderTick) {
+                orderGroup(run);
+            }
+        }
+        groups.tick(); // after the orders above, before the navigation service's tick
         if (tick % STRAY_SAMPLE_TICKS == 0) {
             sampleStray();
         }
@@ -312,7 +472,8 @@ public final class NpcNavRunner {
 
     /** After the service's tick: its main-thread time, for the per-NPC cost. */
     public void sampleService() {
-        serviceUs[serviceSamples++ % TICK_WINDOW] = service.lastTickNanos() / 1000.0;
+        serviceUs[serviceSamples++ % TICK_WINDOW] = (service.lastTickNanos() + groups.lastTickNanos()) / 1000.0;
+        mostPlansAtOnce = Math.max(mostPlansAtOnce, service.queued() + service.plansInFlight());
     }
 
     /** The server's last tick duration (ServerTickEndEvent), for the tick mean against the baseline. */
@@ -439,6 +600,8 @@ public final class NpcNavRunner {
         trips = 0;
         tripSecondsSum = 0;
         blockedReports = 0;
+        groupTrips = 0;
+        mostPlansAtOnce = 0;
         straySamples = 0;
         strayOver2 = 0;
         strayMax = 0;
@@ -492,10 +655,43 @@ public final class NpcNavRunner {
             "distance from the road line: mean %.2f, max %.2f blocks, over 2 blocks %.1f%% of %d samples",
             straySamples == 0 ? 0.0 : straySum / straySamples, strayMax,
             straySamples == 0 ? 0.0 : 100.0 * strayOver2 / straySamples, straySamples));
+        lines.add(groupReport());
         lines.add("failures: " + (failures.isEmpty() ? "none" : failures.toString()));
         lines.add("route: from " + NpcRouteStore.describe(from) + " -> to " + NpcRouteStore.describe(to)
             + (log.fileName() == null ? "" : " | log npc-logs/" + log.fileName()));
         return lines;
+    }
+
+    /**
+     * The groups' line of the report (PandiO/knk-workspace#377): how many, what they did to stay together, and the
+     * most route plans waiting or running at the same time since the last reset - a group's event replan is one.
+     */
+    private String groupReport() {
+        int members = 0;
+        int folded = 0;
+        int waiting = 0;
+        int ownLegs = 0;
+        int leftBehind = 0;
+        double lag = 0;
+        java.util.Set<String> formations = new java.util.TreeSet<>();
+        for (GroupRun run : groupRuns) {
+            if (run.group == null) {
+                continue;
+            }
+            members += run.group.size();
+            folded += run.group.folded() ? 1 : 0;
+            waiting += run.group.holding() ? 1 : 0;
+            ownLegs += run.group.followers(NavGroup.FollowerState.REJOINING);
+            leftBehind += run.group.lost();
+            lag = Math.max(lag, run.group.maxLag());
+            formations.add(run.group.settings().formation().type().configName());
+        }
+        return String.format(Locale.ROOT,
+            "groups %d (%d NPCs%s): trips %d | folds %d, reforms %d, folded now %d | own legs back %d (now %d), "
+                + "left behind %d (now %d), leader waited %d (now %d), furthest behind its slot %.1f blocks | most plans "
+                + "at once %d", groupCount(), members, formations.isEmpty() ? "" : ", " + String.join("/", formations),
+            groupTrips, since(Event.GROUP_FOLD), since(Event.GROUP_REFORM), folded, since(Event.GROUP_REJOIN), ownLegs,
+            since(Event.GROUP_LOST), leftBehind, since(Event.GROUP_REGROUP), waiting, lag, mostPlansAtOnce);
     }
 
     /** Writes a report into the run log file. */

@@ -48,6 +48,8 @@ public final class NpcNavigationModule {
     // Route following (PandiO/knk-workspace#360): built on the first /knk npc nav use, so nothing runs before that.
     private java.util.function.Supplier<net.knightsandkings.knk.paper.navigation.NavigationService> navigation;
     private NpcNavigationService service;
+    /** Groups on top of the navigation service (PandiO/knk-workspace#377); built with it. */
+    private net.knightsandkings.knk.core.npc.nav.group.NavGroupService groups;
     private NpcNavRunner runner;
     private BukkitTask navTask;
     private org.bukkit.event.Listener tickListener;
@@ -124,7 +126,8 @@ public final class NpcNavigationModule {
                 "NPC navigation: status, NPC event audit, test NPCs, route following (PandiO/knk-workspace#358)",
                 "/knk npc <status|audit start|audit stop|audit report|test spawn <n> [radius]|test clear|nav ...>", PERMISSION,
                 List.of("/knk npc status", "/knk npc audit start", "/knk npc test spawn 50 24", "/knk npc audit report",
-                    "/knk npc nav from", "/knk npc nav to", "/knk npc nav spawn 50", "/knk npc nav stats")),
+                    "/knk npc nav from", "/knk npc nav to", "/knk npc nav spawn 50", "/knk npc nav group 20 ranks",
+                    "/knk npc nav stats")),
             module::execute, module::complete);
         return module;
     }
@@ -155,6 +158,7 @@ public final class NpcNavigationModule {
             runner.clear();
             runner = null;
             service = null;
+            groups = null;
         }
         if (walkers != null) {
             walkers.clear();
@@ -211,24 +215,37 @@ public final class NpcNavigationModule {
         // gate and availability events reach the NPCs through road navigation's listener port; an event may arrive
         // off the main thread (a cache refresh), the NPC service is main thread only
         NpcNavigationService npcs = service;
+        // groups sit on top of the navigation service: a leader hears of a rule change there (one replan per group),
+        // the followers' lanes are asked about again here
+        net.knightsandkings.knk.core.npc.nav.group.NavGroupService groupService =
+            new net.knightsandkings.knk.core.npc.nav.group.NavGroupService(
+                new net.knightsandkings.knk.core.npc.nav.group.NavGroupService.Ports(service, world, nav.accessRules(),
+                    metrics, System::nanoTime, log::event));
+        groups = groupService;
         ruleEvents = nav.addRuleChangeListener(new net.knightsandkings.knk.core.npc.nav.RuleChangeListener() {
             @Override
             public void gateChanged(int doorId) {
-                onMainThread(() -> npcs.onGateChanged(doorId));
+                onMainThread(() -> {
+                    npcs.onGateChanged(doorId);
+                    groupService.onRulesChanged();
+                });
             }
 
             @Override
             public void availabilityChanged() {
-                onMainThread(npcs::onAvailabilityChanged);
+                onMainThread(() -> {
+                    npcs.onAvailabilityChanged();
+                    groupService.onRulesChanged();
+                });
             }
         });
-        runner = new NpcNavRunner(factory, service, config.settings(), metrics, world,
+        runner = new NpcNavRunner(factory, service, groupService, config.settings(), metrics, world,
             new NpcRouteStore(plugin.getDataFolder(), logger), log, config.spawnsPerTick(), at -> {
                 org.bukkit.World w = Bukkit.getWorld(at.world());
                 return w == null ? List.of() : regionsOuterToInner(new org.bukkit.Location(w, at.x(), at.y(), at.z()));
             });
         navTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
-            runner.tick();
+            runner.tick(); // the test driver, then the groups
             service.tick();
             runner.sampleService();
         }, 1L, 1L);
@@ -293,6 +310,12 @@ public final class NpcNavigationModule {
             if (args.length == 4 && args[1].equalsIgnoreCase("spawn")) {
                 return filter(List.copyOf(config.accessProfiles().keySet()), args[3]);
             }
+            if (args.length == 4 && args[1].equalsIgnoreCase("group")) {
+                return filter(FORMATIONS, args[3]);
+            }
+            if (args.length == 5 && args[1].equalsIgnoreCase("group")) {
+                return filter(List.copyOf(config.accessProfiles().keySet()), args[4]);
+            }
             if (args.length == 3 && args[1].equalsIgnoreCase("stats")) {
                 return filter(List.of("reset"), args[2]);
             }
@@ -319,8 +342,8 @@ public final class NpcNavigationModule {
         }
         if (runner != null) {
             lines.add("route NPCs " + runner.count() + (runner.pendingSpawns() == 0 ? "" : " (+" + runner.pendingSpawns()
-                + " spawning)") + " " + service.states() + ", planning queue " + service.queued() + ", in flight "
-                + service.plansInFlight());
+                + " spawning)") + " " + service.states() + ", groups " + runner.groupCount() + ", planning queue "
+                + service.queued() + ", in flight " + service.plansInFlight());
         }
         lines.add("event audit " + (audit.isRunning() ? "running" : "stopped") + "; metrics "
             + (metricsExported ? "on" : "off (metrics.enabled)"));
@@ -407,10 +430,14 @@ public final class NpcNavigationModule {
 
     // ==================== /knk npc nav ====================
 
-    static final List<String> NAV_ACTIONS = List.of("from", "to", "route", "baseline", "spawn", "goto", "patrol",
+    static final List<String> NAV_ACTIONS = List.of("from", "to", "route", "baseline", "spawn", "group", "goto", "patrol",
         "stats", "trace", "clear");
     static final String NAV_USAGE = "/knk npc nav <from|to|route list|save|load|delete <name>|baseline|spawn <n> [profile]"
-        + "|goto|patrol|stats [reset]|trace [npc] [seconds]|clear>";
+        + "|group <n> [formation] [profile]|goto|patrol|stats [reset]|trace [npc] [seconds]|clear>";
+    /** The formations of {@code /knk npc nav group}, by config name. */
+    static final List<String> FORMATIONS = java.util.Arrays.stream(
+            net.knightsandkings.knk.core.npc.nav.group.Formation.Type.values())
+        .map(net.knightsandkings.knk.core.npc.nav.group.Formation.Type::configName).toList();
 
     /**
      * Route following for testing (in place of the spike's {@code /knk npcspike}):
@@ -419,6 +446,8 @@ public final class NpcNavigationModule {
      * route list|save|load|delete    named routes in npc-routes.yml
      * baseline                       store the current mean tick time as the no-NPC baseline
      * spawn &lt;n&gt; [profile]            n NPCs (a few per tick) that walk the route back and forth
+     * group &lt;n&gt; [formation] [profile] n NPCs that walk the route as one group: column, ranks, cluster or
+     *                                escort-ring (default: the group-formation setting at the route's start)
      * goto | patrol                  every NPC walks to you once | walks the route again
      * stats [reset]                  the counters (also written to npc-logs/); reset zeroes them
      * trace [npc] [seconds]          per-tick trace of one NPC (nearest by default, 30 s) to npc-logs/
@@ -449,6 +478,7 @@ public final class NpcNavigationModule {
             case "baseline" -> sender.sendMessage(String.format(Locale.ROOT, "Baseline %.2f ms (%d route NPCs out)",
                 runner.baseline(), runner.count()));
             case "spawn" -> navSpawn(sender, args);
+            case "group" -> navGroup(sender, args);
             case "goto" -> {
                 if (!(sender instanceof Player player)) {
                     sender.sendMessage("Players only.");
@@ -515,6 +545,49 @@ public final class NpcNavigationModule {
         runner.spawn(n, profile);
         sender.sendMessage("Spawning " + n + " route NPCs, " + config.spawnsPerTick() + " per tick, access profile "
             + profile.id() + ". /knk npc nav stats shows them; /knk npc nav clear removes them.");
+    }
+
+    /** {@code /knk npc nav group <n> [formation] [profile]}: n NPCs as one group on the route. */
+    private void navGroup(CommandSender sender, String[] args) {
+        if (runner.from() == null || runner.to() == null) {
+            sender.sendMessage("Set both ends first: /knk npc nav from, /knk npc nav to (or route load <name>)");
+            return;
+        }
+        if (!runner.from().world().equals(runner.to().world())) {
+            sender.sendMessage("Both ends must be in the same world.");
+            return;
+        }
+        int n;
+        try {
+            n = Math.max(2, Math.min(500, Integer.parseInt(args.length > 2 ? args[2] : "20")));
+        } catch (NumberFormatException e) {
+            sender.sendMessage("Not a number: " + args[2]);
+            return;
+        }
+        net.knightsandkings.knk.core.npc.nav.group.Formation.Type formation = null;
+        String profileId = net.knightsandkings.knk.core.npc.nav.NpcAccessProfile.DEFAULT.id();
+        if (args.length > 3) {
+            formation = net.knightsandkings.knk.core.npc.nav.group.Formation.Type.byName(args[3]);
+            if (formation == null && args.length > 4) {
+                sender.sendMessage("No formation " + args[3] + ": " + FORMATIONS);
+                return;
+            }
+            if (formation == null) {
+                profileId = args[3]; // no formation given: the settings' own, and this is the profile
+            } else if (args.length > 4) {
+                profileId = args[4];
+            }
+        }
+        net.knightsandkings.knk.core.npc.nav.NpcAccessProfile profile = config.accessProfile(profileId);
+        if (profile == null) {
+            sender.sendMessage("No formation or access profile " + profileId + ". Formations: " + FORMATIONS
+                + "; access profiles (npc.navigation.access-profiles): " + config.accessProfiles().keySet());
+            return;
+        }
+        runner.spawnGroup(n, profile, formation);
+        sender.sendMessage("Spawning a group of " + n + " route NPCs, " + config.spawnsPerTick() + " per tick, formation "
+            + (formation == null ? "from the settings (group-formation)" : formation.configName()) + ", access profile "
+            + profile.id() + ". The first one leads; /knk npc nav stats has a groups line; /knk npc nav clear removes them.");
     }
 
     private void navRoute(CommandSender sender, String[] args) {

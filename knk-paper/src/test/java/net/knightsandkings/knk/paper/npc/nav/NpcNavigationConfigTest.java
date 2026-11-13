@@ -190,4 +190,56 @@ class NpcNavigationConfigTest {
         assertFalse(bad.settings().value(NavigationSettings.STOP_ON_TRESPASS, Scope.of("w")));
         assertEquals(10, NpcNavigationConfig.disabled().ruleChecksPerTick());
     }
+
+    @Test
+    void readsTheGroupKeysInEveryConfigLayer() throws Exception {
+        NpcNavigationConfig config = parse("""
+            npc:
+              navigation:
+                group-formation: ranks
+                group-spacing: 1.5
+                group-ranks-width: 3
+                group-rejoin-blocks: 6
+                group-regroup-blocks: 0
+                group-catch-up-speed: 1.5
+                worlds:
+                  w:
+                    group-formation: cluster
+                regions:
+                  keep:
+                    group-formation: escort-ring
+                    group-spacing: 3
+            """);
+        assertTrue(config.rejected().isEmpty(), config.rejected().toString());
+        Scope elsewhere = Scope.of("other");
+        assertEquals("ranks", config.settings().value(NavigationSettings.GROUP_FORMATION, elsewhere));
+        assertEquals(1.5, config.settings().value(NavigationSettings.GROUP_SPACING, elsewhere));
+        assertEquals(3, config.settings().value(NavigationSettings.GROUP_RANKS_WIDTH, elsewhere));
+        assertEquals(6.0, config.settings().value(NavigationSettings.GROUP_REJOIN_BLOCKS, elsewhere));
+        assertEquals(0.0, config.settings().value(NavigationSettings.GROUP_REGROUP_BLOCKS, elsewhere));
+        assertEquals(1.5, config.settings().value(NavigationSettings.GROUP_CATCH_UP_SPEED, elsewhere));
+        assertEquals("cluster", config.settings().value(NavigationSettings.GROUP_FORMATION, Scope.of("w")));
+        Scope inTheKeep = new Scope("w", java.util.List.of("keep"), null, null);
+        assertEquals(new NavigationSettings.Resolved<>("escort-ring", Layer.REGION, "keep"),
+            config.settings().resolve(NavigationSettings.GROUP_FORMATION, inTheKeep));
+        net.knightsandkings.knk.core.npc.nav.group.GroupSettings group =
+            net.knightsandkings.knk.core.npc.nav.group.GroupSettings.of(config.settings(), inTheKeep);
+        assertEquals(net.knightsandkings.knk.core.npc.nav.group.Formation.Type.ESCORT_RING, group.formation().type());
+        assertEquals(3.0, group.formation().spacing());
+        assertEquals(0.0, group.regroupBlocks());
+
+        NpcNavigationConfig bad = parse("""
+            npc:
+              navigation:
+                group-formation: wedge
+                group-spacing: 0
+                group-ranks-width: 1
+                group-rejoin-blocks: 100
+                group-regroup-blocks: -5
+                group-catch-up-speed: 5
+            """);
+        assertEquals(6, bad.rejected().size(), bad.rejected().toString());
+        assertEquals("column", bad.settings().value(NavigationSettings.GROUP_FORMATION, elsewhere), "the default stays");
+        assertEquals(1.3, bad.settings().value(NavigationSettings.GROUP_CATCH_UP_SPEED, elsewhere));
+    }
 }

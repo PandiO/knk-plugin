@@ -27,4 +27,32 @@ class CitizensNpcMoverPathTest {
     void anEmptyPathHasNothingAhead() {
         assertTrue(CitizensNpcMover.aheadOf("world", new Vector(0, 64, 0), List.of()).isEmpty());
     }
+
+    /** PandiO/knk-workspace#377: a group's follower catching up walks faster through Citizens' speed modifier. */
+    @Test
+    void theSpeedFactorGoesToTheNextOrdersAndTheRunningOne() {
+        net.citizensnpcs.api.npc.NPC npc = org.mockito.Mockito.mock(net.citizensnpcs.api.npc.NPC.class);
+        net.citizensnpcs.api.ai.Navigator navigator = org.mockito.Mockito.mock(net.citizensnpcs.api.ai.Navigator.class);
+        net.citizensnpcs.api.ai.NavigatorParameters defaults =
+            org.mockito.Mockito.mock(net.citizensnpcs.api.ai.NavigatorParameters.class);
+        net.citizensnpcs.api.ai.NavigatorParameters local =
+            org.mockito.Mockito.mock(net.citizensnpcs.api.ai.NavigatorParameters.class);
+        org.mockito.Mockito.when(npc.getNavigator()).thenReturn(navigator);
+        org.mockito.Mockito.when(navigator.getDefaultParameters()).thenReturn(defaults);
+        org.mockito.Mockito.when(navigator.getLocalParameters()).thenReturn(local);
+        org.mockito.Mockito.when(npc.isSpawned()).thenReturn(true);
+        CitizensNpcMover mover = new CitizensNpcMover(npc, removed -> { });
+
+        mover.setSpeedFactor(1.3); // standing still: only the orders to come
+        org.mockito.Mockito.verify(defaults).speedModifier(1.3f);
+        org.mockito.Mockito.verifyNoInteractions(local);
+
+        org.mockito.Mockito.when(navigator.isNavigating()).thenReturn(true);
+        mover.setSpeedFactor(1);
+        org.mockito.Mockito.verify(defaults).speedModifier(1f);
+        org.mockito.Mockito.verify(local).speedModifier(1f);
+
+        mover.setSpeedFactor(50); // never absurd
+        org.mockito.Mockito.verify(defaults).speedModifier(3f);
+    }
 }
