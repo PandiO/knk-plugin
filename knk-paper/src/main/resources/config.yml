@@ -502,6 +502,37 @@ crossplay:
 
 # Road navigation (KNG-27, docs/specs/navigation/DESIGN.md §4). Road materials live in the API's road
 # profiles (learned by /knk road survey, edited in the web app), not here. Every key has a default.
+# NPC navigation (PandiO/knk-workspace#358, docs/specs/npc-platform/IMPLEMENTATION_PLAN.md): K&K plans routes, Citizens
+# moves the NPCs. Needs the Citizens plugin; without it /knk npc status says why NPC navigation is off.
+npc:
+  navigation:
+    enabled: false
+    # Route plans running at once, server-wide.
+    max-plans-in-flight: 4
+    # Per-NPC settings below are the global layer. A value comes from the most specific layer that sets it:
+    # code default -> this global layer -> worlds.<world> -> regions.<WorldGuard region or domain id> (innermost wins)
+    # -> NPC template -> assignment. /knk npc status shows each value with the layer it came from.
+    # Citizens path search for local legs and recovery: citizens | citizens_async
+    pathfinder: citizens
+    # Blocks of the route handed to the NPC at once.
+    stretch-blocks: 32
+    # Ticks between rechecks of the way ahead against the current gate and access rules (0 = off).
+    recheck-ticks: 40
+    # Ticks without movement before Citizens reports stuck.
+    stationary-ticks: 60
+    # Ticks without progress along the route before K&K's watchdog steps in.
+    no-progress-ticks: 60
+    # Whether NPCs push and block each other.
+    collidable: false
+    # Outside player-loaded areas: load (keep the chunks ahead loaded, the NPC really walks; capped) | simulate.
+    chunk-loading: load
+    worlds: {}
+    #   world_KNK-DEV:
+    #     chunk-loading: simulate
+    regions: {}
+    #   district_1000006:
+    #     recheck-ticks: 20
+
 navigation:
   enabled: true
   # Routing cost per road class; lower is preferred

@@ -148,6 +148,8 @@ public class KnKPlugin extends JavaPlugin {
     private RegionHttpServer regionHttpServer;
     /** KNG-232: performance metrics endpoint, sampler and instruments; null until onEnable reads the config. */
     private net.knightsandkings.knk.paper.metrics.MetricsService metricsService;
+    // NPC navigation (PandiO/knk-workspace#358): /knk npc, metrics, the Citizens adapter when present.
+    private net.knightsandkings.knk.paper.npc.nav.NpcNavigationModule npcNavigation;
     private KnkConfig config;
     private CacheManager cacheManager;
     /** KNG-58: last-known account, freeze, mode and permission answers on disk, for when the API is down. */
@@ -1244,6 +1246,14 @@ public class KnKPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (npcNavigation != null) {
+            try {
+                npcNavigation.stop();
+            } catch (RuntimeException | LinkageError e) {
+                getLogger().log(java.util.logging.Level.WARNING, "[NPC] navigation shutdown failed", e);
+            }
+            npcNavigation = null;
+        }
         if (realtimeService != null) {
             realtimeService.stop();
             realtimeService = null;
@@ -2646,6 +2656,14 @@ public class KnKPlugin extends JavaPlugin {
             knkAdminCommand.setGateSpawnLookup(gateSpawnLookup(), MenuService.mainThreadExecutor(this));
             registerKnkShortcut("gate", knkAdminCommand);
             registerKnkShortcut("gatedoor", knkAdminCommand);
+            // NPC navigation (PandiO/knk-workspace#358): runs without Citizens; /knk npc status says why it's off.
+            try {
+                npcNavigation = net.knightsandkings.knk.paper.npc.nav.NpcNavigationModule.start(this, knkAdminCommand,
+                    metricsService == null ? null : metricsService::register,
+                    regionTracker == null ? null : regionTracker.regionIds());
+            } catch (RuntimeException | LinkageError e) {
+                getLogger().log(java.util.logging.Level.WARNING, "[NPC] navigation module failed to start", e);
+            }
             if (managedRegions != null) {
                 var regionsCommand = new net.knightsandkings.knk.paper.commands.RegionsAdminCommand(managedRegions, domainAccessSync, this,
                     tempRegionRetentionTask);
