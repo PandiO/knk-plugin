@@ -28,9 +28,12 @@ public final class NpcNavigationMetrics implements MetricsCollector {
         RECOVERED,
         /** Bounded retries used up (DESIGN §6). */
         RETRIES_EXHAUSTED,
-        /** An NPC stood in a region the current rules deny it (must stay 0). */
+        /** An NPC entered a region the current rules deny it (must stay 0). */
         TRESPASS,
-        REPLAN_RECHECK, REPLAN_EVENT,
+        /** The periodic recheck found a denied region or a closed gate ahead: the route was planned again. */
+        REPLAN_RECHECK,
+        /** A gate or availability event made an NPC plan again: its route crosses what changed, or it waited on it. */
+        REPLAN_EVENT,
         /** No allowed route: the NPC waits (NAV-03). */
         NO_ROUTE_WAIT,
         /** Chunk unloaded / loaded again (NAV-11). */
@@ -42,7 +45,13 @@ public final class NpcNavigationMetrics implements MetricsCollector {
         /** The engine added a block rule of its own to a local search; it was removed (must stay 0). */
         EXAMINER_LEAK,
         /** An order ended as failed (no road connects, retries and replans used up). */
-        FAILED
+        FAILED,
+        /** One NPC's way ahead and position were checked against the current rules (NAV-02). */
+        RULE_CHECK,
+        /** A blocked NPC set out on the partial route to its blocking element (NAV-04). */
+        BLOCKED_WALK,
+        /** An NPC waiting at a blocking element was woken by an event instead of its safety timer. */
+        WOKEN
     }
 
     /** Main-thread time per tick: 10 µs .. 50 ms. */

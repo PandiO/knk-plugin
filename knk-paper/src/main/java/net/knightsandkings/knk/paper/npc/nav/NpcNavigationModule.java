@@ -51,6 +51,8 @@ public final class NpcNavigationModule {
     private NpcNavRunner runner;
     private BukkitTask navTask;
     private org.bukkit.event.Listener tickListener;
+    /** Ends the subscription to road navigation's gate and availability events (PandiO/knk-workspace#361). */
+    private Runnable ruleEvents;
 
     private NpcNavigationModule(JavaPlugin plugin, NpcNavigationConfig config, RegionIds regionIds) {
         this.plugin = plugin;
@@ -145,6 +147,10 @@ public final class NpcNavigationModule {
             org.bukkit.event.HandlerList.unregisterAll(tickListener);
             tickListener = null;
         }
+        if (ruleEvents != null) {
+            ruleEvents.run();
+            ruleEvents = null;
+        }
         if (runner != null) {
             runner.clear();
             runner = null;
@@ -200,7 +206,22 @@ public final class NpcNavigationModule {
         NpcNavLog log = new NpcNavLog(plugin.getDataFolder().toPath(), logger);
         service = new NpcNavigationService(new NpcNavigationService.Ports(nav::planRoadFor,
             new NpcLegPreparer(legs, walk.searches(), task -> Bukkit.getScheduler().runTask(plugin, task),
-                Bukkit::getWorld, logger), world, metrics, System::nanoTime, log::event), config.maxPlansInFlight());
+                Bukkit::getWorld, logger), world, metrics, System::nanoTime, log::event, nav.accessRules()),
+            config.maxPlansInFlight(), config.ruleChecksPerTick());
+        // gate and availability events reach the NPCs through road navigation's listener port; an event may arrive
+        // off the main thread (a cache refresh), the NPC service is main thread only
+        NpcNavigationService npcs = service;
+        ruleEvents = nav.addRuleChangeListener(new net.knightsandkings.knk.core.npc.nav.RuleChangeListener() {
+            @Override
+            public void gateChanged(int doorId) {
+                onMainThread(() -> npcs.onGateChanged(doorId));
+            }
+
+            @Override
+            public void availabilityChanged() {
+                onMainThread(npcs::onAvailabilityChanged);
+            }
+        });
         runner = new NpcNavRunner(factory, service, config.settings(), metrics, world,
             new NpcRouteStore(plugin.getDataFolder(), logger), log, config.spawnsPerTick(), at -> {
                 org.bukkit.World w = Bukkit.getWorld(at.world());
@@ -214,6 +235,14 @@ public final class NpcNavigationModule {
         tickListener = new TickSampler();
         Bukkit.getPluginManager().registerEvents(tickListener, plugin);
         return null;
+    }
+
+    private void onMainThread(Runnable work) {
+        if (Bukkit.isPrimaryThread()) {
+            work.run();
+        } else {
+            Bukkit.getScheduler().runTask(plugin, work);
+        }
     }
 
     /** The server's tick durations, for the per-NPC cost against a baseline. Public for Bukkit's event executor. */
@@ -282,7 +311,8 @@ public final class NpcNavigationModule {
             : "NPC navigation: unavailable (" + unavailable + ")");
         lines.add("max plans in flight " + config.maxPlansInFlight() + ", override scopes " + config.settings().scopeCounts()
             + (config.rejected().isEmpty() ? "" : ", " + config.rejected().size() + " rejected config entries (see startup log)"));
-        lines.add("spawns per tick " + config.spawnsPerTick() + ", access profiles " + config.accessProfiles().keySet());
+        lines.add("spawns per tick " + config.spawnsPerTick() + ", rule checks per tick " + config.ruleChecksPerTick()
+            + ", access profiles " + config.accessProfiles().keySet());
         if (walkers != null) {
             Map<String, Map<NpcNavState, Integer>> states = walkers.states();
             lines.add("test NPCs " + walkers.count() + (states.isEmpty() ? "" : " " + states));

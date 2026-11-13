@@ -10,12 +10,13 @@ public sealed interface NavigationResult {
     }
 
     /**
-     * No allowed route now (a closed gate, a denied region): the NPC waits at the last allowed point; the order
-     * resumes on its own when the blocking element opens.
+     * No allowed route now (a closed gate, a denied region): the NPC walks as far as the rules allow and waits at
+     * the blocking element; the order resumes on its own when the element opens. Behavior may act on it instead
+     * (BEHAVIOR_MODEL §8, §17 gate confrontation) by giving another order.
      *
-     * @param blockingElement what blocks, as an id or name for logs and behavior (a gate, a region), or null
+     * @param blockingElement what blocks (a gate, a domain's region), or null when the router names nothing
      */
-    record Blocked(String reason, String blockingElement) implements NavigationResult {
+    record Blocked(String reason, BlockingElement blockingElement) implements NavigationResult {
         public Blocked {
             Objects.requireNonNull(reason, "reason");
         }

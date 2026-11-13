@@ -232,7 +232,10 @@ public final class NpcNavRunner {
             }
             case NavigationResult.Blocked blocked -> {
                 blockedReports++;
-                fail("blocked: " + blocked.reason());
+                fail("blocked: " + blocked.reason() + (blocked.blockingElement() == null ? ""
+                    : " [" + blocked.blockingElement().describe() + "]"));
+                log.event(walker.mover.name() + " blocked: " + blocked.reason() + (blocked.blockingElement() == null ? ""
+                    : " [" + blocked.blockingElement().describe() + "]"));
             }
             case NavigationResult.Failed failed -> {
                 fail("failed: " + failed.reason().replaceAll("-?\\d+ -?\\d+ -?\\d+", "<x y z>"));
@@ -478,9 +481,13 @@ public final class NpcNavRunner {
             since(Event.NO_ROUTE_WAIT), blockedReports, since(Event.UNLOADED_WAIT), since(Event.PAUSED),
             since(Event.RESUMED)));
         lines.add(String.format(Locale.ROOT,
-            "examiner: %d cells asked, %d blocked by K&K rules | engine block rules removed %d (must be 0) | "
-                + "trespasses %d (counted from Phase 3 on)", examinerCalls, examinerBlocked,
-            since(Event.EXAMINER_LEAK), since(Event.TRESPASS)));
+            "rules: trespasses %d (must be 0) | rule checks %d, replans: recheck %d, event %d | walked to the blocking "
+                + "element %d, woken by its event %d, waiting there now %d", since(Event.TRESPASS), since(Event.RULE_CHECK),
+            since(Event.REPLAN_RECHECK), since(Event.REPLAN_EVENT), since(Event.BLOCKED_WALK), since(Event.WOKEN),
+            walkers.values().stream().filter(walker -> service.waitsAtBlock(walker.mover.id())).count()));
+        lines.add(String.format(Locale.ROOT,
+            "examiner: %d cells asked, %d blocked by K&K rules | engine block rules removed %d (must be 0)",
+            examinerCalls, examinerBlocked, since(Event.EXAMINER_LEAK)));
         lines.add(String.format(Locale.ROOT,
             "distance from the road line: mean %.2f, max %.2f blocks, over 2 blocks %.1f%% of %d samples",
             straySamples == 0 ? 0.0 : straySum / straySamples, strayMax,

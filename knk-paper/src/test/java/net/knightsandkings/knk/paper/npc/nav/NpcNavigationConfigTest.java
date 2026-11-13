@@ -156,6 +156,38 @@ class NpcNavigationConfigTest {
         }
         assertEquals(2, config.spawnsPerTick());
         assertEquals(4, config.maxPlansInFlight());
+        assertEquals(10, config.ruleChecksPerTick());
         assertEquals(NpcAccessProfile.DEFAULT, config.accessProfile("default"));
+    }
+
+    @Test
+    void readsTheRuleCheckKeys() throws Exception {
+        NpcNavigationConfig config = parse("""
+            npc:
+              navigation:
+                rule-checks-per-tick: 25
+                recheck-ticks: 20
+                stop-on-trespass: true
+                regions:
+                  market:
+                    stop-on-trespass: false
+            """);
+        assertTrue(config.rejected().isEmpty(), config.rejected().toString());
+        assertEquals(25, config.ruleChecksPerTick());
+        assertEquals(20, config.settings().value(NavigationSettings.RECHECK_TICKS, Scope.of("w")));
+        assertTrue(config.settings().value(NavigationSettings.STOP_ON_TRESPASS, Scope.of("w")));
+        assertFalse(config.settings().value(NavigationSettings.STOP_ON_TRESPASS,
+            new Scope("w", java.util.List.of("market"), null, null)), "the region layer wins");
+
+        NpcNavigationConfig bad = parse("""
+            npc:
+              navigation:
+                rule-checks-per-tick: 0
+                stop-on-trespass: sometimes
+            """);
+        assertEquals(2, bad.rejected().size(), bad.rejected().toString());
+        assertEquals(10, bad.ruleChecksPerTick());
+        assertFalse(bad.settings().value(NavigationSettings.STOP_ON_TRESPASS, Scope.of("w")));
+        assertEquals(10, NpcNavigationConfig.disabled().ruleChecksPerTick());
     }
 }

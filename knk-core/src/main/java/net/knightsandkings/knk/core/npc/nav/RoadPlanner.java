@@ -3,6 +3,7 @@ package net.knightsandkings.knk.core.npc.nav;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Predicate;
 
 /**
  * Plans the road part of a route on the K&K road graph for a subject (paper: the road router with the subject's
@@ -29,23 +30,51 @@ public interface RoadPlanner {
     }
 
     /**
-     * @param line            the route as floor points (the road's polyline) for {@link Status#FOUND}; for
-     *                        {@link Status#BLOCKED} the part up to the blocking element (may be empty); else empty
-     * @param reason          why there is no route, for logs and the caller
-     * @param blockingElement what blocks ({@link Status#BLOCKED}): a gate or region name, or null
+     * A gate door on the route.
+     *
+     * @param at the floor point where the road stretch with the gate ends: until the NPC is past it, the gate is
+     *           ahead
      */
-    record RoadPlan(Status status, List<NavPoint> line, String reason, String blockingElement) {
+    record GateCrossing(int doorId, NavPoint at) {
+        public GateCrossing {
+            Objects.requireNonNull(at, "at");
+        }
+    }
+
+    /**
+     * @param line         the route as floor points (the road's polyline) for {@link Status#FOUND}; for
+     *                     {@link Status#BLOCKED} the part up to the blocking element (may be empty); else empty
+     * @param reason       why there is no route, for logs and the caller
+     * @param blocking     what blocks ({@link Status#BLOCKED}), or null
+     * @param gates        the gate doors {@code line} passes, in route order (Phase 3: a gate event replans only the
+     *                     NPCs whose route crosses that gate)
+     * @param stillBlocked for {@link Status#BLOCKED}: whether the blocking element still blocks a subject now,
+     *                     asked on the main thread when an event may have opened it; null when unknown (then the
+     *                     route is planned again to find out)
+     */
+    record RoadPlan(Status status, List<NavPoint> line, String reason, BlockingElement blocking,
+                    List<GateCrossing> gates, Predicate<AccessSubject> stillBlocked) {
         public RoadPlan {
             Objects.requireNonNull(status, "status");
             line = line == null ? List.of() : List.copyOf(line);
+            gates = gates == null ? List.of() : List.copyOf(gates);
         }
 
         public static RoadPlan found(List<NavPoint> line) {
-            return new RoadPlan(Status.FOUND, line, null, null);
+            return new RoadPlan(Status.FOUND, line, null, null, List.of(), null);
+        }
+
+        public static RoadPlan found(List<NavPoint> line, List<GateCrossing> gates) {
+            return new RoadPlan(Status.FOUND, line, null, null, gates, null);
+        }
+
+        public static RoadPlan blocked(List<NavPoint> partialLine, String reason, BlockingElement blocking,
+                                       List<GateCrossing> gates, Predicate<AccessSubject> stillBlocked) {
+            return new RoadPlan(Status.BLOCKED, partialLine, reason, blocking, gates, stillBlocked);
         }
 
         public static RoadPlan none(Status status, String reason) {
-            return new RoadPlan(status, List.of(), reason, null);
+            return new RoadPlan(status, List.of(), reason, null, List.of(), null);
         }
     }
 

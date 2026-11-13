@@ -40,6 +40,15 @@ public interface NpcMover {
      */
     void walkTo(NavPoint target, LocalLeg leg);
 
+    /**
+     * The rest of the path the engine's own search found for the running {@link #walkTo(NavPoint, LocalLeg)} order,
+     * as feet positions from the NPC onwards, so K&K can recheck it against the current rules (NAV-02). Empty when
+     * the engine has no path yet, for waypoint lists and when the engine cannot tell.
+     */
+    default List<NavPoint> pathAhead() {
+        return List.of();
+    }
+
     /** Stop moving; fires no {@link MoverListener#stuck}. */
     void stop();
 

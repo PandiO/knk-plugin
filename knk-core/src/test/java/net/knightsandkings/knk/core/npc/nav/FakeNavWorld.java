@@ -14,6 +14,8 @@ final class FakeNavWorld implements NavWorld {
     BiPredicate<Integer, Integer> loaded = (x, z) -> true;
     final Set<String> extraFloors = new HashSet<>();
     Set<String> regions = Set.of();
+    /** Regions per block column; null: {@link #regions} everywhere. */
+    java.util.function.BiFunction<Integer, Integer, Set<String>> regionsByColumn;
 
     void addFloor(int x, int y, int z) {
         extraFloors.add(x + "," + y + "," + z);
@@ -31,7 +33,7 @@ final class FakeNavWorld implements NavWorld {
 
     @Override
     public Set<String> regionsAt(String world, int x, int feetY, int z) {
-        return regions;
+        return regionsByColumn == null ? regions : regionsByColumn.apply(x, z);
     }
 
     static NavPoint floor(double x, double y, double z) {
