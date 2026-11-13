@@ -14,6 +14,7 @@ import java.util.function.Predicate;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
 
+import net.knightsandkings.knk.core.npc.nav.AccessSubject;
 import net.knightsandkings.knk.core.regions.DomainAccessEvaluator;
 import net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot;
 import net.knightsandkings.knk.core.roads.build.GateCells;
@@ -26,6 +27,7 @@ import net.knightsandkings.knk.core.roads.walk.DoorCellAccess;
 import net.knightsandkings.knk.core.roads.walk.GateCellAccess;
 import net.knightsandkings.knk.core.util.BlockKey;
 import net.knightsandkings.knk.paper.navigation.NavigationAccess;
+import net.knightsandkings.knk.paper.navigation.PlayerAccessSubject;
 
 /**
  * Builds one player's {@link CellAccess} for a captured walk box (KNG-51 {@code LAST_MILE_PATHFINDING.md}
@@ -68,11 +70,13 @@ public final class WalkAccessFactory {
      */
     public record WalkAccess(GateCellAccess gates, DoorCellAccess doors, List<DeniedRegionAccess.Candidate> regions,
                              boolean bypass, DomainAvailability.DomainLookup lookup, DomainAccessEvaluator evaluator,
-                             Set<String> destinationRegions) {
+                             Set<String> destinationRegions, List<DeniedRegionAccess.Rule> subjectDenied) {
         /**
          * @param destinationRegions KNG-121: the regions the navigation's destination lies in, for the "no way out"
          *                           rule ({@link DeniedRegionAccess#resolve(List, Set, DomainAvailability.DomainLookup,
          *                           DomainAccessEvaluator, boolean)}); null = not known, no such rule
+         * @param subjectDenied      PandiO/knk-workspace#360: regions the mover's own deny list keeps it out of
+         *                           (an NPC's access profile); empty for a player
          */
         public WalkAccess {
             Objects.requireNonNull(gates, "gates");
@@ -81,6 +85,14 @@ public final class WalkAccessFactory {
             Objects.requireNonNull(lookup, "lookup");
             Objects.requireNonNull(evaluator, "evaluator");
             destinationRegions = destinationRegions == null ? null : Set.copyOf(destinationRegions);
+            subjectDenied = subjectDenied == null ? List.of() : List.copyOf(subjectDenied);
+        }
+
+        /** Without a deny list of the mover's own (a player). */
+        public WalkAccess(GateCellAccess gates, DoorCellAccess doors, List<DeniedRegionAccess.Candidate> regions,
+                          boolean bypass, DomainAvailability.DomainLookup lookup, DomainAccessEvaluator evaluator,
+                          Set<String> destinationRegions) {
+            this(gates, doors, regions, bypass, lookup, evaluator, destinationRegions, List.of());
         }
 
         /** Without the destination's regions (no "no way out" rule). */
@@ -91,8 +103,9 @@ public final class WalkAccessFactory {
 
         /** Routing thread: looks the regions' domains up (may block briefly) and composes gates, doors and domains. */
         public CellAccess resolve() {
-            return CellAccess.all(gates, doors,
-                DeniedRegionAccess.resolve(regions, destinationRegions, lookup, evaluator, bypass));
+            DeniedRegionAccess domains = DeniedRegionAccess.resolve(regions, destinationRegions, lookup, evaluator, bypass);
+            return subjectDenied.isEmpty() ? CellAccess.all(gates, doors, domains)
+                : CellAccess.all(gates, doors, domains, new DeniedRegionAccess(subjectDenied));
         }
     }
 
@@ -103,6 +116,8 @@ public final class WalkAccessFactory {
     private final DoorUse doorUse;
     private final BiFunction<String, String, Optional<DomainSnapshot>> lookup;
     private final DomainAccessEvaluator evaluator;
+    /** PandiO/knk-workspace#360: the gate rule for movers that are not players; null until {@link #subjectGates}. */
+    private BiFunction<AccessSubject, Collection<Integer>, GateAvailability> subjectGateRule;
 
     /**
      * @param gateRule     the router's gate rule for a player and doors ({@link NavigationAccess#gateAvailability})
@@ -161,24 +176,65 @@ public final class WalkAccessFactory {
     public WalkAccess prepare(Player player, World world, GateCells gates, WalkSnapshotService.WalkCapture capture,
                               int headroom, Set<String> destinationRegions) {
         Objects.requireNonNull(player, "player");
+        return prepare(bypass.test(player), doorIds -> gateRule.apply(player, doorIds),
+            (x, y, z) -> doorUse.mayUse(player, world, x, y, z), () -> moverRegions.apply(player), null, world, gates,
+            capture, headroom, destinationRegions);
+    }
+
+    /**
+     * PandiO/knk-workspace#360: the access of any mover for a captured box (a player through
+     * {@code NavigationAccess.subjectOf}, an NPC with its access profile). The rules are the player's: gates by the
+     * router's gate rule for the subject, domains judged from the regions the subject stands in. A player subject's
+     * doors are WorldGuard's answer as before; any other subject answers for its doors itself. The subject's own
+     * lists: a region it is always allowed in is left out of the domain rules, a region it never enters is blocked
+     * unless it stands in it.
+     */
+    public WalkAccess prepare(AccessSubject subject, World world, GateCells gates,
+                              WalkSnapshotService.WalkCapture capture, int headroom, Set<String> destinationRegions) {
+        Objects.requireNonNull(subject, "subject");
+        if (subjectGateRule == null) {
+            throw new IllegalStateException("no gate rule for access subjects (subjectGates)");
+        }
+        Player player = subject instanceof PlayerAccessSubject adapter ? adapter.player() : null;
+        String worldName = world == null ? null : world.getName();
+        return prepare(subject.bypassesDomainRules(), doorIds -> subjectGateRule.apply(subject, doorIds),
+            (x, y, z) -> player != null ? doorUse.mayUse(player, world, x, y, z) : subject.mayOpenDoor(worldName, x, y, z),
+            subject::currentRegions, subject::regionOverride, world, gates, capture, headroom, destinationRegions);
+    }
+
+    /** The gate rule for access subjects ({@link NavigationAccess#gateAvailability(AccessSubject, Collection)}). */
+    public WalkAccessFactory subjectGates(BiFunction<AccessSubject, Collection<Integer>, GateAvailability> rule) {
+        this.subjectGateRule = Objects.requireNonNull(rule, "rule");
+        return this;
+    }
+
+    @FunctionalInterface
+    private interface DoorCheck {
+        boolean mayUse(int x, int y, int z);
+    }
+
+    /** {@code overrides}: the subject's own verdict per region, or null (a player: the domain rules only). */
+    private WalkAccess prepare(boolean bypasses, Function<Collection<Integer>, GateAvailability> gateRuleFor,
+                               DoorCheck doorCheck, java.util.function.Supplier<Set<String>> insideRegions,
+                               Function<String, AccessSubject.RegionOverride> overrides, World world, GateCells gates,
+                               WalkSnapshotService.WalkCapture capture, int headroom, Set<String> destinationRegions) {
         Objects.requireNonNull(capture, "capture");
         if (!capture.ready()) {
             throw new IllegalArgumentException("capture is " + capture.status());
         }
         WalkBox box = capture.box();
-        boolean bypasses = bypass.test(player);
 
         Set<Integer> doorIds = gates instanceof net.knightsandkings.knk.paper.roads.GateCellsIndex index
             ? index.doorIdsWithin(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ())
             : doorIdsIn(gates, box);
         Map<Integer, String> blocked = doorIds.isEmpty() ? Map.of()
-            : GateCellAccess.decideAll(gateRule.apply(player, doorIds), doorIds);
+            : GateCellAccess.decideAll(gateRuleFor.apply(doorIds), doorIds);
         GateCellAccess gateAccess = new GateCellAccess(gates == null ? GateCells.NONE : gates, headroom, blocked);
 
         List<Long> denied = new ArrayList<>();
         if (!bypasses) {
             for (long key : capture.doorBlocks()) {
-                if (!doorUse.mayUse(player, world, BlockKey.x(key), BlockKey.y(key), BlockKey.z(key))) {
+                if (!doorCheck.mayUse(BlockKey.x(key), BlockKey.y(key), BlockKey.z(key))) {
                     denied.add(key);
                 }
             }
@@ -186,14 +242,24 @@ public final class WalkAccessFactory {
         DoorCellAccess doorAccess = new DoorCellAccess(denied, headroom);
 
         List<DeniedRegionAccess.Candidate> candidates = new ArrayList<>();
-        if (!bypasses) {
-            Set<String> inside = moverRegions.apply(player);
-            regionsInBox.regions(world, box).forEach((id, shape) ->
-                candidates.add(new DeniedRegionAccess.Candidate(id, shape, inside.contains(id))));
+        List<DeniedRegionAccess.Rule> subjectDenied = new ArrayList<>();
+        if (!bypasses || overrides != null) {
+            Set<String> inside = insideRegions.get();
+            regionsInBox.regions(world, box).forEach((id, shape) -> {
+                AccessSubject.RegionOverride override = overrides == null ? AccessSubject.RegionOverride.RULES
+                    : overrides.apply(id);
+                if (override == AccessSubject.RegionOverride.DENY) {
+                    if (!inside.contains(id)) {
+                        subjectDenied.add(new DeniedRegionAccess.Rule(id, shape, false, "not allowed in " + id));
+                    }
+                } else if (override == AccessSubject.RegionOverride.RULES && !bypasses) {
+                    candidates.add(new DeniedRegionAccess.Candidate(id, shape, inside.contains(id)));
+                }
+            });
         }
         String worldName = world == null ? null : world.getName();
         return new WalkAccess(gateAccess, doorAccess, candidates, bypasses,
-            regionId -> lookup.apply(worldName, regionId), evaluator, destinationRegions);
+            regionId -> lookup.apply(worldName, regionId), evaluator, destinationRegions, subjectDenied);
     }
 
     /** Door ids of a {@link GateCells} that is not an index (tests): scan the box. */

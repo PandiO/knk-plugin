@@ -135,6 +135,15 @@ public final class NavigationService implements SiegeMatchObserver {
         default Set<String> regionsAt(World world, double[] floorPoint) {
             return Set.of();
         }
+
+        /**
+         * PandiO/knk-workspace#360: the policy of a mover that is not (necessarily) a player - an NPC with its own
+         * access subject - judged from the regions the subject stands in. Main thread. Unsupported by default.
+         */
+        default AccessPolicy policyFor(net.knightsandkings.knk.core.npc.nav.AccessSubject subject,
+                                       RoadNetworkSnapshot snapshot, Set<String> destinationRegions) {
+            throw new UnsupportedOperationException("no access policy for subjects");
+        }
     }
 
     /**
@@ -472,6 +481,97 @@ public final class NavigationService implements SiegeMatchObserver {
 
     public EtaEstimator eta() {
         return eta;
+    }
+
+    // ==================== NPC navigation (PandiO/knk-workspace#360) ====================
+
+    /** The walk-leg capture, search and executor, or null when walk paths are off ({@code navigation.walk.enabled}). */
+    public Walk walk() {
+        return deps.walk();
+    }
+
+    /**
+     * The road route between two floor points for a mover with its own access subject (an NPC), as the
+     * {@link net.knightsandkings.knk.core.npc.nav.RoadPlanner} port: the same snapping, component handling and router
+     * as a player's route, with the subject's policy - its own regions decide the exit rules, not a player's
+     * position. Needs no chunks. Main thread; routed on the routing executor; completes on the main thread.
+     */
+    public CompletableFuture<net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan> planRoadFor(
+            net.knightsandkings.knk.core.npc.nav.AccessSubject subject,
+            net.knightsandkings.knk.core.npc.nav.NavPoint fromFloor,
+            net.knightsandkings.knk.core.npc.nav.NavPoint toFloor) {
+        CompletableFuture<net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan> out = new CompletableFuture<>();
+        String world = fromFloor.world();
+        RoadNetworkSnapshot snapshot = deps.snapshots().apply(world);
+        if (snapshot == null) {
+            out.complete(net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.none(
+                net.knightsandkings.knk.core.npc.nav.RoadPlanner.Status.NO_NETWORK, "no road network for world " + world));
+            return out;
+        }
+        Optional<SnapPoint> from = snapStart(snapshot, fromFloor.x(), fromFloor.y(), fromFloor.z(), null);
+        Optional<SnapPoint> to = snapStart(snapshot, toFloor.x(), toFloor.y(), toFloor.z(), null);
+        if (from.isEmpty() || to.isEmpty()) {
+            out.complete(net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.none(
+                net.knightsandkings.knk.core.npc.nav.RoadPlanner.Status.OFF_ROAD,
+                (from.isEmpty() ? "start" : "end") + " too far from a road (limit " + Math.round(startLimit()) + " blocks)"));
+            return out;
+        }
+        // As a player's route (connectedStart / connectedGoals): an end off the road may snap to a stray stretch in
+        // another network component; then snap it to the nearest road in the other end's component instead.
+        SnapPoint start = from.get();
+        SnapPoint end = to.get();
+        if (componentOf(snapshot, start) != componentOf(snapshot, end)) {
+            int startComponent = componentOf(snapshot, start);
+            Optional<SnapPoint> endInStart = snapStart(snapshot, toFloor.x(), toFloor.y(), toFloor.z(),
+                edgeIndex -> snapshot.componentOf(snapshot.edgeAt(edgeIndex)) == startComponent);
+            if (endInStart.isPresent()) {
+                end = endInStart.get();
+            } else {
+                int endComponent = componentOf(snapshot, end);
+                start = snapStart(snapshot, fromFloor.x(), fromFloor.y(), fromFloor.z(),
+                    edgeIndex -> snapshot.componentOf(snapshot.edgeAt(edgeIndex)) == endComponent).orElse(start);
+            }
+        }
+        RouteRequest request;
+        try {
+            request = RouteRequest.of(start, end, deps.policies().policyFor(subject, snapshot, null), routerParameters);
+        } catch (RuntimeException e) {
+            deps.logger().log(Level.WARNING, "[NPC] road policy failed for " + subject.name(), e);
+            out.complete(net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.none(
+                net.knightsandkings.knk.core.npc.nav.RoadPlanner.Status.ERROR, "policy error: " + e));
+            return out;
+        }
+        deps.routing().execute(() -> {
+            net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan plan;
+            try {
+                plan = roadPlanOf(world, new AStarRouter(snapshot).routeOrExplain(request));
+            } catch (RuntimeException e) {
+                deps.logger().log(Level.WARNING, "[NPC] road routing failed for " + subject.name(), e);
+                plan = net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.none(
+                    net.knightsandkings.knk.core.npc.nav.RoadPlanner.Status.ERROR, "router error: " + e);
+            }
+            var delivered = plan;
+            deps.mainThread().execute(() -> out.complete(delivered));
+        });
+        return out;
+    }
+
+    /** A router result as the NPC port's plan: the polyline as floor points, and what blocks for BLOCKED. */
+    static net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan roadPlanOf(String world, RouteResult result) {
+        List<net.knightsandkings.knk.core.npc.nav.NavPoint> line = new ArrayList<>();
+        result.routeToGuide().ifPresent(route -> route.polyline().forEach(p ->
+            line.add(new net.knightsandkings.knk.core.npc.nav.NavPoint(world, p[0], p[1], p[2]))));
+        return switch (result.status()) {
+            case FOUND -> net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.found(line);
+            case BLOCKED -> new net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan(
+                net.knightsandkings.knk.core.npc.nav.RoadPlanner.Status.BLOCKED, line,
+                result.explanation().verdict().message(), result.explanation().cause().name());
+            case DIFFERENT_COMPONENTS -> net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.none(
+                net.knightsandkings.knk.core.npc.nav.RoadPlanner.Status.DIFFERENT_COMPONENTS,
+                "start and goal are on road networks that do not connect");
+            case NO_ROUTE -> net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.none(
+                net.knightsandkings.knk.core.npc.nav.RoadPlanner.Status.NO_ROUTE, "no route on the road network");
+        };
     }
 
     // ==================== commands ====================

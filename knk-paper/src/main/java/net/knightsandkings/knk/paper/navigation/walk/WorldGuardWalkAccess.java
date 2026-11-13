@@ -42,7 +42,7 @@ public final class WorldGuardWalkAccess {
         return new WalkAccessFactory(access::gateAvailability, access::regionsAt, access::bypasses,
             WorldGuardWalkAccess::regions, WorldGuardWalkAccess::mayUseDoor,
             (BiFunction<String, String, Optional<DomainSnapshot>>) access::domainByRegionId,
-            access.evaluator());
+            access.evaluator()).subjectGates(access::gateAvailability);
     }
 
     /** Every region but {@code __global__} overlapping the box, by id, as Bukkit-free shapes. */
