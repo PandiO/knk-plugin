@@ -511,6 +511,10 @@ npc:
     max-plans-in-flight: 4
     # NPC spawns per tick at most (20 player-shaped NPCs spawned in one tick cost a 48.8 ms tick).
     spawns-per-tick: 2
+    # NPCs whose way ahead and position are checked against the current gate and access rules per tick at most
+    # (the recheck, the trespass guard, wake-ups after a gate or access change). 200 walking NPCs at recheck-ticks 40
+    # need 5 per tick; with too few, checks simply come later than recheck-ticks.
+    rule-checks-per-tick: 10
     # Per-NPC settings below are the global layer. A value comes from the most specific layer that sets it:
     # code default -> this global layer -> worlds.<world> -> regions.<WorldGuard region or domain id> (innermost wins)
     # -> NPC template -> assignment. /knk npc status shows each value with the layer it came from.
@@ -520,7 +524,9 @@ npc:
     stretch-blocks: 32
     # Blocks between the hops of an off-road or recovery leg (each hop is one Citizens path search).
     hop-blocks: 16
-    # Ticks between rechecks of the way ahead against the current gate and access rules (0 = off).
+    # Ticks between rechecks of a walking NPC's way ahead against the current gate and access rules: a denied region
+    # or a closed gate ahead plans the route again (0 = off; gate and access events still reach the NPCs, and the
+    # trespass guard still looks every 40 ticks).
     recheck-ticks: 40
     # Ticks without movement before Citizens reports stuck.
     stationary-ticks: 60
@@ -528,11 +534,15 @@ npc:
     no-progress-ticks: 60
     # Recovery attempts per hop or stretch before the route is dropped and planned again (then the order fails).
     max-retries: 3
-    # Ticks an NPC waits before asking again while the rules allow no route or the way ahead is not loaded.
+    # Ticks an NPC waits before asking again while the rules allow no route or the way ahead is not loaded. An NPC
+    # waiting at a closed gate or a district edge is woken by the gate or access change itself; this is the fallback.
     no-route-wait-ticks: 100
     # With an end too far from a road (or no road network): the longest trip, in blocks, walked as off-road hops.
     # Further than this the order fails; NPCs never cross terrain in a straight line.
     walk-only-blocks: 64
+    # The trespass guard logs and counts an NPC that entered a region its current rules deny (it must never happen).
+    # true: also stop that NPC and plan its route again. For dev servers.
+    stop-on-trespass: false
     # Whether NPCs push and block each other.
     collidable: false
     # Outside player-loaded areas: load (keep the chunks ahead loaded, the NPC really walks; capped) | simulate.

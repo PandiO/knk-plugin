@@ -40,6 +40,8 @@ class NpcNavigationModuleDisabledTest {
 
     private final List<String> said = new ArrayList<>();
 
+    private final NavigationService roadNavigation = mock(NavigationService.class);
+
     private NpcNavigationModule startWithShippedConfig(List<String> navigationAsked) throws Exception {
         YamlConfiguration shipped = new YamlConfiguration();
         try (var in = getClass().getResourceAsStream("/config.yml")) {
@@ -51,7 +53,7 @@ class NpcNavigationModuleDisabledTest {
         when(plugin.getDataFolder()).thenReturn(dataFolder.toFile());
         return NpcNavigationModule.start(plugin, mock(KnkAdminCommand.class), null, null, () -> {
             navigationAsked.add("asked");
-            return mock(NavigationService.class);
+            return roadNavigation;
         });
     }
 
@@ -80,9 +82,13 @@ class NpcNavigationModuleDisabledTest {
         assertEquals(List.of("NPC navigation unavailable: npc.navigation.enabled is false"), said);
 
         assertTrue(navigationAsked.isEmpty(), "road navigation is not touched");
+        // PandiO/knk-workspace#361: no rule-change listener, no access rules port, no rule checks
+        org.mockito.Mockito.verifyNoInteractions(roadNavigation);
+        assertEquals(0, module.metrics().total(net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event.RULE_CHECK));
         assertFalse(new File(dataFolder.toFile(), NpcRouteStore.FILE).exists(), "no files");
         assertFalse(new File(dataFolder.toFile(), "npc-logs").exists());
         module.stop(); // and stopping it needs no server either
+        org.mockito.Mockito.verifyNoInteractions(roadNavigation);
     }
 
     @Test

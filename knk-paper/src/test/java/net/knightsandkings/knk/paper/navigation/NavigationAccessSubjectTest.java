@@ -209,6 +209,58 @@ class NavigationAccessSubjectTest {
         verify(regionIds, never()).at(any(Location.class)); // no player's position is asked for an NPC
     }
 
+    // ==================== PandiO/knk-workspace#361: the rules asked while an NPC walks ====================
+
+    @Test
+    void anNpcsEntryRuleIsTheRoadPolicysJudgedFromWhereItStands() {
+        castleDeniesEntry();
+        String castle = NavigationTestNetwork.CASTLE_REGION;
+
+        assertFalse(access.mayEnter(npc(NpcAccessProfile.DEFAULT)).test(castle), "the domain denies entry");
+        assertTrue(access.mayEnter(npc(NpcAccessProfile.DEFAULT)).test("town_1"));
+        assertTrue(access.mayEnter(npc(NpcAccessProfile.DEFAULT)).test("unknown_region"), "no domain known: open, as for the router");
+        assertTrue(access.mayEnter(npc(NpcAccessProfile.DEFAULT, castle)).test(castle), "already inside: not an entry");
+
+        NpcAccessProfile allowed = new NpcAccessProfile("castle-guard", false, true, Set.of(castle), Set.of());
+        assertTrue(access.mayEnter(npc(allowed)).test(castle));
+        NpcAccessProfile bypassing = new NpcAccessProfile("staff", true, true, Set.of(), Set.of());
+        assertTrue(access.mayEnter(npc(bypassing)).test(castle));
+        NpcAccessProfile denied = new NpcAccessProfile("outsider", true, true, Set.of(), Set.of("town_1"));
+        assertFalse(access.mayEnter(npc(denied)).test("town_1"), "the deny list holds even with the bypass");
+        assertTrue(access.mayEnter(npc(denied, "town_1")).test("town_1"), "but a region it stands in is not entered");
+        verify(regionIds, never()).at(any(Location.class)); // no player's position is asked for an NPC
+    }
+
+    @Test
+    void theEntryRuleAgreesWithTheRoadPolicyOnTheCastleEdge() {
+        castleDeniesEntry();
+        var castleEdge = network.snapshot.requireEdge(NavigationTestNetwork.E_C_CASTLE);
+        for (NpcAccessSubject subject : List.of(npc(NpcAccessProfile.DEFAULT),
+            npc(NpcAccessProfile.DEFAULT, NavigationTestNetwork.CASTLE_REGION),
+            npc(new NpcAccessProfile("staff", true, true, Set.of(), Set.of())),
+            npc(new NpcAccessProfile("outsider", false, true, Set.of(), Set.of(NavigationTestNetwork.CASTLE_REGION))))) {
+            boolean routerOpen = access.policyFor(subject, network.snapshot, null).check(castleEdge).isOpen();
+            assertEquals(routerOpen, access.mayEnter(subject).test(NavigationTestNetwork.CASTLE_REGION),
+                subject.profile().id() + " in " + subject.currentRegions());
+            assertEquals(!routerOpen, access.edgeBlocked(subject, network.snapshot, castleEdge));
+        }
+    }
+
+    @Test
+    void aGateBlocksAnNpcUnlessItIsOpen() {
+        NpcAccessSubject guard = npc(NpcAccessProfile.DEFAULT);
+        assertFalse(access.gateBlocks(guard, OPEN));
+        assertFalse(access.gateBlocks(guard, 99), "a door the gate cache does not know cannot be checked");
+        for (int door : List.of(CLOSED_PASS_THROUGH, CLOSED, SIEGE_LOCKED, SIEGE_CARRIES, JAMMED)) {
+            assertTrue(access.gateBlocks(guard, door), "door " + door);
+        }
+        var gateEdge = network.snapshot.requireEdge(NavigationTestNetwork.E_BC);
+        assertTrue(access.edgeBlocked(guard, network.snapshot, gateEdge), "the edge behind the closed gate");
+        when(gates.getGate(NavigationTestNetwork.GATE_DOOR).getCurrentState()).thenReturn(AnimationState.OPEN);
+        assertFalse(access.edgeBlocked(guard, network.snapshot, gateEdge), "read again when asked: the gate opened");
+        assertFalse(access.gateBlocks(guard, NavigationTestNetwork.GATE_DOOR));
+    }
+
     @Test
     void anNpcsListsComeBeforeTheDomainRules() {
         castleDeniesEntry();

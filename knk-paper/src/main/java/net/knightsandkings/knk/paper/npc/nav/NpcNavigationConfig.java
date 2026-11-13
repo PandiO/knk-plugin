@@ -18,14 +18,23 @@ import net.knightsandkings.knk.core.npc.nav.NpcAccessProfile;
  * @param maxPlansInFlight route plans running at once, server-wide
  * @param spawnsPerTick    NPC spawns per tick at most (NAV-13)
  * @param accessProfiles   the configured NPC access profiles by id (lower case); always has {@code default}
+ * @param ruleChecksPerTick NPCs whose way ahead and position are checked against the current rules per tick at most
+ *                         (PandiO/knk-workspace#361, NAV-13)
  */
 public record NpcNavigationConfig(boolean enabled, int maxPlansInFlight, NavigationSettings settings,
                                   List<String> rejected, int spawnsPerTick,
-                                  Map<String, NpcAccessProfile> accessProfiles) {
+                                  Map<String, NpcAccessProfile> accessProfiles, int ruleChecksPerTick) {
+
+    /** Before PandiO/knk-workspace#361: ten rule checks per tick. */
+    public NpcNavigationConfig(boolean enabled, int maxPlansInFlight, NavigationSettings settings,
+                               List<String> rejected, int spawnsPerTick, Map<String, NpcAccessProfile> accessProfiles) {
+        this(enabled, maxPlansInFlight, settings, rejected, spawnsPerTick, accessProfiles,
+            net.knightsandkings.knk.core.npc.nav.NpcNavigationService.DEFAULT_RULE_CHECKS_PER_TICK);
+    }
 
     /** The global switches: direct values of the section that are not per-NPC settings. */
     static final java.util.Set<String> GLOBAL_KEYS = java.util.Set.of("enabled", "max-plans-in-flight",
-        "spawns-per-tick", "worlds", "regions", "access-profiles");
+        "spawns-per-tick", "rule-checks-per-tick", "worlds", "regions", "access-profiles");
 
     public NpcNavigationConfig {
         Map<String, NpcAccessProfile> profiles = new java.util.LinkedHashMap<>();
@@ -85,6 +94,13 @@ public record NpcNavigationConfig(boolean enabled, int maxPlansInFlight, Navigat
             rejected.add(PATH + ".spawns-per-tick: " + spawns + " is outside 1..20 (using 2)");
             spawns = 2;
         }
+        int checks = section.getInt("rule-checks-per-tick",
+            net.knightsandkings.knk.core.npc.nav.NpcNavigationService.DEFAULT_RULE_CHECKS_PER_TICK);
+        if (checks < 1 || checks > 200) {
+            rejected.add(PATH + ".rule-checks-per-tick: " + checks + " is outside 1..200 (using "
+                + net.knightsandkings.knk.core.npc.nav.NpcNavigationService.DEFAULT_RULE_CHECKS_PER_TICK + ")");
+            checks = net.knightsandkings.knk.core.npc.nav.NpcNavigationService.DEFAULT_RULE_CHECKS_PER_TICK;
+        }
         Map<String, NpcAccessProfile> profiles = new java.util.LinkedHashMap<>();
         ConfigurationSection profileSection = section.getConfigurationSection("access-profiles");
         if (profileSection != null) {
@@ -107,7 +123,7 @@ public record NpcNavigationConfig(boolean enabled, int maxPlansInFlight, Navigat
             }
         }
         return new NpcNavigationConfig(section.getBoolean("enabled", false), plans, builder.build(),
-            List.copyOf(rejected), spawns, profiles);
+            List.copyOf(rejected), spawns, profiles, checks);
     }
 
     static final java.util.Set<String> PROFILE_KEYS = java.util.Set.of("bypass-domain-rules", "open-doors",

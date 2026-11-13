@@ -128,11 +128,16 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
      */
     @Override
     public AccessPolicy policyFor(AccessSubject subject, RoadNetworkSnapshot snapshot, Set<String> destinationRegions) {
-        String world = snapshot.world() != null ? snapshot.world() : subject.world();
         Set<Integer> doorIds = new HashSet<>();
         for (RoadEdge edge : snapshot.edges()) {
             doorIds.addAll(edge.gateDoorIds());
         }
+        return policyFor(subject, snapshot, destinationRegions, doorIds);
+    }
+
+    private AccessPolicy policyFor(AccessSubject subject, RoadNetworkSnapshot snapshot, Set<String> destinationRegions,
+                                   Collection<Integer> doorIds) {
+        String world = snapshot.world() != null ? snapshot.world() : subject.world();
         DomainAvailability.DomainLookup lookup = regionId ->
             subject.regionOverride(regionId) == AccessSubject.RegionOverride.ALLOW ? Optional.empty()
                 : domainByRegionId(world, regionId);
@@ -140,6 +145,38 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
             new DomainAvailability(evaluator, lookup, roadRule, subject.currentRegions(), destinationRegions,
                 subject.bypassesDomainRules()),
             new SubjectRegionAvailability(subject));
+    }
+
+    /**
+     * PandiO/knk-workspace#361: the router's entry rule per region for any mover, for the recheck of an NPC's way
+     * ahead and the trespass guard - {@link #policyFor(AccessSubject, RoadNetworkSnapshot, Set)}'s domain rule and
+     * the subject's own lists, with the domain cache only (a region of unknown domain is open, as for the trail).
+     */
+    @Override
+    public Predicate<String> mayEnter(AccessSubject subject) {
+        String world = subject.world();
+        Set<String> current = Set.copyOf(subject.currentRegions());
+        DomainAvailability rule = new DomainAvailability(evaluator,
+            regionId -> subject.regionOverride(regionId) == AccessSubject.RegionOverride.ALLOW ? Optional.empty()
+                : resolver.getDomainByRegionIdNoRefresh(world, regionId),
+            roadRule, current, null, subject.bypassesDomainRules());
+        return regionId -> current.contains(regionId)
+            || (subject.regionOverride(regionId) != AccessSubject.RegionOverride.DENY && rule.mayEnter(regionId));
+    }
+
+    /** PandiO/knk-workspace#361: the router's gate rule for one door, read now. */
+    @Override
+    public boolean gateBlocks(AccessSubject subject, int doorId) {
+        return gateAvailability(subject, java.util.List.of(doorId)).decide(doorId).isBlocked();
+    }
+
+    /**
+     * PandiO/knk-workspace#361: the subject's policy for one edge, reading only that edge's gates (the full policy
+     * reads every gate of the network).
+     */
+    @Override
+    public boolean edgeBlocked(AccessSubject subject, RoadNetworkSnapshot snapshot, RoadEdge edge) {
+        return policyFor(subject, snapshot, null, edge.gateDoorIds()).check(edge).isBlocked();
     }
 
     /**

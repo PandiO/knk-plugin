@@ -17,6 +17,7 @@ import org.bukkit.entity.Player;
 import org.junit.jupiter.api.Test;
 
 import net.knightsandkings.knk.core.npc.nav.AccessSubject;
+import net.knightsandkings.knk.core.npc.nav.BlockingElement;
 import net.knightsandkings.knk.core.npc.nav.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NpcAccessProfile;
 import net.knightsandkings.knk.core.npc.nav.NpcAccessSubject;
@@ -50,6 +51,12 @@ class NpcRoadPlanningTest {
             public AccessPolicy policyFor(AccessSubject subject, RoadNetworkSnapshot snapshot, Set<String> destination) {
                 asked.add(subject);
                 return policy;
+            }
+
+            @Override
+            public boolean edgeBlocked(AccessSubject subject, RoadNetworkSnapshot snapshot,
+                                       net.knightsandkings.knk.core.domain.roads.RoadEdge edge) {
+                return policy.check(edge).isBlocked();
             }
         };
         return new NavigationService(new NavigationService.Deps(null, NavigationConfig.defaults(),
@@ -91,7 +98,14 @@ class NpcRoadPlanningTest {
         assertEquals(RoadPlanner.Status.FOUND, plan.status());
         assertEquals(floor(0, 0), plan.line().get(0));
         assertEquals(floor(200, 0), plan.line().get(plan.line().size() - 1));
-        assertNull(plan.blockingElement());
+        assertNull(plan.blocking());
+        assertEquals(List.of(new RoadPlanner.GateCrossing(NavigationTestNetwork.GATE_DOOR, floor(200, 0))), plan.gates(),
+            "the gate on the way, placed where its road stretch ends");
+    }
+
+    @Test
+    void aRouteWithoutGatesNamesNone() {
+        assertTrue(plan(floor(0, 0), floor(90, 0)).gates().isEmpty());
     }
 
     @Test
@@ -104,10 +118,79 @@ class NpcRoadPlanningTest {
         RoadPlan plan = plan(floor(0, 0), floor(200, 200));
 
         assertEquals(RoadPlanner.Status.BLOCKED, plan.status());
-        assertEquals("Kardenna Castle", plan.blockingElement());
+        BlockingElement blocking = plan.blocking();
+        assertEquals(BlockingElement.Kind.DOMAIN, blocking.kind());
+        assertEquals("Kardenna Castle", blocking.name());
+        assertEquals(String.valueOf(NavigationTestNetwork.CASTLE_DOMAIN), blocking.id());
+        assertEquals(Set.of(NavigationTestNetwork.CASTLE_REGION), blocking.regionIds());
+        assertTrue(plan.stillBlocked().test(npc), "asked again later: the castle edge is still blocked");
+        policy = AccessPolicy.ALL_OPEN;
+        assertTrue(!plan.stillBlocked().test(npc), "and open once the rule is gone");
         assertEquals("you may not enter Kardenna Castle", plan.reason());
         NavPoint reached = plan.line().get(plan.line().size() - 1);
         assertTrue(reached.z() < 200 && !plan.line().isEmpty(), "as close as the open roads go, short of the castle: " + reached);
+    }
+
+    @Test
+    void aClosedGateIsTheBlockingElementWithItsDoor() {
+        policy = edge -> edge.gateDoorIds().contains(NavigationTestNetwork.GATE_DOOR)
+            ? EdgeVerdict.blocked("the West Gate is closed", EdgeVerdict.Cause.gate(NavigationTestNetwork.GATE_DOOR, "the West Gate"))
+            : edge.id() == NavigationTestNetwork.E_BD ? EdgeVerdict.blocked("closed road", EdgeVerdict.Cause.flag("closed", "closed road"))
+            : EdgeVerdict.open();
+
+        RoadPlan plan = plan(floor(0, 0), floor(200, 0));
+
+        assertEquals(RoadPlanner.Status.BLOCKED, plan.status());
+        assertEquals(BlockingElement.Kind.GATE, plan.blocking().kind());
+        assertTrue(plan.blocking().hasGate(NavigationTestNetwork.GATE_DOOR));
+        assertEquals("the West Gate", plan.blocking().name());
+        NavPoint reached = plan.line().get(plan.line().size() - 1);
+        assertEquals(100, reached.x(), 1e-6, "the partial route leads to the gate's side of the road");
+        assertTrue(plan.gates().isEmpty(), "the partial route itself passes no gate");
+    }
+
+    @Test
+    void ruleChangeListenersHearGateAndAvailabilityChangesUntilTheyUnsubscribe() {
+        NavigationService service = service();
+        List<String> heard = new ArrayList<>();
+        Runnable unsubscribe = service.addRuleChangeListener(new net.knightsandkings.knk.core.npc.nav.RuleChangeListener() {
+            @Override
+            public void gateChanged(int doorId) {
+                heard.add("gate " + doorId);
+            }
+
+            @Override
+            public void availabilityChanged() {
+                heard.add("availability");
+            }
+        });
+        service.addRuleChangeListener(new net.knightsandkings.knk.core.npc.nav.RuleChangeListener() {
+            @Override
+            public void gateChanged(int doorId) {
+                throw new IllegalStateException("a broken listener");
+            }
+
+            @Override
+            public void availabilityChanged() {
+                throw new IllegalStateException("a broken listener");
+            }
+        });
+
+        service.onGateChanged(7);
+        service.onAvailabilityChanged();
+        assertEquals(List.of("gate 7", "availability"), heard, "and a listener that throws does not stop road navigation");
+
+        unsubscribe.run();
+        service.onGateChanged(7);
+        service.onAvailabilityChanged();
+        assertEquals(2, heard.size());
+    }
+
+    @Test
+    void theAccessRulesPortAsksThePolicyFactory() {
+        NavigationService open = service();
+        assertTrue(open.accessRules().mayEnter(npc).test("anything"), "a factory without subject rules allows everything");
+        assertTrue(!open.accessRules().gateBlocks(npc, 7));
     }
 
     @Test

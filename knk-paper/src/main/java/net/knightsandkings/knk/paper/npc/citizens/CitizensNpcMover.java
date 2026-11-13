@@ -161,6 +161,44 @@ final class CitizensNpcMover implements NpcMover {
         return examiner.getClass().getName().startsWith("net.citizensnpcs.npc.ai.AStarNavigationStrategy$");
     }
 
+    /**
+     * The rest of Citizens' path for the running order, from the point nearest the NPC on (Citizens keeps the whole
+     * path from its start). Empty when Citizens has no path yet or its strategy has none to show.
+     */
+    @Override
+    public List<NavPoint> pathAhead() {
+        if (!npc.isSpawned() || !npc.getNavigator().isNavigating()) {
+            return List.of();
+        }
+        net.citizensnpcs.api.ai.PathStrategy strategy = npc.getNavigator().getPathStrategy();
+        Iterable<Vector> path = strategy == null ? null : strategy.getPath();
+        if (path == null) {
+            return List.of();
+        }
+        Location at = npc.getEntity().getLocation();
+        return aheadOf(at.getWorld().getName(), at.toVector(), path);
+    }
+
+    /** {@code path} from the point nearest {@code feet} on, as feet positions at block centres. */
+    static List<NavPoint> aheadOf(String world, Vector feet, Iterable<Vector> path) {
+        List<Vector> points = new ArrayList<>();
+        path.forEach(points::add);
+        int nearest = 0;
+        double best = Double.MAX_VALUE;
+        for (int i = 0; i < points.size(); i++) {
+            double d = points.get(i).distanceSquared(feet);
+            if (d < best) {
+                best = d;
+                nearest = i;
+            }
+        }
+        List<NavPoint> ahead = new ArrayList<>(points.size() - nearest);
+        for (Vector p : points.subList(nearest, points.size())) {
+            ahead.add(new NavPoint(world, p.getBlockX() + 0.5, p.getBlockY(), p.getBlockZ() + 0.5));
+        }
+        return ahead;
+    }
+
     @Override
     public void stop() {
         if (npc.isSpawned() && npc.getNavigator().isNavigating()) {

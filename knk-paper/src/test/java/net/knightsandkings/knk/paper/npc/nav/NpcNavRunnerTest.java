@@ -297,6 +297,17 @@ class NpcNavRunnerTest {
     }
 
     @Test
+    void theReportHasTheRuleNumbers() {
+        runner.spawn(1, NpcAccessProfile.DEFAULT);
+        ticks(2);
+        metrics.count(net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event.REPLAN_EVENT, 3);
+        String rules = runner.report(0, 0).stream().filter(line -> line.startsWith("rules:")).findFirst().orElseThrow();
+        assertTrue(rules.startsWith("rules: trespasses 0 (must be 0) | rule checks "), rules);
+        assertTrue(rules.contains("replans: recheck 0, event 3"), rules);
+        assertTrue(rules.endsWith("walked to the blocking element 0, woken by its event 0, waiting there now 0"), rules);
+    }
+
+    @Test
     void percentilesAndTheDistanceFromALine() {
         double[] window = new double[100];
         for (int i = 0; i < 100; i++) {
