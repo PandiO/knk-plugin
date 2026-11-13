@@ -16,6 +16,12 @@ import java.util.function.Predicate;
  *   <li>a fresh API lookup, made right before deleting, finds no domain using it. If the lookup fails the region is
  *       kept: a domain whose rename failed lives in a temp-named region, and an unreachable API must not cost it.</li>
  * </ol>
+ * PandiO/knk-workspace#34: lootbox spawn areas draw their regions through the same task and are renamed to
+ * {@code lootbox_area_<id>}; the fresh lookup asks them too ({@link #inUseByAny}), so an area whose rename failed keeps
+ * its region like a domain does.
+ * <p>
+ * PandiO/knk-workspace#269: a region the API released (its draft was deleted, its task closed without a result, or its
+ * session was swept) skips only the age check: {@link #decideRelease}.
  */
 public final class TempRegionCleanupPolicy {
 
@@ -46,6 +52,123 @@ public final class TempRegionCleanupPolicy {
     }
 
     private TempRegionCleanupPolicy() {
+    }
+
+    /**
+     * #269: what to do with a region the API released. {@link #settles()} says whether the API is told (it then deletes the
+     * release); the others are asked again on the next pass.
+     */
+    public enum ReleaseDecision {
+        /** Every check passed: remove it, then settle as removed. */
+        REMOVE(true),
+        /** No such region in any loaded world (removed or renamed already, or never drawn here). */
+        MISSING(true),
+        /** Not the release's own {@code tempregion_worldtask_<taskId>} name: never removed. */
+        KEEP_NOT_ITS_TEMP_REGION(true),
+        /** The id is in more than one world: not sure which one the task drew. */
+        KEEP_IN_SEVERAL_WORLDS(true),
+        /** No (valid) creation timestamp: not drawn by the region task, so never removed. */
+        KEEP_NO_TIMESTAMP(true),
+        /** A domain or lootbox area uses it according to a fresh API lookup. */
+        KEEP_IN_USE(true),
+        /** A player on this server is still running the task. */
+        WAIT_TASK_ACTIVE(false),
+        /** The last managed-region repair saw a domain use it, or hasn't run yet. */
+        WAIT_KNOWN_DOMAIN_REGION(false),
+        /** The fresh lookup could not ask the API. */
+        WAIT_USAGE_UNKNOWN(false);
+
+        private final boolean settles;
+
+        ReleaseDecision(boolean settles) {
+            this.settles = settles;
+        }
+
+        public boolean settles() {
+            return settles;
+        }
+
+        public boolean remove() {
+            return this == REMOVE;
+        }
+    }
+
+    /**
+     * #269: the checks for a released region, in order; like {@link #decide} without the age check, and nothing is removed
+     * while unsure.
+     *
+     * @param release           the API's release
+     * @param worldsHoldingIt   how many loaded worlds have a region with that id
+     * @param creationTimestamp its {@code knk-creation-timestamp} flag (in the one world holding it), or null
+     * @param taskActiveHere    whether a player on this server is still running the release's task
+     * @param knownDomainRegion as for {@link #decide}
+     * @param freshUsage        as for {@link #decide}; only called when every other check allows removing it
+     */
+    public static ReleaseDecision decideRelease(TempRegionRelease release, int worldsHoldingIt, String creationTimestamp,
+                                                boolean taskActiveHere, Predicate<String> knownDomainRegion,
+                                                Function<String, Usage> freshUsage) {
+        if (release == null || !release.namesItsOwnTaskRegion() || !isTemporary(release.regionId().trim())) {
+            return ReleaseDecision.KEEP_NOT_ITS_TEMP_REGION;
+        }
+        String regionId = release.regionId().trim();
+        if (worldsHoldingIt <= 0) {
+            return ReleaseDecision.MISSING;
+        }
+        if (worldsHoldingIt > 1) {
+            return ReleaseDecision.KEEP_IN_SEVERAL_WORLDS;
+        }
+        if (taskActiveHere) {
+            return ReleaseDecision.WAIT_TASK_ACTIVE;
+        }
+        if (knownDomainRegion.test(regionId)) {
+            return ReleaseDecision.WAIT_KNOWN_DOMAIN_REGION;
+        }
+        if (creationTimestamp == null || creationTimestamp.isBlank()) {
+            return ReleaseDecision.KEEP_NO_TIMESTAMP;
+        }
+        try {
+            Long.parseLong(creationTimestamp.trim());
+        } catch (NumberFormatException e) {
+            return ReleaseDecision.KEEP_NO_TIMESTAMP;
+        }
+        Usage usage;
+        try {
+            usage = freshUsage.apply(regionId);
+        } catch (RuntimeException e) {
+            usage = Usage.UNKNOWN;
+        }
+        return switch (usage == null ? Usage.UNKNOWN : usage) {
+            case IN_USE -> ReleaseDecision.KEEP_IN_USE;
+            case UNKNOWN -> ReleaseDecision.WAIT_USAGE_UNKNOWN;
+            case UNUSED -> ReleaseDecision.REMOVE;
+        };
+    }
+
+    /**
+     * #34: one fresh lookup over several owners (domains, lootbox spawn areas): {@link Usage#IN_USE} as soon as one uses
+     * the region, {@link Usage#UNUSED} only when every one answered unused, else {@link Usage#UNKNOWN} (an owner that
+     * could not be asked, or threw, keeps the region). Owners after the first one that uses it are not asked.
+     */
+    @SafeVarargs
+    public static Function<String, Usage> inUseByAny(Function<String, Usage>... owners) {
+        return regionId -> {
+            boolean allUnused = true;
+            for (Function<String, Usage> owner : owners) {
+                Usage usage;
+                try {
+                    usage = owner == null ? Usage.UNKNOWN : owner.apply(regionId);
+                } catch (RuntimeException e) {
+                    usage = Usage.UNKNOWN;
+                }
+                if (usage == Usage.IN_USE) {
+                    return Usage.IN_USE;
+                }
+                if (usage != Usage.UNUSED) {
+                    allUnused = false;
+                }
+            }
+            return allUnused ? Usage.UNUSED : Usage.UNKNOWN;
+        };
     }
 
     /**

@@ -12,9 +12,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import net.knightsandkings.knk.api.auth.AuthProvider;
 import net.knightsandkings.knk.api.dto.GiveKitRequestDto;
 import net.knightsandkings.knk.api.dto.KitClaimResultDto;
+import net.knightsandkings.knk.api.dto.KitDeliveryDto;
 import net.knightsandkings.knk.api.dto.KitPurchaseResultDto;
 import net.knightsandkings.knk.api.mapper.KitsMapper;
 import net.knightsandkings.knk.core.domain.item.KnkKitClaimResult;
+import net.knightsandkings.knk.core.domain.item.KnkKitDelivery;
 import net.knightsandkings.knk.core.domain.item.KnkKitPurchaseResult;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.KitsCommandApi;
@@ -114,6 +116,39 @@ public class KitsCommandApiImpl extends BaseApiImpl implements KitsCommandApi {
                 return KitsMapper.mapClaimResultList(dtos);
             } catch (ApiException | IOException e) {
                 throw new RuntimeException("Failed to grant first-join kits for user " + userId, e);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<List<KnkKitDelivery>> pendingDeliveriesAsync(int userId) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + BASE_ENDPOINT + "/deliveries/pending?userId=" + userId;
+            try {
+                String responseJson = get(url);
+                List<KitDeliveryDto> dtos = parse(responseJson, new TypeReference<List<KitDeliveryDto>>() {}, url);
+                return KitsMapper.mapDeliveryList(dtos);
+            } catch (ApiException | IOException e) {
+                throw new RuntimeException("Failed to read pending kit deliveries for user " + userId, e);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<Boolean> markDeliveredAsync(int userId, int claimId) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = baseUrl + BASE_ENDPOINT + "/deliveries/" + claimId + "/delivered?userId=" + userId;
+            try {
+                postJson(url, "{}");
+                return true;
+            } catch (ApiException e) {
+                // 409: another call or server took it; 404: not (or no longer) pending. Either way: place nothing.
+                if (e.getStatusCode() == 409 || e.getStatusCode() == 404) {
+                    return false;
+                }
+                throw new RuntimeException("Failed to mark kit delivery " + claimId + " for user " + userId, e);
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to mark kit delivery " + claimId + " for user " + userId, e);
             }
         }, executor);
     }

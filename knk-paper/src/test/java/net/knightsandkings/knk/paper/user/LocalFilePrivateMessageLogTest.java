@@ -108,4 +108,29 @@ class LocalFilePrivateMessageLogTest {
 
         log.log(new Entry(NOW, Outcome.DELIVERED, "Alice", ALICE, "Bob", BOB, "late", false));
     }
+
+    // ---- account erasure (PandiO/knk-workspace#184) ----
+
+    @Test
+    void purge_removesTheLinesTheErasedPlayerSentOrReceived_InEveryFile() throws Exception {
+        UUID carol = UUID.fromString("00000000-0000-0000-0000-00000000000c");
+        newLog(30);
+        log.log(new Entry(NOW, Outcome.DELIVERED, "Alice", ALICE, "Bob", BOB, "keep", false));
+        log.log(new Entry(NOW, Outcome.DELIVERED, "Carol", carol, "Bob", BOB, "from carol", false));
+        log.log(new Entry(NOW, Outcome.DELIVERED, "Alice", ALICE, "Carol", carol, "to carol", false));
+        // Text naming the UUID is not a party: kept.
+        log.log(new Entry(NOW, Outcome.DELIVERED, "Alice", ALICE, "Bob", BOB, "(" + carol + ")", false));
+        log.flush();
+        Path older = Files.writeString(dir.resolve("private-messages-2026-09-20.log"),
+                "2026-09-20T10:00:00+02:00 | DELIVERED | Carol(" + carol + ") -> Bob(" + BOB + ") | old" + System.lineSeparator());
+
+        assertEquals(3, log.purge(carol));
+
+        List<String> lines = Files.readAllLines(dir.resolve("private-messages-2026-09-26.log"), StandardCharsets.UTF_8);
+        assertEquals(2, lines.size());
+        assertTrue(lines.get(0).endsWith("| keep"));
+        assertFalse(Files.exists(older), "a file left empty is deleted");
+        assertEquals(0, log.purge(carol));
+        assertEquals(0, log.purge(null));
+    }
 }

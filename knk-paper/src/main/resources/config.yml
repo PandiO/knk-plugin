@@ -94,6 +94,18 @@ realtime:
   # notification poll stops entirely while connected (pushed instead) and drains once on every (re)connect.
   # 1 = no slowdown. Hub down = every interval as configured.
   fallback-poll-multiplier: 4
+  # GDPR account erasure (PandiO/knk-workspace#184), only while enabled: when the API erases an account it pushes
+  # AccountErased; an online player is kicked with kick-message (a siege vault they hold is given back to them first),
+  # then everything this server keeps about the account is deleted (offline security store, user/permission caches,
+  # discovery and statistics spools, the PM-log queue and local log lines, offline siege vaults, hub-outage return point). Minecraft's own player files are not deleted: they are
+  # listed in minecraft-files-list for the owner. Every (re)connect catches up from the API's erasure feed; the
+  # position is kept in feed-file. With realtime off, the hourly offline-cache re-check stays the only path.
+  erasure:
+    kick-message: "Your account data has been deleted."
+    # Wait between the kick and the deletion (quit handlers, Minecraft saving the player), 0-30
+    settle-seconds: 2
+    feed-file: "erasure-feed.json"
+    minecraft-files-list: "erasure-minecraft-files.txt"
 
 # Performance metrics (KNG-232): a Prometheus /metrics endpoint with TPS, tick time, players, chunks/entities per
 # world, JVM heap/off-heap/GC, process CPU and RSS, the container's memory and CPU (cgroup), API-call and task
@@ -976,6 +988,11 @@ regions:
   # after it was orphaned. Never one a domain uses, and nothing while the API can't be asked.
   temp-retention:
     days: 14
+    # PandiO/knk-workspace#269: how often (minutes) the server removes the temp regions knk-web-api released: those of
+    # a deleted draft, of a region task cancelled, expired or failed after a server held it, or of a workflow session
+    # the world-task sweep removed. Same "used by a domain or lootbox area" checks as above, without the age; the daily
+    # cleanup stays the backstop. 0 = off.
+    release-interval-minutes: 5
   # WorldGuard's global region (QOL hotfix 2026-10-25): where no region but __global__ applies - outside every domain,
   # arena and other region - a default player can't break or place blocks (buckets included), can't place, break, use
   # or hit item frames, paintings and armor stands, and can't use crafting blocks; explosions break no blocks and no
