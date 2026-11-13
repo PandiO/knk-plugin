@@ -49,6 +49,13 @@ public interface NpcMover {
         return List.of();
     }
 
+    /**
+     * Walking speed as a factor of the NPC's normal speed, for the orders given from now on and the one running
+     * (a group's follower catching up with its slot, NAV-05). An engine that cannot change speed ignores it.
+     */
+    default void setSpeedFactor(double factor) {
+    }
+
     /** Stop moving; fires no {@link MoverListener#stuck}. */
     void stop();
 

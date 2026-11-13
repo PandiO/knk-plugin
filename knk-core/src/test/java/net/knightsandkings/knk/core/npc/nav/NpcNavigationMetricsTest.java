@@ -66,4 +66,24 @@ class NpcNavigationMetricsTest {
         assertTrue(text.contains("knk_npc_nav_events_total{event=\"failed\"} 1"), text);
         assertTrue(text.contains("knk_npc_nav_events_total{event=\"examiner_leak\"} 0"), "must stay 0: " + text);
     }
+
+    @Test
+    void theGroupEventsHaveTheirOwnSeries() {
+        NpcNavigationMetrics metrics = new NpcNavigationMetrics();
+        metrics.setEnabled(true);
+        metrics.count(Event.GROUP_FOLD);
+        metrics.count(Event.GROUP_REFORM);
+        metrics.count(Event.GROUP_REJOIN, 2);
+        metrics.count(Event.GROUP_REGROUP);
+
+        PrometheusWriter out = new PrometheusWriter();
+        metrics.collect(out);
+        String text = out.render();
+
+        assertTrue(text.contains("knk_npc_nav_events_total{event=\"group_fold\"} 1"), text);
+        assertTrue(text.contains("knk_npc_nav_events_total{event=\"group_reform\"} 1"), text);
+        assertTrue(text.contains("knk_npc_nav_events_total{event=\"group_rejoin\"} 2"), text);
+        assertTrue(text.contains("knk_npc_nav_events_total{event=\"group_regroup\"} 1"), text);
+        assertTrue(text.contains("knk_npc_nav_events_total{event=\"group_lost\"} 0"), text);
+    }
 }

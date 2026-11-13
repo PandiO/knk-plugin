@@ -125,4 +125,46 @@ class NavigationSettingsTest {
         assertEquals(32.0, resolved.stretchBlocks());
         assertEquals(60, resolved.noProgressTicks());
     }
+
+    @Test
+    void groupKeysHaveDefaultsLayersAndRanges() {
+        Scope scope = Scope.of("w");
+        NavigationSettings defaults = NavigationSettings.defaults();
+        assertEquals("column", defaults.value(NavigationSettings.GROUP_FORMATION, scope));
+        assertEquals(2.0, defaults.value(NavigationSettings.GROUP_SPACING, scope));
+        assertEquals(2, defaults.value(NavigationSettings.GROUP_RANKS_WIDTH, scope));
+        assertEquals(4.0, defaults.value(NavigationSettings.GROUP_REJOIN_BLOCKS, scope));
+        assertEquals(24.0, defaults.value(NavigationSettings.GROUP_REGROUP_BLOCKS, scope));
+        assertEquals(1.3, defaults.value(NavigationSettings.GROUP_CATCH_UP_SPEED, scope));
+
+        NavigationSettings settings = NavigationSettings.builder()
+            .global(parse(Map.of("group-formation", "RANKS", "group-spacing", 1.5, "group-catch-up-speed", 1)))
+            .world("w", parse(Map.of("group-ranks-width", 4, "group-regroup-blocks", 0)))
+            .region("keep", parse(Map.of("group-rejoin-blocks", 6)))
+            .template("bodyguards", parse(Map.of("group-formation", "escort-ring")))
+            .build();
+        assertEquals(new Resolved<>("ranks", Layer.GLOBAL, null), settings.resolve(NavigationSettings.GROUP_FORMATION, scope));
+        assertEquals(new Resolved<>(1.5, Layer.GLOBAL, null), settings.resolve(NavigationSettings.GROUP_SPACING, scope));
+        assertEquals(1.0, settings.value(NavigationSettings.GROUP_CATCH_UP_SPEED, scope), "1 turns catching up off");
+        assertEquals(new Resolved<>(4, Layer.WORLD, "w"), settings.resolve(NavigationSettings.GROUP_RANKS_WIDTH, scope));
+        assertEquals(0.0, settings.value(NavigationSettings.GROUP_REGROUP_BLOCKS, scope), "0: the leader never waits");
+        assertEquals(new Resolved<>(6.0, Layer.REGION, "keep"),
+            settings.resolve(NavigationSettings.GROUP_REJOIN_BLOCKS, new Scope("w", List.of("keep"), null, null)));
+        // a formation per template and per assignment (decision Q4)
+        assertEquals(new Resolved<>("escort-ring", Layer.TEMPLATE, "bodyguards"),
+            settings.resolve(NavigationSettings.GROUP_FORMATION, new Scope("w", List.of(), "bodyguards", null)));
+        assertEquals(new Resolved<>("cluster", Layer.ASSIGNMENT, null), settings.resolve(NavigationSettings.GROUP_FORMATION,
+            new Scope("w", List.of(), "bodyguards", Overrides.of(NavigationSettings.GROUP_FORMATION, "cluster"))));
+
+        Map<String, Object> bad = new LinkedHashMap<>();
+        bad.put("group-formation", "wedge");
+        bad.put("group-spacing", 0.5);
+        bad.put("group-ranks-width", 1);
+        bad.put("group-rejoin-blocks", 1);
+        bad.put("group-regroup-blocks", -1);
+        bad.put("group-catch-up-speed", 3);
+        List<String> rejected = new ArrayList<>();
+        Overrides.parse(bad, "test", rejected);
+        assertEquals(6, rejected.size(), rejected.toString());
+    }
 }

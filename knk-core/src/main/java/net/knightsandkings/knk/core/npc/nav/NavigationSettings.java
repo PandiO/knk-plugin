@@ -88,10 +88,32 @@ public final class NavigationSettings {
     public static final Key<Boolean> STOP_ON_TRESPASS = new Key<>("stop-on-trespass", false, bool(),
         "stop and replan an NPC that entered a region its rules deny (dev servers)");
 
+    // ---- groups (implementation plan Phase 4, decision Q4): resolved once per group, for its leader ----
+
+    /** A group's formation: {@code column}, {@code ranks} (rows behind the leader), {@code cluster}, {@code escort-ring}. */
+    public static final Key<String> GROUP_FORMATION = new Key<>("group-formation", "column",
+        oneOf("column", "ranks", "cluster", "escort-ring"), "a group's formation: column, ranks, cluster or escort-ring");
+    /** Blocks between neighbouring formation slots. */
+    public static final Key<Double> GROUP_SPACING = new Key<>("group-spacing", 2.0,
+        decimal(1, 8), "blocks between neighbouring formation slots");
+    /** NPCs per row in the {@code ranks} formation (2 = pairs). */
+    public static final Key<Integer> GROUP_RANKS_WIDTH = new Key<>("group-ranks-width", 2,
+        integer(2, 8), "NPCs per row in the ranks formation (2 = pairs)");
+    /** A follower further than this from its lane (or stuck) plans its own leg back; never the whole route. */
+    public static final Key<Double> GROUP_REJOIN_BLOCKS = new Key<>("group-rejoin-blocks", 4.0,
+        decimal(2, 16), "blocks off its lane before a follower plans its own leg back");
+    /** The leader waits when a follower is this far behind its slot, until the group has closed up; 0 = never. */
+    public static final Key<Double> GROUP_REGROUP_BLOCKS = new Key<>("group-regroup-blocks", 24.0,
+        decimal(0, 256), "blocks a follower may fall behind its slot before the leader waits (0 = never)");
+    /** Walking speed, as a factor, of a follower that is behind its slot; 1 = no catching up. */
+    public static final Key<Double> GROUP_CATCH_UP_SPEED = new Key<>("group-catch-up-speed", 1.3,
+        decimal(1, 2), "speed factor of a follower that is behind its slot (1 = off)");
+
     /** Every per-NPC setting, in display order. */
     public static final List<Key<?>> KEYS = List.of(PATHFINDER, STRETCH_BLOCKS, HOP_BLOCKS, RECHECK_TICKS,
         STATIONARY_TICKS, NO_PROGRESS_TICKS, MAX_RETRIES, NO_ROUTE_WAIT_TICKS, WALK_ONLY_BLOCKS, STOP_ON_TRESPASS,
-        COLLIDABLE, CHUNK_LOADING);
+        COLLIDABLE, CHUNK_LOADING, GROUP_FORMATION, GROUP_SPACING, GROUP_RANKS_WIDTH, GROUP_REJOIN_BLOCKS,
+        GROUP_REGROUP_BLOCKS, GROUP_CATCH_UP_SPEED);
 
     /** A resolved value and its origin ({@code scope}: the world, region or template id; null for default/global). */
     public record Resolved<T>(T value, Layer layer, String scope) {
