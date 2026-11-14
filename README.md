@@ -16,7 +16,7 @@ JDK 25, pass `-Porg.gradle.java.installations.paths=<jdk25 dir>`.
 
 ```bash
 ./gradlew build -x deployToDevServer   # build and test all modules, no copy to a dev server
-./gradlew test                          # tests only (integration / requires-bukkit tags are excluded)
+./gradlew test                          # tests only (all of them; some start a MockBukkit server)
 ./gradlew :knk-paper:dev                # shadowJar + copy into <devServerDirectory>/plugins
 ```
 

@@ -13,14 +13,12 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Tag;
 
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.*;
 
-@Tag("requires-bukkit")
 class AccountCommandRegistryTest {
     private KnkConfig config;
     private KnKPlugin plugin;
@@ -80,8 +78,12 @@ class AccountCommandRegistryTest {
         verify(player, atLeastOnce()).sendMessage(anyString());
     }
 
+    /**
+     * The permission gate of a subcommand. Written for {@code /account create}, which was removed with KNG-208
+     * (it is now an unknown subcommand); PandiO/knk-workspace#499 points it at {@code link}, the gated one left.
+     */
     @Test
-    void deniesCreateWhenPermissionMissing() {
+    void deniesLinkWhenPermissionMissing() {
         AccountCommandRegistry registry = new AccountCommandRegistry(
             plugin,
             userManager,
@@ -91,12 +93,13 @@ class AccountCommandRegistryTest {
             cooldownManager
         );
 
-        CommandSender sender = mock(CommandSender.class);
-        when(sender.hasPermission("knk.account.create")).thenReturn(false);
+        Player sender = mock(Player.class);
+        when(sender.hasPermission("knk.account.use")).thenReturn(false);
 
-        registry.onCommand(sender, null, "account", new String[] { "create" });
+        registry.onCommand(sender, null, "account", new String[] { "link" });
 
         verify(sender).sendMessage(contains("permission"));
+        verifyNoInteractions(userAccountApi);
     }
 
     @Test
