@@ -348,4 +348,104 @@ class AccountErasureServiceTest {
         assertTrue(kick.kicked());
         assertTrue(kick.returned().isEmpty() && kick.failed().isEmpty());
     }
+
+    // --- #486: the catch-up path and the returning player's first join ---
+
+    private ErasedPlayerMarks marksWithStep() {
+        ErasedPlayerMarks marks = new ErasedPlayerMarks(dir.resolve("erasure-first-joins.json"), null, Logger.getAnonymousLogger());
+        eraser.register("next join is a first join", Where.WORKER, a -> a.formerUuid() == null ? 0 : marks.mark(a.formerUuid()));
+        return marks;
+    }
+
+    /**
+     * § S5 step 5: the server was down while T2 was erased; after the start T2 connects. The join waits for the
+     * catch-up, which applies the erasure with the UUID and marks T2's next join as a first join.
+     */
+    @Test
+    void catchUpAfterARestart_AppliesTheErasureBeforeTheJoin_AndMarksTheFirstJoin() {
+        feed.rows.add(new ErasedAccount(1, 40, ONLINE));
+        cursor.advanceTo(1); // applied before the stop
+        feed.rows.add(new ErasedAccount(2, 41, OFFLINE)); // filed while the server was down
+        ErasedPlayerMarks marks = marksWithStep();
+        AccountErasureService afterStart = service();
+        assertFalse(afterStart.isCaughtUp());
+
+        assertTrue(afterStart.awaitCaughtUp(Duration.ofSeconds(5)));
+
+        assertEquals(2, cursor.lastId());
+        assertEquals(List.of("vault 2", "offline 2"), events);
+        assertTrue(marks.take(OFFLINE), "T2's join is a first join");
+        assertFalse(marks.take(ONLINE), "the erasure before the stop isn't applied again");
+    }
+
+    @Test
+    void anErasureAppliedByThePush_MarksTheFirstJoinToo() {
+        ErasedPlayerMarks marks = marksWithStep();
+        feed.rows.add(new ErasedAccount(3, 42, ONLINE));
+
+        service().pushed(new ErasedAccount(3, 42, ONLINE));
+
+        assertTrue(marks.isMarked(ONLINE));
+    }
+
+    @Test
+    void anErasureWithoutTheUuid_MarksNobody() {
+        ErasedPlayerMarks marks = marksWithStep();
+        feed.rows.add(new ErasedAccount(4, 43, null));
+
+        service().awaitCaughtUp(Duration.ofSeconds(5));
+
+        assertEquals(0, marks.size());
+    }
+
+    @Test
+    void onceCaughtUp_JoinsDoNotAskTheApiAgain() {
+        AccountErasureService service = service();
+        assertTrue(service.awaitCaughtUp(Duration.ofSeconds(5)));
+
+        assertTrue(service.awaitCaughtUp(Duration.ofSeconds(5)));
+        assertTrue(service.awaitCaughtUp(Duration.ofSeconds(5)));
+
+        assertEquals(List.of(0L), feed.asked);
+    }
+
+    @Test
+    void theApiDown_TheJoinGoesOn_AndTheNextJoinTriesAgain() {
+        feed.rows.add(new ErasedAccount(1, 40, OFFLINE));
+        feed.down = true;
+        AccountErasureService service = service();
+
+        assertFalse(service.awaitCaughtUp(Duration.ofSeconds(5)));
+        assertTrue(events.isEmpty());
+
+        feed.down = false;
+        assertTrue(service.awaitCaughtUp(Duration.ofSeconds(5)));
+        assertEquals(List.of("vault 1", "offline 1"), events);
+    }
+
+    @Test
+    void aSlowApi_HoldsTheJoinAtMostTheWait() {
+        PrivacyErasuresApi hanging = (since, limit) -> new CompletableFuture<>();
+        AccountErasureService service = new AccountErasureService(eraser, hanging, cursor,
+            account -> CompletableFuture.completedFuture(false), main, null, Duration.ZERO, slept::add,
+            Logger.getAnonymousLogger());
+        try {
+            long start = System.nanoTime();
+            assertFalse(service.awaitCaughtUp(Duration.ofMillis(200)));
+            long waitedMs = (System.nanoTime() - start) / 1_000_000;
+            assertTrue(waitedMs < 5_000, "waited " + waitedMs + " ms");
+            assertFalse(service.isCaughtUp());
+        } finally {
+            service.close();
+        }
+    }
+
+    @Test
+    void closed_JoinsDoNotWait() {
+        AccountErasureService service = service();
+        service.close();
+
+        assertFalse(service.awaitCaughtUp(Duration.ofSeconds(5)));
+        assertTrue(feed.asked.isEmpty());
+    }
 }

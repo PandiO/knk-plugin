@@ -1,11 +1,14 @@
 package net.knightsandkings.knk.paper.listeners;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
@@ -46,5 +49,33 @@ class PlayerListenerPreLoginTest {
         listener(users).onValidateLogin(event(Result.ALLOWED));
 
         verify(users).getByUuidAsync(org.mockito.ArgumentMatchers.eq(PLAYER), any());
+    }
+
+    /** #486: the erasure catch-up runs before the account is looked up (or created) for a connecting player. */
+    @Test
+    void theErasureCatchUp_RunsBeforeTheAccountLookup() {
+        UsersDataAccess users = mock(UsersDataAccess.class);
+        List<String> order = new ArrayList<>();
+        when(users.getByUuidAsync(org.mockito.ArgumentMatchers.eq(PLAYER), any())).thenAnswer(inv -> {
+            order.add("lookup");
+            return null;
+        });
+        PlayerListener listener = listener(users);
+        listener.setErasureHooks(uuid -> order.add("catch-up " + uuid), uuid -> false);
+
+        listener.onValidateLogin(event(Result.ALLOWED));
+
+        assertEquals(List.of("catch-up " + PLAYER, "lookup"), order);
+    }
+
+    @Test
+    void aDisallowedLogin_DoesNotWaitForTheCatchUp() {
+        List<UUID> waited = new ArrayList<>();
+        PlayerListener listener = listener(mock(UsersDataAccess.class));
+        listener.setErasureHooks(waited::add, uuid -> false);
+
+        listener.onValidateLogin(event(Result.KICK_WHITELIST));
+
+        assertEquals(List.of(), waited);
     }
 }

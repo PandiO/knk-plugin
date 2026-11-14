@@ -42,7 +42,17 @@ public final class NewPlayerWindow {
      * kits only once, so that costs a welcome and a quiet period, nothing else.
      */
     public static boolean isFirstJoin(boolean accountCreatedAtThisJoin, boolean hasPlayedBefore) {
-        return accountCreatedAtThisJoin || !hasPlayedBefore;
+        return isFirstJoin(accountCreatedAtThisJoin, hasPlayedBefore, false);
+    }
+
+    /**
+     * {@link #isFirstJoin(boolean, boolean)}, and PandiO/knk-workspace#486: the player's previous knk account was
+     * erased since their last join ({@code ErasedPlayerMarks}). An erasure keeps Minecraft's own player files, so
+     * {@code hasPlayedBefore} is still true for them, and an account they get back through an invitation claim or the
+     * website exists before the join; the mark is what makes this join a first join.
+     */
+    public static boolean isFirstJoin(boolean accountCreatedAtThisJoin, boolean hasPlayedBefore, boolean accountErasedSince) {
+        return accountCreatedAtThisJoin || !hasPlayedBefore || accountErasedSince;
     }
 
     /** The player's first join (see {@link #isFirstJoin}). A relog in the same server session keeps the first time. */
@@ -53,6 +63,17 @@ public final class NewPlayerWindow {
     /** True once per marked player: the join that gets the first-join welcome. */
     public boolean takeFirstJoinWelcome(UUID playerId) {
         return firstJoins.containsKey(playerId) && welcomed.add(playerId);
+    }
+
+    /**
+     * The player's account was erased (PandiO/knk-workspace#486): forget their window, so a return in this server
+     * session gets a new first join (welcome and quiet minutes) instead of the old one's leftovers. Returns 1 if there
+     * was one (a count for the erasure log).
+     */
+    public int forget(UUID playerId) {
+        boolean had = firstJoins.remove(playerId) != null;
+        welcomed.remove(playerId);
+        return had ? 1 : 0;
     }
 
     /** Within the quiet minutes after the first join (never when they are 0). */
