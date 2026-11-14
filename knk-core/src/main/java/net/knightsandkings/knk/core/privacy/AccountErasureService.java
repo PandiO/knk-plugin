@@ -44,6 +44,9 @@ import net.knightsandkings.knk.core.ports.api.PrivacyErasuresApi;
  *   <li>A returning player gets a fresh account under the same Minecraft UUID. When this server last knew that UUID
  *       under another user id ({@link #setKnownUserIds}), the erasure is applied without the UUID: no kick, only what
  *       is filed under the erased user id goes. (The API also serves such a row without the UUID.)</li>
+ *   <li>Joins wait for the first catch-up of a run ({@link #awaitCaughtUp}, PandiO/knk-workspace#486): an erasure made
+ *       while the server was down is applied before the returning player's join is looked at, so it counts as a first
+ *       join ({@link ErasedPlayerMarks}) and the erasure still has the UUID.</li>
  * </ul>
  * Everything runs on one worker thread, in order, so the main thread never waits for the API or the disk. The hourly
  * offline-identity check and the offline store's maximum age (KNG-58) stay as the backstop. Logs name the erasure id
@@ -119,6 +122,10 @@ public final class AccountErasureService implements AutoCloseable {
     private final AtomicLong applied = new AtomicLong();
     private volatile boolean closed;
     private volatile Function<UUID, Integer> knownUserIds = uuid -> null;
+    /** #486: a catch-up of this run read the feed to its end; joins no longer wait for one. */
+    private volatile boolean caughtUp;
+    /** #486: the catch-up a joining player waits for (shared by every join while it runs). */
+    private CompletableFuture<Void> joinCatchUp;
 
     /**
      * @param worker   where pushes and catch-ups run, one at a time; null = an own daemon thread, stopped by {@link #close}
@@ -171,6 +178,50 @@ public final class AccountErasureService implements AutoCloseable {
         submit(this::catchUpNow);
     }
 
+    /** Whether a catch-up of this run has read the feed to its end (#486). */
+    public boolean isCaughtUp() {
+        return caughtUp;
+    }
+
+    /**
+     * A player is connecting (pre-login, async thread; blocks). PandiO/knk-workspace#486: until a catch-up of this run
+     * has read the feed to its end, an erasure made while this server was down may still be waiting in the feed; the
+     * join would then find the erased account's local state (and the erasure, applied later, would come without the
+     * UUID once the player's new account holds it). So the first joins after a start run a catch-up, or join the one
+     * already running, and wait for it at most {@code max}. Returns at once afterwards. True when caught up.
+     */
+    public boolean awaitCaughtUp(Duration max) {
+        if (caughtUp || closed) {
+            return caughtUp;
+        }
+        CompletableFuture<Void> running;
+        synchronized (this) {
+            if (joinCatchUp == null || joinCatchUp.isDone()) {
+                CompletableFuture<Void> started = new CompletableFuture<>();
+                joinCatchUp = started;
+                if (!submitOrFalse(() -> {
+                    try {
+                        catchUpNow();
+                    } finally {
+                        started.complete(null);
+                    }
+                })) {
+                    started.complete(null);
+                }
+            }
+            running = joinCatchUp;
+        }
+        try {
+            running.get(Math.max(0, max == null ? 0 : max.toMillis()), TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            // TimeoutException: the join goes on; the catch-up keeps running and a later join or the hub connect finishes it.
+            logger.fine("[KnK Privacy] A join didn't wait longer for the erasure catch-up");
+        }
+        return caughtUp;
+    }
+
     /** The stored position (shown by /knk health). */
     public long lastId() {
         return cursor.lastId();
@@ -190,8 +241,12 @@ public final class AccountErasureService implements AutoCloseable {
     }
 
     private void submit(Runnable work) {
+        submitOrFalse(work);
+    }
+
+    private boolean submitOrFalse(Runnable work) {
         if (closed) {
-            return;
+            return false;
         }
         try {
             worker.execute(() -> {
@@ -203,7 +258,9 @@ public final class AccountErasureService implements AutoCloseable {
             });
         } catch (RejectedExecutionException ignored) {
             // Shutting down: the next start catches up from the stored position.
+            return false;
         }
+        return true;
     }
 
     /**
@@ -254,6 +311,7 @@ public final class AccountErasureService implements AutoCloseable {
                 cursor.advanceTo(account.erasureId());
             }
             if (!page.hasMore() || page.lastId() <= since) {
+                caughtUp = true;
                 return count;
             }
             since = page.lastId();
