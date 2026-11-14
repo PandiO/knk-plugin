@@ -118,6 +118,22 @@ class UserManagerTest {
             assertEquals(result, userManager.getCachedUser(testUUID));
         }
 
+        /** PandiO/knk-workspace#486: the join's sync tells the first-join decision it created the account. */
+        @Test
+        @DisplayName("A created account is reported to the account-created listener; a found one is not")
+        void aCreatedAccount_IsReportedForTheFirstJoinDecision() {
+            java.util.List<UUID> created = new java.util.ArrayList<>();
+            userManager.setAccountCreatedListener(created::add);
+            when(mockApi.checkDuplicate(testUUID.toString(), "TestPlayer"))
+                .thenReturn(CompletableFuture.completedFuture(new DuplicateCheckResponseDto(false, null, null, null)));
+            when(mockApi.createUser(any(CreateUserRequestDto.class))).thenReturn(CompletableFuture.completedFuture(
+                new UserResponseDto(11, "TestPlayer", testUUID.toString(), null, 0, 0, 0, false, "MINECRAFT")));
+
+            userManager.onPlayerJoin(mockPlayer);
+
+            assertEquals(java.util.List.of(testUUID), created);
+        }
+
         @Test
         @DisplayName("Should handle duplicate account detection")
         void shouldHandleDuplicateAccount() {
