@@ -10,6 +10,8 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.block.Block;
+import org.bukkit.block.data.Waterlogged;
 
 import net.knightsandkings.knk.core.npc.nav.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NavigationSettings;
@@ -124,7 +126,17 @@ public final class NpcTestWalkers {
         randomFloor(walker.center(), walker.radius()).ifPresent(target -> walker.mover().walkTo(toPoint(target)));
     }
 
-    /** A random standable spot within {@code radius} of {@code center}: solid floor, two free blocks above. */
+    /**
+     * A block a body can stand in: passable and dry. Water and lava are passable too, so walkers were sent to the
+     * bottom of ponds and stood there drowning (Citizens' protection cancels the damage, so they never died): the
+     * likely source of the 615 damage events and 18,420 air changes in the Phase 1 audit (PandiO/knk-workspace#490).
+     */
+    static boolean roomForBody(Block block) {
+        return block.isPassable() && !block.isLiquid()
+            && !(block.getBlockData() instanceof Waterlogged waterlogged && waterlogged.isWaterlogged());
+    }
+
+    /** A random standable spot within {@code radius} of {@code center}: solid floor, two free, dry blocks above. */
     static Optional<Location> randomFloor(Location center, int radius) {
         World world = center.getWorld();
         ThreadLocalRandom random = ThreadLocalRandom.current();
@@ -136,8 +148,8 @@ public final class NpcTestWalkers {
             }
             for (int dy = 6; dy >= -6; dy--) {
                 int y = center.getBlockY() - 1 + dy;
-                if (world.getBlockAt(x, y, z).getType().isSolid() && world.getBlockAt(x, y + 1, z).isPassable()
-                    && world.getBlockAt(x, y + 2, z).isPassable()) {
+                if (world.getBlockAt(x, y, z).getType().isSolid() && roomForBody(world.getBlockAt(x, y + 1, z))
+                    && roomForBody(world.getBlockAt(x, y + 2, z))) {
                     return Optional.of(new Location(world, x + 0.5, y + 1, z + 0.5));
                 }
             }

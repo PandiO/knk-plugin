@@ -12,6 +12,7 @@ import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Zombie;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.plugin.Plugin;
 import org.junit.jupiter.api.Test;
@@ -59,5 +60,23 @@ class NpcEventAuditTest {
         List<String> report = audit.report();
         assertTrue(report.stream().anyMatch(line -> line.contains("PlayerMoveEvent") && line.contains(" 2 ")),
             report.toString());
+    }
+
+    @Test
+    void damageEventsListTheirCauses() {
+        NpcEventAudit audit = new NpcEventAudit(mock(Plugin.class));
+        Player npc = player(true);
+        for (EntityDamageEvent.DamageCause cause : List.of(EntityDamageEvent.DamageCause.DROWNING,
+            EntityDamageEvent.DamageCause.DROWNING, EntityDamageEvent.DamageCause.FALL)) {
+            EntityDamageEvent damage = mock(EntityDamageEvent.class);
+            when(damage.getEntity()).thenReturn(npc);
+            when(damage.getCause()).thenReturn(cause);
+            when(damage.getHandlers()).thenReturn(EntityDamageEvent.getHandlerList());
+            audit.observe(damage);
+        }
+        List<String> report = audit.report();
+        assertTrue(report.stream().anyMatch(line -> line.contains("causes: DROWNING 2, FALL 1")), report.toString());
+        audit.reset();
+        assertTrue(audit.report().stream().noneMatch(line -> line.contains("causes:")));
     }
 }
