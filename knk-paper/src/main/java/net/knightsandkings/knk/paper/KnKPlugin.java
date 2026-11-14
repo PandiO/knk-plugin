@@ -704,6 +704,12 @@ public class KnKPlugin extends JavaPlugin {
             // Realtime S2 (#179): no HTTP poll while the hub pushes; a drain on every (re)connect instead.
             playerNotificationPoller.setHubConnected(fallbackPolling::connected);
             playerNotificationPoller.start();
+            // PandiO/knk-workspace#485: while the hub pushes (no poll), a join drains what waited for this player.
+            final PlayerNotificationPoller joinDrainPoller = playerNotificationPoller;
+            getServer().getPluginManager().registerEvents(new net.knightsandkings.knk.paper.tasks.NotificationJoinDrain(
+                fallbackPolling::connected, joinDrainPoller::drainNow,
+                drain -> getServer().getScheduler().runTaskLater(this, drain,
+                    net.knightsandkings.knk.paper.tasks.NotificationJoinDrain.DELAY_TICKS)), this);
             
             getLogger().info("WorldTaskHandlerRegistry initialized with handlers");
             
@@ -3435,8 +3441,10 @@ public class KnKPlugin extends JavaPlugin {
             admission, apiClient.getAdmissionApi(), uuid -> org.bukkit.Bukkit.getOfflinePlayer(uuid).isOp(),
             uuid -> offline != null && offline.identity(uuid).isPresent(), java.time.Clock.systemUTC()), this);
         if (playerNotificationPoller != null) {
+            // PandiO/knk-workspace#485: messages.web-account-registered after a game-first registration.
             playerNotificationPoller.setAccountLinkedHandler(
-                new net.knightsandkings.knk.paper.admission.AccountLinkedNotifier(admission.accountLinkedMessage()));
+                new net.knightsandkings.knk.paper.admission.AccountLinkedNotifier(admission.accountLinkedMessage(),
+                    getConfig().getString("messages.web-account-registered"), config.web().publicUrl()));
         }
         getLogger().info("[KnK Admission] admission.mode=" + admission.mode().name().toLowerCase(java.util.Locale.ROOT));
         if (admission.mode() == net.knightsandkings.knk.core.admission.AdmissionPolicy.Mode.INVITE && admission.linkUrl().isEmpty()) {

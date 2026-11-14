@@ -183,7 +183,8 @@ public class UsersMapper {
             LootboxMapper.toCore(dto.lootboxWorldChanged()),
             net.knightsandkings.knk.api.impl.LocationRetentionApiImpl.mapDigest(dto.locationOrphanDigest()),
             dto.accountLinked() == null ? null
-                : new net.knightsandkings.knk.core.domain.users.AccountLinkedNotice(dto.accountLinked().maskedEmail())
+                : new net.knightsandkings.knk.core.domain.users.AccountLinkedNotice(dto.accountLinked().maskedEmail(),
+                    dto.accountLinked().via())
         );
     }
 

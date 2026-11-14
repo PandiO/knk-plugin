@@ -20,6 +20,7 @@ import org.bukkit.scheduler.BukkitTask;
 
 import java.util.HashSet;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.function.Supplier;
 import java.util.logging.Level;
@@ -30,7 +31,8 @@ import java.util.logging.Logger;
  * {@link LootboxSpawnPlanner} says to try: up to {@code surface.max-attempts-per-tick} random columns in the area's
  * region bounds, each loaded with {@code getChunkAtAsync(x, z, false)}, which <b>never generates terrain</b> (an
  * ungenerated chunk is skipped). A column qualifies when its surface is solid, not a liquid, leaves or a forbidden
- * block, has two air blocks above it, lies inside the area's region and outside its excluded regions and the area of any
+ * block, has two air blocks above it, lies inside the area's region (when the region stops below the surface, the
+ * highest such spot inside the region's Y range, {@link LootboxSpawnPlanner#standY}, PandiO/knk-workspace#487) and outside its excluded regions and the area of any
  * siege being fought ({@link LootboxSiegeRules}), and is at least
  * {@code MinDistanceFromPlayers} from every player. The first one that does is sent to the API, which checks the caps
  * again and rolls the type and box grade; the new box is cached, shown and (when grand enough) announced.
@@ -118,7 +120,7 @@ public final class LootboxSpawnScheduler {
         int x = candidate.get().x();
         int z = candidate.get().z();
         world.getChunkAtAsync(x >> 4, z >> 4, false).whenComplete((chunk, ex) -> runOnMainThread(() -> {
-            Integer y = chunk == null || ex != null ? null : spawnY(world, area, x, z);
+            Integer y = chunk == null || ex != null ? null : spawnY(world, area, bounds, x, z);
             if (y == null) {
                 attempt(world, area, bounds, attemptsLeft - 1);
                 return;
@@ -128,17 +130,15 @@ public final class LootboxSpawnScheduler {
     }
 
     /** The y a box would stand at in column (x, z), or null when the column doesn't qualify. Main thread. */
-    Integer spawnY(World world, KnkLootboxArea area, int x, int z) {
-        Block ground = world.getHighestBlockAt(x, z, HeightMap.MOTION_BLOCKING_NO_LEAVES);
-        if (!isGoodGround(ground, runtime.settings())) {
+    Integer spawnY(World world, KnkLootboxArea area, LootboxSpawnPlanner.Bounds bounds, int x, int z) {
+        LootboxSettings settings = runtime.settings();
+        int surfaceY = world.getHighestBlockAt(x, z, HeightMap.MOTION_BLOCKING_NO_LEAVES).getY() + 1;
+        OptionalInt stand = LootboxSpawnPlanner.standY(surfaceY, bounds.minY(), bounds.maxY(),
+            y -> canStandAt(world, x, y, z, settings));
+        if (stand.isEmpty()) {
             return null;
         }
-        Block feet = ground.getRelative(BlockFace.UP);
-        Block head = feet.getRelative(BlockFace.UP);
-        if (!feet.getType().isAir() || !head.getType().isAir()) {
-            return null;
-        }
-        int y = feet.getY();
+        int y = stand.getAsInt();
         if (!regionsAllow(world, area, x, y, z)) {
             return null;
         }
@@ -173,6 +173,13 @@ public final class LootboxSpawnScheduler {
             }
         }
         return !LootboxSiegeRules.insideAny(here, arenas);
+    }
+
+    /** Good ground at {@code y - 1}, air at {@code y} and {@code y + 1}. */
+    static boolean canStandAt(World world, int x, int y, int z, LootboxSettings settings) {
+        Block feet = world.getBlockAt(x, y, z);
+        return isGoodGround(feet.getRelative(BlockFace.DOWN), settings)
+            && feet.getType().isAir() && feet.getRelative(BlockFace.UP).getType().isAir();
     }
 
     static boolean isGoodGround(Block ground, LootboxSettings settings) {
