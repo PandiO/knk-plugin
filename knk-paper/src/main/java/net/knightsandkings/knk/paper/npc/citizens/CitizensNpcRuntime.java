@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.npc.citizens;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -22,6 +23,7 @@ import net.citizensnpcs.api.ai.StuckAction;
 import net.citizensnpcs.api.ai.event.CancelReason;
 import net.citizensnpcs.api.ai.event.NavigationCancelEvent;
 import net.citizensnpcs.api.ai.event.NavigationCompleteEvent;
+import net.citizensnpcs.api.astar.pathfinder.MinecraftBlockExaminer;
 import net.citizensnpcs.api.event.DespawnReason;
 import net.citizensnpcs.api.event.NPCDespawnEvent;
 import net.citizensnpcs.api.event.NPCSpawnEvent;
@@ -84,7 +86,13 @@ final class CitizensNpcRuntime implements NpcMoverFactory, Listener {
             .destinationTeleportMargin(-1)
             // Citizens' A* only finishes on the exact target block by default; arrive within 1.5 blocks
             .pathDistanceMargin(1.5);
-        CitizensNpcMover mover = new CitizensNpcMover(npc, this::forget);
+        DryBlockExaminer dry = null;
+        if (options.dry()) {
+            // #490: the test walkers' own searches (walkTo without a leg) never go through or over water or lava.
+            dry = new DryBlockExaminer(List.of(new MinecraftBlockExaminer(npc)));
+            params.avoidWater(true).clearExaminers().examiner(dry);
+        }
+        CitizensNpcMover mover = new CitizensNpcMover(npc, this::forget, dry);
         movers.put(npc.getId(), mover);
         return mover;
     }

@@ -13,6 +13,8 @@ import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.data.Waterlogged;
 
+import io.papermc.paper.block.fluid.FluidData;
+
 import net.knightsandkings.knk.core.npc.nav.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NavigationSettings;
 import net.knightsandkings.knk.core.npc.nav.NpcMover;
@@ -51,10 +53,12 @@ public final class NpcTestWalkers {
     public int spawn(Location center, int n, int radius) {
         World world = center.getWorld();
         NavigationSettings.Scope scope = NavigationSettings.Scope.of(world.getName());
+        // Dry: Citizens' path search treats water as walkable (a point in or over water is standable), so a dry target
+        // across a pond was reached through it, and walkers stood drowning on the bottom (#490 audit: DROWNING 1088).
         NpcMoverFactory.MoverOptions options = new NpcMoverFactory.MoverOptions(
             settings.value(NavigationSettings.PATHFINDER, scope),
             settings.value(NavigationSettings.STATIONARY_TICKS, scope),
-            settings.value(NavigationSettings.COLLIDABLE, scope));
+            settings.value(NavigationSettings.COLLIDABLE, scope), true);
         int made = 0;
         for (int i = 0; i < n; i++) {
             Optional<Location> at = randomFloor(center, Math.min(radius, 4));
@@ -129,11 +133,15 @@ public final class NpcTestWalkers {
     /**
      * A block a body can stand in: passable and dry. Water and lava are passable too, so walkers were sent to the
      * bottom of ponds and stood there drowning (Citizens' protection cancels the damage, so they never died): the
-     * likely source of the 615 damage events and 18,420 air changes in the Phase 1 audit (PandiO/knk-workspace#490).
+     * source of the damage events and air changes in the Phase 1 audits (PandiO/knk-workspace#490). Dry means no fluid
+     * at all: {@code isLiquid()} is only WATER and LAVA, and seagrass, kelp and bubble columns hold water without being
+     * {@link Waterlogged}, so a pond bottom with tall seagrass passed the first fix; {@code fluid} (the block's
+     * {@link FluidData}, level 0 when empty) catches every water-holding block.
      */
-    static boolean roomForBody(Block block) {
+    static boolean roomForBody(Block block, FluidData fluid) {
         return block.isPassable() && !block.isLiquid()
-            && !(block.getBlockData() instanceof Waterlogged waterlogged && waterlogged.isWaterlogged());
+            && !(block.getBlockData() instanceof Waterlogged waterlogged && waterlogged.isWaterlogged())
+            && (fluid == null || fluid.getLevel() <= 0);
     }
 
     /** A random standable spot within {@code radius} of {@code center}: solid floor, two free, dry blocks above. */
@@ -148,13 +156,19 @@ public final class NpcTestWalkers {
             }
             for (int dy = 6; dy >= -6; dy--) {
                 int y = center.getBlockY() - 1 + dy;
-                if (world.getBlockAt(x, y, z).getType().isSolid() && roomForBody(world.getBlockAt(x, y + 1, z))
-                    && roomForBody(world.getBlockAt(x, y + 2, z))) {
+                if (standable(world, x, y, z)) {
                     return Optional.of(new Location(world, x + 0.5, y + 1, z + 0.5));
                 }
             }
         }
         return Optional.empty();
+    }
+
+    /** Solid floor at {@code y}, and room for a dry body at {@code y + 1} and {@code y + 2}. */
+    static boolean standable(World world, int x, int y, int z) {
+        return world.getBlockAt(x, y, z).isSolid()
+            && roomForBody(world.getBlockAt(x, y + 1, z), world.getFluidData(x, y + 1, z))
+            && roomForBody(world.getBlockAt(x, y + 2, z), world.getFluidData(x, y + 2, z));
     }
 
     static NavPoint toPoint(Location l) {
