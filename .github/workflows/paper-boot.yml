@@ -3,6 +3,9 @@ name: Paper boot test
 # Starts a real Paper server with the shaded KnK jar, WorldGuard and WorldEdit and checks that KnK enables without
 # errors (PandiO/knk-workspace#420, DESIGN § 6.3.1 in knk-workspace docs/specs/ai-agent-workflow/). No knk-web-api
 # runs: the plugin starts in its "API down" state, and errors caused by the unreachable API are excused.
+# After the boot check the same server runs every in-plugin scenario (PandiO/knk-workspace#421, DESIGN § 6.3.2):
+# `knk scenario run all` with testing.scenarios.enabled on; the job fails on any KNK-SCENARIO FAIL line, a scenario
+# without a result, a missing summary line or fewer than MIN_SCENARIOS scenarios.
 # Script and log check: tools/paper-boot/. Docs: docs/guides/developer/ci.md in knk-workspace.
 on:
   push:
@@ -86,15 +89,21 @@ jobs:
           cp "$DOWNLOADS/worldedit-bukkit.jar" "$SERVER/plugins/worldedit-bukkit.jar"
           cp "$DOWNLOADS/worldguard-bukkit.jar" "$SERVER/plugins/worldguard-bukkit.jar"
 
-      - name: Boot the server and check the log
-        # Hook for in-plugin scenarios (PandiO/knk-workspace#421): add --console-command "<scenario command>" and
-        # --expect-line '<pass line regex>' / --fail-line '<fail line regex>' to run one after startup.
+      - name: Boot the server, check the log and run the plugin scenarios
+        # --scenarios: turn on testing.scenarios.enabled, run `knk scenario run all`, check the KNK-SCENARIO lines
+        # (tools/paper-boot/check_scenarios.py; the result table also goes to the job summary). Raise MIN_SCENARIOS
+        # when a scenario is added, so a scenario that silently stops registering fails the job.
+        env:
+          MIN_SCENARIOS: 3
         run: >-
           tools/paper-boot/boot-test.sh
           --server-dir "$RUNNER_TEMP/paper-server"
           --plugin-jar "${{ steps.build.outputs.jar }}"
           --java "$JAVA_HOME_25_X64/bin/java"
           --expect-commit "${{ steps.build.outputs.commit }}"
+          --scenarios
+          --min-scenarios "$MIN_SCENARIOS"
+          --expect-timeout 180
 
       - name: Upload the server log
         if: always()
