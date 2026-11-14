@@ -160,7 +160,11 @@ public class KnKPlugin extends JavaPlugin {
      */
     private final net.knightsandkings.knk.core.privacy.LocalDataEraser localDataEraser =
         new net.knightsandkings.knk.core.privacy.LocalDataEraser();
-    private net.knightsandkings.knk.core.privacy.AccountErasureService accountErasureService;
+    private volatile net.knightsandkings.knk.core.privacy.AccountErasureService accountErasureService;
+    /** PandiO/knk-workspace#486: erased accounts' players whose next join is a first join; null with the hub off. */
+    private volatile net.knightsandkings.knk.core.privacy.ErasedPlayerMarks erasedPlayerMarks;
+    /** PandiO/knk-workspace#486: how long a join waits at pre-login for the first erasure catch-up of this run. */
+    private static final java.time.Duration ERASURE_JOIN_WAIT = java.time.Duration.ofSeconds(5);
     private net.knightsandkings.knk.paper.hub.HubService hubService;
     private DataAccessFactory dataAccessFactory;
     private TownsQueryApi townsQueryApi;
@@ -2253,6 +2257,16 @@ public class KnKPlugin extends JavaPlugin {
         }
         PlayerListener playerListener = new PlayerListener(usersDataAccess, gameSettingsManager, this.getCacheManager(), knkPermissible, usersCommandApi, kitsCommandApi, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, ignoreService, newPlayerWindow);
         playerListener.setHubAdmitted(uuid -> hubService != null && hubService.consumeAdmitted(uuid));
+        // #486: read when a player connects/joins (the realtime erasure sync is set up later in onEnable).
+        playerListener.setErasureHooks(uuid -> {
+            var erasures = accountErasureService;
+            if (erasures != null) {
+                erasures.awaitCaughtUp(ERASURE_JOIN_WAIT);
+            }
+        }, uuid -> {
+            var marks = erasedPlayerMarks;
+            return marks != null && marks.take(uuid);
+        });
         pluginManager.registerEvents(playerListener, this);
         if (playerCurrencyService != null) {
             // Drops a leaving player's open /pay confirmation and its expiry notice.
@@ -2415,6 +2429,21 @@ public class KnKPlugin extends JavaPlugin {
                 return dropped;
             });
         }
+        // #486: the erased account's player keeps Minecraft's own files (hasPlayedBefore), so their next join is marked
+        // as a first join here (welcome, quiet discovery minutes), whether the erasure came by push or by catch-up.
+        var marks = new net.knightsandkings.knk.core.privacy.ErasedPlayerMarks(
+            getDataFolder().toPath().resolve("erasure-first-joins.json"), java.time.Clock.systemUTC(), getLogger());
+        this.erasedPlayerMarks = marks;
+        var window = newPlayerWindow;
+        localDataEraser.register("next join is a first join", net.knightsandkings.knk.core.privacy.LocalDataEraser.Where.WORKER, account -> {
+            if (account.formerUuid() == null) {
+                return 0;
+            }
+            if (window != null) {
+                window.forget(account.formerUuid());
+            }
+            return marks.mark(account.formerUuid());
+        });
         java.nio.file.Path levelDirectory = org.bukkit.Bukkit.getServer().getLevelDirectory();
         java.nio.file.Path minecraftList = getDataFolder().toPath().resolve(settings.minecraftList());
         localDataEraser.register("Minecraft player files listed", net.knightsandkings.knk.core.privacy.LocalDataEraser.Where.WORKER, account -> {

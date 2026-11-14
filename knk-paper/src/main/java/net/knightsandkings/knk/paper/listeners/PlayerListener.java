@@ -88,6 +88,20 @@ public class PlayerListener implements Listener {
 		this.hubAdmitted = hubAdmitted != null ? hubAdmitted : uuid -> false;
 	}
 
+	/**
+	 * PandiO/knk-workspace#486: runs at pre-login before the account is looked up or created (async thread, may block
+	 * briefly): waits until the erasure catch-up of this run has applied what the feed holds. None without the hub.
+	 */
+	private java.util.function.Consumer<UUID> beforeAccountLookup = uuid -> { };
+
+	/** PandiO/knk-workspace#486: true once when the player's previous account was erased since their last join (and forgets it). */
+	private java.util.function.Predicate<UUID> takeErasedSince = uuid -> false;
+
+	public void setErasureHooks(java.util.function.Consumer<UUID> beforeAccountLookup, java.util.function.Predicate<UUID> takeErasedSince) {
+		this.beforeAccountLookup = beforeAccountLookup != null ? beforeAccountLookup : uuid -> { };
+		this.takeErasedSince = takeErasedSince != null ? takeErasedSince : uuid -> false;
+	}
+
 	public PlayerListener(
 			UsersDataAccess usersDataAccess,
 			GameSettingsManager gameSettings,
@@ -121,6 +135,12 @@ public class PlayerListener implements Listener {
 		}
 		UUID uuid = e.getUniqueId();
 		String username = e.getName();
+
+		try {
+			beforeAccountLookup.accept(uuid);
+		} catch (RuntimeException ex) {
+			LOGGER.log(Level.WARNING, "Erasure catch-up before the account lookup failed", ex);
+		}
 
 		try {
 			// API first, so a relog always picks up changes made since the cache was filled (a premium
@@ -261,12 +281,17 @@ public class PlayerListener implements Listener {
 			// exists before its first join, so isNewUser is false; the server not having seen the player
 			// is the other first-join signal. Both get the same first join: welcome, starter kits (the API
 			// grants them once per account) and the quiet discovery minutes (NewPlayerWindow).
-			if (NewPlayerWindow.isFirstJoin(user.isNewUser(), player.hasPlayedBefore())) {
+			// #486: an erased account's player keeps Minecraft's player files (hasPlayedBefore stays true), and an
+			// account got back through a claim or the website isn't new at this join: the erasure's mark decides.
+			boolean erasedSince = takeErasedSince.test(player.getUniqueId());
+			if (NewPlayerWindow.isFirstJoin(user.isNewUser(), player.hasPlayedBefore(), erasedSince)) {
 				if (newPlayers != null) {
 					newPlayers.markFirstJoin(player.getUniqueId());
 				}
 				LOGGER.info("First-join kits: " + player.getName() + " (user " + user.id() + ") "
-					+ (user.isNewUser() ? "is a new account" : "joins for the first time with an existing account")
+					+ (user.isNewUser() ? "is a new account"
+						: erasedSince ? "returns after their previous account was erased"
+						: "joins for the first time with an existing account")
 					+ ", asking the API to grant them");
 				triggerBackgroundFirstJoinKits(player, user.id());
 			}
