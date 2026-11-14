@@ -2,6 +2,7 @@ package net.knightsandkings.knk.paper.enchantment.effects;
 
 import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuning;
 import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuningTable;
+import net.knightsandkings.knk.core.random.ChanceRoll;
 import net.knightsandkings.knk.paper.enchantment.display.EffectDisplay;
 import org.bukkit.Bukkit;
 import org.bukkit.Effect;
@@ -20,12 +21,13 @@ import java.util.function.Supplier;
 /**
  * An enchantment effect that may go off when its holder hits something. The chance, duration and level scaling come
  * from {@link EnchantmentTuningTable} at the moment of the hit, so an admin's change in the web app applies without a
- * restart (PandiO/knk-workspace#151).
+ * restart (PandiO/knk-workspace#151). Whether a hit sets it off is decided by a {@link ChanceRoll}: an independent
+ * roll per hit unless {@link #setChanceRoll} gives it one that remembers the attacker's earlier hits (#476).
  */
 public abstract class AttackEnchantmentEffect implements EnchantmentEffect {
     private final String enchantmentId;
     private final Plugin plugin;
-    private final DoubleSupplier rollSupplier;
+    private volatile ChanceRoll chanceRoll;
     private final Supplier<EnchantmentTuning> tuning;
     private volatile EffectDisplay display = EffectDisplay.NONE;
 
@@ -46,7 +48,7 @@ public abstract class AttackEnchantmentEffect implements EnchantmentEffect {
     ) {
         this.enchantmentId = Objects.requireNonNull(enchantmentId, "enchantmentId must not be null");
         this.plugin = Objects.requireNonNull(plugin, "plugin must not be null");
-        this.rollSupplier = Objects.requireNonNull(rollSupplier, "rollSupplier must not be null");
+        this.chanceRoll = ChanceRoll.independent(Objects.requireNonNull(rollSupplier, "rollSupplier must not be null"));
         this.tuning = Objects.requireNonNull(tuning, "tuning must not be null");
     }
 
@@ -57,7 +59,7 @@ public abstract class AttackEnchantmentEffect implements EnchantmentEffect {
 
     @Override
     public final boolean tryExecute(ItemStack weapon, Player attacker, LivingEntity target, int level) {
-        if (!shouldTrigger(level)) {
+        if (!shouldTrigger(attacker, level)) {
             return false;
         }
 
@@ -67,7 +69,7 @@ public abstract class AttackEnchantmentEffect implements EnchantmentEffect {
 
     protected abstract void applyEffect(ItemStack weapon, Player attacker, LivingEntity target, int level);
 
-    protected final boolean shouldTrigger(int level) {
+    private boolean shouldTrigger(Player attacker, int level) {
         if (level < 1) {
             return false;
         }
@@ -76,7 +78,17 @@ public abstract class AttackEnchantmentEffect implements EnchantmentEffect {
         if (chance >= 1.0d) {
             return true;
         }
-        return rollSupplier.getAsDouble() < chance;
+        return chanceRoll.roll(attacker != null ? attacker.getUniqueId() : null, enchantmentId, chance);
+    }
+
+    /**
+     * How this effect decides whether a hit sets it off (PandiO/knk-workspace#476); {@code null} keeps the current one.
+     * A chance of 100% never asks it.
+     */
+    public final void setChanceRoll(ChanceRoll chanceRoll) {
+        if (chanceRoll != null) {
+            this.chanceRoll = chanceRoll;
+        }
     }
 
     /** This enchantment's current combat values. */

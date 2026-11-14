@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.paper.config;
 
 import net.knightsandkings.knk.core.enchantbook.EnchantBookCapSettings;
+import net.knightsandkings.knk.core.random.ChanceBag;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.plugin.Plugin;
 
@@ -10,6 +11,7 @@ public class EnchantmentConfigManager {
     private static final String ROOT = "custom-enchantments";
     private static final String DEFAULT_COOLDOWN_MESSAGE = "&c%seconds% seconds remaining";
     private static final String BOOK_CAP_ROOT = "enchant-books.grade-cap";
+    private static final String FAIR_CHANCE_ROOT = ROOT + ".fair-chance";
 
     private final Plugin plugin;
 
@@ -66,6 +68,28 @@ public class EnchantmentConfigManager {
                 config.getBoolean(BOOK_CAP_ROOT + ".apply-to-custom", d.applyToCustom()),
                 config.getInt(BOOK_CAP_ROOT + ".ungraded-stars", d.ungradedStars()),
                 config.getDouble(BOOK_CAP_ROOT + ".bonus-level-chance", d.bonusLevelChance())
+        );
+    }
+
+    /**
+     * {@code custom-enchantments.fair-chance.enabled} (PandiO/knk-workspace#476): whether on-hit chances draw from a
+     * marble bag per player and enchantment instead of rolling independently. On when the key is missing.
+     */
+    public boolean fairChanceEnabled() {
+        FileConfiguration config = plugin.getConfig();
+        return config == null || config.getBoolean(FAIR_CHANCE_ROOT + ".enabled", true);
+    }
+
+    /** {@code custom-enchantments.fair-chance.min-bag-size} / {@code max-bag-size}; {@link ChanceBag.Size#DEFAULT} when missing. */
+    public ChanceBag.Size fairChanceBagSize() {
+        FileConfiguration config = plugin.getConfig();
+        ChanceBag.Size d = ChanceBag.Size.DEFAULT;
+        if (config == null) {
+            return d;
+        }
+        return new ChanceBag.Size(
+                config.getInt(FAIR_CHANCE_ROOT + ".min-bag-size", d.min()),
+                config.getInt(FAIR_CHANCE_ROOT + ".max-bag-size", d.max())
         );
     }
 

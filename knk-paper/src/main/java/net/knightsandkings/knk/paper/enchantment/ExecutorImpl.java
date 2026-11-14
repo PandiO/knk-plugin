@@ -4,6 +4,7 @@ import net.knightsandkings.knk.core.domain.enchantment.EnchantmentTuningTable;
 import net.knightsandkings.knk.core.ports.enchantment.CooldownManager;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentExecutor;
 import net.knightsandkings.knk.paper.enchantment.display.EffectDisplay;
+import net.knightsandkings.knk.core.random.ChanceRoll;
 import net.knightsandkings.knk.paper.enchantment.effects.AttackEnchantmentEffect;
 import net.knightsandkings.knk.paper.enchantment.effects.SupportEnchantmentEffect;
 import net.knightsandkings.knk.paper.enchantment.effects.impl.ArmorRepairEffect;
@@ -70,6 +71,14 @@ public class ExecutorImpl implements EnchantmentExecutor {
     public void setEffectDisplay(EffectDisplay display) {
         attackEffects.values().forEach(effect -> effect.setDisplay(display));
         supportEffects.values().forEach(effect -> effect.setDisplay(display));
+    }
+
+    /**
+     * How the on-hit enchantments decide whether a hit sets them off (PandiO/knk-workspace#476); without this call
+     * each hit is an independent roll.
+     */
+    public void setChanceRoll(ChanceRoll chanceRoll) {
+        attackEffects.values().forEach(effect -> effect.setChanceRoll(chanceRoll));
     }
 
     @Override

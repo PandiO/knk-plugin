@@ -6,6 +6,7 @@ import net.knightsandkings.knk.core.domain.item.GradeCatalog;
 import net.knightsandkings.knk.core.ports.enchantment.CooldownManager;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentExecutor;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentRepository;
+import net.knightsandkings.knk.core.random.MarbleBagChanceRoll;
 import net.knightsandkings.knk.paper.commands.enchantment.EnchantmentCommandHandler;
 import net.knightsandkings.knk.paper.config.EnchantmentConfigManager;
 import net.knightsandkings.knk.paper.enchantbook.EnchantBooks;
@@ -13,6 +14,7 @@ import net.knightsandkings.knk.paper.enchantment.CooldownBarCooldownManager;
 import net.knightsandkings.knk.paper.enchantment.AbilityDeathMessageListener;
 import net.knightsandkings.knk.paper.enchantment.EnchantmentPermissions;
 import net.knightsandkings.knk.paper.enchantment.ExecutorImpl;
+import net.knightsandkings.knk.paper.enchantment.FairChanceCleanup;
 import net.knightsandkings.knk.paper.enchantment.GateAreaDamage;
 import net.knightsandkings.knk.paper.enchantment.FrozenPlayerTracker;
 import net.knightsandkings.knk.paper.enchantment.InMemoryCooldownManager;
@@ -86,6 +88,12 @@ public class EnchantmentBootstrap {
         effectBossBars.setInvisibleEquipment(invisibleEquipment);
         effectBossBars.remainingFrom("freeze", frozenPlayerTracker::remainingMillis);
         enchantmentExecutor.setEffectDisplay(effectBossBars);
+        // #476: on-hit chances draw from a marble bag per player and enchantment, so streaks stay short. Read at
+        // startup; java.util.Random because hits are handled on pool threads.
+        MarbleBagChanceRoll fairChance = configManager.fairChanceEnabled()
+                ? new MarbleBagChanceRoll(configManager.fairChanceBagSize(), new java.util.Random())
+                : null;
+        enchantmentExecutor.setChanceRoll(fairChance);
         EnchantmentCommandHandler commandHandler = new EnchantmentCommandHandler(
                 plugin,
                 configManager,
@@ -121,6 +129,9 @@ public class EnchantmentBootstrap {
         pluginManager.registerEvents(effectBossBars, plugin);
         pluginManager.registerEvents(cooldownManager, plugin);
         pluginManager.registerEvents(invisibleEquipment, plugin);
+        if (fairChance != null) {
+            pluginManager.registerEvents(new FairChanceCleanup(fairChance), plugin);
+        }
         // #222: Chaos / Flash Chaos kills get a death message naming the ability and its user.
         pluginManager.registerEvents(new AbilityDeathMessageListener(plugin), plugin);
         // Permanent enchantment books (KNG-5), capped by the target's grade (KNG-6).

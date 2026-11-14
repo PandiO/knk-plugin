@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.lang.reflect.Proxy;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -74,6 +75,35 @@ class AttackEnchantmentEffectTest {
         current.set(new EnchantmentTuning(0.6d, 0.0d, false, 0L, 60, 1.0d));
         assertTrue(effect.tryExecute(null, null, null, 1));
         assertTrue(called.get());
+    }
+
+    @Test
+    void aChanceRollDecidesPerAttackerAndEnchantment() {
+        // #476: with a chance roll set, the roll supplier is no longer asked.
+        AtomicBoolean called = new AtomicBoolean(false);
+        AttackEnchantmentEffect effect = new TestAttackEffect("poison", 0.15d, () -> 0.99d, called);
+        java.util.UUID attackerId = java.util.UUID.randomUUID();
+        Player attacker = (Player) Proxy.newProxyInstance(Player.class.getClassLoader(), new Class[]{Player.class},
+                (proxy, method, args) -> method.getName().equals("getUniqueId") ? attackerId : null);
+        java.util.List<String> asked = new java.util.ArrayList<>();
+        effect.setChanceRoll((subject, key, chance) -> {
+            asked.add(subject + " " + key + " " + chance);
+            return true;
+        });
+        effect.setChanceRoll(null);
+
+        assertTrue(effect.tryExecute(null, attacker, null, 2));
+        assertTrue(called.get());
+        assertEquals(java.util.List.of(attackerId + " poison 0.3"), asked);
+    }
+
+    @Test
+    void aFullChanceNeverAsksTheChanceRoll() {
+        AtomicBoolean called = new AtomicBoolean(false);
+        AttackEnchantmentEffect effect = new TestAttackEffect("blindness", null, () -> 0.99d, called);
+        effect.setChanceRoll((subject, key, chance) -> false);
+
+        assertTrue(effect.tryExecute(null, null, null, 1));
     }
 
     private static final class TestAttackEffect extends AttackEnchantmentEffect {

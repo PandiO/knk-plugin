@@ -883,6 +883,17 @@ custom-enchantments:
   # in the web app (enchantment form, step "Combat values"); empty there = the plugin's built-in value. The plugin
   # re-reads them from the API this often (and at /ce reload); while the API is down the last values stay.
   tuning-refresh-minutes: 5
+  # PandiO/knk-workspace#476: an on-hit chance (Poison, Wither, Freeze, Blindness, Confusion, Strength) is drawn from
+  # a "marble bag" per player and enchantment instead of rolled anew on every hit. The bag holds hits and misses in the
+  # enchantment's ratio (25% = 2 hits in a bag of 8), is drawn from without putting back and refilled when empty. The
+  # average stays the same, but long unlucky or lucky streaks can't happen. Read at startup.
+  fair-chance:
+    # false = every hit is an independent roll, as before #476
+    enabled: true
+    # The bag is the smallest size in this range in which the chance is a whole number of hits; a chance that fits
+    # none uses max-bag-size and carries the fraction over to the next bag. Larger = more room for streaks.
+    min-bag-size: 8
+    max-bag-size: 20
   # PandiO/knk-workspace#222: the death message of a player killed by Chaos or Flash Chaos (only a death inside the
   # ability's own hit; every other death keeps the vanilla message; a siege match still shows none). Placeholders:
   # %victim%, %player% (who used the ability), %enchantment% (its name), %item% (the item it was used with, shown like
