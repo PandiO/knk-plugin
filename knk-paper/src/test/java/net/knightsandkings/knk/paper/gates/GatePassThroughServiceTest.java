@@ -4,10 +4,12 @@ import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
-import org.bukkit.block.Block;
 import org.bukkit.util.Vector;
+import org.mockbukkit.mockbukkit.MockBukkit;
+import org.mockbukkit.mockbukkit.world.WorldMock;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
@@ -17,10 +19,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for GatePassThroughService's pure geometry helpers (isBlockInPassThroughPath,
@@ -202,99 +200,102 @@ class GatePassThroughServiceTest {
     }
 
     /**
-     * Mocks a single (x, z) column so getBlockAt(x, y, z) returns a Material looked up per y,
-     * defaulting to STONE for any y not explicitly listed (simulating solid ground/terrain).
+     * The safe-spot searches call {@code Material.isSolid()}, which needs Paper's block registry: these run on a
+     * MockBukkit server (PandiO/knk-workspace#499) with a real {@link WorldMock} instead of a mocked World.
      */
-    private World mockColumn(int x, int z, Map<Integer, Material> yToMaterial) {
-        World world = mock(World.class);
-        when(world.getMinHeight()).thenReturn(-64);
-        when(world.getMaxHeight()).thenReturn(320);
-        when(world.getBlockAt(eq(x), anyInt(), eq(z))).thenAnswer(invocation -> {
-            int y = invocation.getArgument(1);
-            Material material = yToMaterial.getOrDefault(y, Material.STONE);
-            Block block = mock(Block.class);
-            when(block.getType()).thenReturn(material);
-            return block;
-        });
-        return world;
-    }
+    @Nested
+    class OnAMockServer {
+        @BeforeEach
+        void startServer() {
+            MockBukkit.mock();
+        }
 
-    // Material.isSolid() needs a live Paper block registry (RegistryAccess), unavailable in a
-    // plain unit test - matches this project's existing requires-bukkit convention for tests
-    // that touch such calls (see build.gradle.kts excludeTags).
-    @Test
-    @Tag("requires-bukkit")
-    void findStandableYReturnsStartYWhenAlreadyOnSolidGroundWithAirAbove() {
-        Map<Integer, Material> column = new HashMap<>();
-        column.put(64, Material.AIR);
-        column.put(65, Material.AIR);
-        column.put(63, Material.STONE);
-        World world = mockColumn(0, 0, column);
+        @AfterEach
+        void stopServer() {
+            MockBukkit.unmock();
+        }
 
-        Integer safeY = GatePassThroughService.findStandableY(world, 0, 64, 0);
+        /**
+         * A world whose (x, z) column is STONE from y=40 to y=100 (solid ground/terrain) apart from the listed y
+         * values, which get the given material.
+         */
+        private World mockColumn(int x, int z, Map<Integer, Material> yToMaterial) {
+            WorldMock world = new WorldMock(Material.AIR, -64, 320, 0);
+            for (int y = 40; y <= 100; y++) {
+                world.getBlockAt(x, y, z).setType(yToMaterial.getOrDefault(y, Material.STONE));
+            }
+            return world;
+        }
 
-        assertEquals(64, safeY);
-    }
+        @Test
+        void findStandableYReturnsStartYWhenAlreadyOnSolidGroundWithAirAbove() {
+            Map<Integer, Material> column = new HashMap<>();
+            column.put(64, Material.AIR);
+            column.put(65, Material.AIR);
+            column.put(63, Material.STONE);
+            World world = mockColumn(0, 0, column);
 
-    @Test
-    @Tag("requires-bukkit")
-    void findStandableYSearchesUpwardWhenStartingInsideSolidGround() {
-        // Reproduces the reported bug: approaching from one block below the gate lands the raw
-        // destination inside solid ground (y=64 solid) on the far side; open air with solid
-        // footing exists two blocks higher (y=66/67 air, y=65 solid).
-        Map<Integer, Material> column = new HashMap<>();
-        column.put(65, Material.STONE);
-        column.put(66, Material.AIR);
-        column.put(67, Material.AIR);
-        World world = mockColumn(10, 20, column);
-        // Everything else in the column defaults to STONE (solid), including the start y=64.
+            Integer safeY = GatePassThroughService.findStandableY(world, 0, 64, 0);
 
-        Integer safeY = GatePassThroughService.findStandableY(world, 10, 64, 20);
+            assertEquals(64, safeY);
+        }
 
-        assertEquals(66, safeY);
-    }
+        @Test
+        void findStandableYSearchesUpwardWhenStartingInsideSolidGround() {
+            // Reproduces the reported bug: approaching from one block below the gate lands the raw
+            // destination inside solid ground (y=64 solid) on the far side; open air with solid
+            // footing exists two blocks higher (y=66/67 air, y=65 solid).
+            Map<Integer, Material> column = new HashMap<>();
+            column.put(65, Material.STONE);
+            column.put(66, Material.AIR);
+            column.put(67, Material.AIR);
+            World world = mockColumn(10, 20, column);
+            // Everything else in the column defaults to STONE (solid), including the start y=64.
 
-    @Test
-    @Tag("requires-bukkit")
-    void findStandableYReturnsNullWhenNoStandableSpotWithinRadius() {
-        // Entirely solid column (default STONE) - no air pocket anywhere nearby.
-        World world = mockColumn(0, 0, Map.of());
+            Integer safeY = GatePassThroughService.findStandableY(world, 10, 64, 20);
 
-        Integer safeY = GatePassThroughService.findStandableY(world, 0, 64, 0);
+            assertEquals(66, safeY);
+        }
 
-        assertNull(safeY);
-    }
+        @Test
+        void findStandableYReturnsNullWhenNoStandableSpotWithinRadius() {
+            // Entirely solid column (default STONE) - no air pocket anywhere nearby.
+            World world = mockColumn(0, 0, Map.of());
 
-    @Test
-    @Tag("requires-bukkit")
-    void findNonSuffocatingYNudgesUpwardUntilFeetAndHeadArePassable() {
-        Map<Integer, Material> column = new HashMap<>();
-        column.put(70, Material.AIR);
-        column.put(71, Material.AIR);
-        World world = mockColumn(0, 0, column);
-        // y=64..69 default to solid STONE, so it must climb to 70 before both feet/head are clear.
+            Integer safeY = GatePassThroughService.findStandableY(world, 0, 64, 0);
 
-        int safeY = GatePassThroughService.findNonSuffocatingY(world, 0, 64, 0);
+            assertNull(safeY);
+        }
 
-        assertEquals(70, safeY);
-    }
+        @Test
+        void findNonSuffocatingYNudgesUpwardUntilFeetAndHeadArePassable() {
+            Map<Integer, Material> column = new HashMap<>();
+            column.put(70, Material.AIR);
+            column.put(71, Material.AIR);
+            World world = mockColumn(0, 0, column);
+            // y=64..69 default to solid STONE, so it must climb to 70 before both feet/head are clear.
 
-    @Test
-    @Tag("requires-bukkit")
-    void findSafeTeleportLocationPreservesXZAndOrientationWhileFixingY() {
-        Map<Integer, Material> column = new HashMap<>();
-        column.put(66, Material.AIR);
-        column.put(67, Material.AIR);
-        column.put(65, Material.STONE);
-        World world = mockColumn(5, 9, column);
+            int safeY = GatePassThroughService.findNonSuffocatingY(world, 0, 64, 0);
 
-        Vector rawDestination = new Vector(5.3, 64, 9.7);
-        Location safeLocation = GatePassThroughService.findSafeTeleportLocation(world, rawDestination, 45f, 10f);
+            assertEquals(70, safeY);
+        }
 
-        assertEquals(5.3, safeLocation.getX(), 1e-9);
-        assertEquals(66.0, safeLocation.getY(), 1e-9);
-        assertEquals(9.7, safeLocation.getZ(), 1e-9);
-        assertEquals(45f, safeLocation.getYaw());
-        assertEquals(10f, safeLocation.getPitch());
+        @Test
+        void findSafeTeleportLocationPreservesXZAndOrientationWhileFixingY() {
+            Map<Integer, Material> column = new HashMap<>();
+            column.put(66, Material.AIR);
+            column.put(67, Material.AIR);
+            column.put(65, Material.STONE);
+            World world = mockColumn(5, 9, column);
+
+            Vector rawDestination = new Vector(5.3, 64, 9.7);
+            Location safeLocation = GatePassThroughService.findSafeTeleportLocation(world, rawDestination, 45f, 10f);
+
+            assertEquals(5.3, safeLocation.getX(), 1e-9);
+            assertEquals(66.0, safeLocation.getY(), 1e-9);
+            assertEquals(9.7, safeLocation.getZ(), 1e-9);
+            assertEquals(45f, safeLocation.getYaw());
+            assertEquals(10f, safeLocation.getPitch());
+        }
     }
 }

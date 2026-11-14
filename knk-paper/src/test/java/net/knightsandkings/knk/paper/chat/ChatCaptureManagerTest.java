@@ -9,13 +9,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Logger;
 
+import org.bukkit.Server;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitScheduler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Tag;
 import org.mockito.ArgumentCaptor;
 
 import net.knightsandkings.knk.paper.config.KnkConfig;
@@ -27,7 +28,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
  * Tests secure chat capture flows for account creation and merging.
  */
 @ExtendWith(MockitoExtension.class)
-@Tag("requires-bukkit")
 class ChatCaptureManagerTest {
 
     private ChatCaptureManager manager;
@@ -45,18 +45,25 @@ class ChatCaptureManagerTest {
         mockPlayer = mock(Player.class);
         
         testUUID = UUID.randomUUID();
-        when(mockPlayer.getUniqueId()).thenReturn(testUUID);
-        when(mockPlayer.getName()).thenReturn("TestPlayer");
-        
+        // Shared fixture: not every test reaches every stub, so they are lenient (PandiO/knk-workspace#499).
+        lenient().when(mockPlayer.getUniqueId()).thenReturn(testUUID);
+        lenient().when(mockPlayer.getName()).thenReturn("TestPlayer");
+
+        // Each flow schedules its timeout through plugin.getServer().getScheduler() (PandiO/knk-workspace#499).
+        Server server = mock(Server.class);
+        BukkitScheduler scheduler = mock(BukkitScheduler.class);
+        lenient().when(mockPlugin.getServer()).thenReturn(server);
+        lenient().when(server.getScheduler()).thenReturn(scheduler);
+
         // Mock config messages
         KnkConfig.MessagesConfig messagesConfig = mock(KnkConfig.MessagesConfig.class);
-        when(messagesConfig.prefix()).thenReturn("§8[§6KnK§8]§r ");
-        when(mockConfig.messages()).thenReturn(messagesConfig);
-        
+        lenient().when(messagesConfig.prefix()).thenReturn("§8[§6KnK§8]§r ");
+        lenient().when(mockConfig.messages()).thenReturn(messagesConfig);
+
         // Mock account config
         KnkConfig.AccountConfig accountConfig = mock(KnkConfig.AccountConfig.class);
-        when(accountConfig.chatCaptureTimeoutSeconds()).thenReturn(120);
-        when(mockConfig.account()).thenReturn(accountConfig);
+        lenient().when(accountConfig.chatCaptureTimeoutSeconds()).thenReturn(120);
+        lenient().when(mockConfig.account()).thenReturn(accountConfig);
         
         manager = new ChatCaptureManager(mockPlugin, mockConfig, mockLogger);
     }
@@ -103,7 +110,8 @@ class ChatCaptureManagerTest {
                 mockPlayer,
                 100, 50, 1000, "account-a@example.com",
                 200, 75, 2000, null,
-                capturedData::set,
+                // The manager clears the data map after the callback (sensitive input), so copy it here.
+                data -> capturedData.set(new java.util.HashMap<>(data)),
                 () -> {}
             );
 
@@ -125,7 +133,8 @@ class ChatCaptureManagerTest {
                 mockPlayer,
                 100, 50, 1000, "account-a@example.com",
                 200, 75, 2000, null,
-                capturedData::set,
+                // The manager clears the data map after the callback (sensitive input), so copy it here.
+                data -> capturedData.set(new java.util.HashMap<>(data)),
                 () -> {}
             );
 
@@ -172,7 +181,8 @@ class ChatCaptureManagerTest {
                 mockPlayer,
                 100, 50, 1000, "account-a@example.com",
                 200, 75, 2000, null,
-                capturedData::set,
+                // The manager clears the data map after the callback (sensitive input), so copy it here.
+                data -> capturedData.set(new java.util.HashMap<>(data)),
                 () -> {}
             );
 
@@ -238,14 +248,12 @@ class ChatCaptureManagerTest {
             // Act - Start second session
             Player player2 = mock(Player.class);
             when(player2.getUniqueId()).thenReturn(UUID.randomUUID());
-            when(player2.getName()).thenReturn("TestPlayer2");
+            lenient().when(player2.getName()).thenReturn("TestPlayer2");
             manager.startMergeFlow(player2, 0, 0, 0, null, 0, 0, 0, null, data -> {}, () -> {});
             assertEquals(2, manager.getActiveSessionCount());
 
-            // Act - Complete first session
-            manager.handleChatInput(mockPlayer, "test@example.com");
-            manager.handleChatInput(mockPlayer, "Password123");
-            manager.handleChatInput(mockPlayer, "Password123");
+            // Act - Complete first session (the merge flow ends with a choice)
+            manager.handleChatInput(mockPlayer, "A");
             assertEquals(1, manager.getActiveSessionCount());
         }
 
@@ -263,44 +271,34 @@ class ChatCaptureManagerTest {
         }
     }
 
+    /**
+     * The in-game account creation flow (email, password, confirmation over chat) was removed with
+     * {@code /account create} (KNG-67; its last caller went in KNG-208). What is left to guarantee for the
+     * merge flow: text that is neither A nor B, such as an email or a password typed by habit, never
+     * completes the session and is answered with the A/B prompt (PandiO/knk-workspace#499 updated
+     * these tests from the removed flow).
+     */
     @Nested
     @DisplayName("Email Validation Tests")
     class EmailValidationTests {
 
         @Test
-        @DisplayName("Should accept valid email formats")
+        @DisplayName("An email typed during the merge flow is not taken as a choice")
         void shouldAcceptValidEmails() {
-            String[] validEmails = {
+            String[] emails = {
                 "test@example.com",
                 "user.name@example.com",
                 "user+tag@example.co.uk",
                 "user_123@sub.example.com",
                 "UPPERCASE@EXAMPLE.COM"
             };
-
-            for (String email : validEmails) {
-                manager.startMergeFlow(mockPlayer, 0, 0, 0, null, 0, 0, 0, null, data -> {}, () -> {});
-                manager.handleChatInput(mockPlayer, email);
-                
-                // If email is valid, should move to password step
-                ArgumentCaptor<String> messageCaptor = ArgumentCaptor.forClass(String.class);
-                verify(mockPlayer, atLeastOnce()).sendMessage(messageCaptor.capture());
-                
-                boolean movedToPasswordStep = messageCaptor.getAllValues().stream()
-                    .anyMatch(msg -> msg.contains("Step 2/3"));
-                
-                assertTrue(movedToPasswordStep, "Email should be accepted: " + email);
-                
-                // Clean up for next iteration
-                manager.clearAllSessions();
-                reset(mockPlayer);
-                when(mockPlayer.getUniqueId()).thenReturn(testUUID);
-                when(mockPlayer.getName()).thenReturn("TestPlayer");
+            for (String email : emails) {
+                assertNotTakenAsAChoice(email);
             }
         }
 
         @Test
-        @DisplayName("Should reject invalid email formats")
+        @DisplayName("Malformed or empty text is not taken as a choice either")
         void shouldRejectInvalidEmails() {
             String[] invalidEmails = {
                 "not-an-email",
@@ -311,20 +309,8 @@ class ChatCaptureManagerTest {
                 "user domain@example.com",
                 ""
             };
-
             for (String email : invalidEmails) {
-                manager.startMergeFlow(mockPlayer, 0, 0, 0, null, 0, 0, 0, null, data -> {}, () -> {});
-                manager.handleChatInput(mockPlayer, email);
-                
-                // Session should still be active (email rejected)
-                assertTrue(manager.isCapturingChat(testUUID), 
-                    "Session should remain active for invalid email: " + email);
-                
-                // Clean up for next iteration
-                manager.clearAllSessions();
-                reset(mockPlayer);
-                when(mockPlayer.getUniqueId()).thenReturn(testUUID);
-                when(mockPlayer.getName()).thenReturn("TestPlayer");
+                assertNotTakenAsAChoice(email);
             }
         }
     }
@@ -334,62 +320,45 @@ class ChatCaptureManagerTest {
     class PasswordValidationTests {
 
         @Test
-        @DisplayName("Should accept passwords with 8+ characters")
+        @DisplayName("A password typed during the merge flow is not taken as a choice")
         void shouldAcceptValidPasswords() {
-            String[] validPasswords = {
+            String[] passwords = {
                 "Password123",
                 "12345678",
                 "!@#$%^&*",
                 "LongPasswordWithSpecialChars!123"
             };
-
-            for (String password : validPasswords) {
-                manager.startMergeFlow(mockPlayer, 0, 0, 0, null, 0, 0, 0, null, data -> {}, () -> {});
-                manager.handleChatInput(mockPlayer, "test@example.com");
-                manager.handleChatInput(mockPlayer, password);
-                
-                // Should move to confirmation step
-                ArgumentCaptor<String> messageCaptor = ArgumentCaptor.forClass(String.class);
-                verify(mockPlayer, atLeastOnce()).sendMessage(messageCaptor.capture());
-                
-                boolean movedToConfirmStep = messageCaptor.getAllValues().stream()
-                    .anyMatch(msg -> msg.contains("Step 3/3"));
-                
-                assertTrue(movedToConfirmStep, "Password should be accepted: " + password);
-                
-                // Clean up
-                manager.clearAllSessions();
-                reset(mockPlayer);
-                when(mockPlayer.getUniqueId()).thenReturn(testUUID);
-                when(mockPlayer.getName()).thenReturn("TestPlayer");
+            for (String password : passwords) {
+                assertNotTakenAsAChoice(password);
             }
         }
 
         @Test
-        @DisplayName("Should reject passwords with less than 8 characters")
+        @DisplayName("Short text (one letter other than A or B) is not taken as a choice")
         void shouldRejectWeakPasswords() {
-            String[] weakPasswords = {
+            String[] shortInputs = {
                 "Pass123",
                 "1234567",
-                "short",
-                ""
+                "C",
+                "AB"
             };
-
-            for (String password : weakPasswords) {
-                manager.startMergeFlow(mockPlayer, 0, 0, 0, null, 0, 0, 0, null, data -> {}, () -> {});
-                manager.handleChatInput(mockPlayer, "test@example.com");
-                manager.handleChatInput(mockPlayer, password);
-                
-                // Session should still be active (password rejected)
-                assertTrue(manager.isCapturingChat(testUUID), 
-                    "Session should remain active for weak password: " + password);
-                
-                // Clean up
-                manager.clearAllSessions();
-                reset(mockPlayer);
-                when(mockPlayer.getUniqueId()).thenReturn(testUUID);
-                when(mockPlayer.getName()).thenReturn("TestPlayer");
+            for (String input : shortInputs) {
+                assertNotTakenAsAChoice(input);
             }
         }
+    }
+
+    /** Starts a merge flow, types the text, and checks the session stays open, incomplete and re-prompts. */
+    private void assertNotTakenAsAChoice(String text) {
+        AtomicBoolean completed = new AtomicBoolean(false);
+        manager.startMergeFlow(mockPlayer, 0, 0, 0, null, 0, 0, 0, null, data -> completed.set(true), () -> {});
+        clearInvocations(mockPlayer);
+
+        assertTrue(manager.handleChatInput(mockPlayer, text), "the chat line is captured: " + text);
+
+        assertTrue(manager.isCapturingChat(testUUID), "the session stays open after: " + text);
+        assertFalse(completed.get(), "the session is not completed by: " + text);
+        verify(mockPlayer).sendMessage(contains("Please type 'A' or 'B'"));
+        manager.clearAllSessions();
     }
 }
