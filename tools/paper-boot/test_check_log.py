@@ -3,7 +3,7 @@ import unittest
 
 from check_log import check, parse_entries
 
-API = "127.0.0.1:5294"
+API = "localhost:5294"
 
 GOOD_BOOT = """\
 [16:30:39] [ServerMain/INFO]: [PluginInitializerManager] Bukkit plugins (3):
@@ -53,6 +53,17 @@ class CheckLogTest(unittest.TestCase):
         errors, _ = check(lines(GOOD_BOOT))
         self.assertEqual(2, len(errors))
         self.assertTrue(all("ERROR" in e for e in errors))
+
+    def test_api_errors_excused_whatever_address_localhost_resolved_to(self):
+        log = GOOD_BOOT.replace("localhost/127.0.0.1:5294", "localhost/[0:0:0:0:0:0:0:1]:5294")
+        self.assertEqual([], check(lines(log), unreachable_api=API)[0])
+
+    def test_connection_failure_to_another_port_is_not_excused(self):
+        log = GOOD_BOOT + (
+            "[16:30:55] [knk-api-client/ERROR]: [KnightsAndKings] Failed to connect to localhost/127.0.0.1:8081\n"
+        )
+        errors, _ = check(lines(log), unreachable_api=API)
+        self.assertEqual(1, len(errors))
 
     def test_unrelated_server_error_is_ignored(self):
         errors, _ = check(lines(GOOD_BOOT), unreachable_api=API)

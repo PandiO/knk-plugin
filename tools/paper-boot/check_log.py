@@ -61,10 +61,14 @@ def parse_entries(lines):
 
 
 def api_down_pattern(address):
-    """Matches a failed connection to the unreachable API, for example 'Failed to connect to localhost/127.0.0.1:5294'."""
+    """Matches a failed connection to the unreachable API at host:port, whatever address the host resolved to.
+
+    OkHttp writes 'Failed to connect to localhost/127.0.0.1:5294' or 'localhost/[0:0:0:0:0:0:0:1]:5294' for localhost:5294.
+    """
     if not address:
         return None
-    return re.compile(r"Failed to connect to \S*" + re.escape(address) + r"\b")
+    host, _, port = address.rpartition(":")
+    return re.compile(r"Failed to connect to \S*" + re.escape(host) + r"\S*:" + re.escape(port) + r"\b")
 
 
 def check(lines, expect_commit=None, unreachable_api=None, expect_shutdown=False):
@@ -113,7 +117,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("log", help="the server's logs/latest.log")
     parser.add_argument("--expect-commit", help="commit the version stamp must report")
-    parser.add_argument("--unreachable-api", help="host:port of the API the test leaves unreachable, e.g. 127.0.0.1:5294")
+    parser.add_argument("--unreachable-api", help="host:port of the API the test leaves unreachable, e.g. localhost:5294")
     parser.add_argument("--expect-shutdown", action="store_true", help="also require KnK's 'Plugin Disabled!' line")
     args = parser.parse_args(argv)
 

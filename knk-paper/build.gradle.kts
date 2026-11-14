@@ -78,8 +78,8 @@ tasks.test {
 }
 
 // The tests tagged integration / requires-bukkit, which `test` skips: `./gradlew :knk-paper:taggedTest`. Not part of
-// `check` or CI: most of them fail today (Bukkit statics without a server, stale stubs); see the follow-up issue linked
-// in docs/guides/developer/ci.md (knk-workspace, PandiO/knk-workspace#420).
+// `check` or CI: most of them fail today (Bukkit statics without a server, stale stubs); PandiO/knk-workspace#499.
+// Findings and options: that issue and docs/guides/developer/ci.md in knk-workspace.
 tasks.register<Test>("taggedTest") {
     description = "Runs the tests tagged integration or requires-bukkit (excluded from test)."
     group = "verification"

@@ -40,7 +40,7 @@ COMMANDS=()
 EXPECT_LINES=()
 FAIL_LINES=()
 # The address check_log.py treats as the unreachable API (the default api.base-url of config.yml).
-UNREACHABLE_API="127.0.0.1:5294"
+UNREACHABLE_API="localhost:5294"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
