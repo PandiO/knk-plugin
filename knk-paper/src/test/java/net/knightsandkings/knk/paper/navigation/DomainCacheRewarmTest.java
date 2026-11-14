@@ -24,9 +24,10 @@ class DomainCacheRewarmTest {
     private final Map<String, Collection<String>> asked = new HashMap<>();
     private final List<Runnable> mainThread = new ArrayList<>();
     private int events;
+    private boolean npcNavigation = true;
 
     private DomainCacheRewarm hook(List<String> worlds) {
-        return new DomainCacheRewarm(() -> worlds, world -> roads.get(world), (world, regions) -> {
+        return new DomainCacheRewarm(() -> npcNavigation, () -> worlds, world -> roads.get(world), (world, regions) -> {
             asked.put(world, regions);
             if ("broken".equals(world)) {
                 throw new IllegalStateException("no API");
@@ -71,6 +72,18 @@ class DomainCacheRewarmTest {
         runMainThread();
 
         assertEquals(1, events);
+    }
+
+    @Test
+    void nothingHappensWhileNpcNavigationDoesNotRun() {
+        roads.put("world", Set.of("residential"));
+        npcNavigation = false;
+
+        hook(List.of("world")).run();
+        runMainThread();
+
+        assertEquals(Map.of(), asked);
+        assertEquals(0, events);
     }
 
     @Test
