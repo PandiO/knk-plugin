@@ -77,6 +77,19 @@ tasks.test {
     }
 }
 
+// The tests tagged integration / requires-bukkit, which `test` skips: `./gradlew :knk-paper:taggedTest`. Not part of
+// `check` or CI: most of them fail today (Bukkit statics without a server, stale stubs); see the follow-up issue linked
+// in docs/guides/developer/ci.md (knk-workspace, PandiO/knk-workspace#420).
+tasks.register<Test>("taggedTest") {
+    description = "Runs the tests tagged integration or requires-bukkit (excluded from test)."
+    group = "verification"
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    useJUnitPlatform {
+        includeTags("integration", "requires-bukkit")
+    }
+}
+
 val devPluginsDir: File = try {
     rootProject.layout.projectDirectory
         .dir(devServerDirPath)
