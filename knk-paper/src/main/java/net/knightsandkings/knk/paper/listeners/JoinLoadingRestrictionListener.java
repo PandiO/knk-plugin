@@ -20,6 +20,7 @@ import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 
+import net.knightsandkings.knk.paper.npc.nav.NpcEntities;
 import net.knightsandkings.knk.paper.user.JoinLoadingGuard;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -81,6 +82,9 @@ public class JoinLoadingRestrictionListener implements Listener {
 
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onDamage(EntityDamageByEntityEvent event) {
+        if (NpcEntities.isNpc(resolvePlayerDamager(event.getDamager()))) {
+            return; // an NPC attacker is never loading; treated like a mob (NAV-08)
+        }
         Player attacker = resolvePlayerDamager(event.getDamager());
         if (attacker == null) {
             return;

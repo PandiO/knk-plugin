@@ -24,6 +24,7 @@ import net.knightsandkings.knk.core.telemetry.TelemetryEvent;
 import net.knightsandkings.knk.core.telemetry.TelemetryEventNames;
 import net.knightsandkings.knk.paper.events.GateDoorDamageEvent;
 import net.knightsandkings.knk.paper.events.UserDataLoadedEvent;
+import net.knightsandkings.knk.paper.npc.nav.NpcEntities;
 
 /**
  * Baseline and enhanced diagnostic events from plain Bukkit events (KNG-34 link 6, DESIGN.md §F.12):
@@ -107,6 +108,9 @@ public final class TelemetryListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onDamage(EntityDamageByEntityEvent event) {
+        if (NpcEntities.isNpc(event.getEntity()) || NpcEntities.isNpc(playerOf(event.getDamager()))) {
+            return; // no combat telemetry for hits by or on NPCs (NAV-08)
+        }
         Player attacker = playerOf(event.getDamager());
         Player victim = event.getEntity() instanceof Player p ? p : null;
         Player enhanced = attacker != null && emitter.isEnhanced(attacker.getUniqueId()) ? attacker

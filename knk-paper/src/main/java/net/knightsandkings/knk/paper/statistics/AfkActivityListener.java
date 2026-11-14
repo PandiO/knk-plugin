@@ -25,6 +25,8 @@ import org.bukkit.event.player.PlayerToggleSprintEvent;
 
 import io.papermc.paper.event.player.AsyncChatEvent;
 
+import net.knightsandkings.knk.paper.npc.nav.NpcEntities;
+
 /**
  * AFK activity signals (DESIGN.md §F.2): looking around (yaw or pitch ≥ 1°), walking while not in a
  * vehicle and not in water, chat, commands, block break/place, interacting with a block or entity,
@@ -164,6 +166,9 @@ public final class AfkActivityListener implements Listener {
     /** Attacking is activity; being hit is not. */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onAttack(EntityDamageByEntityEvent event) {
+        if (NpcEntities.isNpc(event.getDamager())) {
+            return; // NPCs have no statistics session (NAV-08)
+        }
         if (event.getDamager() instanceof Player attacker) {
             service.activity(attacker);
         }

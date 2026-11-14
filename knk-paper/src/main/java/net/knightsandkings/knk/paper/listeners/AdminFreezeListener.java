@@ -20,6 +20,7 @@ import org.bukkit.plugin.Plugin;
 import net.knightsandkings.knk.core.dataaccess.UsersDataAccess;
 import net.knightsandkings.knk.paper.commands.MessageCommand;
 import net.knightsandkings.knk.paper.commands.ReplyCommand;
+import net.knightsandkings.knk.paper.npc.nav.NpcEntities;
 import net.knightsandkings.knk.paper.user.AdminFreezeManager;
 
 /**
@@ -124,6 +125,9 @@ public class AdminFreezeListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onDamage(EntityDamageEvent event) {
+        if (NpcEntities.isNpc(event.getEntity())) {
+            return; // NPCs are never frozen (NAV-08)
+        }
         if (event.getEntity() instanceof Player player && freezeManager.isFrozen(player.getUniqueId())) {
             event.setCancelled(true);
         }
