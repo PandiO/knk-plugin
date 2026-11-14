@@ -823,6 +823,13 @@ messages:
   
   # Accounts linked
   account-linked: "&aYour accounts have been linked!"
+
+  # PandiO/knk-workspace#485: shown once after a game-first registration (the player registered on the website with the
+  # link code from /account link): right away when online (realtime push or the notification poll), else on the next
+  # join. Placeholders: {maskedEmail} (the web login, masked as st***@example.com), {name} (the Minecraft name, which
+  # logs in too), {url} (web.public-url; lines that use it are left out while it is empty). A link code entered on the
+  # Account page and a claim code show admission.account-linked instead.
+  web-account-registered: "&aYour website account is ready and linked to this Minecraft account.\n&aLog in at &e{url} &awith &e{maskedEmail} &aor your Minecraft name &e{name}&a.\n&cNot you? Tell staff right away."
   
   # Link code generated (/account link). Placeholders: {code}, {minutes}, {url} (web.public-url).
   # \n starts a new chat line; lines that use {url} are left out while web.public-url is empty.

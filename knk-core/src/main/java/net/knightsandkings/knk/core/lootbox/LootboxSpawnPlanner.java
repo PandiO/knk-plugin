@@ -5,7 +5,9 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.function.DoubleSupplier;
+import java.util.function.IntPredicate;
 
 /**
  * The pure part of spawning (docs/specs/lootboxes/DESIGN.md §3.4, the siege {@code EnchantDropPlanner} pattern): per
@@ -104,6 +106,38 @@ public final class LootboxSpawnPlanner {
 
     public synchronized void reset() {
         lastTry.clear();
+    }
+
+    /**
+     * The y a box stands at in one column of an area's region (PandiO/knk-workspace#487: a region keeps the Y range it
+     * was drawn with, so it need not reach the surface), or empty when the column has none.
+     *
+     * <ol>
+     *   <li>The surface (the block above the column's highest motion-blocking block) inside {@code minY..maxY}: that
+     *       spot or none, as for a full-height region, so a surface of water never sends a box into a cave below.</li>
+     *   <li>The surface above the region (a roof, an overhang, the region under the ground): the highest {@code y} from
+     *       {@code maxY} down to {@code minY} that is {@code standable}.</li>
+     *   <li>The surface below the region (a region in the air): none.</li>
+     * </ol>
+     *
+     * @param surfaceY  the y just above the column's highest block
+     * @param minY      the region's lowest y (inclusive)
+     * @param maxY      the region's highest y (inclusive)
+     * @param standable whether a box can stand at that y: good ground below, two air blocks from it up
+     */
+    public static OptionalInt standY(int surfaceY, int minY, int maxY, IntPredicate standable) {
+        if (maxY < minY || surfaceY < minY) {
+            return OptionalInt.empty();
+        }
+        if (surfaceY <= maxY) {
+            return standable.test(surfaceY) ? OptionalInt.of(surfaceY) : OptionalInt.empty();
+        }
+        for (int y = maxY; y >= minY; y--) {
+            if (standable.test(y)) {
+                return OptionalInt.of(y);
+            }
+        }
+        return OptionalInt.empty();
     }
 
     /** Whether {@code (x, z)} is at least {@code minDistance} blocks (horizontally and vertically) from a player. */
