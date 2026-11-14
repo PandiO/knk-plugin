@@ -44,6 +44,13 @@ public class UserManager {
     
     // Thread-safe cache of player data indexed by UUID
     private final ConcurrentHashMap<UUID, PlayerUserData> userCache = new ConcurrentHashMap<>();
+
+    /** PandiO/knk-workspace#486: told when the join's sync created the player's account (the first-join decision). */
+    private volatile java.util.function.Consumer<UUID> accountCreated = uuid -> { };
+
+    public void setAccountCreatedListener(java.util.function.Consumer<UUID> accountCreated) {
+        this.accountCreated = accountCreated != null ? accountCreated : uuid -> { };
+    }
     
     public UserManager(
         KnKPlugin plugin,
@@ -227,6 +234,7 @@ public class UserManager {
                     // Update legacy cache for PlayerListener compatibility
                     legacyUserCache.put(newUserSummary);
                     logger.info("Updated legacy cache for new user " + username + " with isNewUser=true");
+                    accountCreated.accept(uuid);
 
                     // Map to PlayerUserData (mark as new user since we just created it)
                     return mapToPlayerUserData(response, uuid, true); // NEW user - just created

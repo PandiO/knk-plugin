@@ -2263,23 +2263,30 @@ public class KnKPlugin extends JavaPlugin {
         }
         PlayerListener playerListener = new PlayerListener(usersDataAccess, gameSettingsManager, this.getCacheManager(), knkPermissible, usersCommandApi, kitsCommandApi, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, ignoreService, newPlayerWindow);
         playerListener.setHubAdmitted(uuid -> hubService != null && hubService.consumeAdmitted(uuid));
-        // #486: read when a player connects/joins (the realtime erasure sync is set up later in onEnable).
-        playerListener.setErasureHooks(uuid -> {
+        // #486: read when a player connects (the realtime erasure sync is set up later in onEnable).
+        playerListener.setBeforeAccountLookup(uuid -> {
             var erasures = accountErasureService;
             if (erasures != null) {
                 erasures.awaitCaughtUp(ERASURE_JOIN_WAIT);
             }
-        }, uuid -> {
-            var marks = erasedPlayerMarks;
-            return marks != null && marks.take(uuid);
         });
         pluginManager.registerEvents(playerListener, this);
         if (playerCurrencyService != null) {
             // Drops a leaving player's open /pay confirmation and its expiry notice.
             pluginManager.registerEvents(playerCurrencyService, this);
         }
-        pluginManager.registerEvents(new UserAccountListener(this, userManager, joinLoadingGuard, config.messages(), getLogger(), playerCurrencyService,
-            newPlayerWindow, config.onboarding()), this);
+        UserAccountListener userAccountListener = new UserAccountListener(this, userManager, joinLoadingGuard, config.messages(), getLogger(),
+            playerCurrencyService, newPlayerWindow, config.onboarding());
+        // #486: the first join is decided once the join's sync knows the account: the erasure mark (set later in onEnable,
+        // read at the join) and the first-join kits follow that one decision, as do the welcome and the quiet minutes.
+        userAccountListener.setFirstJoinHooks(uuid -> {
+            var marks = erasedPlayerMarks;
+            return marks != null && marks.take(uuid);
+        }, playerListener::requestFirstJoinKits);
+        if (userManager != null && newPlayerWindow != null) {
+            userManager.setAccountCreatedListener(newPlayerWindow::accountCreated);
+        }
+        pluginManager.registerEvents(userAccountListener, this);
         getLogger().info("Registered UserAccountListener for account management");
         pluginManager.registerEvents(new JoinLoadingRestrictionListener(joinLoadingGuard), this);
         pluginManager.registerEvents(new ModeListener(modeService), this);
