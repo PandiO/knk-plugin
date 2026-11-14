@@ -159,6 +159,14 @@ public final class NavigationService implements SiegeMatchObserver {
         }
 
         /**
+         * PandiO/knk-workspace#507: the box of a gate door's blocks, closed and open (what its animation sweeps), so
+         * NPCs keep out of a moving door's way. Main thread. Not known by default.
+         */
+        default java.util.Optional<net.knightsandkings.knk.core.gates.target.GateBox> doorBox(int doorId) {
+            return java.util.Optional.empty();
+        }
+
+        /**
          * PandiO/knk-workspace#361: whether the subject's policy blocks this one edge now - the question behind
          * "does the blocking element still block?". Main thread, without reading the rest of the network. Not
          * blocked by default.
@@ -650,6 +658,11 @@ public final class NavigationService implements SiegeMatchObserver {
             @Override
             public boolean gateBlocks(net.knightsandkings.knk.core.npc.nav.AccessSubject subject, int doorId) {
                 return deps.policies().gateBlocks(subject, doorId);
+            }
+
+            @Override
+            public java.util.Optional<net.knightsandkings.knk.core.gates.target.GateBox> doorBox(int doorId) {
+                return deps.policies().doorBox(doorId);
             }
         };
     }

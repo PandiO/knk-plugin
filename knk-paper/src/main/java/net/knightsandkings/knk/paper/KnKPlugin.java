@@ -1921,6 +1921,15 @@ public class KnKPlugin extends JavaPlugin {
         }
         roadNetworkCache.addListener(navigationService::onNetworkChanged);
         cacheManager.registerRefreshHook("navigation routes", navigationService::onAvailabilityChanged);
+        if (regionDomainResolver != null && roadNetworkCache != null) {
+            // PandiO/knk-workspace#506: the refresh forgot the region -> domain map, so the NPC rule checks saw every
+            // district as open; warm the map again for the roads' regions, then tell navigation once more
+            cacheManager.registerRefreshHook("navigation region domains",
+                new net.knightsandkings.knk.paper.navigation.DomainCacheRewarm(
+                    () -> org.bukkit.Bukkit.getWorlds().stream().map(org.bukkit.World::getName).toList(),
+                    world -> roadNetworkCache.snapshot(world).regionIds(), regionDomainResolver::warmCache, mainThread,
+                    navigationService::onAvailabilityChanged, getLogger()));
+        }
         getServer().getPluginManager().registerEvents(
             new net.knightsandkings.knk.paper.navigation.NavigationListener(navigationService), this);
         navigationService.start();

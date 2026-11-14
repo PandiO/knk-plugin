@@ -40,6 +40,9 @@ class NpcRoadPlanningTest {
     private final NpcAccessSubject npc = new NpcAccessSubject("guard-1", NpcAccessProfile.DEFAULT,
         NavigationTestNetwork.WORLD, Set.of("town_1"));
 
+    private static final net.knightsandkings.knk.core.gates.target.GateBox DOOR_7 =
+        new net.knightsandkings.knk.core.gates.target.GateBox(60, 64, -1, 61, 69, 2);
+
     private NavigationService service() {
         NavigationService.PolicyFactory policies = new NavigationService.PolicyFactory() {
             @Override
@@ -57,6 +60,11 @@ class NpcRoadPlanningTest {
             public boolean edgeBlocked(AccessSubject subject, RoadNetworkSnapshot snapshot,
                                        net.knightsandkings.knk.core.domain.roads.RoadEdge edge) {
                 return policy.check(edge).isBlocked();
+            }
+
+            @Override
+            public java.util.Optional<net.knightsandkings.knk.core.gates.target.GateBox> doorBox(int doorId) {
+                return doorId == 7 ? java.util.Optional.of(DOOR_7) : java.util.Optional.empty();
             }
         };
         return new NavigationService(new NavigationService.Deps(null, NavigationConfig.defaults(),
@@ -191,6 +199,14 @@ class NpcRoadPlanningTest {
         NavigationService open = service();
         assertTrue(open.accessRules().mayEnter(npc).test("anything"), "a factory without subject rules allows everything");
         assertTrue(!open.accessRules().gateBlocks(npc, 7));
+        assertEquals(java.util.Optional.of(DOOR_7), open.accessRules().doorBox(7), "PandiO/knk-workspace#507");
+        assertTrue(open.accessRules().doorBox(8).isEmpty());
+        assertTrue(new NavigationService.PolicyFactory() {
+            @Override
+            public AccessPolicy policyFor(Player player, RoadNetworkSnapshot snapshot) {
+                return policy;
+            }
+        }.doorBox(7).isEmpty(), "a factory without door boxes knows none");
     }
 
     @Test

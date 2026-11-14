@@ -262,6 +262,24 @@ class NavigationAccessSubjectTest {
     }
 
     @Test
+    void aDoorThatStartedClosingBlocksAnNpcAtOnce() {
+        // PandiO/knk-workspace#507: the gate's state event comes when the close starts; the door blocks from then on
+        when(gates.getGate(OPEN).getCurrentState()).thenReturn(AnimationState.CLOSING);
+        assertTrue(access.gateBlocks(npc(NpcAccessProfile.DEFAULT), OPEN));
+    }
+
+    @Test
+    void aDoorsBoxIsItsClosedFootprintAndUnknownDoorsHaveNone() {
+        // PandiO/knk-workspace#507: followers keep out of a moving door's box
+        when(gates.getGate(CLOSED).getId()).thenReturn(CLOSED);
+        when(gates.closedFootprint(CLOSED)).thenReturn(List.of(new org.bukkit.util.Vector(60, 64, 0),
+            new org.bukkit.util.Vector(60, 67, 1)));
+        assertEquals(Optional.of(new net.knightsandkings.knk.core.gates.target.GateBox(60, 64, 0, 61, 68, 2)),
+            access.doorBox(CLOSED));
+        assertEquals(Optional.empty(), access.doorBox(99), "a door the gate cache does not know");
+    }
+
+    @Test
     void anNpcsListsComeBeforeTheDomainRules() {
         castleDeniesEntry();
         var castleEdge = network.snapshot.requireEdge(NavigationTestNetwork.E_C_CASTLE);
