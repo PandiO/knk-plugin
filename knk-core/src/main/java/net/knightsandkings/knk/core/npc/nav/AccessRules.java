@@ -1,6 +1,9 @@
 package net.knightsandkings.knk.core.npc.nav;
 
+import java.util.Optional;
 import java.util.function.Predicate;
+
+import net.knightsandkings.knk.core.gates.target.GateBox;
 
 /**
  * The access rules as they are <b>now</b>, asked while an NPC walks (implementation plan Phase 3; BEHAVIOR_MODEL
@@ -31,4 +34,13 @@ public interface AccessRules {
 
     /** Whether this gate door stops the subject now (closed, moving, jammed or locked, and not its to pass). */
     boolean gateBlocks(AccessSubject subject, int doorId);
+
+    /**
+     * Where a gate door's blocks are, closed and open, and so what its animation sweeps (PandiO/knk-workspace#507): a
+     * walker in this box when the door starts moving is in its way. Empty when not known (the default): nobody is
+     * held back by the door's box then.
+     */
+    default Optional<GateBox> doorBox(int doorId) {
+        return Optional.empty();
+    }
 }

@@ -2,13 +2,16 @@ package net.knightsandkings.knk.core.npc.nav.group;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 
+import net.knightsandkings.knk.core.gates.target.GateBox;
 import net.knightsandkings.knk.core.npc.nav.BlockingElement;
 import net.knightsandkings.knk.core.npc.nav.HopPlanner;
 import net.knightsandkings.knk.core.npc.nav.NavPoint;
@@ -37,9 +40,12 @@ import net.knightsandkings.knk.core.npc.nav.RouteFollower;
  *
  * <p>Rules stay binding for followers: a lane point never lies in a WorldGuard region the path's own point is not
  * in, and before a follower is sent on, every region ahead that it does not stand in yet is asked about with the
- * current rules; it stops before the first one it may not enter. Closed gates are the leader's affair on the way
- * ahead; behind the leader a closed gate stops a follower bodily and its own leg back then waits at the gate under
- * the navigation service's rules.
+ * current rules; it stops before the first one it may not enter. The same goes for the gate doors on the leader's
+ * routes (PandiO/knk-workspace#507): a follower stops {@link #DOOR_MARGIN} short of the box of a door that blocks it
+ * now (closed, moving, jammed), so a door that starts closing between the leader and its followers does not push
+ * them aside; a follower already in that box when the door starts moving walks on out of it. A gate or availability
+ * event hands every follower its waypoints again under the new rules (PandiO/knk-workspace#506), and a trespass
+ * guard of their own counts a follower that entered a region the current rules deny it ({@link Event#TRESPASS}).
  *
  * <p>Main thread only. Created and ticked by {@link NavGroupService}.
  */
@@ -74,6 +80,13 @@ public final class NavGroup {
     static final int MAX_HOLD_TICKS = 600;
     /** Waypoints handed to a follower at once at most. */
     static final int MAX_WAYPOINTS = 32;
+    /**
+     * A follower keeps this many blocks (horizontally, and one block up and down) out of the box of a gate door that
+     * blocks it; inside that margin when the door starts moving, it walks on out (PandiO/knk-workspace#507).
+     */
+    static final double DOOR_MARGIN = 1.0;
+    /** With the recheck off ({@code recheck-ticks: 0}) the followers' trespass guard still looks this often. */
+    static final int GUARD_TICKS = 40;
 
     public enum FollowerState {
         /** Walks the group's path in its slot. */
@@ -105,6 +118,11 @@ public final class NavGroup {
         boolean sentIntoRegion;
         /** The rules may have changed since it got its waypoints: they are handed out again. */
         boolean recheck;
+        /** The regions it stood in at the trespass guard's last look; null before the first (PandiO/knk-workspace#506). */
+        Set<String> regions;
+        long guardTick;
+        /** Walks out of the way of a gate door that started moving with it in its box; not stopped on the way. */
+        boolean leavingDoor;
         /** How far behind its slot (negative: ahead), from the last look. */
         double lag;
         boolean settled = true;
@@ -147,9 +165,16 @@ public final class NavGroup {
     private boolean blockedReported;
     private BlockingElement reportedElement;
     private final Map<Verdict, Boolean> verdicts = new HashMap<>();
+    /** The gate doors on the leader's routes in this order: a door the leader has passed stays one (#507). */
+    private final Set<Integer> routeDoors = new LinkedHashSet<>();
+    private final Map<Integer, Optional<GateBox>> doorBoxes = new HashMap<>();
+    /** Whether a door blocks the group's NPCs now; asked again with the region verdicts. */
+    private final Map<Integer, Boolean> doorVerdicts = new HashMap<>();
     private long verdictTick;
     private long now;
     private boolean disbanded;
+    /** A rule changed since the last look: the next tick looks at the group whatever its turn. */
+    private boolean rulesPending;
 
     NavGroup(int id, NavGroupService.Ports ports, NpcMover leader, List<NpcMover> followers, NpcAccessProfile profile,
              GroupSettings settings) {
@@ -280,6 +305,7 @@ public final class NavGroup {
             f.lag = 0;
             f.settled = true;
             f.progressTick = now;
+            f.regions = null;
         }
         orderLeader();
         return true;
@@ -334,10 +360,23 @@ public final class NavGroup {
         disbanded = true;
     }
 
-    /** A gate or an access rule changed: followers waiting on the rules or on a failed leg try again now. */
+    /**
+     * A gate or an access rule changed: every follower gets its waypoints again under the new rules (one that may no
+     * longer walk on stops at the edge, PandiO/knk-workspace#506), and followers waiting on a failed leg try again now.
+     */
     void rulesChanged() {
         verdicts.clear();
+        doorVerdicts.clear();
+        doorBoxes.clear();
+        rulesPending = goal != null;
         for (Follower f : followers) {
+            // the trespass guard judges entries from here on by the new rules, not the ones made under the old rules
+            if (goal != null && f.state != FollowerState.REJOINING) {
+                f.mover.position().ifPresent(feet -> {
+                    f.regions = regionsAt(feet);
+                    f.guardTick = now;
+                });
+            }
             f.recheck = true;
             if (f.state == FollowerState.RETRY_WAIT) {
                 f.retryAt = now;
@@ -405,11 +444,13 @@ public final class NavGroup {
         f.heldByRule = false;
         f.sentIntoRegion = false;
         f.recheck = false;
+        f.leavingDoor = false;
         normalSpeed(f);
     }
 
     private void resetPath() {
         path.clear();
+        routeDoors.clear();
         leaderIdx = -1;
         line = null;
         onLine = false;
@@ -422,9 +463,10 @@ public final class NavGroup {
 
     void tick(long tick) {
         now = tick;
-        if (goal == null || (tick + id) % GROUP_TICKS != 0) {
+        if (goal == null || ((tick + id) % GROUP_TICKS != 0 && !rulesPending)) {
             return;
         }
+        rulesPending = false;
         NavPoint at = leader.position().orElse(null);
         if (at == null) {
             return; // the leader's chunk is unloaded: navigation resumes it; the followers finish what they have
@@ -433,6 +475,7 @@ public final class NavGroup {
             // a rule change that came without an event: ask again, and look again at waypoints that cross into
             // a region (the navigation service's own recheck does the same for the leader)
             verdicts.clear();
+            doorVerdicts.clear();
             verdictTick = tick;
             for (Follower f : followers) {
                 f.recheck |= f.sentIntoRegion;
@@ -444,6 +487,7 @@ public final class NavGroup {
             reportedElement = null;
         }
         trackLeader(at);
+        routeDoors.addAll(ports.navigation().gateDoorsOf(leader.id()));
         decideFold();
         NpcNavState leaderState = ports.navigation().state(leader.id());
         boolean walking = leaderState == NpcNavState.MOVING && onLine && leaderDoneTick < 0 && !holding;
@@ -544,6 +588,11 @@ public final class NavGroup {
             f.progressTick = now;
             return;
         }
+        if (f.state == FollowerState.REJOINING) {
+            f.regions = null; // on a leg of its own the navigation service's trespass guard watches it
+        } else if (now - f.guardTick >= (settings.recheckTicks() > 0 ? settings.recheckTicks() : GUARD_TICKS)) {
+            f.mover.position().ifPresent(feet -> guard(f, feet, regionsAt(feet)));
+        }
         double slotArc = leaderArc - slot.back();
         if (f.state != FollowerState.FOLLOWING) {
             // on a leg of its own, or between two tries: how far behind it is, for the leader's waiting
@@ -588,6 +637,20 @@ public final class NavGroup {
         double a = path.arcOf(at, f.pathIdx);
         f.lag = slotArc - a;
         speed(f);
+        if (f.leavingDoor) {
+            if (f.mover.isMoving()) {
+                f.settled = false;
+                f.progressTick = now;
+                return; // out of a moving door's way first, wherever its slot is
+            }
+            f.leavingDoor = false;
+        }
+        if (f.recheck && !routeDoors.isEmpty() && inBlockingDoorWay(f, at)) {
+            send(f, slot, at, a, targetArc); // a door started moving with it in the way, its slot or not: out
+            f.settled = false;
+            f.progressTick = now;
+            return;
+        }
         if (a >= targetArc - 0.3 || f.lag < -AHEAD_TOLERANCE) {
             // in its place, or ahead of its slot: wait for the slot
             if (f.mover.isMoving() && !(f.sentEndArc <= Math.max(targetArc, a) + 0.5)) {
@@ -627,7 +690,16 @@ public final class NavGroup {
 
     /** Hands a follower its lane from where it is to {@code targetArc}, as far as the current rules let it walk. */
     private void send(Follower f, Formation.Slot slot, NavPoint at, double a, double targetArc) {
-        Set<String> here = ports.world().regionsAt(at.world(), at.blockX(), at.blockY(), at.blockZ());
+        Set<String> here = regionsAt(at);
+        guard(f, at, here);
+        List<GateBox> doors = blockingDoors(f, at.world(), here);
+        GateBox inDoor = null;
+        for (GateBox box : doors) {
+            if (inDoorWay(box, at)) {
+                inDoor = box; // the door starts moving with it in the way: it walks on out, never stops in there
+                break;
+            }
+        }
         int end = path.indexAtArc(targetArc);
         List<NavPoint> waypoints = new ArrayList<>();
         double endArc = a;
@@ -636,7 +708,7 @@ public final class NavGroup {
         f.sentIntoRegion = false;
         int k = path.arc(f.pathIdx) > a + 0.3 ? f.pathIdx : f.pathIdx + 1;
         for (; k <= end && waypoints.size() < MAX_WAYPOINTS; k++) {
-            if (!mayWalk(f, here, k)) {
+            if (!mayWalk(f, here, k) || intoDoor(doors, inDoor, HopPlanner.feet(path.get(k).floor))) {
                 cut = true;
                 break;
             }
@@ -647,11 +719,26 @@ public final class NavGroup {
             // the slot itself: between two path points, or past the path's end (a slot ahead of the leader)
             double along = targetArc - path.arc(end);
             if (along > 0.2 && mayWalk(f, here, end)) {
-                add(waypoints, lanePoint(end, along, slot.side()));
-                endArc = targetArc;
+                NavPoint p = lanePoint(end, along, slot.side());
+                if (!intoDoor(doors, inDoor, p)) {
+                    add(waypoints, p);
+                    endArc = targetArc;
+                }
+            }
+        }
+        if (inDoor != null && !cut) {
+            // its slot lies in the door's way: on along the path until it is out of it
+            for (; k < path.size() && waypoints.size() < MAX_WAYPOINTS
+                && (waypoints.isEmpty() || inDoorWay(inDoor, waypoints.get(waypoints.size() - 1))); k++) {
+                if (!mayWalk(f, here, k) || intoDoor(doors, inDoor, HopPlanner.feet(path.get(k).floor))) {
+                    break;
+                }
+                add(waypoints, lanePoint(k, 0, slot.side()));
+                endArc = Math.max(endArc, path.arc(k));
             }
         }
         f.heldByRule = cut && waypoints.isEmpty();
+        f.leavingDoor = inDoor != null && !waypoints.isEmpty();
         if (waypoints.isEmpty()) {
             if (f.mover.isMoving()) {
                 f.mover.stop();
@@ -697,6 +784,78 @@ public final class NavGroup {
             return !(onLine && line != null && lineStart + lineAdded < line.line().size());
         }
         return path.point(ports.world(), index, 0, side) != null;
+    }
+
+    private Set<String> regionsAt(NavPoint feet) {
+        return ports.world().regionsAt(feet.world(), feet.blockX(), feet.blockY(), feet.blockZ());
+    }
+
+    /**
+     * The boxes of the gate doors on the leader's routes that block the group's NPCs now (PandiO/knk-workspace#507);
+     * doors whose box is not known are left out.
+     */
+    private List<GateBox> blockingDoors(Follower f, String world, Set<String> here) {
+        if (routeDoors.isEmpty()) {
+            return List.of();
+        }
+        List<GateBox> out = new ArrayList<>(2);
+        for (int doorId : routeDoors) {
+            Optional<GateBox> box = doorBoxes.computeIfAbsent(doorId, id -> ports.rules().doorBox(id));
+            if (box.isPresent() && doorVerdicts.computeIfAbsent(doorId, id -> ports.rules()
+                .gateBlocks(new NpcAccessSubject(f.mover.name(), profile, world, here), id))) {
+                out.add(box.get());
+            }
+        }
+        return out;
+    }
+
+    private boolean inBlockingDoorWay(Follower f, NavPoint at) {
+        for (GateBox box : blockingDoors(f, at.world(), regionsAt(at))) {
+            if (inDoorWay(box, at)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Whether a point lies in a blocking door's box or within {@link #DOOR_MARGIN} of it, other than {@code inDoor}. */
+    private static boolean intoDoor(List<GateBox> doors, GateBox inDoor, NavPoint feet) {
+        for (GateBox box : doors) {
+            if (box != inDoor && inDoorWay(box, feet)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Whether an NPC with its feet here is in a door's way: in its box or within {@link #DOOR_MARGIN} of it. */
+    static boolean inDoorWay(GateBox box, NavPoint feet) {
+        return feet.x() >= box.minX() - DOOR_MARGIN && feet.x() <= box.maxX() + DOOR_MARGIN
+            && feet.z() >= box.minZ() - DOOR_MARGIN && feet.z() <= box.maxZ() + DOOR_MARGIN
+            && feet.y() + 2 > box.minY() - DOOR_MARGIN && feet.y() < box.maxY() + DOOR_MARGIN;
+    }
+
+    /**
+     * The followers' trespass guard (PandiO/knk-workspace#506; the navigation service's guard watches leaders and
+     * followers on a leg of their own): a region the follower stands in now and did not stand in at the last look
+     * was entered; the entry is judged by the current rules from the regions it came from. Logged and counted as
+     * {@link Event#TRESPASS}; must stay 0.
+     */
+    private void guard(Follower f, NavPoint at, Set<String> here) {
+        Set<String> before = f.regions;
+        f.regions = here;
+        f.guardTick = now;
+        if (before == null || before.containsAll(here)) {
+            return;
+        }
+        for (String region : here) {
+            if (!before.contains(region) && !verdicts.computeIfAbsent(new Verdict(before, region), v -> ports.rules()
+                .mayEnter(new NpcAccessSubject(f.mover.name(), profile, at.world(), before)).test(region))) {
+                ports.metrics().count(Event.TRESPASS);
+                ports.log().accept(String.format(Locale.ROOT, "TRESPASS %s entered %s at %d %d %d (a follower of group %d)",
+                    f.mover.name(), region, at.blockX(), at.blockY(), at.blockZ(), id));
+            }
+        }
     }
 
     /** Whether a follower standing in the regions {@code here} may walk on to a path point under the current rules. */
@@ -762,6 +921,7 @@ public final class NavGroup {
             f.mover.stop();
         }
         normalSpeed(f);
+        f.leavingDoor = false;
         f.state = FollowerState.REJOINING;
         f.heldByRule = false;
         f.rejoinNode = target;

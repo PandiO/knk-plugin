@@ -10,6 +10,7 @@ import java.util.function.BiFunction;
 import java.util.function.BiPredicate;
 import java.util.function.Predicate;
 
+import net.knightsandkings.knk.core.gates.target.GateBox;
 import net.knightsandkings.knk.core.npc.nav.AccessRules;
 import net.knightsandkings.knk.core.npc.nav.AccessSubject;
 import net.knightsandkings.knk.core.npc.nav.LocalLeg;
@@ -58,10 +59,19 @@ final class GroupSim {
         }
     }
 
-    /** The current rules: regions nobody may enter (unless already inside) and gate doors that are closed. */
+    /**
+     * The current rules: regions nobody may enter (unless already inside), gate doors that are closed (or moving) and
+     * the doors' boxes.
+     */
     static final class SimRules implements AccessRules {
         final Set<String> deniedRegions = new HashSet<>();
         final Set<Integer> closedGates = new HashSet<>();
+        final java.util.Map<Integer, GateBox> doorBoxes = new java.util.HashMap<>();
+
+        @Override
+        public Optional<GateBox> doorBox(int doorId) {
+            return Optional.ofNullable(doorBoxes.get(doorId));
+        }
 
         @Override
         public Predicate<String> mayEnter(AccessSubject subject) {

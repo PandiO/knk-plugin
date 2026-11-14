@@ -15,6 +15,7 @@ import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
+import net.knightsandkings.knk.core.gates.target.GateBox;
 import net.knightsandkings.knk.core.npc.nav.BlockingElement;
 import net.knightsandkings.knk.core.npc.nav.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NavigationResult;
@@ -419,6 +420,155 @@ class NavGroupTest {
         // the leader waited for them once they could follow again: one more plan for the group at most
         assertEquals(1 + sim.metrics.total(Event.GROUP_REGROUP), sim.roadPlans);
         assertTrue(sim.metrics.total(Event.GROUP_REGROUP) <= 1);
+    }
+
+    @Test
+    void anAccessChangeInTheMiddleOfAColumnOfTwentyStopsTheOutsideFollowersAtTheEdge() {
+        // PandiO/knk-workspace#506 (Phase 4 developer test step 10)
+        sim.world.regions = (x, z) -> x >= 50 ? Set.of("residential") : Set.of();
+        NavGroup group = sim.group(20, COLUMN);
+        group.navigate(feet(200.5, 0.5), results);
+        assertTrue(sim.runUntil(() -> leader().position.x() > 66, 3000));
+        List<SimMover> inside = sim.movers.stream().skip(1).filter(m -> m.position.x() >= 50).toList();
+        List<SimMover> outside = sim.movers.stream().skip(1).filter(m -> m.position.x() < 50).toList();
+        assertTrue(inside.size() >= 3 && outside.size() >= 3, "part of the column is inside: " + inside.size());
+        java.util.Map<SimMover, Double> was = new java.util.HashMap<>();
+        inside.forEach(m -> was.put(m, m.position.x()));
+
+        sim.rules.deniedRegions.add("residential");
+        sim.service.onAvailabilityChanged();
+        sim.groups.onRulesChanged();
+        for (int t = 0; t < 400; t++) {
+            sim.tick();
+            for (SimMover m : outside) {
+                assertTrue(m.position.x() < 50, m.name() + " entered the district at " + m.position);
+            }
+        }
+
+        for (SimMover m : inside) {
+            assertTrue(m.position.x() > was.get(m) + 20, m.name() + " was inside and walks on, at " + m.position);
+        }
+        for (SimMover m : outside) {
+            assertFalse(m.isMoving(), m.name() + " stands at the edge");
+        }
+        assertEquals(0, sim.metrics.total(Event.TRESPASS));
+        assertEquals(0, sim.metrics.total(Event.GROUP_REJOIN), "waiting on a rule is not being stuck");
+
+        sim.rules.deniedRegions.clear();
+        sim.service.onAvailabilityChanged();
+        sim.groups.onRulesChanged();
+        assertTrue(sim.runUntil(results::ended, 4000));
+
+        assertArrived();
+        for (SimMover m : outside) {
+            assertTrue(m.position.x() > 150, m.name() + " followed once entry was allowed again, at " + m.position);
+        }
+        assertEquals(0, sim.metrics.total(Event.TRESPASS), "trespasses 0 with a guard that counts followers");
+        assertTrue(sim.metrics.total(Event.GROUP_REGROUP) <= 1, "the leader waited for them once at most");
+    }
+
+    @Test
+    void theTrespassGuardCountsAFollowerCarriedIntoADeniedRegion() {
+        sim.world.regions = (x, z) -> x >= 50 ? Set.of("keep") : Set.of();
+        sim.group(6, COLUMN).navigate(feet(140.5, 0.5), results);
+        assertTrue(sim.runUntil(() -> leader().position.x() > 52, 2000));
+        sim.rules.deniedRegions.add("keep");
+        sim.service.onAvailabilityChanged();
+        sim.groups.onRulesChanged();
+        sim.run(40);
+        assertEquals(0, sim.metrics.total(Event.TRESPASS));
+
+        SimMover carried = follower(3);
+        assertTrue(carried.position.x() < 50, "outside: " + carried.position);
+        carried.position = feet(51.5, 0.5); // carried in by water or a push
+        sim.run(100);
+
+        assertEquals(1, sim.metrics.total(Event.TRESPASS), "log: " + tail());
+        assertTrue(sim.log.stream().anyMatch(l -> l.startsWith("TRESPASS " + carried.name() + " entered keep")
+            && l.contains("a follower of group")), "log: " + tail());
+        for (int i = 1; i < 5; i++) {
+            if (follower(i) != carried) {
+                assertTrue(follower(i).position.x() < 50, "follower " + i + " stays outside: " + follower(i).position);
+            }
+        }
+    }
+
+    // ==================== gate doors behind the leader (#507) ====================
+
+    /** Door 7's box: the opening across the road at x = 60, five blocks high. */
+    private static final GateBox DOOR_7 = new GateBox(60, 64, -1, 61, 69, 2);
+
+    private boolean inDoorWay(SimMover m) {
+        return NavGroup.inDoorWay(DOOR_7, m.position);
+    }
+
+    @Test
+    void theGroupKnowsTheGateDoorsOnItsLeadersRoute() {
+        gatedRoad();
+        sim.group(3, COLUMN).navigate(feet(120.5, 0.5), results);
+        sim.run(5);
+        assertEquals(List.of(7), sim.service.gateDoorsOf(leader().id()));
+        assertEquals(List.of(), sim.service.gateDoorsOf(follower(0).id()), "a follower has no route of its own");
+        assertEquals(List.of(), sim.service.gateDoorsOf(999));
+    }
+
+    @Test
+    void aGateClosingInTheMiddleOfTheGroupPushesNobodyAndTheRestFollowsWhenItOpens() {
+        gatedRoad();
+        sim.rules.doorBoxes.put(7, DOOR_7);
+        NavGroup group = sim.group(12, COLUMN);
+        group.navigate(feet(200.5, 0.5), results);
+        assertTrue(sim.runUntil(() -> sim.movers.stream().skip(2).anyMatch(this::inDoorWay), 3000));
+        SimMover inDoor = sim.movers.stream().skip(2).filter(this::inDoorWay).findFirst().orElseThrow();
+        // a follower within a step of the door's margin when the event comes may still walk on through
+        List<SimMover> before = sim.movers.stream().skip(1).filter(m -> m.position.x() < 58.5).toList();
+        assertTrue(before.size() >= 3, "followers still have to pass the gate");
+
+        // the door starts closing: its state event comes at the start of the close
+        sim.rules.closedGates.add(7);
+        sim.service.onGateChanged(7);
+        sim.groups.onRulesChanged();
+        for (int t = 0; t < 300; t++) {
+            sim.tick();
+            for (SimMover m : before) {
+                assertFalse(inDoorWay(m), m.name() + " walked into the moving door at " + m.position);
+            }
+            if (t >= 30) {
+                assertFalse(inDoorWay(inDoor), "the follower in the doorway walked on out of it, at " + inDoor.position);
+            }
+        }
+
+        assertTrue(inDoor.position.x() > 62, inDoor.name() + " left the door's way forwards");
+        for (SimMover m : before) {
+            assertTrue(m.position.x() < 59, m.name() + " stands short of the door");
+            assertFalse(m.isMoving(), m.name() + " waits at the door");
+        }
+        assertTrue(leader().position.x() > 100, "the leader walks on");
+        assertEquals(0, sim.metrics.total(Event.GROUP_REJOIN), "waiting at a closed door is not being stuck");
+        assertEquals(0, sim.metrics.total(Event.GROUP_REGROUP), "the leader does not wait for a closed door");
+
+        sim.rules.closedGates.clear();
+        sim.service.onGateChanged(7);
+        sim.groups.onRulesChanged();
+        assertTrue(sim.runUntil(results::ended, 4000));
+
+        assertArrived();
+        assertEquals(200.5 - 2 * 11, follower(10).position.x(), 1.2, "the rest followed once the gate opened");
+    }
+
+    @Test
+    void aDoorWithoutAKnownBoxHoldsNoFollowerBack() {
+        // the default AccessRules answer no box: followers behind the leader walk on, as before #507
+        gatedRoad();
+        NavGroup group = sim.group(8, noWaiting(COLUMN));
+        group.navigate(feet(120.5, 0.5), results);
+        assertTrue(sim.runUntil(() -> leader().position.x() > 70, 3000));
+        sim.rules.closedGates.add(7);
+        sim.service.onGateChanged(7);
+        sim.groups.onRulesChanged();
+        assertTrue(sim.runUntil(results::ended, 4000));
+        assertArrived();
+        assertTrue(follower(6).position.x() > 100);
     }
 
     @Test
