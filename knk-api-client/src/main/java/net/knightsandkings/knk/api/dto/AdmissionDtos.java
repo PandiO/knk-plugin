@@ -24,8 +24,17 @@ public final class AdmissionDtos {
         }
     }
 
-    /** The {@code accountLinked} payload of an {@code AccountLinked} player notification. */
+    /**
+     * The {@code accountLinked} payload of an {@code AccountLinked} player notification; {@code via} is how the link
+     * came about ({@code register}, {@code link} or {@code claim}, PandiO/knk-workspace#485), null from an older API.
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record AccountLinkedNotificationDto(@JsonProperty("maskedEmail") String maskedEmail) {
+    public record AccountLinkedNotificationDto(
+        @JsonProperty("maskedEmail") String maskedEmail,
+        @JsonProperty("via") String via
+    ) {
+        public AccountLinkedNotificationDto(String maskedEmail) {
+            this(maskedEmail, null);
+        }
     }
 }
