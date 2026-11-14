@@ -3,6 +3,7 @@ package net.knightsandkings.knk.paper.listeners;
 import net.knightsandkings.knk.core.siege.SiegeCombatRules;
 import net.knightsandkings.knk.core.siege.SiegeCombatRules.Combatant;
 import net.knightsandkings.knk.core.siege.SiegeCombatRules.Outcome;
+import net.knightsandkings.knk.paper.npc.nav.NpcEntities;
 import net.knightsandkings.knk.paper.siege.SiegeMessages;
 import net.knightsandkings.knk.paper.siege.SiegeService;
 import net.kyori.adventure.text.Component;
@@ -45,6 +46,8 @@ public class SiegeCombatListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onDamage(EntityDamageByEntityEvent event) {
+        // NPCs are no siege combatants (NAV-08)
+        if (NpcEntities.isNpc(event.getEntity()) || NpcEntities.isNpc(resolveAttacker(event.getDamager()))) return;
         if (!(event.getEntity() instanceof Player victim)) return;
         Projectile projectile = event.getDamager() instanceof Projectile p ? p : null;
         Player attacker = resolveAttacker(event.getDamager());
