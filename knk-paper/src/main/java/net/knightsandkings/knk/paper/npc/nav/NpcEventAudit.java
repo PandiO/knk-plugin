@@ -15,6 +15,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.stream.Collectors;
 
 import org.bukkit.entity.Entity;
 import org.bukkit.event.Event;
@@ -22,6 +23,7 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityEvent;
 import org.bukkit.event.player.PlayerEvent;
 import org.bukkit.plugin.Plugin;
@@ -32,6 +34,11 @@ import org.bukkit.plugin.RegisteredListener;
  * the events whose player or entity is an NPC ({@link NpcEntities#isNpc}), and the report lists, per event type, which
  * of this plugin's listeners receive it. Those are the listeners to guard. A count, not a guess: most of the plugin's
  * player listeners never see an NPC. Event types first used after {@link #start} are picked up by starting again.
+ * <p>
+ * Damage events also list their causes. The listeners named are the event type's handler list, which Bukkit shares
+ * between {@code EntityDamageEvent} and {@code EntityDamageByEntityEvent}: a listener for hits is listed for plain
+ * damage too, but never called for it. A listed listener is a receiver, not proof that it acts: the guarded ones
+ * return at once for an NPC (PandiO/knk-workspace#490).
  */
 public final class NpcEventAudit {
 
@@ -42,6 +49,8 @@ public final class NpcEventAudit {
     };
     private final Map<Class<? extends Event>, LongAdder> counts = new ConcurrentHashMap<>();
     private final Map<Class<? extends Event>, HandlerList> handlerLists = new ConcurrentHashMap<>();
+    /** Damage events by cause, so the report says why NPCs take damage (#490). */
+    private final Map<Class<? extends Event>, Map<String, LongAdder>> damageCauses = new ConcurrentHashMap<>();
     private volatile boolean running;
     private LocalDateTime startedAt;
 
@@ -77,6 +86,7 @@ public final class NpcEventAudit {
     public void reset() {
         counts.clear();
         handlerLists.clear();
+        damageCauses.clear();
         startedAt = running ? LocalDateTime.now() : null;
     }
 
@@ -86,6 +96,11 @@ public final class NpcEventAudit {
         }
         counts.computeIfAbsent(event.getClass(), c -> new LongAdder()).increment();
         handlerLists.putIfAbsent(event.getClass(), event.getHandlers());
+        if (event instanceof EntityDamageEvent damage) {
+            String cause = damage.getCause() == null ? "UNKNOWN" : damage.getCause().name();
+            damageCauses.computeIfAbsent(event.getClass(), c -> new ConcurrentHashMap<>())
+                .computeIfAbsent(cause, c -> new LongAdder()).increment();
+        }
     }
 
     static boolean involvesNpc(Event event) {
@@ -125,6 +140,14 @@ public final class NpcEventAudit {
                 }
                 lines.add(String.format(Locale.ROOT, "  %-40s %8d  -> %s", entry.getKey().getSimpleName(),
                     entry.getValue().sum(), ours.isEmpty() ? "(no K&K listener)" : String.join(", ", ours)));
+                Map<String, LongAdder> causes = damageCauses.get(entry.getKey());
+                if (causes != null) {
+                    lines.add("      causes: " + causes.entrySet().stream()
+                        .sorted(Comparator.comparingLong((Map.Entry<String, LongAdder> c) -> c.getValue().sum())
+                            .reversed().thenComparing(Map.Entry::getKey))
+                        .map(c -> c.getKey() + " " + c.getValue().sum())
+                        .collect(Collectors.joining(", ")));
+                }
             });
         return lines;
     }

@@ -31,6 +31,7 @@ import net.knightsandkings.knk.core.statistics.KillstreakTracker;
 import net.knightsandkings.knk.core.statistics.StatisticsContext;
 import net.knightsandkings.knk.core.statistics.StatisticsMetric;
 import net.knightsandkings.knk.paper.config.KnkConfig;
+import net.knightsandkings.knk.paper.npc.nav.NpcEntities;
 import net.knightsandkings.knk.paper.siege.SiegeService;
 
 /**
@@ -96,6 +97,9 @@ public final class CombatStatisticsListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onDamage(EntityDamageByEntityEvent event) {
+        if (NpcEntities.isNpc(event.getEntity()) || NpcEntities.isNpc(playerBehind(event.getDamager()))) {
+            return; // no combat statistics for hits by or on NPCs (NAV-08)
+        }
         if (!(event.getEntity() instanceof LivingEntity victim) || victim instanceof ArmorStand) {
             return;
         }
@@ -136,6 +140,9 @@ public final class CombatStatisticsListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onPlayerDeath(PlayerDeathEvent event) {
+        if (NpcEntities.isNpc(event.getEntity())) {
+            return; // an NPC's death is no player death (NAV-08)
+        }
         Player victim = event.getEntity();
         UUID victimId = victim.getUniqueId();
         streaks.death(victimId);
@@ -181,6 +188,9 @@ public final class CombatStatisticsListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onEntityDeath(EntityDeathEvent event) {
+        if (NpcEntities.isNpc(event.getEntity().getKiller())) {
+            return; // a kill by an NPC is no player's PvE kill (NAV-08)
+        }
         LivingEntity entity = event.getEntity();
         if (entity instanceof Player || entity instanceof ArmorStand) {
             return;
@@ -197,6 +207,9 @@ public final class CombatStatisticsListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onShoot(EntityShootBowEvent event) {
+        if (NpcEntities.isNpc(event.getEntity())) {
+            return; // arrows of NPCs are not counted (NAV-08)
+        }
         if (!(event.getEntity() instanceof Player shooter) || service.excluded(shooter)) {
             return;
         }

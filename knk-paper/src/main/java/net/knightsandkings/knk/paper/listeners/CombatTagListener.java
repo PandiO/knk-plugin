@@ -11,6 +11,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 
+import net.knightsandkings.knk.paper.npc.nav.NpcEntities;
 import net.knightsandkings.knk.paper.teleport.TeleportService;
 
 /**
@@ -30,6 +31,9 @@ public class CombatTagListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onDamage(EntityDamageByEntityEvent event) {
+        if (NpcEntities.isNpc(event.getEntity()) || NpcEntities.isNpc(attackerOf(event.getDamager()))) {
+            return; // a fight with an NPC tags nobody (NAV-08)
+        }
         if (!(event.getEntity() instanceof Player victim)) {
             return;
         }

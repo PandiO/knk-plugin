@@ -1,0 +1,108 @@
+name: Paper boot test
+
+# Starts a real Paper server with the shaded KnK jar, WorldGuard and WorldEdit and checks that KnK enables without
+# errors (PandiO/knk-workspace#420, DESIGN § 6.3.1 in knk-workspace docs/specs/ai-agent-workflow/). No knk-web-api
+# runs: the plugin starts in its "API down" state, and errors caused by the unreachable API are excused.
+# Script and log check: tools/paper-boot/. Docs: docs/guides/developer/ci.md in knk-workspace.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: paper-boot-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Every download is pinned to an exact build and checked against its SHA-256 (no "latest").
+  # Paper: keep in step with paperApiVersion in gradle.properties (26.3.build.205-stable -> 26.3 build 205).
+  # Hash from https://fill.papermc.io/v3/projects/paper/versions/26.3/builds/205 (downloads.server:default).
+  PAPER_URL: https://fill-data.papermc.io/v1/objects/a0a58f532f08054ea92eb916d3edb6ed3c86429d77175317304f6e995cce9968/paper-26.3-205.jar
+  PAPER_SHA256: a0a58f532f08054ea92eb916d3edb6ed3c86429d77175317304f6e995cce9968
+  # WorldEdit and WorldGuard: the versions knk-paper compiles against (knk-paper/build.gradle.kts), both listing
+  # Minecraft 26.3 on Modrinth. Hashes checked against Modrinth's SHA-512 when pinned (2026-11-14).
+  WORLDEDIT_URL: https://cdn.modrinth.com/data/1u6JkXh5/versions/YFnqiUlL/worldedit-bukkit-7.4.6.jar
+  WORLDEDIT_SHA256: e0ce67d870ad1fef8a40dd9d7926360caf3bb44722438545d6b20b55f82a0c91
+  WORLDGUARD_URL: https://cdn.modrinth.com/data/DKY9btbd/versions/9YdeGXiK/worldguard-bukkit-7.0.20.jar
+  WORLDGUARD_SHA256: 8768a49bcbecbb7a413ad134ee72d9871cdf967b7d938e6b96bb0ca72bb1467b
+
+jobs:
+  paper-boot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # As build.yml: 25 compiles (the toolchain) and runs the server; 21, listed last, becomes JAVA_HOME and
+          # runs Gradle 8.14, which can't run on Java 25.
+          java-version: |
+            25
+            21
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Test the log check
+        run: python3 -m unittest discover -s tools/paper-boot -p 'test_*.py' -v
+
+      - name: Build the shaded plugin jar
+        id: build
+        run: |
+          commit=$(git rev-parse --short=8 HEAD)
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          ./gradlew :knk-paper:shadowJar --no-daemon -PgitCommit="$commit" \
+            -Porg.gradle.java.installations.fromEnv=JAVA_HOME_25_X64
+          jars=(knk-paper/build/libs/knk-paper-*.jar)
+          [ "${#jars[@]}" -eq 1 ] || { echo "::error::Expected one jar in knk-paper/build/libs: ${jars[*]}"; exit 1; }
+          echo "jar=${jars[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the server downloads and Paper's Minecraft files
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/paper-downloads
+            ${{ runner.temp }}/paper-server/cache
+            ${{ runner.temp }}/paper-server/libraries
+            ${{ runner.temp }}/paper-server/versions
+          key: paper-boot-${{ env.PAPER_SHA256 }}-${{ env.WORLDEDIT_SHA256 }}-${{ env.WORLDGUARD_SHA256 }}
+
+      - name: Download Paper, WorldEdit and WorldGuard (pinned, SHA-256 checked)
+        env:
+          DOWNLOADS: ${{ runner.temp }}/paper-downloads
+          SERVER: ${{ runner.temp }}/paper-server
+        run: |
+          mkdir -p "$DOWNLOADS" "$SERVER/plugins"
+          fetch() { # url sha256 target
+            if [ ! -f "$3" ] || ! echo "$2  $3" | sha256sum -c --quiet; then
+              curl -fsSL --retry 3 --retry-all-errors -o "$3" "$1"
+            fi
+            echo "$2  $3" | sha256sum -c
+          }
+          fetch "$PAPER_URL" "$PAPER_SHA256" "$DOWNLOADS/paper.jar"
+          fetch "$WORLDEDIT_URL" "$WORLDEDIT_SHA256" "$DOWNLOADS/worldedit-bukkit.jar"
+          fetch "$WORLDGUARD_URL" "$WORLDGUARD_SHA256" "$DOWNLOADS/worldguard-bukkit.jar"
+          cp "$DOWNLOADS/paper.jar" "$SERVER/paper.jar"
+          cp "$DOWNLOADS/worldedit-bukkit.jar" "$SERVER/plugins/worldedit-bukkit.jar"
+          cp "$DOWNLOADS/worldguard-bukkit.jar" "$SERVER/plugins/worldguard-bukkit.jar"
+
+      - name: Boot the server and check the log
+        # Hook for in-plugin scenarios (PandiO/knk-workspace#421): add --console-command "<scenario command>" and
+        # --expect-line '<pass line regex>' / --fail-line '<fail line regex>' to run one after startup.
+        run: >-
+          tools/paper-boot/boot-test.sh
+          --server-dir "$RUNNER_TEMP/paper-server"
+          --plugin-jar "${{ steps.build.outputs.jar }}"
+          --java "$JAVA_HOME_25_X64/bin/java"
+          --expect-commit "${{ steps.build.outputs.commit }}"
+
+      - name: Upload the server log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper-boot-log
+          path: |
+            ${{ runner.temp }}/paper-server/logs/latest.log
+            ${{ runner.temp }}/paper-server/server-stdout.log
+          if-no-files-found: ignore
+          retention-days: 14
