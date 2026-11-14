@@ -13,6 +13,10 @@
 # Hook for in-plugin scenarios (PandiO/knk-workspace#421): --console-command sends a command to the server console
 # once it is up, and --expect-line waits for a log line matching a regular expression (for example a scenario's pass
 # line); --fail-line fails the run as soon as a matching line appears.
+#
+# In-plugin scenarios (PandiO/knk-workspace#421): --scenarios turns on testing.scenarios.enabled in the KnK config,
+# runs `knk scenario run all` after settling, waits for the KNK-SCENARIO SUMMARY line and checks the scenario lines
+# with check_scenarios.py (every scenario passed, none missing).
 set -euo pipefail
 
 usage() {
@@ -26,6 +30,8 @@ Usage: boot-test.sh --server-dir DIR --plugin-jar JAR [options]
   --expect-line REGEX      log line that must appear after the commands (repeatable)
   --fail-line REGEX        log line that fails the run when it appears after the commands (repeatable)
   --expect-timeout SECONDS time allowed for the expected lines (default 120)
+  --scenarios              enable the in-plugin scenarios, run them all and check their result lines
+  --min-scenarios N        with --scenarios: fail when fewer than N scenarios ran (default 1)
 EOF
 }
 
@@ -39,6 +45,8 @@ EXPECT_TIMEOUT=120
 COMMANDS=()
 EXPECT_LINES=()
 FAIL_LINES=()
+SCENARIOS=0
+MIN_SCENARIOS=1
 # The address check_log.py treats as the unreachable API (the default api.base-url of config.yml).
 UNREACHABLE_API="localhost:5294"
 
@@ -54,11 +62,18 @@ while [[ $# -gt 0 ]]; do
     --expect-line) EXPECT_LINES+=("$2"); shift 2 ;;
     --fail-line) FAIL_LINES+=("$2"); shift 2 ;;
     --expect-timeout) EXPECT_TIMEOUT="$2"; shift 2 ;;
+    --scenarios) SCENARIOS=1; shift ;;
+    --min-scenarios) MIN_SCENARIOS="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
 [[ -n "$SERVER_DIR" && -n "$PLUGIN_JAR" ]] || { usage >&2; exit 2; }
+if [[ $SCENARIOS -eq 1 ]]; then
+  COMMANDS+=("knk scenario run all")
+  # No fail line: a failed scenario doesn't stop the server, so the log shows every result; check_scenarios.py judges.
+  EXPECT_LINES+=('KNK-SCENARIO SUMMARY ')
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_JAR="$(cd "$(dirname "$PLUGIN_JAR")" && pwd)/$(basename "$PLUGIN_JAR")"
@@ -84,6 +99,7 @@ generate-structures=false
 view-distance=2
 simulation-distance=2
 spawn-protection=0
+pause-when-empty-seconds=-1
 max-players=5
 enable-rcon=false
 enable-query=false
@@ -97,6 +113,12 @@ grep -q '^  base-url: "http://localhost:5294/api"$' plugins/KnightsAndKings/conf
 sed -i 's/^    api-key: ""$/    api-key: "ci-boot-test-dummy-key"/' plugins/KnightsAndKings/config.yml
 grep -q '^    api-key: "ci-boot-test-dummy-key"$' plugins/KnightsAndKings/config.yml \
   || { echo "::error::Could not set api.auth.api-key in config.yml (its layout changed)"; exit 2; }
+if [[ $SCENARIOS -eq 1 ]]; then
+  # testing.scenarios.enabled is the first "    enabled:" after the top-level "testing:" key.
+  sed -i '/^testing:$/,/^    enabled:/ s/^    enabled: false$/    enabled: true/' plugins/KnightsAndKings/config.yml
+  sed -n '/^testing:$/,/^    enabled:/p' plugins/KnightsAndKings/config.yml | grep -q '^    enabled: true$' \
+    || { echo "::error::Could not set testing.scenarios.enabled in config.yml (its layout changed)"; exit 2; }
+fi
 
 rm -f logs/latest.log console.in
 mkdir -p logs
@@ -161,7 +183,8 @@ else
         grep -qE "$pattern" <<<"$since" || remaining+=("$pattern")
       done
       pending=("${remaining[@]}")
-      [[ ${#pending[@]} -eq 0 && ${#FAIL_LINES[@]} -eq 0 ]] && break
+      # Done once every expected line is there; with only fail lines, watch for the whole timeout.
+      [[ ${#pending[@]} -eq 0 && ( ${#EXPECT_LINES[@]} -gt 0 || ${#FAIL_LINES[@]} -eq 0 ) ]] && break
       sleep 1
     done
     for pattern in "${pending[@]}"; do
@@ -178,6 +201,9 @@ check_args=(logs/latest.log --unreachable-api "$UNREACHABLE_API")
 [[ -n "$EXPECT_COMMIT" ]] && check_args+=(--expect-commit "$EXPECT_COMMIT")
 [[ $started -eq 1 ]] && check_args+=(--expect-shutdown)
 python3 -I "$SCRIPT_DIR/check_log.py" "${check_args[@]}" || FAILED=1
+if [[ $SCENARIOS -eq 1 ]]; then
+  python3 -I "$SCRIPT_DIR/check_scenarios.py" logs/latest.log --min-scenarios "$MIN_SCENARIOS" || FAILED=1
+fi
 
 if [[ $FAILED -ne 0 ]]; then
   echo "Paper boot test FAILED"

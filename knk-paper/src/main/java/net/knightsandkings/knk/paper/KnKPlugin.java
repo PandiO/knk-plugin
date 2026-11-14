@@ -2767,6 +2767,28 @@ public class KnKPlugin extends JavaPlugin {
     
     // No extra helpers needed; API client constructs and owns HTTP internals.
     
+    /**
+     * In-plugin test scenarios (PandiO/knk-workspace#421): registers {@code /knk scenario} only when
+     * {@code testing.scenarios.enabled} is on, never on a real server. Guide: knk-workspace
+     * docs/guides/developer/plugin-scenarios.md.
+     */
+    private void registerScenarioCommand(KnkAdminCommand knkAdminCommand) {
+        var settings = net.knightsandkings.knk.paper.scenario.ScenarioSettings.from(getConfig());
+        if (!settings.enabled()) {
+            return;
+        }
+        var services = new net.knightsandkings.knk.paper.scenario.ScenarioServices(
+            this, () -> gateManager, () -> gateLoaderAdapter, () -> gateDisplayManager);
+        var scenarioCommand = new net.knightsandkings.knk.paper.scenario.ScenarioCommand(this,
+            net.knightsandkings.knk.paper.scenario.PaperScenarios.registry(),
+            new net.knightsandkings.knk.paper.scenario.PaperScenarioHost(settings, services));
+        knkAdminCommand.registerSubcommand(net.knightsandkings.knk.paper.scenario.ScenarioCommand.metadata(),
+            scenarioCommand, scenarioCommand::complete);
+        getLogger().warning("Test scenarios are ON (" + net.knightsandkings.knk.paper.scenario.ScenarioSettings.ENABLED_PATH
+            + "): /knk scenario is registered and builds test scenes at " + settings.originX() + ", "
+            + settings.originY() + ", " + settings.originZ() + ". Never turn this on on a real server.");
+    }
+
     private void registerCommands() {
         PluginCommand knkCommand = getCommand("knk");
         if (knkCommand != null) {
@@ -2898,6 +2920,9 @@ public class KnKPlugin extends JavaPlugin {
                 net.knightsandkings.knk.paper.roads.RoadAdminCommand.metadata(), roadAdmin, roadAdmin::complete);
             knkAdminCommand.setSubcommandVisibleToAny("road",
                 java.util.List.of(net.knightsandkings.knk.paper.roads.RoadAdminCommand.NODE)); // KNG-107
+            // PandiO/knk-workspace#421: /knk scenario exists only on a test server (testing.scenarios.enabled, default
+            // off); a real server registers nothing and behaves as before.
+            registerScenarioCommand(knkAdminCommand);
             // Road navigation Phase 4: /navigate (/nav), DESIGN §6.1. The services are read lazily - they
             // exist only when navigation.enabled and the road cache started (initializeNavigation).
             var navigateCommand = new net.knightsandkings.knk.paper.navigation.NavigateCommand(
