@@ -427,6 +427,15 @@ public final class ScenarioNpcs {
             : "recovered " + metrics.total(Event.RECOVERED) + " is not the sum of the freed_* events " + freed;
     }
 
+    /** The stats line of the local legs (link M6), with K&K's search counters, for failure reasons. */
+    public String localLegs() {
+        var legs = service.localLegs();
+        return NpcNavigationMetrics.localLegsLine(metrics.total(Event.LOCAL_LEG_KNK), metrics.total(Event.LOCAL_LEG_ENGINE),
+            metrics.total(Event.LOCAL_LEG_NONE)) + String.format(java.util.Locale.ROOT,
+            " (K&K searches %d, found %d, %d cells, %.3f ms)", legs.searches(), legs.found(), legs.expansions(),
+            legs.nanos() / 1e6);
+    }
+
     /** The stats line of the spells, for failure reasons. */
     public String stats() {
         return metrics.spells().describe(metrics.total(Event.RECOVERY_NO_PATH), metrics.total(Event.FELL))
