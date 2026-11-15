@@ -18,14 +18,14 @@ import net.knightsandkings.knk.core.npc.nav.NavWorld;
  * strip are not looked at and count as neither.
  *
  * <p>The clearance of a point is its distance to the nearest obstacle cell's square, capped at {@link #CAP}: a capped
- * Euclidean distance transform, evaluated per cell centre when the corridor is built ({@link #cellClearance}) and for
- * any point on demand ({@link #clearanceAt}). An obstacle is judged against the floor of the point's own cell: a cell
+ * Euclidean distance transform, evaluated per cell centre ({@link #cellClearance}, kept once worked out) and for any
+ * point ({@link #clearanceAt}). An obstacle is judged against the floor of the point's own cell: a cell
  * whose floor is more than a step above or below is a wall or a drop for it, so a corridor over a staircase works.
  *
- * <p>Built once per route stretch and shared by every NPC on it ({@link CorridorShaper}); immutable after the build and
- * reads the world only while it is built. Later links read it: M3 the free width per path point ({@link #freeWidth}),
- * M6 the clearance per cell ({@link #cellClearance}, {@link #clearanceAt}). Pure, over the {@link NavWorld} port; main
- * thread.
+ * <p>Built once per route stretch and shared by every NPC on it ({@link CorridorShaper}); its cells are fixed after the
+ * build, it reads the world only while it is built, and the clearance of a cell's centre is kept once asked. Later
+ * links read it: M3 the free width per path point ({@link #freeWidth}), M6 the clearance per cell
+ * ({@link #cellClearance}, {@link #clearanceAt}). Pure, over the {@link NavWorld} port; main thread.
  */
 public final class Corridor {
 
@@ -48,6 +48,7 @@ public final class Corridor {
     /** Per cell: its floor, or {@link #BLOCKED} or {@link #OUTSIDE}. */
     private final int[] floors;
     /** Per cell: the clearance of its centre (0 for cells not in the corridor). */
+    /** Per cell: the clearance of its centre, NaN until first asked. */
     private final float[] clearance;
     private final double halfWidth;
     private final int cells;
@@ -63,13 +64,13 @@ public final class Corridor {
         this.halfWidth = halfWidth;
         this.reads = reads;
         int walkable = 0;
-        this.clearance = new float[floors.length];
-        for (int i = 0; i < floors.length; i++) {
-            if (floors[i] > OUTSIDE) {
+        for (int f : floors) {
+            if (f > OUTSIDE) {
                 walkable++;
-                clearance[i] = (float) clearanceAt(minX + i % sizeX + 0.5, minZ + i / sizeX + 0.5);
             }
         }
+        this.clearance = new float[floors.length];
+        java.util.Arrays.fill(clearance, Float.NaN); // worked out when first asked
         this.cells = walkable;
     }
 
@@ -101,7 +102,7 @@ public final class Corridor {
         for (int i = 0; i < floors.length; i++) {
             int x = minX + i % sizeX;
             int z = minZ + i / sizeX;
-            floors[i] = distanceToLine(feet, x + 0.5, z + 0.5) <= halfWidth ? BLOCKED : OUTSIDE;
+            floors[i] = withinOf(feet, x + 0.5, z + 0.5, halfWidth) ? BLOCKED : OUTSIDE;
         }
         CountingReads reads = new CountingReads(world);
         Set<Set<String>> regionSets = new HashSet<>();
@@ -143,6 +144,25 @@ public final class Corridor {
             }
         }
         return new Corridor(w, minX, minZ, sizeX, sizeZ, floors, halfWidth, reads.count);
+    }
+
+    /** Whether a point is within {@code r} of the line (horizontally); pieces far away are skipped by their box. */
+    static boolean withinOf(List<NavPoint> line, double px, double pz, double r) {
+        if (line.size() == 1) {
+            return Math.hypot(px - line.get(0).x(), pz - line.get(0).z()) <= r;
+        }
+        for (int k = 1; k < line.size(); k++) {
+            NavPoint a = line.get(k - 1);
+            NavPoint b = line.get(k);
+            if (px < Math.min(a.x(), b.x()) - r || px > Math.max(a.x(), b.x()) + r
+                || pz < Math.min(a.z(), b.z()) - r || pz > Math.max(a.z(), b.z()) + r) {
+                continue;
+            }
+            if (distanceToLine(List.of(a, b), px, pz) <= r) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** The horizontal distance from a point to the nearest piece of the line. */
@@ -197,7 +217,13 @@ public final class Corridor {
     /** The clearance of a cell's centre (0 for a cell not in the corridor), from the build's distance transform. */
     public double cellClearance(int x, int z) {
         int i = index(x, z);
-        return i < 0 || floors[i] <= OUTSIDE ? 0 : clearance[i];
+        if (i < 0 || floors[i] <= OUTSIDE) {
+            return 0;
+        }
+        if (Float.isNaN(clearance[i])) {
+            clearance[i] = (float) scan(x + 0.5, z + 0.5, x, z, floors[i], CAP);
+        }
+        return clearance[i];
     }
 
     /**
@@ -205,15 +231,36 @@ public final class Corridor {
      * floor of its own cell; 0 when its cell is not in the corridor.
      */
     public double clearanceAt(double x, double z) {
+        return clearanceAt(x, z, CAP);
+    }
+
+    /**
+     * As {@link #clearanceAt(double, double)}, worked out only up to {@code cap} (at most {@link #CAP}): a point with
+     * at least that much gets {@code cap}. Cheaper for the small caps the shaper asks for.
+     */
+    public double clearanceAt(double x, double z, double cap) {
         int cx = (int) Math.floor(x);
         int cz = (int) Math.floor(z);
-        int floor = floorAt(cx, cz);
-        if (floor == NONE) {
+        int i = index(cx, cz);
+        if (i < 0 || floors[i] <= OUTSIDE) {
             return 0;
         }
-        double best = CAP;
-        for (int dz = -REACH; dz <= REACH; dz++) {
-            for (int dx = -REACH; dx <= REACH; dx++) {
+        cap = Math.min(cap, CAP);
+        // a point is at most half a cell's diagonal from its cell's centre
+        if (!Float.isNaN(clearance[i]) && clearance[i] - HALF_DIAGONAL >= cap) {
+            return cap;
+        }
+        return scan(x, z, cx, cz, floors[i], cap);
+    }
+
+    private static final double HALF_DIAGONAL = Math.sqrt(0.5);
+
+    /** The clearance of a point in cell (cx, cz) on {@code floor}, up to {@code cap}, by looking at the cells round it. */
+    private double scan(double x, double z, int cx, int cz, int floor, double cap) {
+        int reach = Math.min(REACH, (int) Math.ceil(cap) + 1);
+        double best = cap;
+        for (int dz = -reach; dz <= reach; dz++) {
+            for (int dx = -reach; dx <= reach; dx++) {
                 int ox = cx + dx;
                 int oz = cz + dz;
                 if (!obstacleFor(ox, oz, floor)) {

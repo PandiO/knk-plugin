@@ -52,10 +52,12 @@ public final class CorridorShaper {
     public static final long TTL_TICKS = 600;
     /** Shaped stretches kept at most. */
     static final int MAX_CACHED = 512;
+    /** Blocks either side of the line the clearance across it is looked at. */
+    static final double LATERAL_SEARCH = 2.5;
     /** Tolerance of the string pulling's clearance check. */
     private static final double SLACK = 0.05;
     /** Spacing of the string pulling's samples along a step. */
-    private static final double PULL_SAMPLE = 0.2;
+    private static final double PULL_SAMPLE = 0.25;
     /** The body's half width, for the step check's corners. */
     private static final double HALF_BODY = 0.3;
 
@@ -344,40 +346,56 @@ public final class CorridorShaper {
          */
         private void profile(Dense d, double[] n, double left, double right, double w, int j, double[] lo,
                              double[] hi, boolean[] good, double[] best) {
-            int steps = (int) Math.round((left + right) / Corridor.LATERAL_STEP);
-            double bestC = -1;
+            // places further than this from the line are never needed: a wider road has places with the
+            // clearance nearer, and the middle of a narrower one is within it
+            int maxL = (int) Math.floor(Math.min(left, LATERAL_SEARCH) / Corridor.LATERAL_STEP + 1e-9);
+            int maxR = (int) Math.floor(Math.min(right, LATERAL_SEARCH) / Corridor.LATERAL_STEP + 1e-9);
+            double bestC = clear(d, n, 0, w);
             double bestS = 0;
-            double nearestGood = Double.NaN;
-            double[] cs = new double[steps + 1];
-            for (int k = 0; k <= steps; k++) {
-                double sOff = -left + k * Corridor.LATERAL_STEP;
-                double c = corridor.clearanceAt(d.x() + sOff * n[0], d.z() + sOff * n[1]);
-                cs[k] = c;
-                if (c > bestC + 1e-9 || (Math.abs(c - bestC) <= 1e-9 && Math.abs(sOff) < Math.abs(bestS))) {
-                    bestC = c;
-                    bestS = sOff;
-                }
-                if (c >= w - 1e-9 && (Double.isNaN(nearestGood) || Math.abs(sOff) < Math.abs(nearestGood))) {
-                    nearestGood = sOff;
+            int at = Integer.MIN_VALUE; // the good place nearest the line, in steps
+            if (bestC >= w - 1e-9) {
+                at = 0;
+            } else {
+                // outwards from the line, both sides in turn, to the first place with the clearance
+                for (int k = 1; k <= Math.max(maxL, maxR) && at == Integer.MIN_VALUE; k++) {
+                    for (int side : new int[] {1, -1}) {
+                        if ((side > 0 ? maxR : maxL) < k) {
+                            continue;
+                        }
+                        double sOff = side * k * Corridor.LATERAL_STEP;
+                        double c = clear(d, n, sOff, w);
+                        if (c > bestC + 1e-9) {
+                            bestC = c;
+                            bestS = sOff;
+                        }
+                        if (c >= w - 1e-9) {
+                            at = side * k;
+                            break;
+                        }
+                    }
                 }
             }
             best[j] = bestS;
-            if (Double.isNaN(nearestGood)) {
+            if (at == Integer.MIN_VALUE) {
                 good[j] = false;
                 return;
             }
             good[j] = true;
-            int at = (int) Math.round((nearestGood + left) / Corridor.LATERAL_STEP);
             int a = at;
-            while (a > 0 && cs[a - 1] >= w - 1e-9) {
+            while (a - 1 >= -maxL && clear(d, n, (a - 1) * Corridor.LATERAL_STEP, w) >= w - 1e-9) {
                 a--;
             }
             int b = at;
-            while (b < steps && cs[b + 1] >= w - 1e-9) {
+            while (b + 1 <= maxR && clear(d, n, (b + 1) * Corridor.LATERAL_STEP, w) >= w - 1e-9) {
                 b++;
             }
-            lo[j] = -left + a * Corridor.LATERAL_STEP;
-            hi[j] = -left + b * Corridor.LATERAL_STEP;
+            lo[j] = a * Corridor.LATERAL_STEP;
+            hi[j] = b * Corridor.LATERAL_STEP;
+        }
+
+        /** The clearance, up to {@code cap}, of the place {@code sOff} blocks to the right of a point. */
+        private double clear(Dense d, double[] n, double sOff, double cap) {
+            return corridor.clearanceAt(d.x() + sOff * n[0], d.z() + sOff * n[1], cap);
         }
 
         /** The line every {@link #DENSE} blocks between the waypoints, on the corridor's floors. */
@@ -537,39 +555,63 @@ public final class CorridorShaper {
             return f == Corridor.NONE ? null : new Dense(x, z, f, index, true);
         }
 
-        /** String pulling over the moved points, into the out lists. */
+        /**
+         * String pulling over the moved points, into the out lists: from each anchor, the furthest point (not past
+         * a pinned one) whose straight step from the anchor fits ({@link #stepFits}, with the least clearance of the
+         * points it passes, at most {@code wall-clearance}), found by galloping then halving; every step taken is
+         * checked.
+         */
         private void pull(List<Dense> moved) {
             int n = moved.size();
+            double w = options.wallClearance();
             double[] clear = new double[n];
+            double[] prefixMin = new double[n];
             for (int k = 0; k < n; k++) {
-                clear[k] = corridor.clearanceAt(moved.get(k).x(), moved.get(k).z());
+                clear[k] = corridor.clearanceAt(moved.get(k).x(), moved.get(k).z(), w);
             }
             emit(moved.get(0), clear[0], 0);
             int a = 0;
-            double minClear = Math.min(options.wallClearance(), clear[0]);
-            int k = 1;
-            while (k < n) {
-                minClear = Math.min(minClear, clear[k]);
-                if (k == n - 1) {
-                    break;
+            while (a < n - 1) {
+                int limit = n - 1;
+                for (int k = a + 1; k < n - 1; k++) {
+                    if (moved.get(k).pinned()) {
+                        limit = k;
+                        break;
+                    }
                 }
-                if (moved.get(k).pinned()) {
-                    emit(moved.get(k), clear[k], k);
-                    a = k;
-                    minClear = Math.min(options.wallClearance(), clear[k]);
-                    k++;
-                    continue;
+                // the least clearance from the anchor up to each point
+                prefixMin[a] = Math.min(w, clear[a]);
+                for (int k = a + 1; k <= limit; k++) {
+                    prefixMin[k] = Math.min(prefixMin[k - 1], clear[k]);
                 }
-                int next = k + 1;
-                double nextMin = Math.min(minClear, clear[next]);
-                if (!stepFits(moved.get(a), moved.get(next), Math.max(nextMin, 0) - SLACK)) {
-                    emit(moved.get(k), clear[k], k);
-                    a = k;
-                    minClear = Math.min(options.wallClearance(), clear[k]);
+                int good = a + 1; // the next point is always taken
+                int step = 1;
+                int bad = -1;
+                while (good < limit) {
+                    int probe = Math.min(limit, good + step);
+                    if (fits(moved, a, probe, prefixMin[probe])) {
+                        good = probe;
+                        step *= 2;
+                    } else {
+                        bad = probe;
+                        break;
+                    }
                 }
-                k++;
+                while (bad > good + 1) {
+                    int mid = (good + bad) >>> 1;
+                    if (fits(moved, a, mid, prefixMin[mid])) {
+                        good = mid;
+                    } else {
+                        bad = mid;
+                    }
+                }
+                emit(moved.get(good), clear[good], good);
+                a = good;
             }
-            emit(moved.get(n - 1), clear[n - 1], n - 1);
+        }
+
+        private boolean fits(List<Dense> moved, int a, int b, double minClear) {
+            return stepFits(moved.get(a), moved.get(b), Math.max(minClear, 0) - SLACK);
         }
 
         /**
@@ -599,7 +641,7 @@ public final class CorridorShaper {
                         return false;
                     }
                 }
-                if (corridor.clearanceAt(x, z) < minClear) {
+                if (minClear > 0 && corridor.clearanceAt(x, z, minClear + SLACK) < minClear) {
                     return false;
                 }
                 prevFloor = f;
