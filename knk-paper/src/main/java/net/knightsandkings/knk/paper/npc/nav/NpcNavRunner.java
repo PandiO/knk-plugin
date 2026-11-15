@@ -772,11 +772,12 @@ public final class NpcNavRunner {
             formations.add(run.group.settings().formation().type().configName());
         }
         return String.format(Locale.ROOT,
-            "groups %d (%d NPCs%s): trips %d | widths: narrows %d%s, widens %d | folds %d%s, reforms %d, folded now %d | "
+            "groups %d (%d NPCs%s): trips %d | widths: narrows %d%s, widens %d, merges %d%s | folds %d%s, reforms %d, folded now %d | "
                 + "abreast now %s | finished trips %d (finishing now %d) | own legs back %d (now %d), "
                 + "left behind %d (now %d), leader waited %d (now %d), furthest behind its slot %.1f blocks | road plans "
                 + "per group event: max %d | local legs at once: max %d", groupCount(), members, formations.isEmpty() ? "" : ", " + String.join("/", formations),
             groupTrips, since(Event.GROUP_NARROW), reasons(Event.GROUP_NARROW), since(Event.GROUP_WIDEN),
+            since(Event.GROUP_MERGE), reasons(Event.GROUP_MERGE),
             since(Event.GROUP_FOLD), reasons(Event.GROUP_FOLD), since(Event.GROUP_REFORM), folded, abreast.isEmpty() ? "-" : String.join("/", abreast),
             since(Event.GROUP_FINISH_TRIP), finishing, since(Event.GROUP_REJOIN), ownLegs,
             since(Event.GROUP_LOST), leftBehind, since(Event.GROUP_REGROUP), waiting, lag, mostGroupRoadPlans,

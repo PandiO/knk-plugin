@@ -16,12 +16,15 @@ import net.knightsandkings.knk.paper.scenario.NpcMovementScene;
 import net.knightsandkings.knk.paper.scenario.ScenarioScene;
 
 /**
- * Plan 4c.5 item 3 (link M1, PandiO/knk-workspace#621), in report mode: a group of 20 in {@code ranks} walks from the
- * street north of the stair house through the entrance (1413 49 -508), along the straight at 1414 49 -503 and up the
- * two steps into the hall, once (the developer's schematic). Reports the leader's result, the folds and narrowings with their reasons and places
- * (decision 2.8), the longest a follower stood in one block in the entrance, stuck spells, lag and the tick cost.
- * Later links check: folds only at 1-wide places with their reasons, no follower still in the entrance for more than
- * 10 s, no stuck spell left open (M3, M4). Needs Citizens.
+ * Plan 4c.5 item 3 (link M1, PandiO/knk-workspace#621): a group of 20 in {@code ranks} walks from the street north of
+ * the stair house through the entrance (1413 49 -508), along the straight at 1414 49 -503 and up the two steps into
+ * the hall, once (the developer's schematic). Reports the leader's result, the folds, narrowings and merges with their
+ * reasons and places (decision 2.8), the longest a follower stood in one block in the entrance, stuck spells, lag and
+ * the tick cost. Link M3 (PandiO/knk-workspace#624) runs it with {@code group-formation-keeping: elastic} (and the
+ * corridor and local-leg keys on) and checks plan 4c.4 item 3.3: the leader arrives, folds at most the number of
+ * 1-wide places on the line, no stuck spell left open or not freed, nobody stuck near a wall. "No follower still in
+ * the entrance for more than 10 s" is M4's check (turn-taking at the chokepoint) and is reported only. Needs
+ * Citizens.
  */
 public final class NpcStairhouseGroupScenario implements Scenario<ScenarioScene> {
 
@@ -58,7 +61,7 @@ public final class NpcStairhouseGroupScenario implements Scenario<ScenarioScene>
         long[] took = {-1};
         plan.act("paste the stair house", () -> built.set(house.build()))
             .act("start NPC navigation on Citizens", () -> npcs.set(ScenarioNpcs.start(scene, house.houseLoop(),
-                NpcMovementReport.settings(collisionOn))))
+                NpcMovementReport.settings(collisionOn, true, true, true))))
             .cleanup("remove the NPCs", () -> {
                 if (npcs.get() != null) {
                     npcs.get().stop();
@@ -89,8 +92,13 @@ public final class NpcStairhouseGroupScenario implements Scenario<ScenarioScene>
             })
             .await("the group's trip ends or the time is up", MAX_TICKS + 20,
                 () -> result.get() != null || npcs.get().ticks() - started[0] >= MAX_TICKS)
-            .check("report the numbers (report mode, M1)", () -> {
+            .check("folds only at 1-wide places, no stuck spell open, none near a wall (M3)", () -> {
+                int oneWide = NpcMovementReport.oneWidePlaces(
+                    new net.knightsandkings.knk.paper.npc.nav.BukkitNavWorld(null), house.houseLine());
+                String failed = report.groupFailures(npcs.get(), result.get(), oneWide);
                 report.add("scene", built.get())
+                    .add("formation keeping", "elastic")
+                    .add("1-wide places", oneWide)
                     .add("leader", result.get() == null ? "still walking after " + MAX_TICKS / 20 + " s"
                         : result.get().getClass().getSimpleName() + String.format(Locale.ROOT, " after %.1f s", took[0] / 20.0))
                     .add("width now", group.get().width().describe())
@@ -101,8 +109,9 @@ public final class NpcStairhouseGroupScenario implements Scenario<ScenarioScene>
                     .add("rejoins", report.count(npcs.get(),
                         net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event.GROUP_REJOIN))
                     .common(npcs.get(), house)
+                    .corridor(npcs.get())
                     .log("a group of 20 in ranks");
-                return null;
+                return failed;
             });
     }
 }

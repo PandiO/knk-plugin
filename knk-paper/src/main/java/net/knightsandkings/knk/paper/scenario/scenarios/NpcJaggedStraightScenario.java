@@ -21,8 +21,9 @@ import net.knightsandkings.knk.paper.scenario.ScenarioScene;
  * walked on the road line the skeleton gives (the middle of the local width, wobbling at every notch), with
  * {@code corridor-steering} on. First 12 singles at once, 6 from each end; checks (plan 4c.4 item 2.3): all arrive, 0
  * stuck spells, nobody still longer than 3 s, corridor steering's cost within its share of the budget. Then a group of
- * 9 in {@code ranks} from the north end to the south end, still in report mode (its width changes with their reasons,
- * the tick cost); link M3 checks the group (3 or 2 abreast, 0 folds). Needs Citizens.
+ * 9 in {@code ranks} from the north end to the south end with {@code group-formation-keeping: elastic} (link M3,
+ * PandiO/knk-workspace#624); checks (plan 4c.5 item 4): the leader arrives, 0 folds (3 or 2 abreast), no stuck spell
+ * left open or not freed, nobody stuck near a wall. Needs Citizens.
  */
 public final class NpcJaggedStraightScenario implements Scenario<ScenarioScene> {
 
@@ -59,7 +60,7 @@ public final class NpcJaggedStraightScenario implements Scenario<ScenarioScene> 
         long[] took = {-1};
         plan.act("paste the jagged straight", () -> built.set(road.build()))
             .act("start NPC navigation on Citizens", () -> npcs.set(ScenarioNpcs.start(scene, road.jaggedLoop(),
-                NpcMovementReport.settings(collisionOn, true))))
+                NpcMovementReport.settings(collisionOn, true, false, true))))
             .cleanup("remove the NPCs", () -> {
                 if (npcs.get() != null) {
                     npcs.get().stop();
@@ -104,8 +105,13 @@ public final class NpcJaggedStraightScenario implements Scenario<ScenarioScene> 
             })
             .await("the group's trip ends or the time is up", GROUP_TICKS + 20,
                 () -> result.get() != null || npcs.get().ticks() - started[0] >= GROUP_TICKS)
-            .check("report the group (report mode, M1)", () -> {
-                report.add("leader", result.get() == null ? "still walking after " + GROUP_TICKS / 20 + " s"
+            .check("the group keeps 3 or 2 abreast: 0 folds, no stuck spell open, none near a wall (M3)", () -> {
+                String failed = report.groupFailures(npcs.get(), result.get(), 0);
+                if (group.get().width().abreast() < 2) {
+                    failed = (failed == null ? "" : failed + "; ") + "ended as " + group.get().width().describe();
+                }
+                report.add("formation keeping", "elastic")
+                    .add("leader", result.get() == null ? "still walking after " + GROUP_TICKS / 20 + " s"
                         : result.get().getClass().getSimpleName() + String.format(Locale.ROOT, " after %.1f s", took[0] / 20.0))
                     .add("width now", group.get().width().describe())
                     .widthChanges(npcs.get(), road)
@@ -114,7 +120,7 @@ public final class NpcJaggedStraightScenario implements Scenario<ScenarioScene> 
                     .common(npcs.get(), road)
                     .corridor(npcs.get())
                     .log("a group of 9 in ranks");
-                return null;
+                return failed;
             });
     }
 }
