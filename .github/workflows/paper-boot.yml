@@ -145,7 +145,7 @@ jobs:
         # drive NPCs through that running adapter; the #521 ones start a Citizens registry of their own).
         # --bot-tests (only with BOT_TESTS_ENABLED): the Mineflayer bot tests after the scenarios (#540).
         # --expect-timeout 1200 and the job's 30 minutes: the ten NPC movement runs of #621 (five scenarios, collision
-        # off and on) add about 4 to 5 minutes of scenario time to the 35 earlier ones (about 6 minutes).
+        # off and on) add about 3.5 minutes to the run (a local run: 9 min 40 s for 45, 6 min 40 s for the 35 before).
         env:
           MIN_SCENARIOS: 45
         run: >-

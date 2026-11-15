@@ -74,6 +74,25 @@ class SceneSchematicTest {
     }
 
     @Test
+    void aFileSavedByWorldEditItselfIsRead() throws IOException {
+        // saved on the paper-boot server (WorldEdit 7.4.6, Paper 26.3) from the console: //world world,
+        // //pos1 0,-61,0, //pos2 2,-60,1, //copy, //schem save m1check (2026-11-15, PandiO/knk-workspace#621)
+        try (var in = getClass().getClassLoader().getResourceAsStream("scenario-scenes-test/worldedit-7.4.6-console.schem")) {
+            SceneSchematic s = SceneSchematic.read(in);
+
+            assertEquals(3, s.width());
+            assertEquals(2, s.height());
+            assertEquals(2, s.length());
+            assertEquals(5023, s.dataVersion(), "Minecraft 26.3");
+            assertArrayEquals(new int[] {0, -61, 0}, s.worldMin(), "//pos1, the region's lowest corner");
+            assertArrayEquals(new int[] {0, 0, 0}, s.origin(), "the console copies from the region's corner");
+            assertEquals("minecraft:stone", s.blockAt(0, 0, 0));
+            assertEquals("minecraft:grass_block[snowy=false]", s.blockAt(2, 1, 1), "block states come along");
+            assertEquals(new SceneSchematic.Pasted(12, 0), s.paste(scene(), 0, 0, 0));
+        }
+    }
+
+    @Test
     void aVersionTwoSchematicIsReadToo() throws IOException {
         ByteArrayOutputStream raw = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(raw);
