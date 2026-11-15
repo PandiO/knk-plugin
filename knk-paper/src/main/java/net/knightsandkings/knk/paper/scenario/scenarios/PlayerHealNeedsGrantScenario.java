@@ -15,8 +15,9 @@ import org.bukkit.command.PluginIdentifiableCommand;
  * WorldGuard's "You don't have permission to do that." and an op was healed by WorldGuard. Three fake players with
  * fake accounts and 4 health type {@code /heal}: the one without {@code knk.heal} is refused by KnK's in-house gate
  * and stays hurt; the one granted it is healed and told so by KnK; an op without the grant is healed by KnK too. The
- * granted player is then hurt again and uses {@code /knightsandkings:heal}, which still works, and the server's
- * {@code heal} label is KnK's while {@code worldguard:heal} stays WorldGuard's.
+ * granted player is then hurt again and uses {@code /knightsandkings:heal}, which still works. Last, the server's
+ * {@code heal} label is KnK's while {@code worldguard:heal} stays WorldGuard's (checked last, so a regression shows
+ * first as what a player sees).
  */
 public final class PlayerHealNeedsGrantScenario implements Scenario<ScenarioScene> {
 
@@ -41,10 +42,6 @@ public final class PlayerHealNeedsGrantScenario implements Scenario<ScenarioScen
         ScenarioPlayer granted = scene.player("ScnHealer", p -> p.account(scene.fakeId(2)).grant("knk.heal"));
         ScenarioPlayer op = scene.player("ScnHealOp", p -> p.account(scene.fakeId(3)).op());
         plan.act("build a floor", () -> ScenarioGates.floor(scene, 8, 8, 28, 24, 1, Material.STONE))
-            .check("the plain heal label is KnK's", () -> owner("heal").equals("KnightsAndKings")
-                ? null : "heal belongs to " + owner("heal"))
-            .check("WorldGuard's heal keeps its namespaced label", () -> Bukkit.getPluginManager().getPlugin("WorldGuard") == null
-                || owner("worldguard:heal").equals("WorldGuard") ? null : "worldguard:heal belongs to " + owner("worldguard:heal"))
             .act("the players join", () -> {
                 refused.join();
                 granted.join();
@@ -81,7 +78,11 @@ public final class PlayerHealNeedsGrantScenario implements Scenario<ScenarioScen
             })
             .act("they type /knightsandkings:heal", () -> granted.command("knightsandkings:heal"))
             .await("they are healed again", 60, () -> granted.player().getHealth() == FULL)
-            .await("and told so", 60, () -> granted.received(HEALED));
+            .await("and told so", 60, () -> granted.received(HEALED))
+            .check("the plain heal label is KnK's", () -> owner("heal").equals("KnightsAndKings")
+                ? null : "heal belongs to " + owner("heal"))
+            .check("WorldGuard's heal keeps its namespaced label", () -> Bukkit.getPluginManager().getPlugin("WorldGuard") == null
+                || owner("worldguard:heal").equals("WorldGuard") ? null : "worldguard:heal belongs to " + owner("worldguard:heal"));
     }
 
     private static String owner(String label) {
