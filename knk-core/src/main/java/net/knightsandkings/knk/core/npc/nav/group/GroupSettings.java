@@ -19,13 +19,28 @@ import net.knightsandkings.knk.core.npc.nav.NavigationSettings;
  * @param maxRetries       a stuck follower's recovery steps before its own leg back is planned again (4b.2 item 9)
  * @param recoveryWaitTicks ticks between two recovery steps of a stuck follower
  * @param waypointMargin   how close a follower comes to a waypoint before heading for the next (4b.2 item 2)
+ * @param widthHysteresisBlocks a narrower width (still 2 abreast or more) or a wider one is taken only when it lasts
+ *                         this many blocks along the path (4b.3 item 5)
+ * @param followersFinishTrip followers still on their way when the leader has arrived finish their trip to their
+ *                         slot at the goal before they follow the group's next order (4b.3 items 8 to 11)
  */
 public record GroupSettings(Formation formation, double rejoinBlocks, double regroupBlocks, double catchUpSpeed,
                             double hopBlocks, int noProgressTicks, int noRouteWaitTicks, int recheckTicks,
-                            int maxRetries, int recoveryWaitTicks, double waypointMargin) {
+                            int maxRetries, int recoveryWaitTicks, double waypointMargin,
+                            int widthHysteresisBlocks, boolean followersFinishTrip) {
 
     public GroupSettings {
         Objects.requireNonNull(formation, "formation");
+    }
+
+    /** With the code defaults for the 4b.3 settings (width hysteresis, followers finish their trip). */
+    public GroupSettings(Formation formation, double rejoinBlocks, double regroupBlocks, double catchUpSpeed,
+                         double hopBlocks, int noProgressTicks, int noRouteWaitTicks, int recheckTicks,
+                         int maxRetries, int recoveryWaitTicks, double waypointMargin) {
+        this(formation, rejoinBlocks, regroupBlocks, catchUpSpeed, hopBlocks, noProgressTicks, noRouteWaitTicks,
+            recheckTicks, maxRetries, recoveryWaitTicks, waypointMargin,
+            NavigationSettings.GROUP_WIDTH_HYSTERESIS_BLOCKS.defaultValue(),
+            NavigationSettings.GROUP_FOLLOWERS_FINISH_TRIP.defaultValue());
     }
 
     /** With the code defaults for the 4b.2 settings (recovery steps, their wait, the waypoint margin). */
@@ -40,6 +55,7 @@ public record GroupSettings(Formation formation, double rejoinBlocks, double reg
         Formation.Type type = Formation.Type.byName(settings.value(NavigationSettings.GROUP_FORMATION, scope));
         return new GroupSettings(new Formation(type == null ? Formation.Type.COLUMN : type,
             settings.value(NavigationSettings.GROUP_SPACING, scope),
+            settings.value(NavigationSettings.GROUP_LATERAL_SPACING, scope),
             settings.value(NavigationSettings.GROUP_RANKS_WIDTH, scope)),
             settings.value(NavigationSettings.GROUP_REJOIN_BLOCKS, scope),
             settings.value(NavigationSettings.GROUP_REGROUP_BLOCKS, scope),
@@ -50,7 +66,9 @@ public record GroupSettings(Formation formation, double rejoinBlocks, double reg
             settings.value(NavigationSettings.RECHECK_TICKS, scope),
             settings.value(NavigationSettings.MAX_RETRIES, scope),
             settings.value(NavigationSettings.RECOVERY_WAIT_TICKS, scope),
-            settings.value(NavigationSettings.WAYPOINT_MARGIN, scope));
+            settings.value(NavigationSettings.WAYPOINT_MARGIN, scope),
+            settings.value(NavigationSettings.GROUP_WIDTH_HYSTERESIS_BLOCKS, scope),
+            settings.value(NavigationSettings.GROUP_FOLLOWERS_FINISH_TRIP, scope));
     }
 
     public static GroupSettings defaults() {
@@ -59,6 +77,14 @@ public record GroupSettings(Formation formation, double rejoinBlocks, double reg
 
     public GroupSettings withFormation(Formation other) {
         return new GroupSettings(other, rejoinBlocks, regroupBlocks, catchUpSpeed, hopBlocks, noProgressTicks,
-            noRouteWaitTicks, recheckTicks, maxRetries, recoveryWaitTicks, waypointMargin);
+            noRouteWaitTicks, recheckTicks, maxRetries, recoveryWaitTicks, waypointMargin, widthHysteresisBlocks,
+            followersFinishTrip);
+    }
+
+    /** The same settings with the toggle of 4b.3 item 8 set (the group command's {@code finish-trip}). */
+    public GroupSettings withFollowersFinishTrip(boolean finish) {
+        return new GroupSettings(formation, rejoinBlocks, regroupBlocks, catchUpSpeed, hopBlocks, noProgressTicks,
+            noRouteWaitTicks, recheckTicks, maxRetries, recoveryWaitTicks, waypointMargin, widthHysteresisBlocks,
+            finish);
     }
 }

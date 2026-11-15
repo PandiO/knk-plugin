@@ -142,7 +142,10 @@ class FormationTest {
     void aGroupsSettingsComeFromTheLayers() {
         GroupSettings defaults = GroupSettings.defaults();
         assertSame(Type.COLUMN, defaults.formation().type());
-        assertEquals(2.0, defaults.formation().spacing());
+        assertEquals(1.5, defaults.formation().spacing());
+        assertEquals(1.0, defaults.formation().lateralSpacing());
+        assertEquals(3, defaults.widthHysteresisBlocks());
+        assertEquals(false, defaults.followersFinishTrip());
         assertEquals(4.0, defaults.rejoinBlocks());
         assertEquals(24.0, defaults.regroupBlocks());
         assertEquals(1.3, defaults.catchUpSpeed());
@@ -158,5 +161,96 @@ class FormationTest {
         assertEquals(1.5, soldiers.formation().spacing());
         assertEquals(4, soldiers.formation().ranksWidth());
         assertSame(Type.CLUSTER, soldiers.withFormation(new Formation(Type.CLUSTER, 2, 2)).formation().type());
+    }
+
+    // ==================== widths (implementation plan 4b.3 items 1 to 3, NAV-22) ====================
+
+    private static Formation of(Type type, int ranksWidth) {
+        return new Formation(type, 1.5, 1.0, ranksWidth); // the decided defaults: rows 1.5 apart, shoulder to shoulder
+    }
+
+    @Test
+    void everyFormationListsItsWidthsWidestFirstAndEndsWithTheColumn() {
+        assertEquals(List.of(new Formation.Width(1, false)), of(Type.COLUMN, 2).widths());
+        assertEquals(List.of(new Formation.Width(4, false), new Formation.Width(3, false), new Formation.Width(2, false),
+            new Formation.Width(1, false)), of(Type.RANKS, 4).widths());
+        assertEquals(List.of(new Formation.Width(2, false), new Formation.Width(1, false)), of(Type.RANKS, 2).widths());
+        assertEquals(List.of(new Formation.Width(3, false), new Formation.Width(2, false), new Formation.Width(1, false)),
+            of(Type.CLUSTER, 2).widths());
+        assertEquals(List.of(new Formation.Width(0, true), new Formation.Width(3, false), new Formation.Width(2, false),
+            new Formation.Width(1, false)), of(Type.ESCORT_RING, 2).widths());
+        assertEquals(3, of(Type.ESCORT_RING, 2).columnLevel());
+        assertEquals("3 abreast", new Formation.Width(3, false).describe());
+        assertEquals("a column", new Formation.Width(1, false).describe());
+        assertEquals("the escort ring", new Formation.Width(0, true).describe());
+    }
+
+    @Test
+    void ranksStepDownShoulderToShoulderWithRowsOneAndAHalfApart() {
+        Formation ranks = of(Type.RANKS, 3);
+
+        assertEquals(List.of(new Slot(1.5, -1), new Slot(1.5, 0), new Slot(1.5, 1), new Slot(3, -1), new Slot(3, 0)),
+            ranks.slots(5, 0));
+        assertEquals(List.of(new Slot(1.5, -0.5), new Slot(1.5, 0.5), new Slot(3, -0.5), new Slot(3, 0.5), new Slot(4.5, -0.5)),
+            ranks.slots(5, 1));
+        assertEquals(ranks.columnSlots(5), ranks.slots(5, 2));
+        assertEquals(List.of(new Slot(1.5, 0), new Slot(3, 0)), ranks.slots(2, 2));
+        assertEquals(1.0, ranks.halfWidth(5, 0), "3 abreast need a road 3 wide");
+        assertEquals(0.5, ranks.halfWidth(5, 1), "2 abreast one 2 wide");
+        assertEquals(0.0, ranks.halfWidth(5, 2));
+        assertEquals(3.0, ranks.depth(5, 0));
+        assertEquals(4.5, ranks.depth(5, 1));
+        assertEquals(7.5, ranks.depth(5, 2));
+        assertEquals(0.0, ranks.front(5, 1));
+        assertEquals(ranks.slots(5, 0), ranks.slots(5), "the widest width is the formation's own");
+    }
+
+    @Test
+    void theClusterNudgeNeverMakesAWidthWider() {
+        Formation cluster = of(Type.CLUSTER, 2);
+        for (int n = 1; n <= 30; n++) {
+            assertTrue(cluster.halfWidth(n, 0) <= 1.0 + 1e-9, n + " followers, 3 abreast: " + cluster.halfWidth(n, 0));
+            assertTrue(cluster.halfWidth(n, 1) <= 0.5 + 1e-9, n + " followers, 2 abreast: " + cluster.halfWidth(n, 1));
+            for (Slot slot : cluster.slots(n, 0)) {
+                assertTrue(slot.back() > 0, "behind the leader: " + slot);
+            }
+        }
+        boolean nudged = false;
+        for (Slot slot : cluster.slots(12, 0)) {
+            nudged |= Math.abs(slot.side() - Math.round(slot.side())) > 0.02;
+        }
+        assertTrue(nudged, "still a crowd, not a grid");
+        assertEquals(cluster.columnSlots(4), cluster.slots(4, 2));
+    }
+
+    @Test
+    void theEscortRingIsOneAndAQuarterLateralSpacingsAroundTheLeader() {
+        Formation ring = of(Type.ESCORT_RING, 2);
+        for (Slot slot : ring.slots(8, 0)) {
+            assertEquals(1.25, Math.hypot(slot.back(), slot.side()), 1e-9);
+        }
+        assertEquals(1.25, ring.halfWidth(8, 0), 1e-9, "eight escorts fit a 3-wide road");
+        assertEquals(1.25, ring.halfWidth(9, 0), 1e-9, "the ninth walks straight ahead on the second ring");
+        assertEquals(2.5, ring.halfWidth(11, 0), 1e-9, "the second ring's sides need a wider road");
+    }
+
+    @Test
+    void theNarrowedEscortRingKeepsTheLeaderInTheMiddleOfTheSecondRow() {
+        Formation ring = of(Type.ESCORT_RING, 2);
+
+        // 3 abreast: a row of three ahead, one either side of the leader, rows of three behind
+        assertEquals(List.of(new Slot(-1.5, 0), new Slot(-1.5, -1), new Slot(-1.5, 1), new Slot(0, 1), new Slot(0, -1),
+            new Slot(1.5, 0), new Slot(1.5, -1), new Slot(1.5, 1), new Slot(3, 0)), ring.slots(9, 1));
+        assertEquals(1.0, ring.halfWidth(9, 1));
+        assertEquals(1.5, ring.front(9, 1));
+        // 2 abreast: a pair ahead, the leader, pairs behind
+        assertEquals(List.of(new Slot(-1.5, -0.5), new Slot(-1.5, 0.5), new Slot(1.5, -0.5), new Slot(1.5, 0.5),
+            new Slot(3, -0.5)), ring.slots(5, 2));
+        assertEquals(0.5, ring.halfWidth(5, 2));
+        // the column: one escort ahead, the rest behind
+        assertEquals(List.of(new Slot(-1.5, 0), new Slot(1.5, 0), new Slot(3, 0)), ring.slots(3, 3));
+        assertEquals(0.0, ring.halfWidth(3, 3));
+        assertEquals(1.5, ring.front(3, 3));
+        assertEquals(List.of(new Slot(-1.5, 0)), ring.slots(1, 1), "a single escort walks ahead");
     }
 }
