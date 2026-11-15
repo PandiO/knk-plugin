@@ -51,7 +51,7 @@ env:
 jobs:
   paper-boot:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -144,8 +144,10 @@ jobs:
         # --npc-navigation: turn on npc.navigation.enabled and require it running on Citizens (#543: its NPC scenarios
         # drive NPCs through that running adapter; the #521 ones start a Citizens registry of their own).
         # --bot-tests (only with BOT_TESTS_ENABLED): the Mineflayer bot tests after the scenarios (#540).
+        # --expect-timeout 1200 and the job's 30 minutes: the ten NPC movement runs of #621 (five scenarios, collision
+        # off and on) add about 3.5 minutes to the run (a local run: 9 min 40 s for 45, 6 min 40 s for the 35 before).
         env:
-          MIN_SCENARIOS: 35
+          MIN_SCENARIOS: 45
         run: >-
           tools/paper-boot/boot-test.sh
           --server-dir "$RUNNER_TEMP/paper-server"
@@ -155,8 +157,22 @@ jobs:
           --scenarios
           --min-scenarios "$MIN_SCENARIOS"
           --npc-navigation
-          --expect-timeout 600
+          --expect-timeout 1200
           ${{ vars.BOT_TESTS_ENABLED == 'true' && '--bot-tests tools/bot-tests --bot-version "$BOT_MC_VERSION"' || '' }}
+
+      - name: NPC movement numbers (report mode)
+        # The NPC movement scenarios of plan 4c.5 run in report mode (link M1, PandiO/knk-workspace#621): each logs one
+        # KNK-NPC-REPORT line per phase with its numbers and passes. The lines go into the job summary, so a run's
+        # numbers can be compared with the baseline in the chain report without downloading the log.
+        if: always()
+        run: |
+          log="$RUNNER_TEMP/paper-server/logs/latest.log"
+          [ -f "$log" ] || exit 0
+          {
+            echo "### NPC movement numbers (report mode)"
+            echo
+            grep -o 'KNK-NPC-REPORT .*' "$log" | sed 's/^KNK-NPC-REPORT /1. /' || echo "1. none"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the server log
         if: always()

@@ -67,6 +67,9 @@ public final class ScenarioNpcs {
     private final Map<Integer, int[]> lastBlock = new HashMap<>();
     private final Map<Integer, Integer> stillTicks = new HashMap<>();
     private long tick;
+    /** K&K's navigation time on the main thread (group and service ticks) and NPC ticks, for the cost per NPC. */
+    private long navNanos;
+    private long npcTicks;
     private int longestStill;
     private String longestStillWho = "-";
     private BukkitTask task;
@@ -150,8 +153,11 @@ public final class ScenarioNpcs {
 
     private void tick() {
         tick++;
+        long started = System.nanoTime();
         groups.tick();
         service.tick();
+        navNanos += System.nanoTime() - started;
+        npcTicks += movers.size();
         if (traced != null && tick % 5 == 0) {
             NpcMover t = traced;
             log.add(new LogLine(tick, "trace " + t.name() + " " + t.position().map(p -> String.format(Locale.ROOT,
@@ -163,6 +169,17 @@ public final class ScenarioNpcs {
         }
         for (Runnable watcher : watchers) {
             watcher.run();
+        }
+    }
+
+    /** Removes single NPCs (a scenario that runs singles, then a group, PandiO/knk-workspace#621). */
+    public void remove(List<NpcMover> singles) {
+        for (NpcMover mover : List.copyOf(singles)) {
+            service.unregister(mover.id());
+            mover.remove();
+            movers.remove(mover);
+            stillTicks.remove(mover.id());
+            lastBlock.remove(mover.id());
         }
     }
 
@@ -368,6 +385,25 @@ public final class ScenarioNpcs {
 
     public String longestStillWho() {
         return longestStillWho;
+    }
+
+    /** Starts the longest-still watch afresh (a second phase of a scenario). */
+    public void resetLongestStill() {
+        longestStill = 0;
+        longestStillWho = "-";
+    }
+
+    /**
+     * K&K's navigation time on the main thread per NPC per tick so far, in milliseconds (the group and navigation
+     * services' ticks; the budget of plan 4c.1 item 7 is 0.03 ms). NaN before the first NPC tick.
+     */
+    public double navMsPerNpcTick() {
+        return npcTicks == 0 ? Double.NaN : navNanos / 1e6 / npcTicks;
+    }
+
+    /** The server ticks the NPCs have been ticked so far. */
+    public long ticks() {
+        return tick;
     }
 
     /** Null when the counters of 4b.2 item 12 add up, else why not. */

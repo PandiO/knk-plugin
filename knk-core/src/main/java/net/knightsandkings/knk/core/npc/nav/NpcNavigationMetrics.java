@@ -88,11 +88,36 @@ public final class NpcNavigationMetrics implements MetricsCollector {
         GROUP_LOST
     }
 
+    /**
+     * Why a group gave up a width (implementation plan 4c.3 decision 2.8, link M1: counted and logged only, no
+     * behaviour depends on it), judged at the first path point where the width it gave up does not fit; the metric
+     * label is the lower-case name.
+     */
+    public enum FoldReason {
+        /** The path climbs or drops a block or more there: L4's rule makes a flight of stairs a column. */
+        STAIR,
+        /** No floor (or an unloaded chunk) where a lane would stand, or on the way out to it: the walk is too narrow. */
+        NARROW,
+        /** A gate door on the leader's routes is there (its box, with the followers' door margin). */
+        DOOR,
+        /** A lane point has floor but other WorldGuard regions than the path's own point (a structure, a district edge). */
+        RULES,
+        /** A lane point has floor but not {@code LANE_CLEARANCE} to its side: a jutting wall piece breaks the body's room. */
+        EDGE;
+
+        /** The lower-case name used in the log, the stats and the metric label. */
+        public String label() {
+            return name().toLowerCase(Locale.ROOT);
+        }
+    }
+
     /** Main-thread time per tick: 10 µs .. 50 ms. */
     static final double[] TICK_BOUNDS = {0.00001, 0.000025, 0.00005, 0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005,
         0.01, 0.025, 0.05};
 
     private final Map<Event, LongAdder> events = new EnumMap<>(Event.class);
+    /** Per width change ({@link Event#GROUP_FOLD}, {@link Event#GROUP_NARROW}) the count per reason. */
+    private final Map<Event, Map<FoldReason, LongAdder>> foldReasons = new EnumMap<>(Event.class);
     private final LabeledHistogram planSeconds = new LabeledHistogram("knk_npc_nav_plan_seconds",
         "Time to plan NPC routes, by kind (road: the road graph; local: a capture and local search).", "kind");
     private final LabeledHistogram queueWaitSeconds = new LabeledHistogram("knk_npc_nav_queue_wait_seconds",
@@ -107,6 +132,13 @@ public final class NpcNavigationMetrics implements MetricsCollector {
     public NpcNavigationMetrics() {
         for (Event event : Event.values()) {
             events.put(event, new LongAdder());
+        }
+        for (Event change : WIDTH_CHANGES) {
+            Map<FoldReason, LongAdder> byReason = new EnumMap<>(FoldReason.class);
+            for (FoldReason reason : FoldReason.values()) {
+                byReason.put(reason, new LongAdder());
+            }
+            foldReasons.put(change, byReason);
         }
         setEnabled(false);
     }
@@ -135,6 +167,29 @@ public final class NpcNavigationMetrics implements MetricsCollector {
     /** Running total (also while disabled: 0). */
     public long total(Event event) {
         return events.get(event).sum();
+    }
+
+    /** The width changes that carry a reason (decision 2.8): a fold and a narrowing. */
+    public static final List<Event> WIDTH_CHANGES = List.of(Event.GROUP_FOLD, Event.GROUP_NARROW);
+
+    /**
+     * A group folded or narrowed for {@code reason} (decision 2.8): counts the reason under {@code change}
+     * ({@link Event#GROUP_FOLD} or {@link Event#GROUP_NARROW}; the change itself is counted with {@link #count}).
+     */
+    public void countFoldReason(Event change, FoldReason reason) {
+        Map<FoldReason, LongAdder> byReason = foldReasons.get(change);
+        if (byReason == null) {
+            throw new IllegalArgumentException("no reasons are counted for " + change);
+        }
+        if (enabled) {
+            byReason.get(reason).increment();
+        }
+    }
+
+    /** Running total of a width change's reason (also while disabled: 0). */
+    public long foldReasonTotal(Event change, FoldReason reason) {
+        Map<FoldReason, LongAdder> byReason = foldReasons.get(change);
+        return byReason == null ? 0 : byReason.get(reason).sum();
     }
 
     /** The stuck spells' numbers for {@code /knk npc nav stats} (main thread). */
@@ -213,6 +268,14 @@ public final class NpcNavigationMetrics implements MetricsCollector {
         for (Map.Entry<Event, LongAdder> event : events.entrySet()) {
             out.counter("knk_npc_nav_events_total", "NPC navigation events by kind.", event.getValue().sum(),
                 "event", event.getKey().name().toLowerCase(Locale.ROOT));
+        }
+        for (Map.Entry<Event, Map<FoldReason, LongAdder>> change : foldReasons.entrySet()) {
+            for (Map.Entry<FoldReason, LongAdder> reason : change.getValue().entrySet()) {
+                out.counter("knk_npc_nav_group_width_reasons_total",
+                    "Group folds and narrowings by the reason at the place the wider width did not fit.",
+                    reason.getValue().sum(), "change", change.getKey() == Event.GROUP_FOLD ? "fold" : "narrow",
+                    "reason", reason.getKey().label());
+            }
         }
         planSeconds.collect(out);
         queueWaitSeconds.collect(out);
