@@ -165,6 +165,62 @@ class CheckLogTest(unittest.TestCase):
         self.assertTrue(menu.has_stack_trace)
         self.assertEqual(6, len(menu.lines))
 
+    def test_print_stack_trace_lines_join_the_error_above(self):
+        # PandiO/knk-workspace#540: UserManager logs the join's failed account sync and then printStackTrace()s it, one
+        # timestamped WARN line per frame; the cause (the unreachable API) is only in those lines.
+        log = GOOD_BOOT + (
+            "[10:51:28] [knk-api-client/ERROR]: [KnightsAndKings] Failed to sync user data for ScnFeeder (bc73): "
+            "java.lang.RuntimeException: Failed to check duplicate\n"
+            "[10:51:28] [knk-api-client/WARN]: java.util.concurrent.CompletionException: java.lang.RuntimeException: "
+            "Failed to check duplicate\n"
+            "[10:51:28] [knk-api-client/WARN]: \tat java.base/java.util.concurrent.CompletableFuture.encodeThrowable("
+            "CompletableFuture.java:359)\n"
+            "[10:51:28] [knk-api-client/WARN]: Caused by: java.lang.RuntimeException: Failed to check duplicate\n"
+            "[10:51:28] [knk-api-client/WARN]: \tat KnightsAndKings.jar//net.knightsandkings.knk.api.impl."
+            "UserAccountApiImpl.lambda$checkDuplicate$0(UserAccountApiImpl.java:67)\n"
+            "[10:51:28] [Server thread/INFO]: ScnNoFeed logged in with entity id 1\n"
+            "[10:51:28] [knk-api-client/WARN]: \t... 3 more\n"
+            "[10:51:28] [knk-api-client/WARN]: Caused by: java.net.ConnectException: Failed to connect to "
+            "localhost/127.0.0.1:5294\n"
+            "[10:51:28] [Server thread/INFO]: ScnFeeder joined the game\n"
+        )
+        errors, notes = check(lines(log), expect_commit="bd7b78a8", unreachable_api=API, expect_shutdown=True)
+        self.assertEqual([], errors)
+        self.assertIn("3 error/stack-trace entries excused", notes[-1])
+        # the "... 3 more" frame came after another thread's line: it still joins the error
+        entry = next(e for e in parse_entries(lines(log)) if "Failed to sync user data" in e.lines[0])
+        self.assertEqual(7, len(entry.lines))
+
+    def test_print_stack_trace_skips_a_logged_exception_of_a_pool_thread_with_the_same_name(self):
+        # The API client's pool threads are all called knk-api-client: another one's logged exception (with its own
+        # untimestamped trace) can come between the error and its printStackTrace() frames.
+        log = GOOD_BOOT + (
+            "[11:18:22] [knk-api-client/ERROR]: [KnightsAndKings] Failed to sync user data for ScnTeleporter (575d): "
+            "java.lang.RuntimeException: Failed to check duplicate\n"
+            "[11:18:22] [knk-api-client/WARN]: [net.knightsandkings.knk.paper.user.IgnoreService] Failed to load the "
+            "ignore list of user -421004002\n"
+            "java.util.concurrent.CompletionException: java.lang.RuntimeException: Failed to list ignores\n"
+            "\tat java.base/java.lang.Thread.run(Thread.java:1474) ~[?:?]\n"
+            "Caused by: java.net.ConnectException: Failed to connect to localhost/127.0.0.1:5294\n"
+            "[11:18:22] [knk-api-client/WARN]: java.util.concurrent.CompletionException: java.lang.RuntimeException: "
+            "Failed to check duplicate\n"
+            "[11:18:22] [knk-api-client/WARN]: \tat java.base/java.lang.Thread.run(Thread.java:1474)\n"
+            "[11:18:22] [knk-api-client/WARN]: Caused by: java.net.ConnectException: Failed to connect to "
+            "localhost/127.0.0.1:5294\n"
+        )
+        errors, notes = check(lines(log), expect_commit="bd7b78a8", unreachable_api=API, expect_shutdown=True)
+        self.assertEqual([], errors)
+        self.assertIn("4 error/stack-trace entries excused", notes[-1])
+
+    def test_trace_lines_of_another_thread_start_their_own_entry(self):
+        log = GOOD_BOOT + (
+            "[10:51:28] [knk-api-client/ERROR]: [KnightsAndKings] Failed to sync user data for ScnFeeder\n"
+            "[10:51:28] [Server thread/WARN]: java.lang.IllegalStateException: something else in KnightsAndKings\n"
+        )
+        errors, _ = check(lines(log), expect_commit="bd7b78a8", unreachable_api=API, expect_shutdown=True)
+        self.assertEqual(1, len(errors))
+        self.assertIn("Failed to sync user data", errors[0])
+
 
 if __name__ == "__main__":
     unittest.main()
