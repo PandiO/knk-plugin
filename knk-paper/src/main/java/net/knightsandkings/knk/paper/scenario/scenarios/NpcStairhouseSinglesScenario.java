@@ -12,11 +12,11 @@ import net.knightsandkings.knk.paper.scenario.NpcMovementScene;
 import net.knightsandkings.knk.paper.scenario.ScenarioScene;
 
 /**
- * Plan 4c.5 item 2 (link M1, PandiO/knk-workspace#621), in report mode: 12 singles at once, 6 from the road east of
- * the stair house up through the entrance (1413 49 -508), along the 3-wide straight (1414 49 -503) and up both
- * flights, 6 from the top landing down the same way. Reports arrivals, stuck spells, the longest still single, the
+ * Plan 4c.5 item 2 (link M1, PandiO/knk-workspace#621), in report mode, on the developer's schematic: 12 singles at
+ * once, 6 from the street north of the stair house through the entrance (1413 49 -508), along the straight
+ * (1414 49 -503) and the 3-wide passage and up the two steps into the hall, 6 from the hall down the same way. Reports arrivals, stuck spells, the longest still single, the
  * longest stand on the straight and in the entrance, falls and the tick cost. Later links check: all arrive, 0 stuck
- * spells, longest still under 3 s, no fall (M2). Runs on the stand-in until the developer's schematic. Needs Citizens.
+ * spells, longest still under 3 s, no fall (M2). Needs Citizens.
  */
 public final class NpcStairhouseSinglesScenario implements Scenario<ScenarioScene> {
 
@@ -35,7 +35,7 @@ public final class NpcStairhouseSinglesScenario implements Scenario<ScenarioScen
 
     @Override
     public String description() {
-        return "Report: 12 singles both ways through the stair house's entrance, straight and flights (collision "
+        return "Report: 12 singles both ways through the stair house's entrance, straight and steps (collision "
             + (collisionOn ? "on" : "off") + ")";
     }
 
@@ -57,7 +57,7 @@ public final class NpcStairhouseSinglesScenario implements Scenario<ScenarioScen
                     npcs.get().stop();
                 }
             })
-            .act("6 singles walk up from the road and 6 down from the top landing, at once", () -> {
+            .act("6 singles walk in from the street and 6 out from the hall, at once", () -> {
                 List<NavPoint> starts = new ArrayList<>(house.houseBottomSpots());
                 starts.addAll(house.houseTopSpots());
                 List<NavPoint> goals = new ArrayList<>(house.houseTopSpots());

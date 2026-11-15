@@ -35,21 +35,48 @@ class NpcMovementSceneTest {
                 () -> null, () -> null, () -> null, () -> null, () -> null));
     }
 
-    /** Null when a floor point stands on a block with two free blocks above it in the schematic, else why not. */
-    private static String standable(SceneSchematic s, NavPoint floor) {
+    /**
+     * The block at a box position once a scene is built: the schematic pasted at {@code at}, with the stone floor the
+     * stair house gets under its footprint below it.
+     */
+    private static String boxBlock(SceneSchematic s, int[] at, int x, int y, int z) {
+        int lx = x - at[0];
+        int ly = y - at[1];
+        int lz = z - at[2];
+        boolean inFootprint = lx >= 0 && lx < s.width() && lz >= 0 && lz < s.length();
+        if (!inFootprint) {
+            return "minecraft:air";
+        }
+        if (ly < 0) {
+            return at[1] > 0 ? "minecraft:stone" : "minecraft:air";
+        }
+        return ly < s.height() ? s.blockAt(lx, ly, lz) : "minecraft:air";
+    }
+
+    private static boolean passable(String block) {
+        return block.equals("minecraft:air") || block.startsWith("minecraft:wall_torch")
+            || block.startsWith("minecraft:soul_wall_torch") || block.contains("sign");
+    }
+
+    /** Null when a floor point stands on a block with two free blocks above it in the built scene, else why not. */
+    private static String standable(SceneSchematic s, int[] at, NavPoint floor) {
         int x = floor.blockX() - OX;
         int y = floor.blockY() - OY;
         int z = floor.blockZ() - OZ;
-        String below = s.blockAt(x, y, z);
-        String feet = s.blockAt(x, y + 1, z);
-        String head = s.blockAt(x, y + 2, z);
+        String below = boxBlock(s, at, x, y, z);
+        String feet = boxBlock(s, at, x, y + 1, z);
+        String head = boxBlock(s, at, x, y + 2, z);
         if (below.equals("minecraft:air")) {
             return "no floor under " + x + " " + y + " " + z;
         }
-        if (!feet.equals("minecraft:air") || !head.equals("minecraft:air")) {
+        if (!passable(feet) || !passable(head)) {
             return "no room above " + x + " " + y + " " + z + ": " + feet + ", " + head;
         }
         return null;
+    }
+
+    private static String standable(SceneSchematic s, NavPoint floor) {
+        return standable(s, new int[] {0, 0, 0}, floor);
     }
 
     private static NavPoint floorOf(NavPoint feet) {
@@ -57,36 +84,50 @@ class NpcMovementSceneTest {
     }
 
     private static void assertStandable(SceneSchematic s, List<NavPoint> floors, String what) {
+        assertStandable(s, new int[] {0, 0, 0}, floors, what);
+    }
+
+    private static void assertStandable(SceneSchematic s, int[] at, List<NavPoint> floors, String what) {
         for (NavPoint p : floors) {
-            String why = standable(s, p);
+            String why = standable(s, at, p);
             assertEquals(null, why, what);
         }
     }
 
     @Test
-    void theStairHouseLineAndSpotsStandOnTheStandIn() {
+    void theStairHouseLineAndSpotsStandOnTheDevelopersSchematic() {
         NpcMovementScene house = NpcMovementScene.stairHouse(scene());
         SceneSchematic s = SceneSchematic.fromResource(house.resource());
+        int[] at = house.pasteAt();
 
-        assertTrue(house.standIn());
-        assertStandable(s, house.houseLine(), "the road line");
+        assertEquals(NpcMovementScene.STAIRHOUSE, house.resource());
+        assertStandable(s, at, house.houseLine(), "the road line");
         List<NavPoint> spots = new ArrayList<>(house.houseBottomSpots());
         spots.addAll(house.houseTopSpots());
-        assertStandable(s, spots.stream().map(NpcMovementSceneTest::floorOf).toList(), "the starts and goals");
+        for (int i = 0; i < 20; i++) {
+            spots.add(house.houseGroupSpot(i));
+        }
+        spots.add(house.houseGoal());
+        assertStandable(s, at, spots.stream().map(NpcMovementSceneTest::floorOf).toList(), "the starts and goals");
         assertEquals(6, house.houseTopSpots().size());
     }
 
     @Test
-    void theStairHouseAreasLieWhereThePlanSaysInTheRealWorld() {
+    void theStairHouseIsPastedInTheRealFrameAndItsAreasLieWhereTheDeveloperNamedThem() {
         NpcMovementScene house = NpcMovementScene.stairHouse(scene());
         SceneSchematic s = SceneSchematic.fromResource(house.resource());
-        int[] entrance = s.local(1413, 49, -508); // a feet block
-        int[] straight = s.local(1414, 49, -503);
+        int[] at = house.pasteAt();
 
-        assertTrue(house.inHouseEntrance(house.feet(entrance[0] + 0.5, entrance[1] - 1, entrance[2] + 0.5)));
-        assertTrue(house.onHouseStraight(house.feet(straight[0] + 0.5, straight[1] - 1, straight[2] + 0.5)));
-        assertFalse(house.inHouseEntrance(house.feet(20.5, NpcMovementScene.HOUSE_GROUND, 3.5)), "the road east");
+        // box = real - (1400, 46, -515), as the stand-in was
+        assertEquals(s.worldMin()[0] - 1400, at[0]);
+        assertEquals(s.worldMin()[1] - 46, at[1]);
+        assertEquals(s.worldMin()[2] + 515, at[2]);
+        assertTrue(house.inHouseEntrance(house.feet(13.5, NpcMovementScene.HOUSE_GROUND, 7.5)), "1413 49 -508");
+        assertTrue(house.onHouseStraight(house.feet(14.5, NpcMovementScene.HOUSE_GROUND, 12.5)), "1414 49 -503");
+        assertFalse(house.inHouseEntrance(house.feet(13.5, NpcMovementScene.HOUSE_GROUND, 1.5)), "the street");
         assertEquals("13 2 7", house.local(house.feet(13.5, 2, 7.5)), "box block, floor height");
+        assertEquals(null, standable(s, at, house.floor(14.5, NpcMovementScene.HOUSE_GROUND, 12.5)),
+            "1414 49 -503 is walkable");
     }
 
     @Test

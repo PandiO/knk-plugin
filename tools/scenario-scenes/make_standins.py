@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Writes the synthetic stand-in scenes of the NPC movement scenarios as WorldEdit schematics.
 
-Implementation plan 4c.5 (PandiO/knk-workspace#621, link M1): until the developer's schematic of the stair house is
-posted on PandiO/knk-workspace#603, the scenarios run on stand-ins built from the descriptions in the plan. Each scene
-is written in the format WorldEdit 7.3+ saves (Sponge schematic version 3, gzipped NBT), so the developer's own file
-drops in the same way: knk-paper/src/main/resources/scenario-scenes/<name>.schem, read by SceneSchematic.
+Implementation plan 4c.5 items 4 to 6 (PandiO/knk-workspace#621, link M1): the jagged straight, the doorway and the
+plaza are synthetic scenes built from the plan's descriptions (the stair house is the developer's own schematic,
+knk-stairhouse.schem). Each is written in the format WorldEdit 7.3+ saves (Sponge schematic version 3, gzipped NBT):
+knk-paper/src/main/resources/scenario-scenes/<name>.schem, read by SceneSchematic.
 
 Run from the knk-plugin root:  python3 tools/scenario-scenes/make_standins.py
 The output is deterministic (no dates), so a rerun without changes gives the same bytes.
@@ -147,60 +147,6 @@ def write_schematic(path, scene, world_origin, offset):
 
 # ==================== the scenes ====================
 
-def stairhouse():
-    """Stand-in for the developer's stair house (plan 4c.5 items 1-3), in its real place.
-
-    Real corner 1400 46 -515 (the developer's //pos1), floor at real y 48 (local 2, feet 49). The schematic's copy
-    origin is the entrance, 1413 49 -508 (local 13 3 7), as the request on #603 asks. Real length 34 is cut to the
-    box's 32 (z -515..-484); the stand-in is 32 wide so a group of 20 can stand on the road east of the house.
-    1. A 3-wide road comes from the east along z 2..4 and turns south along x 13..15.
-    2. The entrance at 1413 -508: a wall across at z 7 with a one-block doorway at x 13, two blocks high.
-    3. The 3-wide straight 1414 -503 (local z 8..12, x 13..15) with one-block notches in its walls, so the road's
-       middle line wobbles past jutting wall pieces (plan 4c.1 item 2).
-    4. The stair house (x 8..16, z 12..31): a 3-wide flight south up x 13..15 (stair blocks, floor 2 -> 10), a
-       landing across x 9..15 at z 22..25, a 3-wide flight north up x 9..11 (floor 11 -> 17) behind a divider wall
-       at x 12, and the top landing at z 13..14 (floor 17).
-    """
-    s = Scene(32, 21, 32)
-    s.fill(0, 0, 0, 31, 2, 31, STONE)
-    top = 20
-    # 1. the road from the east and its turn south
-    s.fill(13, 3, 1, 31, 5, 1, WALL)
-    s.fill(16, 3, 5, 31, 5, 5, WALL)
-    s.fill(12, 3, 1, 12, 5, 6, WALL)
-    s.fill(16, 3, 5, 16, 5, 6, WALL)
-    # 2. the entrance wall with its doorway at x 13
-    s.fill(8, 3, 7, 16, 5, 7, WALL)
-    s.set(13, 3, 7, AIR)
-    s.set(13, 4, 7, AIR)
-    # 3. the jagged 3-wide straight, z 8..12, walls at x 12 and 16 with notches
-    s.fill(12, 3, 8, 12, 5, 12, WALL)
-    s.fill(16, 3, 8, 16, 5, 12, WALL)
-    for x, z in ((16, 9), (16, 11), (12, 10)):
-        s.fill(x, 3, z, x, 5, z, AIR)
-        s.fill(x + (1 if x == 16 else -1), 3, z, x + (1 if x == 16 else -1), 5, z, WALL)
-    # 4. the stair house's walls
-    s.fill(8, 3, 12, 12, top, 12, WALL)
-    s.fill(8, 3, 12, 8, top, 31, WALL)
-    s.fill(16, 3, 13, 16, top, 31, WALL)
-    s.fill(8, 3, 31, 16, top, 31, WALL)
-    s.fill(12, 3, 13, 12, top, 21, WALL)          # the divider between the flights
-    for k in range(8):                             # flight 1, south up x 13..15: stairs at y 3..10, z 14..21
-        z = 14 + k
-        if k > 0:
-            s.fill(13, 3, z, 15, 2 + k, z, STONE)
-        s.fill(13, 3 + k, z, 15, 3 + k, z, stairs("south"))
-    s.fill(9, 3, 22, 15, 10, 25, STONE)            # the landing, floor 10
-    s.fill(9, 3, 13, 11, 10, 21, STONE)            # under flight 2
-    for k in range(7):                             # flight 2, north up x 9..11: stairs at y 11..17, z 21..15
-        z = 21 - k
-        if k > 0:
-            s.fill(9, 11, z, 11, 10 + k, z, STONE)
-        s.fill(9, 11 + k, z, 11, 11 + k, z, stairs("north"))
-    s.fill(9, 11, 13, 11, 17, 14, STONE)           # the top landing, floor 17
-    return s, (1413, 49, -508), (-13, -3, -7)
-
-
 def jagged_straight():
     """Plan 4c.5 item 4: a 3-wide straight along z (x 14..16, floor 1) with one-block notches in both walls every 2
     to 3 blocks, a lantern on a fence post in an east notch and a stair block in a west notch."""
@@ -261,7 +207,6 @@ def plaza():
 
 
 SCENES = {
-    "npc-stairhouse-standin": stairhouse,
     "npc-jagged-straight": jagged_straight,
     "npc-doorway": doorway,
     "npc-plaza": plaza,

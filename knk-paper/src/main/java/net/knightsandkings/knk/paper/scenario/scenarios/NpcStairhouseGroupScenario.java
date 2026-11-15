@@ -17,11 +17,11 @@ import net.knightsandkings.knk.paper.scenario.ScenarioScene;
 
 /**
  * Plan 4c.5 item 3 (link M1, PandiO/knk-workspace#621), in report mode: a group of 20 in {@code ranks} walks from the
- * road east of the stair house through the entrance (1413 49 -508), along the 3-wide straight and up both flights to
- * the top landing, once. Reports the leader's result, the folds and narrowings with their reasons and places
+ * street north of the stair house through the entrance (1413 49 -508), along the straight at 1414 49 -503 and up the
+ * two steps into the hall, once (the developer's schematic). Reports the leader's result, the folds and narrowings with their reasons and places
  * (decision 2.8), the longest a follower stood in one block in the entrance, stuck spells, lag and the tick cost.
  * Later links check: folds only at 1-wide places with their reasons, no follower still in the entrance for more than
- * 10 s, no stuck spell left open (M3, M4). Runs on the stand-in until the developer's schematic. Needs Citizens.
+ * 10 s, no stuck spell left open (M3, M4). Needs Citizens.
  */
 public final class NpcStairhouseGroupScenario implements Scenario<ScenarioScene> {
 
@@ -41,7 +41,7 @@ public final class NpcStairhouseGroupScenario implements Scenario<ScenarioScene>
 
     @Override
     public String description() {
-        return "Report: a group of 20 in ranks through the stair house's entrance and up (collision "
+        return "Report: a group of 20 in ranks through the stair house's entrance and up the steps (collision "
             + (collisionOn ? "on" : "off") + ")";
     }
 
@@ -64,17 +64,16 @@ public final class NpcStairhouseGroupScenario implements Scenario<ScenarioScene>
                     npcs.get().stop();
                 }
             })
-            .act("a group of 20 in ranks walks from the road through the entrance and up", () -> {
+            .act("a group of 20 in ranks walks from the street through the entrance and up the steps", () -> {
                 List<NpcMover> members = new ArrayList<>();
                 for (int i = 0; i < MEMBERS; i++) {
-                    // the leader in front, 3 abreast behind it, rows 1.5 apart along the road east of the house
-                    members.add(npcs.get().spawn(i == 0 ? house.feet(17.5, NpcMovementScene.HOUSE_GROUND, 3.5)
-                        : house.feet(19.0 + 1.5 * ((i - 1) / 3), NpcMovementScene.HOUSE_GROUND, 2.5 + ((i - 1) % 3))));
+                    // the leader in front, the followers in a bunch behind it on the street north of the entrance
+                    members.add(npcs.get().spawn(house.houseGroupSpot(i)));
                 }
                 report.phaseStarts(npcs.get());
                 started[0] = npcs.get().ticks();
                 group.set(npcs.get().group(members, Formation.Type.RANKS));
-                group.get().navigate(house.feet(10.5, NpcMovementScene.HOUSE_TOP, 13.5), r -> {
+                group.get().navigate(house.houseGoal(), r -> {
                     result.set(r);
                     took[0] = npcs.get().ticks() - started[0];
                 });

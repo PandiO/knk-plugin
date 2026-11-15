@@ -187,29 +187,25 @@ class SceneSchematicTest {
     // ==================== the shipped stand-ins (plan 4c.5 item 7) ====================
 
     @Test
-    void theStairHouseStandInSitsInTheRealPlaceWithItsEntranceAsOrigin() {
-        SceneSchematic s = SceneSchematic.fromResource("npc-stairhouse-standin.schem");
+    void theDevelopersStairHouseIsReadWithItsRealCorner() {
+        SceneSchematic s = SceneSchematic.fromResource("knk-stairhouse.schem");
 
-        assertEquals(32, s.width());
-        assertEquals(21, s.height(), "real y 46..66");
-        assertEquals(32, s.length(), "real z -515..-484: the box's 32 of the developer's 34");
-        assertArrayEquals(new int[] {1400, 46, -515}, s.worldMin(), "the developer's //pos1");
-        assertArrayEquals(s.local(1413, 49, -508), s.origin(), "copied standing in the entrance");
+        assertEquals(12, s.width());
+        assertEquals(31, s.height());
+        assertEquals(63, s.length());
+        assertEquals(5023, s.dataVersion());
+        assertArrayEquals(new int[] {1407, 49, -549}, s.worldMin(), "copied from 1407 49 -549 to 1418 79 -487");
         int[] door = s.local(1413, 49, -508);
-        assertEquals("minecraft:air", s.blockAt(door[0], door[1], door[2]), "the doorway is open");
-        assertEquals("minecraft:air", s.blockAt(door[0], door[1] + 1, door[2]), "two blocks high");
-        assertEquals("minecraft:stone_bricks", s.blockAt(door[0] - 1, door[1], door[2]), "a one-block doorway");
-        assertEquals("minecraft:stone_bricks", s.blockAt(door[0] + 1, door[1], door[2]));
+        assertEquals("minecraft:air", s.blockAt(door[0], door[1], door[2]), "the entrance is open at feet height");
+        assertEquals("minecraft:air", s.blockAt(door[0], door[1] + 1, door[2]), "and at head height");
         int[] straight = s.local(1414, 49, -503);
-        assertEquals("minecraft:air", s.blockAt(straight[0], straight[1], straight[2]), "1414 49 -503 is walkable");
-        assertEquals("minecraft:stone", s.blockAt(straight[0], straight[1] - 1, straight[2]), "on the floor");
-        assertTrue(s.palette().stream().anyMatch(p -> p.startsWith("minecraft:stone_brick_stairs")), "it has stairs");
+        assertEquals("minecraft:air", s.blockAt(straight[0], straight[1], straight[2]), "1414 49 -503 is open");
+        assertTrue(s.palette().stream().anyMatch(p -> p.contains("_stairs[")), "it has stairs");
     }
 
     @Test
-    void everyStandInPastesIntoTheBoxWithBlocksTheServerKnows() {
-        for (String name : List.of("npc-stairhouse-standin.schem", "npc-jagged-straight.schem", "npc-doorway.schem",
-            "npc-plaza.schem")) {
+    void everySceneTheScenariosUsePastesWithBlocksTheServerKnows() {
+        for (String name : List.of("npc-jagged-straight.schem", "npc-doorway.schem", "npc-plaza.schem")) {
             assertTrue(SceneSchematic.hasResource(name), name);
             SceneSchematic s = SceneSchematic.fromResource(name);
             assertTrue(s.width() <= ScenarioScene.SIZE && s.height() <= ScenarioScene.HEIGHT
@@ -220,7 +216,10 @@ class SceneSchematicTest {
             assertEquals(0, pasted.outsideTheBox(), name);
             assertTrue(pasted.placed() > 1000, name + " placed " + pasted.placed());
         }
-        assertFalse(SceneSchematic.hasResource("knk-stairhouse.schem"), "the developer's schematic is not here yet");
+        // the developer's stair house is pasted by the Paper scenarios only: MockBukkit knows no lantern properties
+        // (minecraft:lantern[hanging=true]), Paper does
+        assertTrue(SceneSchematic.hasResource("knk-stairhouse.schem"));
+        assertFalse(SceneSchematic.hasResource("npc-stairhouse-standin.schem"), "the stand-in is gone");
     }
 
     @Test

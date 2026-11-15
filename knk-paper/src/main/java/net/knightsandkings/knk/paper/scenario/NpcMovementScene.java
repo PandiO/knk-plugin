@@ -11,20 +11,20 @@ import net.knightsandkings.knk.core.npc.nav.NavPoint;
  * WorldEdit schematic pasted into the scenario's box ({@link SceneSchematic}) with the points the scenarios use: the
  * road line as the road graph would give it, where NPCs start and where they go, and the areas the checks watch.
  * <p>
- * Until the developer's schematic of the stair house (attached to PandiO/knk-workspace#603) is committed here, the
- * stair house is the synthetic stand-in {@value #STAIRHOUSE_STANDIN} (built from the plan's description, in the real
- * place: local = real - (1400, 46, -515)); the jagged straight, the doorway and the plaza are synthetic by design (4c.5 items 4 to 6).
- * When the developer's file is committed as {@value #STAIRHOUSE_DEVELOPER}, its road line and points are taken from its
- * geometry and the trace on #603, and {@link #stairHouse} switches to it.
+ * The stair house is the developer's schematic {@value #STAIRHOUSE} (PandiO/knk-workspace#603, copied in the dev
+ * world): it covers 1407 49 -549 to 1418 79 -487 and is pasted in the frame box = real - (1400, 46, -515), so its
+ * rows north of -515 and its blocks above y 69 fall outside the box. It starts at y 49, one block above the street's
+ * floor, so the scene lays a stone floor at real y 48 under its footprint first. The jagged straight, the doorway and
+ * the plaza are synthetic by design (4c.5 items 4 to 6).
  * <p>
  * Coordinates are the box's (x, z 0..31, y 0..23); floor points are the block the NPC stands on.
  */
 public final class NpcMovementScene {
 
-    /** The stand-in stair house (tools/scenario-scenes/make_standins.py). */
-    public static final String STAIRHOUSE_STANDIN = "npc-stairhouse-standin.schem";
-    /** The developer's schematic, once committed from its attachment on #603 (not here yet). */
-    public static final String STAIRHOUSE_DEVELOPER = "knk-stairhouse.schem";
+    /** The developer's schematic of the stair house (attached to #603, committed on 2026-11-15). */
+    public static final String STAIRHOUSE = "knk-stairhouse.schem";
+    /** Where the stair house's schematic goes in the box: its lowest corner (1407 49 -549) in the frame real - (1400, 46, -515). */
+    static final int[] STAIRHOUSE_AT = {7, 3, -34};
 
     private final ScenarioScene scene;
     private final String resource;
@@ -36,7 +36,7 @@ public final class NpcMovementScene {
 
     /** The stair house, its entrance at 1413 49 -508 and the 3-wide straight at 1414 49 -503 (4c.5 items 1 to 3). */
     public static NpcMovementScene stairHouse(ScenarioScene scene) {
-        return new NpcMovementScene(scene, STAIRHOUSE_STANDIN);
+        return new NpcMovementScene(scene, STAIRHOUSE);
     }
 
     /** A 3-wide straight with one-block notches, a lantern on a post and a stair block beside it (4c.5 item 4). */
@@ -57,9 +57,20 @@ public final class NpcMovementScene {
     /** Pastes the scene into the box; returns what was built, for the report. */
     public String build() {
         SceneSchematic schematic = SceneSchematic.fromResource(resource);
-        SceneSchematic.Pasted pasted = schematic.paste(scene, 0, 0, 0);
-        return resource + (STAIRHOUSE_STANDIN.equals(resource) ? " (stand-in until the developer's schematic)" : "")
-            + ", " + pasted.placed() + " blocks";
+        int[] at = pasteAt();
+        if (STAIRHOUSE.equals(resource)) {
+            // the street's floor (real y 48) under the schematic's footprint: the copy starts at y 49
+            for (int x = at[0]; x < at[0] + schematic.width(); x++) {
+                for (int z = Math.max(0, at[2]); z < Math.min(ScenarioScene.SIZE, at[2] + schematic.length()); z++) {
+                    for (int y = 0; y < at[1]; y++) {
+                        scene.block(x, y, z).setType(org.bukkit.Material.STONE, false);
+                    }
+                }
+            }
+        }
+        SceneSchematic.Pasted pasted = schematic.paste(scene, at[0], at[1], at[2]);
+        return resource + ", " + pasted.placed() + " blocks"
+            + (pasted.outsideTheBox() > 0 ? ", " + pasted.outsideTheBox() + " outside the box" : "");
     }
 
     /** The schematic this scene is built from. */
@@ -67,31 +78,31 @@ public final class NpcMovementScene {
         return resource;
     }
 
-    /** Whether it is a stand-in for a real place (the stair house before the developer's schematic). */
-    public boolean standIn() {
-        return STAIRHOUSE_STANDIN.equals(resource);
+    /** Where the schematic's lowest corner goes in the box. */
+    public int[] pasteAt() {
+        return STAIRHOUSE.equals(resource) ? STAIRHOUSE_AT.clone() : new int[] {0, 0, 0};
     }
 
-    // ==================== the stair house (stand-in) ====================
+    // ==================== the stair house (the developer's schematic) ====================
 
-    /** The ground floor's height (real y 48: feet 49). */
+    /** The street's floor (real y 48: feet 49). */
     public static final int HOUSE_GROUND = 2;
-    /** The landing between the flights. */
-    public static final int HOUSE_LANDING = 10;
-    /** The top landing. */
-    public static final int HOUSE_TOP = 17;
+    /** The floor after the first steps (real 49). */
+    public static final int HOUSE_STEP = 3;
+    /** The hall at the top of the second step (real 50: feet 51). */
+    public static final int HOUSE_HALL = 4;
 
     /**
-     * The road line from the road east of the house through the entrance, along the 3-wide straight (wobbling towards
-     * its notches as a skeleton line does, plan 4c.1 item 2), up the first flight, across the landing and up the
-     * second flight to the top landing.
+     * The road line from the street north of the stair house through the entrance (1413 -508), along the straight at
+     * 1414 -503 and the 3-wide passage (1411..1413, -502..-500), up the two steps (-499, -495) to the hall at feet 51
+     * (-492..-490). Hand-drawn on the developer's schematic along the walkable middle, as the road graph's line would
+     * run; replace it with the developer's trace when one is posted.
      */
     public List<NavPoint> houseLine() {
-        return List.of(floor(28.5, HOUSE_GROUND, 3.5), floor(14.5, HOUSE_GROUND, 3.5), floor(13.5, HOUSE_GROUND, 6.0),
-            floor(13.5, HOUSE_GROUND, 7.5), floor(14.5, HOUSE_GROUND, 9.0), floor(15.2, HOUSE_GROUND, 10.5),
-            floor(14.3, HOUSE_GROUND, 12.5), floor(14.5, HOUSE_GROUND, 13.5), floor(14.5, HOUSE_LANDING, 21.5),
-            floor(14.5, HOUSE_LANDING, 23.5), floor(10.5, HOUSE_LANDING, 23.5), floor(10.5, HOUSE_LANDING + 1, 21.5),
-            floor(10.5, HOUSE_TOP, 15.5), floor(10.5, HOUSE_TOP, 13.5));
+        return List.of(floor(13.5, HOUSE_GROUND, 1.5), floor(13.5, HOUSE_GROUND, 5.5), floor(13.0, HOUSE_GROUND, 7.5),
+            floor(12.5, HOUSE_GROUND, 10.0), floor(12.5, HOUSE_GROUND, 12.5), floor(12.5, HOUSE_GROUND, 14.5),
+            floor(12.5, HOUSE_GROUND, 15.5), floor(12.5, HOUSE_STEP, 16.5), floor(12.5, HOUSE_STEP, 18.5),
+            floor(12.5, HOUSE_HALL, 20.5), floor(12.5, HOUSE_HALL, 23.5), floor(13.5, HOUSE_HALL, 25.5));
     }
 
     /** {@link #houseLine} there and back, the loop the scenario road walks. */
@@ -99,38 +110,49 @@ public final class NpcMovementScene {
         return thereAndBack(houseLine());
     }
 
-    /** Six places on the road east of the house (feet). */
+    /** Six places on the street north of the entrance (feet; real -514..-512). */
     public List<NavPoint> houseBottomSpots() {
         List<NavPoint> spots = new ArrayList<>();
         for (int i = 0; i < 6; i++) {
-            spots.add(feet(20.5 + 1.5 * i, HOUSE_GROUND, 2.5 + (i % 3)));
+            spots.add(feet(10.5 + 1.2 * i, HOUSE_GROUND, 1.5 + (i % 3)));
         }
         return spots;
     }
 
-    /** The six cells of the top landing (feet). */
+    /** Six places in the hall at the top (feet 51; real 1412..1414, -491..-490). */
     public List<NavPoint> houseTopSpots() {
         List<NavPoint> spots = new ArrayList<>();
-        for (int z = 13; z <= 14; z++) {
-            for (int x = 9; x <= 11; x++) {
-                spots.add(feet(x + 0.5, HOUSE_TOP, z + 0.5));
+        for (int z = 24; z <= 25; z++) {
+            for (int x = 12; x <= 14; x++) {
+                spots.add(feet(x + 0.5, HOUSE_HALL, z + 0.5));
             }
         }
         return spots;
     }
 
-    /** Whether feet are in or just before or after the entrance (the doorway at local 13 7, real 1413 -508). */
+    /** The group's start: the street north of the entrance (real -515..-511, 1409..1418), leader in front. */
+    public NavPoint houseGroupSpot(int i) {
+        return i == 0 ? feet(13.5, HOUSE_GROUND, 4.5)
+            : feet(11.0 + 1.0 * ((i - 1) % 6), HOUSE_GROUND, 3.5 - 0.9 * ((i - 1) / 6));
+    }
+
+    /** The group's goal in the hall. */
+    public NavPoint houseGoal() {
+        return feet(13.5, HOUSE_HALL, 25.5);
+    }
+
+    /** Whether feet are in or just before or after the entrance (1411..1415, -510..-506). */
     public boolean inHouseEntrance(NavPoint feet) {
         int x = localX(feet);
         int z = localZ(feet);
-        return x >= 12 && x <= 16 && z >= 5 && z <= 9 && localY(feet) <= HOUSE_GROUND + 2;
+        return x >= 11 && x <= 15 && z >= 5 && z <= 9 && localY(feet) <= HOUSE_GROUND + 1;
     }
 
-    /** Whether feet are on the 3-wide straight at 1414 49 -503 (local z 8..12). */
+    /** Whether feet are on the straight at 1414 49 -503 and the passage after it (-505..-500). */
     public boolean onHouseStraight(NavPoint feet) {
         int x = localX(feet);
         int z = localZ(feet);
-        return x >= 12 && x <= 16 && z >= 8 && z <= 12 && localY(feet) <= HOUSE_GROUND + 2;
+        return x >= 9 && x <= 16 && z >= 10 && z <= 15 && localY(feet) <= HOUSE_GROUND + 1;
     }
 
     // ==================== the jagged straight ====================
