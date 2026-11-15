@@ -114,16 +114,23 @@ public final class RealtimeClient {
         });
     }
 
-    /** Closes the connection for good (plugin disable). Safe to call more than once. */
+    /**
+     * Closes the connection for good (plugin disable). Safe to call more than once. {@link #state()} turns
+     * {@link RealtimeState#STOPPED} only after the transport's close has been requested, so whoever sees STOPPED
+     * knows the close is under way (PandiO/knk-workspace#264).
+     */
     public void stop() {
         stopped = true;
         executor.execute(() -> {
             cancelPending();
             HubTransport transport = current;
             current = null;
-            setState(RealtimeState.STOPPED);
-            if (transport != null) {
-                transport.stop().exceptionally(error -> null);
+            try {
+                if (transport != null) {
+                    transport.stop().exceptionally(error -> null);
+                }
+            } finally {
+                setState(RealtimeState.STOPPED);
             }
         });
     }
@@ -300,9 +307,10 @@ public final class RealtimeClient {
         }
     }
 
+    /** Stats first, then the volatile {@code state}: a thread that sees the new state also sees the stats for it. */
     private void setState(RealtimeState newState) {
-        state = newState;
         stats.state(newState, clock.instant());
+        state = newState;
     }
 
     private static Throwable unwrap(Throwable error) {

@@ -1,0 +1,18 @@
+{
+  "name": "knk-bot-tests",
+  "private": true,
+  "description": "Headless Mineflayer bots that run plugin tests against the CI Paper server (PandiO/knk-workspace#540). Off until the pinned client supports the server's Minecraft version.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "bots": "node run.mjs",
+    "support": "node check-support.mjs --latest"
+  },
+  "dependencies": {
+    "minecraft-protocol": "1.68.0",
+    "mineflayer": "4.39.0"
+  }
+}

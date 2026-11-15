@@ -94,6 +94,27 @@ realtime:
   # notification poll stops entirely while connected (pushed instead) and drains once on every (re)connect.
   # 1 = no slowdown. Hub down = every interval as configured.
   fallback-poll-multiplier: 4
+  # GDPR account erasure (PandiO/knk-workspace#184), only while enabled: when the API erases an account it pushes
+  # AccountErased; an online player is kicked with kick-message (a siege vault they hold is given back to them first),
+  # then everything this server keeps about the account is deleted (offline security store, user/permission caches,
+  # discovery and statistics spools, the PM-log queue and local log lines, offline siege vaults, hub-outage return point). Minecraft's own player files are not deleted: they are
+  # listed in minecraft-files-list for the owner. Every (re)connect catches up from the API's erasure feed; the
+  # position is kept in feed-file. With realtime off, the hourly offline-cache re-check stays the only path.
+  erasure:
+    kick-message: "Your account data has been deleted."
+    # Wait between the kick and the deletion (quit handlers, Minecraft saving the player), 0-30
+    settle-seconds: 2
+    feed-file: "erasure-feed.json"
+    minecraft-files-list: "erasure-minecraft-files.txt"
+  # Kick and ban from the web app (PandiO/knk-workspace#574), only while enabled: staff with knk.kick / knk.ban use the
+  # player profile page; the API sends PlayerKick / PlayerBan to every connected game server. A kick removes the player
+  # if they are online here, showing the reason staff typed (or kick-default-reason when they typed none). A ban adds
+  # the player to this server's ban list (banned-players.json, permanent, with the reason and the staff member as
+  # source; unban with /pardon in game) and kicks them with ban-message if online. & colour codes; placeholders
+  # {reason}, {player} and {staff} (the staff member's username).
+  moderation:
+    kick-default-reason: "You were kicked by a member of staff."
+    ban-message: "You are banned from this server.\nReason: {reason}"
 
 # Performance metrics (KNG-232): a Prometheus /metrics endpoint with TPS, tick time, players, chunks/entities per
 # world, JVM heap/off-heap/GC, process CPU and RSS, the container's memory and CPU (cgroup), API-call and task
@@ -502,6 +523,113 @@ crossplay:
 
 # Road navigation (KNG-27, docs/specs/navigation/DESIGN.md §4). Road materials live in the API's road
 # profiles (learned by /knk road survey, edited in the web app), not here. Every key has a default.
+# NPC navigation (PandiO/knk-workspace#358, docs/specs/npc-platform/IMPLEMENTATION_PLAN.md): K&K plans routes, Citizens
+# moves the NPCs. Needs the Citizens plugin; without it /knk npc status says why NPC navigation is off.
+npc:
+  navigation:
+    enabled: false
+    # Route plans running at once, server-wide.
+    max-plans-in-flight: 4
+    # NPC spawns per tick at most (20 player-shaped NPCs spawned in one tick cost a 48.8 ms tick).
+    spawns-per-tick: 2
+    # NPCs whose way ahead and position are checked against the current gate and access rules per tick at most
+    # (the recheck, the trespass guard, wake-ups after a gate or access change). 200 walking NPCs at recheck-ticks 40
+    # need 5 per tick; with too few, checks simply come later than recheck-ticks.
+    rule-checks-per-tick: 10
+    # Per-NPC settings below are the global layer. A value comes from the most specific layer that sets it:
+    # code default -> this global layer -> worlds.<world> -> regions.<WorldGuard region or domain id> (innermost wins)
+    # -> NPC template -> assignment. /knk npc status shows each value with the layer it came from.
+    # Citizens path search for local legs and recovery: citizens | citizens_async
+    pathfinder: citizens
+    # Blocks of the route handed to the NPC at once.
+    stretch-blocks: 32
+    # Blocks between the hops of an off-road or recovery leg (each hop is one Citizens path search).
+    hop-blocks: 16
+    # Ticks between rechecks of a walking NPC's way ahead against the current gate and access rules: a denied region
+    # or a closed gate ahead plans the route again (0 = off; gate and access events still reach the NPCs, and the
+    # trespass guard still looks every 40 ticks).
+    recheck-ticks: 40
+    # Ticks in one block before Citizens reports stuck; the first recovery step starts then.
+    stationary-ticks: 40
+    # Ticks without progress along the route before K&K's watchdog steps in.
+    no-progress-ticks: 40
+    # Recovery steps of a stuck NPC before its route is planned again: 1 back-off (walk back along its last
+    # footsteps), 2 side-step (one block away from the wall), 3 local leg ahead (one Citizens search to a point ahead
+    # on its own floor). After the route was planned again twice without getting it free, the order fails.
+    max-retries: 3
+    # Ticks between two recovery steps of a stuck NPC (back-off, side-step, local leg, replan).
+    recovery-wait-ticks: 20
+    # Blocks an NPC keeps between itself and a wall on the inside of a turn of its route, as far as the road allows;
+    # straight stretches may run along a wall (0 = off).
+    corner-clearance: 1.0
+    # How close an NPC comes to a route waypoint before it heads for the next one; smaller walks turns through the
+    # corner point (Citizens' own default is 1).
+    waypoint-margin: 0.5
+    # Ticks an NPC waits before asking again while the rules allow no route or the way ahead is not loaded. An NPC
+    # waiting at a closed gate or a district edge is woken by the gate or access change itself; this is the fallback.
+    no-route-wait-ticks: 100
+    # With an end too far from a road (or no road network): the longest trip, in blocks, walked as off-road hops.
+    # Further than this the order fails; NPCs never cross terrain in a straight line.
+    walk-only-blocks: 64
+    # The trespass guard logs and counts an NPC that entered a region its current rules deny (it must never happen).
+    # true: also stop that NPC and plan its route again. For dev servers.
+    stop-on-trespass: false
+    # Whether NPCs push and block each other.
+    collidable: false
+    # Outside player-loaded areas: load (keep the chunks ahead loaded, the NPC really walks; capped) | simulate.
+    chunk-loading: load
+    # Groups (a leader plans the route once, the followers walk it in formation slots). These are per-NPC settings
+    # too: a group takes them once, for its leader, so a world, a region, a template or an assignment can give
+    # groups their own formation. /knk npc nav group <n> [formation] tries one.
+    # A group's formation: column (single file, the default) | ranks (rows behind the leader; pairs with
+    # group-ranks-width 2) | cluster (a loose crowd, 3 abreast) | escort-ring (an octagon around the leader, then
+    # wider rings). Where the road is too narrow, a formation narrows before it folds: ranks one fewer abreast down
+    # to 2, a cluster 3 then 2, the escort ring rows of 3 with the leader in the middle of the second row, then 2
+    # abreast; only where 2 abreast do not fit (a gate, stairs, a wall walk) the group folds into a column, and it
+    # takes up its widest width that fits again after.
+    group-formation: column
+    # Blocks between the rows of a formation and between NPCs in a column.
+    group-spacing: 1.5
+    # Blocks between neighbours in a row (1 = shoulder to shoulder): 3 abreast need a road 1 + 2 x this wide,
+    # rounded down to whole blocks.
+    group-lateral-spacing: 1.0
+    # NPCs per row in the ranks formation (its widest width; it narrows one by one down to 2 before it folds).
+    group-ranks-width: 2
+    # A group changes to a narrower width (still 2 abreast or more) or a wider one only when it lasts this many
+    # blocks along the path; a column at a gate or a stair is taken at once.
+    group-width-hysteresis-blocks: 3
+    # When the leader has arrived and the group gets its next order (it turns back), followers still on their way
+    # (held at a gate, behind) finish their trip to their place at the goal first and then rejoin the group
+    # (couriers). false: they follow the leader at once. /knk npc nav group <n> ... finish-trip|follow-leader.
+    group-followers-finish-trip: false
+    # A follower further than this from its lane (pushed away, fallen off) plans its own leg back to the group's path:
+    # one local leg, never the whole route. A follower without progress for no-progress-ticks takes the recovery
+    # steps first (back-off, side-step), then its own leg back to a point ahead of it on its own floor.
+    group-rejoin-blocks: 4.0
+    # The leader waits when a follower is this many blocks behind its slot, until the group has closed up to half
+    # of it (at most 30 seconds). 0 = the leader never waits.
+    group-regroup-blocks: 24.0
+    # Walking speed, as a factor, of a follower that is behind its slot (1 = followers never walk faster).
+    group-catch-up-speed: 1.3
+    worlds: {}
+    #   world_KNK-DEV:
+    #     chunk-loading: simulate
+    regions: {}
+    #   district_1000006:
+    #     recheck-ticks: 20
+    # NPC access profiles (until NPCs have their own permissions): what an NPC with that profile may enter. Region ids
+    # are WorldGuard region ids (domains are regions). NPCs never pass a closed gate. /knk npc nav spawn <n> <profile>.
+    access-profiles:
+      default:
+        # Ignore every domain's entry and exit rule.
+        bypass-domain-rules: false
+        # May open hand-openable doors on off-road legs.
+        open-doors: true
+        # Regions the NPC may enter and leave whatever the domain's rule says.
+        allow-regions: []
+        # Regions the NPC never enters (wins over allow-regions).
+        deny-regions: []
+
 navigation:
   enabled: true
   # Routing cost per road class; lower is preferred
@@ -727,6 +855,13 @@ messages:
   
   # Accounts linked
   account-linked: "&aYour accounts have been linked!"
+
+  # PandiO/knk-workspace#485: shown once after a game-first registration (the player registered on the website with the
+  # link code from /account link): right away when online (realtime push or the notification poll), else on the next
+  # join. Placeholders: {maskedEmail} (the web login, masked as st***@example.com), {name} (the Minecraft name, which
+  # logs in too), {url} (web.public-url; lines that use it are left out while it is empty). A link code entered on the
+  # Account page and a claim code show admission.account-linked instead.
+  web-account-registered: "&aYour website account is ready and linked to this Minecraft account.\n&aLog in at &e{url} &awith &e{maskedEmail} &aor your Minecraft name &e{name}&a.\n&cNot you? Tell staff right away."
   
   # Link code generated (/account link). Placeholders: {code}, {minutes}, {url} (web.public-url).
   # \n starts a new chat line; lines that use {url} are left out while web.public-url is empty.
@@ -892,6 +1027,11 @@ regions:
   # after it was orphaned. Never one a domain uses, and nothing while the API can't be asked.
   temp-retention:
     days: 14
+    # PandiO/knk-workspace#269: how often (minutes) the server removes the temp regions knk-web-api released: those of
+    # a deleted draft, of a region task cancelled, expired or failed after a server held it, or of a workflow session
+    # the world-task sweep removed. Same "used by a domain or lootbox area" checks as above, without the age; the daily
+    # cleanup stays the backstop. 0 = off.
+    release-interval-minutes: 5
   # WorldGuard's global region (QOL hotfix 2026-10-25): where no region but __global__ applies - outside every domain,
   # arena and other region - a default player can't break or place blocks (buckets included), can't place, break, use
   # or hit item frames, paintings and armor stands, and can't use crafting blocks; explosions break no blocks and no
@@ -1150,3 +1290,19 @@ cache:
       # is reloaded in the background (never waiting for the API); while the API is DOWN only for this
       # many seconds more, then the offline cache answers. Running a command always waits for a fresh set.
       effective-set-stale-seconds: 90
+
+# In-plugin test scenarios (PandiO/knk-workspace#421; knk-workspace docs/guides/developer/plugin-scenarios.md).
+# TEST SERVERS ONLY: keep enabled false on every real server (dev worlds with builds, alpha, production).
+# enabled: true registers /knk scenario list|run <name|all> (node knk.admin.scenario), which builds small test
+# scenes, plays them out and logs one "KNK-SCENARIO PASS|FAIL <name>" line each plus a summary. CI's Paper boot test
+# turns it on. false (the default) registers nothing: the server behaves exactly as without this section.
+# Each scene is a 32 x 24 x 32 box that is cleared to air before and after its scenario; scene n sits 64 blocks
+# along x from the origin. Pick an origin far away from anything built. world: blank = the main world. Read at startup.
+testing:
+  scenarios:
+    enabled: false
+    world: ""
+    origin:
+      x: 30000
+      y: 100
+      z: 30000

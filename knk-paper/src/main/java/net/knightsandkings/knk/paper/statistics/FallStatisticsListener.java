@@ -9,6 +9,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageEvent;
 
 import net.knightsandkings.knk.core.statistics.FallRule;
+import net.knightsandkings.knk.paper.npc.nav.NpcEntities;
 
 /**
  * Highest survived fall (DESIGN.md §F.9, D3): fall damage observed at MONITOR is recorded when the
@@ -25,6 +26,9 @@ public final class FallStatisticsListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onDamage(EntityDamageEvent event) {
+        if (NpcEntities.isNpc(event.getEntity())) {
+            return; // NPCs have no fall statistics (NAV-08)
+        }
         if (event.getCause() != EntityDamageEvent.DamageCause.FALL || !(event.getEntity() instanceof Player player)) {
             return;
         }

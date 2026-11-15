@@ -2,6 +2,7 @@ package net.knightsandkings.knk.paper.listeners;
 
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentExecutor;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentRepository;
+import net.knightsandkings.knk.paper.npc.nav.NpcEntities;
 import net.knightsandkings.knk.paper.regions.CombatSafezoneCheck;
 import org.bukkit.GameMode;
 import org.bukkit.entity.LivingEntity;
@@ -56,6 +57,9 @@ public class EnchantmentCombatListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onEntityDamage(EntityDamageByEntityEvent event) {
+        if (NpcEntities.isNpc(event.getDamager())) {
+            return; // an NPC's weapon runs no K&K enchantments (NAV-08)
+        }
         if (!(event.getDamager() instanceof Player attacker)) {
             return;
         }

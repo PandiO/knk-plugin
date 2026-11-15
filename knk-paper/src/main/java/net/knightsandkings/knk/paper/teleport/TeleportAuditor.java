@@ -61,13 +61,32 @@ public class TeleportAuditor {
         try {
             Snapshot snapshot = Snapshot.of(plan, from, to);
             return snapshot.send(this).exceptionally(ex -> {
-                LOGGER.log(Level.WARNING, "[KnK Teleport] Could not audit " + snapshot.describe(), ex);
+                if (isShutdown(ex)) {
+                    // The plugin is shutting down and its executors no longer take work: the teleport is in
+                    // TeleportService's INFO line, so one line without a stack trace is enough.
+                    LOGGER.info("[KnK Teleport] Audit of " + snapshot.describe() + " skipped: the plugin is shutting down");
+                } else {
+                    LOGGER.log(Level.WARNING, "[KnK Teleport] Could not audit " + snapshot.describe(), ex);
+                }
                 return null;
             });
         } catch (RuntimeException ex) {
             LOGGER.log(Level.WARNING, "[KnK Teleport] Could not audit the teleport of " + plan.subject().getName(), ex);
             return CompletableFuture.completedFuture(null);
         }
+    }
+
+    /** True when the failure is an executor refusing work because it was shut down (plugin disable). */
+    static boolean isShutdown(Throwable ex) {
+        for (Throwable t = ex; t != null; t = t.getCause()) {
+            if (t instanceof java.util.concurrent.RejectedExecutionException) {
+                return true;
+            }
+            if (t.getCause() == t) {
+                break;
+            }
+        }
+        return false;
     }
 
     private CompletableFuture<Integer> idOf(UUID player) {

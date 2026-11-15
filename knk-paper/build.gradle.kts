@@ -10,6 +10,8 @@ repositories {
     // EngineHub repo voor WorldGuard/WorldEdit
     maven("https://maven.enginehub.org/repo/")
     maven("https://jitpack.io")
+    // Citizens (NPC navigation, PandiO/knk-workspace#358)
+    maven("https://maven.citizensnpcs.co/repo")
 }
 
 dependencies {
@@ -21,8 +23,16 @@ dependencies {
     compileOnly("com.sk89q.worldguard:worldguard-bukkit:7.0.20")
     // Log4j core (provided by the server) for the private-message command-log filter (KNG-18 Phase 3)
     compileOnly("org.apache.logging.log4j:log4j-core:2.24.1")
+    // NPC navigation (PandiO/knk-workspace#358): compile-only, never shaded (Citizens is OSL-3.0; the server provides the
+    // jar). Non-transitive: Paper is already on the classpath. Only paper/npc/citizens/ may use Citizens types.
+    compileOnly("net.citizensnpcs:citizensapi:${property("citizensApiVersion")}") { isTransitive = false }
+    // Scripted players for plugin scenarios (PandiO/knk-workspace#540): the fake connection's in-memory channel. Compile-only,
+    // never shaded: the server provides Netty. Keep it at the server's version (libraries/io/netty/netty-transport/ of a
+    // Paper server); only paper/scenario/NmsFakePlayer may use it.
+    compileOnly("io.netty:netty-transport:${property("nettyVersion")}")
     
     testImplementation("io.papermc.paper:paper-api:${property("paperApiVersion")}")
+    testImplementation("net.citizensnpcs:citizensapi:${property("citizensApiVersion")}") { isTransitive = false }
     // One JUnit version for every artifact (api, engine, platform). Without the BOM, a transitive
     // junit-jupiter-api (mockito-junit-jupiter brings 5.13.4) upgrades api/commons while the engine stays at
     // the explicit version, and the engine then fails test discovery with NoSuchMethodError.
@@ -37,6 +47,14 @@ dependencies {
     // artifacts only: the bukkit ones bring an older spigot-api).
     testImplementation("com.sk89q.worldedit:worldedit-core:7.4.6")
     testImplementation("com.sk89q.worldguard:worldguard-core:7.0.20")
+    // PandiO/knk-workspace#499 (developer decision 2026-11-14: test-only): a mock Paper server for tests that need
+    // Bukkit statics (Registry, Material.isSolid, the scheduler). Its release line must match paperApiVersion
+    // (mockbukkit-v<minecraft version>). Its JUnit 6 dependency is left out: tests call MockBukkit.mock()/unmock()
+    // themselves and don't use its JUnit extension, so the JUnit 5 BOM above stays the only JUnit on the classpath.
+    testImplementation("org.mockbukkit.mockbukkit:mockbukkit-v26.3:${property("mockBukkitVersion")}") {
+        exclude(group = "org.junit.jupiter")
+        exclude(group = "org.junit.platform")
+    }
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
@@ -64,11 +82,12 @@ tasks.processResources {
     }
 }
 
+// Every knk-paper test runs in `test` (and so in CI). The integration / requires-bukkit tags that used to be excluded
+// are gone since PandiO/knk-workspace#499: tests that need Bukkit statics start a MockBukkit server themselves. Don't
+// bring back a tag to hide a failing test; fix it, or mark a known failure (docs/guides/developer/ci.md § 2 in
+// knk-workspace).
 tasks.test {
-    useJUnitPlatform {
-        // Skip integration tests by default during build
-        excludeTags("integration", "requires-bukkit")
-    }
+    useJUnitPlatform()
 }
 
 val devPluginsDir: File = try {

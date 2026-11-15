@@ -19,6 +19,7 @@ import org.bukkit.event.entity.EntityDamageEvent.DamageCause;
 
 import net.knightsandkings.knk.core.regions.DomainEffectDamage;
 import net.knightsandkings.knk.core.regions.RegionDomainResolver;
+import net.knightsandkings.knk.paper.npc.nav.NpcEntities;
 
 /**
  * No effect damage for players inside domains unless a flag allows it (PandiO/knk-workspace#162; rule:
@@ -99,6 +100,9 @@ public final class DomainEffectDamageListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onDamage(EntityDamageEvent event) {
+        if (NpcEntities.isNpc(event.getEntity())) {
+            return; // players only: an NPC is treated like a mob (NAV-08)
+        }
         if (!(event.getEntity() instanceof Player player) || !causes.contains(event.getCause()) || !enabled.getAsBoolean()) {
             return;
         }

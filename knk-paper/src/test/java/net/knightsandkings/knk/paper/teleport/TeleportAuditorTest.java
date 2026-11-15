@@ -124,6 +124,39 @@ class TeleportAuditorTest {
     }
 
     @Test
+    void anAuditRefusedBecauseThePluginIsShuttingDownIsLoggedWithoutAWarning() {
+        java.util.List<java.util.logging.LogRecord> records = new java.util.ArrayList<>();
+        java.util.logging.Handler handler = new java.util.logging.Handler() {
+            @Override public void publish(java.util.logging.LogRecord record) { records.add(record); }
+            @Override public void flush() { }
+            @Override public void close() { }
+        };
+        java.util.logging.Logger logger = java.util.logging.Logger.getLogger(TeleportAuditor.class.getName());
+        logger.addHandler(handler);
+        try {
+            when(acting.recordTeleportAudit(any())).thenReturn(CompletableFuture.failedFuture(
+                new java.util.concurrent.CompletionException(new java.util.concurrent.RejectedExecutionException("Terminated"))));
+
+            await(auditor.record(TeleportPlan.staffToPlayer(alice, alice, bob, false), from, to));
+
+            assertTrue(records.stream().noneMatch(r -> r.getLevel().intValue() >= java.util.logging.Level.WARNING.intValue()),
+                "no WARNING for a shutdown refusal");
+            assertTrue(records.stream().anyMatch(r -> r.getMessage().contains("skipped: the plugin is shutting down")));
+            assertTrue(records.stream().allMatch(r -> r.getThrown() == null), "no stack trace");
+        } finally {
+            logger.removeHandler(handler);
+        }
+    }
+
+    @Test
+    void isShutdownFindsARejectedExecutionAnywhereInTheCauses() {
+        assertTrue(TeleportAuditor.isShutdown(new java.util.concurrent.CompletionException(
+            new RuntimeException(new java.util.concurrent.RejectedExecutionException()))));
+        assertFalse(TeleportAuditor.isShutdown(new RuntimeException("API down")));
+        assertFalse(TeleportAuditor.isShutdown(null));
+    }
+
+    @Test
     void secondFailureIsOnlyLogged() {
         when(acting.recordTeleportAudit(any())).thenReturn(CompletableFuture.failedFuture(new RuntimeException("API down")));
 

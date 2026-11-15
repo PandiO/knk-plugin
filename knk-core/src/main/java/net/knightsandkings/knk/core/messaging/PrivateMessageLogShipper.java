@@ -126,6 +126,24 @@ public final class PrivateMessageLogShipper {
         }
     }
 
+    /**
+     * Account erasure (PandiO/knk-workspace#184): drops every queued entry the erased player sent or received, so they
+     * never reach the API's log (which deleted that player's messages) after the erasure. A batch already on its way is
+     * not recalled.
+     *
+     * @return how many entries were dropped
+     */
+    public int purge(UUID playerId) {
+        if (playerId == null) {
+            return 0;
+        }
+        synchronized (queue) {
+            int before = queue.size();
+            queue.removeIf(e -> playerId.equals(e.senderUuid()) || playerId.equals(e.recipientUuid()));
+            return before - queue.size();
+        }
+    }
+
     /** Entries waiting to be sent (shown by /knk health). */
     public int queueDepth() {
         synchronized (queue) {

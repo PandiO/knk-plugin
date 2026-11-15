@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.core.ports.api;
 
 import net.knightsandkings.knk.core.domain.item.KnkKitClaimResult;
+import net.knightsandkings.knk.core.domain.item.KnkKitDelivery;
 import net.knightsandkings.knk.core.domain.item.KnkKitPurchaseResult;
 
 import java.util.List;
@@ -30,4 +31,17 @@ public interface KitsCommandApi {
 
     /** Grants every GrantOnFirstJoin kit the user is gated to receive (DESIGN.md §4.4). */
     CompletableFuture<List<KnkKitClaimResult>> grantFirstJoinKitsAsync(int userId);
+
+    /**
+     * Staff grants made outside the game server (the web app's player profile) whose items this player still has to
+     * receive in game, oldest first (PandiO/knk-workspace#261).
+     */
+    CompletableFuture<List<KnkKitDelivery>> pendingDeliveriesAsync(int userId);
+
+    /**
+     * Takes a pending delivery before its items are placed. True for the one call that took it (place the items now);
+     * false when it was taken already or isn't pending (place nothing), so a grant is never handed over twice. Fails
+     * on any other error (place nothing, it stays pending).
+     */
+    CompletableFuture<Boolean> markDeliveredAsync(int userId, int claimId);
 }

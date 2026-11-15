@@ -135,7 +135,7 @@ public final class SiegeGateController implements SiegeMatchObserver {
         api.restoreStale().whenComplete((result, error) -> {
             if (error != null) {
                 logger.log(Level.WARNING, "[Siege] Gate recovery (restore-stale-gates) failed; gates a crash left "
-                        + "locked down stay so until the next start (or the next realtime reconnect)", error);
+                        + "locked down stay so until it is retried when the API is back (or the next start)", error);
                 done.complete(false);
                 return;
             }
@@ -153,7 +153,8 @@ public final class SiegeGateController implements SiegeMatchObserver {
 
     /**
      * PandiO/knk-workspace#31 / #182: the stale-gate restore again when it failed at startup, as a pending startup step
-     * on the realtime reconnect. Waits (stays pending) while a lockdown of this run holds gates.
+     * run when the API is back (connectivity UP, a fallback retry or the realtime reconnect). Waits (stays pending) while
+     * a lockdown of this run holds gates.
      */
     public synchronized CompletableFuture<Boolean> retryRecovery() {
         if (recovered) return CompletableFuture.completedFuture(true);

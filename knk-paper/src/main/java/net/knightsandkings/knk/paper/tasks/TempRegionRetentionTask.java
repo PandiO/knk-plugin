@@ -5,7 +5,10 @@ import com.sk89q.worldguard.WorldGuard;
 import com.sk89q.worldguard.protection.managers.RegionManager;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import net.knightsandkings.knk.core.exception.ApiException;
+import net.knightsandkings.knk.core.lootbox.KnkLootboxArea;
+import net.knightsandkings.knk.core.lootbox.KnkLootboxRuntimeConfig;
 import net.knightsandkings.knk.core.ports.api.DomainsQueryApi;
+import net.knightsandkings.knk.core.ports.api.LootboxesQueryApi;
 import net.knightsandkings.knk.core.regions.RegionRenamePlan;
 import net.knightsandkings.knk.core.regions.SubRegionMirror;
 import net.knightsandkings.knk.core.regions.TempRegionCleanupPolicy;
@@ -36,6 +39,13 @@ import java.util.logging.Logger;
  * KNG-258: also deletes orphaned domain sub-regions ({@code domain_<d>_sub_<s>} no domain lists, marked
  * {@code knk-orphaned-since} by the access sync) once they have been orphaned longer than the same retention period,
  * with the same fresh API lookup ({@link TempRegionCleanupPolicy#decideOrphanedSubRegion}).
+ *
+ * PandiO/knk-workspace#34: the fresh lookup also asks the lootbox spawn areas ({@link #regionUsageVia}), so an area
+ * whose drawn region could not be renamed to {@code lootbox_area_<id>} keeps it.
+ *
+ * PandiO/knk-workspace#269: with {@link #setReleasePass} it also runs {@link TempRegionReleasePass} every few minutes,
+ * which removes the temp regions the API released (abandoned drafts, tasks closed without a result) without waiting for
+ * the retention period. This daily pass stays the backstop.
  */
 public class TempRegionRetentionTask {
     private static final Logger LOGGER = Logger.getLogger(TempRegionRetentionTask.class.getName());
@@ -52,6 +62,9 @@ public class TempRegionRetentionTask {
     private final Function<String, Usage> domainUsage;
     private final Predicate<String> listedSubRegion;
     private BukkitTask task;
+    private TempRegionReleasePass releasePass;
+    private long releaseIntervalMinutes;
+    private BukkitTask releaseTask;
 
     /**
      * @param knownDomainRegion regions the last managed-region repair saw a domain use (true for everything until it has
@@ -107,6 +120,57 @@ public class TempRegionRetentionTask {
     }
 
     /**
+     * #34: whether a lootbox spawn area stands on the region, from a fresh {@code GET api/LootboxSpawns/runtime-config}
+     * (it lists every area, disabled ones too): in use / unused, or unknown when the API can't be asked. Not
+     * world-qualified, like the domain lookup: an area on that id in any world keeps it. Blocks; call off the main thread.
+     */
+    public static Function<String, Usage> lootboxAreaUsageVia(LootboxesQueryApi lootboxesQueryApi) {
+        return regionId -> {
+            if (lootboxesQueryApi == null) {
+                return Usage.UNKNOWN;
+            }
+            try {
+                KnkLootboxRuntimeConfig config = lootboxesQueryApi.getRuntimeConfig().get(LOOKUP_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                if (config == null || config.areas() == null) {
+                    return Usage.UNKNOWN;
+                }
+                for (KnkLootboxArea area : config.areas()) {
+                    if (area.wgRegionId() != null && area.wgRegionId().trim().equalsIgnoreCase(regionId)) {
+                        return Usage.IN_USE;
+                    }
+                }
+                return Usage.UNUSED;
+            } catch (ExecutionException e) {
+                LOGGER.warning("Could not check whether a lootbox area uses temp region " + regionId + "; keeping it: "
+                        + (e.getCause() != null ? e.getCause().getMessage() : e.getMessage()));
+                return Usage.UNKNOWN;
+            } catch (TimeoutException e) {
+                LOGGER.warning("Timed out checking whether a lootbox area uses temp region " + regionId + "; keeping it");
+                return Usage.UNKNOWN;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return Usage.UNKNOWN;
+            }
+        };
+    }
+
+    /**
+     * #34: the fresh lookup the cleanup makes before deleting: a domain ({@link #domainUsageVia}) or a lootbox spawn area
+     * ({@link #lootboxAreaUsageVia}) using the region keeps it; deleted only when both answer unused.
+     */
+    public static Function<String, Usage> regionUsageVia(DomainsQueryApi domainsQueryApi, LootboxesQueryApi lootboxesQueryApi) {
+        return TempRegionCleanupPolicy.inUseByAny(domainUsageVia(domainsQueryApi), lootboxAreaUsageVia(lootboxesQueryApi));
+    }
+
+    /**
+     * #269: also run {@code pass} every {@code intervalMinutes} (0 or less: never), from {@link #start()}. Call before it.
+     */
+    public void setReleasePass(TempRegionReleasePass pass, long intervalMinutes) {
+        this.releasePass = pass;
+        this.releaseIntervalMinutes = intervalMinutes;
+    }
+
+    /**
      * Start the retention task, running once per day.
      */
     public void start() {
@@ -118,6 +182,27 @@ public class TempRegionRetentionTask {
             24 * 60 * 60 * 20 // 24 hours
         );
         LOGGER.info("TempRegionRetentionTask started. Will clean up unused temp regions older than " + (retentionMillis / (24 * 60 * 60 * 1000)) + " days");
+        if (releasePass != null && releaseIntervalMinutes > 0) {
+            long period = releaseIntervalMinutes * 60 * 20;
+            releaseTask = plugin.getServer().getScheduler().runTaskTimerAsynchronously(plugin, this::runReleasePass,
+                    2 * 60 * 20, period);
+            LOGGER.info("Temp regions of abandoned drafts are removed every " + releaseIntervalMinutes
+                    + " minutes once the API releases them (regions.temp-retention.release-interval-minutes)");
+        }
+    }
+
+    private void runReleasePass() {
+        try {
+            TempRegionReleasePass.Result result = releasePass.run();
+            if (result.any()) {
+                LOGGER.info("Released temp regions: removed " + result.removed().size() + ", already gone "
+                        + result.missing().size() + ", kept " + result.kept().size()
+                        + (result.failed().isEmpty() ? "" : ", failed " + result.failed().size())
+                        + (result.waiting().isEmpty() ? "" : ", waiting " + result.waiting().size()));
+            }
+        } catch (Exception e) {
+            LOGGER.warning("Error removing released temp regions: " + e.getMessage());
+        }
     }
 
     /**
@@ -127,6 +212,10 @@ public class TempRegionRetentionTask {
         if (task != null) {
             task.cancel();
             task = null;
+        }
+        if (releaseTask != null) {
+            releaseTask.cancel();
+            releaseTask = null;
         }
         LOGGER.info("TempRegionRetentionTask stopped");
     }
@@ -161,10 +250,10 @@ public class TempRegionRetentionTask {
             int keptUnknown = sweep.usageUnknown().size();
             if (deletedCount > 0 || keptInUse > 0 || keptUnknown > 0) {
                 LOGGER.info("Temp region retention cleanup completed. Deleted " + deletedCount + ", kept " + keptInUse
-                        + " used by a domain" + (keptUnknown > 0 ? ", kept " + keptUnknown + " because the API could not be asked" : ""));
+                        + " used by a domain or lootbox area" + (keptUnknown > 0 ? ", kept " + keptUnknown + " because the API could not be asked" : ""));
             }
             if (keptInUse > 0) {
-                LOGGER.info("Temp-named regions used by a domain can be renamed to domain_<id> with POST /api/Regions/finalize-temp-names");
+                LOGGER.info("Temp-named regions used by a domain or lootbox area can be renamed (domain_<id>, lootbox_area_<id>) with POST /api/Regions/finalize-temp-names");
             }
         } catch (Exception e) {
             LOGGER.warning("Error running temp region retention cleanup: " + e.getMessage());

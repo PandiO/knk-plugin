@@ -1,0 +1,171 @@
+name: Paper boot test
+
+# Starts a real Paper server with the shaded KnK jar, WorldGuard, WorldEdit and Citizens and checks that KnK enables
+# without errors (PandiO/knk-workspace#420, DESIGN § 6.3.1 in knk-workspace docs/specs/ai-agent-workflow/). No
+# knk-web-api runs: the plugin starts in its "API down" state, and errors caused by the unreachable API are excused.
+# Citizens is there for the NPC scenarios (PandiO/knk-workspace#521, #543); npc.navigation.enabled is turned on and
+# the log check requires KnK's NPC navigation running on Citizens (#543).
+# After the boot check the same server runs every in-plugin scenario (PandiO/knk-workspace#421, DESIGN § 6.3.2):
+# `knk scenario run all` with testing.scenarios.enabled on; the job fails on any KNK-SCENARIO FAIL line, a scenario
+# without a result, a missing summary line or fewer than MIN_SCENARIOS scenarios.
+# Headless bot tests (PandiO/knk-workspace#540): Mineflayer bots in tools/bot-tests join the same server through the
+# real protocol after the scenarios. OFF until the pinned Mineflayer lists Minecraft 26.3: they run only when the
+# repository variable BOT_TESTS_ENABLED is 'true' (Settings > Secrets and variables > Actions > Variables). While off,
+# only their harness unit tests and a support report run (seconds). How to switch them on: ci.md § 7.3.
+# Script and log check: tools/paper-boot/. Docs: docs/guides/developer/ci.md in knk-workspace.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: paper-boot-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The Minecraft version the bot tests speak (tools/bot-tests; the server's version).
+  BOT_MC_VERSION: '26.3'
+  # Every download is pinned to an exact build and checked against its SHA-256 (no "latest").
+  # Paper: keep in step with paperApiVersion in gradle.properties (26.3.build.205-stable -> 26.3 build 205).
+  # Hash from https://fill.papermc.io/v3/projects/paper/versions/26.3/builds/205 (downloads.server:default).
+  PAPER_URL: https://fill-data.papermc.io/v1/objects/a0a58f532f08054ea92eb916d3edb6ed3c86429d77175317304f6e995cce9968/paper-26.3-205.jar
+  PAPER_SHA256: a0a58f532f08054ea92eb916d3edb6ed3c86429d77175317304f6e995cce9968
+  # WorldEdit and WorldGuard: the versions knk-paper compiles against (knk-paper/build.gradle.kts), both listing
+  # Minecraft 26.3 on Modrinth. Hashes checked against Modrinth's SHA-512 when pinned (2026-11-14).
+  WORLDEDIT_URL: https://cdn.modrinth.com/data/1u6JkXh5/versions/YFnqiUlL/worldedit-bukkit-7.4.6.jar
+  WORLDEDIT_SHA256: e0ce67d870ad1fef8a40dd9d7926360caf3bb44722438545d6b20b55f82a0c91
+  WORLDGUARD_URL: https://cdn.modrinth.com/data/DKY9btbd/versions/9YdeGXiK/worldguard-bukkit-7.0.20.jar
+  WORLDGUARD_SHA256: 8768a49bcbecbb7a413ad134ee72d9871cdf967b7d938e6b96bb0ca72bb1467b
+  # Citizens for the NPC scenarios (PandiO/knk-workspace#521, plan 4b.2 item 18, and #543; developer decision
+  # 2026-11-15: pinned download): the server build that matches citizensApiVersion in gradle.properties
+  # (2.0.44-20261020.020503-8 = Citizens 2.0.44, build 4269, for Minecraft 26.3). knk-paper still compiles against
+  # CitizensAPI only and never shades it. Citizens publishes no release files and its Maven repository has no
+  # runnable plugin jar, so the jar comes from its Jenkins, pinned to the build and checked against its SHA-256 (the
+  # build's Jenkins MD5 fingerprint matched when pinned, 2026-11-15). Bump it together with citizensApiVersion; if
+  # Jenkins prunes the build, the download fails: pin a newer build here and its API snapshot in gradle.properties,
+  # both at once (docs/guides/developer/ci.md § 7.2 in knk-workspace).
+  CITIZENS_URL: https://ci.citizensnpcs.co/job/Citizens2/4269/artifact/dist/target/Citizens-2.0.44-b4269.jar
+  CITIZENS_SHA256: e6b0a0e3346bd2cb982bcd3e1b628143629042e1a50479ae3c24858e2cacde22
+
+jobs:
+  paper-boot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # As build.yml: 25 compiles (the toolchain) and runs the server; 21, listed last, becomes JAVA_HOME and
+          # runs Gradle 8.14, which can't run on Java 25.
+          java-version: |
+            25
+            21
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Test the log check
+        run: python3 -m unittest discover -s tools/paper-boot -p 'test_*.py' -v
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Test the bot harness (no Minecraft client needed)
+        run: node --test tools/bot-tests/test/*.test.mjs
+
+      - name: Report whether Mineflayer supports the server's Minecraft version
+        # Informational, never fails the job: says whether the pinned and the newest Mineflayer/minecraft-protocol list
+        # BOT_MC_VERSION, so the developer knows when to bump the pins and set BOT_TESTS_ENABLED (ci.md § 7.3).
+        continue-on-error: true
+        run: |
+          node tools/bot-tests/check-support.mjs --latest | tee bot-support.txt
+          {
+            echo "### Bot tests: ${{ vars.BOT_TESTS_ENABLED == 'true' && 'on' || 'off (BOT_TESTS_ENABLED is not true)' }}"
+            echo
+            sed 's/^/1. /' bot-support.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install the bot client (bot tests on)
+        if: vars.BOT_TESTS_ENABLED == 'true'
+        working-directory: tools/bot-tests
+        run: |
+          npm ci --no-audit --no-fund
+          # Fails here, with the reason, when the pinned client doesn't speak the server's version yet.
+          node check-support.mjs --require
+
+      - name: Build the shaded plugin jar
+        id: build
+        run: |
+          commit=$(git rev-parse --short=8 HEAD)
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          ./gradlew :knk-paper:shadowJar --no-daemon -PgitCommit="$commit" \
+            -Porg.gradle.java.installations.fromEnv=JAVA_HOME_25_X64
+          jars=(knk-paper/build/libs/knk-paper-*.jar)
+          [ "${#jars[@]}" -eq 1 ] || { echo "::error::Expected one jar in knk-paper/build/libs: ${jars[*]}"; exit 1; }
+          echo "jar=${jars[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the server downloads and Paper's Minecraft files
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/paper-downloads
+            ${{ runner.temp }}/paper-server/cache
+            ${{ runner.temp }}/paper-server/libraries
+            ${{ runner.temp }}/paper-server/versions
+            ${{ runner.temp }}/paper-server/plugins/Citizens/lib
+          key: paper-boot-${{ env.PAPER_SHA256 }}-${{ env.WORLDEDIT_SHA256 }}-${{ env.WORLDGUARD_SHA256 }}-${{ env.CITIZENS_SHA256 }}
+
+      - name: Download Paper, WorldEdit, WorldGuard and Citizens (pinned, SHA-256 checked)
+        env:
+          DOWNLOADS: ${{ runner.temp }}/paper-downloads
+          SERVER: ${{ runner.temp }}/paper-server
+        run: |
+          mkdir -p "$DOWNLOADS" "$SERVER/plugins"
+          fetch() { # url sha256 target
+            if [ ! -f "$3" ] || ! echo "$2  $3" | sha256sum -c --quiet; then
+              curl -fsSL --retry 3 --retry-all-errors -o "$3" "$1"
+            fi
+            echo "$2  $3" | sha256sum -c
+          }
+          fetch "$PAPER_URL" "$PAPER_SHA256" "$DOWNLOADS/paper.jar"
+          fetch "$WORLDEDIT_URL" "$WORLDEDIT_SHA256" "$DOWNLOADS/worldedit-bukkit.jar"
+          fetch "$WORLDGUARD_URL" "$WORLDGUARD_SHA256" "$DOWNLOADS/worldguard-bukkit.jar"
+          fetch "$CITIZENS_URL" "$CITIZENS_SHA256" "$DOWNLOADS/citizens.jar"
+          cp "$DOWNLOADS/paper.jar" "$SERVER/paper.jar"
+          cp "$DOWNLOADS/worldedit-bukkit.jar" "$SERVER/plugins/worldedit-bukkit.jar"
+          cp "$DOWNLOADS/worldguard-bukkit.jar" "$SERVER/plugins/worldguard-bukkit.jar"
+          cp "$DOWNLOADS/citizens.jar" "$SERVER/plugins/citizens.jar"
+
+      - name: Boot the server, check the log and run the plugin scenarios
+        # --scenarios: turn on testing.scenarios.enabled, run `knk scenario run all`, check the KNK-SCENARIO lines
+        # (tools/paper-boot/check_scenarios.py; the result table also goes to the job summary). Raise MIN_SCENARIOS
+        # when a scenario is added, so a scenario that silently stops registering fails the job.
+        # --npc-navigation: turn on npc.navigation.enabled and require it running on Citizens (#543: its NPC scenarios
+        # drive NPCs through that running adapter; the #521 ones start a Citizens registry of their own).
+        # --bot-tests (only with BOT_TESTS_ENABLED): the Mineflayer bot tests after the scenarios (#540).
+        env:
+          MIN_SCENARIOS: 34
+        run: >-
+          tools/paper-boot/boot-test.sh
+          --server-dir "$RUNNER_TEMP/paper-server"
+          --plugin-jar "${{ steps.build.outputs.jar }}"
+          --java "$JAVA_HOME_25_X64/bin/java"
+          --expect-commit "${{ steps.build.outputs.commit }}"
+          --scenarios
+          --min-scenarios "$MIN_SCENARIOS"
+          --npc-navigation
+          --expect-timeout 600
+          ${{ vars.BOT_TESTS_ENABLED == 'true' && '--bot-tests tools/bot-tests --bot-version "$BOT_MC_VERSION"' || '' }}
+
+      - name: Upload the server log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper-boot-log
+          path: |
+            ${{ runner.temp }}/paper-server/logs/latest.log
+            ${{ runner.temp }}/paper-server/server-stdout.log
+            ${{ runner.temp }}/paper-server/bot-tests.log
+          if-no-files-found: ignore
+          retention-days: 14

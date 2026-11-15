@@ -171,6 +171,11 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
         return playerId != null && activeTasksByPlayer.containsKey(playerId);
     }
 
+    /** PandiO/knk-workspace#269: whether a player on this server is running task {@code taskId} (its temp region stays). */
+    public boolean isHandlingTask(int taskId) {
+        return activeTasksByPlayer.values().stream().anyMatch(context -> context.taskId == taskId);
+    }
+
     @Override
     public void setLifecycle(WorldTaskLifecycle lifecycle) {
         this.lifecycle = lifecycle != null ? lifecycle : WorldTaskLifecycle.NONE;
@@ -702,6 +707,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      */
     public boolean renameRegion(String oldRegionId, String newRegionId, String domainType, String parentRegionId,
                                 String world, String replaceRegionId, String subRegionOf) {
+        // The renamed region keeps the drawn outline and Y range, a lootbox spawn area's too (PandiO/knk-workspace#487).
         boolean renamed = renameRegionInternal(oldRegionId, newRegionId, world, replaceRegionId);
         if (renamed && subRegionOf != null && !subRegionOf.isBlank()) {
             finalizeSubRegion(newRegionId, subRegionOf.trim(), world);

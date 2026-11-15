@@ -135,6 +135,46 @@ public final class NavigationService implements SiegeMatchObserver {
         default Set<String> regionsAt(World world, double[] floorPoint) {
             return Set.of();
         }
+
+        /**
+         * PandiO/knk-workspace#360: the policy of a mover that is not (necessarily) a player - an NPC with its own
+         * access subject - judged from the regions the subject stands in. Main thread. Unsupported by default.
+         */
+        default AccessPolicy policyFor(net.knightsandkings.knk.core.npc.nav.AccessSubject subject,
+                                       RoadNetworkSnapshot snapshot, Set<String> destinationRegions) {
+            throw new UnsupportedOperationException("no access policy for subjects");
+        }
+
+        /**
+         * PandiO/knk-workspace#361: the router's entry rule per region for a subject, judged from the regions the
+         * subject stands in, with the domain cache only (main thread, never blocks). Every region by default.
+         */
+        default Predicate<String> mayEnter(net.knightsandkings.knk.core.npc.nav.AccessSubject subject) {
+            return regionId -> true;
+        }
+
+        /** PandiO/knk-workspace#361: whether this gate door stops the subject now. Main thread. Never by default. */
+        default boolean gateBlocks(net.knightsandkings.knk.core.npc.nav.AccessSubject subject, int doorId) {
+            return false;
+        }
+
+        /**
+         * PandiO/knk-workspace#507: the box of a gate door's blocks, closed and open (what its animation sweeps), so
+         * NPCs keep out of a moving door's way. Main thread. Not known by default.
+         */
+        default java.util.Optional<net.knightsandkings.knk.core.gates.target.GateBox> doorBox(int doorId) {
+            return java.util.Optional.empty();
+        }
+
+        /**
+         * PandiO/knk-workspace#361: whether the subject's policy blocks this one edge now - the question behind
+         * "does the blocking element still block?". Main thread, without reading the rest of the network. Not
+         * blocked by default.
+         */
+        default boolean edgeBlocked(net.knightsandkings.knk.core.npc.nav.AccessSubject subject,
+                                    RoadNetworkSnapshot snapshot, RoadEdge edge) {
+            return false;
+        }
     }
 
     /**
@@ -472,6 +512,183 @@ public final class NavigationService implements SiegeMatchObserver {
 
     public EtaEstimator eta() {
         return eta;
+    }
+
+    // ==================== NPC navigation (PandiO/knk-workspace#360) ====================
+
+    /** The walk-leg capture, search and executor, or null when walk paths are off ({@code navigation.walk.enabled}). */
+    public Walk walk() {
+        return deps.walk();
+    }
+
+    /**
+     * The road route between two floor points for a mover with its own access subject (an NPC), as the
+     * {@link net.knightsandkings.knk.core.npc.nav.RoadPlanner} port: the same snapping, component handling and router
+     * as a player's route, with the subject's policy - its own regions decide the exit rules, not a player's
+     * position. Needs no chunks. Main thread; routed on the routing executor; completes on the main thread.
+     */
+    public CompletableFuture<net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan> planRoadFor(
+            net.knightsandkings.knk.core.npc.nav.AccessSubject subject,
+            net.knightsandkings.knk.core.npc.nav.NavPoint fromFloor,
+            net.knightsandkings.knk.core.npc.nav.NavPoint toFloor) {
+        CompletableFuture<net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan> out = new CompletableFuture<>();
+        String world = fromFloor.world();
+        RoadNetworkSnapshot snapshot = deps.snapshots().apply(world);
+        if (snapshot == null) {
+            out.complete(net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.none(
+                net.knightsandkings.knk.core.npc.nav.RoadPlanner.Status.NO_NETWORK, "no road network for world " + world));
+            return out;
+        }
+        Optional<SnapPoint> from = snapStart(snapshot, fromFloor.x(), fromFloor.y(), fromFloor.z(), null);
+        Optional<SnapPoint> to = snapStart(snapshot, toFloor.x(), toFloor.y(), toFloor.z(), null);
+        if (from.isEmpty() || to.isEmpty()) {
+            out.complete(net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.none(
+                net.knightsandkings.knk.core.npc.nav.RoadPlanner.Status.OFF_ROAD,
+                (from.isEmpty() ? "start" : "end") + " too far from a road (limit " + Math.round(startLimit()) + " blocks)"));
+            return out;
+        }
+        // As a player's route (connectedStart / connectedGoals): an end off the road may snap to a stray stretch in
+        // another network component; then snap it to the nearest road in the other end's component instead.
+        SnapPoint start = from.get();
+        SnapPoint end = to.get();
+        if (componentOf(snapshot, start) != componentOf(snapshot, end)) {
+            int startComponent = componentOf(snapshot, start);
+            Optional<SnapPoint> endInStart = snapStart(snapshot, toFloor.x(), toFloor.y(), toFloor.z(),
+                edgeIndex -> snapshot.componentOf(snapshot.edgeAt(edgeIndex)) == startComponent);
+            if (endInStart.isPresent()) {
+                end = endInStart.get();
+            } else {
+                int endComponent = componentOf(snapshot, end);
+                start = snapStart(snapshot, fromFloor.x(), fromFloor.y(), fromFloor.z(),
+                    edgeIndex -> snapshot.componentOf(snapshot.edgeAt(edgeIndex)) == endComponent).orElse(start);
+            }
+        }
+        RouteRequest request;
+        try {
+            request = RouteRequest.of(start, end, deps.policies().policyFor(subject, snapshot, null), routerParameters);
+        } catch (RuntimeException e) {
+            deps.logger().log(Level.WARNING, "[NPC] road policy failed for " + subject.name(), e);
+            out.complete(net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.none(
+                net.knightsandkings.knk.core.npc.nav.RoadPlanner.Status.ERROR, "policy error: " + e));
+            return out;
+        }
+        deps.routing().execute(() -> {
+            net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan plan;
+            try {
+                plan = roadPlanOf(world, new AStarRouter(snapshot).routeOrExplain(request),
+                    edge -> asker -> deps.policies().edgeBlocked(asker, snapshot, edge));
+            } catch (RuntimeException e) {
+                deps.logger().log(Level.WARNING, "[NPC] road routing failed for " + subject.name(), e);
+                plan = net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.none(
+                    net.knightsandkings.knk.core.npc.nav.RoadPlanner.Status.ERROR, "router error: " + e);
+            }
+            var delivered = plan;
+            deps.mainThread().execute(() -> out.complete(delivered));
+        });
+        return out;
+    }
+
+    /** A router result as the NPC port's plan, without a way to ask whether a blocking element still blocks. */
+    static net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan roadPlanOf(String world, RouteResult result) {
+        return roadPlanOf(world, result, edge -> null);
+    }
+
+    /**
+     * A router result as the NPC port's plan: the polyline as floor points and the gate doors it passes; for BLOCKED
+     * the partial route, what blocks (PandiO/knk-workspace#361) and the check whether it still does.
+     *
+     * @param stillBlocked for the blocked edge: whether a subject's policy blocks it now (main thread), or null
+     */
+    static net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan roadPlanOf(String world, RouteResult result,
+            Function<RoadEdge, Predicate<net.knightsandkings.knk.core.npc.nav.AccessSubject>> stillBlocked) {
+        List<net.knightsandkings.knk.core.npc.nav.NavPoint> line = new ArrayList<>();
+        List<net.knightsandkings.knk.core.npc.nav.RoadPlanner.GateCrossing> gates = new ArrayList<>();
+        result.routeToGuide().ifPresent(route -> {
+            route.polyline().forEach(p -> line.add(new net.knightsandkings.knk.core.npc.nav.NavPoint(world, p[0], p[1], p[2])));
+            // a step's distances are road lengths; the polyline may be a little longer or shorter
+            double scale = route.length() <= 0 ? 1 : route.polylineLength() / route.length();
+            for (Route.Step step : route.steps()) {
+                if (step.edge().gateDoorIds().isEmpty()) {
+                    continue;
+                }
+                double[] end = route.pointAt((step.startDistance() + step.length()) * scale);
+                for (int doorId : step.edge().gateDoorIds()) {
+                    gates.add(new net.knightsandkings.knk.core.npc.nav.RoadPlanner.GateCrossing(doorId,
+                        new net.knightsandkings.knk.core.npc.nav.NavPoint(world, end[0], end[1], end[2])));
+                }
+            }
+        });
+        return switch (result.status()) {
+            case FOUND -> net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.found(line, gates);
+            case BLOCKED -> net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.blocked(line,
+                result.explanation().verdict().message(), blockingElementOf(result.explanation()), gates,
+                stillBlocked.apply(result.explanation().blockedEdge()));
+            case DIFFERENT_COMPONENTS -> net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.none(
+                net.knightsandkings.knk.core.npc.nav.RoadPlanner.Status.DIFFERENT_COMPONENTS,
+                "start and goal are on road networks that do not connect");
+            case NO_ROUTE -> net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.none(
+                net.knightsandkings.knk.core.npc.nav.RoadPlanner.Status.NO_ROUTE, "no route on the road network");
+        };
+    }
+
+    /** The router's explanation as the element NPC behavior hears about: the cause, with the blocked edge's gates and regions. */
+    static net.knightsandkings.knk.core.npc.nav.BlockingElement blockingElementOf(BlockedExplainer.Explanation why) {
+        EdgeVerdict.Cause cause = why.cause();
+        RoadEdge edge = why.blockedEdge();
+        net.knightsandkings.knk.core.npc.nav.BlockingElement.Kind kind = switch (cause.type()) {
+            case GATE -> net.knightsandkings.knk.core.npc.nav.BlockingElement.Kind.GATE;
+            case DOMAIN -> net.knightsandkings.knk.core.npc.nav.BlockingElement.Kind.DOMAIN;
+            case FLAG -> net.knightsandkings.knk.core.npc.nav.BlockingElement.Kind.ROAD;
+        };
+        return new net.knightsandkings.knk.core.npc.nav.BlockingElement(kind, cause.id(), cause.name(),
+            new java.util.HashSet<>(edge.gateDoorIds()), new java.util.HashSet<>(edge.regionIds()));
+    }
+
+    /**
+     * PandiO/knk-workspace#361: the access rules as they are now, for NPCs that are walking - the same policy code
+     * as the router's, answered from caches on the main thread.
+     */
+    public net.knightsandkings.knk.core.npc.nav.AccessRules accessRules() {
+        return new net.knightsandkings.knk.core.npc.nav.AccessRules() {
+            @Override
+            public Predicate<String> mayEnter(net.knightsandkings.knk.core.npc.nav.AccessSubject subject) {
+                return deps.policies().mayEnter(subject);
+            }
+
+            @Override
+            public boolean gateBlocks(net.knightsandkings.knk.core.npc.nav.AccessSubject subject, int doorId) {
+                return deps.policies().gateBlocks(subject, doorId);
+            }
+
+            @Override
+            public java.util.Optional<net.knightsandkings.knk.core.gates.target.GateBox> doorBox(int doorId) {
+                return deps.policies().doorBox(doorId);
+            }
+        };
+    }
+
+    private final List<net.knightsandkings.knk.core.npc.nav.RuleChangeListener> ruleListeners =
+        new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    /**
+     * PandiO/knk-workspace#361, the listener port for NPC navigation: {@code listener} hears what this service
+     * re-checks its own routes on - {@link #onGateChanged} and {@link #onAvailabilityChanged} - on the thread the
+     * change arrives on. Returns the unsubscribe. Nothing is called while nobody listens.
+     */
+    public Runnable addRuleChangeListener(net.knightsandkings.knk.core.npc.nav.RuleChangeListener listener) {
+        Objects.requireNonNull(listener, "listener");
+        ruleListeners.add(listener);
+        return () -> ruleListeners.remove(listener);
+    }
+
+    private void notifyRuleListeners(Consumer<net.knightsandkings.knk.core.npc.nav.RuleChangeListener> what) {
+        for (net.knightsandkings.knk.core.npc.nav.RuleChangeListener listener : ruleListeners) {
+            try {
+                what.accept(listener);
+            } catch (RuntimeException e) {
+                deps.logger().log(Level.WARNING, "[NPC] rule change listener failed", e);
+            }
+        }
     }
 
     // ==================== commands ====================
@@ -1732,6 +1949,7 @@ public final class NavigationService implements SiegeMatchObserver {
 
     /** A gate changed state (R4 listener, hopped to the main thread by the caller). */
     public void onGateChanged(int doorId) {
+        notifyRuleListeners(listener -> listener.gateChanged(doorId));
         long now = deps.tick().getAsLong();
         for (Active a : new ArrayList<>(active.values())) {
             if (a.direct()) {
@@ -1757,6 +1975,7 @@ public final class NavigationService implements SiegeMatchObserver {
 
     /** Something may have opened anywhere (domain cache refresh, siege lockdown change): every session re-checks. */
     public void onAvailabilityChanged() {
+        notifyRuleListeners(net.knightsandkings.knk.core.npc.nav.RuleChangeListener::availabilityChanged);
         long now = deps.tick().getAsLong();
         for (Active a : new ArrayList<>(active.values())) {
             if (a.direct()) {

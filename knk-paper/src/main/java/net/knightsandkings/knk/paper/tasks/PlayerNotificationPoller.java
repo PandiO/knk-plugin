@@ -25,8 +25,9 @@ import net.knightsandkings.knk.paper.commands.support.PromotionEffects;
  * a promotion/demotion from an XP change made through the web admin's player profile page, and a
  * rank change made outside the plugin (web app, or a temporary rank expiring), which re-reads the
  * player so chat and the tab list show the new rank within one poll, and a domain discovery reset,
- * which re-syncs the player's discovery tracking so the reset place counts again right away, and a new
- * Minecraft-to-web account link (invitations, KNG-214), which tells the player the masked address.
+ * which re-syncs the player's discovery tracking so the reset place counts again right away, a new
+ * Minecraft-to-web account link (invitations, KNG-214), which tells the player the masked address, and a kit a
+ * staff member granted from the web app (PandiO/knk-workspace#261), which hands the kit's items over.
  * Without this, that path only ever showed a banner in the browser: the API returned the
  * TitleChangeResult to the web app and the server never heard about it, so the online player got
  * the rewards but none of PromotionEffects' sound/particles/message. (/knk user ... xp worked
@@ -82,6 +83,8 @@ public class PlayerNotificationPoller {
     private volatile Consumer<Player> discoveryResetHandler;
     // A new Minecraft-to-web link (invitations, KNG-214): which web account now holds this player.
     private volatile BiConsumer<Player, PlayerNotification> accountLinkedHandler;
+    // A kit a staff member granted from the web app (PandiO/knk-workspace#261): hand its items over.
+    private volatile Consumer<Player> kitDeliveryHandler;
 
     public PlayerNotificationPoller(PlayerNotificationsApi notificationsApi, Plugin plugin) {
         this(notificationsApi, plugin,
@@ -124,6 +127,15 @@ public class PlayerNotificationPoller {
      */
     public void setAccountLinkedHandler(BiConsumer<Player, PlayerNotification> handler) {
         this.accountLinkedHandler = handler;
+    }
+
+    /**
+     * What to do for a {@link PlayerNotification#TYPE_KIT_DELIVERY_PENDING} whose player is online: fetch and hand over
+     * their pending kit deliveries (PandiO/knk-workspace#261). An offline player's stays queued; their join reads the
+     * pending deliveries anyway, so a nudge that expires or is lost delays nothing past it.
+     */
+    public void setKitDeliveryHandler(Consumer<Player> handler) {
+        this.kitDeliveryHandler = handler;
     }
 
     /**
@@ -282,6 +294,8 @@ public class PlayerNotificationPoller {
                     discoveryResetHandler.accept(player);
                 } else if (PlayerNotification.TYPE_ACCOUNT_LINKED.equals(notification.type()) && accountLinkedHandler != null) {
                     accountLinkedHandler.accept(player, notification);
+                } else if (PlayerNotification.TYPE_KIT_DELIVERY_PENDING.equals(notification.type()) && kitDeliveryHandler != null) {
+                    kitDeliveryHandler.accept(player);
                 }
             } catch (RuntimeException e) {
                 // Acknowledged anyway: retrying a notification that throws would only repeat

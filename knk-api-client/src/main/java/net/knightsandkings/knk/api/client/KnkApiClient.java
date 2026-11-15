@@ -146,6 +146,8 @@ public class KnkApiClient {
     private final KitsQueryApi kitsQueryApi;
     private final net.knightsandkings.knk.core.ports.api.CategoriesQueryApi categoriesQueryApi;
     private final KitsCommandApi kitsCommandApi;
+    /** PandiO/knk-workspace#269: temp regions the API released for removal. */
+    private final net.knightsandkings.knk.core.ports.api.TempRegionReleasesApi tempRegionReleasesApi;
     private final net.knightsandkings.knk.core.ports.api.GameSettingsQueryApi gameSettingsQueryApi;
     private final net.knightsandkings.knk.core.ports.api.GameSettingsCommandApi gameSettingsCommandApi;
     private final net.knightsandkings.knk.core.ports.api.DomainAccessRulesApi domainAccessRulesApi;
@@ -159,6 +161,7 @@ public class KnkApiClient {
     private final net.knightsandkings.knk.core.ports.api.NavigationCompassSettingsApi navigationCompassSettingsApi;
     private final RoadNetworkCommandApi roadNetworkCommandApi;
     private final net.knightsandkings.knk.core.ports.api.LocationRetentionApi locationRetentionApi;
+    private final net.knightsandkings.knk.core.ports.api.PrivacyErasuresApi privacyErasuresApi;
 
     private KnkApiClient(
         String baseUrl,
@@ -223,6 +226,8 @@ public class KnkApiClient {
         this.titleBracketsQueryApi = new TitleBracketsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.kitsQueryApi = new KitsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.kitsCommandApi = new KitsCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.tempRegionReleasesApi = new net.knightsandkings.knk.api.impl.TempRegionReleasesApiImpl(baseUrl, httpClient,
+                objectMapper, authProvider, executor, debugLogging);
         this.currencyApi = new net.knightsandkings.knk.api.impl.CurrencyApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.categoriesQueryApi = new net.knightsandkings.knk.api.impl.CategoriesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.gameSettingsQueryApi = new net.knightsandkings.knk.api.impl.GameSettingsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -237,6 +242,7 @@ public class KnkApiClient {
         this.navigationCompassSettingsApi = new net.knightsandkings.knk.api.impl.NavigationCompassSettingsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.roadNetworkCommandApi = new RoadNetworkCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.locationRetentionApi = new net.knightsandkings.knk.api.impl.LocationRetentionApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.privacyErasuresApi = new net.knightsandkings.knk.api.impl.PrivacyErasuresApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
     }
     
     public HealthApi getHealthApi() {
@@ -266,6 +272,11 @@ public class KnkApiClient {
     /** Player currency routes: balances, /baltop, /pay and history (currency ledger, KNG-21 Phase 3). */
     public CurrencyApi getCurrencyApi() {
         return currencyApi;
+    }
+
+    /** PandiO/knk-workspace#269. */
+    public net.knightsandkings.knk.core.ports.api.TempRegionReleasesApi getTempRegionReleasesApi() {
+        return tempRegionReleasesApi;
     }
 
     public KitsCommandApi getKitsCommandApi() {
@@ -417,6 +428,11 @@ public class KnkApiClient {
     /** Location retention (KNG-80): the orphan list and teleport targets. */
     public net.knightsandkings.knk.core.ports.api.LocationRetentionApi getLocationRetentionApi() {
         return locationRetentionApi;
+    }
+
+    /** Realtime S5 (PandiO/knk-workspace#184): the GDPR erasure feed the game server catches up from. */
+    public net.knightsandkings.knk.core.ports.api.PrivacyErasuresApi getPrivacyErasuresApi() {
+        return privacyErasuresApi;
     }
 
     /** KNG-18 Phase 2: players' ignore lists. */

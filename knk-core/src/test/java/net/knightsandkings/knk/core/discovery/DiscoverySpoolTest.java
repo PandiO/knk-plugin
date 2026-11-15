@@ -174,4 +174,25 @@ class DiscoverySpoolTest {
         assertEquals(7, pending.userId());
         assertEquals(2, pending.entries().size(), "the old world-less entry is kept next to the world one");
     }
+
+    // ---- account erasure (PandiO/knk-workspace#184) ----
+
+    @Test
+    void deleteAccount_ByUuidOrUserId_KeepsOthers() {
+        UUID other = UUID.fromString("99999999-2222-3333-4444-555555555555");
+        UUID sameUserOtherFile = UUID.fromString("88888888-2222-3333-4444-555555555555");
+        DiscoverySpool spool = spool();
+        spool.add(PLAYER, 7, List.of(new PendingDiscovery("town_rivia", DiscoverySource.JOIN_INSIDE, T0),
+                new PendingDiscovery("town_vizima", DiscoverySource.REGION_ENTER, T0)));
+        spool.add(sameUserOtherFile, 7, List.of(new PendingDiscovery("town_a", DiscoverySource.REGION_ENTER, T0)));
+        spool.add(other, 8, List.of(new PendingDiscovery("town_b", DiscoverySource.REGION_ENTER, T0)));
+
+        assertEquals(3, spool.deleteAccount(PLAYER, 7));
+
+        assertEquals(List.of(other), spool.list().stream().map(DiscoverySpool.Pending::playerId).toList());
+        assertEquals(0, spool.deleteAccount(PLAYER, 7));
+        // Without the UUID (the API's retention ended) the user id still finds it.
+        assertEquals(1, spool.deleteAccount(null, 8));
+        assertTrue(spool.list().isEmpty());
+    }
 }

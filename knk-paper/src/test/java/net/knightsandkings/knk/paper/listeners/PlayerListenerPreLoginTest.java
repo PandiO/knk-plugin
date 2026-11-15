@@ -1,11 +1,14 @@
 package net.knightsandkings.knk.paper.listeners;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
@@ -46,5 +49,74 @@ class PlayerListenerPreLoginTest {
         listener(users).onValidateLogin(event(Result.ALLOWED));
 
         verify(users).getByUuidAsync(org.mockito.ArgumentMatchers.eq(PLAYER), any());
+    }
+
+    /** #486: the erasure catch-up runs before the account is looked up (or created) for a connecting player. */
+    @Test
+    void theErasureCatchUp_RunsBeforeTheAccountLookup() {
+        UsersDataAccess users = mock(UsersDataAccess.class);
+        List<String> order = new ArrayList<>();
+        when(users.getByUuidAsync(org.mockito.ArgumentMatchers.eq(PLAYER), any())).thenAnswer(inv -> {
+            order.add("lookup");
+            return null;
+        });
+        PlayerListener listener = listener(users);
+        listener.setBeforeAccountLookup(uuid -> order.add("catch-up " + uuid));
+
+        listener.onValidateLogin(event(Result.ALLOWED));
+
+        assertEquals(List.of("catch-up " + PLAYER, "lookup"), order);
+    }
+
+    @Test
+    void aDisallowedLogin_DoesNotWaitForTheCatchUp() {
+        List<UUID> waited = new ArrayList<>();
+        PlayerListener listener = listener(mock(UsersDataAccess.class));
+        listener.setBeforeAccountLookup(waited::add);
+
+        listener.onValidateLogin(event(Result.KICK_WHITELIST));
+
+        assertEquals(List.of(), waited);
+    }
+
+    /**
+     * #486: an account the API creates while the player connects is noted for the join's first-join decision, which
+     * doesn't read the user cache; an account the lookup found is not.
+     */
+    @Test
+    void anAccountCreatedAtPreLogin_IsNotedForTheFirstJoinDecision() {
+        net.knightsandkings.knk.paper.onboarding.NewPlayerWindow window = new net.knightsandkings.knk.paper.onboarding.NewPlayerWindow(
+            java.time.Clock.systemUTC(), java.time.Duration.ofMinutes(10));
+        UsersDataAccess users = mock(UsersDataAccess.class);
+        when(users.getByUuidAsync(org.mockito.ArgumentMatchers.eq(PLAYER), any())).thenReturn(
+            java.util.concurrent.CompletableFuture.completedFuture(net.knightsandkings.knk.core.dataaccess.FetchResult.notFound()));
+        when(users.getByUsernameAsync("Steve")).thenReturn(
+            java.util.concurrent.CompletableFuture.completedFuture(net.knightsandkings.knk.core.dataaccess.FetchResult.notFound()));
+        when(users.getOrCreateAsync(org.mockito.ArgumentMatchers.eq(PLAYER), org.mockito.ArgumentMatchers.eq(true), any())).thenReturn(
+            java.util.concurrent.CompletableFuture.completedFuture(net.knightsandkings.knk.core.dataaccess.FetchResult.missFetched(
+                new net.knightsandkings.knk.core.domain.users.UserSummary(11, "Steve", PLAYER, null, 0, 0, 0, false, true,
+                    net.knightsandkings.knk.core.domain.users.GatePassThroughMethod.DEFAULT))));
+        PlayerListener listener = new PlayerListener(users, null, null, null, null, null, null, null, null, window);
+
+        listener.onValidateLogin(event(Result.ALLOWED));
+
+        org.junit.jupiter.api.Assertions.assertTrue(window.takeAccountCreated(PLAYER));
+        org.junit.jupiter.api.Assertions.assertFalse(window.takeAccountCreated(PLAYER), "taken once");
+    }
+
+    @Test
+    void anAccountFoundAtPreLogin_IsNotNoted() {
+        net.knightsandkings.knk.paper.onboarding.NewPlayerWindow window = new net.knightsandkings.knk.paper.onboarding.NewPlayerWindow(
+            java.time.Clock.systemUTC(), java.time.Duration.ofMinutes(10));
+        UsersDataAccess users = mock(UsersDataAccess.class);
+        when(users.getByUuidAsync(org.mockito.ArgumentMatchers.eq(PLAYER), any())).thenReturn(
+            java.util.concurrent.CompletableFuture.completedFuture(net.knightsandkings.knk.core.dataaccess.FetchResult.hit(
+                new net.knightsandkings.knk.core.domain.users.UserSummary(11, "Steve", PLAYER, null, 0, 0, 0, false, false,
+                    net.knightsandkings.knk.core.domain.users.GatePassThroughMethod.DEFAULT))));
+        PlayerListener listener = new PlayerListener(users, null, null, null, null, null, null, null, null, window);
+
+        listener.onValidateLogin(event(Result.ALLOWED));
+
+        org.junit.jupiter.api.Assertions.assertFalse(window.takeAccountCreated(PLAYER));
     }
 }

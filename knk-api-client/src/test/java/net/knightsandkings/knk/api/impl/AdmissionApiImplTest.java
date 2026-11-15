@@ -140,6 +140,20 @@ class AdmissionApiImplTest {
 
         assertEquals(net.knightsandkings.knk.core.domain.users.PlayerNotification.TYPE_ACCOUNT_LINKED, notification.type());
         assertEquals("st***@example.com", notification.accountLinked().maskedEmail());
+        assertEquals(null, notification.accountLinked().via());
+    }
+
+    @Test
+    void anAccountLinkedNotificationSaysHowTheLinkCameAbout() throws Exception {
+        // PandiO/knk-workspace#485: "register" after a game-first registration on the website.
+        var dto = new ObjectMapper().readValue("{\"id\":6,\"userId\":7,\"uuid\":\"" + UUID_1 + "\",\"username\":\"Steve\","
+            + "\"type\":\"AccountLinked\",\"accountLinked\":{\"maskedEmail\":\"st***@example.com\",\"via\":\"register\"}}",
+            net.knightsandkings.knk.api.dto.PlayerNotificationDto.class);
+
+        var notice = net.knightsandkings.knk.api.mapper.UsersMapper.mapPlayerNotification(dto).accountLinked();
+
+        assertEquals("register", notice.via());
+        assertTrue(notice.viaRegister());
     }
 
     @Test

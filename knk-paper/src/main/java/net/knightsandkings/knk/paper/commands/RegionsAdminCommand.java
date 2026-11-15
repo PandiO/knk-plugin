@@ -180,12 +180,12 @@ public class RegionsAdminCommand {
         sender.sendMessage(ChatColor.GREEN + "Temp regions: " + sweep.temporaryTotal() + " found"
                 + (purge ? ", " + sweep.deleted().size() + " deleted" : ", " + sweep.deletable().size()
                         + " unused and older than " + hours + "h")
-                + ", " + sweep.inUse().size() + " used by a domain, " + sweep.tooRecent().size() + " too recent, "
+                + ", " + sweep.inUse().size() + " used by a domain or lootbox area, " + sweep.tooRecent().size() + " too recent, "
                 + sweep.noTimestamp().size() + " without a creation time (kept), " + sweep.usageUnknown().size()
                 + " not checked (API)" + (sweep.deleteFailed().isEmpty() ? "" : ", " + sweep.deleteFailed().size()
                         + " failed to delete"));
         list(sender, purge ? "Deleted" : "Unused (purge deletes)", purge ? sweep.deleted() : sweep.deletable());
-        list(sender, "Used by a domain (POST /api/Regions/finalize-temp-names renames them)", sweep.inUse());
+        list(sender, "Used by a domain or lootbox area (POST /api/Regions/finalize-temp-names renames them)", sweep.inUse());
         list(sender, "Delete failed", sweep.deleteFailed());
         // KNG-258
         list(sender, purge ? "Orphaned sub-regions deleted" : "Orphaned sub-regions past the retention (purge deletes)",
