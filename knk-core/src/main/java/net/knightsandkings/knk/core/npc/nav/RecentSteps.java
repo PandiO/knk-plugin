@@ -18,24 +18,47 @@ public final class RecentSteps {
     public static final int KEEP = 8;
     /** A drop of this many blocks or more while off the ground is a fall. */
     public static final double FALL_BLOCKS = 3;
+    /**
+     * ... when the engine, which can tell, saw the body fall at least this far in one go at one of the looks (a
+     * 3-block fall lasts about 15 ticks, so a look every 5 ticks sees at least this much; a stair step never does).
+     */
+    public static final double ENGINE_FALL_BLOCKS = 1.5;
+    /** A step this far (horizontally) from the last one was no step: the body was pushed or teleported. */
+    public static final double JUMP_BLOCKS = 2.5;
 
     private final Deque<NavPoint> steps = new ArrayDeque<>();
     private double groundY = Double.NaN;
     private boolean airborne;
+    /** The most fall distance the engine reported while off the ground this time (NaN: it cannot tell). */
+    private double maxFall = Double.NaN;
 
     /**
      * Records where the NPC's feet are now; returns the drop in blocks when it just landed from a fall of
      * {@link #FALL_BLOCKS} or more, else 0.
      */
     public double record(NavPoint feet, boolean onGround) {
+        return record(feet, onGround, Double.NaN);
+    }
+
+    /**
+     * As {@link #record(NavPoint, boolean)}, with the engine's fall distance ({@link NpcMover#fallDistance()}): a drop
+     * counts as a fall only when the engine also saw the body fall {@link #ENGINE_FALL_BLOCKS} or more in one go, so
+     * walking down a flight between two looks (several stair steps, each a short hop) is no fall.
+     */
+    public double record(NavPoint feet, boolean onGround, double fallDistance) {
         double fell = 0;
         if (!onGround) {
             airborne = true;
+            if (!Double.isNaN(fallDistance)) {
+                maxFall = Double.isNaN(maxFall) ? fallDistance : Math.max(maxFall, fallDistance);
+            }
         } else {
-            if (airborne && !Double.isNaN(groundY) && groundY - feet.y() >= FALL_BLOCKS) {
+            if (airborne && !Double.isNaN(groundY) && groundY - feet.y() >= FALL_BLOCKS
+                && (Double.isNaN(maxFall) || maxFall >= ENGINE_FALL_BLOCKS)) {
                 fell = groundY - feet.y();
             }
             airborne = false;
+            maxFall = Double.NaN;
             groundY = feet.y();
         }
         NavPoint last = steps.peekLast();
@@ -44,7 +67,8 @@ public final class RecentSteps {
             return fell;
         }
         if (last != null && (!last.world().equals(feet.world())
-            || Math.abs(last.blockY() - feet.blockY()) > HopPlanner.CONTINUITY_RANGE || fell > 0)) {
+            || Math.abs(last.blockY() - feet.blockY()) > HopPlanner.CONTINUITY_RANGE || fell > 0
+            || last.horizontalDistance(feet) > JUMP_BLOCKS)) {
             steps.clear(); // no continuity with what came before: those steps lead nowhere now
         }
         if (onGround) {

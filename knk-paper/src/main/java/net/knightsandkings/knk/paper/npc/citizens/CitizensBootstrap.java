@@ -71,6 +71,19 @@ public final class CitizensBootstrap {
         }
     }
 
+    /**
+     * Puts a Citizens NPC's body somewhere else at once (scenarios: a player pushing an NPC into a corner); false for
+     * a mover that is not a Citizens one.
+     */
+    public static boolean teleport(net.knightsandkings.knk.core.npc.nav.NpcMover mover,
+                                   net.knightsandkings.knk.core.npc.nav.NavPoint feet) {
+        if (mover instanceof CitizensNpcMover citizens) {
+            citizens.teleport(feet);
+            return true;
+        }
+        return false;
+    }
+
     /** Removes the runtime's NPCs and registry; safe with any factory or null. */
     public static void stop(NpcMoverFactory factory) {
         if (factory instanceof CitizensNpcRuntime runtime) {

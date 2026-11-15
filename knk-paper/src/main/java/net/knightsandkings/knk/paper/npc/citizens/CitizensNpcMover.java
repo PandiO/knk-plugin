@@ -84,6 +84,21 @@ final class CitizensNpcMover implements NpcMover {
     }
 
     @Override
+    public double fallDistance() {
+        Entity entity = npc.getEntity();
+        return entity == null ? Double.NaN : entity.getFallDistance();
+    }
+
+    /** Puts the body somewhere else at once, through Citizens (a scenario pushing an NPC into a corner). */
+    void teleport(NavPoint feet) {
+        World world = Bukkit.getWorld(feet.world());
+        if (npc.isSpawned() && world != null) {
+            npc.teleport(new Location(world, feet.x(), feet.y(), feet.z()),
+                org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.PLUGIN);
+        }
+    }
+
+    @Override
     public void follow(List<NavPoint> waypoints) {
         if (!npc.isSpawned() || waypoints.isEmpty()) {
             return;

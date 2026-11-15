@@ -1232,7 +1232,7 @@ public final class NpcNavigationService {
         if (at == null) {
             return;
         }
-        double fell = nav.steps.record(at, nav.mover.onGround());
+        double fell = nav.steps.record(at, nav.mover.onGround(), nav.mover.fallDistance());
         if (fell > 0) {
             ports.metrics().count(Event.FELL);
             ports.log().accept(String.format(Locale.ROOT, "%s fell %.1f blocks to %s (%s)", nav.mover.name(), fell,
@@ -1331,7 +1331,8 @@ public final class NpcNavigationService {
             case BACK_OFF -> {
                 List<NavPoint> back = nav.steps.wayBack(at, 2);
                 move.set(back);
-                yield !back.isEmpty();
+                // only a way back it can walk straight (a pushed body's footsteps may lie behind a wall)
+                yield !back.isEmpty() && NavGeometry.straightWalkable(ports.world(), at, back.get(0));
             }
             case SIDE_STEP -> {
                 NavPoint side = RecoveryMoves.sideStep(ports.world(), at, wall, null, feet -> mayStand(nav, at, feet));

@@ -52,4 +52,26 @@ class RecentStepsTest {
 
         assertEquals(0, fell, 1e-9);
     }
+
+    @Test
+    void withTheEnginesFallDistanceStairsBetweenTwoLooksAreNoFallARealDropIs() {
+        steps.record(feet(0.5, 70), true, 0);
+        steps.record(feet(1.5, 69), false, 0.4); // three stair steps between two looks, each a short hop
+        steps.record(feet(2.5, 68), false, 0.6);
+        assertEquals(0, steps.record(feet(3.5, 67), true, 0), 1e-9);
+
+        steps.record(feet(4.5, 67), false, 0.3); // off a ledge
+        steps.record(feet(4.5, 65), false, 1.9);
+        assertEquals(4, steps.record(feet(4.5, 63), true, 0), 1e-9);
+    }
+
+    @Test
+    void aPushedBodysOldFootstepsAreNoWayBack() {
+        for (int i = 0; i < 6; i++) {
+            steps.record(feet(10.5 + i, 65), true);
+        }
+        steps.record(new NavPoint(WORLD, 13.5, 65, 3.5), true); // pushed three blocks aside into a pocket
+
+        assertTrue(steps.wayBack(new NavPoint(WORLD, 13.5, 65, 3.5), 2).isEmpty());
+    }
 }

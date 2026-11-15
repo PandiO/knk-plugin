@@ -24,6 +24,15 @@ public interface NpcMover {
     boolean onGround();
 
     /**
+     * How far the body has fallen since it last stood on the ground, in blocks, as the engine counts it (it resets on
+     * landing and on every stair step), so a fall can be told from walking down stairs (implementation plan 4b.2
+     * item 12). NaN when the engine cannot tell.
+     */
+    default double fallDistance() {
+        return Double.NaN;
+    }
+
+    /**
      * Walk the given points in order without the engine's own path search (NAV-15 trail mode). The engine's block
      * rules are not consulted, so K&K's recheck keeps access rules binding (NAV-02).
      */

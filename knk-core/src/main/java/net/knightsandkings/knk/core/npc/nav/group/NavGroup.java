@@ -621,7 +621,7 @@ public final class NavGroup {
             return;
         }
         f.mover.position().ifPresent(feet -> {
-            double fell = f.steps.record(feet, f.mover.onGround());
+            double fell = f.steps.record(feet, f.mover.onGround(), f.mover.fallDistance());
             if (fell > 0) {
                 ports.metrics().count(Event.FELL);
                 ports.log().accept(String.format(Locale.ROOT, "%s (group %d) fell %.1f blocks to %s", f.mover.name(), id,
@@ -829,7 +829,7 @@ public final class NavGroup {
             case BACK_OFF -> {
                 move.clear();
                 move.addAll(f.steps.wayBack(at, 2));
-                yield !move.isEmpty();
+                yield !move.isEmpty() && NavGeometry.straightWalkable(ports.world(), at, move.get(0));
             }
             case SIDE_STEP -> {
                 move.clear();
@@ -956,7 +956,7 @@ public final class NavGroup {
                 cut = true;
                 break;
             }
-            add(waypoints, lanePoint(k, 0, slot.side()));
+            add(waypoints, continuous(waypoints, at, lanePoint(k, 0, slot.side()), k));
             endArc = path.arc(k);
         }
         if (!cut && k > end) {
@@ -977,7 +977,7 @@ public final class NavGroup {
                 if (!mayWalk(f, here, k) || intoDoor(doors, inDoor, HopPlanner.feet(path.get(k).floor))) {
                     break;
                 }
-                add(waypoints, lanePoint(k, 0, slot.side()));
+                add(waypoints, continuous(waypoints, at, lanePoint(k, 0, slot.side()), k));
                 endArc = Math.max(endArc, path.arc(k));
             }
         }
@@ -992,6 +992,19 @@ public final class NavGroup {
         }
         f.mover.follow(waypoints);
         f.sentEndArc = endArc;
+    }
+
+    /**
+     * A lane waypoint more than a block above or below the waypoint before it (or the follower's feet) is the path's
+     * centre instead: a lane never steps onto a wall top beside a stair and drops off it (implementation plan 4b.2
+     * item 12, falls; found by the {@code npc-corners-walk} scenario).
+     */
+    private NavPoint continuous(List<NavPoint> waypoints, NavPoint at, NavPoint lane, int index) {
+        NavPoint before = waypoints.isEmpty() ? at : waypoints.get(waypoints.size() - 1);
+        if (Math.abs(lane.y() - before.y()) <= 1) {
+            return lane;
+        }
+        return HopPlanner.feet(path.get(index).floor);
     }
 
     private static void add(List<NavPoint> waypoints, NavPoint p) {
