@@ -42,6 +42,12 @@ public final class NpcNavigationMetrics implements MetricsCollector {
         NOT_FREED,
         /** The engine's path search for a recovery step found no path: that step failed (not a new spell). */
         RECOVERY_NO_PATH,
+        /** A local leg was found by K&K's own search on the walk grid and walked as a waypoint list (link M6). */
+        LOCAL_LEG_KNK,
+        /** A local leg was walked with the engine's own path search (key off, or K&K's search found nothing). */
+        LOCAL_LEG_ENGINE,
+        /** A local leg found no path at all: K&K's search found nothing and the engine's search ended without one. */
+        LOCAL_LEG_NONE,
         /** A navigating NPC's feet dropped 3 or more blocks between two looks while it was off the ground. */
         FELL,
         /** Recovery steps used up (DESIGN §6): the route is planned again. */
@@ -109,6 +115,14 @@ public final class NpcNavigationMetrics implements MetricsCollector {
         public String label() {
             return name().toLowerCase(Locale.ROOT);
         }
+    }
+
+    /**
+     * The stats line of the local legs (link M6): how many K&K's own search found ({@code k&k}), how many the engine's
+     * search walked ({@code engine}), how many found no path either way ({@code none}).
+     */
+    public static String localLegsLine(long knk, long engine, long none) {
+        return String.format(Locale.ROOT, "local legs: k&k %d, engine %d, none %d", knk, engine, none);
     }
 
     /** Main-thread time per tick: 10 µs .. 50 ms. */

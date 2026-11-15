@@ -299,6 +299,50 @@ class NpcNavigationConfigTest {
     }
 
     @Test
+    void readsTheLocalLegsClearanceKeyInEveryConfigLayer() throws Exception {
+        YamlConfiguration shipped = new YamlConfiguration();
+        try (InputStreamReader reader = new InputStreamReader(
+            NpcNavigationConfigTest.class.getResourceAsStream("/config.yml"), StandardCharsets.UTF_8)) {
+            shipped.load(reader);
+        }
+        NavigationSettings defaults = NpcNavigationConfig.from(shipped.getConfigurationSection(NpcNavigationConfig.PATH))
+            .settings();
+        Scope anywhere = Scope.of("w");
+        assertEquals(false, defaults.value(NavigationSettings.LOCAL_LEGS_CLEARANCE, anywhere), "off by default");
+        assertEquals(Layer.GLOBAL, defaults.resolve(NavigationSettings.LOCAL_LEGS_CLEARANCE, anywhere).layer(),
+            "the shipped config.yml has the key");
+
+        NpcNavigationConfig config = parse("""
+            npc:
+              navigation:
+                local-legs-clearance: true
+                worlds:
+                  w2:
+                    local-legs-clearance: false
+                regions:
+                  stairhouse:
+                    local-legs-clearance: false
+            """);
+        assertTrue(config.rejected().isEmpty(), config.rejected().toString());
+        NavigationSettings settings = config.settings();
+        assertEquals(true, settings.value(NavigationSettings.LOCAL_LEGS_CLEARANCE, anywhere), "the global layer");
+        assertEquals(false, settings.value(NavigationSettings.LOCAL_LEGS_CLEARANCE, Scope.of("w2")), "a world turns it off");
+        net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings resolved =
+            net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings.of(settings,
+                new Scope("w", List.of("town", "stairhouse"), null, null));
+        assertEquals(false, resolved.localLegsClearance(), "a region turns it off");
+        assertEquals(true, net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings.of(settings, anywhere)
+            .localLegsClearance());
+
+        NpcNavigationConfig bad = parse("""
+            npc:
+              navigation:
+                local-legs-clearance: sometimes
+            """);
+        assertEquals(1, bad.rejected().size(), bad.rejected().toString());
+    }
+
+    @Test
     void readsTheGroupKeysInEveryConfigLayer() throws Exception {
         NpcNavigationConfig config = parse("""
             npc:

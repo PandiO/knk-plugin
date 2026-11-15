@@ -107,6 +107,15 @@ public final class NavigationSettings {
     public static final Key<Double> WALL_CLEARANCE = new Key<>("wall-clearance", 0.8,
         decimal(0.35, 2), "blocks from the body's centre to a wall, post or drop that corridor steering keeps where "
             + "the road allows (at least 0.35)");
+    /**
+     * Clearance-aware local legs (implementation plan 4c.3 decision 8, add-on D, link M6; BEHAVIOR_MODEL NAV-24): short
+     * trips, a follower's own leg back and the recovery ladder's local leg are searched on K&K's walk grid with the
+     * corridor's clearance (the body's width as the hard minimum, {@code wall-clearance} as a cost), smoothed, and
+     * walked as a waypoint list; the engine's own search is the fallback. Off by default until the developer has
+     * tested it.
+     */
+    public static final Key<Boolean> LOCAL_LEGS_CLEARANCE = new Key<>("local-legs-clearance", false, bool(),
+        "search local legs on K&K's walk grid with the corridor's clearance, the engine's search as the fallback");
     /** Ticks an NPC waits before asking again when the rules allow no route or the way ahead is not loaded (NAV-03). */
     public static final Key<Integer> NO_ROUTE_WAIT_TICKS = new Key<>("no-route-wait-ticks", 100,
         integer(20, 6000), "ticks between asks while no route is allowed or the way ahead is not loaded");
@@ -166,7 +175,7 @@ public final class NavigationSettings {
     /** Every per-NPC setting, in display order. */
     public static final List<Key<?>> KEYS = List.of(PATHFINDER, STRETCH_BLOCKS, HOP_BLOCKS, RECHECK_TICKS,
         STATIONARY_TICKS, NO_PROGRESS_TICKS, MAX_RETRIES, RECOVERY_WAIT_TICKS, CORNER_CLEARANCE, WAYPOINT_MARGIN,
-        CORRIDOR_STEERING, CORRIDOR_HALF_WIDTH, WALL_CLEARANCE, NO_ROUTE_WAIT_TICKS, WALK_ONLY_BLOCKS, STOP_ON_TRESPASS,
+        CORRIDOR_STEERING, CORRIDOR_HALF_WIDTH, WALL_CLEARANCE, LOCAL_LEGS_CLEARANCE, NO_ROUTE_WAIT_TICKS, WALK_ONLY_BLOCKS, STOP_ON_TRESPASS,
         COLLIDABLE, CHUNK_LOADING, GROUP_FORMATION, GROUP_SPACING, GROUP_LATERAL_SPACING, GROUP_RANKS_WIDTH,
         GROUP_WIDTH_HYSTERESIS_BLOCKS, GROUP_FOLLOWERS_FINISH_TRIP, GROUP_REJOIN_BLOCKS, GROUP_REGROUP_BLOCKS,
         GROUP_CATCH_UP_SPEED);

@@ -18,6 +18,7 @@ import java.util.function.Predicate;
 
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event;
 import net.knightsandkings.knk.core.npc.nav.corridor.CorridorShaper;
+import net.knightsandkings.knk.core.npc.nav.corridor.LocalLegSearch;
 
 /**
  * Walks NPCs along K&K routes (implementation plan Phase 2; BEHAVIOR_MODEL NAV-01, 03, 11, 13, 14, 15, 17): a state
@@ -107,7 +108,18 @@ public final class NpcNavigationService {
     public record Settings(double stretchBlocks, double hopBlocks, int noProgressTicks, int maxRetries,
                            int noRouteWaitTicks, double walkOnlyBlocks, int recheckTicks, boolean stopOnTrespass,
                            double cornerClearance, double waypointMargin, int recoveryWaitTicks,
-                           boolean corridorSteering, double corridorHalfWidth, double wallClearance) {
+                           boolean corridorSteering, double corridorHalfWidth, double wallClearance,
+                           boolean localLegsClearance) {
+
+        /** With clearance-aware local legs off (plan 4c.3 decision 8; link M6). */
+        public Settings(double stretchBlocks, double hopBlocks, int noProgressTicks, int maxRetries,
+                        int noRouteWaitTicks, double walkOnlyBlocks, int recheckTicks, boolean stopOnTrespass,
+                        double cornerClearance, double waypointMargin, int recoveryWaitTicks,
+                        boolean corridorSteering, double corridorHalfWidth, double wallClearance) {
+            this(stretchBlocks, hopBlocks, noProgressTicks, maxRetries, noRouteWaitTicks, walkOnlyBlocks, recheckTicks,
+                stopOnTrespass, cornerClearance, waypointMargin, recoveryWaitTicks, corridorSteering, corridorHalfWidth,
+                wallClearance, NavigationSettings.LOCAL_LEGS_CLEARANCE.defaultValue());
+        }
 
         /** With corridor steering off (plan 4c.3 decision 1; its keys at their code defaults). */
         public Settings(double stretchBlocks, double hopBlocks, int noProgressTicks, int maxRetries,
@@ -148,7 +160,8 @@ public final class NpcNavigationService {
                 settings.value(NavigationSettings.RECOVERY_WAIT_TICKS, scope),
                 settings.value(NavigationSettings.CORRIDOR_STEERING, scope),
                 settings.value(NavigationSettings.CORRIDOR_HALF_WIDTH, scope),
-                settings.value(NavigationSettings.WALL_CLEARANCE, scope));
+                settings.value(NavigationSettings.WALL_CLEARANCE, scope),
+                settings.value(NavigationSettings.LOCAL_LEGS_CLEARANCE, scope));
         }
 
         /** The waypoint margin for a stretch: {@link CorridorShaper#CHOKE_MARGIN} with an aligned chokepoint. */
@@ -186,6 +199,12 @@ public final class NpcNavigationService {
         boolean onTrail;
         boolean recovering;
         long lastProgressTick;
+        /** The waypoints of the running local leg K&K's own search found (link M6); null for any other order. */
+        List<NavPoint> knkLeg;
+        /** The rest of {@link #knkLeg} at the last progress, for its watchdog. */
+        double knkLegRest = Double.NaN;
+        /** A local leg handed to the engine's search whose outcome (a path, or none) is not counted yet. */
+        boolean engineLegOpen;
         // ---- stuck spells and the recovery ladder (4b.2 items 6 and 7) ----
         final RecoveryLadder ladder = new RecoveryLadder();
         final RecentSteps steps = new RecentSteps();
@@ -233,6 +252,7 @@ public final class NpcNavigationService {
         @Override
         public void arrived(NpcMover m) {
             timed(() -> {
+                settleEngineLeg(this, false);
                 if (state == NpcNavState.MOVING) {
                     if (moveOnly) {
                         // a back-off or side-step of an NPC on a local leg: its hop again from here
@@ -253,6 +273,7 @@ public final class NpcNavigationService {
         @Override
         public void stuck(NpcMover m, NpcMover.StuckKind kind) {
             timed(() -> {
+                settleEngineLeg(this, kind == NpcMover.StuckKind.NO_PATH);
                 if (state == NpcNavState.MOVING) {
                     onStuck(this, kind == NpcMover.StuckKind.NO_PATH ? RecoveryLadder.Reporter.NO_PATH
                         : RecoveryLadder.Reporter.STATIONARY);
@@ -319,7 +340,11 @@ public final class NpcNavigationService {
     private int localInFlight;
     private long tick;
     /** Corridor steering's shaped stretches, shared by every NPC here (plan 4c.3 decision 1.5). */
+    /** Blocks a K&K local leg must get shorter between two watchdog looks to count as progress. */
+    static final double KNK_LEG_PROGRESS = 0.5;
     private final CorridorShaper corridors;
+    /** K&K's own local leg search (plan 4c.3 decision 8, link M6). */
+    private final LocalLegSearch localLegs = new LocalLegSearch();
     private java.util.function.IntPredicate unshaped = id -> false;
     private long busyNanos;
     private long lastTickNanos;
@@ -594,6 +619,11 @@ public final class NpcNavigationService {
         if (nav.mover.isSpawned() && (tick + nav.mover.id()) % HANDOVER_TICKS == 0) {
             footstep(nav);
         }
+        if (nav.knkLeg != null && !nav.onTrail && !nav.moveOnly && nav.state == NpcNavState.MOVING
+            && nav.mover.isSpawned()) {
+            watchKnkLeg(nav);
+            return;
+        }
         if (!nav.onTrail || nav.follower == null || !nav.mover.isSpawned()) {
             return;
         }
@@ -622,6 +652,47 @@ public final class NpcNavigationService {
                 sendStretch(nav, false);
             }
         }
+    }
+
+    /**
+     * The watchdog of a K&K local leg (link M6): the engine reports no stuck for waypoint lists (NAV-17), so progress
+     * along the leg is watched here as on the line; while a recovery try runs, {@link #supervise} judges it instead.
+     */
+    private void watchKnkLeg(Nav nav) {
+        if ((tick + nav.mover.id()) % WATCHDOG_TICKS != 0 || nav.ladder.tryRunning()) {
+            return;
+        }
+        NavPoint at = nav.mover.position().orElse(null);
+        if (at == null) {
+            return;
+        }
+        double rest = restOf(nav.knkLeg, at);
+        if (Double.isNaN(nav.knkLegRest) || rest < nav.knkLegRest - KNK_LEG_PROGRESS) {
+            nav.knkLegRest = rest;
+            nav.lastProgressTick = tick;
+        } else if (tick - nav.lastProgressTick >= nav.settings.noProgressTicks()) {
+            nav.lastProgressTick = tick;
+            onStuck(nav, RecoveryLadder.Reporter.NO_PROGRESS);
+        }
+    }
+
+    /** The length of a waypoint list still to walk from {@code at}: to the nearest point of it, then along it. */
+    static double restOf(List<NavPoint> way, NavPoint at) {
+        double best = Double.MAX_VALUE;
+        double tail = 0;
+        double bestRest = 0;
+        for (int i = way.size() - 1; i >= 0; i--) {
+            NavPoint p = way.get(i);
+            if (i < way.size() - 1) {
+                tail += p.horizontalDistance(way.get(i + 1));
+            }
+            double d = Math.sqrt(sq(p.x() - at.x()) + sq(p.y() - at.y()) + sq(p.z() - at.z()));
+            if (d + tail < best) {
+                best = d + tail;
+                bestRest = best;
+            }
+        }
+        return bestRest;
     }
 
     // ==================== planning ====================
@@ -905,8 +976,22 @@ public final class NpcNavigationService {
                 case READY -> {
                     nav.prepareFailures = 0;
                     nav.onTrail = false;
+                    settleEngineLeg(nav, false);
+                    nav.knkLeg = null;
+                    List<NavPoint> way = nav.settings.localLegsClearance() ? knkLeg(nav, at, target, prepared.leg())
+                        : null;
                     nav.state = NpcNavState.MOVING;
-                    nav.mover.walkTo(HopPlanner.feet(target), prepared.leg());
+                    if (way != null) {
+                        // K&K's own leg with the corridor's clearance (plan 4c.3 decision 8, link M6)
+                        ports.metrics().count(Event.LOCAL_LEG_KNK);
+                        nav.knkLeg = way;
+                        nav.knkLegRest = Double.NaN;
+                        nav.lastProgressTick = tick;
+                        nav.mover.follow(way, nav.settings.waypointMargin());
+                    } else {
+                        nav.engineLegOpen = true; // counted engine or none once the engine's search answered
+                        nav.mover.walkTo(HopPlanner.feet(target), prepared.leg());
+                    }
                 }
                 case UNLOADED -> {
                     // never load chunks for a capture: wait at the edge of the loaded area (NAV-12, Phase 7b)
@@ -924,6 +1009,43 @@ public final class NpcNavigationService {
                 }
             }
         }));
+    }
+
+    /**
+     * K&K's own search for a local leg (link M6): the waypoints from {@code at} to the hop {@code target}, or null when
+     * it found none within its budget (the engine's search takes the leg then). The NPC's position at the time the leg
+     * is handed over is used, since the preparation took a while.
+     */
+    private List<NavPoint> knkLeg(Nav nav, NavPoint planned, NavPoint target, LocalLeg leg) {
+        NavPoint at = nav.mover.position().orElse(planned);
+        LocalLegSearch.Result result;
+        try {
+            result = localLegs.find(ports.world(), at, target, leg, nav.settings.wallClearance());
+        } catch (RuntimeException e) {
+            ports.log().accept(nav.mover.name() + " K&K local leg search failed: " + e);
+            return null;
+        }
+        if (!result.found()) {
+            ports.log().accept(String.format(Locale.ROOT, "%s local leg from %s to %s: K&K found no path (%s, %d cells),"
+                    + " the engine searches", nav.mover.name(), NavGeometry.block(at),
+                NavGeometry.block(HopPlanner.feet(target)), result.reason(), result.expansions()));
+            return null;
+        }
+        return result.waypoints();
+    }
+
+    /** The outcome of the open engine leg, counted once: no path when the engine found none, else engine. */
+    private void settleEngineLeg(Nav nav, boolean noPath) {
+        if (!nav.engineLegOpen) {
+            return;
+        }
+        nav.engineLegOpen = false;
+        ports.metrics().count(noPath ? Event.LOCAL_LEG_NONE : Event.LOCAL_LEG_ENGINE);
+    }
+
+    /** K&K's local legs (link M6): their search counters. */
+    public LocalLegSearch localLegs() {
+        return localLegs;
     }
 
     /**
@@ -954,6 +1076,7 @@ public final class NpcNavigationService {
                 }
             }
             case WAYPOINTS -> {
+                nav.knkLeg = null;
                 if (!nav.onTrail || nav.follower.bestIndex() < 0) {
                     nav.lastProgressTick = tick;
                 }
@@ -969,6 +1092,7 @@ public final class NpcNavigationService {
     /** A stretch or a local leg was walked: the next hop, the next stretch, the tail, or the end of the order. */
     private void legDone(Nav nav) {
         nav.retries = 0;
+        nav.knkLeg = null;
         if (!nav.onTrail && !nav.hops.isEmpty()) {
             nav.hops.pollFirst();
             if (nav.ladder.isOpen()) {
@@ -1217,7 +1341,8 @@ public final class NpcNavigationService {
         Map<String, Boolean> verdicts = new HashMap<>();
         List<Set<String>> ahead = new java.util.ArrayList<>();
         if (!nav.onTrail) {
-            for (NavPoint feet : nav.mover.pathAhead()) {
+            // a K&K local leg's own waypoints (link M6), else the engine's path
+            for (NavPoint feet : nav.knkLeg != null ? nav.knkLeg : nav.mover.pathAhead()) {
                 ahead.add(regionsAtFeet(feet));
             }
         }
@@ -1369,6 +1494,7 @@ public final class NpcNavigationService {
 
     /** Takes the next step of the open spell's ladder: back-off, side-step, local leg ahead, or the replan. */
     private void nextTry(Nav nav) {
+        nav.knkLeg = null;
         NavPoint at = nav.mover.position().orElse(null);
         if (at == null) {
             nav.state = NpcNavState.PAUSED;
@@ -1532,6 +1658,8 @@ public final class NpcNavigationService {
     }
 
     private void dropRoute(Nav nav) {
+        settleEngineLeg(nav, false);
+        nav.knkLeg = null;
         nav.hops.clear();
         nav.tail.clear();
         nav.follower = null;

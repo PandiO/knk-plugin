@@ -59,10 +59,32 @@ public final class NpcMovementReport {
      * defaults).
      */
     static NavigationSettings settings(boolean collisionOn, boolean corridorSteering) {
+        return settings(collisionOn, corridorSteering, false);
+    }
+
+    /** As {@link #settings(boolean, boolean)}, with {@code local-legs-clearance} on or off (link M6). */
+    static NavigationSettings settings(boolean collisionOn, boolean corridorSteering, boolean localLegsClearance) {
         return NavigationSettings.builder()
             .global(NavigationSettings.Overrides.of(NavigationSettings.COLLIDABLE, collisionOn)
                 .with(NavigationSettings.GROUP_RANKS_WIDTH, 3)
-                .with(NavigationSettings.CORRIDOR_STEERING, corridorSteering)).build();
+                .with(NavigationSettings.CORRIDOR_STEERING, corridorSteering)
+                .with(NavigationSettings.LOCAL_LEGS_CLEARANCE, localLegsClearance)).build();
+    }
+
+    /** The local legs of this phase (link M6): found by K&K, walked with the engine's search, no path either way. */
+    NpcMovementReport localLegs(ScenarioNpcs npcs) {
+        return add("local legs", "k&k %d, engine %d, none %d", count(npcs, Event.LOCAL_LEG_KNK),
+            count(npcs, Event.LOCAL_LEG_ENGINE), count(npcs, Event.LOCAL_LEG_NONE));
+    }
+
+    /**
+     * The check of plan 4c.4 item 6.3 on the stair-house scene (link M6, with {@code local-legs-clearance} on): no local
+     * leg ends without a path (no {@code none}, no {@code recovery_no_path}). Null when it holds, else what failed.
+     */
+    String localLegFailures(ScenarioNpcs npcs) {
+        long none = count(npcs, Event.LOCAL_LEG_NONE);
+        long noPath = count(npcs, Event.RECOVERY_NO_PATH);
+        return none == 0 && noPath == 0 ? null : "local legs without a path " + none + ", recovery no path " + noPath;
     }
 
     /** The longest a single may stand still (plan 4c.4 item 2.3: nobody still longer than 3 s). */
@@ -157,6 +179,7 @@ public final class NpcMovementReport {
         add("stuck spells", spells + " (near a wall " + (m.spells().started(true) - baseNearWall) + ", not freed "
             + count(npcs, Event.NOT_FREED) + ", open now " + m.spells().open() + ")");
         add("recovery no path", count(npcs, Event.RECOVERY_NO_PATH));
+        localLegs(npcs);
         add("falls", count(npcs, Event.FELL));
         add("trespasses", count(npcs, Event.TRESPASS));
         add("longest still single", String.format(Locale.ROOT, "%.1f s (%s)", npcs.longestStillTicks() / 20.0,

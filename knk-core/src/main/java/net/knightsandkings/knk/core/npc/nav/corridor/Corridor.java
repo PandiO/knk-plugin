@@ -79,6 +79,15 @@ public final class Corridor {
      * root): the cells within {@code halfWidth} blocks of the line, flooded from the line's cells.
      */
     public static Corridor build(NavWorld world, List<NavPoint> feet, double halfWidth) {
+        return build(world, feet, halfWidth, false);
+    }
+
+    /**
+     * As {@link #build(NavWorld, List, double)}; with {@code anyRegion} a cell's WorldGuard regions don't matter (link
+     * M6: a local leg's own cell access decides where the NPC may go, so the corridor only gives the walk and its
+     * clearance).
+     */
+    public static Corridor build(NavWorld world, List<NavPoint> feet, double halfWidth, boolean anyRegion) {
         if (feet.isEmpty()) {
             throw new IllegalArgumentException("a corridor needs a line");
         }
@@ -110,7 +119,9 @@ public final class Corridor {
         for (NavPoint p : feet) {
             int i = (p.blockZ() - minZ) * sizeX + (p.blockX() - minX);
             int floorY = p.blockY() - 1;
-            regionSets.add(reads.regionsAt(w, p.blockX(), p.blockY(), p.blockZ()));
+            if (!anyRegion) {
+                regionSets.add(reads.regionsAt(w, p.blockX(), p.blockY(), p.blockZ()));
+            }
             if (floors[i] == BLOCKED || floors[i] == OUTSIDE) {
                 floors[i] = floorY; // the line's own cell (a seed), whatever the strip test says
                 queue.add(i);
@@ -135,7 +146,7 @@ public final class Corridor {
                 for (int d : new int[] {0, 1, -1}) {
                     int f = floor + d;
                     if (reads.isStandableFloor(w, nx, f, nz) && reads.freeHeight(w, nx, f, nz) >= NavGeometry.BODY_HEIGHT
-                        && regionSets.contains(reads.regionsAt(w, nx, f + 1, nz))) {
+                        && (anyRegion || regionSets.contains(reads.regionsAt(w, nx, f + 1, nz)))) {
                         floors[n] = f;
                         queue.add(n);
                         break;
