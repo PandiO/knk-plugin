@@ -22,7 +22,7 @@ import net.knightsandkings.knk.paper.scenario.ScenarioScene;
 import net.knightsandkings.knk.paper.scenario.ScenarioServices;
 
 /** The fake road network the NPC scenarios walk on (PandiO/knk-workspace#543). */
-class ScenarioNpcsTest {
+class ScenarioRoadNpcsTest {
 
     // kept in a field, never inline (knk-plugin CLAUDE.md: a Location holds its world weakly)
     private final World world = mock(World.class);
@@ -35,7 +35,7 @@ class ScenarioNpcsTest {
 
     @Test
     void theRoadIsOneEdgeOfFloorPointsInWorldCoordinates() {
-        RoadNetworkSnapshot network = ScenarioNpcs.network(scene(),
+        RoadNetworkSnapshot network = ScenarioRoadNpcs.network(scene(),
             new int[][] {{3, 16}, {6, 16}, {6, 27}, {25, 27}});
 
         assertEquals("world", network.world());
@@ -50,7 +50,7 @@ class ScenarioNpcsTest {
 
     @Test
     void theRouterFindsTheWholeRoadBetweenItsEnds() {
-        RoadNetworkSnapshot network = ScenarioNpcs.network(scene(), new int[][] {{3, 16}, {6, 16}, {6, 27}});
+        RoadNetworkSnapshot network = ScenarioRoadNpcs.network(scene(), new int[][] {{3, 16}, {6, 16}, {6, 27}});
         RouteRequest request = RouteRequest.of(SnapPoint.atNode(network, 1), SnapPoint.atNode(network, 2),
             AccessPolicy.ALL_OPEN, RouterParameters.defaults());
 

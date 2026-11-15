@@ -35,19 +35,19 @@ public final class NpcKeepsToRoadScenario implements Scenario<ScenarioScene> {
 
     @Override
     public void define(ScenarioPlan plan, ScenarioScene scene) {
-        AtomicReference<ScenarioNpcs> npcs = new AtomicReference<>();
+        AtomicReference<ScenarioRoadNpcs> npcs = new AtomicReference<>();
         AtomicReference<NpcMover> npc = new AtomicReference<>();
         AtomicReference<AtomicReference<NavigationResult>> result = new AtomicReference<>();
         double[] worst = {0};
         AtomicReference<NavPoint> worstAt = new AtomicReference<>();
         plan.act("lay a road that bends around the obstacle's place and start NPC navigation on it", () ->
-                npcs.set(new ScenarioNpcs(scene, new int[] {3, 16}, new int[] {6, 16}, new int[] {6, 27},
+                npcs.set(new ScenarioRoadNpcs(scene, new int[] {3, 16}, new int[] {6, 16}, new int[] {6, 27},
                     new int[] {25, 27}, new int[] {25, 16}, new int[] {28, 16}).start()))
             .cleanup("remove the NPCs", () -> {
                 if (npcs.get() != null) npcs.get().close();
             })
             .act("put a stone block 3 high on the straight line between the road's ends", () -> {
-                for (int y = ScenarioNpcs.FEET_Y; y < ScenarioNpcs.FEET_Y + 3; y++) {
+                for (int y = ScenarioRoadNpcs.FEET_Y; y < ScenarioRoadNpcs.FEET_Y + 3; y++) {
                     ScenarioGates.floor(scene, 11, 12, 20, 20, y, Material.STONE);
                 }
             })

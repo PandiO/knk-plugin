@@ -40,13 +40,13 @@ public final class NpcGroupSpacingScenario implements Scenario<ScenarioScene> {
 
     @Override
     public void define(ScenarioPlan plan, ScenarioScene scene) {
-        AtomicReference<ScenarioNpcs> npcs = new AtomicReference<>();
+        AtomicReference<ScenarioRoadNpcs> npcs = new AtomicReference<>();
         AtomicReference<List<NpcMover>> members = new AtomicReference<>();
         AtomicReference<NavigationResult> result = new AtomicReference<>();
         double[] gaps = {Double.MAX_VALUE, 0}; // smallest and largest gap seen while walking
         AtomicReference<String> where = new AtomicReference<>("");
         plan.act("lay a straight road from x 2 to x 29 and start NPC navigation on it", () ->
-                npcs.set(new ScenarioNpcs(scene, new int[] {2, 16}, new int[] {29, 16}).start()))
+                npcs.set(new ScenarioRoadNpcs(scene, new int[] {2, 16}, new int[] {29, 16}).start()))
             .cleanup("remove the NPCs", () -> {
                 if (npcs.get() != null) npcs.get().close();
             })

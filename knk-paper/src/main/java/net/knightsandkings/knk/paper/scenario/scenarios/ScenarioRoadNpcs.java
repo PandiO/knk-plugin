@@ -64,7 +64,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * Build it in an {@code act} step and register {@link #close} as a cleanup: the NPCs are player entities, which the
  * scene does not remove.
  */
-public final class ScenarioNpcs {
+public final class ScenarioRoadNpcs {
 
     /** The scene y of the floor; NPCs stand at {@link #FEET_Y}. */
     public static final int FLOOR_Y = 1;
@@ -91,7 +91,7 @@ public final class ScenarioNpcs {
      *
      * @param road the road's centre line as scene (x, z) points, in order (at least two); 3 blocks wide
      */
-    public ScenarioNpcs(ScenarioScene scene, int[]... road) {
+    public ScenarioRoadNpcs(ScenarioScene scene, int[]... road) {
         if (road.length < 2) {
             throw new IllegalArgumentException("a road needs two points");
         }
@@ -132,7 +132,7 @@ public final class ScenarioNpcs {
     }
 
     /** Starts the per-tick work (groups first, then the navigation service, as the live module does). */
-    public ScenarioNpcs start() {
+    public ScenarioRoadNpcs start() {
         ticker = Bukkit.getScheduler().runTaskTimer(scene.services().plugin(), () -> {
             groups.tick();
             service.tick();

@@ -34,11 +34,11 @@ public final class NpcWalksRoadRouteScenario implements Scenario<ScenarioScene> 
 
     @Override
     public void define(ScenarioPlan plan, ScenarioScene scene) {
-        AtomicReference<ScenarioNpcs> npcs = new AtomicReference<>();
+        AtomicReference<ScenarioRoadNpcs> npcs = new AtomicReference<>();
         AtomicReference<NpcMover> npc = new AtomicReference<>();
         AtomicReference<AtomicReference<NavigationResult>> result = new AtomicReference<>();
         plan.act("lay a straight road from x 3 to x 28 and start NPC navigation on it", () ->
-                npcs.set(new ScenarioNpcs(scene, new int[] {3, 16}, new int[] {28, 16}).start()))
+                npcs.set(new ScenarioRoadNpcs(scene, new int[] {3, 16}, new int[] {28, 16}).start()))
             .cleanup("remove the NPCs", () -> {
                 if (npcs.get() != null) npcs.get().close();
             })
