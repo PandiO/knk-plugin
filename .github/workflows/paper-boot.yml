@@ -11,7 +11,7 @@ name: Paper boot test
 # Headless bot tests (PandiO/knk-workspace#540): Mineflayer bots in tools/bot-tests join the same server through the
 # real protocol after the scenarios. OFF until the pinned Mineflayer lists Minecraft 26.3: they run only when the
 # repository variable BOT_TESTS_ENABLED is 'true' (Settings > Secrets and variables > Actions > Variables). While off,
-# only their harness unit tests and a support report run (seconds). How to switch them on: ci.md § 7.5.
+# only their harness unit tests and a support report run (seconds). How to switch them on: ci.md § 7.3.
 # Script and log check: tools/paper-boot/. Docs: docs/guides/developer/ci.md in knk-workspace.
 on:
   push:
@@ -76,7 +76,7 @@ jobs:
 
       - name: Report whether Mineflayer supports the server's Minecraft version
         # Informational, never fails the job: says whether the pinned and the newest Mineflayer/minecraft-protocol list
-        # BOT_MC_VERSION, so the developer knows when to bump the pins and set BOT_TESTS_ENABLED (ci.md § 7.5).
+        # BOT_MC_VERSION, so the developer knows when to bump the pins and set BOT_TESTS_ENABLED (ci.md § 7.3).
         continue-on-error: true
         run: |
           node tools/bot-tests/check-support.mjs --latest | tee bot-support.txt

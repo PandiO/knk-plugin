@@ -1,6 +1,6 @@
 // Headless bot client for plugin tests (PandiO/knk-workspace#540): Mineflayer bots that join the CI Paper server in
 // offline mode through the real Minecraft protocol (login, configuration, spawn), so they cover what the in-plugin
-// fake players skip. Docs: docs/guides/developer/plugin-scenarios.md § 8 and ci.md § 7.5 in knk-workspace.
+// fake players skip. Docs: docs/guides/developer/plugin-scenarios.md § 8 and ci.md § 7.3 in knk-workspace.
 //
 // A bot test is a module in tests/ that exports { name, description, run(ctx) }; run.mjs runs them one after the other
 // and prints the report lines (the same contract as the in-plugin scenarios, read by tools/paper-boot/check_scenarios.py

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Says whether the pinned Mineflayer and minecraft-protocol versions (package-lock.json) list a Minecraft version, and
 // with --latest also whether the newest ones on npm do (PandiO/knk-workspace#540). The bot tests stay off until they
-// list the CI server's version (26.3); this tells when to bump the pins and set BOT_TESTS_ENABLED (ci.md § 7.5 in
+// list the CI server's version (26.3); this tells when to bump the pins and set BOT_TESTS_ENABLED (ci.md § 7.3 in
 // knk-workspace).
 //
 //   node check-support.mjs [--version 26.3] [--latest] [--require]

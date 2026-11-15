@@ -14,7 +14,7 @@ import org.bukkit.Material;
  * the permission answer through the live {@code KnkPermissible} and permission cache.
  * <p>
  * {@code /feed}, not {@code /heal}: on a server with WorldGuard the plain {@code /heal} label is WorldGuard's own
- * command (found by this scenario; see the scenario guide § 5).
+ * command (found by this scenario, PandiO/knk-workspace#580).
  */
 public final class PlayerCommandNeedsGrantScenario implements Scenario<ScenarioScene> {
 
